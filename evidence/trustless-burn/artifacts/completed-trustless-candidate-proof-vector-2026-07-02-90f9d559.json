@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-02T00:00:00.000Z",
+  "evidenceKind": "trustless-settlement-candidate",
+  "label": "Proof-vector-derived trustless settlement candidate",
+  "stateTrackerMode": "read-only",
+  "broadcast": "no",
+  "boundary": {
+    "gate5Closure": "no",
+    "prebroadcastEvidence": "no",
+    "settlementReadiness": "no",
+    "testnetProductionCandidateClaim": "no",
+    "productionReadyClaim": "no"
+  },
+  "claimCount": 1,
+  "claims": [
+    {
+      "legacySidechainTxHash": "6666666666666666666666666666666666666666666666666666666666666666",
+      "sidechainBlockHeight": 1234,
+      "trustlessBurnDerivation": {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainLogIndex": 8,
+        "derivedBurnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+      },
+      "settlementIdentity": {
+        "source": "trustless-burn-leaf",
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "bridgeEventRootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+        "recipientErgoTreeHashHex": "8888888888888888888888888888888888888888888888888888888888888888",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "sourceBindings": {
+    "proofVector": {
+      "sourceKind": "trustless-burn-proof-vector",
+      "target": "test-vectors/trustless-burn-proof-v1-multi-leaf.json",
+      "targetBurnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+      "bridgeEventRootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+      "leafHashHex": "31c300fa370b8c9ff01a722eea2f590130fc2c5008249d861234a30d2df4ea6f",
+      "leafCount": 2,
+      "proofNodeCount": 1,
+      "gate5Claim": false,
+      "contractsChanged": false,
+      "boundary": "local-proof-core-candidate-only"
+    }
+  },
+  "contractCompatibility": "candidate-only-trustless-v2-required"
+}

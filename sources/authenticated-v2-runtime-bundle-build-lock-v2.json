@@ -1,0 +1,28 @@
+{
+  "schema": "e2s.authenticated-v2-runtime-bundle-build-lock.v2",
+  "platform": "win32-x64",
+  "nodeVersion": "24.18.1",
+  "nodeExecutableSha256": "ac51903c4c111815d52280b1fdcc8da067cbb37e2fe1a765097b85c3292c8582",
+  "relayerPackageLockSha256": "a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8",
+  "parentRuntimePackages": [
+    {
+      "path": "relayer/node_modules/tsx",
+      "sha256": "d9cb38c993c2887fb23b9d7cf155e8b07b760ae2ba269d0154a040cb60f33cc1"
+    },
+    {
+      "path": "relayer/node_modules/esbuild",
+      "sha256": "052b3ce51ca0fb993e9fa3e9f0c6624f548df4b46c4e060663c3f8d99fe36a40"
+    },
+    {
+      "path": "relayer/node_modules/@esbuild/win32-x64",
+      "sha256": "00b7981a271109000082f87395916b2e91dc913a382f4fe288553388f8371d34"
+    }
+  ],
+  "forbiddenParentEnvironmentOverrides": [
+    "NODE_COMPILE_CACHE",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TSX_TSCONFIG_PATH"
+  ]
+}

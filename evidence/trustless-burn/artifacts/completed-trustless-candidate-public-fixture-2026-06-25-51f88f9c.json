@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-06-25T00:00:00.000Z",
+  "evidenceKind": "trustless-settlement-candidate",
+  "label": "Public fixture trustless settlement candidate",
+  "stateTrackerMode": "read-only",
+  "broadcast": "no",
+  "boundary": {
+    "gate5Closure": "no",
+    "prebroadcastEvidence": "no",
+    "settlementReadiness": "no",
+    "testnetProductionCandidateClaim": "no",
+    "productionReadyClaim": "no"
+  },
+  "claimCount": 1,
+  "claims": [
+    {
+      "legacySidechainTxHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "sidechainBlockHeight": 1234,
+      "trustlessBurnDerivation": {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainLogIndex": 7,
+        "derivedBurnIdHex": "5236a760c284ca4a5dcb9c47a12c56f2db86328b6e447ac2cce1a184abc63843"
+      },
+      "settlementIdentity": {
+        "source": "trustless-burn-leaf",
+        "duplicatePreventionKeyHex": "5236a760c284ca4a5dcb9c47a12c56f2db86328b6e447ac2cce1a184abc63843",
+        "bridgeEventRootHex": "4444444444444444444444444444444444444444444444444444444444444444",
+        "recipientErgoTreeHashHex": "3333333333333333333333333333333333333333333333333333333333333333",
+        "amountNanoErg": "1000000"
+      }
+    }
+  ],
+  "contractCompatibility": "candidate-only-trustless-v2-required"
+}

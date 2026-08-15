@@ -1,0 +1,990 @@
+{
+  "schemaVersion": 1,
+  "command": "demo:anchor:preflight",
+  "sourceLabel": "demo:anchor:preflight read-only Ergo extension scan",
+  "network": "testnet",
+  "nodeUrl": "http://213.239.193.208:9052",
+  "observedAt": "2026-07-03T19:29:38.548Z",
+  "scanWindow": {
+    "minHeight": 428837,
+    "maxHeight": 429556,
+    "lookbackBlocks": 720,
+    "maxScanBlocks": 240,
+    "scannedBlocks": 240
+  },
+  "heights": [
+    {
+      "height": 429317,
+      "fields": []
+    },
+    {
+      "height": 429318,
+      "fields": []
+    },
+    {
+      "height": 429319,
+      "fields": []
+    },
+    {
+      "height": 429320,
+      "fields": []
+    },
+    {
+      "height": 429321,
+      "fields": []
+    },
+    {
+      "height": 429322,
+      "fields": []
+    },
+    {
+      "height": 429323,
+      "fields": []
+    },
+    {
+      "height": 429324,
+      "fields": []
+    },
+    {
+      "height": 429325,
+      "fields": []
+    },
+    {
+      "height": 429326,
+      "fields": []
+    },
+    {
+      "height": 429327,
+      "fields": []
+    },
+    {
+      "height": 429328,
+      "fields": []
+    },
+    {
+      "height": 429329,
+      "fields": []
+    },
+    {
+      "height": 429330,
+      "fields": []
+    },
+    {
+      "height": 429331,
+      "fields": []
+    },
+    {
+      "height": 429332,
+      "fields": []
+    },
+    {
+      "height": 429333,
+      "fields": []
+    },
+    {
+      "height": 429334,
+      "fields": []
+    },
+    {
+      "height": 429335,
+      "fields": []
+    },
+    {
+      "height": 429336,
+      "fields": []
+    },
+    {
+      "height": 429337,
+      "fields": []
+    },
+    {
+      "height": 429338,
+      "fields": []
+    },
+    {
+      "height": 429339,
+      "fields": []
+    },
+    {
+      "height": 429340,
+      "fields": []
+    },
+    {
+      "height": 429341,
+      "fields": []
+    },
+    {
+      "height": 429342,
+      "fields": []
+    },
+    {
+      "height": 429343,
+      "fields": []
+    },
+    {
+      "height": 429344,
+      "fields": []
+    },
+    {
+      "height": 429345,
+      "fields": []
+    },
+    {
+      "height": 429346,
+      "fields": []
+    },
+    {
+      "height": 429347,
+      "fields": []
+    },
+    {
+      "height": 429348,
+      "fields": []
+    },
+    {
+      "height": 429349,
+      "fields": []
+    },
+    {
+      "height": 429350,
+      "fields": []
+    },
+    {
+      "height": 429351,
+      "fields": []
+    },
+    {
+      "height": 429352,
+      "fields": []
+    },
+    {
+      "height": 429353,
+      "fields": []
+    },
+    {
+      "height": 429354,
+      "fields": []
+    },
+    {
+      "height": 429355,
+      "fields": []
+    },
+    {
+      "height": 429356,
+      "fields": []
+    },
+    {
+      "height": 429357,
+      "fields": []
+    },
+    {
+      "height": 429358,
+      "fields": []
+    },
+    {
+      "height": 429359,
+      "fields": []
+    },
+    {
+      "height": 429360,
+      "fields": []
+    },
+    {
+      "height": 429361,
+      "fields": []
+    },
+    {
+      "height": 429362,
+      "fields": []
+    },
+    {
+      "height": 429363,
+      "fields": []
+    },
+    {
+      "height": 429364,
+      "fields": []
+    },
+    {
+      "height": 429365,
+      "fields": []
+    },
+    {
+      "height": 429366,
+      "fields": []
+    },
+    {
+      "height": 429367,
+      "fields": []
+    },
+    {
+      "height": 429368,
+      "fields": []
+    },
+    {
+      "height": 429369,
+      "fields": []
+    },
+    {
+      "height": 429370,
+      "fields": []
+    },
+    {
+      "height": 429371,
+      "fields": []
+    },
+    {
+      "height": 429372,
+      "fields": []
+    },
+    {
+      "height": 429373,
+      "fields": []
+    },
+    {
+      "height": 429374,
+      "fields": []
+    },
+    {
+      "height": 429375,
+      "fields": []
+    },
+    {
+      "height": 429376,
+      "fields": []
+    },
+    {
+      "height": 429377,
+      "fields": []
+    },
+    {
+      "height": 429378,
+      "fields": []
+    },
+    {
+      "height": 429379,
+      "fields": []
+    },
+    {
+      "height": 429380,
+      "fields": []
+    },
+    {
+      "height": 429381,
+      "fields": []
+    },
+    {
+      "height": 429382,
+      "fields": []
+    },
+    {
+      "height": 429383,
+      "fields": []
+    },
+    {
+      "height": 429384,
+      "fields": []
+    },
+    {
+      "height": 429385,
+      "fields": []
+    },
+    {
+      "height": 429386,
+      "fields": []
+    },
+    {
+      "height": 429387,
+      "fields": []
+    },
+    {
+      "height": 429388,
+      "fields": []
+    },
+    {
+      "height": 429389,
+      "fields": []
+    },
+    {
+      "height": 429390,
+      "fields": []
+    },
+    {
+      "height": 429391,
+      "fields": []
+    },
+    {
+      "height": 429392,
+      "fields": []
+    },
+    {
+      "height": 429393,
+      "fields": []
+    },
+    {
+      "height": 429394,
+      "fields": []
+    },
+    {
+      "height": 429395,
+      "fields": []
+    },
+    {
+      "height": 429396,
+      "fields": []
+    },
+    {
+      "height": 429397,
+      "fields": []
+    },
+    {
+      "height": 429398,
+      "fields": []
+    },
+    {
+      "height": 429399,
+      "fields": []
+    },
+    {
+      "height": 429400,
+      "fields": []
+    },
+    {
+      "height": 429401,
+      "fields": []
+    },
+    {
+      "height": 429402,
+      "fields": []
+    },
+    {
+      "height": 429403,
+      "fields": []
+    },
+    {
+      "height": 429404,
+      "fields": []
+    },
+    {
+      "height": 429405,
+      "fields": []
+    },
+    {
+      "height": 429406,
+      "fields": []
+    },
+    {
+      "height": 429407,
+      "fields": []
+    },
+    {
+      "height": 429408,
+      "fields": []
+    },
+    {
+      "height": 429409,
+      "fields": []
+    },
+    {
+      "height": 429410,
+      "fields": []
+    },
+    {
+      "height": 429411,
+      "fields": []
+    },
+    {
+      "height": 429412,
+      "fields": []
+    },
+    {
+      "height": 429413,
+      "fields": []
+    },
+    {
+      "height": 429414,
+      "fields": []
+    },
+    {
+      "height": 429415,
+      "fields": []
+    },
+    {
+      "height": 429416,
+      "fields": []
+    },
+    {
+      "height": 429417,
+      "fields": []
+    },
+    {
+      "height": 429418,
+      "fields": []
+    },
+    {
+      "height": 429419,
+      "fields": []
+    },
+    {
+      "height": 429420,
+      "fields": []
+    },
+    {
+      "height": 429421,
+      "fields": []
+    },
+    {
+      "height": 429422,
+      "fields": []
+    },
+    {
+      "height": 429423,
+      "fields": []
+    },
+    {
+      "height": 429424,
+      "fields": []
+    },
+    {
+      "height": 429425,
+      "fields": []
+    },
+    {
+      "height": 429426,
+      "fields": []
+    },
+    {
+      "height": 429427,
+      "fields": []
+    },
+    {
+      "height": 429428,
+      "fields": []
+    },
+    {
+      "height": 429429,
+      "fields": []
+    },
+    {
+      "height": 429430,
+      "fields": []
+    },
+    {
+      "height": 429431,
+      "fields": []
+    },
+    {
+      "height": 429432,
+      "fields": []
+    },
+    {
+      "height": 429433,
+      "fields": []
+    },
+    {
+      "height": 429434,
+      "fields": []
+    },
+    {
+      "height": 429435,
+      "fields": []
+    },
+    {
+      "height": 429436,
+      "fields": []
+    },
+    {
+      "height": 429437,
+      "fields": []
+    },
+    {
+      "height": 429438,
+      "fields": []
+    },
+    {
+      "height": 429439,
+      "fields": []
+    },
+    {
+      "height": 429440,
+      "fields": []
+    },
+    {
+      "height": 429441,
+      "fields": []
+    },
+    {
+      "height": 429442,
+      "fields": []
+    },
+    {
+      "height": 429443,
+      "fields": []
+    },
+    {
+      "height": 429444,
+      "fields": []
+    },
+    {
+      "height": 429445,
+      "fields": []
+    },
+    {
+      "height": 429446,
+      "fields": []
+    },
+    {
+      "height": 429447,
+      "fields": []
+    },
+    {
+      "height": 429448,
+      "fields": []
+    },
+    {
+      "height": 429449,
+      "fields": []
+    },
+    {
+      "height": 429450,
+      "fields": []
+    },
+    {
+      "height": 429451,
+      "fields": []
+    },
+    {
+      "height": 429452,
+      "fields": []
+    },
+    {
+      "height": 429453,
+      "fields": []
+    },
+    {
+      "height": 429454,
+      "fields": []
+    },
+    {
+      "height": 429455,
+      "fields": []
+    },
+    {
+      "height": 429456,
+      "fields": []
+    },
+    {
+      "height": 429457,
+      "fields": []
+    },
+    {
+      "height": 429458,
+      "fields": []
+    },
+    {
+      "height": 429459,
+      "fields": []
+    },
+    {
+      "height": 429460,
+      "fields": []
+    },
+    {
+      "height": 429461,
+      "fields": []
+    },
+    {
+      "height": 429462,
+      "fields": []
+    },
+    {
+      "height": 429463,
+      "fields": []
+    },
+    {
+      "height": 429464,
+      "fields": []
+    },
+    {
+      "height": 429465,
+      "fields": []
+    },
+    {
+      "height": 429466,
+      "fields": []
+    },
+    {
+      "height": 429467,
+      "fields": []
+    },
+    {
+      "height": 429468,
+      "fields": []
+    },
+    {
+      "height": 429469,
+      "fields": []
+    },
+    {
+      "height": 429470,
+      "fields": []
+    },
+    {
+      "height": 429471,
+      "fields": []
+    },
+    {
+      "height": 429472,
+      "fields": []
+    },
+    {
+      "height": 429473,
+      "fields": []
+    },
+    {
+      "height": 429474,
+      "fields": []
+    },
+    {
+      "height": 429475,
+      "fields": []
+    },
+    {
+      "height": 429476,
+      "fields": []
+    },
+    {
+      "height": 429477,
+      "fields": []
+    },
+    {
+      "height": 429478,
+      "fields": []
+    },
+    {
+      "height": 429479,
+      "fields": []
+    },
+    {
+      "height": 429480,
+      "fields": []
+    },
+    {
+      "height": 429481,
+      "fields": []
+    },
+    {
+      "height": 429482,
+      "fields": []
+    },
+    {
+      "height": 429483,
+      "fields": []
+    },
+    {
+      "height": 429484,
+      "fields": []
+    },
+    {
+      "height": 429485,
+      "fields": []
+    },
+    {
+      "height": 429486,
+      "fields": []
+    },
+    {
+      "height": 429487,
+      "fields": []
+    },
+    {
+      "height": 429488,
+      "fields": []
+    },
+    {
+      "height": 429489,
+      "fields": []
+    },
+    {
+      "height": 429490,
+      "fields": []
+    },
+    {
+      "height": 429491,
+      "fields": []
+    },
+    {
+      "height": 429492,
+      "fields": []
+    },
+    {
+      "height": 429493,
+      "fields": []
+    },
+    {
+      "height": 429494,
+      "fields": []
+    },
+    {
+      "height": 429495,
+      "fields": []
+    },
+    {
+      "height": 429496,
+      "fields": []
+    },
+    {
+      "height": 429497,
+      "fields": []
+    },
+    {
+      "height": 429498,
+      "fields": []
+    },
+    {
+      "height": 429499,
+      "fields": []
+    },
+    {
+      "height": 429500,
+      "fields": []
+    },
+    {
+      "height": 429501,
+      "fields": []
+    },
+    {
+      "height": 429502,
+      "fields": []
+    },
+    {
+      "height": 429503,
+      "fields": []
+    },
+    {
+      "height": 429504,
+      "fields": []
+    },
+    {
+      "height": 429505,
+      "fields": []
+    },
+    {
+      "height": 429506,
+      "fields": []
+    },
+    {
+      "height": 429507,
+      "fields": []
+    },
+    {
+      "height": 429508,
+      "fields": []
+    },
+    {
+      "height": 429509,
+      "fields": []
+    },
+    {
+      "height": 429510,
+      "fields": []
+    },
+    {
+      "height": 429511,
+      "fields": []
+    },
+    {
+      "height": 429512,
+      "fields": []
+    },
+    {
+      "height": 429513,
+      "fields": []
+    },
+    {
+      "height": 429514,
+      "fields": []
+    },
+    {
+      "height": 429515,
+      "fields": []
+    },
+    {
+      "height": 429516,
+      "fields": []
+    },
+    {
+      "height": 429517,
+      "fields": []
+    },
+    {
+      "height": 429518,
+      "fields": []
+    },
+    {
+      "height": 429519,
+      "fields": []
+    },
+    {
+      "height": 429520,
+      "fields": []
+    },
+    {
+      "height": 429521,
+      "fields": []
+    },
+    {
+      "height": 429522,
+      "fields": []
+    },
+    {
+      "height": 429523,
+      "fields": []
+    },
+    {
+      "height": 429524,
+      "fields": []
+    },
+    {
+      "height": 429525,
+      "fields": []
+    },
+    {
+      "height": 429526,
+      "fields": []
+    },
+    {
+      "height": 429527,
+      "fields": []
+    },
+    {
+      "height": 429528,
+      "fields": []
+    },
+    {
+      "height": 429529,
+      "fields": []
+    },
+    {
+      "height": 429530,
+      "fields": []
+    },
+    {
+      "height": 429531,
+      "fields": []
+    },
+    {
+      "height": 429532,
+      "fields": []
+    },
+    {
+      "height": 429533,
+      "fields": []
+    },
+    {
+      "height": 429534,
+      "fields": []
+    },
+    {
+      "height": 429535,
+      "fields": []
+    },
+    {
+      "height": 429536,
+      "fields": []
+    },
+    {
+      "height": 429537,
+      "fields": []
+    },
+    {
+      "height": 429538,
+      "fields": []
+    },
+    {
+      "height": 429539,
+      "fields": []
+    },
+    {
+      "height": 429540,
+      "fields": []
+    },
+    {
+      "height": 429541,
+      "fields": []
+    },
+    {
+      "height": 429542,
+      "fields": []
+    },
+    {
+      "height": 429543,
+      "fields": []
+    },
+    {
+      "height": 429544,
+      "fields": []
+    },
+    {
+      "height": 429545,
+      "fields": []
+    },
+    {
+      "height": 429546,
+      "fields": []
+    },
+    {
+      "height": 429547,
+      "fields": []
+    },
+    {
+      "height": 429548,
+      "fields": []
+    },
+    {
+      "height": 429549,
+      "fields": []
+    },
+    {
+      "height": 429550,
+      "fields": []
+    },
+    {
+      "height": 429551,
+      "fields": []
+    },
+    {
+      "height": 429552,
+      "fields": []
+    },
+    {
+      "height": 429553,
+      "fields": []
+    },
+    {
+      "height": 429554,
+      "fields": []
+    },
+    {
+      "height": 429555,
+      "fields": []
+    },
+    {
+      "height": 429556,
+      "fields": []
+    }
+  ],
+  "boundary": {
+    "Sanitized public extension observations only": "yes",
+    "Read-only Ergo node client": "yes",
+    "Node wallet used": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Transaction broadcast, submit, deploy, or state mutation performed": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no"
+  }
+}

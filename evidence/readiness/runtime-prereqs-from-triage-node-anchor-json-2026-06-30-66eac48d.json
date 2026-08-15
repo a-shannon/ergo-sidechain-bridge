@@ -1,0 +1,93 @@
+{
+  "status": "READY",
+  "exitCode": 0,
+  "command": "npm run readiness:runtime-prereqs -- --triage-json ../evidence/readiness/readiness-triage-2026-06-30-66eac48d.json --node-preflight-json ../evidence/readiness/node-preflight-testnet-2026-06-30-817f801d.json --anchor-preflight-json ../evidence/readiness/anchor-preflight-explicit-testnet-scan-2026-06-30-41f7d9ec.json --out <report.md> --json-out <report.json>",
+  "totalStructuralIssues": 40,
+  "nodeBackedIssueCount": 9,
+  "reviewerOrExternalIssueCount": 24,
+  "claimOrPublicationBoundaryIssueCount": 7,
+  "localEvidenceIssueCount": 0,
+  "triageSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/readiness-triage-2026-06-30-66eac48d.json"
+  },
+  "nodeBackedIssues": [
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Ergo extension-section anchoring: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Sidechain header/finality verifier: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: SPV relay contract or tracker: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Burn inclusion proof: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: DUP settlement binding: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Positive Proof Acceptance: Valid burn proof acceptance: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Rotation Plan: Reconcile deployment state: status must be linked before committee governance evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Negative Checks: Deployment state points to the wrong network: status must be linked before committee governance evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "issue": "Metric Table: Live batch settlement: status must be linked before Gate 7 evidence can pass"
+    }
+  ],
+  "nodePreflight": "PASS",
+  "nodePreflightSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/node-preflight-testnet-2026-06-30-817f801d.json"
+  },
+  "anchorPreflight": "FAIL",
+  "anchorPreflightSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/anchor-preflight-explicit-testnet-scan-2026-06-30-41f7d9ec.json"
+  },
+  "anchorPreflightSummary": {
+    "expectedRootMode": "generic-diagnostic",
+    "anchorCount": 0,
+    "nodeEndpoint": "http://213.239.193.208:9052"
+  },
+  "nodeEndpoint": "http://213.239.193.208:9052",
+  "nextActions": [
+    "Collect node-backed/live-drill evidence for Gate 5 trustless burn, Gate 6 committee governance and Gate 7 benchmark before changing claim/publication fields.",
+    "Route reviewer/external blockers to human review material after the concrete runtime evidence exists.",
+    "Do not unlock claim/publication fields until node-backed, local-evidence, and reviewer/external blockers are all resolved."
+  ],
+  "boundary": {
+    "Planning output only": "yes",
+    "Readiness triage JSON reused": "yes",
+    "Node preflight executed": "no",
+    "Node preflight JSON reused": "yes",
+    "Live node probe executed by runtime prerequisites": "no",
+    "Anchor preflight JSON reused": "yes",
+    "Non-mainnet node prerequisite available": "yes",
+    "Claim/publication fields unlocked": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Anchor evidence row closure claimed": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no",
+    "Public claim authorization granted": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no"
+  }
+}

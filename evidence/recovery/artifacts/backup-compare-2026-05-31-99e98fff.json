@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS",
+  "comparedAt": "2026-05-31T11:22:58.692Z",
+  "snapshotSchemaVersions": {
+    "preBackup": 1,
+    "restored": 1
+  },
+  "preBackupLabel": "..\\evidence\\recovery\\artifacts\\pre-backup-snapshot-2026-05-31-99e98fff.json",
+  "restoredLabel": "..\\evidence\\recovery\\artifacts\\restored-snapshot-2026-05-31-99e98fff.json",
+  "rows": [
+    {
+      "check": "Peg-out status counts",
+      "preBackupValue": "detected=1,confirmed=0,phase1_created=0,aggregate_submitted=0,batch_submitted=1,phase2_unlocked=0,burn_reverted=0,failed=0",
+      "restoredValue": "detected=1,confirmed=0,phase1_created=0,aggregate_submitted=0,batch_submitted=1,phase2_unlocked=0,burn_reverted=0,failed=0",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "Pending reconciliation rows",
+      "preBackupValue": "2",
+      "restoredValue": "2",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "DUP AVL history count",
+      "preBackupValue": "2",
+      "restoredValue": "2",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "DUP rebuilt digest",
+      "preBackupValue": "e1a78985f47c5df2423d4fc857978a4a51212759a3bd331a4dc76d5c4ea1051402",
+      "restoredValue": "e1a78985f47c5df2423d4fc857978a4a51212759a3bd331a4dc76d5c4ea1051402",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "SPV tracker history count",
+      "preBackupValue": "1",
+      "restoredValue": "1",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "SPV rebuilt digest",
+      "preBackupValue": "594cdfde0b6e35b8a1cdcbfd22a4b83f0de480a2b55367780d5827133d438a7701",
+      "restoredValue": "594cdfde0b6e35b8a1cdcbfd22a4b83f0de480a2b55367780d5827133d438a7701",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "Persisted anchor heights",
+      "preBackupValue": "54321",
+      "restoredValue": "54321",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "Pending DUP heartbeats",
+      "preBackupValue": "1",
+      "restoredValue": "1",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    },
+    {
+      "check": "Runtime artifact hygiene",
+      "preBackupValue": "snapshot read-only; confirm git status clean or backups ignored",
+      "restoredValue": "snapshot read-only; confirm git status clean or backups ignored",
+      "status": "linked",
+      "evidenceHint": "Copy this comparison row into the matching Backup Restore Evidence state row."
+    }
+  ],
+  "errors": [],
+  "notes": [
+    "Comparison covers local SQLite snapshot values only.",
+    "Pre-backup and restored snapshot targets must be distinct artifacts.",
+    "The restored snapshot must be generated after the pre-backup snapshot.",
+    "DUP and SPV tracker singleton digest comparisons against current on-chain boxes remain separate evidence.",
+    "A BLOCKED row must be classified before restarting the daemon or linking Gate 3 evidence."
+  ],
+  "message": "Backup-restore snapshot comparison PASS: 9 local state rows match."
+}

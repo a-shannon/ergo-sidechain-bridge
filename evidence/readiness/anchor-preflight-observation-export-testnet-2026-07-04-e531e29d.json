@@ -1,0 +1,72 @@
+{
+  "status": "FAIL",
+  "exitCode": 1,
+  "expectedRoot": {
+    "mode": "root-bound",
+    "status": "PASS",
+    "provided": true,
+    "rootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+    "message": "root-bound scan for bridgeEventRootHex 1db43125ab9e2f51..."
+  },
+  "node": {
+    "endpoint": "http://213.239.193.208:9052",
+    "requestAttempted": true,
+    "currentHeight": 431366,
+    "network": "testnet"
+  },
+  "scanWindow": {
+    "minHeight": 430647,
+    "maxHeight": 431366,
+    "lookbackBlocks": 720,
+    "maxScanBlocks": 720,
+    "scannedBlocks": 720
+  },
+  "anchorScan": {
+    "anchorKey": "0401",
+    "anchorCount": 0
+  },
+  "checks": [
+    {
+      "name": "Expected root",
+      "status": "PASS",
+      "message": "root-bound scan for bridgeEventRootHex 1db43125ab9e2f51..."
+    },
+    {
+      "name": "Ergo node",
+      "status": "PASS",
+      "message": "reachable, network=testnet, height=431366"
+    },
+    {
+      "name": "Node endpoint",
+      "status": "PASS",
+      "message": "http://213.239.193.208:9052"
+    },
+    {
+      "name": "Scan window",
+      "status": "PASS",
+      "message": "heights 430647..431366 (lookback=720)"
+    },
+    {
+      "name": "0x0401 anchors (scanned 720 blocks)",
+      "status": "FAIL",
+      "message": "no 0x0401 anchor found in scan window"
+    },
+    {
+      "name": "Min confirmations",
+      "status": "FAIL",
+      "message": "no anchor to confirm"
+    }
+  ],
+  "boundary": {
+    "Ergo node request attempted": "yes",
+    "Read-only Ergo node client": "yes",
+    "Node wallet used": "no",
+    "ERGO_API_KEY read": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Transaction broadcast, submit, deploy, or state mutation performed": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no"
+  }
+}

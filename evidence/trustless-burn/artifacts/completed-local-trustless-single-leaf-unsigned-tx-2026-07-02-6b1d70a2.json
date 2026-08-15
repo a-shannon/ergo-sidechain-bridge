@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-02T12:00:00.000Z",
+  "evidenceKind": "trustless-single-leaf-unsigned-tx",
+  "label": "Gate 5 local trustless single-leaf unsigned transaction evidence at 6b1d70a2",
+  "stateTrackerMode": "read-only",
+  "broadcast": "no",
+  "boundary": {
+    "gate5Closure": "no",
+    "prebroadcastEvidence": "no",
+    "settlementReadiness": "no",
+    "transactionCheck": "no",
+    "expectedTxId": "no",
+    "signing": "no",
+    "submit": "no",
+    "testnetProductionCandidateClaim": "no",
+    "productionReadyClaim": "no"
+  },
+  "claimCount": 1,
+  "claims": [
+    {
+      "legacySidechainTxHash": "5555555555555555555555555555555555555555555555555555555555555555",
+      "sidechainBlockHeight": 1001,
+      "trustlessBurnDerivation": {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainLogIndex": 7,
+        "derivedBurnIdHex": "57182144540292d653cf0d5f3b1e1f347795d67f9dd7fa3d1d2e2fe420d06c3a"
+      },
+      "settlementIdentity": {
+        "source": "trustless-burn-leaf",
+        "duplicatePreventionKeyHex": "57182144540292d653cf0d5f3b1e1f347795d67f9dd7fa3d1d2e2fe420d06c3a",
+        "bridgeEventRootHex": "57fd4d8eae68fecabf590561062f0c054514149aca9617cfe12d1e0e5c6bb5c9",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "1000000"
+      }
+    }
+  ],
+  "selectedBoxes": {
+    "trackerBoxId": "1010101010101010101010101010101010101010101010101010101010101010",
+    "aggregateDupBoxId": "2020202020202020202020202020202020202020202020202020202020202020",
+    "unlockBoxId": "3030303030303030303030303030303030303030303030303030303030303030"
+  },
+  "settlementShape": {
+    "inputCount": 3,
+    "outputCount": 4,
+    "contextExtensionKeyCounts": [
+      0,
+      3,
+      9
+    ],
+    "contextExtensionKeyCountsCsv": "0,3,9"
+  },
+  "contextExtensionGuard": {
+    "status": "blocked",
+    "reason": "context-extension-serialization-conformance",
+    "effectiveThreshold": 4,
+    "offenderCount": 1,
+    "offenders": [
+      {
+        "inputIndex": 2,
+        "varCount": 9,
+        "keys": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8
+        ]
+      }
+    ],
+    "signingPermitted": false,
+    "broadcastPermitted": false
+  },
+  "contractCompatibility": "candidate-only-trustless-v2-required"
+}

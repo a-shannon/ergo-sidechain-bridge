@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:proof-vector:validate",
+  "status": "PASS",
+  "errors": [],
+  "boundary": {
+    "readOnly": true,
+    "localProofCoreOnly": true,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "broadcastAuthorization": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  },
+  "reports": [
+    {
+      "label": "test-vectors/trustless-burn-proof-v1-multi-leaf-recipient-tree.json",
+      "status": "PASS",
+      "message": "Trustless burn proof vector PASS: leafCount=2, proofNodes=1, gate5Claim=false, contractsChanged=false; local proof-core evidence only, not Gate 5 closure, settlement readiness, broadcast authorization, production claim support, or testnet production-candidate claim support.",
+      "errors": [],
+      "bridgeEventRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+      "leafHashHex": "0a287906f429e445513ba008fa4d178c7319993b178bb37822228ddd024c7681",
+      "leafCount": 2,
+      "proofNodeCount": 1,
+      "negativeCaseResults": [
+        {
+          "name": "wrong-sidechain-id",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "burnId must equal derived sidechain event identity"
+          ],
+          "observedErrors": [
+            "burnId must equal derived sidechain event identity"
+          ]
+        },
+        {
+          "name": "wrong-burn-id",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "burnId must equal derived sidechain event identity"
+          ],
+          "observedErrors": [
+            "burnId must equal derived sidechain event identity"
+          ]
+        },
+        {
+          "name": "wrong-event-index",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "burnId must equal derived sidechain event identity"
+          ],
+          "observedErrors": [
+            "burnId must equal derived sidechain event identity"
+          ]
+        },
+        {
+          "name": "wrong-recipient",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "settlement recipient must equal proved recipientErgoTreeHash"
+          ],
+          "observedErrors": [
+            "settlement recipient must equal proved recipientErgoTreeHash"
+          ]
+        },
+        {
+          "name": "wrong-amount",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "settlement amount must equal proved amountNanoErg"
+          ],
+          "observedErrors": [
+            "settlement amount must equal proved amountNanoErg"
+          ]
+        },
+        {
+          "name": "wrong-duplicate-prevention-key",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "duplicatePreventionKey must equal burnId"
+          ],
+          "observedErrors": [
+            "duplicatePreventionKey must equal burnId"
+          ]
+        },
+        {
+          "name": "wrong-bridge-event-root",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "burn inclusion proof must resolve to bridgeEventRoot"
+          ],
+          "observedErrors": [
+            "burn inclusion proof must resolve to bridgeEventRoot"
+          ]
+        },
+        {
+          "name": "malformed-inclusion-path",
+          "status": "REJECTED",
+          "expectedErrors": [
+            "burn inclusion proof must resolve to bridgeEventRoot"
+          ],
+          "observedErrors": [
+            "burn inclusion proof must resolve to bridgeEventRoot"
+          ]
+        }
+      ]
+    }
+  ]
+}

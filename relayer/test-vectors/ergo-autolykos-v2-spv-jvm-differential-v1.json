@@ -1,0 +1,428 @@
+{
+  "schema": "e2s.ergo-autolykos-v2-spv-jvm-differential.v1",
+  "source": {
+    "network": "Ergo mainnet",
+    "networkIdHex": "b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b",
+    "apiBase": "https://api.ergoplatform.com",
+    "heightRouteTemplate": "/blocks/at/{height}",
+    "headerRouteTemplate": "/blocks/{headerId}",
+    "ergoNodeCommit": "2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1"
+  },
+  "profile": {
+    "activationHeight": 844673,
+    "epochLength": 128,
+    "useLastEpochs": 8,
+    "desiredBlockIntervalMs": "120000",
+    "initialDifficulty": "1199990374400",
+    "expectedHeaderVersion": 3,
+    "requiredConfirmations": 10,
+    "maximumHeaders": 10,
+    "maximumFutureDriftMs": "0",
+    "relativeCheckpointWork": "1"
+  },
+  "difficultyContext": [
+    {
+      "idHex": "3954183f0a8c5826350be2435013cb85f400d40fc3780aab7a802ba891ce447a",
+      "parentIdHex": "b0e1316f39e6f4052ec2c318a5b7e5efaa2f852df6a2a64cf00874e6971a6063",
+      "version": 3,
+      "height": 925952,
+      "timestampMs": "1674655018947",
+      "nBits": 118460573,
+      "adProofsRootHex": "26a4d10db92416c8a2aaadca589c23beb9b2b6124af9ce44ea6620bf24f4d740",
+      "stateRootHex": "f6aa177b40f3a307d8deaba169a049efe41131c846a78a80ee1f5f924be7d79219",
+      "transactionsRootHex": "5b0bb4c9d47ec01458f540309882c6a6194e51381426e323c5233f331cd888fb",
+      "extensionHashHex": "c6824f92f5ccae6e355a4fe2a68a3d7c7782bae4281fa05ef7e0389e4ab9378e",
+      "votesHex": "000000",
+      "powPublicKeyHex": "030ab3e89183caae079bc07685e0ac5b3adc6d40a3e9112fe56e22c655bd41d4da",
+      "powNonceHex": "8323006a076195f2"
+    },
+    {
+      "idHex": "b735341efec48b385c3f269f1c9be36e27578610425537a7627c2f63ea6db688",
+      "parentIdHex": "155735549b53e0789b02341efcc56d18c697f9b88b9475dc07d3896435867566",
+      "version": 3,
+      "height": 926080,
+      "timestampMs": "1674672816970",
+      "nBits": 118332959,
+      "adProofsRootHex": "04fb83aa409026b8cdff351d9eb149ffd03c376a68895452f04d069337a43947",
+      "stateRootHex": "311e98a9d9524a7e26db0f7e94dc69c8e532b2f7c8e4635bbd66cdab3aba6f8e19",
+      "transactionsRootHex": "4293c9e69aa1b1e7d9a94b99154ba22b8d64e7373c46409b4328a300cc1d3460",
+      "extensionHashHex": "e5c8b10cd42c374874905e08c0740cd0860054d4e9d7816998727363d11eb252",
+      "votesHex": "000000",
+      "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+      "powNonceHex": "d992e8a55bfe9fb6"
+    },
+    {
+      "idHex": "72b720e0cf61a3f4dac4fe5438adc58c828dfdca9647798edec1f60efad2c11e",
+      "parentIdHex": "1f3390117ca7eb7613f50dcf36d64f711608f673ac5f94b0e730026ee53be9ad",
+      "version": 3,
+      "height": 926208,
+      "timestampMs": "1674687372908",
+      "nBits": 118279203,
+      "adProofsRootHex": "fd76e24dbbb8b4b4f323e7c20e344f9725bd7a0fac4fa863f4f02583d33879af",
+      "stateRootHex": "a64c30f21363993fcb1b23327cb175bd2606ce22c12178cb38ec7b6748237a7f19",
+      "transactionsRootHex": "5bb1ec3e62e0ddaca990d906c89f3843c3cae990b7bfe1e988b551ef4adcea6d",
+      "extensionHashHex": "45f503fc74985cd4b27b3d05442027991288ddea594d30e8e3f336ffbd5a1228",
+      "votesHex": "000000",
+      "powPublicKeyHex": "033133187bde16d8b847923852ac7fe5bfbb50a81f1c040d00850e1f776c18e1b5",
+      "powNonceHex": "e31567a20f1c70af"
+    },
+    {
+      "idHex": "f190ce12a55939442cd370d3cc51166621f53f5b095d1abff957b85f6205f35c",
+      "parentIdHex": "fcc3ea072603d5ecbce8bd83dc0622869e275e4ec04670a600cf007e284ff840",
+      "version": 3,
+      "height": 926336,
+      "timestampMs": "1674704389730",
+      "nBits": 118312303,
+      "adProofsRootHex": "7dbcfa8ccdf6b44dcd892344d53bf72bc7892dc1db8ec2327fab88ec6101e65f",
+      "stateRootHex": "26b0bc0943d3d59d42dd039adbbe012e6640be1215ded77f2816c37c63e1aff119",
+      "transactionsRootHex": "b7f6a4727ae1e36efe0d78c7f626d7972dbb81a516de49a6e298f8d79ca169b7",
+      "extensionHashHex": "1a801d53cf6e837adc37560b01101c9c1d7f026572448a7f26a344a71535997a",
+      "votesHex": "000000",
+      "powPublicKeyHex": "030ab3e89183caae079bc07685e0ac5b3adc6d40a3e9112fe56e22c655bd41d4da",
+      "powNonceHex": "4c4200122621e597"
+    },
+    {
+      "idHex": "ab74be766f91994cd6d64ea49b5936af734bce5a115728e83c5ce3471b575773",
+      "parentIdHex": "b3cce9498fb61b1c1ceeb8bcd284296ea9a0ea234cac4f1e19a7cc0b73955b3a",
+      "version": 3,
+      "height": 926464,
+      "timestampMs": "1674718196250",
+      "nBits": 118230431,
+      "adProofsRootHex": "2c633b518b6721ba6dad182c2c2e52edea5ffd43f146b4e4da9ce5f5b47d29fa",
+      "stateRootHex": "19aaac6863670dcb01bca4e626165e153aa63acfbb36479513547cd08b29ad9019",
+      "transactionsRootHex": "0fe3e5acdc3f057243963e0b5b1d8ef16254b8678fa7b04638f3d1f4b26c06fa",
+      "extensionHashHex": "293cdf1a47398eb95eb6e4084f51e532761c3b7b716f6730ce495f2bd2a766a3",
+      "votesHex": "000000",
+      "powPublicKeyHex": "033133187bde16d8b847923852ac7fe5bfbb50a81f1c040d00850e1f776c18e1b5",
+      "powNonceHex": "8f9202a4414e1959"
+    },
+    {
+      "idHex": "9c85188c3532b1072d1e1532b921ce75e347d63093da2742eb1a3c5244ad7365",
+      "parentIdHex": "8c714bdf46c9e155e17806da50e5cc0491cfbd59a8dc0323c1cdedc1bfeaeff0",
+      "version": 3,
+      "height": 926592,
+      "timestampMs": "1674732539625",
+      "nBits": 118283461,
+      "adProofsRootHex": "069d23997c1d9debb99efd982f4719ad031ec83f985e60bb9e73e451752ca0aa",
+      "stateRootHex": "9b9113d03d020445db2b6b8a6725726e7ae35236957d0c0170e3c9c4aba2d14c19",
+      "transactionsRootHex": "724fe7c639e1536c973e5fe396786cf7617d75f382231a6041e2d132f70163d9",
+      "extensionHashHex": "1cb0cfb3956f6379294298b84aa2563e4226aa14ba537576b2dffa31912e5aec",
+      "votesHex": "000000",
+      "powPublicKeyHex": "0295facb78290ac2b55f1453204d49df37be5bae9f185ed6704c1ba3ee372280c1",
+      "powNonceHex": "c0d7a3fb03503f8c"
+    },
+    {
+      "idHex": "b7e9e5c8ffb405b077b8462910f4dde07cfbb952a7b674175e3e3c5b7abcd9f1",
+      "parentIdHex": "eeb22c3b21e173c5da1ae0dbdd606850b20e18e6c0a0efcd23deba15244d6132",
+      "version": 3,
+      "height": 926720,
+      "timestampMs": "1674745038716",
+      "nBits": 118303333,
+      "adProofsRootHex": "d8b3d597294be2a87a24f2f440fceb35f96c33b2f2b555d7ed89148e506adf35",
+      "stateRootHex": "6b2df7cb3380dabb822d4c63afce37302ac66131081abcb438578d942b45639619",
+      "transactionsRootHex": "126ad67cd726b804d17479f15658b4fff5631b6ab47a90bf5aceab0fa63bd3b3",
+      "extensionHashHex": "3ded5bc3901886c384e7fb32cbe1575223d9dd9dae3660fb563ff67634dd8d42",
+      "votesHex": "000000",
+      "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+      "powNonceHex": "6b27000d45ef47c1"
+    },
+    {
+      "idHex": "10a350491a9825e8e4d259d395fce3a607c21e1beb33c10ebc808608e3c16bc7",
+      "parentIdHex": "16ba004940612203ea41ee95c49922fc7af817c9fac5192f27ad6a1759919ba1",
+      "version": 3,
+      "height": 926848,
+      "timestampMs": "1674763873258",
+      "nBits": 118435574,
+      "adProofsRootHex": "2e52f4c25aac0fa92fee6de73e7d6367d539dfef5f80062061e1495af9dcc728",
+      "stateRootHex": "54005990059f018b9b33490b3a414993667b9f95874c01ee56e8c007841310a819",
+      "transactionsRootHex": "91f26283b3d71c925479812d708a8e10ec1c0aa678706fff25c78499ecd34c98",
+      "extensionHashHex": "17e0fb20e6f2d317c3ffe39af4aeb62f2b4b3fcce50c6ab3a25512772dc7e105",
+      "votesHex": "000000",
+      "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+      "powNonceHex": "d7e45be65a01c4e7"
+    }
+  ],
+  "checkpoint": {
+    "idHex": "af1fffd4452177b33c0fb3b7fd9a13b43c9f4621615b7b4c9a8541ca75e27ebb",
+    "parentIdHex": "adcdd43e0fb5e00544542929eb1258dec6ec46bca6c7f5b859d70b38ffce74e8",
+    "version": 3,
+    "height": 926976,
+    "timestampMs": "1674778945289",
+    "nBits": 118316716,
+    "adProofsRootHex": "f71576136a614564903242e9d8f91f0125a2a2574c0ebb69dae0a4836c646259",
+    "stateRootHex": "1939fe8eb2d3749640745e8f1748cbe74b9caed1cfe0bce8a90c6a52bd4ee69819",
+    "transactionsRootHex": "1e7d132c7a7a9fb3b75e631923f18424bd4fe840ff4d20c574fbfd59902ca4d6",
+    "extensionHashHex": "a030ec67022ffc8bdaf6f9adddcea9ce68954761506a2deac25d3483e71c0578",
+    "votesHex": "000000",
+    "powPublicKeyHex": "0204b680ae52835e22f12fc3c51c4cd9e18852ac4f4a8131be29920678aceeeebe",
+    "powNonceHex": "bc410cf43b7681f0"
+  },
+  "suffix": [
+    {
+      "header": {
+        "idHex": "834065702aac3e5f8680a5a3555665970ca4b38a945fdba7dd1aae58e8b9a6b2",
+        "parentIdHex": "af1fffd4452177b33c0fb3b7fd9a13b43c9f4621615b7b4c9a8541ca75e27ebb",
+        "version": 3,
+        "height": 926977,
+        "timestampMs": "1674779024200",
+        "nBits": 118359535,
+        "adProofsRootHex": "4e80d00148f30c53077197ad052e2ff07d919bb9aed0ff4da9b3b66586664f3c",
+        "stateRootHex": "ef55b17904d9e95523dc30353646612af1b23ba796bd7ee56847813a46de8f2c19",
+        "transactionsRootHex": "3bfa8e9a376e92fb55d6f42cde344b74220897053e54e606e8433c3b8b57b183",
+        "extensionHashHex": "a030ec67022ffc8bdaf6f9adddcea9ce68954761506a2deac25d3483e71c0578",
+        "votesHex": "000000",
+        "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+        "powNonceHex": "b7f9c2a1972dfd2a"
+      },
+      "expected": {
+        "prePowHex": "03af1fffd4452177b33c0fb3b7fd9a13b43c9f4621615b7b4c9a8541ca75e27ebb4e80d00148f30c53077197ad052e2ff07d919bb9aed0ff4da9b3b66586664f3c3bfa8e9a376e92fb55d6f42cde344b74220897053e54e606e8433c3b8b57b183ef55b17904d9e95523dc30353646612af1b23ba796bd7ee56847813a46de8f2c19c8b6ef84df30a030ec67022ffc8bdaf6f9adddcea9ce68954761506a2deac25d3483e71c0578070e05ef81ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "5051427666840945311051310164175493970126824622488381174485332",
+        "relativeCumulativeWork": "3947173729271809"
+      }
+    },
+    {
+      "header": {
+        "idHex": "05faef39ee15eefc114f6797552674aae55afdf50c6fc9c7329d124e22c8d385",
+        "parentIdHex": "834065702aac3e5f8680a5a3555665970ca4b38a945fdba7dd1aae58e8b9a6b2",
+        "version": 3,
+        "height": 926978,
+        "timestampMs": "1674779060282",
+        "nBits": 118359535,
+        "adProofsRootHex": "6e97ee2c624c4fe840005c639f42141fa8cbcb2995d274bf2f90faa1a863386e",
+        "stateRootHex": "3f54cf50bdfaf365118069b0e91be68a9d0e404fb4408508e5af04ffa969696819",
+        "transactionsRootHex": "5edb65f0017f8820fe3b0c16835b497cea2d8a51345b49f8a720168c04ecfcb9",
+        "extensionHashHex": "63cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903",
+        "votesHex": "000000",
+        "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+        "powNonceHex": "1fff00169aa8daf0"
+      },
+      "expected": {
+        "prePowHex": "03834065702aac3e5f8680a5a3555665970ca4b38a945fdba7dd1aae58e8b9a6b26e97ee2c624c4fe840005c639f42141fa8cbcb2995d274bf2f90faa1a863386e5edb65f0017f8820fe3b0c16835b497cea2d8a51345b49f8a720168c04ecfcb93f54cf50bdfaf365118069b0e91be68a9d0e404fb4408508e5af04ffa969696819bad0f184df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef82ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "22755271339837235570570666195133595284727220351297613274296874",
+        "relativeCumulativeWork": "7894347458543617"
+      }
+    },
+    {
+      "header": {
+        "idHex": "f7e111263b3dd393efda226a3d884601f98fe0d800f65b3b8ad739ceba34f883",
+        "parentIdHex": "05faef39ee15eefc114f6797552674aae55afdf50c6fc9c7329d124e22c8d385",
+        "version": 3,
+        "height": 926979,
+        "timestampMs": "1674779154254",
+        "nBits": 118359535,
+        "adProofsRootHex": "00dd3556148ad47a3e2d28be9c281c70d8e221c2e20921f2f2b45dda443fe9b9",
+        "stateRootHex": "ad69b91d25d7af8455aca123b123deb4dd49e91f987014334e72ad87f92bdbeb19",
+        "transactionsRootHex": "c9e63150b78d2a9ac61a0e3c2001ea08f29bce7c93ed8d8a571ee6989f11cda8",
+        "extensionHashHex": "63cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903",
+        "votesHex": "000000",
+        "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+        "powNonceHex": "cc6e92005087f5cc"
+      },
+      "expected": {
+        "prePowHex": "0305faef39ee15eefc114f6797552674aae55afdf50c6fc9c7329d124e22c8d38500dd3556148ad47a3e2d28be9c281c70d8e221c2e20921f2f2b45dda443fe9b9c9e63150b78d2a9ac61a0e3c2001ea08f29bce7c93ed8d8a571ee6989f11cda8ad69b91d25d7af8455aca123b123deb4dd49e91f987014334e72ad87f92bdbeb19ceaef784df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef83ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "25304509906866132143688225114164628983776705406089017951945920",
+        "relativeCumulativeWork": "11841521187815425"
+      }
+    },
+    {
+      "header": {
+        "idHex": "9845cd1217e1df3bf0809d0711fb6820027f64a44dfb3b052106462b91586e9c",
+        "parentIdHex": "f7e111263b3dd393efda226a3d884601f98fe0d800f65b3b8ad739ceba34f883",
+        "version": 3,
+        "height": 926980,
+        "timestampMs": "1674779252223",
+        "nBits": 118359535,
+        "adProofsRootHex": "6d074d3eaf43d2b4b509feba1345ccbf32dfcf2184ef0f228b73c4b7dd3cbe5c",
+        "stateRootHex": "db1b62a80cfc715c8705f785ebd0a4955dac782c802c7cbeffea311a7c8083a219",
+        "transactionsRootHex": "693a20805ad5b158b6d870587a81e8c4de602f1f4d0f7ed32b25015eb9965317",
+        "extensionHashHex": "63cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903",
+        "votesHex": "000000",
+        "powPublicKeyHex": "033133187bde16d8b847923852ac7fe5bfbb50a81f1c040d00850e1f776c18e1b5",
+        "powNonceHex": "134f00774df974fb"
+      },
+      "expected": {
+        "prePowHex": "03f7e111263b3dd393efda226a3d884601f98fe0d800f65b3b8ad739ceba34f8836d074d3eaf43d2b4b509feba1345ccbf32dfcf2184ef0f228b73c4b7dd3cbe5c693a20805ad5b158b6d870587a81e8c4de602f1f4d0f7ed32b25015eb9965317db1b62a80cfc715c8705f785ebd0a4955dac782c802c7cbeffea311a7c8083a219ffabfd84df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef84ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "29220869632144359168524481848298703873737197428862975294593110",
+        "relativeCumulativeWork": "15788694917087233"
+      }
+    },
+    {
+      "header": {
+        "idHex": "0ce718a6bcc0cb02737eb8a5971c6855d7b015491609fb9cc701748cb6be9628",
+        "parentIdHex": "9845cd1217e1df3bf0809d0711fb6820027f64a44dfb3b052106462b91586e9c",
+        "version": 3,
+        "height": 926981,
+        "timestampMs": "1674779525746",
+        "nBits": 118359535,
+        "adProofsRootHex": "7c09b1792206736a3da27c0386312b4f84c7784d9ba7c269b1e0d64d959e0e04",
+        "stateRootHex": "9df92bfda3195576bf0db7d1e19e04c740c82ec7d575965112a5a6344497b97419",
+        "transactionsRootHex": "f1fe63dec3f6994c5f0eb062af37df668428e02cf71ce0377ae5a5d9c164c703",
+        "extensionHashHex": "63cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903",
+        "votesHex": "000000",
+        "powPublicKeyHex": "02eeec374f4e660e117fccbfec79e6fe5cdf44ac508fa228bfc654d2973f9bdc9a",
+        "powNonceHex": "528f000a74de5d2b"
+      },
+      "expected": {
+        "prePowHex": "039845cd1217e1df3bf0809d0711fb6820027f64a44dfb3b052106462b91586e9c7c09b1792206736a3da27c0386312b4f84c7784d9ba7c269b1e0d64d959e0e04f1fe63dec3f6994c5f0eb062af37df668428e02cf71ce0377ae5a5d9c164c7039df92bfda3195576bf0db7d1e19e04c740c82ec7d575965112a5a6344497b97419f2848e85df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef85ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "13766584076378062803118067588104302743864952429355517441384520",
+        "relativeCumulativeWork": "19735868646359041"
+      }
+    },
+    {
+      "header": {
+        "idHex": "5dd4584ffe3913d5562065b51800f1a0cf06a93048acc29db5989a003b1fb3c7",
+        "parentIdHex": "0ce718a6bcc0cb02737eb8a5971c6855d7b015491609fb9cc701748cb6be9628",
+        "version": 3,
+        "height": 926982,
+        "timestampMs": "1674779620821",
+        "nBits": 118359535,
+        "adProofsRootHex": "e864e7dccda538a215ce70fa26d8ca2f2402eec7d10959884b041d3c59c6110f",
+        "stateRootHex": "0e30592350b2d710c299cf3c6a410625bebdfacc5ed92e4dafb1e87c8d63b53619",
+        "transactionsRootHex": "e59b88ff25489fa5bde1ca07dbaa6d396ab7dc3f73a2a1181b1ffd494e153255",
+        "extensionHashHex": "845b1d820dd2833a5b2050fdf24664309cc06b28f4600d48edf9f1c359fd4d9a",
+        "votesHex": "000000",
+        "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+        "powNonceHex": "7a2400060e27968e"
+      },
+      "expected": {
+        "prePowHex": "030ce718a6bcc0cb02737eb8a5971c6855d7b015491609fb9cc701748cb6be9628e864e7dccda538a215ce70fa26d8ca2f2402eec7d10959884b041d3c59c6110fe59b88ff25489fa5bde1ca07dbaa6d396ab7dc3f73a2a1181b1ffd494e1532550e30592350b2d710c299cf3c6a410625bebdfacc5ed92e4dafb1e87c8d63b53619d5eb9385df30845b1d820dd2833a5b2050fdf24664309cc06b28f4600d48edf9f1c359fd4d9a070e05ef86ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "28152589526490427068979286918533254085975978294526945061810444",
+        "relativeCumulativeWork": "23683042375630849"
+      }
+    },
+    {
+      "header": {
+        "idHex": "332b131874ee1883404cf68f0ae8fec25e0bda6a8a51e26d573cefed3efdc166",
+        "parentIdHex": "5dd4584ffe3913d5562065b51800f1a0cf06a93048acc29db5989a003b1fb3c7",
+        "version": 3,
+        "height": 926983,
+        "timestampMs": "1674779661427",
+        "nBits": 118359535,
+        "adProofsRootHex": "8d6c4b5eabb99066133d8d887c5442b51dff12a8f3bdd4ccf7d2e397e2c9acfc",
+        "stateRootHex": "5d24b4d628675f71d211ac0677038b68140d14e9c319d8e431d77eca85b7c34219",
+        "transactionsRootHex": "822ca592d2b300a8de2c34ddfb8079cee702e0ff7e8699a69a32147d445c8c1d",
+        "extensionHashHex": "845b1d820dd2833a5b2050fdf24664309cc06b28f4600d48edf9f1c359fd4d9a",
+        "votesHex": "000000",
+        "powPublicKeyHex": "02eeec374f4e660e117fccbfec79e6fe5cdf44ac508fa228bfc654d2973f9bdc9a",
+        "powNonceHex": "3bd714bb4935ff08"
+      },
+      "expected": {
+        "prePowHex": "035dd4584ffe3913d5562065b51800f1a0cf06a93048acc29db5989a003b1fb3c78d6c4b5eabb99066133d8d887c5442b51dff12a8f3bdd4ccf7d2e397e2c9acfc822ca592d2b300a8de2c34ddfb8079cee702e0ff7e8699a69a32147d445c8c1d5d24b4d628675f71d211ac0677038b68140d14e9c319d8e431d77eca85b7c34219f3a89685df30845b1d820dd2833a5b2050fdf24664309cc06b28f4600d48edf9f1c359fd4d9a070e05ef87ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "169992693581496973777579003493210518307404951074282352442881",
+        "relativeCumulativeWork": "27630216104902657"
+      }
+    },
+    {
+      "header": {
+        "idHex": "8c4a6768bd29b3f04b50f9d81581d907171c24be1c31f0d95c0ef3c70f6d35e8",
+        "parentIdHex": "332b131874ee1883404cf68f0ae8fec25e0bda6a8a51e26d573cefed3efdc166",
+        "version": 3,
+        "height": 926984,
+        "timestampMs": "1674779828538",
+        "nBits": 118359535,
+        "adProofsRootHex": "29b715c2e4874bd90c28a4c1f6921d891361b1a59f2ce6c3be82a7a0a9081e70",
+        "stateRootHex": "864531b5e1a956be1eedf288b902f07ae372b600f678eebbf0a73b2862011c0e19",
+        "transactionsRootHex": "f37d9848efaf475c9d97cdc2c0aae05462b94c85557922c6ab87ac82aeb6fcef",
+        "extensionHashHex": "2a3d01274e33f864137f128b008ba7f7bf7abcd47ac94a0d05f77423e3613e84",
+        "votesHex": "000000",
+        "powPublicKeyHex": "0295facb78290ac2b55f1453204d49df37be5bae9f185ed6704c1ba3ee372280c1",
+        "powNonceHex": "78ff000a0761c934"
+      },
+      "expected": {
+        "prePowHex": "03332b131874ee1883404cf68f0ae8fec25e0bda6a8a51e26d573cefed3efdc16629b715c2e4874bd90c28a4c1f6921d891361b1a59f2ce6c3be82a7a0a9081e70f37d9848efaf475c9d97cdc2c0aae05462b94c85557922c6ab87ac82aeb6fcef864531b5e1a956be1eedf288b902f07ae372b600f678eebbf0a73b2862011c0e19bac2a085df302a3d01274e33f864137f128b008ba7f7bf7abcd47ac94a0d05f77423e3613e84070e05ef88ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "4285446329709146958064845589041406758935621836385181886594198",
+        "relativeCumulativeWork": "31577389834174465"
+      }
+    },
+    {
+      "header": {
+        "idHex": "d40415c0018bda27de08519f3142b543366781f993088ae37d5e025a3726d694",
+        "parentIdHex": "8c4a6768bd29b3f04b50f9d81581d907171c24be1c31f0d95c0ef3c70f6d35e8",
+        "version": 3,
+        "height": 926985,
+        "timestampMs": "1674779864909",
+        "nBits": 118359535,
+        "adProofsRootHex": "170f1658475a319fc6612ea7c34ff8e0094e3b6a9d137759bcefe69e46a865b2",
+        "stateRootHex": "603de5da206b08a71985d60c11129de349422d4dab00031a5d2e0e528e4cdc4219",
+        "transactionsRootHex": "e2b7273dbd33d7150394768648a9c93be16d46b3a66faf2f932b9f0cbd5103a0",
+        "extensionHashHex": "c3ed672b2904c1f9cd3f035f712871970564ad72744bbe77b6c13bd90d8651d9",
+        "votesHex": "000000",
+        "powPublicKeyHex": "0274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f",
+        "powNonceHex": "c65c0009be24ead7"
+      },
+      "expected": {
+        "prePowHex": "038c4a6768bd29b3f04b50f9d81581d907171c24be1c31f0d95c0ef3c70f6d35e8170f1658475a319fc6612ea7c34ff8e0094e3b6a9d137759bcefe69e46a865b2e2b7273dbd33d7150394768648a9c93be16d46b3a66faf2f932b9f0cbd5103a0603de5da206b08a71985d60c11129de349422d4dab00031a5d2e0e528e4cdc4219cddea285df30c3ed672b2904c1f9cd3f035f712871970564ad72744bbe77b6c13bd90d8651d9070e05ef89ca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "26509171617136427619999012770311838924438822035913608249574750",
+        "relativeCumulativeWork": "35524563563446273"
+      }
+    },
+    {
+      "header": {
+        "idHex": "a9f2af54e6ab68bf016241eb79a51afc3f943edfed2ed6d968c9376985ad3895",
+        "parentIdHex": "d40415c0018bda27de08519f3142b543366781f993088ae37d5e025a3726d694",
+        "version": 3,
+        "height": 926986,
+        "timestampMs": "1674779920410",
+        "nBits": 118359535,
+        "adProofsRootHex": "e3bfee792ec525ee232adbc3bfffcc849dfd480d174f6ed13ceed8f15bbcc60b",
+        "stateRootHex": "b7a98256f8d47b222529d1ab6678dd5ea6a65a4f7c373e0b5c77ed1f72989c8a19",
+        "transactionsRootHex": "8ac085a735a3f5d4af608bcc94e91189ced6f61895ae00f7f7beb4950c6762f4",
+        "extensionHashHex": "c3ed672b2904c1f9cd3f035f712871970564ad72744bbe77b6c13bd90d8651d9",
+        "votesHex": "000000",
+        "powPublicKeyHex": "02eeec374f4e660e117fccbfec79e6fe5cdf44ac508fa228bfc654d2973f9bdc9a",
+        "powNonceHex": "1efc0002b41b676b"
+      },
+      "expected": {
+        "prePowHex": "03d40415c0018bda27de08519f3142b543366781f993088ae37d5e025a3726d694e3bfee792ec525ee232adbc3bfffcc849dfd480d174f6ed13ceed8f15bbcc60b8ac085a735a3f5d4af608bcc94e91189ced6f61895ae00f7f7beb4950c6762f4b7a98256f8d47b222529d1ab6678dd5ea6a65a4f7c373e0b5c77ed1f72989c8a199a90a685df30c3ed672b2904c1f9cd3f035f712871970564ad72744bbe77b6c13bd90d8651d9070e05ef8aca3800000000",
+        "difficulty": "3947173729271808",
+        "target": "29335442820419771643002422232109131842768313421543785981182534",
+        "hit": "28935477989052486393037677960203375092215603877231978795364319",
+        "relativeCumulativeWork": "39471737292718081"
+      }
+    }
+  ],
+  "expected": {
+    "difficultyContextDigestHex": "64be12239d9a179026e6cfece52b84d996cfe24244fb45897072ec740f7bdc44",
+    "boundaryDifficulty": "3947173729271808",
+    "boundaryNBits": 118359535,
+    "suffixWork": "39471737292718080",
+    "finalRelativeCumulativeWork": "39471737292718081",
+    "finalHeaderIdHex": "a9f2af54e6ab68bf016241eb79a51afc3f943edfed2ed6d968c9376985ad3895"
+  },
+  "mutants": {
+    "easierBoundaryNBits": 16842752,
+    "ancestryHeaderIndex": 1,
+    "ancestryParentIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "boundaries": {
+    "historicalHeaderFixture": true,
+    "currentCanonicalityEstablished": false,
+    "checkpointAuthenticationEstablished": false,
+    "absoluteCheckpointWorkEstablished": false,
+    "nodeAcceptanceEstablished": false,
+    "mintAuthorityEstablished": false,
+    "settlementAuthorityEstablished": false,
+    "gate5Closed": false,
+    "trustlessStatusEstablished": false,
+    "productionReadinessEstablished": false,
+    "broadcastPerformed": false
+  }
+}

@@ -1,0 +1,17 @@
+[package]
+name = "bridge-contained-launcher"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+
+[[bin]]
+name = "bridge-contained-launcher"
+path = "src/main.rs"
+
+[[bin]]
+name = "launcher-fixture"
+path = "src/bin/launcher-fixture.rs"

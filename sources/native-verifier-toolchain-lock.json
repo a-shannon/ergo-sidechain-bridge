@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "kind": "bridge-native-verifier-toolchain-lock",
+  "profiles": {
+    "win32-x64": {
+      "rustTarget": "x86_64-pc-windows-msvc",
+      "cargo": {
+        "version": "cargo 1.82.0 (8f40fc59f 2024-08-21)",
+        "sha256": "e0d72a8a6fc72c5bbaf88eb028fbdc0e0f9eb2aaaebb77d2b7271a9d09798aa2"
+      },
+      "rustc": {
+        "version": "rustc 1.82.0 (f6e511eec 2024-10-15)",
+        "sha256": "443b551e5248e5d8ebd0103dbb66e2e25d218ccd4195cdac3fbdc8f3f8dec455"
+      },
+      "git": {
+        "version": "git version 2.54.0.windows.1",
+        "sha256": "81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5"
+      }
+    }
+  },
+  "boundaries": {
+    "absoluteToolPathsRequired": true,
+    "toolDigestsRequired": true,
+    "isolatedCargoTargetRequired": true,
+    "cargoLockedRequired": true,
+    "unsupportedPlatformsFailClosed": true,
+    "completeBuildToolClosureVerifiedByThisLock": false,
+    "dependencyCacheContentAttestedByThisLock": false,
+    "independentBuildAttestationVerifiedByThisLock": false,
+    "localConformanceOnly": true,
+    "admissionEligible": false
+  }
+}

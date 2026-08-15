@@ -1,0 +1,117 @@
+diff --git a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+index bfa0fe616..076f788f3 100644
+--- a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
++++ b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+@@ -11 +11 @@ import org.ergoplatform.modifiers.history._
+-import org.ergoplatform.modifiers.history.extension.Extension
++import org.ergoplatform.modifiers.history.extension.{Extension, ExtensionCandidate}
+@@ -245,0 +246,2 @@ object CandidateGenerator extends ScorexLogging {
++  val SidechainExtensionFieldsEnv = "ERGO_SIDECHAIN_EXTENSION_FIELDS"
++
+@@ -370,0 +373,66 @@ object CandidateGenerator extends ScorexLogging {
++  private[mining] def parseSidechainExtensionFields(raw: String): ExtensionCandidate = {
++    val fields = raw
++      .split("[,;]")
++      .toSeq
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map { entry =>
++        val parts = entry.split(":", 2).map(_.trim)
++        require(
++          parts.length == 2,
++          s"$SidechainExtensionFieldsEnv entries must use keyHex:valueHex format"
++        )
++
++        val key = Base16.decode(parts(0)).get
++        val value = Base16.decode(parts(1)).get
++
++        require(
++          key.lengthCompare(Extension.FieldKeySize) == 0,
++          s"Sidechain extension key ${parts(0)} must be ${Extension.FieldKeySize} bytes"
++        )
++        require(
++          key.headOption.contains(0x04.toByte),
++          s"Sidechain extension key ${parts(0)} must use the 0x04 key space"
++        )
++        require(
++          value.lengthCompare(Extension.FieldValueMaxSize) <= 0,
++          s"Sidechain extension value for ${parts(0)} exceeds ${Extension.FieldValueMaxSize} bytes"
++        )
++
++        key -> value
++      }
++
++    val encodedKeys = fields.map { case (key, _) => Base16.encode(key) }
++    require(
++      encodedKeys.distinct.length == encodedKeys.length,
++      s"$SidechainExtensionFieldsEnv contains duplicate keys"
++    )
++
++    ExtensionCandidate(fields)
++  }
++
++  private[mining] def sidechainExtensionFieldsFromEnv(): ExtensionCandidate =
++    sys.env
++      .get(SidechainExtensionFieldsEnv)
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map(parseSidechainExtensionFields)
++      .getOrElse(ExtensionCandidate(Seq.empty))
++
++  private[mining] def appendConfiguredSidechainExtensionFields(base: ExtensionCandidate): ExtensionCandidate = {
++    val extra = sidechainExtensionFieldsFromEnv()
++    if (extra.fields.isEmpty) {
++      base
++    } else {
++      val duplicate = base.fields.exists { case (existingKey, _) =>
++        extra.fields.exists { case (extraKey, _) => existingKey sameElements extraKey }
++      }
++      require(
++        !duplicate,
++        s"$SidechainExtensionFieldsEnv duplicates an existing extension key"
++      )
++      log.info(s"Appending ${extra.fields.size} configured sidechain extension fields")
++      base ++ extra
++    }
++  }
++
+@@ -569,0 +638,3 @@ object CandidateGenerator extends ScorexLogging {
++      val extensionCandidateWithSidechainFields =
++        appendConfiguredSidechainExtensionFields(extensionCandidate)
++
+@@ -627 +698 @@ object CandidateGenerator extends ScorexLogging {
+-            extensionCandidate,
++            extensionCandidateWithSidechainFields,
+@@ -659 +730 @@ object CandidateGenerator extends ScorexLogging {
+-                    extensionCandidate,
++                    extensionCandidateWithSidechainFields,
+diff --git a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+index 1c394b281..6de21f113 100644
+--- a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
++++ b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+@@ -58,0 +59,25 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
++  it should "parse configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++    val candidate = CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex")
++
++    candidate.fields.length shouldBe 1
++    Base16.encode(candidate.fields.head._1) shouldBe "0401"
++    Base16.encode(candidate.fields.head._2) shouldBe valueHex
++  }
++
++  it should "reject extension fields outside the sidechain key space" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0301:$valueHex")
++    }.getMessage should include("0x04 key space")
++  }
++
++  it should "reject duplicate configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex,0401:$valueHex")
++    }.getMessage should include("duplicate keys")
++  }
++

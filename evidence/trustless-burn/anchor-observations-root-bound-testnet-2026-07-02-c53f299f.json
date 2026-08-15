@@ -1,0 +1,510 @@
+{
+  "schemaVersion": 1,
+  "command": "demo:anchor:preflight",
+  "sourceLabel": "demo:anchor:preflight read-only Ergo extension scan",
+  "network": "testnet",
+  "nodeUrl": "http://213.239.193.208:9052",
+  "observedAt": "2026-07-02T02:16:19.449Z",
+  "scanWindow": {
+    "minHeight": 424704,
+    "maxHeight": 425423,
+    "lookbackBlocks": 720,
+    "maxScanBlocks": 120,
+    "scannedBlocks": 120
+  },
+  "heights": [
+    {
+      "height": 425304,
+      "fields": []
+    },
+    {
+      "height": 425305,
+      "fields": []
+    },
+    {
+      "height": 425306,
+      "fields": []
+    },
+    {
+      "height": 425307,
+      "fields": []
+    },
+    {
+      "height": 425308,
+      "fields": []
+    },
+    {
+      "height": 425309,
+      "fields": []
+    },
+    {
+      "height": 425310,
+      "fields": []
+    },
+    {
+      "height": 425311,
+      "fields": []
+    },
+    {
+      "height": 425312,
+      "fields": []
+    },
+    {
+      "height": 425313,
+      "fields": []
+    },
+    {
+      "height": 425314,
+      "fields": []
+    },
+    {
+      "height": 425315,
+      "fields": []
+    },
+    {
+      "height": 425316,
+      "fields": []
+    },
+    {
+      "height": 425317,
+      "fields": []
+    },
+    {
+      "height": 425318,
+      "fields": []
+    },
+    {
+      "height": 425319,
+      "fields": []
+    },
+    {
+      "height": 425320,
+      "fields": []
+    },
+    {
+      "height": 425321,
+      "fields": []
+    },
+    {
+      "height": 425322,
+      "fields": []
+    },
+    {
+      "height": 425323,
+      "fields": []
+    },
+    {
+      "height": 425324,
+      "fields": []
+    },
+    {
+      "height": 425325,
+      "fields": []
+    },
+    {
+      "height": 425326,
+      "fields": []
+    },
+    {
+      "height": 425327,
+      "fields": []
+    },
+    {
+      "height": 425328,
+      "fields": []
+    },
+    {
+      "height": 425329,
+      "fields": []
+    },
+    {
+      "height": 425330,
+      "fields": []
+    },
+    {
+      "height": 425331,
+      "fields": []
+    },
+    {
+      "height": 425332,
+      "fields": []
+    },
+    {
+      "height": 425333,
+      "fields": []
+    },
+    {
+      "height": 425334,
+      "fields": []
+    },
+    {
+      "height": 425335,
+      "fields": []
+    },
+    {
+      "height": 425336,
+      "fields": []
+    },
+    {
+      "height": 425337,
+      "fields": []
+    },
+    {
+      "height": 425338,
+      "fields": []
+    },
+    {
+      "height": 425339,
+      "fields": []
+    },
+    {
+      "height": 425340,
+      "fields": []
+    },
+    {
+      "height": 425341,
+      "fields": []
+    },
+    {
+      "height": 425342,
+      "fields": []
+    },
+    {
+      "height": 425343,
+      "fields": []
+    },
+    {
+      "height": 425344,
+      "fields": []
+    },
+    {
+      "height": 425345,
+      "fields": []
+    },
+    {
+      "height": 425346,
+      "fields": []
+    },
+    {
+      "height": 425347,
+      "fields": []
+    },
+    {
+      "height": 425348,
+      "fields": []
+    },
+    {
+      "height": 425349,
+      "fields": []
+    },
+    {
+      "height": 425350,
+      "fields": []
+    },
+    {
+      "height": 425351,
+      "fields": []
+    },
+    {
+      "height": 425352,
+      "fields": []
+    },
+    {
+      "height": 425353,
+      "fields": []
+    },
+    {
+      "height": 425354,
+      "fields": []
+    },
+    {
+      "height": 425355,
+      "fields": []
+    },
+    {
+      "height": 425356,
+      "fields": []
+    },
+    {
+      "height": 425357,
+      "fields": []
+    },
+    {
+      "height": 425358,
+      "fields": []
+    },
+    {
+      "height": 425359,
+      "fields": []
+    },
+    {
+      "height": 425360,
+      "fields": []
+    },
+    {
+      "height": 425361,
+      "fields": []
+    },
+    {
+      "height": 425362,
+      "fields": []
+    },
+    {
+      "height": 425363,
+      "fields": []
+    },
+    {
+      "height": 425364,
+      "fields": []
+    },
+    {
+      "height": 425365,
+      "fields": []
+    },
+    {
+      "height": 425366,
+      "fields": []
+    },
+    {
+      "height": 425367,
+      "fields": []
+    },
+    {
+      "height": 425368,
+      "fields": []
+    },
+    {
+      "height": 425369,
+      "fields": []
+    },
+    {
+      "height": 425370,
+      "fields": []
+    },
+    {
+      "height": 425371,
+      "fields": []
+    },
+    {
+      "height": 425372,
+      "fields": []
+    },
+    {
+      "height": 425373,
+      "fields": []
+    },
+    {
+      "height": 425374,
+      "fields": []
+    },
+    {
+      "height": 425375,
+      "fields": []
+    },
+    {
+      "height": 425376,
+      "fields": []
+    },
+    {
+      "height": 425377,
+      "fields": []
+    },
+    {
+      "height": 425378,
+      "fields": []
+    },
+    {
+      "height": 425379,
+      "fields": []
+    },
+    {
+      "height": 425380,
+      "fields": []
+    },
+    {
+      "height": 425381,
+      "fields": []
+    },
+    {
+      "height": 425382,
+      "fields": []
+    },
+    {
+      "height": 425383,
+      "fields": []
+    },
+    {
+      "height": 425384,
+      "fields": []
+    },
+    {
+      "height": 425385,
+      "fields": []
+    },
+    {
+      "height": 425386,
+      "fields": []
+    },
+    {
+      "height": 425387,
+      "fields": []
+    },
+    {
+      "height": 425388,
+      "fields": []
+    },
+    {
+      "height": 425389,
+      "fields": []
+    },
+    {
+      "height": 425390,
+      "fields": []
+    },
+    {
+      "height": 425391,
+      "fields": []
+    },
+    {
+      "height": 425392,
+      "fields": []
+    },
+    {
+      "height": 425393,
+      "fields": []
+    },
+    {
+      "height": 425394,
+      "fields": []
+    },
+    {
+      "height": 425395,
+      "fields": []
+    },
+    {
+      "height": 425396,
+      "fields": []
+    },
+    {
+      "height": 425397,
+      "fields": []
+    },
+    {
+      "height": 425398,
+      "fields": []
+    },
+    {
+      "height": 425399,
+      "fields": []
+    },
+    {
+      "height": 425400,
+      "fields": []
+    },
+    {
+      "height": 425401,
+      "fields": []
+    },
+    {
+      "height": 425402,
+      "fields": []
+    },
+    {
+      "height": 425403,
+      "fields": []
+    },
+    {
+      "height": 425404,
+      "fields": []
+    },
+    {
+      "height": 425405,
+      "fields": []
+    },
+    {
+      "height": 425406,
+      "fields": []
+    },
+    {
+      "height": 425407,
+      "fields": []
+    },
+    {
+      "height": 425408,
+      "fields": []
+    },
+    {
+      "height": 425409,
+      "fields": []
+    },
+    {
+      "height": 425410,
+      "fields": []
+    },
+    {
+      "height": 425411,
+      "fields": []
+    },
+    {
+      "height": 425412,
+      "fields": []
+    },
+    {
+      "height": 425413,
+      "fields": []
+    },
+    {
+      "height": 425414,
+      "fields": []
+    },
+    {
+      "height": 425415,
+      "fields": []
+    },
+    {
+      "height": 425416,
+      "fields": []
+    },
+    {
+      "height": 425417,
+      "fields": []
+    },
+    {
+      "height": 425418,
+      "fields": []
+    },
+    {
+      "height": 425419,
+      "fields": []
+    },
+    {
+      "height": 425420,
+      "fields": []
+    },
+    {
+      "height": 425421,
+      "fields": []
+    },
+    {
+      "height": 425422,
+      "fields": []
+    },
+    {
+      "height": 425423,
+      "fields": []
+    }
+  ],
+  "boundary": {
+    "Sanitized public extension observations only": "yes",
+    "Read-only Ergo node client": "yes",
+    "Node wallet used": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Transaction broadcast, submit, deploy, or state mutation performed": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no"
+  }
+}

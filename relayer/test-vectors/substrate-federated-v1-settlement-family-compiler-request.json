@@ -1,0 +1,66 @@
+{
+  "schema": "e2s.substrate-federated-settlement-family-compiler-request.v1",
+  "version": 1,
+  "sigmaStateCommit": "f78deadd668f801e7fae3bc884283f79c6f484fa",
+  "contracts": [
+    {
+      "role": "duplicatePrevention",
+      "relativePath": "contracts/DoubleUnlockPreventionSubstrateFederatedV1.es",
+      "templateSha256Hex": "a3902150efcdeb4025a50c6a14149d9dc656232c5c65c923a91f85658ddaa12f"
+    },
+    {
+      "role": "sourceLock",
+      "relativePath": "contracts/MainChainLockPooledReserveV6.es",
+      "templateSha256Hex": "f03c1e2ecbb0433d9b5bcad2489467bee26e2e03543ec2a1cd61c18aba21db6b"
+    },
+    {
+      "role": "pooledReserve",
+      "relativePath": "contracts/MainChainPooledReserveValidityApplicationV6.es",
+      "templateSha256Hex": "44f8bf015c301b3fe478764cfc2b841a026b9727a71fa0c4d5a60309894d67f5"
+    }
+  ],
+  "profile": {
+    "schema": "e2s.substrate-federated-settlement-family.v1",
+    "version": 1,
+    "encodedProfileHex": "0101010001010101010101010101010101010101010101010101010101010101010101010202020202020202020202020202020202020202020202020202020202020202060606060606060606060606060606060606060607070707070707070707070707070707070707070b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c957cac901136cc26a00ef51293bf587789292856f79ae0bcf6b4b4c253927de83f934142ee38fbfff97c8b92314d34ab33bce423ab6e4301b2ddc74e3380b42e00029615487c6728fe34514499611d89a438c70ef6788c4b4228dc4885bb59e5ce98000200000000000000070d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f4fbcc5372efb4338b6f150ee5455a7a0cebd1f07c6cb0cc2929e17155086af8c8ea6c51bd501d59f10ba0c771828881d4fea10dc48d2cba451949a3f573ec852a3902150efcdeb4025a50c6a14149d9dc656232c5c65c923a91f85658ddaa12ff03c1e2ecbb0433d9b5bcad2489467bee26e2e03543ec2a1cd61c18aba21db6b44f8bf015c301b3fe478764cfc2b841a026b9727a71fa0c4d5a60309894d67f5000027100000000a0000006400000000000f42400000000000200b200000000000000000000000000000000000000000000000000000000000000000",
+    "familyIdHex": "fc4ef41f900e0801c56183999056ef739c4cce29dab9a7c7129ecaf49c76e6e8",
+    "duplicatePreventionNftIdHex": "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e",
+    "pooledReserveNftIdHex": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+  },
+  "tracker": {
+    "contractIdHex": "4fbcc5372efb4338b6f150ee5455a7a0cebd1f07c6cb0cc2929e17155086af8c",
+    "templateSourceSha256Hex": "8ea6c51bd501d59f10ba0c771828881d4fea10dc48d2cba451949a3f573ec852",
+    "trackerNftIdHex": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+    "sourceNetworkIdHex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "sidechainIdHex": "0202020202020202020202020202020202020202020202020202020202020202",
+    "bridgeAddressHex": "0606060606060606060606060606060606060606",
+    "tokenAddressHex": "0707070707070707070707070707070707070707",
+    "runtimeProfileIdHex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "settlementProfileIdHex": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+    "federationProfileIdHex": "957cac901136cc26a00ef51293bf587789292856f79ae0bcf6b4b4c253927de8",
+    "sourceAttestationKeySetDigestHex": "3f934142ee38fbfff97c8b92314d34ab33bce423ab6e4301b2ddc74e3380b42e",
+    "sourceAttestationThreshold": 2,
+    "ergoAdmissionKeySetDigestHex": "9615487c6728fe34514499611d89a438c70ef6788c4b4228dc4885bb59e5ce98",
+    "ergoAdmissionThreshold": 2,
+    "federationEpoch": "7"
+  },
+  "policies": {
+    "sourceRefundDelayBlocks": 10000,
+    "minimumAnchorConfirmations": 10,
+    "maximumSuccessorCreationHeightLag": 100,
+    "minimumExternalFeeNanoErg": "1000000",
+    "maximumExternalFeeNanoErg": "2100000",
+    "settlementAssetIdHex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "burnLeafVersion": 1,
+    "settlementBundleVersion": 2
+  },
+  "boundaries": {
+    "profileActivated": false,
+    "nodeCheckPerformed": false,
+    "signingAuthorityEstablished": false,
+    "submissionAuthorityEstablished": false,
+    "broadcastAuthorityEstablished": false,
+    "fundsAuthorityEstablished": false,
+    "gate5Closed": false
+  }
+}

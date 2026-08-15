@@ -1,0 +1,25 @@
+[package]
+name = "bridge-avl"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "WASM AVL+ proof generator for the Ergo-Substrate sidechain bridge"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+bytes = "1.0"
+blake2 = { version = "0.10.6", default-features = false }
+
+# Use the published canonical Ergo AVL implementation so a clean checkout can
+# build without relying on a sibling workspace directory.
+ergo_avltree_rust = "0.1.1"
+
+[profile.release]
+opt-level = "s"
+lto = true

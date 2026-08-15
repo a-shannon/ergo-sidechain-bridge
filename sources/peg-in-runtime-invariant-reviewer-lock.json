@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "bridge-peg-in-runtime-invariant-reviewer-lock",
+  "canonicalization": "e2s-canonical-json-v1",
+  "signatureAlgorithm": "ed25519",
+  "profiles": [],
+  "boundaries": {
+    "runtimeProfilesCannotAddTrustRoots": true,
+    "signaturesDoNotProveOrganizationalIndependence": true,
+    "sourceReviewDoesNotVerifyDeployedCodeOrOwnership": true,
+    "runtimeHistoryAndCommittedVaultRemainRequired": true
+  }
+}

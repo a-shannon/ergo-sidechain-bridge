@@ -1,0 +1,236 @@
+name: Bridge public-audit candidate checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/relayer-checks.yml"
+      - ".gitattributes"
+      - ".gitignore"
+      - ".gitmodules"
+      - "README.md"
+      - "docs/**"
+      - "phases/**"
+      - "contracts/**"
+      - "relayer/**"
+      - "scripts/**"
+      - "solidity/**"
+      - "sources/**"
+      - "validity-proof/**"
+      - "wasm-avl/**"
+      - "substrate-node"
+  push:
+    branches:
+      - main
+      - master
+      - "fix/**"
+    paths:
+      - ".github/workflows/relayer-checks.yml"
+      - ".gitattributes"
+      - ".gitignore"
+      - ".gitmodules"
+      - "README.md"
+      - "docs/**"
+      - "phases/**"
+      - "contracts/**"
+      - "relayer/**"
+      - "scripts/**"
+      - "solidity/**"
+      - "sources/**"
+      - "validity-proof/**"
+      - "wasm-avl/**"
+      - "substrate-node"
+
+permissions:
+  contents: read
+
+jobs:
+  audit-alpha:
+    name: Public-audit candidate gate
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: relayer
+
+    steps:
+      - name: Checkout recursive source graph
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.1"
+          cache: npm
+          cache-dependency-path: relayer/package-lock.json
+
+      - name: Capture audit Node.js
+        run: |
+          $node = (Get-Command node.exe -ErrorAction Stop).Source
+          "BRIDGE_AUDIT_NODE_DIRECTORY=$(Split-Path -Parent $node)" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: "17.0.19+10"
+
+      - name: Setup Rust 1.97.1
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack 0.14.0
+        working-directory: .
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Install relayer dependencies
+        run: npm.cmd ci
+
+      - name: Setup compiler Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.14.0"
+
+      - name: Capture compiler Node.js
+        run: |
+          $node = (Get-Command node.exe -ErrorAction Stop).Source
+          "BRIDGE_COMPILER_NODE_EXECUTABLE=$node" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run public-audit candidate gate
+        run: |
+          $npm = Join-Path $env:BRIDGE_AUDIT_NODE_DIRECTORY 'npm.cmd'
+          $env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"
+          & $npm run audit:alpha
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  consensus-sources:
+    name: Rebuild pinned Frontier and Ergo sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout recursive source graph
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            relayer/package-lock.json
+            solidity/package-lock.json
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Install Frontier native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang libclang-dev cmake protobuf-compiler
+
+      - name: Install relayer dependencies
+        working-directory: relayer
+        run: npm ci
+
+      - name: Verify reproducible Solidity build closure
+        working-directory: solidity
+        run: |
+          npm ci --ignore-scripts --include=dev
+          npm run check
+          npm audit --audit-level=high
+
+      - name: Verify standalone consensus workflow
+        working-directory: relayer
+        run: npm run sources:verify:workflow
+
+      - name: Verify tracked source lock
+        working-directory: relayer
+        run: npm run sources:verify:lock
+
+      - name: Validate Frontier bridge event root vector
+        working-directory: relayer
+        run: npm run frontier:bridge-event-root:validate
+
+      - name: Assemble finalized bridge checkpoint candidate vector
+        working-directory: relayer
+        run: npm run checkpoint:finalized:candidate
+
+      - name: Apply tracked Frontier runtime commitment patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch="$GITHUB_WORKSPACE/sources/frontier/0001-bridge-runtime-commitment.patch"
+          git -C substrate-node apply --check --unidiff-zero --whitespace=error-all "$patch"
+          git -C substrate-node apply --unidiff-zero --whitespace=error-all "$patch"
+
+      - name: Prepare pinned patched Ergo source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir=".source-cache/ergo-node"
+          mkdir -p "$source_dir"
+          git -C "$source_dir" init
+          git -C "$source_dir" remote add origin https://github.com/ergoplatform/ergo.git
+          git -C "$source_dir" fetch --depth=1 origin refs/tags/v6.0.2
+          git -C "$source_dir" checkout --detach 2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1
+          git -C "$source_dir" apply --unidiff-zero "$GITHUB_WORKSPACE/sources/ergo-node/0001-sidechain-extension-fields.patch"
+
+      - name: Verify complete source checkouts
+        working-directory: relayer
+        run: npm run sources:verify -- --ergo-source ../.source-cache/ergo-node
+
+      - name: Test Frontier bridge commitment producer
+        working-directory: substrate-node
+        env:
+          WASM_BUILD_WORKSPACE_HINT: ${{ github.workspace }}/substrate-node
+        run: cargo test --locked -p frontier-template-runtime bridge_commitment
+
+      - name: Test native GRANDPA finality proof verifier
+        working-directory: substrate-node
+        run: cargo test --locked -p bridge-finality-proof
+
+      - name: Test native finalized bridge state proof verifier
+        working-directory: substrate-node
+        run: cargo test --locked -p bridge-state-proof
+
+      - name: Test native finalized checkpoint verifier
+        working-directory: substrate-node
+        run: cargo test --locked -p bridge-checkpoint-verifier
+
+      - name: Verify native finalized checkpoint cross-language vector
+        working-directory: relayer
+        run: npm run checkpoint:finalized:native:verify
+
+      - name: Build patched Frontier template node
+        working-directory: substrate-node
+        env:
+          WASM_BUILD_WORKSPACE_HINT: ${{ github.workspace }}/substrate-node
+        run: cargo build --locked --release -p frontier-template-node
+
+      - name: Test Ergo extension producer patch
+        working-directory: .source-cache/ergo-node
+        run: sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"
+
+      - name: Build patched Ergo node
+        working-directory: .source-cache/ergo-node
+        run: sbt assembly
+
+      - name: Recheck source identity after builds
+        working-directory: relayer
+        run: npm run sources:verify -- --ergo-source ../.source-cache/ergo-node

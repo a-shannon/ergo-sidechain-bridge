@@ -1,0 +1,60 @@
+{
+  "status": "PASS",
+  "exitCode": 0,
+  "command": "npm run readiness:handoff:validate -- ../evidence/readiness/readiness-handoff-2026-07-02-c5f1d257.json --report-out <report.md> --json-out <report.json>",
+  "handoffSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/readiness-handoff-2026-07-02-c5f1d257.json"
+  },
+  "liveEvidenceRequestCount": 9,
+  "lanePacketCount": 3,
+  "laneCoverageIssueCount": 9,
+  "operatorInputChecklistCount": 3,
+  "operatorEvidenceInputCount": 11,
+  "errors": [],
+  "laneSummaries": [
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issueCount": 6,
+      "operatorEvidenceInputCount": 5,
+      "evidenceTemplate": "../docs/trustless-burn-verification-evidence-template.md",
+      "validatorCommand": "npm run trustless:validate -- <completed-trustless-burn-evidence.md>",
+      "releaseGateFlag": "--trustless-burn-evidence <completed-trustless-burn-evidence.md>"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issueCount": 2,
+      "operatorEvidenceInputCount": 3,
+      "evidenceTemplate": "../docs/committee-governance-evidence-template.md",
+      "validatorCommand": "npm run governance:validate -- <completed-committee-governance-evidence.md>",
+      "releaseGateFlag": "--governance-evidence <completed-committee-governance-evidence.md>"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issueCount": 1,
+      "operatorEvidenceInputCount": 3,
+      "evidenceTemplate": "../docs/performance-benchmark-evidence-template.md",
+      "validatorCommand": "npm run benchmark:validate -- <completed-benchmark-evidence.md>",
+      "releaseGateFlag": "--benchmark-evidence <completed-benchmark-evidence.md>"
+    }
+  ],
+  "boundary": {
+    "Planning output only": "yes",
+    "Handoff JSON reused": "yes",
+    "Runtime prerequisites JSON reused": "yes",
+    "Live node probe executed by handoff validation": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no",
+    "Public claim authorization granted": "no",
+    "Claim/publication fields unlocked": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no"
+  }
+}

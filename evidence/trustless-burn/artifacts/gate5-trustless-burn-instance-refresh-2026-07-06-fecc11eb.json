@@ -1,0 +1,129 @@
+{
+  "status": "TRUSTLESS_BURN_INSTANCE_REFRESH_READY",
+  "exitCode": 0,
+  "command": "npm run trustless:instance-refresh -- --source-commit fecc11eb --instance-binding ../evidence/trustless-burn/gate5-trustless-burn-instance-binding-2026-07-06-fecc11eb.md --instance-binding-json ../evidence/trustless-burn/artifacts/gate5-trustless-burn-instance-binding-2026-07-06-fecc11eb.json --candidate ../evidence/trustless-burn/gate5-trustless-burn-spv-linked-candidate-2026-07-06-fecc11eb.md --proof-vector-report ../evidence/trustless-burn/artifacts/completed-local-proof-vector-report-2026-07-06-fecc11eb.json --unsigned-tx-report ../evidence/trustless-burn/artifacts/completed-local-trustless-compact-unsigned-tx-validation-2026-07-06-fecc11eb.md --unsigned-tx-json ../evidence/trustless-burn/artifacts/completed-local-trustless-compact-unsigned-tx-2026-07-06-fecc11eb.json --out <refresh.md> --json-out <refresh.json>",
+  "sourceCommit": "fecc11eb",
+  "instanceBindingTarget": "../evidence/trustless-burn/gate5-trustless-burn-instance-binding-2026-07-06-fecc11eb.md",
+  "instanceBindingJsonTarget": "../evidence/trustless-burn/artifacts/gate5-trustless-burn-instance-binding-2026-07-06-fecc11eb.json",
+  "candidateTarget": "../evidence/trustless-burn/gate5-trustless-burn-spv-linked-candidate-2026-07-06-fecc11eb.md",
+  "proofVectorReportTarget": "../evidence/trustless-burn/artifacts/completed-local-proof-vector-report-2026-07-06-fecc11eb.json",
+  "unsignedTxReportTarget": "../evidence/trustless-burn/artifacts/completed-local-trustless-compact-unsigned-tx-validation-2026-07-06-fecc11eb.md",
+  "unsignedTxJsonTarget": "../evidence/trustless-burn/artifacts/completed-local-trustless-compact-unsigned-tx-2026-07-06-fecc11eb.json",
+  "selectedNetwork": "local offline non-mainnet",
+  "identity": {
+    "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+    "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+    "eventIndex": 8,
+    "bridgeEventRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+    "ergoAnchorHeight": 987654,
+    "burnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+    "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+    "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+    "amountNanoErg": "2000000",
+    "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "proofVectorTarget": "../evidence/trustless-burn/artifacts/completed-local-proof-vector-report-2026-07-06-fecc11eb.json"
+  },
+  "structuralIssues": 0,
+  "checks": [
+    {
+      "check": "Instance binding Markdown matches JSON identity",
+      "status": "pass",
+      "detail": "binding target ../evidence/trustless-burn/gate5-trustless-burn-instance-binding-2026-07-06-fecc11eb.md carries burnId 548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+    },
+    {
+      "check": "Candidate target matches instance binding target",
+      "status": "pass",
+      "detail": "candidate target ../evidence/trustless-burn/gate5-trustless-burn-spv-linked-candidate-2026-07-06-fecc11eb.md"
+    },
+    {
+      "check": "Candidate Markdown carries bound instance identity",
+      "status": "pass",
+      "detail": "candidate carries the bound burnId, root, recipient, amount, and sidechain identifiers"
+    },
+    {
+      "check": "Proof-vector target matches instance binding target",
+      "status": "pass",
+      "detail": "proof-vector report target ../evidence/trustless-burn/artifacts/completed-local-proof-vector-report-2026-07-06-fecc11eb.json"
+    },
+    {
+      "check": "Proof-vector report status is PASS",
+      "status": "pass",
+      "detail": "proof-vector report status PASS"
+    },
+    {
+      "check": "Proof-vector report remains local read-only evidence",
+      "status": "pass",
+      "detail": "proof-vector boundary is readOnly/localProofCoreOnly with no closure, settlement, broadcast, or claim support"
+    },
+    {
+      "check": "Proof-vector report bridgeEventRoot matches instance",
+      "status": "pass",
+      "detail": "bridgeEventRoot 701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9"
+    },
+    {
+      "check": "Proof-vector report includes expected rejected negative cases",
+      "status": "pass",
+      "detail": "required negative cases rejected"
+    },
+    {
+      "check": "Unsigned TX validation report target matches JSON target",
+      "status": "pass",
+      "detail": "validated target ../evidence/trustless-burn/artifacts/completed-local-trustless-compact-unsigned-tx-2026-07-06-fecc11eb.json"
+    },
+    {
+      "check": "Unsigned TX validation report is PASS with zero structural issues",
+      "status": "pass",
+      "detail": "unsigned TX validation report PASS / 0 structural issues"
+    },
+    {
+      "check": "Unsigned TX validation report preserves no-check/no-sign/no-broadcast boundary",
+      "status": "pass",
+      "detail": "unsigned TX validation report records no transaction check, expected tx id, signing, or broadcast"
+    },
+    {
+      "check": "Unsigned TX JSON structure validates",
+      "status": "pass",
+      "detail": "Trustless unsigned TX evidence PASS: 1 single-leaf unsigned transaction source-boundary claim(s), broadcast=no, contextExtensionGuard=pass; not Gate 5 closure, pre-broadcast evidence, transaction-check evidence, expected-tx-id evidence, signing authorization, or claim authorization."
+    },
+    {
+      "check": "Unsigned TX JSON settlement identity matches instance",
+      "status": "pass",
+      "detail": "unsigned TX JSON claimCount=1, burnId=548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+    },
+    {
+      "check": "Unsigned TX JSON context-extension guard remains source-boundary only",
+      "status": "pass",
+      "detail": "contextExtensionGuard pass with signingPermitted=false and broadcastPermitted=false"
+    }
+  ],
+  "mismatches": [],
+  "nextEvidence": [
+    "Regenerate local trustless unsigned transaction evidence for burnId 548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f, bridgeEventRoot 701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9, recipient dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401, and amountNanoErg 2000000.",
+    "Keep the regenerated unsigned transaction evidence offline and source-boundary only: no /transactions/check, expected tx id, signing, submit, broadcast, reconciliation, node mutation, or deployment.",
+    "After exact unsigned evidence matches the instance, capture sanitized anchor, SPV tracker, finality, proof-acceptance, and DUP settlement binding evidence for the same identifiers."
+  ],
+  "boundary": {
+    "Refresh/prerequisite output only": "yes",
+    "Instance binding evidence reused": "yes",
+    "Candidate evidence reused": "yes",
+    "Proof-vector report evidence reused": "yes",
+    "Unsigned transaction evidence checked": "yes",
+    "Secret or environment file read": "no",
+    "Wallet recovery material or private key read": "no",
+    "Node config secret read": "no",
+    "Runtime database opened by refresh command": "no",
+    "Private deployment state opened by refresh command": "no",
+    "Node or RPC request performed by refresh command": "no",
+    "Transaction check performed": "no",
+    "Expected transaction ID claimed": "no",
+    "Transaction signing performed or authorized": "no",
+    "Transaction submit or broadcast performed or authorized": "no",
+    "Settlement reconciliation performed": "no",
+    "Gate 5 trustless-burn evidence claimed complete": "no",
+    "Release gate PASS claimed": "no",
+    "Production-ready claim allowed": "no",
+    "Mainnet-grade evidence linked": "no",
+    "Testnet production-candidate claim authorized by refresh": "no"
+  }
+}

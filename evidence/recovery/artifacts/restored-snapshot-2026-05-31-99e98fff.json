@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-31T11:21:50.042Z",
+  "databaseLabel": "restored-state.sqlite",
+  "mode": "readonly",
+  "localOnly": true,
+  "stateConsistencyValues": {
+    "pegOutStatusCounts": "detected=1,confirmed=0,phase1_created=0,aggregate_submitted=0,batch_submitted=1,phase2_unlocked=0,burn_reverted=0,failed=0",
+    "pendingReconciliationRows": "2",
+    "dupAvlHistoryCount": "2",
+    "dupRebuiltDigest": "e1a78985f47c5df2423d4fc857978a4a51212759a3bd331a4dc76d5c4ea1051402",
+    "spvTrackerHistoryCount": "1",
+    "spvRebuiltDigest": "594cdfde0b6e35b8a1cdcbfd22a4b83f0de480a2b55367780d5827133d438a7701",
+    "persistedAnchorHeights": "54321",
+    "pendingDupHeartbeats": "1",
+    "runtimeArtifactHygiene": "snapshot read-only; confirm git status clean or backups ignored"
+  },
+  "evidenceRows": [
+    {
+      "check": "Peg-out status counts",
+      "value": "detected=1,confirmed=0,phase1_created=0,aggregate_submitted=0,batch_submitted=1,phase2_unlocked=0,burn_reverted=0,failed=0",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "Pending reconciliation rows",
+      "value": "2",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "DUP AVL history count",
+      "value": "2",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "DUP rebuilt digest",
+      "value": "e1a78985f47c5df2423d4fc857978a4a51212759a3bd331a4dc76d5c4ea1051402",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "SPV tracker history count",
+      "value": "1",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "SPV rebuilt digest",
+      "value": "594cdfde0b6e35b8a1cdcbfd22a4b83f0de480a2b55367780d5827133d438a7701",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "Persisted anchor heights",
+      "value": "54321",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "Pending DUP heartbeats",
+      "value": "1",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    },
+    {
+      "check": "Runtime artifact hygiene",
+      "value": "snapshot read-only; confirm git status clean or backups ignored",
+      "evidenceHint": "Link this npm run backup:snapshot JSON artifact in the matching evidence row."
+    }
+  ],
+  "notes": [
+    "Snapshot is local SQLite evidence only; it does not compare rebuilt DUP or SPV tracker digests with current on-chain singleton boxes.",
+    "Use the same command before backup and after isolated restore, then copy matching values into the evidence template.",
+    "Keep the JSON artifact out of git when it contains environment-specific runtime state."
+  ]
+}

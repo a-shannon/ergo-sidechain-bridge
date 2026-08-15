@@ -1,0 +1,25 @@
+# check=skip=FromPlatformFlagConstDisallowed
+
+FROM --platform=linux/amd64 rust@sha256:294917190b5a3fed18d3303213943f40ec9b644b3cd6e5cdc8cd029334a770b3 AS host-rust
+
+FROM --platform=linux/amd64 risczero/risc0-guest-builder@sha256:3e12f71bacd27527a61dea96fa0e53e468c99aa261d3a1019b593f6dbd943eb3
+
+LABEL org.opencontainers.image.title="Ergo bridge EIP-0045 preactivation proof environment"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+# The guest-builder base carries guest Rust 1.88.0. The exact RISC Zero
+# v3.0.5 source pin requires host Rust 1.89.0.
+COPY --from=host-rust /usr/local/cargo /opt/bridge-host-rust/cargo
+COPY --from=host-rust /usr/local/rustup /opt/bridge-host-rust/rustup
+
+ENV RUSTUP_HOME=/opt/bridge-host-rust/rustup
+ENV RISC0_HOME=/root/.risc0
+ENV HOST_RUST_TOOLCHAIN=/opt/bridge-host-rust/rustup/toolchains/1.89.0-x86_64-unknown-linux-gnu
+ENV PATH=${HOST_RUST_TOOLCHAIN}/bin:/root/.risc0/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+RUN rustup component add \
+      --toolchain 1.89.0-x86_64-unknown-linux-gnu \
+      clippy rustfmt
+
+WORKDIR /workspace
+ENTRYPOINT []

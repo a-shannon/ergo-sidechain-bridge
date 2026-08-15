@@ -1,0 +1,22 @@
+{
+  "name": "@ergo-sidechain-bridge/solidity-build",
+  "version": "0.0.0-private",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "node compile.js build",
+    "check": "node compile.js check"
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=11 <12"
+  },
+  "packageManager": "npm@11.16.0",
+  "devDependencies": {
+    "@openzeppelin/contracts": "5.6.1",
+    "solc": "0.8.35"
+  },
+  "overrides": {
+    "tmp": "0.2.7"
+  }
+}

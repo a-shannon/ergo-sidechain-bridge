@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 4,
+  "kind": "bridge-authenticated-v2-compiler-lock",
+  "platform": "win32-x64",
+  "nodeVersion": "24.14.0",
+  "nodeExecutableSha256": "63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088",
+  "gitVersion": "2.54.0.windows.1",
+  "gitExecutableSha256": "81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5",
+  "gitDistributionUrl": "https://github.com/git-for-windows/git/releases/download/v2.54.0.windows.1/MinGit-2.54.0-64-bit.zip",
+  "gitDistributionSha256": "04f937e1f0918b17b9be6f2294cb2bb66e96e1d9832d1c298e2de088a1d0e668",
+  "relayerPackageLockSha256": "ec537e51164c2ae33ffb3e3d4fca407a22ef4d8f58d6fdb00d8c9696e148e230",
+  "parentRuntimePackages": [
+    {
+      "path": "relayer/node_modules/tsx",
+      "sha256": "211fc71920bcbcbf1e897c56b9ea7be1faf4f32434938cf784e44f74b4178209"
+    },
+    {
+      "path": "relayer/node_modules/esbuild",
+      "sha256": "dac2f5c5113f8b705103bd4bdabb8e82f119937965a98e32211a3bfb4f29719c"
+    },
+    {
+      "path": "relayer/node_modules/@esbuild/win32-x64",
+      "sha256": "8894ba0941476cec7c8f2b68232db2fc74c931bdf48affc3afe77b8e7c0e6e74"
+    },
+    {
+      "path": "relayer/node_modules/get-tsconfig",
+      "sha256": "9a81f860cce0ca678f68d9cdeb6778fa83a1f3221dd2305c57ab05f2d762721f"
+    },
+    {
+      "path": "relayer/node_modules/resolve-pkg-maps",
+      "sha256": "4563d35d2a214c11d11e79f287a800ef6c4f4690a45d517fb0c69191d3974fab"
+    }
+  ],
+  "forbiddenParentEnvironmentOverrides": [
+    "NODE_COMPILE_CACHE",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_OPTIONS",
+    "NODE_PATH",
+    "TSX_TSCONFIG_PATH"
+  ],
+  "trustedHostModel": "exclusive-same-user-process",
+  "ergoNodeBaseCommit": "2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1",
+  "ergoNodeBaseTag": "v6.0.2",
+  "consensusSourceLockSha256": "ebc6f342f36e84a98dce6d7bd0930598850ff255f4e7d1850fa930163995ceb4",
+  "ergoPatchSha256": "31b27cf9acd7ad6d7c05282d964f51be15b5aa78767b354f8f29ee28d39ebf23",
+  "ergoPatchedBlobIds": [
+    "076f788f3965e188047a7a23a6d0e8c1a79134ff",
+    "6de21f113d966cc94ebd1bbf4f96356001a34433"
+  ],
+  "sigmaStateVersion": "6.0.2",
+  "sigmaStateArtifactSha256": "0dbd3b31ef94affec83f8f0f6c5a9891c45da1e975ff6016a0574fc5aa1418e6",
+  "runtimeBundlePath": "relayer/tools/authenticated-v2-compiler/target/locked-runtime",
+  "runtimeBundleSha256": "7b44b4e318e379716134bc15b125573d4ed111fe40376445669f0f74f183484c",
+  "runtimeClasspathEntries": [
+    "000-classes",
+    "001-scala-library.jar",
+    "002-sigma-state_2.12-6.0.2.jar",
+    "003-scala-reflect.jar",
+    "004-debox_2.12-0.10.0.jar",
+    "005-scala-collection-compat_2.12-2.7.0.jar",
+    "006-scorex-util_2.12-0.2.1.jar",
+    "007-bcprov-jdk15on-1.66.jar",
+    "008-fastparse_2.12-2.3.3.jar",
+    "009-circe-core_2.12-0.13.0.jar",
+    "010-circe-generic_2.12-0.13.0.jar",
+    "011-circe-parser_2.12-0.13.0.jar",
+    "012-scrypto_2.12-3.0.0.jar",
+    "013-scodec-bits_2.12-1.1.34.jar",
+    "014-spire-macros_2.12-0.17.0-M1.jar",
+    "015-supertagged_2.12-2.0-RC2.jar",
+    "016-scala-logging_2.12-3.9.2.jar",
+    "017-sourcecode_2.12-0.2.3.jar",
+    "018-geny_2.12-0.6.10.jar",
+    "019-circe-numbers_2.12-0.13.0.jar",
+    "020-cats-core_2.12-2.1.0.jar",
+    "021-shapeless_2.12-2.3.3.jar",
+    "022-circe-jawn_2.12-0.13.0.jar",
+    "023-bcprov-jdk15to18-1.66.jar",
+    "024-machinist_2.12-0.6.8.jar",
+    "025-algebra_2.12-2.0.0-M2.jar",
+    "026-slf4j-api-1.7.25.jar",
+    "027-cats-macros_2.12-2.1.0.jar",
+    "028-cats-kernel_2.12-2.1.0.jar",
+    "029-macro-compat_2.12-1.1.1.jar",
+    "030-jawn-parser_2.12-1.0.0.jar"
+  ],
+  "runtimeClasspathSha256": "d156d66793cc88b78816c45f82429ed1052c67220133fba0783e38928396131a",
+  "scalaVersion": "2.12.20",
+  "sbtVersion": "1.11.1",
+  "javaMajorVersion": 17,
+  "javaDistribution": "Microsoft OpenJDK 17.0.19+10-LTS",
+  "javaHomeSha256": "43ddaddbc9c892eebb9017eaadd292a0198a3262941f061de61ab03db283dd7e",
+  "networkPrefix": 16,
+  "scriptVersion": 3,
+  "treeVersion": 0,
+  "buildPath": "relayer/tools/authenticated-v2-compiler/build.sbt",
+  "buildSha256": "7febbedb4020e143023bae4396f1b7320548fe88e4baa1fe00c902e2607871a4",
+  "sbtPropertiesPath": "relayer/tools/authenticated-v2-compiler/project/build.properties",
+  "sbtPropertiesSha256": "7806d25d71637c8d78226774ec38dddb6577f77f1208ba0ee2a082245f860043",
+  "toolPath": "relayer/tools/authenticated-v2-compiler/src/main/scala/org/ergoplatform/bridge/tools/ExactAuthenticatedV2Compiler.scala",
+  "toolSha256": "988b37896139753bd7381aecf0cf5a6567f4af942811c1af06d9d4314c1c4b84",
+  "compiledToolClassesSha256": "946592d0a643ac646c934ff24d5eefcc3c02ff1606a6d41821d0e7664a181502",
+  "mainClass": "org.ergoplatform.bridge.tools.ExactAuthenticatedV2Compiler",
+  "forbiddenEnvironmentOverrides": [
+    "CLASSPATH",
+    "JAVA_OPTS",
+    "JAVA_TOOL_OPTIONS",
+    "JDK_JAVA_OPTIONS",
+    "SBT_OPTS",
+    "SIGMASTATE_VERSION",
+    "_JAVA_OPTIONS"
+  ]
+}

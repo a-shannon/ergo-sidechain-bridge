@@ -1,0 +1,29 @@
+{
+  "sourceLabel": "local public Gate 5 SPV tracker observation input",
+  "network": "local offline",
+  "observedAt": "2026-07-02T12:30:00.000Z",
+  "trackerDigestHex": "abc64a32910eb985c7ca95eefc6088c5ae841b74a892beffc9e190db42bae0e301",
+  "trackerBox": {
+    "boxId": "4444444444444444444444444444444444444444444444444444444444444444",
+    "nftId": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "expectedEntry": {
+    "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "sidechainHeight": 12345,
+    "sidechainHeaderHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+    "bridgeEventRootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+    "ergoAnchorHeight": 987654
+  },
+  "sidechainFinality": {
+    "finalityRule": "local offline rule: observedSidechainHeight - sidechainBlockHeight >= requiredConfirmations",
+    "sidechainBlockHeight": 12345,
+    "observedSidechainHeight": 12357,
+    "requiredConfirmations": 12
+  },
+  "history": [
+    {
+      "key": "46bfd6977e3c170fa567da9fd95d79d3e0232c3da99a4dc4194910328789dbdb",
+      "value": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb000f1206"
+    }
+  ]
+}

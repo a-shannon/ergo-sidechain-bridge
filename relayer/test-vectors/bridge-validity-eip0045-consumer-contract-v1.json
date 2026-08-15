@@ -1,0 +1,41 @@
+{
+  "schema": "e2s.bridge-validity-eip0045-consumer-contract.vector.v1",
+  "version": 1,
+  "generator": {
+    "repository": "ScorexFoundation/sigmastate-interpreter",
+    "commit": "f78deadd668f801e7fae3bc884283f79c6f484fa",
+    "treeVersion": 4,
+    "constantSegregation": true
+  },
+  "consumerAbi": {
+    "proofChunksContextVariable": 0,
+    "proofChunksType": "Coll[Coll[Byte]]",
+    "applicationPayloadContextVariable": 1,
+    "applicationPayloadType": "Coll[Byte]",
+    "childOrder": [
+      "proofChunks",
+      "applicationPayload",
+      "programId",
+      "profileId"
+    ]
+  },
+  "constants": {
+    "programIdHex": "5b46bf0ef2ff959327bfb39c6ac4dae48d509a0fcf91f89dcf84b26f44203934",
+    "profileIdHex": "23c4a123ffb33a1c8db89436fe0e7972bd8e4e289459ee5fd71be5440607d383"
+  },
+  "expected": {
+    "propositionBytes": 85,
+    "propositionBytesHex": "1c53020e205b46bf0ef2ff959327bfb39c6ac4dae48d509a0fcf91f89dcf84b26f442039340e2023c4a123ffb33a1c8db89436fe0e7972bd8e4e289459ee5fd71be5440607d383d1b9e4e3001ae4e3010e73007301",
+    "contractIdHex": "9d0ac3c2c7889ef4bfa53c31903f5e11012f20b24156cbcf82b3435d95a290fc"
+  },
+  "claimBoundary": {
+    "fundsNeutral": true,
+    "preactivationOnly": true,
+    "profileActivated": false,
+    "onChainAcceptanceEstablished": false,
+    "fundsAuthorityEstablished": false,
+    "gate5Closed": false,
+    "trustless": false,
+    "productionReady": false
+  }
+}

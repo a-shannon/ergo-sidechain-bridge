@@ -1,0 +1,46 @@
+{
+  "status": "PATCHED_DEVNET_PLAN_READY",
+  "exitCode": 0,
+  "command": "npm run demo:patched-devnet:plan -- --execution-request <gate3-request.md> --out <plan.md> --json-out <plan.json>",
+  "patchedNodeUrl": "http://127.0.0.1:9051",
+  "stepCount": 15,
+  "stepTitles": [
+    "Start Frontier sidechain (ephemeral)",
+    "Set env vars for patched devnet",
+    "Start patched Ergo devnet with DUMMY extension",
+    "Validate frozen TX byte conformance (GATE)",
+    "Fund relayer wallet on devnet",
+    "Deploy Ergo-side contracts on patched devnet",
+    "Deploy EVM contracts to Frontier",
+    "Create peg-out burns on sidechain",
+    "Derive anchor extension field value",
+    "Stop patched Ergo devnet",
+    "Restart patched Ergo devnet with REAL extension",
+    "Run readiness checks",
+    "Build and check aggregate settlement (CHECK ONLY)",
+    "Submit aggregate settlement (REQUIRES EXPLICIT APPROVAL)",
+    "Confirm settlement"
+  ],
+  "evidenceTargetsToProduce": [
+    "../evidence/live-rehearsals/<redacted-signer-output.md>",
+    "../evidence/live-rehearsals/<redacted-funding-output.md>",
+    "../evidence/live-rehearsals/<local-devnet-signer-funding-summary.md>",
+    "../evidence/live-rehearsals/<local-devnet-signer-funding-summary.json>",
+    "../evidence/live-rehearsals/<completed-local-devnet-rehearsal.md>"
+  ],
+  "boundary": {
+    "Plan output only": "yes",
+    "Secret or environment file read": "no",
+    "Wallet recovery material or private key read": "no",
+    "Node config secret read": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Live node probe executed": "no",
+    "Transaction signing performed": "no",
+    "Transaction broadcast, submit, deploy, confirmation, reconciliation, or state mutation performed": "no",
+    "Gate 3 lifecycle evidence claimed complete": "no",
+    "Release gate PASS claimed": "no",
+    "Production-ready claim allowed": "no",
+    "Testnet production-candidate claim allowed": "no"
+  }
+}

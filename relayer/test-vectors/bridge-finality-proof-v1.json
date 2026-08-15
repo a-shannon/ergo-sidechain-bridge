@@ -1,0 +1,51 @@
+{
+  "schema": "e2s.bridge-finality-proof.vector.v1",
+  "claimBoundary": {
+    "syntheticData": true,
+    "nativeEnvelopeOffChainEvidenceOnly": true,
+    "ergoOnChainAcceptanceProven": false,
+    "gate5Closed": false,
+    "trustless": false,
+    "productionReady": false
+  },
+  "domains": {
+    "programId": "E2S_GRANDPA_STATE_AND_FINALITY_PROGRAM_V1",
+    "statement": "E2S_BRIDGE_FINALITY_STATEMENT_V1",
+    "nativePayload": "E2S_NATIVE_GRANDPA_PROOF_PAYLOAD_V1",
+    "aggregateProof": "E2S_AGGREGATE_FINALITY_PROOF_V1"
+  },
+  "input": {
+    "statement": {
+      "version": 1,
+      "hashAlgorithmId": 1,
+      "finalityRuleId": 1,
+      "flags": 0,
+      "encodedCheckpointHex": "010101001111111111111111111111111111111111111111111111111111111111111111000000000000040021212121212121212121212121212121212121212121212121212121212121212222222222222222222222222222222222222222222222222222222222222222d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473000000030000000000000007679828be637d02f812ac8e7a8b27c0757fd9302bdf3558974ad72230b53075a00b1cb3a7b4ca5374805105e3eee09a5e023c23eb2d53edddc9627fcb2a24f5b1",
+      "checkpointCommitmentHex": "e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43",
+      "trustedAnchorDigestHex": "abababababababababababababababababababababababababababababababab",
+      "finalityHorizonHeight": "2048",
+      "finalityHorizonHashHex": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+    },
+    "proof": {
+      "version": 1,
+      "proofSystemId": 1,
+      "hashAlgorithmId": 1,
+      "flags": 0,
+      "verifierProfileIdPreimageAscii": "E2S_SYNTHETIC_PINNED_NATIVE_VERIFIER_V1",
+      "verifierProfileIdHashAlgorithm": "SHA-256",
+      "verifierProfileIdHex": "82154fcd295b1250ddb70f29027e42b92085700d180899feabd031ebd3b24a20",
+      "payloadHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+    }
+  },
+  "expected": {
+    "statementLength": 356,
+    "proofFixedPrefixLength": 464,
+    "payloadLength": 64,
+    "programIdHex": "c175355a0813b4381e9ec9526e00dc0eb920bee5d841936ae2b8d3d3aea3e106",
+    "encodedStatementHex": "01010100010101001111111111111111111111111111111111111111111111111111111111111111000000000000040021212121212121212121212121212121212121212121212121212121212121212222222222222222222222222222222222222222222222222222222222222222d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473000000030000000000000007679828be637d02f812ac8e7a8b27c0757fd9302bdf3558974ad72230b53075a00b1cb3a7b4ca5374805105e3eee09a5e023c23eb2d53edddc9627fcb2a24f5b1e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43abababababababababababababababababababababababababababababababab0000000000000800cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdc175355a0813b4381e9ec9526e00dc0eb920bee5d841936ae2b8d3d3aea3e106",
+    "statementDigestHex": "46c998b73ff196447c0421ba388c27d72e26fc5e6e0627913d08ee222e0e6377",
+    "payloadDigestHex": "794b3c3c39142780fcd0805495dca5b6ffa5c25673ccc5ed7ef8fbac6bbff03f",
+    "proofDigestHex": "9b625217e0ff91f24a5ac898be26470db1e598a0c2fdc1cf027151ab578cb8a3",
+    "encodedProofHex": "01010100000001640000004082154fcd295b1250ddb70f29027e42b92085700d180899feabd031ebd3b24a2046c998b73ff196447c0421ba388c27d72e26fc5e6e0627913d08ee222e0e6377794b3c3c39142780fcd0805495dca5b6ffa5c25673ccc5ed7ef8fbac6bbff03f01010100010101001111111111111111111111111111111111111111111111111111111111111111000000000000040021212121212121212121212121212121212121212121212121212121212121212222222222222222222222222222222222222222222222222222222222222222d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473000000030000000000000007679828be637d02f812ac8e7a8b27c0757fd9302bdf3558974ad72230b53075a00b1cb3a7b4ca5374805105e3eee09a5e023c23eb2d53edddc9627fcb2a24f5b1e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43abababababababababababababababababababababababababababababababab0000000000000800cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdc175355a0813b4381e9ec9526e00dc0eb920bee5d841936ae2b8d3d3aea3e106000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "kind": "wrong-network-negative",
+  "sourceLabel": "local public Gate 6 wrong-network negative input",
+  "targetLabel": "sanitized non-mainnet wrong-network packet",
+  "observedAt": "2026-07-03T08:30:00.000Z",
+  "expectedNetwork": "testnet",
+  "observedNetwork": "patched-devnet",
+  "deploymentStateDigestHex": "3131313131313131313131313131313131313131313131313131313131313131",
+  "stopCondition": "Governance rotation blocked because the deployment-state network does not match the intended testnet target.",
+  "boundary": {
+    "readOnly": true,
+    "sanitizedPublicInputOnly": true,
+    "privateDeploymentStateIncluded": false,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "nodeOrRpcRequestPerformed": false,
+    "keyRotationAuthorized": false,
+    "transactionBroadcastOrMutation": false,
+    "gate6Closure": false,
+    "governanceReadyClaimSupport": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

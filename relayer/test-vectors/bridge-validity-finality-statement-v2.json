@@ -1,0 +1,44 @@
+{
+  "schema": "e2s.bridge-validity-finality-statement.vector.v2",
+  "claimBoundary": {
+    "syntheticData": true,
+    "preactivationOnly": true,
+    "guestProgramImplemented": false,
+    "eip0045Activated": false,
+    "proofSystemId2Activated": false,
+    "ergoOnChainAcceptanceProven": false,
+    "gate5Closed": false,
+    "trustless": false,
+    "productionReady": false
+  },
+  "domains": {
+    "applicationPayload": "E2S_BRIDGE_VALIDITY_FINALITY_PAYLOAD_V2",
+    "eip0045Statement": "Ergo.VerifyStark.Statement"
+  },
+  "input": {
+    "trackerNftIdHex": "9191919191919191919191919191919191919191919191919191919191919191",
+    "compatibilityProofVector": "bridge-finality-proof-v1.json",
+    "chainDomainIdHex": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "profileIdHex": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "programIdHex": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
+    "contractPropositionBytesHex": "0008cd444444444444444444444444444444444444444444444444444444444444444444"
+  },
+  "expected": {
+    "applicationPayloadBytes": 654,
+    "compatibilityStatementV1DigestHex": "46c998b73ff196447c0421ba388c27d72e26fc5e6e0627913d08ee222e0e6377",
+    "compatibilitySemanticProgramIdHex": "c175355a0813b4381e9ec9526e00dc0eb920bee5d841936ae2b8d3d3aea3e106",
+    "compatibilityVerifierProfileIdHex": "82154fcd295b1250ddb70f29027e42b92085700d180899feabd031ebd3b24a20",
+    "compatibilityPayloadDigestHex": "794b3c3c39142780fcd0805495dca5b6ffa5c25673ccc5ed7ef8fbac6bbff03f",
+    "compatibilityAggregateProofDigestHex": "9b625217e0ff91f24a5ac898be26470db1e598a0c2fdc1cf027151ab578cb8a3",
+    "nativeVerifierRequestDigestHex": "10d8e6d534b00939843fe9dcc4dae48cdf008f6b8b2b82b156f5404d874887f5",
+    "checkpointCommitmentHex": "e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43",
+    "extensionValueHex": "d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43",
+    "encodedPayloadHex": "4532535f4252494447455f56414c49444954595f46494e414c4954595f5041594c4f41445f563200020101009191919191919191919191919191919191919191919191919191919191919191010101001111111111111111111111111111111111111111111111111111111111111111000000000000040021212121212121212121212121212121212121212121212121212121212121212222222222222222222222222222222222222222222222222222222222222222d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473000000030000000000000007679828be637d02f812ac8e7a8b27c0757fd9302bdf3558974ad72230b53075a00b1cb3a7b4ca5374805105e3eee09a5e023c23eb2d53edddc9627fcb2a24f5b1e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc4346c998b73ff196447c0421ba388c27d72e26fc5e6e0627913d08ee222e0e6377c175355a0813b4381e9ec9526e00dc0eb920bee5d841936ae2b8d3d3aea3e10682154fcd295b1250ddb70f29027e42b92085700d180899feabd031ebd3b24a20794b3c3c39142780fcd0805495dca5b6ffa5c25673ccc5ed7ef8fbac6bbff03f9b625217e0ff91f24a5ac898be26470db1e598a0c2fdc1cf027151ab578cb8a310d8e6d534b00939843fe9dcc4dae48cdf008f6b8b2b82b156f5404d874887f5abababababababababababababababababababababababababababababababab0000000000000800cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd0401d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43",
+    "payloadDigestHex": "1cae98e8cd554f680e4d9fc25d686a2cf79f8d020508ad296aa8b38bae722f3d",
+    "contractIdHex": "017021d8326cba3c2b8d556c8af13e030cdd390f3a45d34a9d2c7781ecdb78d4",
+    "statementPrefixBytes": 159,
+    "statementPrefixHex": "4572676f2e566572696679537461726b2e53746174656d656e7401a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3017021d8326cba3c2b8d556c8af13e030cdd390f3a45d34a9d2c7781ecdb78d48e020000",
+    "statementBytes": 813,
+    "statementDigestHex": "affd148073266a610152f1b71c7aa8270fa5dda3b231292318ec3b814fa19e60"
+  }
+}

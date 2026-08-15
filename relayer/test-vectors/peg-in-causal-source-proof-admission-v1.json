@@ -1,0 +1,118 @@
+{
+  "schema": "e2s.peg-in-causal-source-proof-admission-vector.v1",
+  "request": {
+    "schema": "e2s.peg-in-causal-source-proof-admission.v1",
+    "candidateIdHex": "0x4f20e048bc8e9da7caf330405f7071e9e81db6d4fee4db2b9f601ba9beaecf97",
+    "admissionProfile": {
+      "formatVersion": 2,
+      "sourceNetworkIdHex": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "sidechainIdHex": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "bridgeAddressHex": "0x3333333333333333333333333333333333333333",
+      "tokenAddressHex": "0x4444444444444444444444444444444444444444",
+      "settlementProfileIdHex": "0x5555555555555555555555555555555555555555555555555555555555555555",
+      "sourceLockErgoTreeHashHex": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "vaultErgoTreeHashHex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "finalityPolicyIdHex": "0x25b6e4d9beac8863882fc8f8c43ced66f2d087b3fba128112014b3fb8fd22ff6",
+      "proofSystemIdHex": "0x36c06f93b9cf9a7f80c59f5bfb8b7790c7f355933cd001fffccc9110f9f95069",
+      "proofProfileIdHex": "0x65ca4632abc4db51255e42e83a9aee8a72b19d41921d45824ce847cd696e9537",
+      "profileRevision": "3",
+      "activationHeight": "1000"
+    },
+    "sourceIntent": {
+      "formatVersion": 2,
+      "sourceNetworkIdHex": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "sidechainIdHex": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "bridgeAddressHex": "0x3333333333333333333333333333333333333333",
+      "tokenAddressHex": "0x4444444444444444444444444444444444444444",
+      "settlementProfileIdHex": "0x5555555555555555555555555555555555555555555555555555555555555555",
+      "admissionProfileIdHex": "0x5b8797d9097e879b24b48ffbc637faadd89714f5d25d435a8e7dea0696c23f8e",
+      "sourceAssetIdHex": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "amountNanoErg": "2000000",
+      "recipientAddressHex": "0x9999999999999999999999999999999999999999"
+    },
+    "statement": {
+      "formatVersion": 2,
+      "sourceIntentIdHex": "0x3997ee20536e6cb65b57249a2a2e5e56bcbae726ed5323dcac316a31c433e6ad",
+      "legacyMintIdentityHex": "0xc452953a3ef735185033e56e686efc3a40b5c3fefab2c9e26e9706d1a57ccdb4",
+      "sourceBoxIdHex": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sourceCreationTransactionIdHex": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "sourceOutputIndex": 1,
+      "sourceLockErgoTreeHashHex": "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "commitmentTransactionIdHex": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "vaultOutputIndex": 0,
+      "vaultBoxIdHex": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "vaultErgoTreeHashHex": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "commitmentInclusionBlockIdHex": "0x1212121212121212121212121212121212121212121212121212121212121212",
+      "commitmentInclusionHeight": "500000",
+      "acceptanceCheckpointBlockIdHex": "0x1313131313131313131313131313131313131313131313131313131313131313",
+      "acceptanceCheckpointHeight": "500011",
+      "finalityPolicyIdHex": "0x25b6e4d9beac8863882fc8f8c43ced66f2d087b3fba128112014b3fb8fd22ff6",
+      "requiredConfirmations": 10
+    },
+    "sourceBoxCanonicalHex": "0x010203",
+    "commitmentTransactionCanonicalHex": "0x040506",
+    "vaultSuccessorCanonicalHex": "0x070809",
+    "inclusionProofCanonicalHex": "0x0a0b0c",
+    "checkpointAncestryCanonicalHex": "0x0d0e0f",
+    "finalityProofCanonicalHex": "0x101112",
+    "verifierExecutableSha256Hex": "0x8787878787878787878787878787878787878787878787878787878787878787",
+    "sourceConsumption": {
+      "consumedSourceBoxIdHex": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "consumingTransactionIdHex": "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "vaultOutputIndex": 0,
+      "vaultBoxIdHex": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "commitmentInclusionBlockIdHex": "0x1212121212121212121212121212121212121212121212121212121212121212",
+      "commitmentInclusionHeight": "500000",
+      "acceptanceCheckpointBlockIdHex": "0x1313131313131313131313131313131313131313131313131313131313131313",
+      "acceptanceCheckpointHeight": "500011",
+      "finalityPolicyIdHex": "0x25b6e4d9beac8863882fc8f8c43ced66f2d087b3fba128112014b3fb8fd22ff6"
+    }
+  },
+  "result": {
+    "formatVersion": 1,
+    "requestDigestHex": "0x91ef3fa07ebb9737eed0b03851e740d3cf844d8c0b7545ba506c635000657726",
+    "sourceBoxCanonicalBlake2b256Hex": "0x11c0e79b71c3976ccd0c02d1310e2516c08edc9d8b6f57ccd680d63a4d8e72da",
+    "commitmentTransactionCanonicalBlake2b256Hex": "0x0afd4a04d7720da9922f2b40249989faf4ff8096e1ed49bee615bb6cb1ee4f7d",
+    "vaultSuccessorCanonicalBlake2b256Hex": "0x0f605d1b9294c36f7d17c48c943da2b877cda960ba5e3337e7b2e29bce603d18",
+    "inclusionProofBlake2b256Hex": "0xe22fb42ef828bc5182ceb04f5c3c1e73c6b0393820d0e883a220020a9539166a",
+    "checkpointAncestryBlake2b256Hex": "0xdc0ea7560af315b69f2b7a5537ef9871559bd8cda061e47441ec8201559fc60b",
+    "finalityProofBlake2b256Hex": "0x4eeb700dc303c96bc00be29e9f6efc1e48fce1bc4f2537d24c4176128a438441",
+    "verifierExecutableSha256Hex": "0x8787878787878787878787878787878787878787878787878787878787878787",
+    "verifierProfileIdHex": "0xe1c2db0d496efae61a16d7791456ae44c3927b3b8d0d9f029d8a9fe100e215ea",
+    "issuedAtNativeHeight": "1001",
+    "expiresAtNativeHeight": "1017"
+  },
+  "signatures": [
+    {
+      "signerPublicKeyHex": "0x2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+      "signatureHex": "0x8787f4dde985117d2b143e72af1e7430878e747985dde040ffc95accfa8a038d9ea9600997f5d674e191dfaae4b29584404991819c26f5ead2492a019dbb030a"
+    },
+    {
+      "signerPublicKeyHex": "0x22fc297792f0b6ffc0bfcfdb7edb0c0aa14e025a365ec0e342e86e3829cb74b6",
+      "signatureHex": "0xe504c8e2e21da94341c87cc772923df32f73ab75b2400ca1ed734120afaa5eb24eb709f64e3ed7ec091b0f01f886a53e2877643662a51945d833b5563c3afa08"
+    }
+  ],
+  "validation": {
+    "currentNativeHeight": "1001"
+  },
+  "expected": {
+    "requestDigestHex": "0x91ef3fa07ebb9737eed0b03851e740d3cf844d8c0b7545ba506c635000657726",
+    "resultIdHex": "0x53e3ad2d0b43043ed56eb127adc6a416a9b2db258f62255492d2f1e7ff4ab1a4",
+    "attestationDigestHex": "0xa1622327ae74faa683653e597f68a3bb88c61413ec47451c9bbc55b03ab40b1f",
+    "signatureSetDigestHex": "0x39e39f57d26c43db5a6476eaeb8c87430b7dd41a7f0d1c65095ce5e8b7711d38",
+    "sourceProofDigestHex": "0xa0f1789da44c02ae20d0e2361174dc94dc9a69b6146431a5c033fe966c2fa04f",
+    "envelopeScaleBytes": 498,
+    "envelopeScaleSha256Hex": "0xc769a38e88f3da57c9b6e9da2b7584c13d7964d5a4d0f6dfd47346a38f77e2f9",
+    "envelopeScaleHex": "0x0191ef3fa07ebb9737eed0b03851e740d3cf844d8c0b7545ba506c63500065772611c0e79b71c3976ccd0c02d1310e2516c08edc9d8b6f57ccd680d63a4d8e72da0afd4a04d7720da9922f2b40249989faf4ff8096e1ed49bee615bb6cb1ee4f7d0f605d1b9294c36f7d17c48c943da2b877cda960ba5e3337e7b2e29bce603d18e22fb42ef828bc5182ceb04f5c3c1e73c6b0393820d0e883a220020a9539166adc0ea7560af315b69f2b7a5537ef9871559bd8cda061e47441ec8201559fc60b4eeb700dc303c96bc00be29e9f6efc1e48fce1bc4f2537d24c4176128a4384418787878787878787878787878787878787878787878787878787878787878787e1c2db0d496efae61a16d7791456ae44c3927b3b8d0d9f029d8a9fe100e215eae903000000000000f903000000000000082152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db128787f4dde985117d2b143e72af1e7430878e747985dde040ffc95accfa8a038d9ea9600997f5d674e191dfaae4b29584404991819c26f5ead2492a019dbb030a22fc297792f0b6ffc0bfcfdb7edb0c0aa14e025a365ec0e342e86e3829cb74b6e504c8e2e21da94341c87cc772923df32f73ab75b2400ca1ed734120afaa5eb24eb709f64e3ed7ec091b0f01f886a53e2877643662a51945d833b5563c3afa08"
+  },
+  "boundary": {
+    "compatibilityProfileExplicitlyFederated": true,
+    "sourceProofExecutionAuthenticated": false,
+    "sourceCanonicalityVerified": false,
+    "trustlessFinalityVerified": false,
+    "runtimePendingAdmissionWritten": false,
+    "mintAuthorized": false,
+    "gate5Closed": false,
+    "productionReadinessVerified": false
+  }
+}

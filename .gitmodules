@@ -1,0 +1,3 @@
+[submodule "substrate-node"]
+	path = substrate-node
+	url = https://github.com/polkadot-evm/frontier.git

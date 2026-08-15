@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "kind": "bridge-native-verifier-attestor-lock",
+  "canonicalization": "e2s-canonical-json-v1",
+  "signatureAlgorithm": "ed25519",
+  "profiles": [],
+  "boundaries": {
+    "runtimeProfilesCannotAddTrustRoots": true,
+    "cryptographyDoesNotProveOrganizationalIndependence": true,
+    "provisioningIntegrationRequiredForAdmission": true,
+    "trackerAttestorSeparationRequired": true
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "result": "PASS",
+  "exitCode": 0,
+  "command": "npm run readiness:node-preflight -- --node-url http://213.239.193.208:9052 --out <report.md> --json-out <report.json>",
+  "nodeEndpoint": "http://213.239.193.208:9052",
+  "reason": "Ergo node readiness preflight completed on testnet height 430517.",
+  "network": "testnet",
+  "height": "430517",
+  "checks": [
+    {
+      "name": "Node info endpoint reachable",
+      "result": "PASS",
+      "detail": "network=testnet height=430517"
+    },
+    {
+      "name": "Latest header endpoint reachable",
+      "result": "PASS",
+      "detail": "headers=1"
+    },
+    {
+      "name": "Script compile endpoint reachable",
+      "result": "PASS",
+      "detail": "compiled deterministic sigmaProp(true) probe without auth headers"
+    }
+  ],
+  "boundary": {
+    "Ergo node request attempted": "yes",
+    "Node info endpoint reachable": "yes",
+    "Node network identified as non-mainnet": "yes",
+    "Header endpoint reachable": "yes",
+    "Script compile endpoint reachable": "yes",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Node wallet used": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Transaction broadcast, submit, deploy, or state mutation performed": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no"
+  }
+}

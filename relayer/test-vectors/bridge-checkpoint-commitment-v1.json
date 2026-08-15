@@ -1,0 +1,76 @@
+{
+  "schema": "e2s.bridge-checkpoint-commitment.vector.v1",
+  "claimBoundary": {
+    "syntheticAuthoritySet": true,
+    "syntheticJustification": true,
+    "authoritySetAuthenticated": false,
+    "grandpaJustificationVerified": false,
+    "executionConsensusMappingVerified": false,
+    "sidechainFinalityVerified": false,
+    "onChainAcceptanceVerified": false,
+    "gate5Closed": false
+  },
+  "domains": {
+    "burnId": "E2S_TRUSTLESS_BURN_ID_V1",
+    "burnLeaf": "E2S_TRUSTLESS_BURN_LEAF_V1",
+    "burnNode": "E2S_TRUSTLESS_BURN_NODE_V1",
+    "checkpoint": "E2S_BRIDGE_CHECKPOINT_V1",
+    "grandpaAuthoritySet": "E2S_GRANDPA_AUTHORITY_SET_V1",
+    "grandpaJustification": "E2S_GRANDPA_JUSTIFICATION_V1"
+  },
+  "input": {
+    "version": 1,
+    "hashAlgorithmId": 1,
+    "finalityRuleId": 1,
+    "flags": 0,
+    "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "sidechainHeight": "1024",
+    "sidechainConsensusBlockHashHex": "2121212121212121212121212121212121212121212121212121212121212121",
+    "executionBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+    "finalityAuthoritySetId": "7",
+    "grandpaAuthoritySetHashInputHex": "083333333333333333333333333333333333333333333333333333333333333333010000000000000044444444444444444444444444444444444444444444444444444444444444440200000000000000",
+    "grandpaJustificationHashInputHex": "0102030405060708090a0b0c0d0e0f10",
+    "burnLeavesInCanonicalOrder": [
+      {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "burnIdHex": "57182144540292d653cf0d5f3b1e1f347795d67f9dd7fa3d1d2e2fe420d06c3a",
+        "sidechainTxHashHex": "5555555555555555555555555555555555555555555555555555555555555555",
+        "eventIndex": 7,
+        "recipientErgoTreeHashHex": "7777777777777777777777777777777777777777777777777777777777777777",
+        "amountNanoErg": "1000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "burnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+        "eventIndex": 8,
+        "recipientErgoTreeHashHex": "8888888888888888888888888888888888888888888888888888888888888888",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "burnIdHex": "2d2be19ab369a60ac5022633e3931aa11ac9b4e09a8f6a5e71482501b73cf336",
+        "sidechainTxHashHex": "9999999999999999999999999999999999999999999999999999999999999999",
+        "eventIndex": 9,
+        "recipientErgoTreeHashHex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "amountNanoErg": "3000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    ]
+  },
+  "expected": {
+    "finalityAuthoritySetHashHex": "679828be637d02f812ac8e7a8b27c0757fd9302bdf3558974ad72230b53075a0",
+    "finalityProofHashHex": "0b1cb3a7b4ca5374805105e3eee09a5e023c23eb2d53edddc9627fcb2a24f5b1",
+    "bridgeEventRootHex": "d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473",
+    "burnLeafCount": 3,
+    "encodedCheckpointHex": "010101001111111111111111111111111111111111111111111111111111111111111111000000000000040021212121212121212121212121212121212121212121212121212121212121212222222222222222222222222222222222222222222222222222222222222222d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473000000030000000000000007679828be637d02f812ac8e7a8b27c0757fd9302bdf3558974ad72230b53075a00b1cb3a7b4ca5374805105e3eee09a5e023c23eb2d53edddc9627fcb2a24f5b1",
+    "checkpointCommitmentHex": "e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43",
+    "extensionKeyHex": "0401",
+    "extensionValueHex": "d8e900c5cf57bae77c078733def23a1cabf00d310a27069730728325e8881473e56daaff8a7400d77853ca556ef3f95af8dff5b9c6e87e962f3783ca5ba8dc43"
+  }
+}

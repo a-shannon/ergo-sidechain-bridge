@@ -1,0 +1,236 @@
+{
+  "status": "READY",
+  "exitCode": 0,
+  "sourceCommit": "2768a62b",
+  "command": "npm run readiness:runtime-prereqs -- --triage-json ../evidence/readiness/readiness-triage-current-lanes-2026-07-03-2768a62b.json --node-preflight-json ../evidence/readiness/node-preflight-testnet-2026-07-02-5dbaa14d.json --anchor-preflight-json ../evidence/readiness/anchor-preflight-observation-export-testnet-2026-07-02-c53f299f.json --out <report.md> --json-out <report.json>",
+  "totalStructuralIssues": 81,
+  "nodeBackedIssueCount": 9,
+  "reviewerOrExternalIssueCount": 29,
+  "claimOrPublicationBoundaryIssueCount": 12,
+  "localEvidenceIssueCount": 31,
+  "localClosureStatus": "local-evidence-work-available",
+  "localOnlyClosureIssueCount": 31,
+  "externalOrLiveClosureIssueCount": 50,
+  "manualTriageIssueCount": 0,
+  "localClosureSummary": "Local-only evidence work remains available; prefer completing those concrete command output or artifact-link gaps before live or reviewer-gated work.",
+  "triageSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/readiness-triage-current-lanes-2026-07-03-2768a62b.json"
+  },
+  "triageTargets": [
+    {
+      "lane": "security-review",
+      "target": "../evidence/security/gate4-independent-security-review-blocker-map-2026-06-26-4ec4f7d1.md"
+    },
+    {
+      "lane": "trustless-burn",
+      "target": "../evidence/trustless-burn/gate5-trustless-burn-blocker-map-2026-06-29-5d075bd9.md"
+    },
+    {
+      "lane": "committee-governance",
+      "target": "../evidence/governance/phase010a-committee-governance-blocker-map-2026-07-03-7f516dcc.md"
+    },
+    {
+      "lane": "benchmark",
+      "target": "../evidence/benchmarks/gate7-offline-structured-candidate-2026-07-03-bcb15f7a.md"
+    }
+  ],
+  "nodeBackedIssues": [
+    {
+      "lane": "security-review",
+      "issue": "Required Scope Coverage: Sidechain finality and burn validity: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "issue": "Required Scope Coverage: Sidechain finality and burn validity: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Ergo extension-section anchoring: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Sidechain header/finality verifier: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: SPV relay contract or tracker: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Burn inclusion proof: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: DUP settlement binding: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Positive Proof Acceptance: Valid burn proof acceptance: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "issue": "Metric Table: Live batch settlement: status must be linked before Gate 7 evidence can pass"
+    }
+  ],
+  "reviewerOrExternalIssues": [
+    {
+      "lane": "security-review",
+      "issue": "Review Classification: Final decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "issue": "Reviewer Sign-Off: Lead reviewer: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "issue": "Reviewer Sign-Off: Security owner: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "issue": "Reviewer Sign-Off: Maintainer: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary: critical/high findings must be numeric 0"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary must mention release support, trustless burn verification implementation, production-ready claim handling, testnet production-candidate claim handling, transitional trusted burn path handling, and critical/high findings"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary must use exact Trustless burn verification implemented = yes"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary must use exact Transitional trusted burn path disabled = yes"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary must use exact Critical/high findings open = 0"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary must not leave critical/high findings open"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Publication Decision: Reviewer decision summary: transitional trusted burn path handling must be disabled, blocked, or not allowed"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Required Components: Independent review: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Reviewer Sign-Off: Protocol reviewer: decision must be approve before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Reviewer Sign-Off: Security reviewer: decision must be approve before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Reviewer Sign-Off: Security reviewer: notes must state a concrete trustless-burn outcome"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "issue": "Reviewer Sign-Off: Operator reviewer: notes must state a concrete trustless-burn outcome"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Publication Rules: Reviewer decision summary must use exact Governance-ready claim allowed = yes"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Publication Rules: Reviewer decision summary must use exact Open governance blockers = 0"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Publication Rules: Reviewer decision summary: open governance blockers must be 0"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Publication Rules: External review evidence must include a link, command, or artifact marker"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Reviewer Sign-Off: Governance owner: decision must be approve before committee governance evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Reviewer Sign-Off: Security reviewer: decision must be approve before committee governance evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before committee governance evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "issue": "Publication Decision: Reviewer decision summary: open benchmark blockers must be 0"
+    },
+    {
+      "lane": "benchmark",
+      "issue": "Reviewer Sign-Off: Benchmark owner: decision must be approve before benchmark evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "issue": "Reviewer Sign-Off: Security reviewer: decision must be approve before benchmark evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before benchmark evidence can pass"
+    }
+  ],
+  "nodePreflight": "PASS",
+  "nodePreflightSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/node-preflight-testnet-2026-07-02-5dbaa14d.json"
+  },
+  "anchorPreflight": "FAIL",
+  "anchorPreflightSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/anchor-preflight-observation-export-testnet-2026-07-02-c53f299f.json"
+  },
+  "anchorPreflightSummary": {
+    "expectedRootMode": "root-bound",
+    "anchorCount": 0,
+    "nodeEndpoint": "http://213.239.193.208:9052"
+  },
+  "nodeEndpoint": "http://213.239.193.208:9052",
+  "nextActions": [
+    "Collect node-backed/live-drill evidence for Gate 4 independent security review, Gate 5 trustless burn and Gate 7 benchmark before changing claim/publication fields.",
+    "Route reviewer/external blockers to human review material after the concrete runtime evidence exists.",
+    "Resolve remaining local-only evidence or target-access blockers with completed command output artifacts before rerunning readiness:triage.",
+    "Do not unlock claim/publication fields until node-backed/live-drill, local-only evidence and reviewer/external blockers are resolved."
+  ],
+  "boundary": {
+    "Planning output only": "yes",
+    "Readiness triage JSON reused": "yes",
+    "Node preflight executed": "no",
+    "Node preflight JSON reused": "yes",
+    "Live node probe executed by runtime prerequisites": "no",
+    "Anchor preflight JSON reused": "yes",
+    "Non-mainnet node prerequisite available": "yes",
+    "Claim/publication fields unlocked": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Anchor evidence row closure claimed": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no",
+    "Public claim authorization granted": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no"
+  }
+}

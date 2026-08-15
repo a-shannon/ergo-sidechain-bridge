@@ -1,0 +1,27 @@
+{
+  "schema": "e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v1",
+  "sourceFiles": [
+    {
+      "path": "wasm-avl/Cargo.toml",
+      "sha256": "3b32adc77ea5403b3c28e802855dbe934b7abc1d3804eb89632e37e08650bd7d"
+    },
+    {
+      "path": "wasm-avl/Cargo.lock",
+      "sha256": "43cfdc14b85b3d1838f85635a00875bcfdc2866e4ec4e347e84625d2f30846fe"
+    },
+    {
+      "path": "wasm-avl/src/lib.rs",
+      "sha256": "d396ab4730e32f60c417f5ab764942917161cf56ed6116fa7a4eeb1a38260056"
+    }
+  ],
+  "runtimeArtifacts": [
+    {
+      "path": "wasm-avl/pkg/bridge_avl.js",
+      "sha256": "98dbefbf0150b477c7af22d5f9cdfaf925cfb464da08e787b284e17d1a1fd13c"
+    },
+    {
+      "path": "wasm-avl/pkg/bridge_avl_bg.wasm",
+      "sha256": "e6fedc505a3904518ab2ff83a5ac6c4af72fb66fc163ff86768280d330a8d487"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:proof-vector:validate",
+  "status": "PASS",
+  "errors": [],
+  "boundary": {
+    "readOnly": true,
+    "localProofCoreOnly": true,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "broadcastAuthorization": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  },
+  "reports": [
+    {
+      "label": "test-vectors/trustless-burn-proof-v1-multi-leaf.json",
+      "status": "PASS",
+      "message": "Trustless burn proof vector PASS: leafCount=2, proofNodes=1, gate5Claim=false, contractsChanged=false; local proof-core evidence only, not Gate 5 closure, settlement readiness, broadcast authorization, production claim support, or testnet production-candidate claim support.",
+      "errors": [],
+      "bridgeEventRootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+      "leafHashHex": "31c300fa370b8c9ff01a722eea2f590130fc2c5008249d861234a30d2df4ea6f",
+      "leafCount": 2,
+      "proofNodeCount": 1
+    }
+  ]
+}

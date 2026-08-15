@@ -1,0 +1,31 @@
+node_modules/
+dist/
+target/
+target-codex/
+.source-cache/
+*.wasm
+pkg/
+.env
+# Deployment output is local runtime state, never source.
+contracts/deployed_state.json
+# Local-only dev helper (reads mnemonic from .env, never commit)
+**/fund-node-wallet.ts
+# SQLite sidecar files produced by local relayer/devnet runs
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+# Local diagnostics and one-off debug scripts
+relayer/.devnet-diagnostics/
+relayer/src/scripts/debug-*.ts
+relayer/src/scripts/e2e-pegin-test.ts
+relayer/src/scripts/verify-avl-state.ts
+# Devnet session backup files (created by demo:devnet:safety)
+.runtime-backups/
+.devnet-backups/
+.operator-campaign/
+# Shell-scoped devnet session env files with secrets
+relayer/scripts/*.local.ps1
+# One-off local debug payloads from node signing/API experiments
+relayer/openapi_temp.json
+relayer/sign_test.json
+relayer/spike3c_debug.json

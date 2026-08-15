@@ -1,0 +1,25 @@
+[package]
+name = "bridge-validity-zkvm-host"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = []
+local-prove = ["dep:anyhow", "risc0-zkvm/prove"]
+
+[dependencies]
+anyhow = { version = "=1.0.99", optional = true }
+bridge-validity-composition = { path = "../../composition" }
+bridge-validity-statement = { path = "../../statement" }
+bridge-validity-zkvm-methods = { path = "../methods" }
+risc0-zkvm = { git = "https://github.com/risc0/risc0", rev = "8eb06ab020a92dc5b63ba6dd0836d432aba6d890", default-features = false, features = ["disable-dev-mode", "std"] }
+risc0-zkp = { git = "https://github.com/risc0/risc0", rev = "8eb06ab020a92dc5b63ba6dd0836d432aba6d890", default-features = false, features = ["std"] }
+thiserror = "=2.0.12"
+
+[dev-dependencies]
+blake2 = "=0.10.6"
+bridge-validity-composition = { path = "../../composition", features = ["test-vectors"] }
+hex = "=0.4.3"

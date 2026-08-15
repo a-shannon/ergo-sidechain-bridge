@@ -1,0 +1,51 @@
+{
+  "schema": "e2s.validity-application-lineage-compiler-lock.v1",
+  "version": 1,
+  "sigmaStateCommit": "f78deadd668f801e7fae3bc884283f79c6f484fa",
+  "scalaVersion": "2.13.18",
+  "sbtVersion": "1.12.11",
+  "buildSbtSha256Hex": "e381716ac80820f5d27ace5bba1ad024276190f40748eefd31785d79ac193c10",
+  "buildPropertiesSha256Hex": "439d984e46d776c13354b1635863583166689ba6e9ebcc703b1d89005d9d37a8",
+  "compilerSpecSha256Hex": "441d9e0c6a0972f6c0a3e7402da04abefbf288f86c3d141a39f56b37a52e18b9",
+  "compilerReceiptSha256Hex": "280081d89ad8303506b3890559bef047cf6ac1bb2a23b729a7e9903e77cf3132",
+  "java": {
+    "vendor": "Microsoft",
+    "version": "17.0.19",
+    "runtimeVersion": "17.0.19+10-LTS",
+    "javaExeSha256Hex": "69ae5108b20bb132442ebe756a41e67f9b33b65b7ae6dc2a87b3b04947bab19e",
+    "releaseSha256Hex": "eff38e2902ff93a11a0ac9b1648d4731b50f221c6fb5c7671181b32b951ffac2",
+    "modulesSha256Hex": "0d7c008e7ac37ab7c5231cc96d7239abaa9538a8c94e64bba27fb36fcbacb090",
+    "jvmDllSha256Hex": "960ba3065f0ce142840aa332338bce23e1d371dedafa957fd9b405f19f272b54"
+  },
+  "sbtLauncher": {
+    "version": "1.12.11",
+    "jarSha256Hex": "b4c0c55d68f11b1510d884641cb1b1456191dac40ddc958bf86c825adc344e16"
+  },
+  "templates": {
+    "tracker": {
+      "path": "contracts/SPVTrackerValidityApplicationLineageV3.es",
+      "sha256Hex": "94334a43b8c356babe5caeeb52bc7f79a20ebcac7587c725b1ed48af972947f5"
+    },
+    "causalVault": {
+      "path": "contracts/MainChainCausalVaultValidityApplicationV2.es",
+      "sha256Hex": "c30d57938590c130dbd97c50b54cb6c707d9ae53b3c2a2651712c9c0864631e7"
+    },
+    "duplicatePrevention": {
+      "path": "contracts/DoubleUnlockPreventionValidityApplicationV2.es",
+      "sha256Hex": "76544c021b45f073e03a7497fb27e910559fdd8e8e2e15d4c3d1beca10eded6a"
+    },
+    "sourceLock": {
+      "path": "contracts/MainChainLockCausalLineageV3.es",
+      "sha256Hex": "c1f977e17472504b4b3a552d306be621b9fc32c8971f803356e03bfeaa4925ff"
+    }
+  },
+  "boundaries": {
+    "profileActivated": false,
+    "nodeCheckPerformed": false,
+    "signingAuthorityEstablished": false,
+    "submissionAuthorityEstablished": false,
+    "broadcastAuthorityEstablished": false,
+    "fundsAuthorityEstablished": false,
+    "gate5Closed": false
+  }
+}

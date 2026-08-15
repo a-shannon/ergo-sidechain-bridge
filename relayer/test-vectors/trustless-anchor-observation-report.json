@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:anchor-observe",
+  "status": "LINKED",
+  "reason": "matching 0x0401 bridgeEventRoot observed",
+  "bridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+  "extensionKey": "0401",
+  "minHeight": 67890,
+  "maxHeight": 67890,
+  "observedAt": "2026-07-01T12:00:00.000Z",
+  "sourceLabel": "provided public extension observation JSON",
+  "network": "testnet",
+  "nodeUrl": "https://ergo-node.invalid/",
+  "commandLine": "npm run trustless:anchor-observe -- --bridge-event-root <bridgeEventRoot> --observations-json <observations.json> --min-height 67890 --max-height 67890 --json-out <report.json>",
+  "workingDirectory": "ergo-sidechain-bridge/relayer",
+  "heightsScanned": 1,
+  "extensionReadsSucceeded": 1,
+  "extensionReadsFailed": 0,
+  "linkedAnchor": {
+    "key": "0401",
+    "bridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+    "ergoAnchorHeight": 67890,
+    "headerId": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "readFailures": [],
+  "boundary": {
+    "readOnly": true,
+    "publicObservationInputOnly": true,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "transactionBroadcastOrMutation": false,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

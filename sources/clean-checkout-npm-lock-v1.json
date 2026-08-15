@@ -1,0 +1,6 @@
+{
+  "schema": "e2s.clean-checkout-npm-lock.v1",
+  "npmVersion": "11.16.0",
+  "npmCliRelativePath": "node_modules/npm/bin/npm-cli.js",
+  "npmPackageSha256": "7133ebaab41993d9317107e5f11d6f4e30ed8a9179839b90422d17d77a34e531"
+}

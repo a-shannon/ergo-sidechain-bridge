@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:spv-tracker-observe",
+  "status": "LINKED",
+  "reason": "SPV tracker history contains expected sidechain commitment entry",
+  "observedAt": "2026-07-02T12:00:00.000Z",
+  "sourceLabel": "operator sanitized SPV tracker observation",
+  "network": "testnet",
+  "nodeUrl": "https://ergo-node.invalid",
+  "commandLine": "npm run trustless:spv-tracker-observe -- --observation-json <observation.json> --json-out <report.json>",
+  "workingDirectory": "ergo-sidechain-bridge/relayer",
+  "trackerBox": {
+    "boxId": "4444444444444444444444444444444444444444444444444444444444444444",
+    "nftId": "5555555555555555555555555555555555555555555555555555555555555555"
+  },
+  "expectedEntry": {
+    "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "sidechainHeight": 12345,
+    "sidechainHeaderHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+    "bridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+    "ergoAnchorHeight": 67890
+  },
+  "historyLength": 1,
+  "trackerDigestHex": "fc3805385bc954de132bf506cf990efa70ce2b91afd1971854dc011e9e3a918001",
+  "rebuiltTrackerDigestHex": "fc3805385bc954de132bf506cf990efa70ce2b91afd1971854dc011e9e3a918001",
+  "expectedKeyHex": "46bfd6977e3c170fa567da9fd95d79d3e0232c3da99a4dc4194910328789dbdb",
+  "expectedValueHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc00010932",
+  "observedValueHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc00010932",
+  "proofDigestHex": "fc3805385bc954de132bf506cf990efa70ce2b91afd1971854dc011e9e3a918001",
+  "getProofHex": "0328f4f2ef4172093d2e6d5128e7ce0f035e240b98ff2014444dbc361da0f006610246bfd6977e3c170fa567da9fd95d79d3e0232c3da99a4dc4194910328789dbdbffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc00010932000400",
+  "decodedValue": {
+    "bridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+    "ergoAnchorHeight": 67890
+  },
+  "sidechainFinality": {
+    "finalityRule": "testnet rule: observedSidechainHeight - sidechainBlockHeight >= requiredConfirmations",
+    "sidechainBlockHeight": 12345,
+    "observedSidechainHeight": 12357,
+    "requiredConfirmations": 12,
+    "observedConfirmations": 12,
+    "status": "FINALIZED"
+  },
+  "boundary": {
+    "readOnly": true,
+    "publicObservationInputOnly": true,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "nodeOrRpcRequestPerformed": false,
+    "transactionBroadcastOrMutation": false,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

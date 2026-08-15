@@ -1,0 +1,586 @@
+{
+  "schemaVersion": 3,
+  "kind": "bridge-consensus-source-lock",
+  "solidityBuild": {
+    "schema": "ergo-sidechain-bridge/solidity-build-closure/v1",
+    "manifestPath": "solidity/compiled/build-manifest.json",
+    "manifestSha256": "16ea523a63f6b0249510a38403701b8172e596740063272bbb9f0a05df04bb45",
+    "checkCommand": "npm --prefix solidity run check",
+    "compiler": "solc@0.8.35",
+    "dependency": "@openzeppelin/contracts@5.6.1",
+    "runtimeCodeIdentityProduced": true,
+    "storageLayoutIdentityProduced": true,
+    "deployedCodeIdentityVerified": false
+  },
+  "frontier": {
+    "repository": "https://github.com/polkadot-evm/frontier.git",
+    "path": "substrate-node",
+    "gitlinkPath": "ergo-sidechain-bridge/substrate-node",
+    "submoduleName": "ergo-sidechain-bridge/substrate-node",
+    "commit": "75329a2df49e2cc7981485392c31160929d1bd48",
+    "ref": "stable2412",
+    "cargoLockBlob": "1f7a23fc520feb2cd150ae8a4c2c1bf6a0900bae",
+    "rustToolchainBlob": "ab41c50970600e50ee7bf33cd44fe538b2ca0771",
+    "nodeManifestBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee",
+    "runtimeManifestBlob": "718995ba1c88a16dabfe535f5beac1a694bf7d8d",
+    "patchPath": "sources/frontier/0001-bridge-runtime-commitment.patch",
+    "patchSha256": "9bcfe26d8e367c858f69bfafd58f47de726b95c8884ef7ef1b957bd766d5a68b",
+    "bridgeAtomicityFixtures": [
+      {
+        "artifactPath": "solidity/compiled/SERG.bin",
+        "fixturePath": "template/node/src/tests/res/bridge-atomicity/SERG.bin",
+        "sha256": "79a6bf7fe67038123b2f40e58f2344ef75597aa3ea62067136180265aedd80a4"
+      },
+      {
+        "artifactPath": "solidity/compiled/ErgoBridge.bin",
+        "fixturePath": "template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin",
+        "sha256": "e05743aa5ed91733301f82257d6d1af356d3a9d410201acbe28b6cf2e45114c5"
+      },
+      {
+        "artifactPath": "solidity/compiled/ErgoBridge.runtime.bin",
+        "fixturePath": "template/node/src/tests/res/bridge-atomicity/ErgoBridge.runtime.bin",
+        "sha256": "aee13a2d26f9ac668c63a0ef0e9f3e1db49bd606423f8f8db10298fbef4a05c8"
+      },
+      {
+        "artifactPath": "solidity/compiled/SERG.runtime.bin",
+        "fixturePath": "template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin",
+        "sha256": "60d18492fd99e2748791b53beb15598efaa6d3acb1a6c89cf992d4b70a2a9935"
+      }
+    ],
+    "files": [
+      {
+        "path": "Cargo.lock",
+        "status": "modified",
+        "baseBlob": "b786af92f464e4aa752034f74ca7b53e6a0b124f",
+        "patchedBlob": "1f7a23fc520feb2cd150ae8a4c2c1bf6a0900bae"
+      },
+      {
+        "path": "Cargo.toml",
+        "status": "modified",
+        "baseBlob": "ffbf86fa13e07a942f81d8bd22c939638b5cc4b9",
+        "patchedBlob": "5267d240be7578fa013d2e61add19b26ee6eb7ae"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/Cargo.toml",
+        "status": "added",
+        "patchedBlob": "e421b5216abc7b211e1a1b42e5723358591b5937"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v2-verifier.rs",
+        "status": "added",
+        "patchedBlob": "223e40d8a8e5784b66dc22aea73c359f9ad251e3"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v3-verifier.rs",
+        "status": "added",
+        "patchedBlob": "809c181ae96ed82f092b1addc58fc1dcb55b02d9"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-source-proof-result-v1-producer.rs",
+        "status": "added",
+        "patchedBlob": "569adb812d0c7a6d5eccc10ab56dbe5f2bce891a"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-contract-state-v1-verifier.rs",
+        "status": "added",
+        "patchedBlob": "c78c2fe084654efbfde52764f73a422430e20443"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-event-v1-verifier.rs",
+        "status": "added",
+        "patchedBlob": "d2dbffc8392966cc92f1267b27b42e874b55d5ca"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-execution-identity-v1-verifier.rs",
+        "status": "added",
+        "patchedBlob": "cc7a2685cfb4161fb7d2328edb5cbbdaad3075eb"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-mint-transition-v1-verifier.rs",
+        "status": "added",
+        "patchedBlob": "c0e48665dfc40a6244fd513da4a8111b020131eb"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-peg-in-runtime-identity-v2-verifier.rs",
+        "status": "added",
+        "patchedBlob": "1ae334ba3b95d3342a937bbc21f623b87b4b2577"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/bridge-rpc-proof-codec.rs",
+        "status": "added",
+        "patchedBlob": "ac6136211f2bb97db34df2652e9aed4393a8da82"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-bridge-checkpoint-fixture.rs",
+        "status": "added",
+        "patchedBlob": "e6b62c1e05f9136968c0135bb7948322f16c753a"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v2-fixture.rs",
+        "status": "added",
+        "patchedBlob": "be39f104acbd8749e1d5664e2f23747d553d53ff"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v3-fixture.rs",
+        "status": "added",
+        "patchedBlob": "132d69c1c5b6ef490d189fd9e1cd0e480c2ede76"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-source-proof-result-v1-fixture.rs",
+        "status": "added",
+        "patchedBlob": "45cc4b9850c66de927d0f2b84431d9b211a16b9c"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-contract-state-v1-fixture.rs",
+        "status": "added",
+        "patchedBlob": "998ea2cbe63099620a00263aee22934cb738ff2b"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-event-v1-fixture.rs",
+        "status": "added",
+        "patchedBlob": "c8f60c75e41b1d41a258038b95e21041ef984870"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-execution-identity-v1-fixture.rs",
+        "status": "added",
+        "patchedBlob": "4293ac2411243d520ee897abd1c5f81274415a22"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-mint-transition-v1-fixture.rs",
+        "status": "added",
+        "patchedBlob": "a6231c25c476397ceafd77cff132976b0acadab1"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-runtime-identity-v2-fixture.rs",
+        "status": "added",
+        "patchedBlob": "bbbda6f80a9f780624c5d0ceaf48478459ca9f78"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/bin/generate-peg-in-state-fixture.rs",
+        "status": "added",
+        "patchedBlob": "a2b8092065e8af67227d6438e67e0a763f140388"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/fixture.rs",
+        "status": "added",
+        "patchedBlob": "63327e8fc683e06aa09ea1c6e1dc4df52e8d4e2c"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/lib.rs",
+        "status": "added",
+        "patchedBlob": "d9ef8c55ce6c1c9a0334c821ed821814ebe39aab"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/main.rs",
+        "status": "added",
+        "patchedBlob": "969359647274454a238eb6c7164dfbabcfad2e07"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in.rs",
+        "status": "added",
+        "patchedBlob": "591803feb43595a86ed75a41b084522f74859147"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2.rs",
+        "status": "added",
+        "patchedBlob": "8b5370ef0f14dfa8bf85a375d0ab684a4956d9f1"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2_fixture.rs",
+        "status": "added",
+        "patchedBlob": "ba38ed9e5b963922bc18531729304a94c2ee0f49"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3.rs",
+        "status": "added",
+        "patchedBlob": "e99788438232a379db49add4039b1dabea992ae6"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3_fixture.rs",
+        "status": "added",
+        "patchedBlob": "9cbe12321e235665f274c96d6b67b8bb28dbec10"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1.rs",
+        "status": "added",
+        "patchedBlob": "cf3ba369c97ad60c04e6e34dd27d2f50be677711"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1_fixture.rs",
+        "status": "added",
+        "patchedBlob": "2c5e6b6669a6354546a8569a0d561e2e1dbdd9ae"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_fixture.rs",
+        "status": "added",
+        "patchedBlob": "681571a124747396e6abd4b77d811a5edc4529d6"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1.rs",
+        "status": "added",
+        "patchedBlob": "782578691603ef2334a3e8e4118cf102228a7ff5"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1_fixture.rs",
+        "status": "added",
+        "patchedBlob": "74fcaf14e32309e5b284701d5bfffde049b742bb"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_event_v1.rs",
+        "status": "added",
+        "patchedBlob": "ca74e49c604b217fed30a4cd3d38305e663eb197"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_event_v1_fixture.rs",
+        "status": "added",
+        "patchedBlob": "3708cb4eee7f11efb3f7f0c447f9b69b2f266adf"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1.rs",
+        "status": "added",
+        "patchedBlob": "23cc6f61c6ca98deed6f74ed9506347e90c333bb"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1_fixture.rs",
+        "status": "added",
+        "patchedBlob": "8f42b9ac6ddade5a1a650e6b6f513d503b9a9a5c"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1.rs",
+        "status": "added",
+        "patchedBlob": "b5ce9b8f3e87522debf20e26712770de0a9155fb"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1_fixture.rs",
+        "status": "added",
+        "patchedBlob": "4ae4fcebbfcc1cc913d91a00ada8765210888cf0"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2.rs",
+        "status": "added",
+        "patchedBlob": "23c3f1a5a1e1801c2c55d97847bc2be0d4663148"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2_fixture.rs",
+        "status": "added",
+        "patchedBlob": "4832766f9e947a9a2f95043e81d126bbfb25eb02"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4.rs",
+        "status": "added",
+        "patchedBlob": "cae1b69ac8759f82adcb817d54e57fd63dc43bae"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4_fixture.rs",
+        "status": "added",
+        "patchedBlob": "d4f6543683150ada26cd8832ed5eb3aeb2500204"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/src/rpc_codec.rs",
+        "status": "added",
+        "patchedBlob": "d4ab4342bc43943730033ff30cdb120af617e541"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/cli.rs",
+        "status": "added",
+        "patchedBlob": "4382936c1184a9a09cbe63357b1062b5bd255347"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs",
+        "status": "added",
+        "patchedBlob": "d8bd6edfd625a50dfcac83a4aa76ef9f4caa15bb"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v3_cli.rs",
+        "status": "added",
+        "patchedBlob": "116b3b86991ae7d861d4478dbef5c8a64f67e888"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_causal_source_proof_result_v1_cli.rs",
+        "status": "added",
+        "patchedBlob": "96e5a4b1d56cd752f3392923981163e188cc7c37"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_frontier_contract_state_v1_cli.rs",
+        "status": "added",
+        "patchedBlob": "f1b74b5782818bbe293f8bdd73b9d91dcd331a17"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_frontier_event_v1_cli.rs",
+        "status": "added",
+        "patchedBlob": "072153f30d36a5934fdc5d6ab670e2cd16499a97"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_frontier_execution_identity_v1_cli.rs",
+        "status": "added",
+        "patchedBlob": "18d2b12fca25621736ebdffab5d0011ec907688d"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_frontier_mint_transition_v1_cli.rs",
+        "status": "added",
+        "patchedBlob": "22c77f6ae0299ea290fcd24e4df513838f294a3d"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/peg_in_runtime_identity_v2_cli.rs",
+        "status": "added",
+        "patchedBlob": "97155a4d8e23bf38a8346fb79ed6d4fa804ef5dc"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/pooled_reserve_mint_reservation_state_v4_cli.rs",
+        "status": "added",
+        "patchedBlob": "0d31c13f311b2b6291cbde4ae70b829c6e8e3dd6"
+      },
+      {
+        "path": "bridge/checkpoint-verifier/tests/rpc_codec_cli.rs",
+        "status": "added",
+        "patchedBlob": "50ae19fd6fa689a97ec3c5694f59acb9b7f506d2"
+      },
+      {
+        "path": "bridge/finality-proof/Cargo.toml",
+        "status": "added",
+        "patchedBlob": "021463765760f441fe588f928991af0b6bcd05a7"
+      },
+      {
+        "path": "bridge/finality-proof/src/lib.rs",
+        "status": "added",
+        "patchedBlob": "042cc45d9d59984ad16fec61bd98b7edae2f7dbb"
+      },
+      {
+        "path": "bridge/state-proof/Cargo.toml",
+        "status": "added",
+        "patchedBlob": "8e4e1f26354023d50d43c2c4ba9a18797e4f06bc"
+      },
+      {
+        "path": "bridge/state-proof/src/lib.rs",
+        "status": "added",
+        "patchedBlob": "6c5ec45b50c5253424f918a5b4dad3ea543246a0"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in.rs",
+        "status": "added",
+        "patchedBlob": "b2153dfed4cd503c8afcf8844f4d71e12df94f1d"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_causal_mint_transition_v2.rs",
+        "status": "added",
+        "patchedBlob": "ccd4ec075c7997a74e5d516e3013659aff4c1a39"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_causal_mint_transition_v3.rs",
+        "status": "added",
+        "patchedBlob": "897218e850c454783937bf9b741a5bb50f68b669"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_frontier_contract_state_v1.rs",
+        "status": "added",
+        "patchedBlob": "51107280f55d13174624acf2c22e40290174a31b"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_frontier_event_v1.rs",
+        "status": "added",
+        "patchedBlob": "45871de80f490f41502f77d60d020e962a1285f8"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_frontier_execution_identity_v1.rs",
+        "status": "added",
+        "patchedBlob": "afb36a339ec3aaee77e4e2af99d92e504865e40b"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_frontier_mint_transition_v1.rs",
+        "status": "added",
+        "patchedBlob": "5901da3a316ce0bce5d69c900b5cd7f40930b8c7"
+      },
+      {
+        "path": "bridge/state-proof/src/peg_in_runtime_identity_v2.rs",
+        "status": "added",
+        "patchedBlob": "7181d4846ce2313d6fd8f7bdc99f856c53f493e2"
+      },
+      {
+        "path": "bridge/state-proof/src/pooled_reserve_mint_reservation_state_v4.rs",
+        "status": "added",
+        "patchedBlob": "634d927464ef35b2b12538fb80e8e96786192307"
+      },
+      {
+        "path": "frame/ethereum/src/lib.rs",
+        "status": "modified",
+        "baseBlob": "406cc3e571d66cd234bea3f53dc19ec2eaddec92",
+        "patchedBlob": "67e5f44fba39a40fdf194afc49a6fd7723e8817c"
+      },
+      {
+        "path": "frame/ethereum/src/mock.rs",
+        "status": "modified",
+        "baseBlob": "d14c95e211b8e478e552110bf338bd61dc9ff2ef",
+        "patchedBlob": "a5315d19556d5674ff33c6cf28443a8c21d8ce29"
+      },
+      {
+        "path": "frame/ethereum/src/tests/mod.rs",
+        "status": "modified",
+        "baseBlob": "c7b2c813c9442875e3d30cac6b0ee3121c0b3a4a",
+        "patchedBlob": "7cd1338b5b392f0af080dd85d774547802b594a9"
+      },
+      {
+        "path": "template/node/Cargo.toml",
+        "status": "modified",
+        "baseBlob": "67505c6b54a852fb861d3eea3c52f6a85b21af7d",
+        "patchedBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee"
+      },
+      {
+        "path": "template/node/src/bridge_atomicity_tests.rs",
+        "status": "added",
+        "patchedBlob": "e3e43f09a5e318798eddd5c61911ae8611d8870c"
+      },
+      {
+        "path": "template/node/src/chain_spec.rs",
+        "status": "modified",
+        "baseBlob": "614161fa35457d3f2dec5c00ea0c58a00caa8366",
+        "patchedBlob": "210eb47ed3ae1be4e238570191e7757fe8ff606f"
+      },
+      {
+        "path": "template/node/src/main.rs",
+        "status": "modified",
+        "baseBlob": "0bb5dad17082a3f3a96771a7d22f0638480b4c46",
+        "patchedBlob": "11b3575f3228aa7eacee75ccfe4073e44549984e"
+      },
+      {
+        "path": "template/node/src/rpc/mod.rs",
+        "status": "modified",
+        "baseBlob": "7202d997a813fea79e176adb93553a3da949446b",
+        "patchedBlob": "da043a24a679dc2b50058970350f6bc1db72b3e8"
+      },
+      {
+        "path": "template/node/src/service.rs",
+        "status": "modified",
+        "baseBlob": "ef293a1293491cf1cebbc612c23a0c9c14c9eec5",
+        "patchedBlob": "18da1dda08d68879bf30ff26a6c5c2a2fe474221"
+      },
+      {
+        "path": "template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin",
+        "status": "added",
+        "patchedBlob": "3b94d8414cde0ee34570d79f075a309c1b1ba7c9"
+      },
+      {
+        "path": "template/node/src/tests/res/bridge-atomicity/ErgoBridge.runtime.bin",
+        "status": "added",
+        "patchedBlob": "a542360b19915949e013f3fe364010d270e1e21e"
+      },
+      {
+        "path": "template/node/src/tests/res/bridge-atomicity/PooledReserveStatementV4.hex",
+        "status": "added",
+        "patchedBlob": "7a1e640d7e7a2192f125bc03019deac972d583ed"
+      },
+      {
+        "path": "template/node/src/tests/res/bridge-atomicity/SERG.bin",
+        "status": "added",
+        "patchedBlob": "d62a83c577110e4c437c11ab7075e7671d1f4388"
+      },
+      {
+        "path": "template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin",
+        "status": "added",
+        "patchedBlob": "7f08ffa7706b00667eae774d00dc57c59ec24fc6"
+      },
+      {
+        "path": "template/runtime-v4-test/Cargo.toml",
+        "status": "added",
+        "patchedBlob": "fd17b6f37cbd8f3c6f6307b618148317cf74a1b7"
+      },
+      {
+        "path": "template/runtime-v4-test/build.rs",
+        "status": "added",
+        "patchedBlob": "902916486d5300683b0938601bedf8686f1fe54b"
+      },
+      {
+        "path": "template/runtime-v4-test/src/lib.rs",
+        "status": "added",
+        "patchedBlob": "ea37c127b5b6d33974ef0768953b9a2a11ba2db2"
+      },
+      {
+        "path": "template/runtime/Cargo.toml",
+        "status": "modified",
+        "baseBlob": "fa10710d06bfc242465d5436ce58f177e2a52635",
+        "patchedBlob": "718995ba1c88a16dabfe535f5beac1a694bf7d8d"
+      },
+      {
+        "path": "template/runtime/src/bridge_commitment.rs",
+        "status": "added",
+        "patchedBlob": "038d6e2108f2409f35c5c6d8ad72eff5087accea"
+      },
+      {
+        "path": "template/runtime/src/lib.rs",
+        "status": "modified",
+        "baseBlob": "25e8406027bbcf8d4f54d03c0135bcaa9b01ed56",
+        "patchedBlob": "b2494e6a18a28417740f7afa9e4776a464adf329"
+      },
+      {
+        "path": "template/runtime/src/peg_in_causal_admission.rs",
+        "status": "added",
+        "patchedBlob": "066ceff6cd44249fbf9806a8fc941e9d5facce82"
+      },
+      {
+        "path": "template/runtime/src/peg_in_causal_source_proof.rs",
+        "status": "added",
+        "patchedBlob": "33868c58f173fe585e58d8b99eede39e1aaed213"
+      },
+      {
+        "path": "template/runtime/src/peg_in_pooled_reserve_reservation.rs",
+        "status": "added",
+        "patchedBlob": "6d2a0e5f9d048d84310c2ed14d097deb5870cec0"
+      },
+      {
+        "path": "template/runtime/src/runtime_body.rs",
+        "status": "added",
+        "patchedBlob": "758000081e329b284120eff36de64fc71e3d3849"
+      }
+    ],
+    "rustToolchain": "1.82.0",
+    "buildEnvironment": {
+      "WASM_BUILD_WORKSPACE_HINT": "<frontier-workspace-root>"
+    },
+    "buildCommand": "cargo build --locked --release -p frontier-template-node",
+    "role": "evm-execution-and-bridge-commitment-producer",
+    "runtimeCommitmentProducerImplemented": true,
+    "grandpaFinalityProofRpcImplemented": true,
+    "nativeGrandpaFinalityProofVerificationImplemented": true,
+    "grandpaAuthorityTransitionProofRpcImplemented": true,
+    "nativeGrandpaAuthorityTransitionVerificationImplemented": true,
+    "nativeHashLinkedGrandpaVerificationImplemented": true,
+    "nativeRuntimeCommitmentStateProofVerificationImplemented": true,
+    "nativeFinalizedCheckpointVerificationImplemented": true,
+    "nativeRpcProofCodecImplemented": true
+  },
+  "ergoNode": {
+    "repository": "https://github.com/ergoplatform/ergo.git",
+    "baseCommit": "2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1",
+    "baseTag": "v6.0.2",
+    "patchCommitProvenance": "ed506f3c63273a89793a14505a709f18701825f8",
+    "patchPath": "sources/ergo-node/0001-sidechain-extension-fields.patch",
+    "patchSha256": "31b27cf9acd7ad6d7c05282d964f51be15b5aa78767b354f8f29ee28d39ebf23",
+    "javaVersion": "17",
+    "testCommand": "sbt \"testOnly org.ergoplatform.mining.CandidateGeneratorSpec\"",
+    "buildCommand": "sbt assembly",
+    "role": "operator-provided-ergo-extension-producer",
+    "commitmentInput": "operator-provided",
+    "files": [
+      {
+        "path": "src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala",
+        "baseBlob": "bfa0fe6162477fae9012eddd3de8736f2c140a1d",
+        "patchedBlob": "076f788f3965e188047a7a23a6d0e8c1a79134ff"
+      },
+      {
+        "path": "src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala",
+        "baseBlob": "1c394b28174aa12303e67827d9c6a38ea6a38caf",
+        "patchedBlob": "6de21f113d966cc94ebd1bbf4f96356001a34433"
+      }
+    ]
+  },
+  "boundaries": {
+    "sidechainFinalityImplemented": true,
+    "runtimeCommitmentProducerImplemented": true,
+    "grandpaAuthorityTransitionVerificationImplemented": true,
+    "hashLinkedGrandpaVerificationImplemented": true,
+    "nativeRuntimeCommitmentStateVerificationImplemented": true,
+    "nativeFinalizedCheckpointVerificationImplemented": true,
+    "nativeRpcProofCodecImplemented": true,
+    "trustlessBurnVerificationImplemented": false,
+    "gate5Closed": false
+  }
+}

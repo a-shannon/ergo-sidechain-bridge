@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:anchor-observe",
+  "status": "BLOCKED",
+  "reason": "no matching 0x0401 bridgeEventRoot observed in readable extension observations",
+  "bridgeEventRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+  "extensionKey": "0401",
+  "minHeight": 430647,
+  "maxHeight": 431366,
+  "observedAt": "2026-07-06T12:00:00.000Z",
+  "sourceLabel": "demo:anchor:preflight read-only Ergo extension scan",
+  "network": "testnet",
+  "nodeUrl": "http://213.239.193.208:9052",
+  "commandLine": "npm run trustless:anchor-observe -- --bridge-event-root 701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9 --observations-json ../evidence/trustless-burn/anchor-observations-root-bound-testnet-2026-07-06-4987caca.json --min-height 430647 --max-height 431366 --observed-at 2026-07-06T12:00:00.000Z --out ../evidence/trustless-burn/anchor-observation-root-bound-testnet-2026-07-06-39bfec72.md --json-out ../evidence/trustless-burn/anchor-observation-root-bound-testnet-2026-07-06-39bfec72.json",
+  "workingDirectory": "ergo-sidechain-bridge/relayer",
+  "heightsScanned": 720,
+  "extensionReadsSucceeded": 720,
+  "extensionReadsFailed": 0,
+  "readFailures": [],
+  "boundary": {
+    "readOnly": true,
+    "publicObservationInputOnly": true,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "transactionBroadcastOrMutation": false,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

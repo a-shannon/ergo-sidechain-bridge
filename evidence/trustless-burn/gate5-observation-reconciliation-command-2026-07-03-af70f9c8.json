@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:observation-reconcile",
+  "status": "BLOCKED",
+  "reason": "anchor report status must be LINKED; observed BLOCKED",
+  "observedAt": "2026-07-03T05:49:38.075Z",
+  "commandLine": "npm run trustless:observation-reconcile -- --anchor-report-json ../evidence/trustless-burn/anchor-observation-root-bound-testnet-2026-07-03-af70f9c8.json --spv-tracker-report-json ../evidence/trustless-burn/artifacts/completed-local-spv-tracker-observation-report-2026-07-02-634b78eb.json --observed-at 2026-07-03T05:49:38.075Z --out ../evidence/trustless-burn/gate5-observation-reconciliation-command-2026-07-03-af70f9c8.md --json-out ../evidence/trustless-burn/gate5-observation-reconciliation-command-2026-07-03-af70f9c8.json",
+  "workingDirectory": "ergo-sidechain-bridge/relayer",
+  "anchorObservationReportTarget": "../evidence/trustless-burn/anchor-observation-root-bound-testnet-2026-07-03-af70f9c8.json",
+  "spvTrackerObservationReportTarget": "../evidence/trustless-burn/artifacts/completed-local-spv-tracker-observation-report-2026-07-02-634b78eb.json",
+  "anchorObservationStatus": "BLOCKED",
+  "spvTrackerObservationStatus": "LINKED",
+  "anchorBridgeEventRootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+  "spvBridgeEventRootHex": "1db43125ab9e2f51bc27b988beb50d51f28e4801750b27e0cc7d80c840156acb",
+  "spvErgoAnchorHeight": 987654,
+  "checks": [
+    {
+      "name": "Target separation",
+      "status": "PASS",
+      "detail": "anchor and SPV tracker observation reports use distinct evidence targets"
+    },
+    {
+      "name": "Anchor observation report command",
+      "status": "PASS",
+      "detail": "anchor report was produced by trustless:anchor-observe"
+    },
+    {
+      "name": "SPV tracker observation report command",
+      "status": "PASS",
+      "detail": "SPV tracker report was produced by trustless:spv-tracker-observe"
+    },
+    {
+      "name": "Anchor observation linked",
+      "status": "BLOCKED",
+      "detail": "anchor report status must be LINKED; observed BLOCKED"
+    },
+    {
+      "name": "SPV tracker observation linked",
+      "status": "PASS",
+      "detail": "SPV tracker report linked the expected key/value proof"
+    },
+    {
+      "name": "Bridge event root identity",
+      "status": "BLOCKED",
+      "detail": "anchor bridgeEventRoot, linkedAnchor.bridgeEventRootHex, SPV expectedEntry.bridgeEventRootHex, and SPV decodedValue.bridgeEventRootHex must all be present and equal"
+    },
+    {
+      "name": "Ergo anchor height identity",
+      "status": "BLOCKED",
+      "detail": "anchor linkedAnchor.ergoAnchorHeight, SPV expectedEntry.ergoAnchorHeight, and SPV decodedValue.ergoAnchorHeight must all be present and equal"
+    },
+    {
+      "name": "Anchor observation boundary",
+      "status": "PASS",
+      "detail": "anchor report preserves read-only public observation boundaries"
+    },
+    {
+      "name": "SPV tracker observation boundary",
+      "status": "PASS",
+      "detail": "SPV tracker report preserves read-only public observation boundaries"
+    }
+  ],
+  "boundary": {
+    "readOnly": true,
+    "publicObservationInputsOnly": true,
+    "anchorObservationJsonReused": true,
+    "spvTrackerObservationJsonReused": true,
+    "nodeOrRpcRequestPerformed": false,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "transactionBroadcastOrMutation": false,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

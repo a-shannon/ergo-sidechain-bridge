@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "command": "governance:reconcile:handoff",
+  "status": "READY",
+  "exitCode": 0,
+  "reason": "Gate 6 reconciliation prerequisites are ready for operator binding into completed committee governance evidence.",
+  "reconciliationReportSource": {
+    "mode": "json",
+    "target": "../evidence/governance/artifacts/completed-local-gate6-governance-reconciliation-report-2026-07-04-9fd9d7e1.json"
+  },
+  "wrongNetworkReportSource": {
+    "mode": "json",
+    "target": "../evidence/governance/artifacts/completed-local-gate6-governance-wrong-network-report-2026-07-04-9fd9d7e1.json"
+  },
+  "linkedPrerequisiteRows": [
+    {
+      "row": "Rotation Plan: Reconcile deployment state",
+      "status": "prerequisite-linked",
+      "reportTarget": "../evidence/governance/artifacts/completed-local-gate6-governance-reconciliation-report-2026-07-04-9fd9d7e1.json",
+      "remainingBoundary": "Operator must bind this sanitized report into completed committee governance evidence before Gate 6 can close."
+    },
+    {
+      "row": "Negative Checks: Deployment state points to the wrong network",
+      "status": "prerequisite-linked",
+      "reportTarget": "../evidence/governance/artifacts/completed-local-gate6-governance-wrong-network-report-2026-07-04-9fd9d7e1.json",
+      "remainingBoundary": "Operator must bind this wrong-network negative report into completed committee governance evidence before Gate 6 can close."
+    }
+  ],
+  "operatorPacket": {
+    "lane": "committee-governance",
+    "reconciliationReportTarget": "../evidence/governance/artifacts/completed-local-gate6-governance-reconciliation-report-2026-07-04-9fd9d7e1.json",
+    "wrongNetworkReportTarget": "../evidence/governance/artifacts/completed-local-gate6-governance-wrong-network-report-2026-07-04-9fd9d7e1.json",
+    "expectedNetwork": "testnet",
+    "observedNetwork": "testnet",
+    "wrongNetworkObservedNetwork": "patched-devnet",
+    "deploymentStateDigestHex": "3131313131313131313131313131313131313131313131313131313131313131",
+    "sidechainIdHex": "3232323232323232323232323232323232323232323232323232323232323232",
+    "scsNftId": "3333333333333333333333333333333333333333333333333333333333333333",
+    "singletonIdentityCount": 6,
+    "oldAuthorityIdentifierCount": 1,
+    "newCommitteeThreshold": "2/3",
+    "rollbackBindingLinked": true,
+    "stopConditions": [
+      "Stop and block rotation if network, singleton, authority, or rollback binding mismatches.",
+      "Governance rotation blocked because the deployment-state network does not match the intended testnet target."
+    ],
+    "nextOperatorStep": "Copy both linked prerequisite report targets into the completed committee governance evidence rows, then run npm run governance:validate on that completed evidence document."
+  },
+  "issueCount": 0,
+  "issues": [],
+  "boundary": {
+    "Read-only handoff composer": "yes",
+    "Reconciliation report JSON reused": "yes",
+    "Wrong-network report JSON reused": "yes",
+    "Private deployment state opened": "no",
+    "Runtime database opened": "no",
+    "Secret or environment file read": "no",
+    "Signing key or wallet material read": "no",
+    "Node, RPC, or explorer request performed": "no",
+    "Key rotation authorized": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no",
+    "Gate 6 committee governance closure claimed": "no",
+    "Governance-ready claim supported": "no",
+    "Production-ready claim supported": "no",
+    "Testnet production-candidate claim supported": "no"
+  }
+}

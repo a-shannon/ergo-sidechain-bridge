@@ -1,0 +1,56 @@
+# Committee Governance Evidence Validation Report
+
+This report records one committee governance validator result. It does not authorize public claims, release claims, publishing, deployment, key rotation, governance mutation, or transaction broadcast.
+
+## Command Result
+
+| Field | Value |
+|---|---|
+| Command | npm run governance:validate -- ../evidence/governance/phase010a-committee-governance-blocker-map-2026-06-29-442a1b08.md --report-out <report.md> |
+| Working directory | ergo-sidechain-bridge/relayer |
+| Validated target | ../evidence/governance/phase010a-committee-governance-blocker-map-2026-06-29-442a1b08.md |
+| Result | BLOCKED |
+| Exit code | 1 |
+| Structural issues | 23 |
+| Stack trace emitted | no |
+| Local path emitted | no |
+
+## Issue Groups
+
+| Issue group | Count | Operator meaning |
+|---|---:|---|
+| Rotation plan | 7 | One or more key-rotation steps lacks linked evidence, identifiers, stop conditions, or disjoint old/new committee bindings |
+| Positive checks | 2 | One or more expected new-committee acceptance checks lacks completed evidence |
+| Negative checks | 4 | One or more rejection, broadcast-disabled, or wrong-network negative checks lacks completed evidence |
+| Publication rules | 7 | Governance-ready, release support, open blocker, release-note, checklist, or external review publication fields are incomplete |
+| Reviewer sign-off | 3 | Governance owner, security reviewer, or operator reviewer approval is incomplete or inconsistent |
+
+## Structural Issue Examples
+
+- Rotation Plan: Identify old committee public keys: status must be linked before committee governance evidence can pass
+- Rotation Plan: Identify old committee public keys: required evidence must include at least one concrete public key/hash identifier
+- Rotation Plan: Identify new committee public keys: status must be linked before committee governance evidence can pass
+- Rotation Plan: Identify new committee public keys: required evidence must include at least 3 concrete public key/hash identifiers matching Committee member count
+- Rotation Plan: Evaluate old and new signer behavior: status must be linked before committee governance evidence can pass
+- Rotation Plan: Reconcile deployment state: status must be linked before committee governance evidence can pass
+- Rotation Plan: Verify rollback plan: status must be linked before committee governance evidence can pass
+- Positive Checks: New committee executes signer-gated mutation after rotation: status must be linked before committee governance evidence can pass
+- Positive Checks: Threshold member-loss tolerance still executes signer-gated mutation: status must be linked before committee governance evidence can pass
+- Negative Checks: Old single signer attempts signer-gated mutation after rotation: status must be linked before committee governance evidence can pass
+- Negative Checks: Non-committee signer attempts signer-gated mutation: status must be linked before committee governance evidence can pass
+- Negative Checks: Committee threshold below policy: status must be linked before committee governance evidence can pass
+- Negative Checks: Deployment state points to the wrong network: status must be linked before committee governance evidence can pass
+- Publication Rules: Release supported must not be none before committee governance evidence can pass
+
+## Boundary
+
+| Boundary | Value |
+|---|---|
+| Evidence target read | yes |
+| Committee governance validator completed | yes |
+| Public claim authorization granted | no |
+| Release gate PASS claimed | no |
+| Gate 6 committee governance closure claimed | no |
+| Key rotation authorization granted | no |
+| Runtime database or deployment state opened | no |
+| Transaction broadcast, submit, deploy, rotate keys, reconcile, or state mutation performed | no |

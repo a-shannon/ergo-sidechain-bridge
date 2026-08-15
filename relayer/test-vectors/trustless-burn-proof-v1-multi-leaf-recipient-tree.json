@@ -1,0 +1,184 @@
+{
+  "schema": "e2s.trustless-burn-proof.vector.v1",
+  "gate5Claim": false,
+  "contractsChanged": false,
+  "leaves": [
+    {
+      "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "burnIdHex": "57182144540292d653cf0d5f3b1e1f347795d67f9dd7fa3d1d2e2fe420d06c3a",
+      "sidechainTxHashHex": "5555555555555555555555555555555555555555555555555555555555555555",
+      "eventIndex": 7,
+      "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+      "amountNanoErg": "1000000",
+      "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+      "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+      "burnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+      "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+      "eventIndex": 8,
+      "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+      "amountNanoErg": "2000000",
+      "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "targetBurnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+  "expected": {
+    "encodedLeafHex": "0111111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f666666666666666666666666666666666666666666666666666666666666666600000008dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f740100000000001e84800000000000000000000000000000000000000000000000000000000000000000",
+    "leafHashHex": "0a287906f429e445513ba008fa4d178c7319993b178bb37822228ddd024c7681",
+    "bridgeEventRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+    "leafIndex": 1,
+    "leafCount": 2,
+    "proof": [
+      {
+        "side": "left",
+        "hashHex": "2c109937d8c0b176a74f5df14a900158a469c03ee963296be38fd9f704781c66"
+      }
+    ],
+    "settlementBinding": {
+      "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+      "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+      "amountNanoErg": "2000000",
+      "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "recipientErgoTreeHex": "0008cd024444444444444444444444444444444444444444444444444444444444444444",
+      "ok": true
+    }
+  },
+  "negativeCases": [
+    {
+      "name": "wrong-sidechain-id",
+      "leaf": {
+        "sidechainIdHex": "1212121212121212121212121212121212121212121212121212121212121212",
+        "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "burnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+        "eventIndex": 8,
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "settlementBinding": {
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "burnId must equal derived sidechain event identity"
+      ]
+    },
+    {
+      "name": "wrong-burn-id",
+      "leaf": {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "burnIdHex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+        "eventIndex": 8,
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "settlementBinding": {
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "burnId must equal derived sidechain event identity"
+      ]
+    },
+    {
+      "name": "wrong-event-index",
+      "leaf": {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+        "burnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+        "eventIndex": 9,
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "settlementBinding": {
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "burnId must equal derived sidechain event identity"
+      ]
+    },
+    {
+      "name": "wrong-recipient",
+      "settlementBinding": {
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "7777777777777777777777777777777777777777777777777777777777777777",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "settlement recipient must equal proved recipientErgoTreeHash"
+      ]
+    },
+    {
+      "name": "wrong-amount",
+      "settlementBinding": {
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "1000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "settlement amount must equal proved amountNanoErg"
+      ]
+    },
+    {
+      "name": "wrong-duplicate-prevention-key",
+      "settlementBinding": {
+        "duplicatePreventionKeyHex": "57182144540292d653cf0d5f3b1e1f347795d67f9dd7fa3d1d2e2fe420d06c3a",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "duplicatePreventionKey must equal burnId"
+      ]
+    },
+    {
+      "name": "wrong-bridge-event-root",
+      "settlementBinding": {
+        "bridgeEventRootHex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "burn inclusion proof must resolve to bridgeEventRoot"
+      ]
+    },
+    {
+      "name": "malformed-inclusion-path",
+      "settlementBinding": {
+        "proof": [
+          {
+            "side": "right",
+            "hashHex": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "expectedErrors": [
+        "burn inclusion proof must resolve to bridgeEventRoot"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 2,
+  "kind": "ergo-sidechain-bridge-public-audit-alpha-manifest",
+  "classification": "public-research-alpha",
+  "sourcePublicationPolicy": "permitted-after-promotion",
+  "supportedReleaseStatus": "blocked",
+  "independentReviewStatus": "open",
+  "validationCommand": "npm run audit:alpha",
+  "authority": {
+    "scope": "audit-command-only",
+    "liveChainRpcAllowed": false,
+    "operatorOrPersistentKeySigningAllowed": false,
+    "externalSubmissionAllowed": false,
+    "externalBroadcastAllowed": false,
+    "deploymentAllowed": false,
+    "liveFundsAllowed": false,
+    "ephemeralTestSigningExpected": true,
+    "mockTransportExpected": true,
+    "gate5Closed": false
+  },
+  "implementedSlices": [
+    "WP-08A",
+    "WP-08B",
+    "WP-08C",
+    "WP-08D",
+    "WP-08E",
+    "WP-08F",
+    "WP-08G",
+    "WP-08H",
+    "WP-08I",
+    "WP-08J",
+    "WP-08K",
+    "WP-08L"
+  ],
+  "requiredArtifacts": [
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "solidity/LICENSE",
+    "solidity/THIRD_PARTY_LICENSES/OpenZeppelin-Contracts-5.6.1.txt",
+    ".gitattributes",
+    ".gitignore",
+    ".gitmodules",
+    ".github/workflows/relayer-checks.yml",
+    "docs/public-audit-alpha.md",
+    "docs/public-audit-alpha-manifest.json",
+    "docs/layered-reference-architecture.md",
+    "docs/aggregate-settlement-threat-model.md",
+    "docs/consensus-source-baseline.md",
+    "docs/operator-runbooks.md",
+    "docs/tier1-gap-analysis.md",
+    "phases/bridge-execution-plan.md",
+    "relayer/package.json",
+    "relayer/.npmignore",
+    "relayer/src/public-audit-alpha-bundle.ts",
+    "relayer/src/scripts/public-audit-alpha-bundle.ts",
+    "relayer/src/validity-application-pooled-reserve-replay-cutover-v6.ts",
+    "relayer/src/validity-application-pooled-reserve-provisioning-v6.ts",
+    "relayer/src/validity-application-pooled-reserve-legacy-route-requirements-v6.ts",
+    "relayer/src/validity-application-pooled-reserve-cutover-eligibility-v6.ts",
+    "relayer/src/validity-application-pooled-reserve-target-check-request-v6.ts",
+    "relayer/src/validity-application-pooled-reserve-funds-authority-switch-precondition-v6.ts",
+    "sources/consensus-source-lock.json",
+    "contracts/README.md"
+  ],
+  "validationSteps": [
+    {
+      "id": "preflight-entry",
+      "command": "npm run audit:alpha:preflight"
+    },
+    {
+      "id": "source-lock",
+      "command": "npm run sources:verify:lock"
+    },
+    {
+      "id": "standalone-consensus-workflow",
+      "command": "npm run sources:verify:workflow"
+    },
+    {
+      "id": "clean-checkout",
+      "command": "npm run check:clean-checkout"
+    },
+    {
+      "id": "release-structure",
+      "command": "npm run audit:alpha:release-structure"
+    },
+    {
+      "id": "signer-unavailable-drill",
+      "command": "npm run operator:drill:signer-unavailable"
+    },
+    {
+      "id": "peg-in-mint-no-transport",
+      "command": "npm run operator:drill:peg-in-mint-transport"
+    },
+    {
+      "id": "recovery-drill",
+      "command": "npm run operator:drill:recovery"
+    },
+    {
+      "id": "alert-delivery-drill",
+      "command": "npm run operator:drill:alerts"
+    },
+    {
+      "id": "preflight-final",
+      "command": "npm run audit:alpha:preflight"
+    }
+  ],
+  "openGaps": [
+    {
+      "id": "gate5-native-profile-activation",
+      "severity": "critical",
+      "status": "blocked",
+      "ownerRole": "proof and finality maintainers",
+      "claimImpact": "Blocks Gate 5 closure, trustless settlement claims, and every production-readiness claim.",
+      "nextAction": "Resume exact target-node acceptance when a reviewed non-inert non-mainnet profile and compatible activated node exist."
+    },
+    {
+      "id": "historical-authority-cutover",
+      "severity": "critical",
+      "status": "open",
+      "ownerRole": "runtime and deployment-lineage maintainers",
+      "claimImpact": "Blocks funds-authority activation and any claim that historical owner, Root/Sudo, committee, or R9 routes are retired.",
+      "nextAction": "Use the distinct V6 settlement and cutover family while retaining the frozen V5 proof-statement semantics and without reinterpreting V4 or V5. Capture one real nonmainnet p1:ergo-cutover:observe packet, independently review the complete deployment and activation-parent lineage, map or admit every nonempty historical replay lineage, and atomically retire every legacy owner, Root/Sudo, committee, R9, vault, and DUP funds route before activating the V6 target."
+    },
+    {
+      "id": "key-rotation-member-loss",
+      "severity": "high",
+      "status": "blocked",
+      "ownerRole": "governance and operator-readiness maintainers",
+      "claimImpact": "Blocks WP-08 completion and governance-readiness claims; it does not close Chain zeta or Phantom Burn.",
+      "nextAction": "Run the cross-surface rotation and member-loss drill only against an exact reviewed activation profile."
+    },
+    {
+      "id": "current-head-non-mainnet-recovery-evidence",
+      "severity": "high",
+      "status": "blocked",
+      "ownerRole": "relayer operations and recovery maintainers",
+      "claimImpact": "Blocks live-recoverability and complete operational-readiness claims; the deterministic local recovery drill does not satisfy this evidence requirement.",
+      "nextAction": "Repeat the reviewed recovery matrix against an exact current-HEAD non-mainnet deployment only after its source profile and target runtime are fixed."
+    },
+    {
+      "id": "independent-security-review",
+      "severity": "critical",
+      "status": "open",
+      "ownerRole": "independent review coordinator",
+      "claimImpact": "Does not block source publication for public research review. Blocks independently reviewed, release-support, and security-completion claims.",
+      "nextAction": "Obtain an independent review of the exact candidate commit and retain all unresolved findings as blockers."
+    },
+    {
+      "id": "current-head-clean-checkout-evidence",
+      "severity": "high",
+      "status": "open",
+      "ownerRole": "CI and release-evidence maintainers",
+      "claimImpact": "Requires an exact promotion run before source publication. Until that run passes, it blocks final-candidate reproducibility claims and source packaging; it does not require release readiness.",
+      "nextAction": "Run the documented gate from a fresh recursive checkout and bind the result to the final candidate commit."
+    },
+    {
+      "id": "standalone-consensus-hosted-run-evidence",
+      "severity": "high",
+      "status": "open",
+      "ownerRole": "source-baseline maintainers",
+      "claimImpact": "Blocks a claim that the exact standalone consensus-source job passed in hosted CI for the candidate commit; the workflow and local command graph are present.",
+      "nextAction": "Run the standalone consensus-sources job on the exact promotion candidate and retain the hosted result separately from local workflow validation."
+    },
+    {
+      "id": "external-alert-delivery-acknowledgement-and-live-recovery-evidence",
+      "severity": "high",
+      "status": "blocked",
+      "ownerRole": "operations and recovery maintainers",
+      "claimImpact": "Blocks claims of external alert delivery, real operator acknowledgement, live recovery, or complete operational incident response; the bounded local worker, acknowledgement verifier, synthetic transport, alert drill, and inert action catalogue do not satisfy this evidence requirement.",
+      "nextAction": "Exercise the WP-08K worker against a reviewed external target with reviewed credential and key custody, retain one real Ed25519 acknowledgement bound to the exact alert and endpoint-bound delivery receipt, and run the current-HEAD recovery procedure on an exact non-mainnet deployment, then retain independently reviewed evidence without granting alert state funds authority."
+    }
+  ],
+  "claimBoundaries": [
+    "This source package may be published for public research and external review only after exact promotion checks pass; it is not a supported release.",
+    "Independent security review is open.",
+    "Gate 5 is open.",
+    "No trustless bridge claim is supported.",
+    "Production-ready and mainnet-readiness claims remain blocked.",
+    "The audit command does not contact chain RPCs, use operator or persistent keys, submit or broadcast externally, deploy, or move funds.",
+    "The tracked demo:devnet:consolidate-rewards utility is separately invoked, restricted to the patched loopback devnet, outside daemon composition, and never invoked by the audit command.",
+    "The bounded test suite may use ephemeral test keys and in-memory or mock transports."
+  ]
+}

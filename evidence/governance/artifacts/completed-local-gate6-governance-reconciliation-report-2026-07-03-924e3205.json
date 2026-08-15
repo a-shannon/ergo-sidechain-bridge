@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "command": "governance:reconcile:validate",
+  "status": "LINKED",
+  "kind": "deployment-state-reconciliation",
+  "reason": "Sanitized deployment-state reconciliation binds network, singleton identity, old authority, new committee authority, and rollback state.",
+  "observedAt": "2026-07-03T08:30:00.000Z",
+  "sourceLabel": "local public Gate 6 governance reconciliation input",
+  "targetLabel": "sanitized non-mainnet committee reconciliation packet",
+  "deploymentStateDigestHex": "3131313131313131313131313131313131313131313131313131313131313131",
+  "sidechainIdHex": "3232323232323232323232323232323232323232323232323232323232323232",
+  "scsNftId": "3333333333333333333333333333333333333333333333333333333333333333",
+  "singletonIdentities": {
+    "sideChainState": "3434343434343434343434343434343434343434343434343434343434343434",
+    "aggregateDup": "3535353535353535353535353535353535353535353535353535353535353535",
+    "batchDup": "3636363636363636363636363636363636363636363636363636363636363636",
+    "spvTracker": "3737373737373737373737373737373737373737373737373737373737373737",
+    "sideChainStateContract": "3838383838383838383838383838383838383838383838383838383838383838",
+    "governanceContract": "3939393939393939393939393939393939393939393939393939393939393939"
+  },
+  "oldAuthority": {
+    "label": "previous committee authority public identifier",
+    "publicIdentifiers": [
+      "024141414141414141414141414141414141414141414141414141414141414141"
+    ]
+  },
+  "newCommittee": {
+    "threshold": 2,
+    "memberCount": 3,
+    "publicIdentifiers": [
+      "025151515151515151515151515151515151515151515151515151515151515151",
+      "025252525252525252525252525252525252525252525252525252525252525252",
+      "025353535353535353535353535353535353535353535353535353535353535353"
+    ]
+  },
+  "rollback": {
+    "previousAuthorityDigestHex": "6161616161616161616161616161616161616161616161616161616161616161",
+    "rollbackStateDigestHex": "6262626262626262626262626262626262626262626262626262626262626262",
+    "recoveryPath": "rollback to previous-authority recovery packet if the committee rotation fails"
+  },
+  "stopCondition": "Stop and block rotation if network, singleton, authority, or rollback binding mismatches.",
+  "networkBinding": {
+    "expectedNetwork": "testnet",
+    "observedNetwork": "testnet",
+    "matched": true
+  },
+  "issueCount": 0,
+  "issues": [],
+  "commandLine": "npm run governance:reconcile:validate -- --reconciliation-json ../evidence/governance/artifacts/completed-local-gate6-governance-reconciliation-input-2026-07-03-924e3205.json --observed-at 2026-07-03T08:30:00.000Z --out ../evidence/governance/artifacts/completed-local-gate6-governance-reconciliation-report-2026-07-03-924e3205.md --json-out ../evidence/governance/artifacts/completed-local-gate6-governance-reconciliation-report-2026-07-03-924e3205.json",
+  "workingDirectory": "ergo-sidechain-bridge/relayer",
+  "boundary": {
+    "readOnly": true,
+    "sanitizedPublicInputOnly": true,
+    "privateDeploymentStateIncluded": false,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "nodeOrRpcRequestPerformed": false,
+    "keyRotationAuthorized": false,
+    "transactionBroadcastOrMutation": false,
+    "gate6Closure": false,
+    "governanceReadyClaimSupport": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

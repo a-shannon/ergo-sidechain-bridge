@@ -1,0 +1,31 @@
+# Local configuration, runtime state, and diagnostics.
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.log.*
+.runtime-backups/
+.devnet-backups/
+.operator-campaign/
+.devnet-diagnostics/
+openapi_temp.json
+sign_test.json
+spike3c_debug.json
+
+# Generated dependency and build caches never belong in a source package.
+node_modules/
+**/target/
+**/target-codex/
+.source-cache/
+pkg/
+*.wasm
+*.tgz

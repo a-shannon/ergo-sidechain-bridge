@@ -1,0 +1,203 @@
+{
+  "status": "ACTION_REQUIRED",
+  "exitCode": 0,
+  "command": "npm run readiness:handoff -- --runtime-prereqs-json ../evidence/readiness/runtime-prereqs-2026-07-02-c5f1d257.json --out <report.md> --json-out <report.json>",
+  "runtimePrereqsSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/runtime-prereqs-2026-07-02-c5f1d257.json"
+  },
+  "runtimePrereqsStatus": "READY",
+  "totalStructuralIssues": 40,
+  "nodeBackedIssueCount": 9,
+  "reviewerOrExternalIssueCount": 24,
+  "claimOrPublicationBoundaryIssueCount": 7,
+  "localEvidenceIssueCount": 0,
+  "localClosureStatus": "external-or-live-required",
+  "localOnlyClosureIssueCount": 0,
+  "externalOrLiveClosureIssueCount": 40,
+  "manualTriageIssueCount": 0,
+  "localClosureSummary": "No local-only closure candidates remain for the selected lanes; next progress requires non-mainnet/live evidence, external review, human approval, or claim fields that must wait for those blockers.",
+  "triageTargets": [
+    {
+      "lane": "trustless-burn",
+      "target": "../evidence/trustless-burn/gate5-trustless-burn-blocker-map-2026-06-29-5d075bd9.md"
+    },
+    {
+      "lane": "committee-governance",
+      "target": "../evidence/governance/phase010a-committee-governance-blocker-map-2026-06-29-f341ad8c.md"
+    },
+    {
+      "lane": "benchmark",
+      "target": "../evidence/benchmarks/gate7-offline-structured-candidate-2026-07-01-5d37c906.md"
+    }
+  ],
+  "nodePreflight": "PASS",
+  "anchorPreflight": "FAIL",
+  "nodeEndpoint": "http://213.239.193.208:9052",
+  "liveEvidenceRequests": [
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Ergo extension-section anchoring: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Sidechain header/finality verifier: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: SPV relay contract or tracker: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Burn inclusion proof: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: DUP settlement binding: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Positive Proof Acceptance: Valid burn proof acceptance: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Rotation Plan: Reconcile deployment state: status must be linked before committee governance evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Negative Checks: Deployment state points to the wrong network: status must be linked before committee governance evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issue": "Metric Table: Live batch settlement: status must be linked before Gate 7 evidence can pass"
+    }
+  ],
+  "lanePackets": [
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issueCount": 6,
+      "evidenceTemplate": "../docs/trustless-burn-verification-evidence-template.md",
+      "validatorCommand": "npm run trustless:validate -- <completed-trustless-burn-evidence.md>",
+      "releaseGateFlag": "--trustless-burn-evidence <completed-trustless-burn-evidence.md>",
+      "triageTarget": "../evidence/trustless-burn/gate5-trustless-burn-blocker-map-2026-06-29-5d075bd9.md",
+      "currentPrerequisiteMap": "../evidence/trustless-burn/gate5-trustless-burn-prerequisite-map-2026-07-02-197c4459.md",
+      "nextOperatorStep": "Collect the requested non-mainnet proof-path artifacts, then run the trustless burn validator on the completed evidence document.",
+      "closureBoundary": "Candidate proof-vector or candidate settlement JSON alone does not close Gate 5; completed protocol evidence plus reviewer sign-off is still required.",
+      "requestedEvidence": [
+        "Required Components: Ergo extension-section anchoring: status must be linked before Gate 5 evidence can pass",
+        "Required Components: Sidechain header/finality verifier: status must be linked before Gate 5 evidence can pass",
+        "Required Components: SPV relay contract or tracker: status must be linked before Gate 5 evidence can pass",
+        "Required Components: Burn inclusion proof: status must be linked before Gate 5 evidence can pass",
+        "Required Components: DUP settlement binding: status must be linked before Gate 5 evidence can pass",
+        "Positive Proof Acceptance: Valid burn proof acceptance: status must be linked before Gate 5 evidence can pass"
+      ],
+      "operatorEvidenceInputs": [
+        "Proof-path packet: sidechain commitment, bridgeEventRoot, burnId, burn amount, recipient ErgoTree hash, sidechain transaction and block hashes, event index, duplicate-prevention key, and non-empty inclusion path.",
+        "Anchor observation packet: sanitized public extension-observation JSON plus completed npm run trustless:anchor-observe -- --bridge-event-root <64hex|0401:64hex> --observations-json <sanitized-public-observations.json> --min-height <n> --max-height <n> --json-out <completed-report.json> report target, with the observed 0x0401 bridgeEventRoot bound to the proof-path packet.",
+        "SPV tracker observation packet: sanitized public observation JSON plus completed npm run trustless:spv-tracker-observe -- --observation-json <sanitized-public-observation.json> --json-out <completed-report.json> report target, with tracker key, value, and digest matched to the recomputed observation.",
+        "Proof-vector validation packet: completed npm run trustless:proof-vector:validate JSON report target, embedded matching multi-leaf proof vector, and required fail-closed negative cases.",
+        "Acceptance-boundary packet: positive proof acceptance evidence plus reviewer notes confirming no Gate 5 closure, no settlement readiness, no broadcast authorization, and no production claim support from local proof-core evidence alone."
+      ]
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issueCount": 2,
+      "evidenceTemplate": "../docs/committee-governance-evidence-template.md",
+      "validatorCommand": "npm run governance:validate -- <completed-committee-governance-evidence.md>",
+      "releaseGateFlag": "--governance-evidence <completed-committee-governance-evidence.md>",
+      "triageTarget": "../evidence/governance/phase010a-committee-governance-blocker-map-2026-06-29-f341ad8c.md",
+      "currentPrerequisiteMap": "../evidence/governance/phase010a-committee-governance-prerequisite-map-2026-07-02-fb143710.md",
+      "nextOperatorStep": "Collect the requested key-rotation and network-scope artifacts, then run the governance validator on the completed evidence document.",
+      "closureBoundary": "Do not flip governance-ready or claim/publication fields until completed governance evidence and external review bindings pass validation.",
+      "requestedEvidence": [
+        "Rotation Plan: Reconcile deployment state: status must be linked before committee governance evidence can pass",
+        "Negative Checks: Deployment state points to the wrong network: status must be linked before committee governance evidence can pass"
+      ],
+      "operatorEvidenceInputs": [
+        "Sanitized deployment-state reconciliation packet: network name or chain id, sidechain id, SCS NFT id, singleton box ids or hashes, governance contract hashes, old and new committee public key or hash identifiers, and npm run governance:reconcile:validate command output with exit code 0.",
+        "Wrong-network negative evidence: sanitized rejected or blocked result that names the deployment-state target, expected network, observed mismatched network, stop condition, and npm run governance:reconcile:validate command output with exit code 0 without exposing private deployment-state content.",
+        "Boundary confirmation: no .env values, secrets, mnemonics, private DB rows, private deployment-state file dumps, signing, key rotation, state mutation, deploy, submit, or broadcast."
+      ]
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issueCount": 1,
+      "evidenceTemplate": "../docs/performance-benchmark-evidence-template.md",
+      "validatorCommand": "npm run benchmark:validate -- <completed-benchmark-evidence.md>",
+      "releaseGateFlag": "--benchmark-evidence <completed-benchmark-evidence.md>",
+      "triageTarget": "../evidence/benchmarks/gate7-offline-structured-candidate-2026-07-01-5d37c906.md",
+      "currentPrerequisiteMap": "../evidence/benchmarks/gate7-live-batch-prerequisite-map-2026-07-02-860dce7f.md",
+      "nextOperatorStep": "Collect the requested live batch settlement benchmark artifact, then run the benchmark validator on the completed evidence document.",
+      "closureBoundary": "Benchmark data can support bounded scaling claims only after completed command-specific outputs, reviewer sign-off, and claim-boundary rows pass validation.",
+      "requestedEvidence": [
+        "Metric Table: Live batch settlement: status must be linked before Gate 7 evidence can pass"
+      ],
+      "operatorEvidenceInputs": [
+        "Live batch settlement packet: Expected transaction ID, submitted transaction ID, confirmation and reconciliation evidence, live batch transaction identity, sample count at least 3, and concrete 32-byte transaction or reconciliation digest.",
+        "Live-readiness packet: user explicit live broadcast approval bound to the Expected transaction ID, scoped BRIDGE_BROADCAST_ENABLED=true evidence, demo:readiness PASS, broadcast policy PASS, live settlement signing PASS, and network reconfirmation.",
+        "Metric-boundary packet: positive measurements with units for throughput, latency, build time, proof size, transaction size, inputs, outputs, context-extension Vars, and batch size; no production throughput or mainnet-grade claim approval."
+      ]
+    }
+  ],
+  "workPackages": [
+    {
+      "name": "Local evidence cleanup",
+      "status": "complete",
+      "issueCount": 0,
+      "action": "No local-only closure candidates remain in the current triage."
+    },
+    {
+      "name": "Non-mainnet or live drill evidence",
+      "status": "action-required",
+      "issueCount": 9,
+      "action": "Collect concrete node-backed or live-drill evidence for Benchmark and scaling evidence, Committee governance and key rotation and Trustless burn verification."
+    },
+    {
+      "name": "Reviewer or external decisions",
+      "status": "action-required",
+      "issueCount": 24,
+      "action": "Prepare reviewer packets and external decision material after the runtime evidence is concrete."
+    },
+    {
+      "name": "Claim and publication boundary",
+      "status": "blocked",
+      "issueCount": 7,
+      "action": "Keep claim and publication fields blocked until runtime evidence and reviewer decisions resolve."
+    }
+  ],
+  "nextActions": [
+    "Collect node-backed or live-drill evidence for Benchmark and scaling evidence, Committee governance and key rotation and Trustless burn verification.",
+    "Route reviewer and external blockers into human review packets with concrete evidence targets.",
+    "Keep claim and publication fields blocked until runtime evidence plus reviewer or external decisions are resolved."
+  ],
+  "boundary": {
+    "Planning output only": "yes",
+    "Runtime prerequisites JSON reused": "yes",
+    "Readiness triage JSON reused": "yes",
+    "Node preflight JSON reused": "yes",
+    "Anchor preflight JSON reused": "yes",
+    "Live node probe executed by handoff command": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no",
+    "Public claim authorization granted": "no",
+    "Claim/publication fields unlocked": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no"
+  }
+}

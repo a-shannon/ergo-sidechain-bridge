@@ -1,0 +1,598 @@
+{
+  "status": "ACTION_REQUIRED",
+  "exitCode": 0,
+  "sourceCommit": "7a63a983",
+  "command": "npm run readiness:handoff -- --runtime-prereqs-json ../evidence/readiness/runtime-prereqs-current-lanes-2026-07-03-7a63a983.json --out <report.md> --json-out <report.json>",
+  "runtimePrereqsSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/runtime-prereqs-current-lanes-2026-07-03-7a63a983.json"
+  },
+  "runtimePrereqsStatus": "READY",
+  "totalStructuralIssues": 81,
+  "nodeBackedIssueCount": 11,
+  "reviewerOrExternalIssueCount": 59,
+  "claimOrPublicationBoundaryIssueCount": 11,
+  "localEvidenceIssueCount": 0,
+  "localClosureStatus": "external-or-live-required",
+  "localOnlyClosureIssueCount": 0,
+  "externalOrLiveClosureIssueCount": 81,
+  "manualTriageIssueCount": 0,
+  "localClosureSummary": "No local-only closure candidates remain for the selected lanes; next progress requires non-mainnet/live evidence, external review, human approval, or claim fields that must wait for those blockers.",
+  "triageTargets": [
+    {
+      "lane": "security-review",
+      "target": "../evidence/security/gate4-independent-security-review-blocker-map-2026-06-26-4ec4f7d1.md"
+    },
+    {
+      "lane": "trustless-burn",
+      "target": "../evidence/trustless-burn/gate5-trustless-burn-blocker-map-2026-06-29-5d075bd9.md"
+    },
+    {
+      "lane": "committee-governance",
+      "target": "../evidence/governance/phase010a-committee-governance-blocker-map-2026-07-03-7f516dcc.md"
+    },
+    {
+      "lane": "benchmark",
+      "target": "../evidence/benchmarks/gate7-offline-structured-candidate-2026-07-03-bcb15f7a.md"
+    }
+  ],
+  "nodePreflight": "PASS",
+  "anchorPreflight": "FAIL",
+  "nodeEndpoint": "http://213.239.193.208:9052",
+  "localEvidenceRequests": [],
+  "liveEvidenceRequests": [
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Evidence Package: Fresh local devnet rehearsal: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Evidence Package: Fresh testnet rehearsal: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Evidence Package: Failed broadcast / phantom AVL drill: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Evidence Package: Batch settlement check/submit/confirm rehearsal: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Ergo extension-section anchoring: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Sidechain header/finality verifier: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: SPV relay contract or tracker: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Burn inclusion proof: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: DUP settlement binding: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Positive Proof Acceptance: Valid burn proof acceptance: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issue": "Metric Table: Live batch settlement: status must be linked before Gate 7 evidence can pass"
+    }
+  ],
+  "reviewerOrExternalRequests": [
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Review Classification: Final decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: ErgoScript contracts: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: ErgoScript contracts: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Relayer signing: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Relayer signing: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: AVL proof generation: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: AVL proof generation: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Settlement reconciliation: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Settlement reconciliation: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Sidechain finality and burn validity: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Sidechain finality and burn validity: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Operator recovery: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Operator recovery: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Dependency risk: coverage must be covered before Gate 4 evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Scope Coverage: Dependency risk: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: Critical findings: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: High findings: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: Medium findings: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: Low findings: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: Informational findings: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: Accepted risks: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Finding Disposition: Publication blockers: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can a production path sign through the Ergo node wallet?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can default production/testnet mode sign an unsafe ContextExtension shape?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can any settlement broadcast without `BRIDGE_BROADCAST_ENABLED=true`?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can a failed broadcast or reorg insert a phantom DUP key?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can a batch settlement accept a wrong-recipient, low-value, or reused payout?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can a same-recipient batch collision pay fewer outputs than expected?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can stale SPV tracker or DUP history build against the wrong singleton digest?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can trusted burn interpretation be mistaken for trustless verification?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Required Negative Review Checks: Can an operator recover from SQLite loss without private maintainer context?: status must be linked before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Reviewer Sign-Off: Lead reviewer: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Reviewer Sign-Off: Security owner: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Reviewer Sign-Off: Maintainer: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before security review evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary: critical/high findings must be numeric 0"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary must mention release support, trustless burn verification implementation, production-ready claim handling, testnet production-candidate claim handling, transitional trusted burn path handling, and critical/high findings"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary must use exact Trustless burn verification implemented = yes"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary must use exact Transitional trusted burn path disabled = yes"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary must use exact Critical/high findings open = 0"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary must not leave critical/high findings open"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Publication Decision: Reviewer decision summary: transitional trusted burn path handling must be disabled, blocked, or not allowed"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Required Components: Independent review: status must be linked before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Reviewer Sign-Off: Protocol reviewer: decision must be approve before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Reviewer Sign-Off: Security reviewer: decision must be approve before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Reviewer Sign-Off: Security reviewer: notes must state a concrete trustless-burn outcome"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before Gate 5 evidence can pass"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issue": "Reviewer Sign-Off: Operator reviewer: notes must state a concrete trustless-burn outcome"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Publication Rules: Reviewer decision summary must use exact Governance-ready claim allowed = yes"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Publication Rules: Reviewer decision summary must use exact Open governance blockers = 0"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Publication Rules: Reviewer decision summary: open governance blockers must be 0"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Publication Rules: External review evidence must include a link, command, or artifact marker"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Reviewer Sign-Off: Governance owner: decision must be approve before committee governance evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Reviewer Sign-Off: Security reviewer: decision must be approve before committee governance evidence can pass"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before committee governance evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issue": "Publication Decision: Reviewer decision summary: open benchmark blockers must be 0"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issue": "Reviewer Sign-Off: Benchmark owner: decision must be approve before benchmark evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issue": "Reviewer Sign-Off: Security reviewer: decision must be approve before benchmark evidence can pass"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issue": "Reviewer Sign-Off: Operator reviewer: decision must be approve before benchmark evidence can pass"
+    }
+  ],
+  "lanePackets": [
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issueCount": 39,
+      "evidenceTemplate": "../docs/independent-security-review-evidence-template.md",
+      "validatorCommand": "npm run security:validate -- <completed-independent-security-review.md>",
+      "releaseGateFlag": "--security-review-evidence <completed-independent-security-review.md>",
+      "triageTarget": "../evidence/security/gate4-independent-security-review-blocker-map-2026-06-26-4ec4f7d1.md",
+      "currentPrerequisiteMap": "../evidence/security/gate4-independent-security-review-prerequisite-map-2026-07-03-566916ce.md",
+      "nextOperatorStep": "Collect the independent reviewer, scope, finding, negative-check, and publication-boundary artifacts, then run the security review validator on the completed evidence document.",
+      "closureBoundary": "Gate 4 remains blocked until a concrete independent review approves the scoped evidence and keeps production-ready, mainnet, publication, deployment, signing, submit, and broadcast boundaries closed.",
+      "requestedEvidence": [
+        "Required Evidence Package: Fresh local devnet rehearsal: status must be linked before security review evidence can pass",
+        "Required Evidence Package: Fresh testnet rehearsal: status must be linked before security review evidence can pass",
+        "Required Evidence Package: Failed broadcast / phantom AVL drill: status must be linked before security review evidence can pass",
+        "Required Evidence Package: Batch settlement check/submit/confirm rehearsal: status must be linked before security review evidence can pass",
+        "Review Classification: Final decision must be approve before security review evidence can pass",
+        "Required Scope Coverage: ErgoScript contracts: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: ErgoScript contracts: status must be linked before security review evidence can pass",
+        "Required Scope Coverage: Relayer signing: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: Relayer signing: status must be linked before security review evidence can pass",
+        "Required Scope Coverage: AVL proof generation: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: AVL proof generation: status must be linked before security review evidence can pass",
+        "Required Scope Coverage: Settlement reconciliation: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: Settlement reconciliation: status must be linked before security review evidence can pass",
+        "Required Scope Coverage: Sidechain finality and burn validity: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: Sidechain finality and burn validity: status must be linked before security review evidence can pass",
+        "Required Scope Coverage: Operator recovery: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: Operator recovery: status must be linked before security review evidence can pass",
+        "Required Scope Coverage: Dependency risk: coverage must be covered before Gate 4 evidence can pass",
+        "Required Scope Coverage: Dependency risk: status must be linked before security review evidence can pass",
+        "Finding Disposition: Critical findings: status must be linked before security review evidence can pass",
+        "Finding Disposition: High findings: status must be linked before security review evidence can pass",
+        "Finding Disposition: Medium findings: status must be linked before security review evidence can pass",
+        "Finding Disposition: Low findings: status must be linked before security review evidence can pass",
+        "Finding Disposition: Informational findings: status must be linked before security review evidence can pass",
+        "Finding Disposition: Accepted risks: status must be linked before security review evidence can pass",
+        "Finding Disposition: Publication blockers: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can a production path sign through the Ergo node wallet?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can default production/testnet mode sign an unsafe ContextExtension shape?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can any settlement broadcast without `BRIDGE_BROADCAST_ENABLED=true`?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can a failed broadcast or reorg insert a phantom DUP key?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can a batch settlement accept a wrong-recipient, low-value, or reused payout?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can a same-recipient batch collision pay fewer outputs than expected?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can stale SPV tracker or DUP history build against the wrong singleton digest?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can trusted burn interpretation be mistaken for trustless verification?: status must be linked before security review evidence can pass",
+        "Required Negative Review Checks: Can an operator recover from SQLite loss without private maintainer context?: status must be linked before security review evidence can pass",
+        "Reviewer Sign-Off: Lead reviewer: decision must be approve before security review evidence can pass",
+        "Reviewer Sign-Off: Security owner: decision must be approve before security review evidence can pass",
+        "Reviewer Sign-Off: Maintainer: decision must be approve before security review evidence can pass",
+        "Reviewer Sign-Off: Operator reviewer: decision must be approve before security review evidence can pass"
+      ],
+      "operatorEvidenceInputs": [
+        "External reviewer packet: concrete independent reviewer organization or affiliation, organization type, lead reviewer, review period, reviewed commit, release scope, and final decision fields.",
+        "Scope and evidence packet: area-specific scope coverage, command evidence, lifecycle, recovery, batch settlement, dependency, Gate 5, Gate 6, Gate 7, and release-note/checklist evidence as applicable.",
+        "Finding and negative-check packet: finding-class disposition, accepted-risk disposition, publication blocker closure, and question-specific negative security-review checks.",
+        "Boundary confirmation: no audit approval, accepted-risk closure, production-ready claim, publication, deployment, signing, submit, broadcast, runtime DB read, or private deployment-state read from this handoff."
+      ]
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issueCount": 19,
+      "evidenceTemplate": "../docs/trustless-burn-verification-evidence-template.md",
+      "validatorCommand": "npm run trustless:validate -- <completed-trustless-burn-evidence.md>",
+      "releaseGateFlag": "--trustless-burn-evidence <completed-trustless-burn-evidence.md>",
+      "triageTarget": "../evidence/trustless-burn/gate5-trustless-burn-blocker-map-2026-06-29-5d075bd9.md",
+      "currentPrerequisiteMap": "../evidence/trustless-burn/gate5-trustless-burn-prerequisite-map-2026-07-03-21f42191.md",
+      "nextOperatorStep": "Collect the requested non-mainnet proof-path artifacts, then run the trustless burn validator on the completed evidence document.",
+      "closureBoundary": "Candidate proof-vector or candidate settlement JSON alone does not close Gate 5; completed protocol evidence plus reviewer sign-off is still required.",
+      "requestedEvidence": [
+        "Required Components: Ergo extension-section anchoring: status must be linked before Gate 5 evidence can pass",
+        "Required Components: Sidechain header/finality verifier: status must be linked before Gate 5 evidence can pass",
+        "Required Components: SPV relay contract or tracker: status must be linked before Gate 5 evidence can pass",
+        "Required Components: Burn inclusion proof: status must be linked before Gate 5 evidence can pass",
+        "Required Components: DUP settlement binding: status must be linked before Gate 5 evidence can pass",
+        "Positive Proof Acceptance: Valid burn proof acceptance: status must be linked before Gate 5 evidence can pass",
+        "Publication Decision: Reviewer decision summary: critical/high findings must be numeric 0",
+        "Publication Decision: Reviewer decision summary must mention release support, trustless burn verification implementation, production-ready claim handling, testnet production-candidate claim handling, transitional trusted burn path handling, and critical/high findings",
+        "Publication Decision: Reviewer decision summary must use exact Trustless burn verification implemented = yes",
+        "Publication Decision: Reviewer decision summary must use exact Transitional trusted burn path disabled = yes",
+        "Publication Decision: Reviewer decision summary must use exact Critical/high findings open = 0",
+        "Publication Decision: Reviewer decision summary must not leave critical/high findings open",
+        "Publication Decision: Reviewer decision summary: transitional trusted burn path handling must be disabled, blocked, or not allowed",
+        "Required Components: Independent review: status must be linked before Gate 5 evidence can pass",
+        "Reviewer Sign-Off: Protocol reviewer: decision must be approve before Gate 5 evidence can pass",
+        "Reviewer Sign-Off: Security reviewer: decision must be approve before Gate 5 evidence can pass",
+        "Reviewer Sign-Off: Security reviewer: notes must state a concrete trustless-burn outcome",
+        "Reviewer Sign-Off: Operator reviewer: decision must be approve before Gate 5 evidence can pass",
+        "Reviewer Sign-Off: Operator reviewer: notes must state a concrete trustless-burn outcome"
+      ],
+      "operatorEvidenceInputs": [
+        "Proof-path packet: sidechain commitment, bridgeEventRoot, burnId, burn amount, recipient ErgoTree hash, sidechain transaction and block hashes, event index, duplicate-prevention key, and non-empty inclusion path.",
+        "Anchor observation packet: sanitized public extension-observation JSON plus completed npm run trustless:anchor-observe -- --bridge-event-root <64hex|0401:64hex> --observations-json <sanitized-public-observations.json> --min-height <n> --max-height <n> --json-out <completed-report.json> report target, with the observed 0x0401 bridgeEventRoot bound to the proof-path packet.",
+        "SPV tracker observation packet: sanitized public observation JSON plus completed npm run trustless:spv-tracker-observe -- --observation-json <sanitized-public-observation.json> --json-out <completed-report.json> report target, with tracker key, value, and digest matched to the recomputed observation.",
+        "Observation reconciliation packet: completed npm run trustless:observation-reconcile -- --anchor-report-json <completed-anchor-observation-report.json> --spv-tracker-report-json <completed-spv-tracker-observation-report.json> --json-out <completed-reconciliation-report.json> target; current reconciliation at ../evidence/trustless-burn/gate5-observation-reconciliation-2026-07-02-6953c3b5.md shows anchor observation BLOCKED, SPV tracker linked-local prerequisite evidence, matched bridgeEventRoot, and mismatched ergoAnchorHeight, so the next packet must bind one shared bridgeEventRoot and ergoAnchorHeight across anchor, SPV, proof-vector, and settlement-binding evidence.",
+        "Proof-vector validation packet: completed npm run trustless:proof-vector:validate JSON report target, embedded matching multi-leaf proof vector, and required fail-closed negative cases.",
+        "Acceptance-boundary packet: positive proof acceptance evidence plus reviewer notes confirming no Gate 5 closure, no settlement readiness, no broadcast authorization, and no production claim support from local proof-core evidence alone."
+      ]
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issueCount": 5,
+      "evidenceTemplate": "../docs/performance-benchmark-evidence-template.md",
+      "validatorCommand": "npm run benchmark:validate -- <completed-benchmark-evidence.md>",
+      "releaseGateFlag": "--benchmark-evidence <completed-benchmark-evidence.md>",
+      "triageTarget": "../evidence/benchmarks/gate7-offline-structured-candidate-2026-07-03-bcb15f7a.md",
+      "currentPrerequisiteMap": "../evidence/benchmarks/gate7-live-batch-prerequisite-map-2026-07-03-bcb15f7a.md",
+      "nextOperatorStep": "Collect the requested live batch settlement benchmark artifact, then run the benchmark validator on the completed evidence document.",
+      "closureBoundary": "Benchmark data can support bounded scaling claims only after completed command-specific outputs, reviewer sign-off, and claim-boundary rows pass validation.",
+      "requestedEvidence": [
+        "Metric Table: Live batch settlement: status must be linked before Gate 7 evidence can pass",
+        "Publication Decision: Reviewer decision summary: open benchmark blockers must be 0",
+        "Reviewer Sign-Off: Benchmark owner: decision must be approve before benchmark evidence can pass",
+        "Reviewer Sign-Off: Security reviewer: decision must be approve before benchmark evidence can pass",
+        "Reviewer Sign-Off: Operator reviewer: decision must be approve before benchmark evidence can pass"
+      ],
+      "operatorEvidenceInputs": [
+        "Live batch settlement packet: Expected transaction ID, submitted transaction ID, confirmation and reconciliation evidence, live batch transaction identity, sample count at least 3, and concrete 32-byte transaction or reconciliation digest.",
+        "Live-readiness packet: user explicit live broadcast approval bound to the Expected transaction ID, scoped BRIDGE_BROADCAST_ENABLED=true evidence, demo:readiness PASS, broadcast policy PASS, live settlement signing PASS, and network reconfirmation.",
+        "Metric-boundary packet: positive measurements with units for throughput, latency, build time, proof size, transaction size, inputs, outputs, context-extension Vars, and batch size; no production throughput or mainnet-grade claim approval."
+      ]
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issueCount": 7,
+      "evidenceTemplate": "../docs/committee-governance-evidence-template.md",
+      "validatorCommand": "npm run governance:validate -- <completed-committee-governance-evidence.md>",
+      "releaseGateFlag": "--governance-evidence <completed-committee-governance-evidence.md>",
+      "triageTarget": "../evidence/governance/phase010a-committee-governance-blocker-map-2026-07-03-7f516dcc.md",
+      "currentPrerequisiteMap": "../evidence/governance/phase010a-committee-governance-prerequisite-map-2026-07-03-7f516dcc.md",
+      "nextOperatorStep": "Collect the requested key-rotation and network-scope artifacts, then run the governance validator on the completed evidence document.",
+      "closureBoundary": "Do not flip governance-ready or claim/publication fields until completed governance evidence and external review bindings pass validation.",
+      "requestedEvidence": [
+        "Publication Rules: Reviewer decision summary must use exact Governance-ready claim allowed = yes",
+        "Publication Rules: Reviewer decision summary must use exact Open governance blockers = 0",
+        "Publication Rules: Reviewer decision summary: open governance blockers must be 0",
+        "Publication Rules: External review evidence must include a link, command, or artifact marker",
+        "Reviewer Sign-Off: Governance owner: decision must be approve before committee governance evidence can pass",
+        "Reviewer Sign-Off: Security reviewer: decision must be approve before committee governance evidence can pass",
+        "Reviewer Sign-Off: Operator reviewer: decision must be approve before committee governance evidence can pass"
+      ],
+      "operatorEvidenceInputs": [
+        "Sanitized deployment-state reconciliation packet: network name or chain id, sidechain id, SCS NFT id, singleton box ids or hashes, governance contract hashes, old and new committee public key or hash identifiers, and npm run governance:reconcile:validate command output with exit code 0.",
+        "Wrong-network negative evidence: sanitized rejected or blocked result that names the deployment-state target, expected network, observed mismatched network, stop condition, and npm run governance:reconcile:validate command output with exit code 0 without exposing private deployment-state content.",
+        "Boundary confirmation: no .env values, secrets, mnemonics, private DB rows, private deployment-state file dumps, signing, key rotation, state mutation, deploy, submit, or broadcast."
+      ]
+    }
+  ],
+  "workPackages": [
+    {
+      "name": "Local evidence cleanup",
+      "status": "complete",
+      "issueCount": 0,
+      "action": "No local-only closure candidates remain in the current triage."
+    },
+    {
+      "name": "Non-mainnet or live drill evidence",
+      "status": "action-required",
+      "issueCount": 11,
+      "action": "Collect concrete node-backed or live-drill evidence for Benchmark and scaling evidence, Independent security review and Trustless burn verification."
+    },
+    {
+      "name": "Reviewer or external decisions",
+      "status": "action-required",
+      "issueCount": 59,
+      "action": "Prepare reviewer packets and external decision material after the runtime evidence is concrete."
+    },
+    {
+      "name": "Claim and publication boundary",
+      "status": "blocked",
+      "issueCount": 11,
+      "action": "Keep claim and publication fields blocked until runtime evidence and reviewer decisions resolve."
+    }
+  ],
+  "nextActions": [
+    "Collect node-backed or live-drill evidence for Benchmark and scaling evidence, Independent security review and Trustless burn verification.",
+    "Route reviewer and external blockers into human review packets with concrete evidence targets.",
+    "Keep claim and publication fields blocked until runtime evidence plus reviewer or external decisions are resolved."
+  ],
+  "boundary": {
+    "Planning output only": "yes",
+    "Runtime prerequisites JSON reused": "yes",
+    "Readiness triage JSON reused": "yes",
+    "Node preflight JSON reused": "yes",
+    "Anchor preflight JSON reused": "yes",
+    "Live node probe executed by handoff command": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no",
+    "Public claim authorization granted": "no",
+    "Claim/publication fields unlocked": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no"
+  }
+}

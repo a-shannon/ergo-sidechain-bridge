@@ -1,0 +1,16 @@
+[workspace]
+members = ["host", "methods"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.89"
+
+# Guest execution is prohibitively slow without optimization, including in local conformance runs.
+[profile.dev]
+opt-level = 3
+
+[profile.release]
+debug = 1
+lto = true

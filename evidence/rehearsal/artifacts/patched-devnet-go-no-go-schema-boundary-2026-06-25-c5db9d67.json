@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "command": "demo:patched-devnet:go-no-go",
+  "generatedAt": "2026-06-25T14:51:13.201Z",
+  "secretEnvInspection": "disabled",
+  "nodeConfigInspection": "disabled",
+  "runtimeStateInspection": "skipped",
+  "checks": [
+    {
+      "status": "PASS",
+      "label": "ergo-source",
+      "detail": "found at configured location"
+    },
+    {
+      "status": "PASS",
+      "label": "run-patched-ergo-devnet.ps1",
+      "detail": "found: scripts/run-patched-ergo-devnet.ps1"
+    },
+    {
+      "status": "PASS",
+      "label": "start-substrate.bat",
+      "detail": "found: start-substrate.bat"
+    },
+    {
+      "status": "PASS",
+      "label": "frontier-template-node.exe",
+      "detail": "found at configured default frontier binary location"
+    },
+    {
+      "status": "PASS",
+      "label": "script: deploy:sidechain",
+      "detail": "tsx src/scripts/deploy-sidechain.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: deploy",
+      "detail": "tsx src/scripts/deploy.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: deploy:aggregate",
+      "detail": "tsx src/scripts/deploy-aggregate.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: e2e:aggregate",
+      "detail": "tsx src/scripts/e2e-aggregate-settlement.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: demo:devnet:safety",
+      "detail": "tsx src/scripts/devnet-session-safety.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: demo:patched-devnet:readiness",
+      "detail": "tsx src/scripts/patched-devnet-readiness.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: demo:anchor:preflight",
+      "detail": "tsx src/scripts/anchor-preflight.ts"
+    },
+    {
+      "status": "PASS",
+      "label": "script: demo:batch:preflight",
+      "detail": "tsx src/scripts/batch-demo-preflight.ts"
+    },
+    {
+      "status": "WARN",
+      "label": "Secret env inspection",
+      "detail": "disabled by default; funding and signer derivation are skipped unless --include-secret-env is set",
+      "liveExecution": true
+    },
+    {
+      "status": "WARN",
+      "label": "Ergo node env vars",
+      "detail": "neither ERGO_NODE nor ERGO_NODE_URL set - deploy scripts use ERGO_NODE, daemon/ErgoClient uses ERGO_NODE_URL; set BOTH to http://127.0.0.1:9051 for devnet",
+      "liveExecution": true
+    },
+    {
+      "status": "WARN",
+      "label": "Patched Ergo devnet",
+      "detail": "offline at http://127.0.0.1:9051",
+      "liveExecution": true
+    },
+    {
+      "status": "WARN",
+      "label": "Frontier sidechain",
+      "detail": "offline at http://127.0.0.1:9945",
+      "liveExecution": true
+    },
+    {
+      "status": "WARN",
+      "label": "Runtime state inspection",
+      "detail": "disabled by --skip-runtime-state-checks; deployment-state files, SQLite state, and backup directories are not inspected",
+      "liveExecution": true
+    },
+    {
+      "status": "WARN",
+      "label": "Relayer funding",
+      "detail": "skipped -- node offline",
+      "liveExecution": true
+    },
+    {
+      "status": "WARN",
+      "label": "Devnet signer alignment",
+      "detail": "node config inspection disabled by default; pass --include-secret-env only for a local signer alignment check",
+      "liveExecution": true
+    }
+  ],
+  "summary": {
+    "verdict": "LOCAL_PREREQS_OK",
+    "message": "RESULT: LOCAL PREREQS OK -- EXECUTION NOT READY",
+    "exitCode": 0,
+    "passCount": 12,
+    "warnCount": 7,
+    "failCount": 0,
+    "liveExecutionWarnCount": 7
+  },
+  "boundary": {
+    "noEnvFileLoaded": true,
+    "noSigning": true,
+    "noBroadcast": true,
+    "noDbWrites": true,
+    "noDeployment": true
+  }
+}

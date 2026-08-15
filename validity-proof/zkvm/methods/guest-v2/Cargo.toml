@@ -1,0 +1,17 @@
+[package]
+name = "bridge-validity-guest-v2"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+rust-version = "1.88"
+publish = false
+
+[workspace]
+
+[dependencies]
+bridge-validity-composition = { path = "../../../composition", default-features = false, features = ["application-v2"] }
+risc0-zkvm = { git = "https://github.com/risc0/risc0", rev = "8eb06ab020a92dc5b63ba6dd0836d432aba6d890", default-features = false, features = ["std"] }
+
+[[bin]]
+name = "bridge-validity-guest-v2"
+path = "src/main.rs"

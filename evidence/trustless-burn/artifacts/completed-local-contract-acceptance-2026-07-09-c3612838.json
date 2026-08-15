@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS",
+  "exitCode": 0,
+  "command": "npm run trustless:contract-acceptance -- --source-commit c3612838 --candidate ../evidence/trustless-burn/gate5-trustless-burn-spv-linked-candidate-2026-07-07-faf05c0b.md --instance-binding-json ../evidence/trustless-burn/artifacts/gate5-trustless-burn-instance-binding-2026-07-09-ace3896d.json --proof-vector test-vectors/trustless-burn-proof-v1-multi-leaf-recipient-tree.json --current-ergo-height 987664 --out <contract-acceptance.md> --json-out <contract-acceptance.json>",
+  "sourceCommit": "c3612838",
+  "candidateTarget": "../evidence/trustless-burn/gate5-trustless-burn-spv-linked-candidate-2026-07-07-faf05c0b.md",
+  "instanceBindingJsonTarget": "../evidence/trustless-burn/artifacts/gate5-trustless-burn-instance-binding-2026-07-09-ace3896d.json",
+  "proofVectorTarget": "test-vectors/trustless-burn-proof-v1-multi-leaf-recipient-tree.json",
+  "currentErgoHeight": 987664,
+  "sidechainHeight": 12345,
+  "selectedNetwork": "local offline non-mainnet",
+  "identity": {
+    "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+    "sidechainTxHashHex": "6666666666666666666666666666666666666666666666666666666666666666",
+    "sidechainBlockHashHex": "2222222222222222222222222222222222222222222222222222222222222222",
+    "eventIndex": 8,
+    "bridgeEventRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+    "ergoAnchorHeight": 987654,
+    "burnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+    "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+    "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+    "amountNanoErg": "2000000",
+    "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000",
+    "proofVectorTarget": "../evidence/trustless-burn/artifacts/completed-local-proof-vector-report-2026-07-07-faf05c0b.json"
+  },
+  "structuralIssues": 0,
+  "sourceChecks": [
+    {
+      "check": "Instance binding JSON validates",
+      "status": "pass",
+      "detail": "binding target ../evidence/trustless-burn/artifacts/gate5-trustless-burn-instance-binding-2026-07-09-ace3896d.json"
+    },
+    {
+      "check": "Proof vector validates",
+      "status": "pass",
+      "detail": "proof vector target test-vectors/trustless-burn-proof-v1-multi-leaf-recipient-tree.json"
+    },
+    {
+      "check": "Candidate sidechain height is available",
+      "status": "pass",
+      "detail": "sidechainHeight 12345"
+    },
+    {
+      "check": "Target proof-vector leaf is present",
+      "status": "pass",
+      "detail": "burnId 548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+    },
+    {
+      "check": "Instance sidechainId matches proof vector",
+      "status": "pass",
+      "detail": "sidechainId 1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "check": "Instance sidechainTxHash matches proof vector",
+      "status": "pass",
+      "detail": "sidechainTxHash 6666666666666666666666666666666666666666666666666666666666666666"
+    },
+    {
+      "check": "Instance sidechainBlockHash matches proof vector",
+      "status": "pass",
+      "detail": "sidechainBlockHash 2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "check": "Instance eventIndex matches proof vector",
+      "status": "pass",
+      "detail": "eventIndex 8"
+    },
+    {
+      "check": "Instance bridgeEventRoot matches proof vector",
+      "status": "pass",
+      "detail": "bridgeEventRoot 701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9"
+    },
+    {
+      "check": "Instance burnId matches proof vector",
+      "status": "pass",
+      "detail": "burnId 548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+    },
+    {
+      "check": "Instance duplicatePreventionKey matches proof vector",
+      "status": "pass",
+      "detail": "duplicatePreventionKey 548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+    },
+    {
+      "check": "Instance recipientErgoTreeHash matches proof vector",
+      "status": "pass",
+      "detail": "recipientErgoTreeHash dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401"
+    },
+    {
+      "check": "Instance amountNanoErg matches proof vector",
+      "status": "pass",
+      "detail": "amountNanoErg 2000000"
+    },
+    {
+      "check": "Instance assetId matches proof vector",
+      "status": "pass",
+      "detail": "assetId 0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "positiveAcceptance": {
+    "accepted": true,
+    "errors": [],
+    "derived": {
+      "trackerKeyHex": "46bfd6977e3c170fa567da9fd95d79d3e0232c3da99a4dc4194910328789dbdb",
+      "merkleRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+      "burnProofNodeCount": 1,
+      "dupLookupProofLength": 0,
+      "ergoAnchorHeight": 987654
+    }
+  },
+  "negativeCases": [
+    {
+      "name": "tracker-event-root-drift",
+      "status": "REJECTED",
+      "expectedError": "burn inclusion proof must resolve to bridgeEventRoot",
+      "observedErrors": [
+        "burn inclusion proof must resolve to bridgeEventRoot"
+      ]
+    },
+    {
+      "name": "malformed-inclusion-path",
+      "status": "REJECTED",
+      "expectedError": "burn inclusion proof must resolve to bridgeEventRoot",
+      "observedErrors": [
+        "burn inclusion proof must resolve to bridgeEventRoot"
+      ]
+    },
+    {
+      "name": "stale-ergo-anchor",
+      "status": "REJECTED",
+      "expectedError": "Ergo anchor height must satisfy minimum confirmations",
+      "observedErrors": [
+        "Ergo anchor height must satisfy minimum confirmations"
+      ]
+    },
+    {
+      "name": "payout-value-drift",
+      "status": "REJECTED",
+      "expectedError": "payout value must equal proved amountNanoErg",
+      "observedErrors": [
+        "payout value must equal proved amountNanoErg"
+      ]
+    },
+    {
+      "name": "recipient-tree-drift",
+      "status": "REJECTED",
+      "expectedError": "leaf fields must bind tracker key, burn id, recipient hash, amount, and ERG asset lane",
+      "observedErrors": [
+        "leaf fields must bind tracker key, burn id, recipient hash, amount, and ERG asset lane"
+      ]
+    },
+    {
+      "name": "tracker-key-drift",
+      "status": "REJECTED",
+      "expectedError": "leaf fields must bind tracker key, burn id, recipient hash, amount, and ERG asset lane",
+      "observedErrors": [
+        "leaf fields must bind tracker key, burn id, recipient hash, amount, and ERG asset lane"
+      ]
+    },
+    {
+      "name": "spent-dup-key",
+      "status": "REJECTED",
+      "expectedError": "DUP key must not already be spent",
+      "observedErrors": [
+        "DUP key must not already be spent"
+      ]
+    },
+    {
+      "name": "bad-proof-side-byte",
+      "status": "REJECTED",
+      "expectedError": "burn proof side bytes must be 0 or 1",
+      "observedErrors": [
+        "burn proof side bytes must be 0 or 1",
+        "burn inclusion proof must resolve to bridgeEventRoot",
+        "contract input shape must match trustless proof bundle constraints"
+      ]
+    }
+  ],
+  "nextEvidence": [
+    "Use this local predicate-model packet only as prerequisite evidence for burnId 548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f.",
+    "Next useful step is real non-broadcast ErgoScript VM acceptance for the same proof bundle, or a formal decision that the ContextExtension serialization blocker prevents live settlement evaluation until upstream conformance is resolved.",
+    "Do not mark Gate 5 closed until mined 0x04 anchoring, Ergo-verifiable finality, on-chain proof acceptance, DUP insertion/replay rejection, stale/reorg rejection, and independent review are all captured."
+  ],
+  "boundary": {
+    "Contract-equivalent local predicate model evaluated": "yes",
+    "Current Gate 5 non-mainnet instance reused": "yes",
+    "Positive proof bundle checked by local predicate model": "yes",
+    "Negative predicate cases checked locally": "yes",
+    "Secret or environment file read": "no",
+    "Wallet recovery material or private key read": "no",
+    "Runtime database opened": "no",
+    "Private deployment state opened": "no",
+    "Node or RPC request performed": "no",
+    "ErgoScript VM execution performed": "no",
+    "On-chain proof acceptance claimed": "no",
+    "Mined Ergo anchor claimed": "no",
+    "Sidechain finality claimed": "no",
+    "DUP insertion on-chain claimed": "no",
+    "Transaction check performed": "no",
+    "Expected transaction ID claimed": "no",
+    "Transaction signing performed or authorized": "no",
+    "Transaction submit or broadcast performed or authorized": "no",
+    "Gate 5 trustless-burn evidence claimed complete": "no",
+    "Release gate PASS claimed": "no",
+    "Testnet production-candidate claim support": "no",
+    "Production-ready claim support": "no",
+    "Mainnet-grade evidence linked": "no"
+  }
+}

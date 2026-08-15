@@ -1,0 +1,67 @@
+[package]
+name = "bridge-validity-composition"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+blake2.workspace = true
+bridge-validity-finality-core = { path = "../core", default-features = false }
+bridge-validity-state-proof = { path = "../state", default-features = false }
+bridge-validity-statement = { path = "../statement", default-features = false }
+finality-grandpa = { workspace = true, optional = true }
+hex = { version = "=0.4.3", optional = true }
+scale-codec.workspace = true
+serde = { version = "=1.0.228", features = ["derive"], optional = true }
+serde_json = { version = "=1.0.149", optional = true }
+sp-core = { workspace = true, features = ["std"], optional = true }
+sp-state-machine = { workspace = true, features = ["std"], optional = true }
+sp-trie = { workspace = true, features = ["std"], optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+finality-grandpa.workspace = true
+hex = "=0.4.3"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+sp-core = { workspace = true, features = ["std"] }
+sp-state-machine = { workspace = true, features = ["std"] }
+sp-trie = { workspace = true, features = ["std"] }
+
+[features]
+default = ["std", "application-v2", "pooled-reserve-burn-v4", "pooled-reserve-burn-v5"]
+application-v2 = [
+    "bridge-validity-state-proof/application-v2",
+    "bridge-validity-statement/application-v2",
+]
+pooled-reserve-burn-v4 = [
+    "bridge-validity-state-proof/pooled-reserve-burn-v4",
+    "bridge-validity-statement/pooled-reserve-burn-v4",
+]
+pooled-reserve-burn-v5 = [
+    "pooled-reserve-burn-v4",
+    "bridge-validity-state-proof/pooled-reserve-burn-v5",
+    "bridge-validity-statement/pooled-reserve-burn-v5",
+]
+std = [
+    "blake2/std",
+    "bridge-validity-finality-core/std",
+    "bridge-validity-state-proof/std",
+    "bridge-validity-statement/std",
+    "scale-codec/std",
+]
+test-vectors = [
+    "std",
+    "application-v2",
+    "pooled-reserve-burn-v4",
+    "pooled-reserve-burn-v5",
+    "dep:finality-grandpa",
+    "dep:hex",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:sp-core",
+    "dep:sp-state-machine",
+    "dep:sp-trie",
+]

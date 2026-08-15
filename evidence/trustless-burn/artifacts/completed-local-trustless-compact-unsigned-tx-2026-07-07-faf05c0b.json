@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-07T00:00:00.000Z",
+  "evidenceKind": "trustless-single-leaf-unsigned-tx",
+  "label": "Gate 5 current-head recipient-tree compact trustless unsigned transaction evidence",
+  "stateTrackerMode": "read-only",
+  "broadcast": "no",
+  "boundary": {
+    "gate5Closure": "no",
+    "prebroadcastEvidence": "no",
+    "settlementReadiness": "no",
+    "transactionCheck": "no",
+    "expectedTxId": "no",
+    "signing": "no",
+    "submit": "no",
+    "testnetProductionCandidateClaim": "no",
+    "productionReadyClaim": "no"
+  },
+  "claimCount": 1,
+  "claims": [
+    {
+      "legacySidechainTxHash": "6666666666666666666666666666666666666666666666666666666666666666",
+      "sidechainBlockHeight": 1001,
+      "trustlessBurnDerivation": {
+        "sidechainIdHex": "1111111111111111111111111111111111111111111111111111111111111111",
+        "sidechainLogIndex": 8,
+        "derivedBurnIdHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f"
+      },
+      "settlementIdentity": {
+        "source": "trustless-burn-leaf",
+        "duplicatePreventionKeyHex": "548fdcae1cfce1dcdeedc744894f8d3e2d18d1e20e500205c6ebfa86be7d891f",
+        "bridgeEventRootHex": "701fbd1ae0ca10d0687281f2b5a136e4f784dd96a87814f44a092b0c4eb6ffc9",
+        "recipientErgoTreeHashHex": "dd254d2834c85be8f7495b3044197f145cb39175571cb6d1a56ba6ff7f6f7401",
+        "amountNanoErg": "2000000",
+        "assetIdHex": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "selectedBoxes": {
+    "trackerBoxId": "1010101010101010101010101010101010101010101010101010101010101010",
+    "aggregateDupBoxId": "2020202020202020202020202020202020202020202020202020202020202020",
+    "unlockBoxId": "3030303030303030303030303030303030303030303030303030303030303030"
+  },
+  "settlementShape": {
+    "inputCount": 3,
+    "outputCount": 4,
+    "contextExtensionKeyCounts": [
+      0,
+      3,
+      4
+    ],
+    "contextExtensionKeyCountsCsv": "0,3,4"
+  },
+  "contextExtensionGuard": {
+    "status": "pass",
+    "reason": "unsigned-source-boundary-only",
+    "effectiveThreshold": 4,
+    "offenderCount": 0,
+    "offenders": [],
+    "signingPermitted": false,
+    "broadcastPermitted": false
+  },
+  "contractCompatibility": "candidate-only-trustless-v2-required"
+}

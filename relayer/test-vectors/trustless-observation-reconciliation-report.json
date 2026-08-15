@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "command": "trustless:observation-reconcile",
+  "status": "LINKED",
+  "reason": "anchor and SPV tracker observations share bridgeEventRoot and ergoAnchorHeight",
+  "observedAt": "2026-07-02T13:00:00.000Z",
+  "commandLine": "npm run trustless:observation-reconcile -- --anchor-report-json test-vectors/trustless-anchor-observation-report.json --spv-tracker-report-json test-vectors/trustless-spv-tracker-observation-report.json --json-out test-vectors/trustless-observation-reconciliation-report.json",
+  "workingDirectory": "ergo-sidechain-bridge/relayer",
+  "anchorObservationReportTarget": "test-vectors/trustless-anchor-observation-report.json",
+  "spvTrackerObservationReportTarget": "test-vectors/trustless-spv-tracker-observation-report.json",
+  "anchorObservationStatus": "LINKED",
+  "spvTrackerObservationStatus": "LINKED",
+  "anchorBridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+  "spvBridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+  "reconciledBridgeEventRootHex": "3089254893ba812d1703febf2372a55757ab8a1aa3cd86c2cdcbd39544427dcc",
+  "anchorErgoAnchorHeight": 67890,
+  "spvErgoAnchorHeight": 67890,
+  "reconciledErgoAnchorHeight": 67890,
+  "checks": [
+    {
+      "name": "Target separation",
+      "status": "PASS",
+      "detail": "anchor and SPV tracker observation reports use distinct evidence targets"
+    },
+    {
+      "name": "Anchor observation report command",
+      "status": "PASS",
+      "detail": "anchor report was produced by trustless:anchor-observe"
+    },
+    {
+      "name": "SPV tracker observation report command",
+      "status": "PASS",
+      "detail": "SPV tracker report was produced by trustless:spv-tracker-observe"
+    },
+    {
+      "name": "Anchor observation linked",
+      "status": "PASS",
+      "detail": "anchor report observed the requested 0x0401 bridgeEventRoot"
+    },
+    {
+      "name": "SPV tracker observation linked",
+      "status": "PASS",
+      "detail": "SPV tracker report linked the expected key/value proof"
+    },
+    {
+      "name": "Bridge event root identity",
+      "status": "PASS",
+      "detail": "anchor and SPV tracker reports bind the same bridgeEventRoot"
+    },
+    {
+      "name": "Ergo anchor height identity",
+      "status": "PASS",
+      "detail": "anchor and SPV tracker reports bind the same ergoAnchorHeight"
+    },
+    {
+      "name": "Anchor observation boundary",
+      "status": "PASS",
+      "detail": "anchor report preserves read-only public observation boundaries"
+    },
+    {
+      "name": "SPV tracker observation boundary",
+      "status": "PASS",
+      "detail": "SPV tracker report preserves read-only public observation boundaries"
+    }
+  ],
+  "boundary": {
+    "readOnly": true,
+    "publicObservationInputsOnly": true,
+    "anchorObservationJsonReused": true,
+    "spvTrackerObservationJsonReused": true,
+    "nodeOrRpcRequestPerformed": false,
+    "deploymentStateOpened": false,
+    "runtimeDatabaseOpened": false,
+    "secretOrEnvironmentFileRead": false,
+    "signingOrWalletMaterialRead": false,
+    "transactionBroadcastOrMutation": false,
+    "gate5Closure": false,
+    "settlementReadiness": false,
+    "productionClaimSupport": false,
+    "testnetProductionCandidateClaimSupport": false
+  }
+}

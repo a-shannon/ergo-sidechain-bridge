@@ -1,0 +1,73 @@
+{
+  "status": "PASS",
+  "exitCode": 0,
+  "command": "npm run readiness:handoff:validate -- ../evidence/readiness/readiness-handoff-current-lanes-2026-07-09-fcd4aa01.json --expected-source-commit fcd4aa01 --report-out <report.md> --json-out <report.json>",
+  "sourceCommit": "fcd4aa01",
+  "expectedSourceCommit": "fcd4aa01",
+  "handoffSource": {
+    "mode": "json",
+    "target": "../evidence/readiness/readiness-handoff-current-lanes-2026-07-09-fcd4aa01.json"
+  },
+  "localEvidenceRequestCount": 0,
+  "liveEvidenceRequestCount": 10,
+  "reviewerOrExternalRequestCount": 59,
+  "lanePacketCount": 4,
+  "laneCoverageIssueCount": 69,
+  "operatorInputChecklistCount": 4,
+  "operatorEvidenceInputCount": 19,
+  "errors": [],
+  "laneSummaries": [
+    {
+      "lane": "security-review",
+      "laneLabel": "Independent security review",
+      "issueCount": 39,
+      "operatorEvidenceInputCount": 4,
+      "evidenceTemplate": "../docs/independent-security-review-evidence-template.md",
+      "validatorCommand": "npm run security:validate -- <completed-independent-security-review.md>",
+      "releaseGateFlag": "--security-review-evidence <completed-independent-security-review.md>"
+    },
+    {
+      "lane": "trustless-burn",
+      "laneLabel": "Trustless burn verification",
+      "issueCount": 18,
+      "operatorEvidenceInputCount": 9,
+      "evidenceTemplate": "../docs/trustless-burn-verification-evidence-template.md",
+      "validatorCommand": "npm run trustless:validate -- <completed-trustless-burn-evidence.md>",
+      "releaseGateFlag": "--trustless-burn-evidence <completed-trustless-burn-evidence.md>"
+    },
+    {
+      "lane": "benchmark",
+      "laneLabel": "Benchmark and scaling evidence",
+      "issueCount": 5,
+      "operatorEvidenceInputCount": 3,
+      "evidenceTemplate": "../docs/performance-benchmark-evidence-template.md",
+      "validatorCommand": "npm run benchmark:validate -- <completed-benchmark-evidence.md>",
+      "releaseGateFlag": "--benchmark-evidence <completed-benchmark-evidence.md>"
+    },
+    {
+      "lane": "committee-governance",
+      "laneLabel": "Committee governance and key rotation",
+      "issueCount": 7,
+      "operatorEvidenceInputCount": 3,
+      "evidenceTemplate": "../docs/committee-governance-evidence-template.md",
+      "validatorCommand": "npm run governance:validate -- <completed-committee-governance-evidence.md>",
+      "releaseGateFlag": "--governance-evidence <completed-committee-governance-evidence.md>"
+    }
+  ],
+  "boundary": {
+    "Planning output only": "yes",
+    "Handoff JSON reused": "yes",
+    "Runtime prerequisites JSON reused": "yes",
+    "Live node probe executed by handoff validation": "no",
+    "ERGO_API_KEY read": "no",
+    "Auth header sent": "no",
+    "Runtime database opened": "no",
+    "Deployment state opened": "no",
+    "Private key material serialized": "no",
+    "Evidence row closure claimed": "no",
+    "Release gate PASS claimed": "no",
+    "Public claim authorization granted": "no",
+    "Claim/publication fields unlocked": "no",
+    "Transaction broadcast, submit, deploy, key rotation, or state mutation performed": "no"
+  }
+}

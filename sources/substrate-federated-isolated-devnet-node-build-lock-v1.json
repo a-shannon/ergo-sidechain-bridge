@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "kind": "substrate-federated-isolated-devnet-node-build-lock",
+  "platform": "win32-x64",
+  "trustedHostModel": "exclusive-same-user-process",
+  "consensusSourceLockSha256": "a732185744a80f7123cd9078c7bc030abe78b34989f084ba816fbbbc2716baa5",
+  "ergoNodeBaseCommit": "2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1",
+  "ergoPatchSha256": "31b27cf9acd7ad6d7c05282d964f51be15b5aa78767b354f8f29ee28d39ebf23",
+  "gitVersion": "2.54.0.windows.1",
+  "gitExecutableSha256": "81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5",
+  "javaMajorVersion": 17,
+  "javaDistribution": "Microsoft OpenJDK 17.0.19+10-LTS",
+  "javaHomeSha256": "43ddaddbc9c892eebb9017eaadd292a0198a3262941f061de61ab03db283dd7e",
+  "sbtLauncherJarSha256": "b4c0c55d68f11b1510d884641cb1b1456191dac40ddc958bf86c825adc344e16",
+  "projectSbtVersion": "1.11.1",
+  "buildArguments": [
+    "assembly"
+  ],
+  "buildProcessRunner": "reviewed-windows-job-object-v1",
+  "windowsJobProcessRunnerSha256": "e16275e019e8cbb30325317fd405d80682d8f3b92e853aa2989ffe917c62c28b",
+  "buildTimeoutMs": 900000,
+  "buildTerminationGraceMs": 10000,
+  "buildMaxOutputBytes": 16777216,
+  "assemblyDirectory": "target/scala-2.12",
+  "assemblyNamePattern": "^ergo-.*\\.jar$",
+  "minimumAssemblyBytes": 33554432
+}
