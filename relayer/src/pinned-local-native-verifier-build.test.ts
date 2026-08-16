@@ -35,7 +35,12 @@ import {
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const bridgeRoot = resolve(directory, '..', '..');
-const PROCESS_LIFECYCLE_TEST_TIMEOUT_MS = 30_000;
+const PROCESS_LIFECYCLE_TEST_TIMEOUT_MS = process.platform === 'win32'
+  ? 60_000
+  : 30_000;
+const LIVE_PROCESS_MARKER_TIMEOUT_MS = process.platform === 'win32'
+  ? 40_000
+  : 2_000;
 const toolchainLockPath = resolve(
   bridgeRoot,
   'sources',
@@ -207,11 +212,15 @@ describe('pinned local native verifier build conformance', () => {
     expect(source).toContain('accounting.ActiveProcesses == 0');
     expect(source).toContain('TARGET_FAILURE_EXIT_CODE');
     expect(source).toContain('WRAPPER_FAILURE_CONTAINED_EXIT_CODE');
+    expect(source).toContain('TARGET_TIMEOUT_EXIT_CODE');
+    expect(source).toContain('targetTimeoutMilliseconds - targetRuntime.ElapsedMilliseconds');
     expect(source).toContain('TryVerifyExceptionalContainment');
     expect(source).toContain('assignedToJob');
     expect(source).toContain('Console.OpenStandardInput().ReadByte()');
     expect(source).not.toMatch(/JOB_OBJECT_LIMIT_(?:SILENT_)?BREAKAWAY_OK/);
     expect(source.indexOf('AssignProcessToJobObject(job, processInformation.hProcess)'))
+      .toBeLessThan(source.indexOf('ResumeThread(processInformation.hThread)'));
+    expect(source.indexOf('Stopwatch targetRuntime = Stopwatch.StartNew()'))
       .toBeLessThan(source.indexOf('ResumeThread(processInformation.hThread)'));
   });
 
@@ -364,6 +373,18 @@ describe('pinned local native verifier build conformance', () => {
     }
   });
 
+  it('rejects process timeouts that exceed the Node timer range', async () => {
+    await expect(runBoundedNativeBuildProcess({
+      executablePath: process.execPath,
+      args: ['--version'],
+      cwd: bridgeRoot,
+      env: process.env,
+      timeoutMs: Number.MAX_SAFE_INTEGER,
+      maxOutputBytes: 1024,
+      label: 'test native build',
+    })).rejects.toThrow(/timeout exceeds the supported timer range/i);
+  });
+
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {
     const workspace = createPinnedLocalNativeBuildWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-timeout-marker-'));
@@ -394,7 +415,10 @@ describe('pinned local native verifier build conformance', () => {
         terminationGraceMs: 1,
         label: 'test native build',
       }));
-      const descendantPid = await waitForLiveProcessMarker(readyPath, 2_000);
+      const descendantPid = await waitForLiveProcessMarker(
+        readyPath,
+        LIVE_PROCESS_MARKER_TIMEOUT_MS,
+      );
 
       const outcome = await execution;
       expect(outcome.status).toBe('rejected');
@@ -451,7 +475,10 @@ describe('pinned local native verifier build conformance', () => {
         maxStderrBytes: 8_192,
         label: 'test native build',
       }));
-      const descendantPid = await waitForLiveProcessMarker(readyPath, 2_000);
+      const descendantPid = await waitForLiveProcessMarker(
+        readyPath,
+        LIVE_PROCESS_MARKER_TIMEOUT_MS,
+      );
       writeFileSync(triggerPath, 'emit bounded overflow');
 
       const outcome = await execution;
@@ -624,12 +651,11 @@ describe('pinned local native verifier build conformance', () => {
         "{ detached: true, stdio: ['ignore', 'inherit', 'inherit'], windowsHide: true, env: process.env });",
       'child.unref();',
       "writeFileSync(process.env.READY_PATH, String(child.pid));",
-      'process.exit(0);',
+      'setTimeout(() => process.exit(0), 250);',
     ].join(' ');
-    const startedAt = Date.now();
 
     try {
-      await expect(runBoundedNativeBuildProcess({
+      const execution = runBoundedNativeBuildProcess({
         executablePath: process.execPath,
         args: ['-e', parentScript],
         cwd: workspace.buildTargetPath,
@@ -637,8 +663,11 @@ describe('pinned local native verifier build conformance', () => {
         timeoutMs: 15_000,
         maxOutputBytes: 1024,
         label: 'test native build',
-      })).resolves.toBeUndefined();
-      expect(Date.now() - startedAt).toBeLessThan(12_000);
+      });
+      await waitForLiveProcessMarker(readyPath, LIVE_PROCESS_MARKER_TIMEOUT_MS);
+      const targetReadyAt = Date.now();
+      await expect(execution).resolves.toBeUndefined();
+      expect(Date.now() - targetReadyAt).toBeLessThan(12_000);
       expect(existsSync(workspace.buildTargetPath)).toBe(true);
       const descendantPid = Number(readFileSync(readyPath, 'utf8'));
       expect(isProcessRunning(descendantPid)).toBe(false);

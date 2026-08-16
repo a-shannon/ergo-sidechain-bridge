@@ -15,10 +15,25 @@ function ConvertFrom-BridgeBase64([string] $Value, [string] $Label) {
 $application = ConvertFrom-BridgeBase64 $env:E2S_JOB_EXECUTABLE_B64 'job executable'
 $argumentsJson = ConvertFrom-BridgeBase64 $env:E2S_JOB_ARGUMENTS_B64 'job arguments'
 $workingDirectory = ConvertFrom-BridgeBase64 $env:E2S_JOB_CWD_B64 'job working directory'
+$targetTimeoutText = ConvertFrom-BridgeBase64 $env:E2S_JOB_TIMEOUT_MS_B64 'job timeout'
+
+try {
+    $targetTimeoutMilliseconds = [long]::Parse(
+        $targetTimeoutText,
+        [Globalization.NumberStyles]::None,
+        [Globalization.CultureInfo]::InvariantCulture)
+}
+catch {
+    throw 'job timeout is invalid'
+}
+if ($targetTimeoutMilliseconds -le 0) {
+    throw 'job timeout is invalid'
+}
 
 Remove-Item Env:E2S_JOB_EXECUTABLE_B64 -ErrorAction SilentlyContinue
 Remove-Item Env:E2S_JOB_ARGUMENTS_B64 -ErrorAction SilentlyContinue
 Remove-Item Env:E2S_JOB_CWD_B64 -ErrorAction SilentlyContinue
+Remove-Item Env:E2S_JOB_TIMEOUT_MS_B64 -ErrorAction SilentlyContinue
 
 $decodedArguments = ConvertFrom-Json -InputObject $argumentsJson
 [string[]] $arguments = @($decodedArguments | ForEach-Object { [string] $_ })
@@ -50,6 +65,7 @@ public static class E2SWindowsJobProcess
     private const int CANCELLATION_EXIT_CODE = 197;
     private const int TARGET_FAILURE_EXIT_CODE = 198;
     private const int WRAPPER_FAILURE_CONTAINED_EXIT_CODE = 199;
+    private const int TARGET_TIMEOUT_EXIT_CODE = 200;
     private const int JobObjectBasicAccountingInformation = 1;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -185,8 +201,14 @@ public static class E2SWindowsJobProcess
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
 
-    public static int Run(string application, string[] arguments, string workingDirectory)
+    public static int Run(
+        string application,
+        string[] arguments,
+        string workingDirectory,
+        long targetTimeoutMilliseconds)
     {
+        if (targetTimeoutMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException("targetTimeoutMilliseconds");
         IntPtr job = IntPtr.Zero;
         IntPtr limitInformation = IntPtr.Zero;
         PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
@@ -264,12 +286,14 @@ public static class E2SWindowsJobProcess
             Task<int> cancellationRead = Task.Run(
                 () => Console.OpenStandardInput().ReadByte());
 
+            Stopwatch targetRuntime = Stopwatch.StartNew();
             if (ResumeThread(processInformation.hThread) == 0xffffffff)
                 throw Win32Failure("ResumeThread");
             CloseHandle(processInformation.hThread);
             processInformation.hThread = IntPtr.Zero;
 
             bool cancellationRequested = false;
+            bool targetTimedOut = false;
             while (true)
             {
                 if (cancellationRead.IsCompleted)
@@ -281,9 +305,28 @@ public static class E2SWindowsJobProcess
                     containmentVerified = true;
                     break;
                 }
-                uint waitResult = WaitForSingleObject(
+                uint waitResult = WaitForSingleObject(processInformation.hProcess, 0);
+                if (waitResult == WAIT_OBJECT_0)
+                    break;
+                if (waitResult != WAIT_TIMEOUT)
+                    throw Win32Failure("WaitForSingleObject");
+                long remainingMilliseconds =
+                    targetTimeoutMilliseconds - targetRuntime.ElapsedMilliseconds;
+                if (remainingMilliseconds <= 0)
+                {
+                    if (!TerminateJobObject(job, TARGET_TIMEOUT_EXIT_CODE))
+                        throw Win32Failure("TerminateJobObject target timeout");
+                    targetTimedOut = true;
+                    WaitForEmptyJob(job, "WaitForEmptyJob target timeout");
+                    containmentVerified = true;
+                    break;
+                }
+                uint waitMilliseconds = (uint) Math.Min(
+                    (long) CANCELLATION_POLL_MS,
+                    remainingMilliseconds);
+                waitResult = WaitForSingleObject(
                     processInformation.hProcess,
-                    CANCELLATION_POLL_MS);
+                    waitMilliseconds);
                 if (waitResult == WAIT_OBJECT_0)
                     break;
                 if (waitResult != WAIT_TIMEOUT)
@@ -294,7 +337,7 @@ public static class E2SWindowsJobProcess
             if (!GetExitCodeProcess(processInformation.hProcess, out exitCode))
                 throw Win32Failure("GetExitCodeProcess");
 
-            if (!cancellationRequested)
+            if (!cancellationRequested && !targetTimedOut)
             {
                 if (!TerminateJobObject(job, 1))
                     throw Win32Failure("TerminateJobObject completion");
@@ -308,6 +351,8 @@ public static class E2SWindowsJobProcess
             Console.OpenStandardError().Flush();
             if (cancellationRequested)
                 return CANCELLATION_EXIT_CODE;
+            if (targetTimedOut)
+                return TARGET_TIMEOUT_EXIT_CODE;
             return exitCode == 0
                 ? 0
                 : TARGET_FAILURE_EXIT_CODE;
@@ -461,4 +506,8 @@ public static class E2SWindowsJobProcess
 '@
 
 Add-Type -TypeDefinition $jobRunnerSource -Language CSharp
-exit [E2SWindowsJobProcess]::Run($application, $arguments, $workingDirectory)
+exit [E2SWindowsJobProcess]::Run(
+    $application,
+    $arguments,
+    $workingDirectory,
+    $targetTimeoutMilliseconds)

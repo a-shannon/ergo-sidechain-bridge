@@ -56,6 +56,9 @@ const DESCENDANT_INSPECTION_INTERVAL_MS = 250;
 const WINDOWS_JOB_CANCELLATION_EXIT_CODE = 197;
 const WINDOWS_JOB_TARGET_FAILURE_EXIT_CODE = 198;
 const WINDOWS_JOB_CONTAINED_WRAPPER_FAILURE_EXIT_CODE = 199;
+const WINDOWS_JOB_TARGET_TIMEOUT_EXIT_CODE = 200;
+const WINDOWS_JOB_RUNNER_WATCHDOG_ALLOWANCE_MS = 45_000;
+const MAX_NODE_TIMER_MS = 2_147_483_647;
 const BUILD_TARGET_PREFIX = 'e2s-pinned-local-native-';
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WINDOWS_JOB_PROCESS_RUNNER_PATH = resolve(
@@ -1518,6 +1521,12 @@ export async function runBoundedProcess(
   if (!Number.isSafeInteger(input.timeoutMs) || input.timeoutMs <= 0) {
     throw new Error('bounded process timeout must be a positive safe integer');
   }
+  const maxSupportedTimeoutMs = process.platform === 'win32'
+    ? MAX_NODE_TIMER_MS - WINDOWS_JOB_RUNNER_WATCHDOG_ALLOWANCE_MS
+    : MAX_NODE_TIMER_MS;
+  if (input.timeoutMs > maxSupportedTimeoutMs) {
+    throw new Error('bounded process timeout exceeds the supported timer range');
+  }
   if (!Number.isSafeInteger(input.maxOutputBytes) || input.maxOutputBytes <= 0) {
     throw new Error('bounded process output limit must be a positive safe integer');
   }
@@ -1569,9 +1578,12 @@ export async function runBoundedProcess(
           env: spawnSpecification.env,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
+    const watchdogTimeoutMs = process.platform === 'win32'
+      ? input.timeoutMs + WINDOWS_JOB_RUNNER_WATCHDOG_ALLOWANCE_MS
+      : input.timeoutMs;
     const timer = setTimeout(() => {
       requestTermination(new Error(`${input.label} timed out`));
-    }, input.timeoutMs);
+    }, watchdogTimeoutMs);
     const consume = (
       chunks: Buffer[],
       channel: 'stdout' | 'stderr',
@@ -1599,6 +1611,14 @@ export async function runBoundedProcess(
     child.once('error', () => finish(new Error(`${input.label} failed to start`)));
     child.once('exit', code => {
       child.stdin?.destroy();
+      if (
+        process.platform === 'win32'
+        && code === WINDOWS_JOB_TARGET_TIMEOUT_EXIT_CODE
+        && !requestedFailure
+      ) {
+        requestedFailure = new Error(`${input.label} timed out`);
+        clearTimeout(timer);
+      }
       postExitCloseTimer = setTimeout(() => {
         postExitCloseTimer = undefined;
         stopTerminationRetry();
@@ -1816,6 +1836,7 @@ function buildBoundedProcessSpawnSpecification(
       E2S_JOB_EXECUTABLE_B64: encodeWindowsJobValue(executablePath),
       E2S_JOB_ARGUMENTS_B64: encodeWindowsJobValue(JSON.stringify(args)),
       E2S_JOB_CWD_B64: encodeWindowsJobValue(cwd),
+      E2S_JOB_TIMEOUT_MS_B64: encodeWindowsJobValue(String(input.timeoutMs)),
     },
   };
 }
@@ -1831,7 +1852,8 @@ function confirmsWindowsJobContainment(code: number | null): boolean {
   return code === 0
     || code === WINDOWS_JOB_CANCELLATION_EXIT_CODE
     || code === WINDOWS_JOB_TARGET_FAILURE_EXIT_CODE
-    || code === WINDOWS_JOB_CONTAINED_WRAPPER_FAILURE_EXIT_CODE;
+    || code === WINDOWS_JOB_CONTAINED_WRAPPER_FAILURE_EXIT_CODE
+    || code === WINDOWS_JOB_TARGET_TIMEOUT_EXIT_CODE;
 }
 
 function encodeWindowsJobValue(value: string): string {
