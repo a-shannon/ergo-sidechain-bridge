@@ -204,7 +204,10 @@ function resolveLockedFile(
     ? sha256(Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'), 'utf8'))
     : sha256(bytes);
   if (digest !== entry.sha256) {
-    throw new Error(`${label} does not match the reviewed SHA-256`);
+    throw new Error(
+      `${label} does not match the reviewed SHA-256 `
+      + `(expected ${entry.sha256}, observed ${digest}, bytes ${bytes.length})`,
+    );
   }
   return candidate;
 }
