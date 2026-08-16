@@ -6,7 +6,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'fs';
 import { tmpdir } from 'os';
@@ -358,7 +360,11 @@ describe('consensus source baseline', () => {
   });
 
   it('discovers a real standalone repository with the local Frontier gitlink shape', () => {
-    const root = mkdtempSync(resolve(tmpdir(), 'bridge-standalone-layout-'));
+    const fixtureRoot = mkdtempSync(resolve(tmpdir(), 'bridge-standalone-layout-'));
+    const root = resolve(fixtureRoot, 'physical');
+    const aliasRoot = resolve(fixtureRoot, 'alias');
+    mkdirSync(root);
+    symlinkSync(root, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
     const git = (...args: string[]) => execFileSync('git', args, {
       cwd: root,
       encoding: 'utf8',
@@ -378,14 +384,22 @@ describe('consensus source baseline', () => {
         '160000,75329a2df49e2cc7981485392c31160929d1bd48,substrate-node',
       );
 
-      expect(discoverBridgeRepositoryRoot(root)).toBe(resolve(root));
-      expect(resolveBridgeRepositoryLayout({ repositoryRoot: root, bridgeRoot: root })).toMatchObject({
+      const discoveredRoot = discoverBridgeRepositoryRoot(aliasRoot);
+      const canonicalRoot = realpathSync.native(resolve(root));
+      expect(resolve(aliasRoot)).not.toBe(canonicalRoot);
+      expect(discoveredRoot).toBe(canonicalRoot);
+      expect(resolveBridgeRepositoryLayout({
+        repositoryRoot: discoveredRoot,
+        bridgeRoot: aliasRoot,
+      })).toMatchObject({
         mode: 'standalone',
+        repositoryRoot: canonicalRoot,
+        bridgeRoot: resolve(aliasRoot),
         frontierGitlinkPath: 'substrate-node',
         frontierSubmoduleName: 'substrate-node',
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(fixtureRoot, { recursive: true, force: true });
     }
   });
 

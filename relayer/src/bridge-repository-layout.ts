@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 
 export type BridgeRepositoryMode = 'superproject' | 'standalone';
@@ -68,8 +69,20 @@ export function discoverBridgeRepositoryRoot(
   return repositoryRoot;
 }
 
+function canonicalizeExistingPath(input: string): string {
+  const resolved = path.resolve(input);
+  try {
+    return realpathSync.native(resolved);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return resolved;
+    throw error;
+  }
+}
+
 function samePath(left: string, right: string): boolean {
+  const canonicalLeft = canonicalizeExistingPath(left);
+  const canonicalRight = canonicalizeExistingPath(right);
   return process.platform === 'win32'
-    ? left.toLowerCase() === right.toLowerCase()
-    : left === right;
+    ? canonicalLeft.toLowerCase() === canonicalRight.toLowerCase()
+    : canonicalLeft === canonicalRight;
 }
