@@ -9,6 +9,7 @@ sources/authenticated-v2-compiler-lock.json text eol=lf
 sources/authenticated-v2-compiler-consensus-source-lock-v1.json text eol=lf
 sources/authenticated-spv-tracker-jvm-avl-wasm-lock-v1.json text eol=lf
 sources/authenticated-spv-tracker-jvm-avl-wasm-lock.json text eol=lf
+relayer/src/scripts/build-wasm-avl.ts text eol=lf
 sources/consensus-source-lock.json text eol=lf
 sources/native-verifier-toolchain-lock.json text eol=lf
 solidity/*.js text eol=lf

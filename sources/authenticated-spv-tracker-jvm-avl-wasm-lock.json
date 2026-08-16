@@ -1,5 +1,5 @@
 {
-  "schema": "e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v2",
+  "schema": "e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v3",
   "sourceFiles": [
     {
       "path": "wasm-avl/rust-toolchain.toml",
@@ -16,6 +16,10 @@
     {
       "path": "wasm-avl/src/lib.rs",
       "sha256": "0262c3987fea151e619003afd3ca2b435c5f03e80b9cb44244835ee160523b6d"
+    },
+    {
+      "path": "relayer/src/scripts/build-wasm-avl.ts",
+      "sha256": "20623c8d693214da686fa08f8a04a39abf745fb7769c2549b25519dd2d66f6ae"
     }
   ],
   "runtimeArtifacts": [
@@ -25,7 +29,7 @@
     },
     {
       "path": "wasm-avl/pkg/bridge_avl_bg.wasm",
-      "sha256": "e6dca7dfb01c20ce3dbbb6382a8b38d2fe326626822952bd7b813f75c32b1fca"
+      "sha256": "be1134ff4052496eac6903dbc9a40bb6d164786de09e8c98488a81eedc151867"
     }
   ]
 }

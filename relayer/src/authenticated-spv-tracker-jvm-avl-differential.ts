@@ -12,7 +12,7 @@ import {
   type AuthenticatedSpvTrackerJvmAvlReport,
 } from './authenticated-v2-source-tree-conformance.js';
 
-const WASM_LOCK_SCHEMA = 'e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v2';
+const WASM_LOCK_SCHEMA = 'e2s.authenticated-spv-tracker-jvm-avl-wasm-lock.v3';
 export const AUTHENTICATED_SPV_TRACKER_JVM_AVL_DIFFERENTIAL_RESULT_SCHEMA =
   'e2s.authenticated-spv-tracker-jvm-avl-differential-result.v1';
 export const AUTHENTICATED_SPV_TRACKER_JVM_AVL_DIFFERENTIAL_RESULT_PREFIX =
@@ -22,6 +22,7 @@ const WASM_SOURCE_PATHS = [
   'wasm-avl/Cargo.toml',
   'wasm-avl/Cargo.lock',
   'wasm-avl/src/lib.rs',
+  'relayer/src/scripts/build-wasm-avl.ts',
 ] as const;
 const WASM_RUNTIME_PATHS = [
   'wasm-avl/pkg/bridge_avl.js',
@@ -194,10 +195,9 @@ function resolveLockedFile(
   canonicalText: boolean,
 ): string {
   const candidate = realpathSync(resolve(bridgeRoot, entry.path));
-  const wasmRoot = realpathSync(resolve(bridgeRoot, 'wasm-avl'));
-  const relativePath = relative(wasmRoot, candidate);
+  const relativePath = relative(bridgeRoot, candidate);
   if (relativePath.startsWith('..') || isAbsolute(relativePath)) {
-    throw new Error(`${label} escapes the WASM crate`);
+    throw new Error(`${label} escapes the bridge source tree`);
   }
   const bytes = readFileSync(candidate);
   const digest = canonicalText

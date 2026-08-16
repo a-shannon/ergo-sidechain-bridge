@@ -2807,14 +2807,15 @@ JVM verifier artifact SHA-256
 and ordered runtime classpath SHA-256
 `d156d66793cc88b78816c45f82429ed1052c67220133fba0783e38928396131a`.
 That reviewed identity remains frozen in the versioned V1 WASM lock. Current
-clean checkouts use a separate V2 lock bound to Rust 1.97.1 through the tracked
-`rust-toolchain.toml`, the current crate sources, unchanged JavaScript glue
+clean checkouts use a separate V3 lock bound to Rust 1.97.1 through the tracked
+`rust-toolchain.toml`, the current crate sources, the exact wasm-pack 0.14.0
+probe and deterministic Cargo-home/workspace path-remapping recipe, unchanged JavaScript glue
 SHA-256
 `98dbefbf0150b477c7af22d5f9cdfaf925cfb464da08e787b284e17d1a1fd13c`,
 and current WASM SHA-256
-`e6dca7dfb01c20ce3dbbb6382a8b38d2fe326626822952bd7b813f75c32b1fca`.
+`be1134ff4052496eac6903dbc9a40bb6d164786de09e8c98488a81eedc151867`.
 The real historical JVM differential runs only under its exact pinned Windows,
-Node and relayer-package-lock closure. Other current hosts validate the V2
+Node and relayer-package-lock closure. Other current hosts validate the V3
 source/runtime identity without claiming a new JVM execution or superseding
 the V1 evidence.
 This is direct verifier conformance only: no node state, transaction check,

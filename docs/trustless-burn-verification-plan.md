@@ -785,15 +785,16 @@ and ordered JVM classpath SHA-256
 `d156d66793cc88b78816c45f82429ed1052c67220133fba0783e38928396131a`.
 Those reviewed identities remain frozen in
 `sources/authenticated-spv-tracker-jvm-avl-wasm-lock-v1.json`. Current clean
-checkouts use the separate V2 lock, which binds Rust 1.97.1 through
-`wasm-avl/rust-toolchain.toml`, the current crate sources, generated JavaScript
-glue SHA-256
+checkouts use the separate V3 lock, which binds Rust 1.97.1 through
+`wasm-avl/rust-toolchain.toml`, the current crate sources, the exact wasm-pack
+0.14.0 probe and deterministic Cargo-home/workspace path-remapping recipe,
+generated JavaScript glue SHA-256
 `98dbefbf0150b477c7af22d5f9cdfaf925cfb464da08e787b284e17d1a1fd13c`,
 and current WASM SHA-256
-`e6dca7dfb01c20ce3dbbb6382a8b38d2fe326626822952bd7b813f75c32b1fca`.
+`be1134ff4052496eac6903dbc9a40bb6d164786de09e8c98488a81eedc151867`.
 The real historical JVM differential executes only under its exact pinned
 Windows, Node and relayer-package-lock closure. Other current hosts validate
-the V2 source/runtime lock and generated artifact identity without relabelling
+the V3 source/runtime lock and generated artifact identity without relabelling
 that result as a new JVM execution or superseding the V1 evidence.
 This is local direct-verifier evidence only. It performs no stateful node check,
 signature, submission, broadcast, or sidechain-finality verification and does

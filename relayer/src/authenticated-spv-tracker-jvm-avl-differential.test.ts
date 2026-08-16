@@ -302,7 +302,7 @@ describe('authenticated SPV tracker JVM AVL differential corpus', () => {
     expect(wrongValue?.wasmSuccessorDigestHex).toMatch(/^[0-9a-f]{66}$/);
     expect(wrongValue?.wasmSuccessorDigestHex).not.toBe(wrongValue?.expectedSuccessorDigestHex);
     expect(corpus.wasmIdentity.wasmArtifactSha256Hex).toBe(
-      'e6dca7dfb01c20ce3dbbb6382a8b38d2fe326626822952bd7b813f75c32b1fca',
+      'be1134ff4052496eac6903dbc9a40bb6d164786de09e8c98488a81eedc151867',
     );
     expect(corpus.wasmIdentity.wasmGlueSha256Hex).toBe(
       '98dbefbf0150b477c7af22d5f9cdfaf925cfb464da08e787b284e17d1a1fd13c',

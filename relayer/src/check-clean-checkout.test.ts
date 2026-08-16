@@ -92,12 +92,15 @@ describe('clean-checkout dual-runtime boundary', () => {
       'build',
       'test:bounded',
     ]);
-    expect(plan.filter(step => step.executable === '/compiler/node')).toHaveLength(3);
+    expect(plan.filter(step => step.executable === '/compiler/node')).toHaveLength(4);
     expect(plan.find(step => step.label === 'wasm:build')).toEqual({
       label: 'wasm:build',
-      executable: 'wasm-pack',
-      args: ['build', '--target', 'nodejs'],
-      cwd: path.resolve('/workspace/bridge', 'wasm-avl'),
+      executable: '/compiler/node',
+      args: [
+        path.resolve('/workspace/relayer', 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+        path.resolve('/workspace/relayer', 'src', 'scripts', 'build-wasm-avl.ts'),
+      ],
+      cwd: '/workspace/relayer',
     });
     expect(JSON.stringify(plan)).not.toMatch(/npm(?:-cli)?(?:\.js)?/i);
   });

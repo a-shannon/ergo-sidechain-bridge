@@ -15,7 +15,7 @@
     "start": "tsx src/relayer-daemon.ts",
     "build": "tsc",
     "architecture:check": "tsx src/scripts/check-layer-imports.ts",
-    "wasm:build": "cd ../wasm-avl && wasm-pack build --target nodejs",
+    "wasm:build": "tsx src/scripts/build-wasm-avl.ts",
     "wasm:test": "cd ../wasm-avl && cargo test",
     "check": "npm run check:bounded",
     "check:parallel": "npm run wasm:build && npm run build && npm test",

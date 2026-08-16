@@ -224,9 +224,12 @@ export function buildCompilerCheckPlan(
     }),
     Object.freeze({
       label: 'wasm:build',
-      executable: 'wasm-pack',
-      args: Object.freeze(['build', '--target', 'nodejs']),
-      cwd: path.resolve(selectedBridgeRoot, 'wasm-avl'),
+      executable: nodeExecutable,
+      args: Object.freeze([
+        tsxCli,
+        path.resolve(selectedRelayerRoot, 'src', 'scripts', 'build-wasm-avl.ts'),
+      ]),
+      cwd: selectedRelayerRoot,
     }),
     Object.freeze({
       label: 'build',
