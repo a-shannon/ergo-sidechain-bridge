@@ -4,6 +4,9 @@ import path from 'node:path';
 
 const DEFAULT_BATCH_SIZE = 1;
 const DEFAULT_REPORTER = 'default';
+const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'
+  ? 15_000
+  : 5_000;
 interface ShardedTestTarget {
   envName: 'RELEASE_GATE_TEST_SHARD' | 'RELEASE_NOTES_TEST_SHARD';
   shardCount: number;
@@ -104,6 +107,7 @@ console.log(
   `Running ${tests.length} of ${collectedTests.length} Vitest files in batches of ${batchSize}`
   + `${resumeBoundary ? ` after ${resumeBoundary}` : ''}.`,
 );
+console.log(`Default Vitest test timeout: ${DEFAULT_TEST_TIMEOUT_MS}ms.`);
 
 function runVitestBatch(batch: string[], env: NodeJS.ProcessEnv = process.env): void {
   const npmExecPath = process.env.npm_execpath;
@@ -113,6 +117,8 @@ function runVitestBatch(batch: string[], env: NodeJS.ProcessEnv = process.env): 
     ...batch,
     '--reporter',
     DEFAULT_REPORTER,
+    '--testTimeout',
+    String(DEFAULT_TEST_TIMEOUT_MS),
     ...(env.RELEASE_GATE_TEST_SHARD || env.RELEASE_NOTES_TEST_SHARD
       ? ['--hideSkippedTests']
       : []),

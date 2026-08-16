@@ -350,6 +350,13 @@ describe('public audit alpha bootstrap', () => {
     expect(boundedVitestRunner).toContain(
       "{ envName: 'RELEASE_GATE_TEST_SHARD', shardCount: 32 }",
     );
+    expect(boundedVitestRunner).toContain(
+      "const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'",
+    );
+    expect(boundedVitestRunner).toContain('? 15_000');
+    expect(boundedVitestRunner).toContain(': 5_000;');
+    expect(boundedVitestRunner).toContain("'--testTimeout',");
+    expect(boundedVitestRunner).toContain('String(DEFAULT_TEST_TIMEOUT_MS)');
     expect(packageJson.scripts['check:clean-checkout']).toBe(
       'tsx src/scripts/check-clean-checkout.ts',
     );
