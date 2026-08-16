@@ -53,6 +53,10 @@ function spawnSync(
   return nodeSpawnSync(command, args, { ...options, timeout: timeoutMs });
 }
 
+function yieldToTestWorker(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 function expectLegacyV1LivePreflightQuarantine(result: { status: number | null; stdout: string }): void {
   expect(result.status).toBe(1);
   expect(result.stdout).toContain(LEGACY_V1_LIVE_PREFLIGHT_QUARANTINE);
@@ -1727,7 +1731,7 @@ describe('rehearsal evidence validation', () => {
     expect(lines[1].indexOf(transcriptTarget)).toBeLessThan(lines[1].indexOf(`validated target ${target}`));
   });
 
-  it('validates transcript targets before reporting the legacy V1 quarantine', () => {
+  it('validates transcript targets before reporting the legacy V1 quarantine', async () => {
     const evidenceDir = join(process.cwd(), 'tmp-rehearsal-validator-test');
     const target = 'tmp-rehearsal-validator-test/completed-testnet-rehearsal.md';
     const assemblyReportTarget = 'tmp-rehearsal-validator-test/completed-assembly-report.json';
@@ -1777,6 +1781,7 @@ describe('rehearsal evidence validation', () => {
         [scriptRunner, 'src/scripts/validate-rehearsal-evidence.ts', target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingTranscript.status).toBe(1);
       expect(missingTranscript.stdout).toContain('--transcript is required for PASS output');
       expect(missingTranscript.stdout).not.toContain('Rehearsal evidence PASS');
@@ -1797,6 +1802,7 @@ describe('rehearsal evidence validation', () => {
           ],
           { cwd: process.cwd(), encoding: 'utf8' },
         );
+        await yieldToTestWorker();
         expect(localOnlyTranscript.status).toBe(1);
         expect(localOnlyTranscript.stderr).toContain('--transcript must not reference a local-only path');
         expect(localOnlyTranscript.stdout).not.toContain('Rehearsal evidence PASS');
@@ -1821,6 +1827,7 @@ describe('rehearsal evidence validation', () => {
           ],
           { cwd: process.cwd(), encoding: 'utf8' },
         );
+        await yieldToTestWorker();
         expect(sensitiveTranscript.status).toBe(1);
         expect(sensitiveTranscript.stderr).toContain('--transcript must not reference runtime or secret-bearing material');
         expect(sensitiveTranscript.stdout).not.toContain('Rehearsal evidence PASS');
@@ -1867,6 +1874,7 @@ describe('rehearsal evidence validation', () => {
           ],
           { cwd: process.cwd(), encoding: 'utf8' },
         );
+        await yieldToTestWorker();
         expect(nonConcreteTranscript.status).toBe(1);
         expect(nonConcreteTranscript.stderr).toContain('--transcript must be a completed artifact target or non-template evidence link');
         expect(nonConcreteTranscript.stdout).not.toContain('Rehearsal evidence PASS');
@@ -1897,6 +1905,7 @@ describe('rehearsal evidence validation', () => {
           ],
           { cwd: process.cwd(), encoding: 'utf8' },
         );
+        await yieldToTestWorker();
         expectLegacyV1LivePreflightQuarantine(concreteAuditTranscript);
       }
 
@@ -1921,6 +1930,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expectLegacyV1LivePreflightQuarantine(validTranscript);
 
       const sameTargetTranscript = spawnSync(
@@ -1928,6 +1938,7 @@ describe('rehearsal evidence validation', () => {
         [scriptRunner, 'src/scripts/validate-rehearsal-evidence.ts', '--transcript', `[same](${target})`, target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(sameTargetTranscript.status).toBe(1);
       expect(sameTargetTranscript.stdout).toContain('--transcript must be distinct from the completed rehearsal target');
       expect(sameTargetTranscript.stdout).not.toContain(`${target}: evidence target BLOCKED`);
