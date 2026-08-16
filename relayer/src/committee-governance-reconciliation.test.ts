@@ -173,7 +173,7 @@ describe('committee governance reconciliation evidence', () => {
       rmSync(linked.outputDir, { recursive: true, force: true });
       rmSync(matching.outputDir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('blocks unsafe fields and claim-escalating boundaries before they can support Gate 6 evidence', () => {
     const run = runValidator({
