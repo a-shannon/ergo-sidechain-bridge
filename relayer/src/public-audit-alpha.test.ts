@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   comparePublicAuditAlphaCandidateIdentity,
+  createPublicAuditGitEnvironment,
   inspectAuditGitCandidate,
   inspectPublicAuditAlphaPreflight,
   inspectRecursiveFrontierCheckout,
@@ -262,6 +263,23 @@ describe('public audit alpha bootstrap', () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it('pins clean-checkout line-ending semantics without inheriting Git overrides', () => {
+    const environment = createPublicAuditGitEnvironment({
+      ...process.env,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'core.filemode',
+      GIT_CONFIG_VALUE_0: 'false',
+      GIT_INDEX_FILE: 'untrusted-index',
+    });
+
+    expect(environment.GIT_CONFIG_COUNT).toBe('1');
+    expect(environment.GIT_CONFIG_KEY_0).toBe('core.autocrlf');
+    expect(environment.GIT_CONFIG_VALUE_0).toBe(process.platform === 'win32' ? 'true' : 'false');
+    expect(environment.GIT_CONFIG_GLOBAL).toBe(process.platform === 'win32' ? 'NUL' : '/dev/null');
+    expect(environment.GIT_CONFIG_NOSYSTEM).toBe('1');
+    expect(environment.GIT_INDEX_FILE).toBeUndefined();
   });
 
   it('keeps the single audit command exact and non-live', () => {

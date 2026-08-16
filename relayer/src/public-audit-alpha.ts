@@ -469,7 +469,9 @@ export function createPublicAuditGitEnvironment(
   for (const key of Object.keys(environment)) {
     if (key.toUpperCase().startsWith('GIT_')) delete environment[key];
   }
-  environment.GIT_CONFIG_COUNT = '0';
+  environment.GIT_CONFIG_COUNT = '1';
+  environment.GIT_CONFIG_KEY_0 = 'core.autocrlf';
+  environment.GIT_CONFIG_VALUE_0 = process.platform === 'win32' ? 'true' : 'false';
   environment.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
   environment.GIT_CONFIG_NOSYSTEM = '1';
   environment.GIT_TERMINAL_PROMPT = '0';
