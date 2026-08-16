@@ -201,6 +201,15 @@ describe('pinned local native verifier build conformance', () => {
     );
     expect(source).toContain('JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE');
     expect(source).toContain('CREATE_SUSPENDED');
+    expect(source).toContain('TerminateJobObject cancellation');
+    expect(source).toContain('TerminateJobObject completion');
+    expect(source).toContain('QueryInformationJobObject');
+    expect(source).toContain('accounting.ActiveProcesses == 0');
+    expect(source).toContain('TARGET_FAILURE_EXIT_CODE');
+    expect(source).toContain('WRAPPER_FAILURE_CONTAINED_EXIT_CODE');
+    expect(source).toContain('TryVerifyExceptionalContainment');
+    expect(source).toContain('assignedToJob');
+    expect(source).toContain('Console.OpenStandardInput().ReadByte()');
     expect(source).not.toMatch(/JOB_OBJECT_LIMIT_(?:SILENT_)?BREAKAWAY_OK/);
     expect(source.indexOf('AssignProcessToJobObject(job, processInformation.hProcess)'))
       .toBeLessThan(source.indexOf('ResumeThread(processInformation.hThread)'));
@@ -458,6 +467,57 @@ describe('pinned local native verifier build conformance', () => {
       if (execution) await execution;
       workspace.cleanup();
       rmSync(markerRoot, { recursive: true, force: true });
+    }
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
+
+  it('rejects output overflow that races verified Windows process completion', async () => {
+    if (process.platform !== 'win32') return;
+    const workspace = createPinnedLocalNativeBuildWorkspace();
+    try {
+      const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
+        executablePath: process.execPath,
+        args: [
+          '-e',
+          "process.stdout.write('x'.repeat(4096), () => process.exit(0));",
+        ],
+        cwd: workspace.buildTargetPath,
+        env: minimalTestProcessEnvironment(),
+        timeoutMs: 5_000,
+        maxOutputBytes: 8_192,
+        maxStdoutBytes: 1_024,
+        maxStderrBytes: 8_192,
+        label: 'test native build completion race',
+      }));
+      expect(outcome.status).toBe('rejected');
+      if (outcome.status === 'rejected') expect(outcome.error).toMatchObject({
+        message: expect.stringMatching(/stdout exceeded the limit/i),
+      });
+    } finally {
+      workspace.cleanup();
+    }
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
+
+  it('rejects a contained Windows wrapper failure without quarantining cleanup', async () => {
+    if (process.platform !== 'win32') return;
+    const workspace = createPinnedLocalNativeBuildWorkspace();
+    try {
+      const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
+        executablePath: resolve(workspace.buildTargetPath, 'missing-native-target.exe'),
+        args: [],
+        cwd: workspace.buildTargetPath,
+        env: minimalTestProcessEnvironment(),
+        timeoutMs: 5_000,
+        maxOutputBytes: 1_024,
+        label: 'test contained wrapper failure',
+      }));
+      expect(outcome.status).toBe('rejected');
+      if (outcome.status === 'rejected') expect(outcome.error).toMatchObject({
+        message: expect.stringMatching(/failed/i),
+      });
+      workspace.cleanup();
+      expect(existsSync(workspace.buildTargetPath)).toBe(false);
+    } finally {
+      workspace.cleanup();
     }
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 

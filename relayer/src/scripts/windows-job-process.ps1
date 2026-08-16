@@ -26,11 +26,13 @@ $decodedArguments = ConvertFrom-Json -InputObject $argumentsJson
 $jobRunnerSource = @'
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 public static class E2SWindowsJobProcess
@@ -41,8 +43,14 @@ public static class E2SWindowsJobProcess
     private const uint STARTF_USESTDHANDLES = 0x00000100;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     private const int JobObjectExtendedLimitInformation = 9;
-    private const uint INFINITE = 0xffffffff;
     private const uint WAIT_OBJECT_0 = 0x00000000;
+    private const uint WAIT_TIMEOUT = 0x00000102;
+    private const uint CANCELLATION_POLL_MS = 100;
+    private const uint JOB_EMPTY_WAIT_MS = 10000;
+    private const int CANCELLATION_EXIT_CODE = 197;
+    private const int TARGET_FAILURE_EXIT_CODE = 198;
+    private const int WRAPPER_FAILURE_CONTAINED_EXIT_CODE = 199;
+    private const int JobObjectBasicAccountingInformation = 1;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct STARTUPINFO
@@ -112,6 +120,19 @@ public static class E2SWindowsJobProcess
         public UIntPtr PeakJobMemoryUsed;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct JOBOBJECT_BASIC_ACCOUNTING_INFORMATION
+    {
+        public long TotalUserTime;
+        public long TotalKernelTime;
+        public long ThisPeriodTotalUserTime;
+        public long ThisPeriodTotalKernelTime;
+        public uint TotalPageFaultCount;
+        public uint TotalProcesses;
+        public uint ActiveProcesses;
+        public uint TotalTerminatedProcesses;
+    }
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
 
@@ -121,6 +142,14 @@ public static class E2SWindowsJobProcess
         int informationClass,
         IntPtr information,
         uint informationLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool QueryInformationJobObject(
+        IntPtr job,
+        int informationClass,
+        out JOBOBJECT_BASIC_ACCOUNTING_INFORMATION information,
+        uint informationLength,
+        IntPtr returnLength);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool CreateProcess(
@@ -162,6 +191,8 @@ public static class E2SWindowsJobProcess
         IntPtr limitInformation = IntPtr.Zero;
         PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
         bool processCreated = false;
+        bool assignedToJob = false;
+        bool containmentVerified = false;
         AnonymousPipeServerStream standardInput = null;
         AnonymousPipeServerStream standardOutput = null;
         AnonymousPipeServerStream standardError = null;
@@ -226,28 +257,70 @@ public static class E2SWindowsJobProcess
 
             if (!AssignProcessToJobObject(job, processInformation.hProcess))
                 throw Win32Failure("AssignProcessToJobObject");
+            assignedToJob = true;
 
             Task outputCopy = standardOutput.CopyToAsync(Console.OpenStandardOutput());
             Task errorCopy = standardError.CopyToAsync(Console.OpenStandardError());
+            Task<int> cancellationRead = Task.Run(
+                () => Console.OpenStandardInput().ReadByte());
 
             if (ResumeThread(processInformation.hThread) == 0xffffffff)
                 throw Win32Failure("ResumeThread");
             CloseHandle(processInformation.hThread);
             processInformation.hThread = IntPtr.Zero;
 
-            if (WaitForSingleObject(processInformation.hProcess, INFINITE) != WAIT_OBJECT_0)
-                throw Win32Failure("WaitForSingleObject");
+            bool cancellationRequested = false;
+            while (true)
+            {
+                if (cancellationRead.IsCompleted)
+                {
+                    if (!TerminateJobObject(job, CANCELLATION_EXIT_CODE))
+                        throw Win32Failure("TerminateJobObject cancellation");
+                    cancellationRequested = true;
+                    WaitForEmptyJob(job, "WaitForEmptyJob cancellation");
+                    containmentVerified = true;
+                    break;
+                }
+                uint waitResult = WaitForSingleObject(
+                    processInformation.hProcess,
+                    CANCELLATION_POLL_MS);
+                if (waitResult == WAIT_OBJECT_0)
+                    break;
+                if (waitResult != WAIT_TIMEOUT)
+                    throw Win32Failure("WaitForSingleObject");
+            }
 
             uint exitCode;
             if (!GetExitCodeProcess(processInformation.hProcess, out exitCode))
                 throw Win32Failure("GetExitCodeProcess");
 
+            if (!cancellationRequested)
+            {
+                if (!TerminateJobObject(job, 1))
+                    throw Win32Failure("TerminateJobObject completion");
+                WaitForEmptyJob(job, "WaitForEmptyJob completion");
+                containmentVerified = true;
+            }
             CloseHandle(job);
             job = IntPtr.Zero;
             Task.WaitAll(new Task[] { outputCopy, errorCopy });
             Console.OpenStandardOutput().Flush();
             Console.OpenStandardError().Flush();
-            return unchecked((int) exitCode);
+            if (cancellationRequested)
+                return CANCELLATION_EXIT_CODE;
+            return exitCode == 0
+                ? 0
+                : TARGET_FAILURE_EXIT_CODE;
+        }
+        catch
+        {
+            if (containmentVerified || TryVerifyExceptionalContainment(
+                processCreated,
+                assignedToJob,
+                job,
+                processInformation.hProcess))
+                return WRAPPER_FAILURE_CONTAINED_EXIT_CODE;
+            throw;
         }
         finally
         {
@@ -256,7 +329,10 @@ public static class E2SWindowsJobProcess
                 TerminateJobObject(job, 1);
                 CloseHandle(job);
             }
-            else if (processCreated && processInformation.hProcess != IntPtr.Zero)
+            if (
+                processCreated
+                && !assignedToJob
+                && processInformation.hProcess != IntPtr.Zero)
             {
                 TerminateProcess(processInformation.hProcess, 1);
             }
@@ -272,6 +348,61 @@ public static class E2SWindowsJobProcess
                 standardOutput.Dispose();
             if (standardError != null)
                 standardError.Dispose();
+        }
+    }
+
+    private static bool TryVerifyExceptionalContainment(
+        bool processCreated,
+        bool assignedToJob,
+        IntPtr job,
+        IntPtr process)
+    {
+        try
+        {
+            if (!processCreated)
+                return true;
+            if (assignedToJob)
+            {
+                if (job == IntPtr.Zero)
+                    return false;
+                TerminateJobObject(job, 1);
+                WaitForEmptyJob(job, "WaitForEmptyJob exceptional cleanup");
+                return true;
+            }
+            if (process == IntPtr.Zero)
+                return false;
+            uint waitResult = WaitForSingleObject(process, 0);
+            if (waitResult == WAIT_OBJECT_0)
+                return true;
+            if (waitResult != WAIT_TIMEOUT)
+                return false;
+            TerminateProcess(process, 1);
+            return WaitForSingleObject(process, JOB_EMPTY_WAIT_MS) == WAIT_OBJECT_0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WaitForEmptyJob(IntPtr job, string operation)
+    {
+        Stopwatch wait = Stopwatch.StartNew();
+        while (true)
+        {
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+            if (!QueryInformationJobObject(
+                job,
+                JobObjectBasicAccountingInformation,
+                out accounting,
+                (uint) Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)),
+                IntPtr.Zero))
+                throw Win32Failure(operation);
+            if (accounting.ActiveProcesses == 0)
+                return;
+            if (wait.ElapsedMilliseconds >= JOB_EMPTY_WAIT_MS)
+                throw new TimeoutException(operation + " timed out");
+            Thread.Sleep((int) CANCELLATION_POLL_MS);
         }
     }
 

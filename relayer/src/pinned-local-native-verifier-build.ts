@@ -53,6 +53,9 @@ const MAX_WINDOWS_PROCESS_TABLE_BYTES = 1024 * 1024;
 const DESCENDANT_INSPECTION_PROBES = 20;
 const DESCENDANT_INSPECTION_REQUIRED_EMPTY_PROBES = 2;
 const DESCENDANT_INSPECTION_INTERVAL_MS = 250;
+const WINDOWS_JOB_CANCELLATION_EXIT_CODE = 197;
+const WINDOWS_JOB_TARGET_FAILURE_EXIT_CODE = 198;
+const WINDOWS_JOB_CONTAINED_WRAPPER_FAILURE_EXIT_CODE = 199;
 const BUILD_TARGET_PREFIX = 'e2s-pinned-local-native-';
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const WINDOWS_JOB_PROCESS_RUNNER_PATH = resolve(
@@ -1549,14 +1552,23 @@ export async function runBoundedProcess(
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     const spawnSpecification = buildBoundedProcessSpawnSpecification(input);
-    const child = spawn(spawnSpecification.executablePath, spawnSpecification.args, {
-      cwd: spawnSpecification.cwd,
-      windowsHide: true,
-      shell: false,
-      detached: process.platform !== 'win32',
-      env: spawnSpecification.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = process.platform === 'win32'
+      ? spawn(spawnSpecification.executablePath, spawnSpecification.args, {
+          cwd: spawnSpecification.cwd,
+          windowsHide: true,
+          shell: false,
+          detached: false,
+          env: spawnSpecification.env,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+      : spawn(spawnSpecification.executablePath, spawnSpecification.args, {
+          cwd: spawnSpecification.cwd,
+          windowsHide: true,
+          shell: false,
+          detached: true,
+          env: spawnSpecification.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
     const timer = setTimeout(() => {
       requestTermination(new Error(`${input.label} timed out`));
     }, input.timeoutMs);
@@ -1585,16 +1597,32 @@ export async function runBoundedProcess(
     child.stdout.on('data', consume(stdoutChunks, 'stdout', maxStdoutBytes));
     child.stderr.on('data', consume(stderrChunks, 'stderr', maxStderrBytes));
     child.once('error', () => finish(new Error(`${input.label} failed to start`)));
-    child.once('exit', () => {
+    child.once('exit', code => {
+      child.stdin?.destroy();
       postExitCloseTimer = setTimeout(() => {
         postExitCloseTimer = undefined;
         stopTerminationRetry();
         holdCleanupAuthority();
       }, POST_EXIT_CLOSE_TIMEOUT_MS);
       if (process.platform === 'win32' && !requestedFailure) {
-        // Exit code zero from the wrapper is emitted only after it closes the
-        // kill-on-close Job Object and drains the contained target pipes.
-        exitVerificationFailure = undefined;
+        exitVerificationFailure = confirmsWindowsJobContainment(code)
+          ? undefined
+          : new Error(
+              'Windows Job Object runner did not confirm process-tree containment',
+            );
+        return;
+      }
+      if (process.platform === 'win32' && requestedFailure) {
+        if (confirmsWindowsJobContainment(code)) {
+          liveTreeTerminationConfirmed = true;
+          terminationFailure = undefined;
+          exitVerificationFailure = undefined;
+          stopTerminationRetry();
+        } else {
+          exitVerificationFailure = new Error(
+            'Windows Job Object runner did not confirm process-tree termination',
+          );
+        }
         return;
       }
       try {
@@ -1618,6 +1646,16 @@ export async function runBoundedProcess(
       if (postExitCloseTimer) {
         clearTimeout(postExitCloseTimer);
         postExitCloseTimer = undefined;
+      }
+      if (
+        requestedFailure
+        && process.platform === 'win32'
+        && confirmsWindowsJobContainment(code)
+      ) {
+        liveTreeTerminationConfirmed = true;
+        terminationFailure = undefined;
+        exitVerificationFailure = undefined;
+        stopTerminationRetry();
       }
       if (requestedFailure) {
         if (
@@ -1663,6 +1701,14 @@ export async function runBoundedProcess(
 
     function attemptTermination(): void {
       try {
+        if (process.platform === 'win32') {
+          if (!child.stdin || child.stdin.destroyed || !child.stdin.writable) {
+            throw new Error('Windows Job Object cancellation channel is unavailable');
+          }
+          if (!child.stdin.writableEnded) child.stdin.end();
+          terminationFailure = undefined;
+          return;
+        }
         terminateNativeBuildProcessTree(child);
         liveTreeTerminationConfirmed = true;
         terminationFailure = undefined;
@@ -1779,6 +1825,13 @@ function requireProcessArgument(value: unknown, label: string): string {
     throw new Error(`${label} must be a non-empty NUL-free string`);
   }
   return value;
+}
+
+function confirmsWindowsJobContainment(code: number | null): boolean {
+  return code === 0
+    || code === WINDOWS_JOB_CANCELLATION_EXIT_CODE
+    || code === WINDOWS_JOB_TARGET_FAILURE_EXIT_CODE
+    || code === WINDOWS_JOB_CONTAINED_WRAPPER_FAILURE_EXIT_CODE;
 }
 
 function encodeWindowsJobValue(value: string): string {
