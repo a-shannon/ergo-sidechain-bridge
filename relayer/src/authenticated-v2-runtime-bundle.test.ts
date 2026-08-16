@@ -87,6 +87,7 @@ describe('authenticated V2 runtime bundle preparation', () => {
         SBT_CREDENTIALS: 'unreviewed',
         PATHEXT: 'unreviewed',
         PATH: 'unreviewed',
+        PSModuleAnalysisCachePath: path.join(TOOL_ROOT, 'unreviewed-cache'),
       },
     });
 
@@ -100,6 +101,9 @@ describe('authenticated V2 runtime bundle preparation', () => {
     expect(plan.env.COMSPEC).toBeUndefined();
     expect(plan.env.PATHEXT).toBe('.COM;.EXE;.BAT;.CMD');
     expect(plan.env.PATH).not.toContain('unreviewed');
+    expect(plan.env.PSModuleAnalysisCachePath).toBe(
+      path.join(path.resolve(SCRATCH_ROOT), 'powershell-cache', 'ModuleAnalysisCache'),
+    );
   });
 
   it('uses isolated sbt, boot, local-cache, Ivy, and Coursier directories', () => {
@@ -129,6 +133,9 @@ describe('authenticated V2 runtime bundle preparation', () => {
     ]);
     expect(plan.javaExecutable).toBe(path.join(path.resolve(JAVA_HOME), 'bin', 'java.exe'));
     expect(plan.isolatedDirectories).toContain(plan.env.COURSIER_CACHE);
+    expect(plan.isolatedDirectories).toContain(
+      path.dirname(plan.env.PSModuleAnalysisCachePath!),
+    );
   });
 
   it('rejects any launcher bytes outside the reviewed size and SHA-256', () => {

@@ -416,6 +416,11 @@ export function buildAuthenticatedV2RuntimeBundlePlan(input: {
   const sbtBoot = path.join(scratchRoot, 'sbt-boot');
   const sbtCache = path.join(scratchRoot, 'sbt-cache');
   const ivyHome = path.join(scratchRoot, 'ivy');
+  const powerShellCacheRoot = path.join(scratchRoot, 'powershell-cache');
+  const powerShellModuleAnalysisCache = path.join(
+    powerShellCacheRoot,
+    'ModuleAnalysisCache',
+  );
   const system32 = path.join(systemRoot, 'System32');
   const javaExecutable = path.join(javaHome, 'bin', 'java.exe');
 
@@ -435,6 +440,7 @@ export function buildAuthenticatedV2RuntimeBundlePlan(input: {
       systemRoot,
     ].join(path.delimiter),
     PATHEXT: '.COM;.EXE;.BAT;.CMD',
+    PSModuleAnalysisCachePath: powerShellModuleAnalysisCache,
     SystemRoot: systemRoot,
     TEMP: temp,
     TMP: temp,
@@ -478,6 +484,7 @@ export function buildAuthenticatedV2RuntimeBundlePlan(input: {
       sbtBoot,
       sbtCache,
       ivyHome,
+      powerShellCacheRoot,
     ],
   };
 }
