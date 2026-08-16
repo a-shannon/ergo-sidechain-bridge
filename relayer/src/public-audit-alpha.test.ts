@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -173,6 +180,7 @@ describe('public audit alpha bootstrap', () => {
 
   it('rejects index drift, untracked source, and an inexact recursive checkout', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'bridge-audit-candidate-'));
+    const aliasRoot = `${root}-alias`;
     const frontierRoot = path.join(root, 'substrate-node');
     const runGit = (cwd: string, ...args: string[]) => execFileSync('git', args, {
       cwd,
@@ -210,6 +218,8 @@ describe('public audit alpha bootstrap', () => {
       expect(entryCandidate.worktreeMatchesIndex).toBe(true);
       expect(entryCandidate.untrackedSourceAbsent).toBe(true);
       expect(inspectRecursiveFrontierCheckout({ bridgeRoot: root })).toBe(true);
+      symlinkSync(root, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
+      expect(inspectRecursiveFrontierCheckout({ bridgeRoot: aliasRoot })).toBe(true);
 
       const alternateIndex = path.join(root, '.git', 'alternate-index');
       copyFileSync(path.join(root, '.git', 'index'), alternateIndex);
@@ -261,6 +271,7 @@ describe('public audit alpha bootstrap', () => {
       expect(parentMetadataDrift.repositoryIndexInventorySha256)
         .not.toBe(committedCandidate.repositoryIndexInventorySha256);
     } finally {
+      rmSync(aliasRoot, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
     }
   });

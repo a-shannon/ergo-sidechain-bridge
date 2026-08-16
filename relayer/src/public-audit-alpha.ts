@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 import {
@@ -534,9 +534,19 @@ function toPosix(value: string): string {
   return value.replace(/\\/g, '/');
 }
 
+function canonicalizeExistingPath(input: string): string {
+  const resolved = path.resolve(input);
+  try {
+    return realpathSync.native(resolved);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return resolved;
+    throw error;
+  }
+}
+
 function samePath(left: string, right: string): boolean {
-  const normalizedLeft = path.resolve(left);
-  const normalizedRight = path.resolve(right);
+  const normalizedLeft = canonicalizeExistingPath(left);
+  const normalizedRight = canonicalizeExistingPath(right);
   return process.platform === 'win32'
     ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
     : normalizedLeft === normalizedRight;
