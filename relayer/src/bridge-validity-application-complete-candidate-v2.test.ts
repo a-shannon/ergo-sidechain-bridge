@@ -1,6 +1,7 @@
 import {
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'fs';
@@ -64,7 +65,7 @@ describe('complete EIP-0045 application candidate V2', () => {
     const loaded =
       loadEip0045BridgeApplicationCompleteCandidateV2(root);
 
-    expect(loaded.candidateRoot).toBe(root);
+    expect(loaded.candidateRoot).toBe(realpathSync.native(root));
     expect(loaded.envelope.contractIdHex)
       .toBe(EIP0045_BRIDGE_APPLICATION_TRACKER_CONTRACT_ID_HEX);
     expect(loaded.envelope.consumerAbi.applicationPayloadHex.length / 2)
