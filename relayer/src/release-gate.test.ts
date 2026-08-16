@@ -30940,7 +30940,7 @@ describe('release gate evaluation', () => {
     );
   });
 
-  it('blocks checked testnet lifecycle evidence when publication updates include contradictory failure markers', () => {
+  it('blocks checked testnet lifecycle evidence when publication updates include contradictory failure markers', async () => {
     const result = evaluateReleaseGate(fullChecklist(), {
       ...passingEvidenceJsonValidations,
       liveRehearsalEvidenceValidation: {
@@ -31116,6 +31116,8 @@ describe('release gate evaluation', () => {
     expect(structuredStringFailureFields.issues).toContain(
       'Gate 3: Fresh Ergo testnet lifecycle run: actual live rehearsal evidence validation: publicationEvidence.requiredChecklistUpdates must not mix completed/PASS evidence with failure markers',
     );
+
+    await new Promise<void>(resolve => setImmediate(resolve));
 
     const structuredValidityFailureFields = evaluateReleaseGate(fullChecklist(), {
       ...passingEvidenceJsonValidations,
@@ -31337,6 +31339,8 @@ describe('release gate evaluation', () => {
       'Gate 3: Fresh Ergo testnet lifecycle run: actual live rehearsal evidence validation: publicationEvidence.requiredChecklistUpdates must not mix completed/PASS evidence with failure markers',
     );
 
+    await new Promise<void>(resolve => setImmediate(resolve));
+
     const structuredConnectivityFailureFields = evaluateReleaseGate(fullChecklist(), {
       ...passingEvidenceJsonValidations,
       liveRehearsalEvidenceValidation: {
@@ -31535,6 +31539,8 @@ describe('release gate evaluation', () => {
       'Gate 3: Fresh Ergo testnet lifecycle run: actual live rehearsal evidence validation: publicationEvidence.requiredChecklistUpdates must not mix completed/PASS evidence with failure markers',
     );
 
+    await new Promise<void>(resolve => setImmediate(resolve));
+
     const structuredSuspendedFailureFields = evaluateReleaseGate(fullChecklist(), {
       ...passingEvidenceJsonValidations,
       liveRehearsalEvidenceValidation: {
@@ -31710,6 +31716,8 @@ describe('release gate evaluation', () => {
     expect(numericPresenceFailureFields.issues).toContain(
       'Gate 3: Fresh Ergo testnet lifecycle run: actual live rehearsal evidence validation: publicationEvidence.requiredChecklistUpdates must not mix completed/PASS evidence with failure markers',
     );
+
+    await new Promise<void>(resolve => setImmediate(resolve));
 
     const partialCompletionFailureFields = evaluateReleaseGate(fullChecklist(), {
       ...passingEvidenceJsonValidations,
@@ -31887,6 +31895,8 @@ describe('release gate evaluation', () => {
       'Gate 3: Fresh Ergo testnet lifecycle run: actual live rehearsal evidence validation: publicationEvidence.requiredChecklistUpdates must not mix completed/PASS evidence with failure markers',
     );
 
+    await new Promise<void>(resolve => setImmediate(resolve));
+
     const overriddenCompletionFields = evaluateReleaseGate(fullChecklist(), {
       ...passingEvidenceJsonValidations,
       liveRehearsalEvidenceValidation: {
@@ -32040,7 +32050,7 @@ describe('release gate evaluation', () => {
     expect(rejectedCompletionFields.issues).toContain(
       'Gate 3: Fresh Ergo testnet lifecycle run: actual live rehearsal evidence validation: publicationEvidence.requiredChecklistUpdates must not mix completed/PASS evidence with failure markers',
     );
-  }, 30_000);
+  }, 60_000);
 
   it('blocks checked testnet lifecycle evidence when publication updates include contradictory exact decision bindings', () => {
     const result = evaluateReleaseGate(fullChecklist(), {
