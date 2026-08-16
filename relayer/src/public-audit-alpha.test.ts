@@ -331,6 +331,8 @@ describe('public audit alpha bootstrap', () => {
     expect(cleanCheckoutRunner).toContain(
       'runAuditedNpmPackageBoundary(process.execPath, npmCli, auditEnvironment)',
     );
+    expect(auditRunner.match(/resolveAuditNpmCli\(\)/g)).toHaveLength(2);
+    expect(auditRunner).toContain('audit npm CLI identity changed during validation');
     expect(cleanCheckoutRunner).toContain('runCompilerCheck(compilerNode');
     expect(cleanCheckoutRunner).not.toContain("npmCli,\n    'check'");
     expect(auditGuide).toContain('npm 11.16.0');
@@ -391,12 +393,26 @@ describe('public audit alpha bootstrap', () => {
     expect(workflow).toContain('node-version: "24.14.0"');
     expect(workflow).toContain('BRIDGE_COMPILER_NODE_EXECUTABLE');
     expect(workflow).toContain('BRIDGE_AUDIT_NODE_DIRECTORY');
+    expect(workflow).toContain('Isolate audit Node.js');
+    expect(workflow).toContain("bridge-audit-node-$([guid]::NewGuid().ToString('N'))");
+    expect(workflow).toContain("'node_modules\\npm\\npmrc'");
+    expect(workflow).toContain("'unexpected npmrc overlay content in hosted Node toolcache'");
+    expect(workflow).toContain("'e2s.authenticated-v2-runtime-bundle-build-lock.v2'");
+    expect(workflow).toContain("'e2s.clean-checkout-npm-lock.v1'");
+    expect(workflow).toContain("'hosted audit npm package does not match its lock'");
+    expect(workflow).toContain('BRIDGE_AUDIT_NODE_EXECUTABLE');
+    expect(workflow).toContain('BRIDGE_AUDIT_NPM_CLI');
+    expect(workflow).toContain('& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI ci');
+    expect(workflow).not.toContain('run: npm.cmd ci');
     expect(workflow).toContain('uses: dtolnay/rust-toolchain@1.97.1');
     expect(workflow).not.toContain('uses: dtolnay/rust-toolchain@stable');
     expect(workflow).toContain('working-directory: relayer');
-    expect(workflow).toContain('& $npm run audit:alpha');
+    expect(workflow).toContain('& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha');
     expect(workflow).toContain('  consensus-sources:');
     expect(workflow).toContain('npm run sources:verify:workflow');
+    expect(workflow).toContain('Build native checkpoint cross-language executables');
+    expect(workflow).toContain('--supplied-verifier "$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-checkpoint-verifier"');
+    expect(workflow).toContain('--supplied-codec "$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-rpc-proof-codec"');
     expect(workflow).toContain('cargo build --locked --release -p frontier-template-node');
     expect(workflow).toContain('sbt assembly');
     expect(workflow).toContain('".gitignore"');

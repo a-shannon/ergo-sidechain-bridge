@@ -503,8 +503,13 @@ describe('publication hygiene', () => {
       'pending / linked / blocker',
     ];
 
-    expect(workflow).toContain('npm.cmd ci');
-    expect(workflow).toContain('& $npm run audit:alpha');
+    expect(workflow).toContain(
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI ci',
+    );
+    expect(workflow).toContain(
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha',
+    );
+    expect(workflow).not.toContain('run: npm.cmd ci');
     expect(workflow).toContain('"README.md"');
     expect(workflow).toContain('"docs/**"');
     expect(workflow).toContain('"phases/**"');

@@ -122,7 +122,7 @@ describe('standalone consensus-source build workflow', () => {
       sourceLock,
     );
     expect(nested.errors).toContain(
-      'standalone consensus job must not contain superproject-relative paths',
+      'workflow jobs must not contain superproject-relative paths',
     );
   });
 
@@ -178,6 +178,31 @@ describe('standalone consensus-source build workflow', () => {
     expect(result.checks.exactCommandGraphValid).toBe(false);
   });
 
+  it('binds the cross-language vector to same-job supplied executables', () => {
+    const missingBuild = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '      - name: Build native checkpoint cross-language executables\n',
+        '',
+      ),
+      sourceLock,
+    );
+    expect(missingBuild.errors).toContain(
+      'standalone consensus job must preserve the exact ordered command graph',
+    );
+
+    const foreignVerifier = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-checkpoint-verifier',
+        '/tmp/unreviewed-bridge-checkpoint-verifier',
+      ),
+      sourceLock,
+    );
+    expect(foreignVerifier.errors).toContain(
+      'Verify native finalized checkpoint cross-language vector: run command must match the reviewed command graph',
+    );
+    expect(foreignVerifier.checks.exactCommandGraphValid).toBe(false);
+  });
+
   it('rejects reordered identity checks and live-capability commands', () => {
     const reordered = validateStandaloneConsensusBuildWorkflow(
       workflowText.replace(
@@ -200,7 +225,89 @@ describe('standalone consensus-source build workflow', () => {
     );
     expect(liveCommand.checks.noLiveCapabilityCommands).toBe(false);
     expect(liveCommand.errors).toContain(
-      'standalone consensus job must not contain deployment, submission, broadcast, wallet, or runtime-state commands',
+      'workflow jobs must not contain deployment, submission, broadcast, wallet, or runtime-state commands',
+    );
+  });
+
+  it('rejects public-audit command drift and live-capability mutations', () => {
+    const cachedUnverifiedRuntime = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '          node-version: "24.18.1"',
+        '          node-version: "24.18.1"\n          cache: npm',
+      ),
+      sourceLock,
+    );
+    expect(cachedUnverifiedRuntime.errors).toContain(
+      'Setup Node.js: with bindings must match the reviewed workflow',
+    );
+
+    const liveAuditCommand = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI ci',
+        '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run deploy',
+      ),
+      sourceLock,
+    );
+    expect(liveAuditCommand.checks.noLiveCapabilityCommands).toBe(false);
+    expect(liveAuditCommand.errors).toContain(
+      'Install relayer dependencies: run command must match the reviewed command graph',
+    );
+    expect(liveAuditCommand.errors).toContain(
+      'workflow jobs must not contain deployment, submission, broadcast, wallet, or runtime-state commands',
+    );
+
+    const pythonBytecodeEnabled = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        "          $env:PYTHONDONTWRITEBYTECODE = '1'\n",
+        '',
+      ),
+      sourceLock,
+    );
+    expect(pythonBytecodeEnabled.errors).toContain(
+      'Install relayer dependencies: run command must match the reviewed command graph',
+    );
+
+    const auditPythonBytecodeEnabled = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        [
+          '      - name: Run public-audit candidate gate',
+          '        run: |',
+          "          $env:PYTHONDONTWRITEBYTECODE = '1'",
+        ].join('\n'),
+        [
+          '      - name: Run public-audit candidate gate',
+          '        run: |',
+        ].join('\n'),
+      ),
+      sourceLock,
+    );
+    expect(auditPythonBytecodeEnabled.errors).toContain(
+      'Run public-audit candidate gate: run command must match the reviewed command graph',
+    );
+
+    const driftedIsolation = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        "throw 'hosted audit npm package is empty'",
+        "throw 'hosted audit npm package unexpectedly empty'",
+      ),
+      sourceLock,
+    );
+    expect(driftedIsolation.errors).toContain(
+      'Isolate audit Node.js: run command digest must match the reviewed command graph',
+    );
+
+    const injectedEnvironment = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '      - name: Install relayer dependencies\n        run: |',
+        '      - name: Install relayer dependencies\n        env:\n          NODE_OPTIONS: --require unreviewed.js\n        run: |',
+      ),
+      sourceLock,
+    );
+    expect(injectedEnvironment.errors).toContain(
+      'Install relayer dependencies: environment must match the reviewed command graph',
+    );
+    expect(injectedEnvironment.errors).toContain(
+      'Install relayer dependencies: run step may contain only the reviewed keys',
     );
   });
 });

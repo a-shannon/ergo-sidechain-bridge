@@ -273,7 +273,9 @@ describe('authenticated V2 runtime bundle preparation', () => {
     ).toHaveLength(2);
     expect(standaloneWorkflow).toContain('npm ci --ignore-scripts --include=dev');
     expect(standaloneWorkflow).toContain('node-version: "24.18.1"');
-    expect(standaloneWorkflow).toContain('& $npm run audit:alpha');
+    expect(standaloneWorkflow).toContain(
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha',
+    );
 
     if (existsSync(superprojectWorkflowPath)) {
       const superprojectWorkflow = readFileSync(superprojectWorkflowPath, 'utf8');

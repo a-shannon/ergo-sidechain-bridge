@@ -32,6 +32,11 @@ function main(): void {
 
   for (const script of validationScripts) runNpmScript(npmCli, script);
 
+  const finalNpmCli = resolveAuditNpmCli();
+  if (finalNpmCli !== npmCli) {
+    throw new Error('audit npm CLI identity changed during validation');
+  }
+
   const final = inspectPublicAuditAlphaPreflight({ bridgeRoot });
   printPreflight('final', final);
   if (final.status !== 'PASS') throw new Error('final audit preflight is blocked');

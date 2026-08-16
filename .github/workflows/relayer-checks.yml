@@ -64,13 +64,84 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24.18.1"
-          cache: npm
-          cache-dependency-path: relayer/package-lock.json
 
-      - name: Capture audit Node.js
+      - name: Isolate audit Node.js
+        working-directory: .
         run: |
-          $node = (Get-Command node.exe -ErrorAction Stop).Source
-          "BRIDGE_AUDIT_NODE_DIRECTORY=$(Split-Path -Parent $node)" |
+          $sourceNode = (Get-Command node.exe -ErrorAction Stop).Source
+          $sourceNodeDirectory = Split-Path -Parent $sourceNode
+          $auditDirectory = Join-Path $env:RUNNER_TEMP "bridge-audit-node-$([guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Path (Join-Path $auditDirectory 'node_modules') | Out-Null
+          Copy-Item -LiteralPath $sourceNode -Destination (Join-Path $auditDirectory 'node.exe')
+          Copy-Item -LiteralPath (Join-Path $sourceNodeDirectory 'node_modules\npm') `
+            -Destination (Join-Path $auditDirectory 'node_modules\npm') -Recurse
+          $npmrcOverlay = Join-Path $auditDirectory 'node_modules\npm\npmrc'
+          if (Test-Path -LiteralPath $npmrcOverlay) {
+            $npmrcItem = Get-Item -LiteralPath $npmrcOverlay -Force
+            if ($npmrcItem.PSIsContainer -or (($npmrcItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+              throw 'unexpected npmrc overlay type in hosted Node toolcache'
+            }
+            $npmrcText = [IO.File]::ReadAllText($npmrcOverlay)
+            if ($npmrcText -notmatch '\Aprefix=\$\{APPDATA\}\\npm(?:\r?\n)?\z') {
+              throw 'unexpected npmrc overlay content in hosted Node toolcache'
+            }
+            Remove-Item -LiteralPath $npmrcOverlay -Force
+          }
+          $auditNode = Join-Path $auditDirectory 'node.exe'
+          $auditNpmPackage = Join-Path $auditDirectory 'node_modules\npm'
+          $auditNpmCli = Join-Path $auditNpmPackage 'bin\npm-cli.js'
+          $nodeLock = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'sources\authenticated-v2-runtime-bundle-build-lock-v2.json') -Raw | ConvertFrom-Json
+          $npmLock = Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'sources\clean-checkout-npm-lock-v1.json') -Raw | ConvertFrom-Json
+          if ($nodeLock.schema -ne 'e2s.authenticated-v2-runtime-bundle-build-lock.v2' -or
+              $nodeLock.platform -ne 'win32-x64' -or $env:RUNNER_ARCH -ne 'X64') {
+            throw 'hosted audit Node platform does not match its lock'
+          }
+          $nodeItem = Get-Item -LiteralPath $auditNode -Force
+          if (-not $nodeItem.PSIsContainer -and (($nodeItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0)) {
+            $nodeSha256 = (Get-FileHash -LiteralPath $auditNode -Algorithm SHA256).Hash.ToLowerInvariant()
+          } else {
+            throw 'hosted audit Node must be a regular non-reparse file'
+          }
+          if ($nodeSha256 -ne $nodeLock.nodeExecutableSha256) {
+            throw 'hosted audit Node executable does not match its lock'
+          }
+          $npmEntries = @(Get-ChildItem -LiteralPath $auditNpmPackage -Recurse -Force)
+          if ($npmEntries.Count -eq 0) { throw 'hosted audit npm package is empty' }
+          $npmRecords = [Collections.Generic.List[string]]::new()
+          foreach ($entry in $npmEntries) {
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+              throw 'hosted audit npm package must not contain reparse points'
+            }
+            if (-not $entry.PSIsContainer) {
+              $relative = [IO.Path]::GetRelativePath($auditNpmPackage, $entry.FullName).Replace('\', '/')
+              $sha256 = (Get-FileHash -LiteralPath $entry.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              $npmRecords.Add("${relative}:${sha256}")
+            }
+          }
+          $orderedRecords = $npmRecords.ToArray()
+          [Array]::Sort($orderedRecords, [StringComparer]::Ordinal)
+          $npmPackageBytes = [Text.Encoding]::UTF8.GetBytes($orderedRecords -join "`n")
+          $npmPackageSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($npmPackageBytes)).ToLowerInvariant()
+          if ($npmLock.schema -ne 'e2s.clean-checkout-npm-lock.v1' -or
+              $npmLock.npmCliRelativePath -ne 'node_modules/npm/bin/npm-cli.js' -or
+              $npmPackageSha256 -ne $npmLock.npmPackageSha256) {
+            throw 'hosted audit npm package does not match its lock'
+          }
+          $npmCliItem = Get-Item -LiteralPath $auditNpmCli -Force
+          if ($npmCliItem.PSIsContainer -or (($npmCliItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'hosted audit npm CLI must be a regular non-reparse file'
+          }
+          $observedNodeVersion = (& $auditNode --version).Trim()
+          $observedNpmVersion = (& $auditNode $auditNpmCli --version).Trim()
+          if ($observedNodeVersion -ne "v$($nodeLock.nodeVersion)" -or
+              $observedNpmVersion -ne $npmLock.npmVersion) {
+            throw 'hosted audit Node or npm version does not match its lock'
+          }
+          "BRIDGE_AUDIT_NODE_DIRECTORY=$auditDirectory" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BRIDGE_AUDIT_NODE_EXECUTABLE=$auditNode" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "BRIDGE_AUDIT_NPM_CLI=$auditNpmCli" |
             Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Setup Java 17
@@ -89,7 +160,11 @@ jobs:
         run: cargo install wasm-pack --version 0.14.0 --locked
 
       - name: Install relayer dependencies
-        run: npm.cmd ci
+        run: |
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          $env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"
+          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Setup compiler Node.js
         uses: actions/setup-node@v4
@@ -104,9 +179,9 @@ jobs:
 
       - name: Run public-audit candidate gate
         run: |
-          $npm = Join-Path $env:BRIDGE_AUDIT_NODE_DIRECTORY 'npm.cmd'
+          $env:PYTHONDONTWRITEBYTECODE = '1'
           $env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"
-          & $npm run audit:alpha
+          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   consensus-sources:
@@ -213,9 +288,19 @@ jobs:
         working-directory: substrate-node
         run: cargo test --locked -p bridge-checkpoint-verifier
 
+      - name: Build native checkpoint cross-language executables
+        working-directory: substrate-node
+        run: >-
+          cargo build --locked -p bridge-checkpoint-verifier
+          --bin bridge-checkpoint-verifier
+          --bin bridge-rpc-proof-codec
+
       - name: Verify native finalized checkpoint cross-language vector
         working-directory: relayer
-        run: npm run checkpoint:finalized:native:verify
+        run: |
+          npm run checkpoint:finalized:native:verify -- \
+            --supplied-verifier "$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-checkpoint-verifier" \
+            --supplied-codec "$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-rpc-proof-codec"
 
       - name: Build patched Frontier template node
         working-directory: substrate-node

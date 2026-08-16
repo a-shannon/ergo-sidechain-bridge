@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -6,9 +7,12 @@ import { parseDocument } from 'yaml';
 export const STANDALONE_CONSENSUS_WORKFLOW_PATH =
   '.github/workflows/relayer-checks.yml';
 export const STANDALONE_CONSENSUS_JOB_ID = 'consensus-sources';
+export const PUBLIC_AUDIT_JOB_ID = 'audit-alpha';
 
 const EXPECTED_WORKFLOW_NAME = 'Bridge public-audit candidate checks';
-const EXPECTED_WORKFLOW_JOB_IDS = ['audit-alpha', STANDALONE_CONSENSUS_JOB_ID] as const;
+const EXPECTED_WORKFLOW_JOB_IDS = [PUBLIC_AUDIT_JOB_ID, STANDALONE_CONSENSUS_JOB_ID] as const;
+const EXPECTED_PUBLIC_AUDIT_JOB_NAME = 'Public-audit candidate gate';
+const EXPECTED_CONSENSUS_JOB_NAME = 'Rebuild pinned Frontier and Ergo sources';
 const EXPECTED_TRIGGER_PATHS = [
   '.github/workflows/relayer-checks.yml',
   '.gitattributes',
@@ -30,6 +34,21 @@ const EXPECTED_PUSH_BRANCHES = ['main', 'master', 'fix/**'] as const;
 const FRONTIER_BUILD_COMMAND = 'cargo build --locked --release -p frontier-template-node';
 const ERGO_TEST_COMMAND = 'sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"';
 const ERGO_BUILD_COMMAND = 'sbt assembly';
+const AUDIT_NODE_ISOLATION_COMMAND_SHA256 =
+  '500825e8cb86e4d82215b2d14076eca67ad74f85a8697f2efe12422cf18bef45';
+
+const EXPECTED_AUDIT_STEP_NAMES = [
+  'Checkout recursive source graph',
+  'Setup Node.js',
+  'Isolate audit Node.js',
+  'Setup Java 17',
+  'Setup Rust 1.97.1',
+  'Install wasm-pack 0.14.0',
+  'Install relayer dependencies',
+  'Setup compiler Node.js',
+  'Capture compiler Node.js',
+  'Run public-audit candidate gate',
+] as const;
 
 const EXPECTED_STEP_NAMES = [
   'Checkout recursive source graph',
@@ -50,6 +69,7 @@ const EXPECTED_STEP_NAMES = [
   'Test native GRANDPA finality proof verifier',
   'Test native finalized bridge state proof verifier',
   'Test native finalized checkpoint verifier',
+  'Build native checkpoint cross-language executables',
   'Verify native finalized checkpoint cross-language vector',
   'Build patched Frontier template node',
   'Test Ergo extension producer patch',
@@ -215,8 +235,118 @@ export function validateStandaloneConsensusBuildWorkflow(
   if (!jobs || !hasExactKeys(jobs, EXPECTED_WORKFLOW_JOB_IDS)) {
     errors.push('workflow jobs must be exactly audit-alpha and consensus-sources');
   }
+  const auditJob = asRecord(jobs?.[PUBLIC_AUDIT_JOB_ID]);
+  if (!auditJob) errors.push(`workflow job ${PUBLIC_AUDIT_JOB_ID} is missing`);
+  if (auditJob?.name !== EXPECTED_PUBLIC_AUDIT_JOB_NAME) {
+    errors.push(`public audit job name must be ${EXPECTED_PUBLIC_AUDIT_JOB_NAME}`);
+  }
+  if (auditJob?.['runs-on'] !== 'windows-latest') {
+    errors.push('public audit job must run on windows-latest');
+  }
+  if (auditJob?.['timeout-minutes'] !== 120) {
+    errors.push('public audit job timeout must be 120 minutes');
+  }
+  if (auditJob && !hasExactKeys(auditJob, [
+    'defaults',
+    'name',
+    'runs-on',
+    'steps',
+    'timeout-minutes',
+  ])) {
+    errors.push('public audit job may contain only its defaults, name, runner, timeout, and exact steps');
+  }
+  const auditDefaults = asRecord(auditJob?.defaults);
+  const auditRunDefaults = asRecord(auditDefaults?.run);
+  if (
+    !auditDefaults
+    || !hasExactKeys(auditDefaults, ['run'])
+    || !auditRunDefaults
+    || !hasExactKeys(auditRunDefaults, ['shell', 'working-directory'])
+    || auditRunDefaults.shell !== 'pwsh'
+    || auditRunDefaults['working-directory'] !== 'relayer'
+  ) {
+    errors.push('public audit defaults must be exactly pwsh in the relayer directory');
+  }
+
+  const auditSteps = Array.isArray(auditJob?.steps) ? auditJob.steps.map(asRecord) : [];
+  if (auditSteps.some(step => !step)) errors.push('every public audit job step must be an object');
+  const concreteAuditSteps = auditSteps.filter(
+    (step): step is Record<string, unknown> => step !== null,
+  );
+  const auditStepNames = concreteAuditSteps.map(step => step.name);
+  if (JSON.stringify(auditStepNames) !== JSON.stringify(EXPECTED_AUDIT_STEP_NAMES)) {
+    errors.push('public audit job must preserve the exact ordered command graph');
+  }
+
+  requireUsesStep(errors, concreteAuditSteps, 'Checkout recursive source graph', 'actions/checkout@v4', {
+    'fetch-depth': 1,
+    submodules: 'recursive',
+  });
+  requireUsesStep(errors, concreteAuditSteps, 'Setup Node.js', 'actions/setup-node@v4', {
+    'node-version': '24.18.1',
+  });
+  requireRunStepDigest(
+    errors,
+    concreteAuditSteps,
+    'Isolate audit Node.js',
+    AUDIT_NODE_ISOLATION_COMMAND_SHA256,
+    '.',
+  );
+  requireUsesStep(errors, concreteAuditSteps, 'Setup Java 17', 'actions/setup-java@v4', {
+    distribution: 'microsoft',
+    'java-version': '17.0.19+10',
+  });
+  requireUsesStep(errors, concreteAuditSteps, 'Setup Rust 1.97.1', 'dtolnay/rust-toolchain@1.97.1', {
+    targets: 'wasm32-unknown-unknown',
+  });
+  requireRunStep(
+    errors,
+    concreteAuditSteps,
+    'Install wasm-pack 0.14.0',
+    'cargo install wasm-pack --version 0.14.0 --locked',
+    '.',
+  );
+  requireRunStep(
+    errors,
+    concreteAuditSteps,
+    'Install relayer dependencies',
+    [
+      "$env:PYTHONDONTWRITEBYTECODE = '1'",
+      '$env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"',
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI ci',
+      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+    ].join('\n'),
+  );
+  requireUsesStep(errors, concreteAuditSteps, 'Setup compiler Node.js', 'actions/setup-node@v4', {
+    'node-version': '24.14.0',
+  });
+  requireRunStep(
+    errors,
+    concreteAuditSteps,
+    'Capture compiler Node.js',
+    [
+      '$node = (Get-Command node.exe -ErrorAction Stop).Source',
+      '"BRIDGE_COMPILER_NODE_EXECUTABLE=$node" |',
+      '  Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append',
+    ].join('\n'),
+  );
+  requireRunStep(
+    errors,
+    concreteAuditSteps,
+    'Run public-audit candidate gate',
+    [
+      "$env:PYTHONDONTWRITEBYTECODE = '1'",
+      '$env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"',
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha',
+      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+    ].join('\n'),
+  );
+
   const job = asRecord(jobs?.[STANDALONE_CONSENSUS_JOB_ID]);
   if (!job) errors.push(`workflow job ${STANDALONE_CONSENSUS_JOB_ID} is missing`);
+  if (job?.name !== EXPECTED_CONSENSUS_JOB_NAME) {
+    errors.push(`standalone consensus job name must be ${EXPECTED_CONSENSUS_JOB_NAME}`);
+  }
   if (job?.['runs-on'] !== 'ubuntu-latest') {
     errors.push('standalone consensus job must run on ubuntu-latest');
   }
@@ -331,9 +461,21 @@ export function validateStandaloneConsensusBuildWorkflow(
       workingDirectory: 'substrate-node',
       run: 'cargo test --locked -p bridge-checkpoint-verifier',
     }],
+    ['Build native checkpoint cross-language executables', {
+      workingDirectory: 'substrate-node',
+      run: [
+        'cargo build --locked -p bridge-checkpoint-verifier',
+        '--bin bridge-checkpoint-verifier',
+        '--bin bridge-rpc-proof-codec',
+      ].join(' '),
+    }],
     ['Verify native finalized checkpoint cross-language vector', {
       workingDirectory: 'relayer',
-      run: 'npm run checkpoint:finalized:native:verify',
+      run: [
+        'npm run checkpoint:finalized:native:verify -- \\',
+        '  --supplied-verifier "$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-checkpoint-verifier" \\',
+        '  --supplied-codec "$GITHUB_WORKSPACE/substrate-node/target/debug/bridge-rpc-proof-codec"',
+      ].join('\n'),
     }],
     ['Build patched Frontier template node', {
       workingDirectory: 'substrate-node',
@@ -366,26 +508,30 @@ export function validateStandaloneConsensusBuildWorkflow(
     );
   }
 
-  const jobText = JSON.stringify(job ?? {});
-  if (jobText.includes('ergo-sidechain-bridge/')) {
-    errors.push('standalone consensus job must not contain superproject-relative paths');
+  const jobsText = JSON.stringify({ auditJob, job });
+  if (jobsText.includes('ergo-sidechain-bridge/')) {
+    errors.push('workflow jobs must not contain superproject-relative paths');
   }
-  if (jobText.includes('secrets.')) {
-    errors.push('standalone consensus job must not consume GitHub secrets');
+  if (jobsText.includes('secrets.')) {
+    errors.push('workflow jobs must not consume GitHub secrets');
   }
 
-  const runCommands = concreteSteps
+  const consensusRunCommands = concreteSteps
     .map(step => typeof step.run === 'string' ? step.run : '')
     .filter(Boolean);
+  const auditRunCommands = concreteAuditSteps
+    .map(step => typeof step.run === 'string' ? step.run : '')
+    .filter(Boolean);
+  const runCommands = [...auditRunCommands, ...consensusRunCommands];
   const commandText = runCommands.join('\n');
   const forbiddenCapability = /(?:^|[\s:])(deploy|submit|broadcast)(?=$|[\s:])/i;
   const noLiveCapabilityCommands = !forbiddenCapability.test(commandText)
     && !/BRIDGE_BROADCAST_ENABLED|deployed_state|node-wallet|wallet-state/i.test(commandText);
   if (!noLiveCapabilityCommands) {
-    errors.push('standalone consensus job must not contain deployment, submission, broadcast, wallet, or runtime-state commands');
+    errors.push('workflow jobs must not contain deployment, submission, broadcast, wallet, or runtime-state commands');
   }
 
-  const patchLines = runCommands
+  const patchLines = consensusRunCommands
     .flatMap(run => normalizeRun(run).split('\n'))
     .filter(line => /\bgit\b.*\bapply\b/.test(line));
   const lockedPatchesOnly = patchLines.length === 3
@@ -393,11 +539,9 @@ export function validateStandaloneConsensusBuildWorkflow(
     && patchLines[2]?.includes(lock.ergoNode.patchPath) === true;
   if (!lockedPatchesOnly) errors.push('standalone consensus job may apply only the two tracked locked patches');
 
-  const recursiveGitlinkCheckoutRequired = stepUsesWith(
-    concreteSteps,
-    'Checkout recursive source graph',
-    'submodules',
-  ) === 'recursive';
+  const recursiveGitlinkCheckoutRequired = [concreteAuditSteps, concreteSteps].every(jobSteps =>
+    stepUsesWith(jobSteps, 'Checkout recursive source graph', 'submodules') === 'recursive'
+  );
   const recheckIndex = stepNames.indexOf('Recheck source identity after builds');
   const buildIndexes = [
     stepNames.indexOf('Build patched Frontier template node'),
@@ -505,6 +649,36 @@ function requireRunStep(
     ...(expectedWorkingDirectory ? ['working-directory'] : []),
     ...(expectedEnvironment ? ['env'] : []),
     ...(expectedShell ? ['shell'] : []),
+  ].sort();
+  if (JSON.stringify(Object.keys(step).sort()) !== JSON.stringify(expectedKeys)) {
+    errors.push(`${name}: run step may contain only the reviewed keys`);
+  }
+}
+
+function requireRunStepDigest(
+  errors: string[],
+  steps: Record<string, unknown>[],
+  name: string,
+  expectedSha256Hex: string,
+  expectedWorkingDirectory?: string,
+): void {
+  const step = steps.find(candidate => candidate.name === name);
+  if (!step) return;
+  const run = normalizeRun(step.run);
+  const observedSha256Hex = createHash('sha256').update(run, 'utf8').digest('hex');
+  if (observedSha256Hex !== expectedSha256Hex) {
+    errors.push(`${name}: run command digest must match the reviewed command graph`);
+  }
+  if (step['working-directory'] !== expectedWorkingDirectory) {
+    errors.push(`${name}: working-directory must be ${expectedWorkingDirectory ?? '<workflow root>'}`);
+  }
+  if (step.uses !== undefined) errors.push(`${name}: uses action is not allowed`);
+  if (step.env !== undefined) errors.push(`${name}: environment is not allowed`);
+  if (step.shell !== undefined) errors.push(`${name}: step-specific shell is not allowed`);
+  const expectedKeys = [
+    'name',
+    'run',
+    ...(expectedWorkingDirectory ? ['working-directory'] : []),
   ].sort();
   if (JSON.stringify(Object.keys(step).sort()) !== JSON.stringify(expectedKeys)) {
     errors.push(`${name}: run step may contain only the reviewed keys`);
