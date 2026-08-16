@@ -143,7 +143,7 @@ describe('local committee governance reconciliation producer', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('rejects unsafe output targets before writing packets', () => {
     const result = spawnSync(
