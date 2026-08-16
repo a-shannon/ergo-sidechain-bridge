@@ -833,7 +833,14 @@ export function validateAuthenticatedV2CompilerProjectFileSet(
     actual.length !== expected.length
     || actual.some((path, index) => path !== expected[index])
   ) {
-    throw new Error('compiler project contains files outside the reviewed lock set');
+    const actualSet = new Set(actual);
+    const expectedSet = new Set(expected);
+    const unexpected = actual.filter(path => !expectedSet.has(path));
+    const missing = expected.filter(path => !actualSet.has(path));
+    throw new Error(
+      'compiler project contains files outside the reviewed lock set '
+      + `(unexpected: ${unexpected.join(', ') || 'none'}; missing: ${missing.join(', ') || 'none'})`,
+    );
   }
 }
 

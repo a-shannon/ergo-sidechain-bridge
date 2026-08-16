@@ -248,8 +248,12 @@ describe('authenticated V2 source-to-tree conformance', () => {
       .toThrow('must contain exactly');
     expect(() => validateAuthenticatedV2CompilerProjectFileSet(
       ['build.sbt', 'project/build.properties', 'src/main/scala/Compiler.scala', 'project/plugins.sbt'],
-      ['build.sbt', 'project/build.properties', 'src/main/scala/Compiler.scala'],
-    )).toThrow('outside the reviewed lock set');
+      ['build.sbt', 'project/build.properties', 'src/main/scala/MissingCompiler.scala'],
+    )).toThrow(
+      'outside the reviewed lock set '
+      + '(unexpected: project/plugins.sbt, src/main/scala/Compiler.scala; '
+      + 'missing: src/main/scala/MissingCompiler.scala)',
+    );
   });
 
   it('encodes canonical ordered compiler records and parses exact output', () => {
