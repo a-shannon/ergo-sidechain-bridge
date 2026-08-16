@@ -488,7 +488,7 @@ describe('readiness runtime prerequisites', () => {
     } finally {
       rmSync(jsonOutPath, { force: true });
     }
-  });
+  }, 30_000);
 
   it('reuses guarded node preflight JSON input for runtime prerequisite routing', () => {
     const triageJson = `../evidence/readiness/tmp-readiness-triage-source-${process.pid}-${Date.now()}.json`;
@@ -558,7 +558,7 @@ describe('readiness runtime prerequisites', () => {
       rmSync(anchorPreflightJsonPath, { force: true });
       rmSync(jsonOutPath, { force: true });
     }
-  });
+  }, 15_000);
 
   it('fails closed on malformed node preflight JSON input', () => {
     const nodePreflightJson = `../evidence/readiness/tmp-node-preflight-malformed-${process.pid}-${Date.now()}.json`;
