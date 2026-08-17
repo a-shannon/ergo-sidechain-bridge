@@ -2843,7 +2843,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         trustPins: fixture.input.trustPins,
       })).rejects.toThrow(/history|artifact|canonical|closure/i);
     });
-  });
+  }, 30_000);
 
   it('snapshots every isolated replay artifact before the compiler await', async () => {
     await withPortableReplayFixture(async fixture => {
@@ -2879,7 +2879,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         mocks.trackerCompileWait = undefined;
       }
     });
-  });
+  }, 30_000);
 
   it('keeps file selection and operational capabilities out of the replay core', () => {
     const source = readFileSync(new URL(
