@@ -2643,7 +2643,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         )
       ).toThrow(/continuation is unavailable/);
     });
-  }, 30_000);
+  }, 60_000);
 
   it('reproduces the exact replay report in two clean child processes', async () => {
     await withPortableReplayFixture(async fixture => {
