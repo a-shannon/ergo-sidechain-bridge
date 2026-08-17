@@ -1947,7 +1947,7 @@ describe('rehearsal evidence validation', () => {
     }
   }, REHEARSAL_PROCESS_TEST_TIMEOUT_MS);
 
-  it('rejects retired legacy V1 rehearsal JSON options', () => {
+  it('rejects retired legacy V1 rehearsal JSON options', async () => {
     const retiredOptions = [
       '--aggregate-prebroadcast-json',
       '--prep-bundle-json',
@@ -1967,6 +1967,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
 
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(`Unknown option: ${option}`);
@@ -1974,7 +1975,7 @@ describe('rehearsal evidence validation', () => {
   });
 
 
-  it('validates linked post-submit observe JSON before reporting the legacy V1 quarantine', () => {
+  it('validates linked post-submit observe JSON before reporting the legacy V1 quarantine', async () => {
     const evidenceDir = join(process.cwd(), 'tmp-rehearsal-validator-post-submit-test');
     const target = 'tmp-rehearsal-validator-post-submit-test/completed-testnet-rehearsal.md';
     const assemblyReportTarget = 'tmp-rehearsal-validator-post-submit-test/completed-assembly-report.json';
@@ -2029,6 +2030,7 @@ describe('rehearsal evidence validation', () => {
         [scriptRunner, 'src/scripts/validate-rehearsal-evidence.ts', '--transcript', transcriptTarget, target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingPostSubmitObserve.status).toBe(1);
       expect(missingPostSubmitObserve.stdout).toContain(
         '--post-submit-observe-json is required when Rehearsal Assembly Evidence includes post-submit evidence',
@@ -2047,6 +2049,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(wrongPostSubmitObserve.status).toBe(1);
       expect(wrongPostSubmitObserve.stdout).toContain('--post-submit-observe-json target must match Post-submit observe JSON report target');
 
@@ -2075,6 +2078,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(invalidPostSubmitObserve.status).toBe(1);
       expect(invalidPostSubmitObserve.stdout).toContain('post-submit: JSON observe report status must be CREATED');
 
@@ -2123,6 +2127,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(mismatchedApprovedBurn.status).toBe(1);
       expect(mismatchedApprovedBurn.stdout).toContain(
         'post-submit: JSON observe report livePreflightBinding.approvedBurnTxHashes must match the validated live-preflight approvalBinding.burnTxHashes',
@@ -2163,6 +2168,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(mismatchedLivePreflight.status).toBe(1);
       expect(mismatchedLivePreflight.stdout).toContain(
         'post-submit: JSON observe report livePreflightBinding.target must match the validated live-preflight JSON target',
@@ -2193,13 +2199,14 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expectLegacyV1LivePreflightQuarantine(validPostSubmitObserve);
     } finally {
       rmSync(evidenceDir, { recursive: true, force: true });
     }
   }, REHEARSAL_PROCESS_TEST_TIMEOUT_MS);
 
-  it('validates linked live-preflight JSON and quarantines legacy V1', () => {
+  it('validates linked live-preflight JSON and quarantines legacy V1', async () => {
     const evidenceDir = join(process.cwd(), 'tmp-rehearsal-validator-live-preflight-test');
     const target = 'tmp-rehearsal-validator-live-preflight-test/completed-testnet-rehearsal.md';
     const assemblyReportTarget = 'tmp-rehearsal-validator-live-preflight-test/completed-assembly-report.json';
@@ -2275,6 +2282,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingLivePreflight.status).toBe(1);
       expect(missingLivePreflight.stdout).toContain(
         '--live-preflight-json is required when Post-Submit Gate Binding includes a live-preflight JSON binding',
@@ -2301,6 +2309,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(wrongLivePreflight.status).toBe(1);
       expect(wrongLivePreflight.stdout).toContain(
         '--live-preflight-json target must match Live-preflight JSON binding target',
@@ -2337,6 +2346,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(invalidLivePreflight.status).toBe(1);
       expect(invalidLivePreflight.stdout).toContain('live-preflight: JSON report status must be GO');
 
@@ -2365,13 +2375,14 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expectLegacyV1LivePreflightQuarantine(validLivePreflight);
     } finally {
       rmSync(evidenceDir, { recursive: true, force: true });
     }
   }, REHEARSAL_PROCESS_TEST_TIMEOUT_MS);
 
-  it('validates linked recovery-observe JSON before reporting the legacy V1 quarantine', () => {
+  it('validates linked recovery-observe JSON before reporting the legacy V1 quarantine', async () => {
     const evidenceDir = join(process.cwd(), 'tmp-rehearsal-validator-recovery-observe-test');
     const target = 'tmp-rehearsal-validator-recovery-observe-test/completed-testnet-rehearsal.md';
     const assemblyReportTarget = 'tmp-rehearsal-validator-recovery-observe-test/completed-assembly-report.json';
@@ -2438,6 +2449,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingRecoveryObserve.status).toBe(1);
       expect(missingRecoveryObserve.stdout).toContain(
         '--recovery-observe-json is required when Failed broadcast / phantom AVL evidence is pass',
@@ -2464,6 +2476,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(wrongRecoveryObserve.status).toBe(1);
       expect(wrongRecoveryObserve.stdout).toContain(
         '--recovery-observe-json target must match linked Failed broadcast / phantom AVL evidence recovery observe JSON report',
@@ -2494,6 +2507,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(invalidRecoveryObserve.status).toBe(1);
       expect(invalidRecoveryObserve.stdout).toContain('recovery-observe: JSON report status must be PASS');
 
@@ -2522,13 +2536,14 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expectLegacyV1LivePreflightQuarantine(validRecoveryObserve);
     } finally {
       rmSync(evidenceDir, { recursive: true, force: true });
     }
   }, REHEARSAL_PROCESS_TEST_TIMEOUT_MS);
 
-  it('validates linked assembly report JSON before reporting the legacy V1 quarantine', () => {
+  it('validates linked assembly report JSON before reporting the legacy V1 quarantine', async () => {
     const evidenceDir = join(process.cwd(), 'tmp-rehearsal-validator-assembly-report-test');
     const target = 'tmp-rehearsal-validator-assembly-report-test/completed-testnet-rehearsal.md';
     const assemblyReportTarget = 'tmp-rehearsal-validator-assembly-report-test/completed-assembly-report.json';
@@ -2580,6 +2595,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingAssemblyReport.status).toBe(1);
       expect(missingAssemblyReport.stdout).toContain(
         '--assembly-report-json is required when Rehearsal Assembly Evidence is present',
@@ -2612,6 +2628,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(mismatchedAssemblyReport.status).toBe(1);
       expect(mismatchedAssemblyReport.stdout).toContain(
         'assembly report JSON targetBindings.postSubmitObserveJson must match Post-submit observe JSON report',
@@ -2646,6 +2663,7 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingStructuredAssemblyValidation.status).toBe(1);
       expect(missingStructuredAssemblyValidation.stdout).toContain(
         'assembly: rehearsalValidation object is required',
@@ -2680,13 +2698,14 @@ describe('rehearsal evidence validation', () => {
         ],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expectLegacyV1LivePreflightQuarantine(validAssemblyReport);
     } finally {
       rmSync(evidenceDir, { recursive: true, force: true });
     }
   }, REHEARSAL_PROCESS_TEST_TIMEOUT_MS);
 
-  it('validates linked fresh checkpoint JSON before reporting the legacy V1 quarantine', () => {
+  it('validates linked fresh checkpoint JSON before reporting the legacy V1 quarantine', async () => {
     const evidenceDir = join(process.cwd(), 'tmp-rehearsal-validator-fresh-checkpoint-test');
     const target = 'tmp-rehearsal-validator-fresh-checkpoint-test/completed-testnet-rehearsal.md';
     const assemblyReportTarget = 'tmp-rehearsal-validator-fresh-checkpoint-test/completed-assembly-report.json';
@@ -2756,6 +2775,7 @@ describe('rehearsal evidence validation', () => {
         [...baseArgs, target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(missingFreshCheckpoint.status).toBe(1);
       expect(missingFreshCheckpoint.stdout).toContain(
         '--fresh-checkpoint-json is required when Rehearsal Assembly Evidence includes a fresh checkpoint',
@@ -2766,6 +2786,7 @@ describe('rehearsal evidence validation', () => {
         [...baseArgs, '--fresh-checkpoint-json', otherFreshCheckpointTarget, target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(wrongFreshCheckpoint.status).toBe(1);
       expect(wrongFreshCheckpoint.stdout).toContain('--fresh-checkpoint-json target must match Fresh checkpoint source target');
 
@@ -2780,6 +2801,7 @@ describe('rehearsal evidence validation', () => {
         [...baseArgs, '--fresh-checkpoint-json', freshCheckpointTarget, target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expect(invalidFreshCheckpoint.status).toBe(1);
       expect(invalidFreshCheckpoint.stdout).toContain('freshCheckpoint: checkpoint.transactionCheckResult must be PASS');
       expect(invalidFreshCheckpoint.stdout).toContain('freshCheckpoint: checkpoint.broadcast must be no');
@@ -2790,6 +2812,7 @@ describe('rehearsal evidence validation', () => {
         [...baseArgs, '--fresh-checkpoint-json', freshCheckpointTarget, target],
         { cwd: process.cwd(), encoding: 'utf8' },
       );
+      await yieldToTestWorker();
       expectLegacyV1LivePreflightQuarantine(validFreshCheckpoint);
     } finally {
       rmSync(evidenceDir, { recursive: true, force: true });
