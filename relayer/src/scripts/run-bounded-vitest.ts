@@ -8,11 +8,18 @@ const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'
   ? 15_000
   : 5_000;
 interface ShardedTestTarget {
-  envName: 'RELEASE_GATE_TEST_SHARD' | 'RELEASE_NOTES_TEST_SHARD';
+  envName:
+    | 'ISOLATED_DEVNET_LAUNCH_TEST_SHARD'
+    | 'RELEASE_GATE_TEST_SHARD'
+    | 'RELEASE_NOTES_TEST_SHARD';
   shardCount: number;
 }
 
 const SHARDED_TEST_TARGETS = new Map<string, ShardedTestTarget>([
+  [
+    'src/substrate-federated-isolated-devnet-launch-v1.test.ts',
+    { envName: 'ISOLATED_DEVNET_LAUNCH_TEST_SHARD', shardCount: 16 },
+  ],
   [
     'src/release-gate.test.ts',
     { envName: 'RELEASE_GATE_TEST_SHARD', shardCount: 64 },

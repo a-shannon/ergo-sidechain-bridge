@@ -22,6 +22,10 @@ import { dirname, join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+function yieldToTestWorker(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 import {
   buildSubstrateFederatedCheckpointProfileV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
@@ -192,6 +196,7 @@ describe('Substrate federated greenfield portable replay V1', () => {
       async () => {
         const compiledTracker =
           await compileSubstrateFederatedTrackerWithPinnedJvmV1(trackerRequest);
+        await yieldToTestWorker();
         const compiledFamily =
           await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
             trackerRequest,
@@ -201,6 +206,7 @@ describe('Substrate federated greenfield portable replay V1', () => {
               fixture.duplicatePrevention.boxId,
             pooledReserveGenesisInputBoxIdHex: fixture.pooledReserve.boxId,
           });
+        await yieldToTestWorker();
         return [compiledTracker, compiledFamily] as const;
       },
     );
@@ -266,9 +272,11 @@ describe('Substrate federated greenfield portable replay V1', () => {
     }
   });
 
-  it('rebuilds the exact authenticated launch and provisioning identities in fresh processes', () => {
+  it('rebuilds the exact authenticated launch and provisioning identities in fresh processes', async () => {
     const first = runCli(requestPath(bundleRoot));
+    await yieldToTestWorker();
     const second = runCli(requestPath(bundleRoot));
+    await yieldToTestWorker();
     expect(first.status).toBe(0);
     expect(second.status).toBe(0);
     expect(first.stderr).toBe('');
@@ -362,32 +370,34 @@ describe('Substrate federated greenfield portable replay V1', () => {
     });
   }, 180_000);
 
-  it('rejects a valid self-signed packet when either explicit trust pin differs', () => {
+  it('rejects a valid self-signed packet when either explicit trust pin differs', async () => {
     for (const pins of [
       trustPins({ expectedTargetDescriptorDigestHex: 'aa'.repeat(32) }),
       trustPins({ expectedSourceAttestationKeySetDigestHex: 'bb'.repeat(32) }),
     ]) {
       const result = runCli(requestPath(bundleRoot), pins);
+      await yieldToTestWorker();
       expect(result.status).toBe(1);
       expect(result.stdout).toBe('');
       expect(result.stderr).toBe('portable greenfield replay failed\n');
     }
   });
 
-  it('rejects one raw artifact drift under the original signed statement', () => {
+  it('rejects one raw artifact drift under the original signed statement', async () => {
     const target = copyBundle('raw-drift');
     writeFileSync(
       join(target, FILES.relayerBuildArtifact),
       Buffer.from('relayer-build-artifact-drift', 'ascii'),
     );
     const result = runCli(requestPath(target));
+    await yieldToTestWorker();
     expect(result.status).toBe(1);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('portable greenfield replay failed\n');
     expect(result.stderr).not.toContain(target);
   }, 120_000);
 
-  it('rejects a quorum-signed history containing an inconsistent genesis box body', () => {
+  it('rejects a quorum-signed history containing an inconsistent genesis box body', async () => {
     const target = copyBundle('bad-genesis-box');
     const manifest = JSON.parse(
       rawArtifacts[FILES.ergoUtxoTransitionsManifest]!.toString('utf8'),
@@ -405,6 +415,7 @@ describe('Substrate federated greenfield portable replay V1', () => {
       signatures: signStatement(changedStatement),
     });
     const result = runCli(requestPath(target));
+    await yieldToTestWorker();
     expect(result.status).toBe(1);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('portable greenfield replay failed\n');

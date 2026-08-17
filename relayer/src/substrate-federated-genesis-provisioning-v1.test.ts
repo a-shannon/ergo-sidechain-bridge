@@ -7,6 +7,10 @@ import { fileURLToPath } from 'node:url';
 
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
+function yieldToTestWorker(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
 const provenance = vi.hoisted(() => ({
   reviews: new WeakSet<object>(),
   replayPackets: new WeakSet<object>(),
@@ -269,6 +273,7 @@ describe('Substrate federated genesis provisioning V1', () => {
       const trackerRequest = buildTrackerRequest(fixture.tracker.boxId);
       const trackerReceipt =
         await compileSubstrateFederatedTrackerWithPinnedJvmV1(trackerRequest);
+      await yieldToTestWorker();
       const familyReceipt =
         await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
           trackerRequest,
@@ -278,6 +283,7 @@ describe('Substrate federated genesis provisioning V1', () => {
             fixture.duplicatePrevention.boxId,
           pooledReserveGenesisInputBoxIdHex: fixture.pooledReserve.boxId,
         });
+      await yieldToTestWorker();
       siblingTrackerRequest = buildTrackerRequest(
         fixture.tracker.boxId,
         {
@@ -291,6 +297,7 @@ describe('Substrate federated genesis provisioning V1', () => {
         await compileSubstrateFederatedTrackerWithPinnedJvmV1(
           siblingTrackerRequest,
         );
+      await yieldToTestWorker();
       siblingFamilyReceipt =
         await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
           trackerRequest: siblingTrackerRequest,
@@ -300,6 +307,7 @@ describe('Substrate federated genesis provisioning V1', () => {
             fixture.duplicatePrevention.boxId,
           pooledReserveGenesisInputBoxIdHex: fixture.pooledReserve.boxId,
         });
+      await yieldToTestWorker();
       baseline = {
         targetProfile: observed.targetProfile,
         observation: observed.observation,
@@ -315,12 +323,14 @@ describe('Substrate federated genesis provisioning V1', () => {
         templates,
         generationManifest,
       );
+      await yieldToTestWorker();
       dustChangeInput = await compileProvisioningInput(
         dustChangeFixture,
         dustChangeObservation,
         templates,
         generationManifest,
       );
+      await yieldToTestWorker();
       plan = await buildSubstrateFederatedGenesisProvisioningV1(baseline);
       setupCheckRequest =
         buildSubstrateFederatedGenesisSetupCheckRequestV1(plan);

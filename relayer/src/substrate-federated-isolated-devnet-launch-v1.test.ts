@@ -15,8 +15,80 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it as vitestIt, vi } from 'vitest';
 import { Mnemonic } from 'ethers';
+
+interface IsolatedDevnetLaunchTestShard {
+  readonly index: number;
+  readonly count: number;
+}
+
+const isolatedDevnetLaunchTestShard = parseIsolatedDevnetLaunchTestShard(
+  process.env.ISOLATED_DEVNET_LAUNCH_TEST_SHARD,
+);
+let isolatedDevnetLaunchTestOrdinal = 0;
+
+function parseIsolatedDevnetLaunchTestShard(
+  raw: string | undefined,
+): IsolatedDevnetLaunchTestShard | undefined {
+  if (!raw) return undefined;
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(raw);
+  if (!match) {
+    throw new Error(
+      `ISOLATED_DEVNET_LAUNCH_TEST_SHARD must use <index>/<count>; got ${raw}`,
+    );
+  }
+  const index = Number(match[1]);
+  const count = Number(match[2]);
+  if (index > count) {
+    throw new Error(
+      `ISOLATED_DEVNET_LAUNCH_TEST_SHARD index must be <= count; got ${raw}`,
+    );
+  }
+  return { index, count };
+}
+
+function shouldRunIsolatedDevnetLaunchTest(): boolean {
+  const ordinal = isolatedDevnetLaunchTestOrdinal;
+  isolatedDevnetLaunchTestOrdinal += 1;
+  if (!isolatedDevnetLaunchTestShard) return true;
+  return ordinal % isolatedDevnetLaunchTestShard.count
+    === isolatedDevnetLaunchTestShard.index - 1;
+}
+
+function isolatedDevnetLaunchIt(
+  ...args: Parameters<typeof vitestIt>
+): ReturnType<typeof vitestIt> {
+  const target = shouldRunIsolatedDevnetLaunchTest() ? vitestIt : vitestIt.skip;
+  return target(...args);
+}
+
+type IsolatedDevnetLaunchEachRunner = (
+  name: string | Function,
+  fn: (...args: any[]) => unknown,
+  options?: Parameters<typeof vitestIt>[2],
+) => void;
+
+function isolatedDevnetLaunchItEach(
+  cases: Parameters<typeof vitestIt.each>[0],
+): IsolatedDevnetLaunchEachRunner {
+  return (name, fn, options): void => {
+    for (const testCase of cases as unknown as readonly unknown[]) {
+      const target = shouldRunIsolatedDevnetLaunchTest()
+        ? vitestIt
+        : vitestIt.skip;
+      const each = target.each([
+        testCase,
+      ] as unknown as Parameters<typeof vitestIt.each>[0]) as unknown as
+        IsolatedDevnetLaunchEachRunner;
+      each(name, fn, options);
+    }
+  };
+}
+
+const it = Object.assign(isolatedDevnetLaunchIt, vitestIt, {
+  each: isolatedDevnetLaunchItEach,
+}) as typeof vitestIt;
 
 import {
   getDupTreeDigest,
