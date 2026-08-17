@@ -223,9 +223,13 @@ function ports(
         sourceBoxUnspent: true,
         targetGenesisHeaderIdHex: GENESIS_HEADER_ID,
         observedAtHeight: phase === 'post-check' ? 720 : 721,
+        observedTipHeaderIdHex: '91'.repeat(32),
+        sourceBoxDigestHex: '92'.repeat(32),
+        sourceBoxSigmaSerializedSha256Hex: '93'.repeat(32),
         observationDigestHex: phase === 'post-check'
           ? POST_CHECK_DIGEST
           : PRE_TRANSPORT_DIGEST,
+        revalidationArtifact: Object.freeze({ phase }),
       }),
     },
     broadcastAuthorizer: {

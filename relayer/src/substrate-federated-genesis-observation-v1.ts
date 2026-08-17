@@ -450,6 +450,25 @@ export async function revalidateSubstrateFederatedGenesisBoxObservationV1(
   return revalidated;
 }
 
+export async function validateSubstrateFederatedGenesisBoxPairV1(
+  rawBox: unknown,
+  rawSigmaSerializedHex: unknown,
+  expectedBoxIdHex: string,
+  expectedRole: SubstrateFederatedGenesisRole,
+  tipHeight: number,
+): Promise<Readonly<SubstrateFederatedGenesisBoxObservationV1>> {
+  return validateGenesisBoxPair(
+    rawBox,
+    rawSigmaSerializedHex,
+    fixedHex(expectedBoxIdHex, 32, `${expectedRole} expected genesis box ID`),
+    expectedRole,
+    nonnegativeSafeInteger(
+      tipHeight,
+      `${expectedRole} observed tip height`,
+    ),
+  );
+}
+
 function settledSourceObservation(
   result: PromiseSettledResult<SourceObservation>,
 ): SourceObservation {

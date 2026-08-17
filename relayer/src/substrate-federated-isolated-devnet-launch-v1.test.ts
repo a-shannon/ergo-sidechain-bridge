@@ -346,6 +346,7 @@ import {
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
@@ -1621,6 +1622,18 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       expect(executionBatch.receipt).not.toBe(receipt);
       expect(executionBatch.targetBinding)
         .toEqual(mocks.executionTargetBinding);
+      expect(
+        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+          executionBatch,
+          mocks.executionTarget,
+        ),
+      ).toEqual(mocks.executionTargetBinding);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+          structuredClone(executionBatch),
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact process provenance/);
       expect(executionBatch.orderedTransactions.map(transaction =>
         transaction.issuance.role
       )).toEqual([

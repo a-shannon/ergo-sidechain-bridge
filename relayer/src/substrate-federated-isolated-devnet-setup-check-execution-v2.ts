@@ -61,6 +61,13 @@ const DECLARED_IDENTITY_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FIXED_SETUP_CHECK_DECLARATION_V2';
 const OBSERVATION_ATTEMPTS = 40;
 const OBSERVATION_RETRY_MS = 250;
+const EXECUTION_BATCHES = new WeakMap<
+  object,
+  Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  }>
+>();
 
 export interface RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input {
   readonly portableReplayInput:
@@ -288,12 +295,42 @@ export function promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
       });
     },
   );
-  return Object.freeze({
+  const batch = Object.freeze({
     receipt,
     request: input.request,
     targetBinding: after,
     orderedTransactions: Object.freeze(orderedTransactions),
   });
+  EXECUTION_BATCHES.set(batch, Object.freeze({
+    target: input.target,
+    binding: after,
+  }));
+  return batch;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const material = EXECUTION_BATCHES.get(batch);
+  if (material === undefined || material.target !== target) {
+    throw new Error('isolated setup execution batch lacks exact process provenance');
+  }
+  const current =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (
+    current.processBindingDigestHex !== material.binding.processBindingDigestHex
+    || current.executionTargetIdentityDigestHex
+      !== material.binding.executionTargetIdentityDigestHex
+    || batch.targetBinding.processBindingDigestHex
+      !== current.processBindingDigestHex
+    || batch.targetBinding.executionTargetIdentityDigestHex
+      !== current.executionTargetIdentityDigestHex
+    || batch.orderedTransactions.length !== 3
+  ) {
+    throw new Error('isolated setup execution batch process binding changed');
+  }
+  return current;
 }
 
 function assertExecutionTargetMatchesOrigins(

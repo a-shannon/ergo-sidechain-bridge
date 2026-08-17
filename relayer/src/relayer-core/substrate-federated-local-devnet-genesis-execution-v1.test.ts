@@ -27,6 +27,9 @@ const JOURNAL_DIGEST = hex('0c');
 const CONFIRMATION_DIGEST = hex('0d');
 const CONFIRMATION_HEADER_ID = hex('0e');
 const RECONCILIATION_IDENTITY = hex('0f');
+const REVALIDATED_TIP_HEADER_ID = hex('10');
+const REVALIDATED_SOURCE_BOX_DIGEST = hex('11');
+const REVALIDATED_SOURCE_BOX_SIGMA_DIGEST = hex('12');
 const OBSERVER_ARTIFACT = Object.freeze({ role: 'confirmation-observer' });
 
 function input(
@@ -146,9 +149,14 @@ function fixture(options: FixtureOptions = {}) {
           sourceBoxUnspent: true as const,
           targetGenesisHeaderIdHex: GENESIS_HEADER_ID,
           observedAtHeight: phase === 'post-check' ? 720 : 721,
+          observedTipHeaderIdHex: REVALIDATED_TIP_HEADER_ID,
+          sourceBoxDigestHex: REVALIDATED_SOURCE_BOX_DIGEST,
+          sourceBoxSigmaSerializedSha256Hex:
+            REVALIDATED_SOURCE_BOX_SIGMA_DIGEST,
           observationDigestHex: phase === 'post-check'
             ? POST_CHECK_DIGEST
             : PRE_TRANSPORT_DIGEST,
+          revalidationArtifact: Object.freeze({ phase }),
         };
       }),
     },
@@ -403,12 +411,35 @@ describe('substrate federated local-devnet genesis execution V1', () => {
       sourceBoxUnspent: true,
       targetGenesisHeaderIdHex: GENESIS_HEADER_ID,
       observedAtHeight: 720,
+      observedTipHeaderIdHex: REVALIDATED_TIP_HEADER_ID,
+      sourceBoxDigestHex: REVALIDATED_SOURCE_BOX_DIGEST,
+      sourceBoxSigmaSerializedSha256Hex:
+        REVALIDATED_SOURCE_BOX_SIGMA_DIGEST,
       observationDigestHex: POST_CHECK_DIGEST,
+      revalidationArtifact: Object.freeze({ phase: 'changed-source' }),
     });
     await expect(executeSubstrateFederatedLocalDevnetGenesisV1(
       input(),
       changedSource.ports,
     )).rejects.toThrow(/changed the admitted source or target/);
+
+    const missingArtifact = fixture();
+    vi.mocked(missingArtifact.ports.revalidator.revalidate)
+      .mockResolvedValue({
+        sourceBoxId: SOURCE_BOX_ID,
+        sourceBoxUnspent: true,
+        targetGenesisHeaderIdHex: GENESIS_HEADER_ID,
+        observedAtHeight: 720,
+        observedTipHeaderIdHex: REVALIDATED_TIP_HEADER_ID,
+        sourceBoxDigestHex: REVALIDATED_SOURCE_BOX_DIGEST,
+        sourceBoxSigmaSerializedSha256Hex:
+          REVALIDATED_SOURCE_BOX_SIGMA_DIGEST,
+        observationDigestHex: POST_CHECK_DIGEST,
+      } as any);
+    await expect(executeSubstrateFederatedLocalDevnetGenesisV1(
+      input(),
+      missingArtifact.ports,
+    )).rejects.toThrow(/revalidation artifact/);
 
     const shallow = fixture({
       confirmation: {

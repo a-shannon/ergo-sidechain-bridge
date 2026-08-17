@@ -637,9 +637,13 @@ describe('separate authenticated check signer and checker capabilities', () => {
           sourceBoxUnspent: true,
           targetGenesisHeaderIdHex: genesisHeaderId,
           observedAtHeight: phase === 'post-check' ? 100 : 101,
+          observedTipHeaderIdHex: '90'.repeat(32),
+          sourceBoxDigestHex: '91'.repeat(32),
+          sourceBoxSigmaSerializedSha256Hex: '95'.repeat(32),
           observationDigestHex: phase === 'post-check'
             ? '92'.repeat(32)
             : '93'.repeat(32),
+          revalidationArtifact: Object.freeze({ phase }),
         }),
       },
       broadcastAuthorizer: {

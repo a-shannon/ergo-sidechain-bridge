@@ -76,7 +76,11 @@ export interface SubstrateFederatedLocalDevnetGenesisRevalidation {
   readonly sourceBoxUnspent: true;
   readonly targetGenesisHeaderIdHex: string;
   readonly observedAtHeight: number;
+  readonly observedTipHeaderIdHex: string;
+  readonly sourceBoxDigestHex: string;
+  readonly sourceBoxSigmaSerializedSha256Hex: string;
   readonly observationDigestHex: string;
+  readonly revalidationArtifact: object;
 }
 
 export interface SubstrateFederatedLocalDevnetGenesisRevalidatedCandidate {
@@ -648,9 +652,25 @@ function normalizeRevalidation(
       value.observedAtHeight,
       'genesis revalidation height',
     ),
+    observedTipHeaderIdHex: fixedHex32(
+      value.observedTipHeaderIdHex,
+      'genesis revalidation tip header ID',
+    ),
+    sourceBoxDigestHex: fixedHex32(
+      value.sourceBoxDigestHex,
+      'genesis revalidation source-box digest',
+    ),
+    sourceBoxSigmaSerializedSha256Hex: fixedHex32(
+      value.sourceBoxSigmaSerializedSha256Hex,
+      'genesis revalidation source-box Sigma digest',
+    ),
     observationDigestHex: fixedHex32(
       value.observationDigestHex,
       'genesis revalidation digest',
+    ),
+    revalidationArtifact: opaqueArtifact(
+      value.revalidationArtifact,
+      'genesis revalidation artifact',
     ),
   });
 }
