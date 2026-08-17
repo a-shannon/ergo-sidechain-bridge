@@ -19,7 +19,7 @@ const SHARDED_TEST_TARGETS = new Map<string, ShardedTestTarget>([
   ],
   [
     'src/release-notes-evidence.test.ts',
-    { envName: 'RELEASE_NOTES_TEST_SHARD', shardCount: 4 },
+    { envName: 'RELEASE_NOTES_TEST_SHARD', shardCount: 8 },
   ],
 ]);
 const ISOLATED_TEST_TARGETS = new Set([
