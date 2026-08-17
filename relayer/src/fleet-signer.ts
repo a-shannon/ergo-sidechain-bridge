@@ -165,6 +165,11 @@ export interface LocalWasmCheckedSubmissionAcceptanceV1 {
   readonly submissionHandle: Readonly<LocalWasmCheckedSubmissionHandleV1>;
 }
 
+export interface LocalWasmSubmissionExecutionBindingV1 {
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+}
+
 interface LocalWasmSignedCheckMaterial {
   readonly signedTx: Readonly<Record<string, unknown>>;
   readonly signedTransactionBytesHex: string;
@@ -173,12 +178,18 @@ interface LocalWasmSignedCheckMaterial {
 const LOCAL_WASM_SIGNED_CHECK_CANDIDATES = new WeakSet<object>();
 const LOCAL_WASM_SIGNED_CHECK_MATERIAL =
   new WeakMap<object, LocalWasmSignedCheckMaterial>();
+const LOCAL_WASM_CHECK_RESULTS = new WeakMap<
+  object,
+  LocalWasmExactBytesSignedCheckCandidate
+>();
+const LOCAL_WASM_PROMOTED_SUBMISSION_CANDIDATES = new WeakSet<object>();
 const LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
 const LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL = new WeakMap<
   object,
   Readonly<{
     signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
     checkResponseDigestHex: string;
+    executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>;
   }>
 >();
 const CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
@@ -879,7 +890,7 @@ export async function checkSignedTransaction(
       result,
     );
     if (!interpreted) return null;
-    return {
+    const checked = Object.freeze({
       txId: interpreted.txId,
       checkResult: interpreted.checkResult,
       signedTransactionDigestHex: candidate.signedTransactionDigestHex,
@@ -895,7 +906,12 @@ export async function checkSignedTransaction(
         method: 'POST',
         transportPolicy: 'no-redirect-no-proxy',
       }),
-    };
+    });
+    LOCAL_WASM_CHECK_RESULTS.set(
+      checked,
+      candidate as LocalWasmExactBytesSignedCheckCandidate,
+    );
+    return checked;
   } catch (err: any) {
     console.error(`   ${label} check failed: ${sanitizeSignerErrorText(err.message || err)}`);
     if (err.stack) {
@@ -993,9 +1009,34 @@ export async function checkSignedTransactionForSubmissionV1(
   candidate: LocalWasmExactBytesSignedCheckCandidate,
   label: string,
   nodeOrigin: string,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
 ): Promise<Readonly<LocalWasmCheckedSubmissionAcceptanceV1> | null> {
   const checked = await checkSignedTransaction(candidate, label, nodeOrigin);
   if (checked === null) return null;
+  return promoteLocalWasmCheckedTransactionForSubmissionV1(
+    candidate,
+    checked,
+    executionBinding,
+  );
+}
+
+/**
+ * Mint one submission handle from the exact process-local result of an already
+ * completed node check. A copied or caller-authored check receipt is rejected.
+ */
+export function promoteLocalWasmCheckedTransactionForSubmissionV1(
+  candidate: LocalWasmExactBytesSignedCheckCandidate,
+  checked: Readonly<LocalWasmOpaqueCheckResult>,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): Readonly<LocalWasmCheckedSubmissionAcceptanceV1> {
+  assertLocalWasmSignedCheckCandidateProvenance(candidate);
+  if (LOCAL_WASM_CHECK_RESULTS.get(checked) !== candidate) {
+    throw new Error('checked submission result lacks exact process provenance');
+  }
+  if (LOCAL_WASM_PROMOTED_SUBMISSION_CANDIDATES.has(candidate)) {
+    LOCAL_WASM_CHECK_RESULTS.delete(checked);
+    throw new Error('signed submission candidate is already promoted');
+  }
   if (
     checked.signedTransactionBytesSha256Hex
       !== candidate.signedTransactionBytesSha256Hex
@@ -1004,13 +1045,18 @@ export async function checkSignedTransactionForSubmissionV1(
   ) {
     throw new Error('checked submission bytes differ from the signed candidate');
   }
-  const frozenChecked = Object.freeze({ ...checked });
+  const frozenChecked = checked;
   const checkResponseDigestHex = digestCheckedSubmissionResponseV1(
     frozenChecked,
   );
   if (candidate.nodeOrigin !== frozenChecked.checkerIdentity.nodeOrigin) {
     throw new Error('checked submission origin differs from its signed context');
   }
+  const frozenExecutionBinding = snapshotSubmissionExecutionBindingV1(
+    executionBinding,
+  );
+  LOCAL_WASM_CHECK_RESULTS.delete(checked);
+  LOCAL_WASM_PROMOTED_SUBMISSION_CANDIDATES.add(candidate);
   const submissionHandle = Object.freeze({
     profile: LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE,
     txId: candidate.txId,
@@ -1026,6 +1072,7 @@ export async function checkSignedTransactionForSubmissionV1(
   LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.set(submissionHandle, Object.freeze({
     signedCandidate: candidate,
     checkResponseDigestHex,
+    executionBinding: frozenExecutionBinding,
   }));
   return Object.freeze({
     checked: frozenChecked,
@@ -1077,6 +1124,24 @@ export function assertLocalWasmCheckedSubmissionHandleV1Provenance(
   }
 }
 
+export function assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+  handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): void {
+  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+  const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  const expected = snapshotSubmissionExecutionBindingV1(executionBinding);
+  if (
+    material === undefined
+    || material.executionBinding.processBindingDigestHex
+      !== expected.processBindingDigestHex
+    || material.executionBinding.executionTargetIdentityDigestHex
+      !== expected.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('checked submission handle execution binding changed');
+  }
+}
+
 /**
  * Give the exact signed object to one reviewed transport callback, once.
  * Callers cannot recover the object from the handle or invoke the callback a
@@ -1110,6 +1175,25 @@ function requireLocalWasmSignedCheckMaterial(
     throw new Error('local WASM signed check material is unavailable');
   }
   return material;
+}
+
+function snapshotSubmissionExecutionBindingV1(
+  value: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): Readonly<LocalWasmSubmissionExecutionBindingV1> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Object.keys(value).sort().join(',')
+      !== 'executionTargetIdentityDigestHex,processBindingDigestHex'
+    || !/^[0-9a-f]{64}$/u.test(value.processBindingDigestHex)
+    || !/^[0-9a-f]{64}$/u.test(value.executionTargetIdentityDigestHex)
+  ) {
+    throw new Error('checked submission execution binding is invalid');
+  }
+  return Object.freeze({
+    processBindingDigestHex: value.processBindingDigestHex,
+    executionTargetIdentityDigestHex: value.executionTargetIdentityDigestHex,
+  });
 }
 
 function snapshotSignedCheckTransaction(

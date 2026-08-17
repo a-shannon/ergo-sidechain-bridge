@@ -88,9 +88,14 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeSessionV1 {
   readonly stop: () => Promise<void>;
 }
 
+type SubstrateFederatedIsolatedDevnetSetupCheckOnlySessionV2 = Pick<
+  SubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
+  'signer' | 'dispose' | 'run'
+>;
+
 export interface SubstrateFederatedIsolatedDevnetBootstrapLifecycleV1Ports {
   readonly createSetupSession: () => Promise<
-    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckOnlySessionV2>
   >;
   readonly createPacketSession: (
     signer: Readonly<
@@ -151,7 +156,7 @@ export async function runSubstrateFederatedIsolatedDevnetBootstrapLifecycleV1(
   ports: Readonly<SubstrateFederatedIsolatedDevnetBootstrapLifecycleV1Ports>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetBootstrapLifecycleV1>> {
   let setupSession:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckOnlySessionV2> | undefined;
   let packetSession:
     Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1> | undefined;
   let nodeSession:

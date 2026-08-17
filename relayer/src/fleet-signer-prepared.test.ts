@@ -178,6 +178,7 @@ import {
   prepareLocalWasmCheckSigner,
   prepareLocalWasmRootCheckCandidates,
   prepareLocalWasmRootCheckSigner,
+  promoteLocalWasmCheckedTransactionForSubmissionV1,
   signTransactionForCheck,
   type LocalWasmExactBytesSignedCheckCandidate,
 } from './fleet-signer.js';
@@ -191,6 +192,14 @@ import {
 
 const firstTxId = 'aa'.repeat(32);
 const secondTxId = 'bb'.repeat(32);
+
+function currentExecutionBinding() {
+  return Object.freeze({
+    processBindingDigestHex: executionProcessMock.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      executionProcessMock.reconciliationIdentityDigestHex,
+  });
+}
 
 function headers(): Array<Record<string, unknown>> {
   const idAt = (height: number) => height.toString(16).padStart(64, '0');
@@ -461,6 +470,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
       signed!,
       'Federated setup',
       'http://127.0.0.1:9052',
+      currentExecutionBinding(),
     );
     expect(accepted).not.toBeNull();
     expect(accepted?.submissionHandle).toMatchObject({
@@ -512,18 +522,39 @@ describe('separate authenticated check signer and checker capabilities', () => {
       'http://127.0.0.1:9052',
     );
     expect(checkedOnly).not.toBeNull();
+    const checksBeforePromotion = nodeMock.ncheck.mock.calls.length;
     expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance(
       checkedOnly,
     )).toThrow(/provenance is missing/);
 
-    const accepted = await checkSignedTransactionForSubmissionV1(
+    const promoted = promoteLocalWasmCheckedTransactionForSubmissionV1(
+      signed!,
+      checkedOnly!,
+      currentExecutionBinding(),
+    );
+    expect(nodeMock.ncheck).toHaveBeenCalledTimes(checksBeforePromotion);
+    expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance(
+      promoted.submissionHandle,
+    )).not.toThrow();
+    expect(() => promoteLocalWasmCheckedTransactionForSubmissionV1(
+      signed!,
+      checkedOnly!,
+      currentExecutionBinding(),
+    )).toThrow(/lacks exact process provenance/);
+    expect(() => promoteLocalWasmCheckedTransactionForSubmissionV1(
+      signed!,
+      { ...checkedOnly! },
+      currentExecutionBinding(),
+    )).toThrow(/lacks exact process provenance/);
+
+    await expect(checkSignedTransactionForSubmissionV1(
       signed!,
       'Federated setup',
       'http://127.0.0.1:9052',
-    );
-    expect(accepted).not.toBeNull();
+      currentExecutionBinding(),
+    )).rejects.toThrow(/already promoted/);
     expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance({
-      ...accepted!.submissionHandle,
+      ...promoted.submissionHandle,
     })).toThrow(/provenance is missing/);
   });
 
@@ -548,6 +579,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
       signedFirst!,
       'Tracker setup',
       'http://127.0.0.1:9052',
+      currentExecutionBinding(),
     );
     expect(accepted).not.toBeNull();
     const consume = vi.fn(async () => 'unexpected');
@@ -589,6 +621,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
             signed.signerArtifact as LocalWasmExactBytesSignedCheckCandidate,
             'FED-6-LAB tracker setup',
             signed.admission.nodeOrigin,
+            currentExecutionBinding(),
           );
           if (!accepted) return null;
           return {

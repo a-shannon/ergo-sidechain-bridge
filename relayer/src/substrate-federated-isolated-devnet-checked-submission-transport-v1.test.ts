@@ -38,6 +38,8 @@ const boundary = vi.hoisted(() => {
     nodeOrigin,
     signedCandidate,
     checkedHandle,
+    handleProcessBindingDigestHex: '11'.repeat(32),
+    handleExecutionTargetIdentityDigestHex: '10'.repeat(32),
     signedTransaction: Object.freeze({ id: expectedTxId, proofs: ['opaque'] }),
     consumed: false,
     consume: vi.fn(),
@@ -70,6 +72,23 @@ vi.mock('./fleet-signer.js', () => ({
   assertLocalWasmCheckedSubmissionHandleV1Provenance: (value: unknown) => {
     if (value !== boundary.checkedHandle || boundary.consumed) {
       throw new Error('synthetic checked handle provenance is missing');
+    }
+  },
+  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding: (
+    value: unknown,
+    binding: Readonly<{
+      processBindingDigestHex: string;
+      executionTargetIdentityDigestHex: string;
+    }>,
+  ) => {
+    if (
+      value !== boundary.checkedHandle
+      || binding.processBindingDigestHex
+        !== boundary.handleProcessBindingDigestHex
+      || binding.executionTargetIdentityDigestHex
+        !== boundary.handleExecutionTargetIdentityDigestHex
+    ) {
+      throw new Error('synthetic checked handle execution binding changed');
     }
   },
   consumeLocalWasmCheckedSubmissionHandleV1: boundary.consume,
@@ -123,6 +142,8 @@ const JOURNAL_DIGEST = '0c'.repeat(32);
 const CONFIRMATION_DIGEST = '0d'.repeat(32);
 
 beforeEach(() => {
+  processBoundary.processBindingDigestHex = '11'.repeat(32);
+  processBoundary.reconciliationIdentityDigestHex = '10'.repeat(32);
   processBoundary.assertionCount = 0;
   processBoundary.expireAfterAssertion = Number.POSITIVE_INFINITY;
   boundary.consumed = false;
@@ -260,6 +281,22 @@ describe('isolated devnet checked submission transport V1', () => {
     expect(JSON.stringify(node.post.mock.calls[0]?.[2])).not.toMatch(
       /api[_-]?key|authorization|cookie|proxy.*true/i,
     );
+  });
+
+  it('contains a handle checked under a replaced execution process', async () => {
+    processBoundary.processBindingDigestHex = '12'.repeat(32);
+    node.post.mockResolvedValue({
+      status: 200,
+      data: boundary.expectedTxId,
+    });
+
+    await expect(execute()).resolves.toMatchObject({
+      status: 'ambiguous',
+      submittedTxId: null,
+      transportAttempted: true,
+    });
+    expect(boundary.consume).not.toHaveBeenCalled();
+    expect(node.post).not.toHaveBeenCalled();
   });
 
   it('keeps HTTP 400 ambiguous because the exact transaction may already be in mempool', async () => {

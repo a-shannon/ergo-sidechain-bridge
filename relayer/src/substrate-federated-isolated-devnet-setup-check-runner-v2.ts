@@ -5,6 +5,12 @@ import type {
   SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import type {
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import type {
+  SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import type {
   SubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 
@@ -38,6 +44,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>>;
+  readonly runForExecution: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>>;
 }
 
 /**
@@ -63,6 +73,22 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
   }
   let state: 'open' | 'running' | 'closed' = 'open';
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
+  const consume = async <T>(operation: () => Promise<T>): Promise<T> => {
+    if (state !== 'open') {
+      throw new Error(
+        'isolated fixed setup-check session is already consumed or disposed',
+      );
+    }
+    MINING_CREDENTIALS.delete(session);
+    revokeSignerBinding(signer);
+    state = 'running';
+    try {
+      return await operation();
+    } finally {
+      state = 'closed';
+      execution.dispose();
+    }
+  };
   session = Object.freeze({
     signer,
     dispose: () => {
@@ -81,22 +107,11 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     },
     run: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
-    ) => {
-      if (state !== 'open') {
-        throw new Error(
-          'isolated fixed setup-check session is already consumed or disposed',
-        );
-      }
-      MINING_CREDENTIALS.delete(session);
-      revokeSignerBinding(signer);
-      state = 'running';
-      try {
-        return await execution.run(input);
-      } finally {
-        state = 'closed';
-        execution.dispose();
-      }
-    },
+    ) => consume(() => execution.run(input)),
+    runForExecution: async (
+      input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(() => execution.runForExecution(input, target)),
   });
   MINING_CREDENTIALS.set(session, execution.miningCredential);
   return session;

@@ -3,6 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { Mnemonic } from 'ethers';
 
 import {
+  promoteLocalWasmCheckedTransactionForSubmissionV1,
+  type LocalWasmCheckedSubmissionAcceptanceV1,
+  type LocalWasmExactBytesSignedCheckCandidate,
+} from './fleet-signer.js';
+import {
   deriveLocalWasmRootSignerPublicIdentity,
 } from './local-wasm-root-signer-public-identity.js';
 import {
@@ -23,6 +28,11 @@ import {
   buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2,
 } from './substrate-federated-isolated-devnet-local-provisioning-v2.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+  type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
+} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import {
   replaySubstrateFederatedIsolatedDevnetPortableV1,
   takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1,
   type ReplaySubstrateFederatedIsolatedDevnetPortableV1Input,
@@ -32,9 +42,12 @@ import {
 } from './substrate-federated-isolated-devnet-settlement-target-v2.js';
 import {
   buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 import {
   runSubstrateFederatedIsolatedDevnetSetupCheckV2,
+  takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
@@ -75,6 +88,51 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>>;
+  readonly runForExecution: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2 {
+  readonly issuance:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2>;
+  readonly signedCandidate:
+    LocalWasmExactBytesSignedCheckCandidate;
+  readonly checkedAcceptance:
+    Readonly<LocalWasmCheckedSubmissionAcceptanceV1>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 {
+  readonly receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>;
+  readonly request:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>;
+  readonly targetBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  readonly orderedTransactions: readonly Readonly<
+    SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2
+  >[];
+}
+
+interface FixedSetupCheckRunV2 {
+  readonly receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>;
+  readonly executionReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>;
+  readonly request:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetSetupExecutionPromotionV2Input {
+  readonly executionReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>;
+  readonly request:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>;
+  readonly expectedTargetBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  readonly target:
+    Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
 }
 
 /**
@@ -114,6 +172,23 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         identity.publicKeyHex,
       );
     let state: 'open' | 'running' | 'closed' = 'open';
+    const consume = async <T>(operation: (activeMnemonic: string) => Promise<T>) => {
+      if (state !== 'open') {
+        throw new Error(
+          'isolated fixed setup-check session is already consumed or disposed',
+        );
+      }
+      state = 'running';
+      try {
+        return await operation(mnemonic);
+      } finally {
+        revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          miningCredential,
+        );
+        mnemonic = '';
+        state = 'closed';
+      }
+    };
     return Object.freeze({
       signer,
       miningCredential,
@@ -131,23 +206,22 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       },
       run: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
-      ) => {
-        if (state !== 'open') {
-          throw new Error(
-            'isolated fixed setup-check session is already consumed or disposed',
-          );
-        }
-        state = 'running';
-        try {
-          return await runFixedSetupCheck(input, mnemonic);
-        } finally {
-          revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
-            miningCredential,
-          );
-          mnemonic = '';
-          state = 'closed';
-        }
-      },
+      ) => consume(async activeMnemonic =>
+        (await runFixedSetupCheck(input, activeMnemonic)).receipt),
+      runForExecution: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume(async activeMnemonic => {
+        const expectedTargetBinding =
+          assertExecutionTargetMatchesOrigins(target, input);
+        const result = await runFixedSetupCheck(input, activeMnemonic);
+        return promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: result.executionReceipt,
+          request: result.request,
+          expectedTargetBinding,
+          target,
+        });
+      }),
     });
   } catch (error) {
     mnemonic = '';
@@ -155,11 +229,95 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
   }
 }
 
+export function promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+  input: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupExecutionPromotionV2Input
+  >,
+): Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2> {
+  const receipt =
+    validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
+      structuredClone(input.executionReceipt),
+      input.request,
+    );
+  const before = assertExecutionTargetMatchesOrigins(input.target, {
+    primaryNodeOrigin: input.request.target.primary.nodeOrigin,
+    witnessNodeOrigin: input.request.target.witness.nodeOrigin,
+  });
+  if (
+    before.processBindingDigestHex
+      !== input.expectedTargetBinding.processBindingDigestHex
+    || before.executionTargetIdentityDigestHex
+      !== input.expectedTargetBinding.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('isolated setup execution process binding changed');
+  }
+  const material =
+    takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2(
+      input.executionReceipt,
+      input.request,
+      input.target,
+    );
+  const after =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
+  if (
+    before.processBindingDigestHex !== after.processBindingDigestHex
+    || before.executionTargetIdentityDigestHex
+      !== after.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('isolated setup execution process binding changed');
+  }
+  const orderedTransactions = material.orderedTransactions.map(
+    (transaction, index) => {
+      const issuance = input.request.orderedIssuances[index];
+      if (
+        issuance === undefined
+        || issuance.ordinal !== transaction.ordinal
+        || issuance.role !== transaction.role
+      ) {
+        throw new Error('isolated setup execution issuance order changed');
+      }
+      return Object.freeze({
+        issuance,
+        signedCandidate: transaction.signedCandidate,
+        checkedAcceptance:
+          promoteLocalWasmCheckedTransactionForSubmissionV1(
+            transaction.signedCandidate,
+            transaction.checked,
+            after,
+          ),
+      });
+    },
+  );
+  return Object.freeze({
+    receipt,
+    request: input.request,
+    targetBinding: after,
+    orderedTransactions: Object.freeze(orderedTransactions),
+  });
+}
+
+function assertExecutionTargetMatchesOrigins(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  input: Readonly<{ primaryNodeOrigin: string; witnessNodeOrigin: string }>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const binding =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (
+    target.primaryNodeOrigin !== input.primaryNodeOrigin
+    || target.witnessNodeOrigin !== input.witnessNodeOrigin
+    || target.primaryMining !== true
+    || target.witnessReadOnly !== true
+  ) {
+    throw new Error('isolated setup execution target differs from its request');
+  }
+  return binding;
+}
+
 /** Reconstruct G1dA-G1dF and perform G1dG without wider capabilities. */
 async function runFixedSetupCheck(
   input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   mnemonic: string,
-): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>> {
+): Promise<Readonly<FixedSetupCheckRunV2>> {
   const captured = captureInput(input);
   const primaryNodeOrigin = exactOrigin(
     captured.primaryNodeOrigin,
@@ -203,14 +361,15 @@ async function runFixedSetupCheck(
       provisioning,
     );
 
-  const receipt = await runSubstrateFederatedIsolatedDevnetSetupCheckV2(
+  const executionReceipt = await runSubstrateFederatedIsolatedDevnetSetupCheckV2(
     request,
     mnemonic,
   );
-  return validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
-    structuredClone(receipt),
+  const receipt = validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
+    structuredClone(executionReceipt),
     request,
   );
+  return Object.freeze({ receipt, executionReceipt, request });
 }
 
 function buildTargetProfile(

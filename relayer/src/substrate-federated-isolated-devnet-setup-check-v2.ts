@@ -6,6 +6,7 @@ import {
   checkSignedTransaction,
   prepareLocalWasmRootCheckCandidates,
   type LocalWasmExactBytesSignedCheckCandidate,
+  type LocalWasmOpaqueCheckResult,
   type SignedCheckSignerContext,
 } from './fleet-signer.js';
 import {
@@ -19,6 +20,10 @@ import {
 import type {
   SubstrateFederatedGenesisObservationV1,
 } from './substrate-federated-genesis-observation-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV2RuntimeProvenance,
   reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
@@ -48,6 +53,26 @@ const ALLOWED_REWARD_DELAYS = [1, 720] as const;
 
 type SetupRole = typeof REQUIRED_ROLES[number];
 type RewardDelay = typeof ALLOWED_REWARD_DELAYS[number];
+
+export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionTransactionV2 {
+  readonly ordinal: 0 | 1 | 2;
+  readonly role: SetupRole;
+  readonly signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
+  readonly checked: Readonly<LocalWasmOpaqueCheckResult>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2 {
+  readonly request:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>;
+  readonly orderedTransactions: readonly Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionTransactionV2
+  >[];
+}
+
+const SETUP_CHECK_EXECUTION_MATERIAL = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2>
+>();
 
 export interface SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2 {
   readonly schema:
@@ -220,6 +245,8 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
   assertRuntimeFresh(request);
 
   const orderedChecks: SetupCheckReceipt[] = [];
+  const executionTransactions:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionTransactionV2[] = [];
   for (let index = 0; index < request.orderedIssuances.length; index += 1) {
     const issuance = request.orderedIssuances[index]!;
     const prepared = batch.candidates[index]!;
@@ -286,6 +313,12 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
       },
       status: 'PASS' as const,
     }));
+    executionTransactions.push(Object.freeze({
+      ordinal: issuance.ordinal,
+      role: issuance.role,
+      signedCandidate: prepared.signedCandidate,
+      checked,
+    }));
     assertRuntimeFresh(request);
   }
 
@@ -336,10 +369,62 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
     ...body,
     receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
   });
-  return validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
+  const validated = validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
     receipt,
     request,
   );
+  SETUP_CHECK_EXECUTION_MATERIAL.set(validated, Object.freeze({
+    request,
+    orderedTransactions: Object.freeze(executionTransactions),
+  }));
+  return validated;
+}
+
+/**
+ * Consume the exact in-process signer/check material behind one setup receipt.
+ * Serialized or independently revalidated receipts intentionally have no such
+ * material and cannot cross into the execution path.
+ */
+export function takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2(
+  receipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>,
+  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2> {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (
+    target.primaryNodeOrigin !== request.target.primary.nodeOrigin
+    || target.witnessNodeOrigin !== request.target.witness.nodeOrigin
+    || target.primaryMining !== true
+    || target.witnessReadOnly !== true
+  ) {
+    throw new Error('isolated setup-check execution target differs from its request');
+  }
+  const material = SETUP_CHECK_EXECUTION_MATERIAL.get(receipt);
+  if (material === undefined || material.request !== request) {
+    throw new Error(
+      'isolated setup-check execution material lacks exact process provenance',
+    );
+  }
+  if (
+    material.orderedTransactions.length !== REQUIRED_ROLES.length
+    || material.orderedTransactions.some((transaction, index) => {
+      const issuance = request.orderedIssuances[index];
+      const check = receipt.orderedChecks[index];
+      return issuance === undefined
+        || check === undefined
+        || transaction.ordinal !== issuance.ordinal
+        || transaction.ordinal !== check.ordinal
+        || transaction.role !== issuance.role
+        || transaction.role !== check.role
+        || transaction.signedCandidate.txId
+          !== issuance.unsignedTransactionIdHex
+        || transaction.checked.txId !== check.signedTransactionIdHex;
+    })
+  ) {
+    throw new Error('isolated setup-check execution material binding is invalid');
+  }
+  SETUP_CHECK_EXECUTION_MATERIAL.delete(receipt);
+  return material;
 }
 
 export function validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(

@@ -346,6 +346,12 @@ describe('broadcast surface isolation', () => {
       sources,
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
     )).toEqual([transportFile]);
+    expect(filesImporting(
+      sources,
+      'takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2',
+    )).toEqual([
+      'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+    ]);
     expect(transport).toContain(
       'SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN',
     );

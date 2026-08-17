@@ -2,6 +2,7 @@ import axios from 'axios';
 
 import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
 import {
+  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding,
   assertLocalWasmCheckedSubmissionHandleV1Provenance,
   assertLocalWasmSignedCheckCandidateProvenance,
   consumeLocalWasmCheckedSubmissionHandleV1,
@@ -87,6 +88,10 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
       assertLocalWasmCheckedSubmissionHandleV1Provenance(submissionHandle);
       const exactHandle =
         submissionHandle as Readonly<LocalWasmCheckedSubmissionHandleV1>;
+      assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+        exactHandle,
+        binding,
+      );
       assertExactAttemptBinding(
         exactHandle,
         exactSignedCandidate,

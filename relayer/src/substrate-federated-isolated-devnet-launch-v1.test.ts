@@ -132,7 +132,18 @@ const mocks = vi.hoisted(() => ({
   setupCheckNodeIdOverride: undefined as string | undefined,
   prepareSetupCheckBatch: vi.fn(),
   checkSetupTransaction: vi.fn(),
+  promoteSetupTransaction: vi.fn(),
   getSetupCheckHeaders: vi.fn(),
+  executionTarget: Object.freeze({
+    primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+    witnessNodeOrigin: 'http://127.0.0.1:9052' as const,
+    primaryMining: true as const,
+    witnessReadOnly: true as const,
+  }),
+  executionTargetBinding: Object.freeze({
+    processBindingDigestHex: '8a'.repeat(32),
+    executionTargetIdentityDigestHex: '8b'.repeat(32),
+  }),
 }));
 
 vi.mock(
@@ -244,8 +255,23 @@ vi.mock('./fleet-signer.js', async importOriginal => {
     ...actual,
     prepareLocalWasmRootCheckCandidates: mocks.prepareSetupCheckBatch,
     checkSignedTransaction: mocks.checkSetupTransaction,
+    promoteLocalWasmCheckedTransactionForSubmissionV1:
+      mocks.promoteSetupTransaction,
   };
 });
+
+vi.mock(
+  './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1:
+      (value: unknown) => {
+        if (value !== mocks.executionTarget) {
+          throw new Error('synthetic execution target provenance is missing');
+        }
+        return mocks.executionTargetBinding;
+      },
+  }),
+);
 
 import {
   getSubstrateFederatedTrackerDigestV1Hex,
@@ -294,6 +320,7 @@ import {
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 import {
   runSubstrateFederatedIsolatedDevnetSetupCheckV2,
+  takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import {
@@ -318,6 +345,9 @@ import {
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import {
+  promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
@@ -1555,6 +1585,65 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       expect(mocks.checkSetupTransaction).toHaveBeenCalledTimes(3);
       expect(mocks.settlementReobservations).toHaveLength(0);
 
+      expect(() =>
+        takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2(
+          receipt,
+          request,
+          structuredClone(mocks.executionTarget),
+        )
+      ).toThrow(/execution target provenance is missing/);
+      expect(() =>
+        takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2(
+          structuredClone(receipt),
+          request,
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact process provenance/);
+      expect(() =>
+        promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: receipt,
+          request,
+          expectedTargetBinding: {
+            ...mocks.executionTargetBinding,
+            processBindingDigestHex: 'fc'.repeat(32),
+          },
+          target: mocks.executionTarget,
+        })
+      ).toThrow(/process binding changed/);
+      const executionBatch =
+        promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: receipt,
+          request,
+          expectedTargetBinding: mocks.executionTargetBinding,
+          target: mocks.executionTarget,
+        });
+      expect(executionBatch.receipt).toEqual(receipt);
+      expect(executionBatch.receipt).not.toBe(receipt);
+      expect(executionBatch.targetBinding)
+        .toEqual(mocks.executionTargetBinding);
+      expect(executionBatch.orderedTransactions.map(transaction =>
+        transaction.issuance.role
+      )).toEqual([
+        'tracker',
+        'duplicate-prevention',
+        'pooled-reserve',
+      ]);
+      expect(executionBatch.orderedTransactions.every((transaction, index) =>
+        transaction.signedCandidate.txId
+          === receipt.orderedChecks[index]?.signedTransactionIdHex
+        && transaction.checkedAcceptance.checked.txId
+          === receipt.orderedChecks[index]?.nodeTransactionIdHex
+      )).toBe(true);
+      expect(mocks.promoteSetupTransaction).toHaveBeenCalledTimes(3);
+      expect(() =>
+        promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: receipt,
+          request,
+          expectedTargetBinding: mocks.executionTargetBinding,
+          target: mocks.executionTarget,
+        })
+      ).toThrow(/lacks exact process provenance/);
+
       expect(
         validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
           structuredClone(receipt),
@@ -1756,6 +1845,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './strict-data-snapshot.js',
       './strict-json.js',
       './substrate-federated-genesis-observation-v1.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
     ]);
     expect(source).not.toMatch(
@@ -1798,6 +1888,8 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect(runnerImports).toEqual([
       './substrate-federated-isolated-devnet-portable-replay-v1.js',
       './substrate-federated-isolated-devnet-setup-check-v2.js',
+      './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
     ]);
     expect([
@@ -1814,11 +1906,13 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect(executionImports).toEqual([
       'node:crypto',
       'ethers',
+      './fleet-signer.js',
       './local-wasm-root-signer-public-identity.js',
       './relayer-core/devnet-reward-consolidation.js',
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
       './substrate-federated-genesis-observation-v1.js',
       './substrate-federated-isolated-devnet-local-provisioning-v2.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-portable-replay-v1.js',
       './substrate-federated-isolated-devnet-settlement-target-v2.js',
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
@@ -3749,6 +3843,33 @@ function configureSetupCheckCapabilities(
         transportPolicy: 'no-redirect-no-proxy',
       },
     };
+  });
+  mocks.promoteSetupTransaction.mockReset();
+  mocks.promoteSetupTransaction.mockImplementation((
+    candidate: any,
+    checked: any,
+    executionBinding: any,
+  ) => {
+    if (
+      executionBinding.processBindingDigestHex
+        !== mocks.executionTargetBinding.processBindingDigestHex
+      || executionBinding.executionTargetIdentityDigestHex
+        !== mocks.executionTargetBinding.executionTargetIdentityDigestHex
+    ) {
+      throw new Error('synthetic execution binding changed');
+    }
+    return Object.freeze({
+      checked,
+      submissionHandle: Object.freeze({
+        txId: candidate.txId,
+        nodeOrigin: candidate.nodeOrigin,
+        signedTransactionDigestHex: candidate.signedTransactionDigestHex,
+        signedTransactionBytesSha256Hex:
+          candidate.signedTransactionBytesSha256Hex,
+        signedTransactionBytesLength: candidate.signedTransactionBytesLength,
+        checkResponseDigestHex: checked.signedTransactionDigestHex,
+      }),
+    });
   });
 }
 
