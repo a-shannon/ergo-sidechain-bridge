@@ -98,6 +98,11 @@ export type SubstrateFederatedLocalDevnetGenesisSubmission =
       responseDigestHex: string;
     }>
   | Readonly<{
+      status: 'rejected';
+      submittedTxId: null;
+      responseDigestHex: string;
+    }>
+  | Readonly<{
       status: 'ambiguous';
       submittedTxId: null;
       responseDigestHex: string | null;
@@ -196,7 +201,7 @@ export type SubstrateFederatedLocalDevnetGenesisExecutionResult =
       transportAttempted: false;
     }>
   | Readonly<{
-      status: 'accepted' | 'ambiguous' | 'reconciled';
+      status: 'accepted' | 'rejected' | 'ambiguous' | 'reconciled';
       role: SubstrateFederatedLocalDevnetGenesisRole;
       expectedTxId: string;
       submittedTxId: string | null;
@@ -366,7 +371,7 @@ export async function executeSubstrateFederatedLocalDevnetGenesisV1(
   } catch {
     rawSubmission = null;
   }
-  assertDurableAttempt(durableAttempt);
+  assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1(durableAttempt);
   const submission = normalizeSubmission(admission, rawSubmission);
   const finalization = ports.journal.finalize({
     attempt: durableAttempt,
@@ -392,8 +397,16 @@ export async function executeSubstrateFederatedLocalDevnetGenesisV1(
   const confirmation = rawConfirmation === null
     ? null
     : normalizeConfirmation(rawConfirmation);
+  if (
+    submission.status === 'rejected'
+    && confirmation?.status === 'confirmed'
+  ) {
+    throw new Error(
+      'genesis transport rejection conflicts with canonical confirmation',
+    );
+  }
   if (confirmation?.status === 'confirmed') {
-    assertDurableAttempt(durableAttempt);
+    assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1(durableAttempt);
     ports.journal.confirm({ attempt: durableAttempt, confirmation });
   }
 
@@ -517,6 +530,19 @@ function normalizeSubmission(
       responseDigestHex: fixedHex32(
         value.responseDigestHex,
         'genesis submission response digest',
+      ),
+    });
+  }
+  if (value.status === 'rejected') {
+    if (value.submittedTxId !== null) {
+      throw new Error('genesis rejected transport cannot report a transaction ID');
+    }
+    return Object.freeze({
+      status: 'rejected' as const,
+      submittedTxId: null,
+      responseDigestHex: fixedHex32(
+        value.responseDigestHex,
+        'genesis rejection response digest',
       ),
     });
   }
@@ -652,7 +678,7 @@ function assertTransportCandidate(
   }
 }
 
-function assertDurableAttempt(
+export function assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1(
   value: SubstrateFederatedLocalDevnetGenesisDurableAttempt,
 ): void {
   assertTransportCandidate(value.candidate);

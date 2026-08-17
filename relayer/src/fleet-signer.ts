@@ -146,6 +146,25 @@ export interface LocalWasmExactBytesSignedCheckCandidate
 
 export type LocalWasmOpaqueCheckResult = SignedCheckResult;
 
+export const LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE =
+  'e2s.local-wasm-checked-submission-handle.v1' as const;
+
+export interface LocalWasmCheckedSubmissionHandleV1 {
+  readonly profile: typeof LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE;
+  readonly txId: string;
+  readonly nodeOrigin: string;
+  readonly signedTransactionDigestHex: string;
+  readonly signedTransactionBytesSha256Hex: string;
+  readonly signedTransactionBytesLength: number;
+  readonly checkResponseDigestHex: string;
+  readonly checkerIdentity: SignedCheckNodeIdentity;
+}
+
+export interface LocalWasmCheckedSubmissionAcceptanceV1 {
+  readonly checked: Readonly<LocalWasmOpaqueCheckResult>;
+  readonly submissionHandle: Readonly<LocalWasmCheckedSubmissionHandleV1>;
+}
+
 interface LocalWasmSignedCheckMaterial {
   readonly signedTx: Readonly<Record<string, unknown>>;
   readonly signedTransactionBytesHex: string;
@@ -154,6 +173,15 @@ interface LocalWasmSignedCheckMaterial {
 const LOCAL_WASM_SIGNED_CHECK_CANDIDATES = new WeakSet<object>();
 const LOCAL_WASM_SIGNED_CHECK_MATERIAL =
   new WeakMap<object, LocalWasmSignedCheckMaterial>();
+const LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
+const LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL = new WeakMap<
+  object,
+  Readonly<{
+    signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
+    checkResponseDigestHex: string;
+  }>
+>();
+const CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
 
 export interface LocalWasmCheckCandidate {
   role: string;
@@ -957,6 +985,123 @@ function serializeSignedCheckTransactionHex(wasm: any, value: unknown): string {
   }
 }
 
+/**
+ * Check one exact signed candidate and mint a distinct one-shot submission
+ * handle. The ordinary check-only API never creates this capability.
+ */
+export async function checkSignedTransactionForSubmissionV1(
+  candidate: LocalWasmExactBytesSignedCheckCandidate,
+  label: string,
+  nodeOrigin: string,
+): Promise<Readonly<LocalWasmCheckedSubmissionAcceptanceV1> | null> {
+  const checked = await checkSignedTransaction(candidate, label, nodeOrigin);
+  if (checked === null) return null;
+  if (
+    checked.signedTransactionBytesSha256Hex
+      !== candidate.signedTransactionBytesSha256Hex
+    || checked.signedTransactionBytesLength
+      !== candidate.signedTransactionBytesLength
+  ) {
+    throw new Error('checked submission bytes differ from the signed candidate');
+  }
+  const frozenChecked = Object.freeze({ ...checked });
+  const checkResponseDigestHex = digestCheckedSubmissionResponseV1(
+    frozenChecked,
+  );
+  if (candidate.nodeOrigin !== frozenChecked.checkerIdentity.nodeOrigin) {
+    throw new Error('checked submission origin differs from its signed context');
+  }
+  const submissionHandle = Object.freeze({
+    profile: LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE,
+    txId: candidate.txId,
+    nodeOrigin: candidate.nodeOrigin,
+    signedTransactionDigestHex: candidate.signedTransactionDigestHex,
+    signedTransactionBytesSha256Hex:
+      candidate.signedTransactionBytesSha256Hex,
+    signedTransactionBytesLength: candidate.signedTransactionBytesLength,
+    checkResponseDigestHex,
+    checkerIdentity: frozenChecked.checkerIdentity,
+  });
+  LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.add(submissionHandle);
+  LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.set(submissionHandle, Object.freeze({
+    signedCandidate: candidate,
+    checkResponseDigestHex,
+  }));
+  return Object.freeze({
+    checked: frozenChecked,
+    submissionHandle,
+  });
+}
+
+export function assertLocalWasmCheckedSubmissionHandleV1Provenance(
+  value: unknown,
+): asserts value is Readonly<LocalWasmCheckedSubmissionHandleV1> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(value)
+  ) {
+    throw new Error('local WASM checked submission handle provenance is missing');
+  }
+  if (CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(value)) {
+    throw new Error('local WASM checked submission handle is already consumed');
+  }
+  const handle = value as Readonly<LocalWasmCheckedSubmissionHandleV1>;
+  const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  if (!material) {
+    throw new Error('local WASM checked submission material is unavailable');
+  }
+  assertLocalWasmSignedCheckCandidateProvenance(material.signedCandidate);
+  if (
+    handle.profile !== LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE
+    || !Object.isFrozen(handle)
+    || handle.txId !== material.signedCandidate.txId
+    || handle.nodeOrigin !== material.signedCandidate.nodeOrigin
+    || handle.signedTransactionDigestHex
+      !== material.signedCandidate.signedTransactionDigestHex
+    || handle.signedTransactionBytesSha256Hex
+      !== material.signedCandidate.signedTransactionBytesSha256Hex
+    || handle.signedTransactionBytesLength
+      !== material.signedCandidate.signedTransactionBytesLength
+    || handle.checkResponseDigestHex !== material.checkResponseDigestHex
+    || !Object.isFrozen(handle.checkerIdentity)
+    || handle.checkerIdentity.profile !== ERGO_NODE_CHECKER_PROFILE
+    || handle.checkerIdentity.sourceAdapterProfile
+      !== ERGO_NODE_CHECK_SOURCE_ADAPTER_PROFILE
+    || handle.checkerIdentity.nodeOrigin !== handle.nodeOrigin
+    || handle.checkerIdentity.path !== '/transactions/check'
+    || handle.checkerIdentity.method !== 'POST'
+    || handle.checkerIdentity.transportPolicy !== 'no-redirect-no-proxy'
+  ) {
+    throw new Error('local WASM checked submission handle binding is invalid');
+  }
+}
+
+/**
+ * Give the exact signed object to one reviewed transport callback, once.
+ * Callers cannot recover the object from the handle or invoke the callback a
+ * second time, including after a transport exception or timeout.
+ */
+export async function consumeLocalWasmCheckedSubmissionHandleV1<T>(
+  handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
+  signedCandidate: LocalWasmExactBytesSignedCheckCandidate,
+  consume: (
+    signedTransaction: Readonly<Record<string, unknown>>,
+  ) => Promise<T>,
+): Promise<T> {
+  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+  const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  if (!material || material.signedCandidate !== signedCandidate) {
+    throw new Error('checked submission handle differs from its signed candidate');
+  }
+  if (typeof consume !== 'function') {
+    throw new Error('checked submission consumer must be a function');
+  }
+  CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.add(handle);
+  const signedMaterial = requireLocalWasmSignedCheckMaterial(signedCandidate);
+  return await consume(signedMaterial.signedTx);
+}
+
 function requireLocalWasmSignedCheckMaterial(
   candidate: LocalWasmSignedCheckCandidate,
 ): LocalWasmSignedCheckMaterial {
@@ -984,6 +1129,23 @@ function snapshotSignedCheckTransaction(
 function digestSignedCheckTransaction(value: unknown): string {
   return createHash('sha256')
     .update(canonicalSignedCheckJson(value), 'utf8')
+    .digest('hex');
+}
+
+function digestCheckedSubmissionResponseV1(
+  checked: Readonly<LocalWasmOpaqueCheckResult>,
+): string {
+  return createHash('sha256')
+    .update('E2S_LOCAL_WASM_CHECKED_SUBMISSION_RESPONSE_V1\0', 'utf8')
+    .update(canonicalSignedCheckJson({
+      txId: checked.txId,
+      checkResult: checked.checkResult,
+      signedTransactionDigestHex: checked.signedTransactionDigestHex,
+      signedTransactionBytesSha256Hex:
+        checked.signedTransactionBytesSha256Hex,
+      signedTransactionBytesLength: checked.signedTransactionBytesLength,
+      checkerIdentity: checked.checkerIdentity,
+    }), 'utf8')
     .digest('hex');
 }
 

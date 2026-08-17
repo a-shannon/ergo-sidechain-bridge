@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
   admitSubstrateFederatedLocalDevnetGenesisExecutionV1,
+  assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1,
   executeSubstrateFederatedLocalDevnetGenesisV1,
   type SubstrateFederatedLocalDevnetGenesisExecutionInput,
   type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
@@ -194,6 +195,24 @@ describe('substrate federated local-devnet genesis execution V1', () => {
     ]);
   });
 
+  it('does not grant durable-attempt provenance to a structural clone', async () => {
+    const flow = fixture();
+    vi.mocked(flow.ports.transport.submit).mockImplementation(async attempt => {
+      expect(() => assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1({
+        ...attempt,
+      })).toThrow(/lacks process provenance/);
+      return {
+        status: 'accepted',
+        submittedTxId: EXPECTED_TX_ID,
+        responseDigestHex: RESPONSE_DIGEST,
+      };
+    });
+
+    await expect(
+      executeSubstrateFederatedLocalDevnetGenesisV1(input(), flow.ports),
+    ).resolves.toMatchObject({ status: 'accepted' });
+  });
+
   it.each([
     {
       name: 'signing rejection',
@@ -294,6 +313,50 @@ describe('substrate federated local-devnet genesis execution V1', () => {
       submittedTxId: EXPECTED_TX_ID,
       confirmationStatus: 'confirmed',
     });
+  });
+
+  it('retains an explicit transport rejection without claiming submission', async () => {
+    const flow = fixture({
+      submission: {
+        status: 'rejected',
+        submittedTxId: null,
+        responseDigestHex: RESPONSE_DIGEST,
+      },
+      confirmation: {
+        status: 'not_found',
+        confirmations: 0,
+        observedAtHeight: 721,
+        observationDigestHex: CONFIRMATION_DIGEST,
+        confirmationHeight: null,
+        confirmationHeaderIdHex: null,
+      },
+    });
+
+    await expect(
+      executeSubstrateFederatedLocalDevnetGenesisV1(input(), flow.ports),
+    ).resolves.toMatchObject({
+      status: 'rejected',
+      submittedTxId: null,
+      confirmationStatus: 'not_found',
+      durableAttemptRecorded: true,
+    });
+    expect(flow.events).toContain('finalize:rejected');
+    expect(flow.confirm).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when an explicit rejection conflicts with canonical confirmation', async () => {
+    const flow = fixture({
+      submission: {
+        status: 'rejected',
+        submittedTxId: null,
+        responseDigestHex: RESPONSE_DIGEST,
+      },
+    });
+
+    await expect(
+      executeSubstrateFederatedLocalDevnetGenesisV1(input(), flow.ports),
+    ).rejects.toThrow(/rejection conflicts with canonical confirmation/);
+    expect(flow.confirm).not.toHaveBeenCalled();
   });
 
   it('retains a pending observation without claiming confirmation', async () => {

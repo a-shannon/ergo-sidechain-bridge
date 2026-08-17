@@ -19,6 +19,10 @@ const nodeMock = vi.hoisted(() => ({
   ncheck: vi.fn(),
 }));
 
+const submissionNodeMock = vi.hoisted(() => ({
+  post: vi.fn(),
+}));
+
 const publicKeyBytes = Uint8Array.from([2, ...Array(32).fill(0x42)]);
 const publicKeyHex = Buffer.from(publicKeyBytes).toString('hex');
 
@@ -129,14 +133,35 @@ vi.mock('./ergo-helpers.js', () => ({
   ncheck: nodeMock.ncheck,
 }));
 
+vi.mock('axios', () => ({
+  default: {
+    post: submissionNodeMock.post,
+    isAxiosError: (error: unknown) =>
+      typeof error === 'object'
+      && error !== null
+      && (error as { isAxiosError?: unknown }).isAxiosError === true,
+  },
+}));
+
 import {
+  assertLocalWasmCheckedSubmissionHandleV1Provenance,
   assertLocalWasmSignedCheckCandidateProvenance,
   checkSignedTransaction,
+  checkSignedTransactionForSubmissionV1,
+  consumeLocalWasmCheckedSubmissionHandleV1,
   prepareLocalWasmCheckSigner,
   prepareLocalWasmRootCheckCandidates,
   prepareLocalWasmRootCheckSigner,
   signTransactionForCheck,
+  type LocalWasmExactBytesSignedCheckCandidate,
 } from './fleet-signer.js';
+import {
+  createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+} from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  executeSubstrateFederatedLocalDevnetGenesisV1,
+  type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
+} from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 
 const firstTxId = 'aa'.repeat(32);
 const secondTxId = 'bb'.repeat(32);
@@ -224,6 +249,7 @@ beforeEach(() => {
     );
     return signed.id;
   });
+  submissionNodeMock.post.mockReset();
   process.env.WALLET_MNEMONIC = 'synthetic test signer input';
   process.env.ERGO_NETWORK_PREFIX = '16';
 });
@@ -393,6 +419,227 @@ describe('separate authenticated check signer and checker capabilities', () => {
     expect(nodeMock.ncheck).not.toHaveBeenCalled();
     expect(() => assertLocalWasmSignedCheckCandidateProvenance(signed))
       .not.toThrow();
+  });
+
+  it('mints a distinct one-shot submission handle from the exact checked bytes', async () => {
+    const input = candidate('federated-setup', firstTxId, 1);
+    const signed = await signTransactionForCheck(
+      input.eip12Tx,
+      'Federated setup',
+      firstTxId,
+      'http://127.0.0.1:9052',
+    );
+    expect(signed).not.toBeNull();
+
+    const accepted = await checkSignedTransactionForSubmissionV1(
+      signed!,
+      'Federated setup',
+      'http://127.0.0.1:9052',
+    );
+    expect(accepted).not.toBeNull();
+    expect(accepted?.submissionHandle).toMatchObject({
+      txId: firstTxId,
+      nodeOrigin: 'http://127.0.0.1:9052',
+      signedTransactionDigestHex: signed!.signedTransactionDigestHex,
+      signedTransactionBytesSha256Hex:
+        signed!.signedTransactionBytesSha256Hex,
+      signedTransactionBytesLength: signed!.signedTransactionBytesLength,
+    });
+    expect(JSON.stringify(accepted?.submissionHandle))
+      .not.toMatch(/signedTx|proofs|inputs|mnemonic|privateKey/i);
+    expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance(
+      accepted!.submissionHandle,
+    )).not.toThrow();
+
+    let consumedId = '';
+    await expect(consumeLocalWasmCheckedSubmissionHandleV1(
+      accepted!.submissionHandle,
+      signed!,
+      async signedTransaction => {
+        consumedId = String(signedTransaction.id);
+        return 'consumed';
+      },
+    )).resolves.toBe('consumed');
+    expect(consumedId).toBe(firstTxId);
+    expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance(
+      accepted!.submissionHandle,
+    )).toThrow(/already consumed/);
+    await expect(consumeLocalWasmCheckedSubmissionHandleV1(
+      accepted!.submissionHandle,
+      signed!,
+      async () => 'reused',
+    )).rejects.toThrow(/already consumed/);
+  });
+
+  it('does not promote a check-only result or cloned handle into submission authority', async () => {
+    const input = candidate('federated-setup', firstTxId, 1);
+    const signed = await signTransactionForCheck(
+      input.eip12Tx,
+      'Federated setup',
+      firstTxId,
+      'http://127.0.0.1:9052',
+    );
+    expect(signed).not.toBeNull();
+    const checkedOnly = await checkSignedTransaction(
+      signed!,
+      'Federated setup',
+      'http://127.0.0.1:9052',
+    );
+    expect(checkedOnly).not.toBeNull();
+    expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance(
+      checkedOnly,
+    )).toThrow(/provenance is missing/);
+
+    const accepted = await checkSignedTransactionForSubmissionV1(
+      signed!,
+      'Federated setup',
+      'http://127.0.0.1:9052',
+    );
+    expect(accepted).not.toBeNull();
+    expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance({
+      ...accepted!.submissionHandle,
+    })).toThrow(/provenance is missing/);
+  });
+
+  it('rejects a handle paired with different exact signed bytes', async () => {
+    const first = candidate('tracker', firstTxId, 1);
+    const second = candidate('duplicate-prevention', secondTxId, 2);
+    const signedFirst = await signTransactionForCheck(
+      first.eip12Tx,
+      'Tracker setup',
+      firstTxId,
+      'http://127.0.0.1:9052',
+    );
+    const signedSecond = await signTransactionForCheck(
+      second.eip12Tx,
+      'DUP setup',
+      secondTxId,
+      'http://127.0.0.1:9052',
+    );
+    expect(signedFirst).not.toBeNull();
+    expect(signedSecond).not.toBeNull();
+    const accepted = await checkSignedTransactionForSubmissionV1(
+      signedFirst!,
+      'Tracker setup',
+      'http://127.0.0.1:9052',
+    );
+    expect(accepted).not.toBeNull();
+    const consume = vi.fn(async () => 'unexpected');
+
+    await expect(consumeLocalWasmCheckedSubmissionHandleV1(
+      accepted!.submissionHandle,
+      signedSecond!,
+      consume,
+    )).rejects.toThrow(/differs from its signed candidate/);
+    expect(consume).not.toHaveBeenCalled();
+    expect(() => assertLocalWasmCheckedSubmissionHandleV1Provenance(
+      accepted!.submissionHandle,
+    )).not.toThrow();
+  });
+
+  it('carries the real opaque handle through the execution core into one exact transport call', async () => {
+    const setup = candidate('tracker', firstTxId, 1);
+    const sourceBoxId = String(setup.eip12Tx.inputs[0].boxId);
+    const genesisHeaderId = '91'.repeat(32);
+    const ports: SubstrateFederatedLocalDevnetGenesisExecutionPorts = {
+      signer: {
+        sign: async admission => {
+          const signed = await signTransactionForCheck(
+            admission.unsignedTransaction,
+            'FED-6-LAB tracker setup',
+            admission.expectedTxId,
+            admission.nodeOrigin,
+          );
+          if (!signed) return null;
+          return {
+            signedTransactionDigestHex: signed.signedTransactionDigestHex,
+            signerArtifact: signed,
+          };
+        },
+      },
+      checker: {
+        check: async signed => {
+          const accepted = await checkSignedTransactionForSubmissionV1(
+            signed.signerArtifact as LocalWasmExactBytesSignedCheckCandidate,
+            'FED-6-LAB tracker setup',
+            signed.admission.nodeOrigin,
+          );
+          if (!accepted) return null;
+          return {
+            checkResponseDigestHex:
+              accepted.submissionHandle.checkResponseDigestHex,
+            checkerArtifact: accepted.submissionHandle,
+          };
+        },
+      },
+      revalidator: {
+        revalidate: async (_checked, phase) => ({
+          sourceBoxId,
+          sourceBoxUnspent: true,
+          targetGenesisHeaderIdHex: genesisHeaderId,
+          observedAtHeight: phase === 'post-check' ? 100 : 101,
+          observationDigestHex: phase === 'post-check'
+            ? '92'.repeat(32)
+            : '93'.repeat(32),
+        }),
+      },
+      broadcastAuthorizer: {
+        authorize: () => ({
+          authorizationDigestHex: '94'.repeat(32),
+          authorizationArtifact: Object.freeze({ role: 'authorization' }),
+        }),
+      },
+      journal: {
+        reserve: () => ({
+          durableAttemptDigestHex: '95'.repeat(32),
+          durableArtifact: Object.freeze({ role: 'durable-attempt' }),
+        }),
+        finalize: ({ submission }) => ({
+          status: submission.status,
+          journalDigestHex: '96'.repeat(32),
+        }),
+        confirm: () => {
+          throw new Error('not-found setup transaction cannot be confirmed');
+        },
+      },
+      transport:
+        createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(),
+      confirmationObserver: {
+        observe: async () => ({
+          status: 'not_found',
+          confirmations: 0,
+          observedAtHeight: 101,
+          observationDigestHex: '97'.repeat(32),
+          confirmationHeight: null,
+          confirmationHeaderIdHex: null,
+        }),
+      },
+    };
+    submissionNodeMock.post.mockResolvedValue({
+      status: 200,
+      data: firstTxId,
+    });
+
+    await expect(executeSubstrateFederatedLocalDevnetGenesisV1({
+      role: 'tracker',
+      planDigestHex: '90'.repeat(32),
+      targetGenesisHeaderIdHex: genesisHeaderId,
+      expectedTxId: firstTxId,
+      sourceBoxId,
+      attemptedAtHeight: 100,
+      nodeOrigin: 'http://127.0.0.1:9051',
+      unsignedTransaction: setup.eip12Tx,
+    }, ports)).resolves.toMatchObject({
+      status: 'accepted',
+      submittedTxId: firstTxId,
+      confirmationStatus: 'not_found',
+    });
+    expect(nodeMock.checkedIds).toEqual([firstTxId]);
+    expect(submissionNodeMock.post).toHaveBeenCalledTimes(1);
+    expect(submissionNodeMock.post.mock.calls[0]?.[0])
+      .toBe('http://127.0.0.1:9051/transactions');
+    expect(submissionNodeMock.post.mock.calls[0]?.[1])
+      .toEqual({ id: firstTxId });
   });
 
   it('rejects cloned provenance and a checker origin different from the signing context', async () => {

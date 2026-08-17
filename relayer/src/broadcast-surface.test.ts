@@ -289,6 +289,7 @@ describe('broadcast surface isolation', () => {
       'broadcast-surface.test.ts',
       'ergo-helpers.ts',
       'scripts/devnet-consolidate-rewards.ts',
+      'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
     ];
 
     const offenders = walk(srcRoot)
@@ -304,6 +305,64 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(productionSources(), 'npostDirect')).toEqual([
       'scripts/devnet-consolidate-rewards.ts',
     ]);
+  });
+
+  it('keeps the FED-6-LAB checked transport dormant and outside no-submit roots', () => {
+    const sources = productionSources();
+    const transportFile =
+      'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
+    const transport = readFileSync(join(srcRoot, transportFile), 'utf-8');
+    const frozenNoSubmit = [
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
+      'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+      'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+    ].map(file => readFileSync(join(srcRoot, file), 'utf-8')).join('\n');
+
+    expect(filesImporting(
+      sources,
+      'consumeLocalWasmCheckedSubmissionHandleV1',
+    )).toEqual([transportFile]);
+    expect(filesContainingIdentifier(
+      sources,
+      'consumeLocalWasmCheckedSubmissionHandleV1',
+    )).toEqual([
+      'fleet-signer.ts',
+      transportFile,
+    ]);
+    expect(sources
+      .filter(({ source }) => source.text.includes(
+        'consumeLocalWasmCheckedSubmissionHandleV1',
+      ))
+      .map(({ rel }) => rel)
+      .sort()).toEqual([
+        'fleet-signer.ts',
+        transportFile,
+      ]);
+    expect(filesImporting(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    )).toEqual([]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    )).toEqual([transportFile]);
+    expect(transport).toContain(
+      'SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN',
+    );
+    expect(transport).toContain(
+      '`${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN}${SUBMISSION_PATH}`',
+    );
+    expect(transport).toContain("const SUBMISSION_PATH = '/transactions'");
+    expect(transport).toContain('maxRedirects: 0');
+    expect(transport).toContain('proxy: false');
+    expect(transport).not.toContain('npostDirect');
+    expect(transport).not.toContain('API_KEY');
+    expect(frozenNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    );
+    expect(frozenNoSubmit).not.toContain(
+      'consumeLocalWasmCheckedSubmissionHandleV1',
+    );
   });
 
   it('keeps generic signer and client modules free of production broadcast endpoints', () => {
