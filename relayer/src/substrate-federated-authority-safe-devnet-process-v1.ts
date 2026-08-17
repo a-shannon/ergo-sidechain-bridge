@@ -1833,7 +1833,7 @@ function windowsListenerBindings(ports: readonly number[]): Map<number, Listener
   }
   const script = [
     `$ports=@(${ports.join(',')})`,
-    '$rows=@(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue '
+    '$rows=@(Get-NetTCPConnection -State Listen -ErrorAction Stop '
       + '| Where-Object { $ports -contains $_.LocalPort } '
       + '| Select-Object LocalAddress,LocalPort,OwningProcess)',
     'ConvertTo-Json -Compress -InputObject $rows',
@@ -1845,7 +1845,7 @@ function windowsListenerBindings(ports: readonly number[]): Map<number, Listener
       cwd: systemRoot,
       env: minimalEnvironment(),
       encoding: 'utf8',
-      timeout: 10_000,
+      timeout: 30_000,
       maxBuffer: 256 * 1024,
       windowsHide: true,
     },

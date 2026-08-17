@@ -71,6 +71,20 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe devnet proce
       witnessPrometheusPort: ports[5]!,
     }, async () => 'unreachable')).rejects.toThrow(/port is already owned/);
     expect(occupied.listening).toBe(true);
+  }, 45_000);
+
+  it('fails closed while allowing a cold Windows listener ownership query', () => {
+    const source = readFileSync(new URL(
+      './substrate-federated-authority-safe-devnet-process-v1.ts',
+      import.meta.url,
+    ), 'utf8');
+    expect(source).toContain(
+      'Get-NetTCPConnection -State Listen -ErrorAction Stop',
+    );
+    expect(source).toContain('timeout: 30_000');
+    expect(source).not.toContain(
+      'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue',
+    );
   });
 
   it('rejects a copied or fabricated process receipt', () => {
