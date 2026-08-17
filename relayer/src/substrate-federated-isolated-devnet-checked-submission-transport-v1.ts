@@ -14,6 +14,11 @@ import {
   type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
   type SubstrateFederatedLocalDevnetGenesisSubmission,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+  type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
+} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-checked-submission-transport.v1' as const;
@@ -30,11 +35,33 @@ type Transport =
  * Create the only transport that may consume a FED-6-LAB checked submission
  * handle. It is credential-free, exact-origin, one-shot, and never retries.
  */
-export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1():
-  Readonly<Transport> {
+export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<Transport> {
+  const binding =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (
+    target.primaryNodeOrigin
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
+    || target.primaryMining !== true
+    || target.witnessReadOnly !== true
+  ) {
+    throw new Error('isolated checked transport target binding is invalid');
+  }
   return Object.freeze({
     submit: async attempt => {
       assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1(attempt);
+      const currentBinding =
+        assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      if (
+        currentBinding.processBindingDigestHex !== binding.processBindingDigestHex
+        || currentBinding.executionTargetIdentityDigestHex
+          !== binding.executionTargetIdentityDigestHex
+        || attempt.reconciliationIdentityDigestHex
+          !== binding.executionTargetIdentityDigestHex
+      ) {
+        throw new Error('isolated checked transport process binding changed');
+      }
       const checked =
         attempt.candidate.authorization.revalidated.checked;
       const admission = checked.signed.admission;
@@ -78,6 +105,7 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
           attempt.durableAttemptDigestHex,
           attempt.candidate.authorization.authorizationDigestHex,
           exactHandle,
+          binding,
         ),
       );
     },
@@ -114,6 +142,8 @@ async function submitExactTransaction(
   durableAttemptDigestHex: string,
   authorizationDigestHex: string,
   handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
+  binding:
+    Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
 ): Promise<SubstrateFederatedLocalDevnetGenesisSubmission> {
   try {
     const response = await axios.post(
@@ -137,6 +167,7 @@ async function submitExactTransaction(
         durableAttemptDigestHex,
         authorizationDigestHex,
         handle,
+        binding,
       });
     }
     return Object.freeze({
@@ -150,6 +181,7 @@ async function submitExactTransaction(
         durableAttemptDigestHex,
         authorizationDigestHex,
         handle,
+        binding,
       }),
     });
   } catch (error) {
@@ -166,6 +198,7 @@ async function submitExactTransaction(
       durableAttemptDigestHex,
       authorizationDigestHex,
       handle,
+      binding,
     });
   }
 }
@@ -192,6 +225,8 @@ interface SubmissionDigestInput {
   readonly durableAttemptDigestHex: string;
   readonly authorizationDigestHex: string;
   readonly handle: Readonly<LocalWasmCheckedSubmissionHandleV1>;
+  readonly binding:
+    Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
 }
 
 function responseDigest(input: SubmissionDigestInput): string {
@@ -207,6 +242,9 @@ function responseDigest(input: SubmissionDigestInput): string {
     expectedTxId: input.expectedTxId,
     durableAttemptDigestHex: input.durableAttemptDigestHex,
     authorizationDigestHex: input.authorizationDigestHex,
+    processBindingDigestHex: input.binding.processBindingDigestHex,
+    reconciliationIdentityDigestHex:
+      input.binding.executionTargetIdentityDigestHex,
     signedTransactionDigestHex: input.handle.signedTransactionDigestHex,
     signedTransactionBytesSha256Hex:
       input.handle.signedTransactionBytesSha256Hex,

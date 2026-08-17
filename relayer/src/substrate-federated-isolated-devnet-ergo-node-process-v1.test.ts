@@ -15,6 +15,8 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
@@ -96,7 +98,20 @@ describe.skipIf(process.platform !== 'win32')(
       );
       await expect(session.withMiningStoppedReadOnlyTarget(async () => 'never'))
         .rejects.toThrow(/requires the active mining phase/);
+      await expect(session.withMiningActiveExecutionTarget(async () => 'never'))
+        .rejects.toThrow(/requires the active mining phase/);
       await expect(session.stop()).resolves.toBeUndefined();
+      expect(() => assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1({
+        primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+        miningStopped: true,
+      })).toThrow(/not owned by the active managed process action/);
+      expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1({
+        primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+        primaryMining: true,
+        witnessReadOnly: true,
+      })).toThrow(/not owned by the active mining action/);
       await expect(session.startMining()).rejects.toThrow(/exactly once/);
       await expect(session.stop()).resolves.toBeUndefined();
     });
@@ -250,8 +265,20 @@ describe.skipIf(process.platform !== 'win32')(
           const actionReleased = new Promise<void>(resolvePromise => {
             releaseAction = resolvePromise;
           });
+          let ownedTarget:
+            Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1>[0]
+              | undefined;
+          let actionProcessBindingDigestHex: string | undefined;
           const managed = session.withMiningStoppedReadOnlyTarget(
             async target => {
+              ownedTarget = target;
+              actionProcessBindingDigestHex =
+                assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(target);
+              expect(() =>
+                assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1({
+                  ...target,
+                })
+              ).toThrow(/not owned by the active managed process action/);
               enterAction();
               await actionReleased;
               const discovery =
@@ -289,6 +316,13 @@ describe.skipIf(process.platform !== 'win32')(
           )).toBe(true);
           expect(result.receipt.miningStoppedBeforeAction).toBe(true);
           expect(result.receipt.processBindingDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+          expect(result.receipt.processBindingDigestHex)
+            .toBe(actionProcessBindingDigestHex);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(
+              ownedTarget!,
+            )
+          ).toThrow(/not owned by the active managed process action/);
           expect(result.receipt.checks).toMatchObject({
             javaImageAndPinnedFilesRechecked: true,
             ephemeralPowSecretPassedOnlyViaProcessEnvironment: true,
@@ -296,6 +330,65 @@ describe.skipIf(process.platform !== 'win32')(
             spawnedProcessListenersExclusivelyLoopbackOwned: true,
             unverifiedProcessTerminationFailsStop: true,
           });
+        } finally {
+          await session.stop();
+          setup.dispose();
+        }
+      },
+      240_000,
+    );
+
+    it.skipIf(!liveJavaPath || !liveJarPath)(
+      'owns a mining-active execution capability and freezes the final target',
+      async () => {
+        const setup =
+          await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+        const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+          {
+            javaExecutablePath: liveJavaPath!,
+            expectedJavaExecutableSha256Hex: fileSha256(liveJavaPath!),
+            nodeAssemblyJarPath: liveJarPath!,
+            expectedNodeAssemblyJarSha256Hex: fileSha256(liveJarPath!),
+            buildIdentityDigestHex:
+              sha256(Buffer.from('live-execution-process-only', 'ascii')),
+          },
+          launchBindingForSigner(setup.signer),
+          claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(setup),
+        );
+        let ownedTarget:
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0]
+            | undefined;
+        try {
+          await session.startMining();
+          const managed = await session.withMiningActiveExecutionTarget(
+            async target => {
+              ownedTarget = target;
+              const binding =
+                assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+                  target,
+                );
+              expect(binding.processBindingDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+              expect(binding.executionTargetIdentityDigestHex)
+                .toMatch(/^[0-9a-f]{64}$/u);
+              expect(() =>
+                assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1({
+                  ...target,
+                })
+              ).toThrow(/not owned by the active mining action/);
+              return binding;
+            },
+          );
+          expect(managed.receipt.processBindingDigestHex)
+            .toBe(managed.value.processBindingDigestHex);
+          expect(managed.receipt.executionTargetIdentityDigestHex)
+            .toBe(managed.value.executionTargetIdentityDigestHex);
+          expect(managed.receipt.finalSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(managed.receipt.initialSnapshot.fullHeight);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+              ownedTarget!,
+            )
+          ).toThrow(/not owned by the active mining action/);
         } finally {
           await session.stop();
           setup.dispose();

@@ -20,6 +20,7 @@ export interface SubstrateFederatedLocalDevnetGenesisExecutionInput {
   readonly targetGenesisHeaderIdHex: string;
   readonly expectedTxId: string;
   readonly sourceBoxId: string;
+  readonly inputBoxIds: readonly string[];
   readonly attemptedAtHeight: number;
   readonly nodeOrigin:
     typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN;
@@ -34,11 +35,24 @@ export interface SubstrateFederatedLocalDevnetGenesisAdmission {
   readonly targetGenesisHeaderIdHex: string;
   readonly expectedTxId: string;
   readonly sourceBoxId: string;
+  readonly inputBoxIds: readonly string[];
   readonly attemptedAtHeight: number;
   readonly nodeOrigin:
     typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN;
   readonly admissionDigestHex: string;
   readonly unsignedTransaction: unknown;
+}
+
+export interface SubstrateFederatedLocalDevnetGenesisAdmissionBindingV1 {
+  readonly role: SubstrateFederatedLocalDevnetGenesisRole;
+  readonly planDigestHex: string;
+  readonly targetGenesisHeaderIdHex: string;
+  readonly expectedTxId: string;
+  readonly sourceBoxId: string;
+  readonly inputBoxIds: readonly string[];
+  readonly attemptedAtHeight: number;
+  readonly nodeOrigin:
+    typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN;
 }
 
 export interface SubstrateFederatedLocalDevnetGenesisSignedCandidate {
@@ -88,6 +102,7 @@ export interface SubstrateFederatedLocalDevnetGenesisDurableAttempt {
   readonly candidate:
     SubstrateFederatedLocalDevnetGenesisTransportCandidate;
   readonly durableAttemptDigestHex: string;
+  readonly reconciliationIdentityDigestHex: string;
   readonly durableArtifact: object;
 }
 
@@ -124,6 +139,7 @@ export interface SubstrateFederatedLocalDevnetGenesisConfirmation {
   readonly observationDigestHex: string;
   readonly confirmationHeight: number | null;
   readonly confirmationHeaderIdHex: string | null;
+  readonly observerArtifact: object;
 }
 
 export interface SubstrateFederatedLocalDevnetGenesisExecutionPorts {
@@ -165,6 +181,7 @@ export interface SubstrateFederatedLocalDevnetGenesisExecutionPorts {
       candidate: SubstrateFederatedLocalDevnetGenesisTransportCandidate,
     ): Readonly<{
       durableAttemptDigestHex: string;
+      reconciliationIdentityDigestHex: string;
       durableArtifact: object;
     }>;
     finalize(input: Readonly<{
@@ -233,21 +250,31 @@ export function admitSubstrateFederatedLocalDevnetGenesisExecutionV1(
   );
   const expectedTxId = fixedHex32(input.expectedTxId, 'genesis expected transaction ID');
   const sourceBoxId = fixedHex32(input.sourceBoxId, 'genesis source box ID');
+  const inputBoxIds = normalizeInputBoxIds(input.inputBoxIds, sourceBoxId);
+  const transactionInputBoxIds = extractUnsignedTransactionInputBoxIds(
+    input.unsignedTransaction,
+  );
+  if (!sameStrings(inputBoxIds, transactionInputBoxIds)) {
+    throw new Error(
+      'genesis declared input box IDs differ from the unsigned transaction inputs',
+    );
+  }
   const attemptedAtHeight = nonNegativeHeight(
     input.attemptedAtHeight,
     'genesis attempted height',
   );
   const nodeOrigin = normalizePrimaryOrigin(input.nodeOrigin);
-  const admissionDigestHex = sha256CanonicalJson({
-    schema: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
+  const admissionDigestHex =
+    deriveSubstrateFederatedLocalDevnetGenesisAdmissionDigestV1({
     role,
     planDigestHex,
     targetGenesisHeaderIdHex,
     expectedTxId,
     sourceBoxId,
+    inputBoxIds,
     attemptedAtHeight,
     nodeOrigin,
-  }, ADMISSION_DIGEST_DOMAIN);
+  });
   const admission = Object.freeze({
     schema: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
     role,
@@ -255,6 +282,7 @@ export function admitSubstrateFederatedLocalDevnetGenesisExecutionV1(
     targetGenesisHeaderIdHex,
     expectedTxId,
     sourceBoxId,
+    inputBoxIds,
     attemptedAtHeight,
     nodeOrigin,
     admissionDigestHex,
@@ -262,6 +290,39 @@ export function admitSubstrateFederatedLocalDevnetGenesisExecutionV1(
   });
   ADMISSIONS.add(admission);
   return admission;
+}
+
+export function deriveSubstrateFederatedLocalDevnetGenesisAdmissionDigestV1(
+  input: Readonly<SubstrateFederatedLocalDevnetGenesisAdmissionBindingV1>,
+): string {
+  const role = normalizeRole(input.role);
+  const planDigestHex = fixedHex32(input.planDigestHex, 'genesis plan digest');
+  const targetGenesisHeaderIdHex = fixedHex32(
+    input.targetGenesisHeaderIdHex,
+    'genesis target header ID',
+  );
+  const expectedTxId = fixedHex32(
+    input.expectedTxId,
+    'genesis expected transaction ID',
+  );
+  const sourceBoxId = fixedHex32(input.sourceBoxId, 'genesis source box ID');
+  const inputBoxIds = normalizeInputBoxIds(input.inputBoxIds, sourceBoxId);
+  const attemptedAtHeight = nonNegativeHeight(
+    input.attemptedAtHeight,
+    'genesis attempted height',
+  );
+  const nodeOrigin = normalizePrimaryOrigin(input.nodeOrigin);
+  return sha256CanonicalJson({
+    schema: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
+    role,
+    planDigestHex,
+    targetGenesisHeaderIdHex,
+    expectedTxId,
+    sourceBoxId,
+    inputBoxIds,
+    attemptedAtHeight,
+    nodeOrigin,
+  }, ADMISSION_DIGEST_DOMAIN);
 }
 
 export async function executeSubstrateFederatedLocalDevnetGenesisV1(
@@ -350,13 +411,19 @@ export async function executeSubstrateFederatedLocalDevnetGenesisV1(
 
   const transportCandidate = Object.freeze({ authorization });
   TRANSPORT_CANDIDATES.add(transportCandidate);
-  assertTransportCandidate(transportCandidate);
+  assertSubstrateFederatedLocalDevnetGenesisTransportCandidateV1(
+    transportCandidate,
+  );
   const durableEvidence = ports.journal.reserve(transportCandidate);
   const durableAttempt = Object.freeze({
     candidate: transportCandidate,
     durableAttemptDigestHex: fixedHex32(
       durableEvidence.durableAttemptDigestHex,
       'genesis durable attempt digest',
+    ),
+    reconciliationIdentityDigestHex: fixedHex32(
+      durableEvidence.reconciliationIdentityDigestHex,
+      'genesis reconciliation identity digest',
     ),
     durableArtifact: opaqueArtifact(
       durableEvidence.durableArtifact,
@@ -396,7 +463,9 @@ export async function executeSubstrateFederatedLocalDevnetGenesisV1(
   }
   const confirmation = rawConfirmation === null
     ? null
-    : normalizeConfirmation(rawConfirmation);
+    : normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
+        rawConfirmation,
+      );
   if (
     submission.status === 'rejected'
     && confirmation?.status === 'confirmed'
@@ -465,6 +534,87 @@ function nonNegativeHeight(value: unknown, label: string): number {
     throw new Error(`${label} must be a non-negative safe integer`);
   }
   return Number(value);
+}
+
+function normalizeInputBoxIds(
+  value: readonly string[],
+  sourceBoxId: string,
+): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('genesis execution must bind at least one input box');
+  }
+  const inputBoxIds = value.map((boxId, index) =>
+    fixedHex32(boxId, `genesis inputBoxIds[${index}]`));
+  if (new Set(inputBoxIds).size !== inputBoxIds.length) {
+    throw new Error('genesis execution input box IDs must be unique');
+  }
+  if (inputBoxIds[0] !== sourceBoxId) {
+    throw new Error('genesis source box must be the first input');
+  }
+  return Object.freeze(inputBoxIds);
+}
+
+function extractUnsignedTransactionInputBoxIds(
+  value: unknown,
+): readonly string[] {
+  const transaction = ownPlainRecord(value, 'genesis unsigned transaction');
+  const inputs = ownDataValue(transaction, 'inputs', 'genesis unsigned transaction');
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new Error('genesis unsigned transaction inputs must be a non-empty array');
+  }
+  const inputBoxIds = inputs.map((entry, index) => {
+    if (!Object.hasOwn(inputs, index)) {
+      throw new Error('genesis unsigned transaction inputs must not be sparse');
+    }
+    const input = ownPlainRecord(
+      entry,
+      `genesis unsigned transaction inputs[${index}]`,
+    );
+    return fixedHex32(
+      ownDataValue(
+        input,
+        'boxId',
+        `genesis unsigned transaction inputs[${index}]`,
+      ),
+      `genesis unsigned transaction inputs[${index}].boxId`,
+    );
+  });
+  if (new Set(inputBoxIds).size !== inputBoxIds.length) {
+    throw new Error('genesis unsigned transaction input box IDs must be unique');
+  }
+  return Object.freeze(inputBoxIds);
+}
+
+function ownPlainRecord(value: unknown, label: string): Record<string, unknown> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || (
+      Object.getPrototypeOf(value) !== Object.prototype
+      && Object.getPrototypeOf(value) !== null
+    )
+  ) {
+    throw new Error(`${label} must be a plain own-data object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function ownDataValue(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(record, key);
+  if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
+    throw new Error(`${label}.${key} must be an own data property`);
+  }
+  return descriptor.value;
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
 }
 
 function opaqueArtifact(value: unknown, label: string): object {
@@ -561,7 +711,7 @@ function normalizeSubmission(
   });
 }
 
-function normalizeConfirmation(
+export function normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
   value: SubstrateFederatedLocalDevnetGenesisConfirmation,
 ): SubstrateFederatedLocalDevnetGenesisConfirmation {
   if (!['confirmed', 'pending', 'not_found'].includes(value.status)) {
@@ -578,6 +728,10 @@ function normalizeConfirmation(
   const observationDigestHex = fixedHex32(
     value.observationDigestHex,
     'genesis confirmation observation digest',
+  );
+  const observerArtifact = opaqueArtifact(
+    value.observerArtifact,
+    'genesis confirmation observer artifact',
   );
   if (value.status === 'confirmed') {
     const confirmationHeight = nonNegativeHeight(
@@ -602,6 +756,7 @@ function normalizeConfirmation(
       observationDigestHex,
       confirmationHeight,
       confirmationHeaderIdHex,
+      observerArtifact,
     });
   }
   if (
@@ -622,6 +777,7 @@ function normalizeConfirmation(
     observationDigestHex,
     confirmationHeight: null,
     confirmationHeaderIdHex: null,
+    observerArtifact,
   });
 }
 
@@ -669,7 +825,7 @@ function assertAuthorization(
   }
 }
 
-function assertTransportCandidate(
+export function assertSubstrateFederatedLocalDevnetGenesisTransportCandidateV1(
   value: SubstrateFederatedLocalDevnetGenesisTransportCandidate,
 ): void {
   assertAuthorization(value.authorization);
@@ -681,7 +837,7 @@ function assertTransportCandidate(
 export function assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1(
   value: SubstrateFederatedLocalDevnetGenesisDurableAttempt,
 ): void {
-  assertTransportCandidate(value.candidate);
+  assertSubstrateFederatedLocalDevnetGenesisTransportCandidateV1(value.candidate);
   if (!DURABLE_ATTEMPTS.has(value)) {
     throw new Error('genesis durable attempt lacks process provenance');
   }

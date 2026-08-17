@@ -73,6 +73,10 @@ const EXTENSION_FIELDS = `0401:${'00'.repeat(64)}`;
 const EPHEMERAL_MINING_MNEMONIC_ENVIRONMENT_VARIABLE =
   'E2S_FED6G1DI3B_EPHEMERAL_MINING_MNEMONIC';
 const PROCESS_START_ERRORS = new WeakSet<ChildProcess>();
+const OWNED_READ_ONLY_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
+const ACTIVE_OWNED_READ_ONLY_TARGETS = new WeakSet<object>();
+const OWNED_EXECUTION_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
+const ACTIVE_OWNED_EXECUTION_TARGETS = new WeakSet<object>();
 
 type NodeRole = 'primary' | 'witness';
 type NodeMode = 'mining' | 'non-mining';
@@ -118,6 +122,12 @@ interface RuntimeLayout {
   }>;
 }
 
+interface OwnedTargetBinding {
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly assertActiveProcesses: () => void;
+}
+
 export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input {
   readonly javaExecutablePath: string;
   readonly expectedJavaExecutableSha256Hex: string;
@@ -154,6 +164,15 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Receipt
 
 export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1 {
   readonly startMining: () => Promise<void>;
+  readonly withMiningActiveExecutionTarget: <T>(
+    action: (
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => Promise<T>,
+  ) => Promise<Readonly<{
+    readonly value: T;
+    readonly receipt:
+      Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  }>>;
   readonly withMiningStoppedReadOnlyTarget: <T>(
     action: (
       target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
@@ -164,6 +183,74 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1 {
       Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Receipt>;
   }>>;
   readonly stop: () => Promise<void>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 {
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMining: true;
+  readonly witnessReadOnly: true;
+}
+
+export interface SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1 {
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA;
+  readonly version: 1;
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMiningDuringAction: true;
+  readonly witnessReadOnlyDuringAction: true;
+  readonly buildIdentityDigestHex: string;
+  readonly executableIdentityDigestHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly initialSnapshot: Readonly<TargetSnapshot>;
+  readonly finalSnapshot: Readonly<TargetSnapshot>;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(
+  value: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+): string {
+  const binding = OWNED_READ_ONLY_TARGET_BINDINGS.get(value);
+  if (
+    binding === undefined
+    || !ACTIVE_OWNED_READ_ONLY_TARGETS.has(value)
+  ) {
+    throw new Error(
+      'isolated Ergo target is not owned by the active managed process action',
+    );
+  }
+  binding.assertActiveProcesses();
+  return binding.processBindingDigestHex;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+  value: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const binding = OWNED_EXECUTION_TARGET_BINDINGS.get(value);
+  if (
+    binding === undefined
+    || !ACTIVE_OWNED_EXECUTION_TARGETS.has(value)
+  ) {
+    throw new Error(
+      'isolated Ergo execution target is not owned by the active mining action',
+    );
+  }
+  binding.assertActiveProcesses();
+  return Object.freeze({
+    processBindingDigestHex: binding.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      binding.executionTargetIdentityDigestHex,
+  });
 }
 
 interface NormalizedProcessInput {
@@ -207,7 +294,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
   let runtime: RuntimeLayout | undefined;
   let primary: OwnedNode | undefined;
   let witness: OwnedNode | undefined;
-  let activeOperation: 'start' | 'transition' | 'stop' | undefined;
+  let activeOperation: 'start' | 'execution' | 'transition' | 'stop' | undefined;
 
   const cleanup = async (): Promise<void> => {
     if (state === 'stopped') return;
@@ -355,6 +442,116 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         activeOperation = undefined;
       }
     },
+    withMiningActiveExecutionTarget: async <T>(
+      action: (
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => Promise<T>,
+    ) => {
+      if (
+        state !== 'mining' || activeOperation !== undefined
+        || runtime === undefined || primary === undefined || witness === undefined
+      ) {
+        throw new Error(
+          'isolated Ergo execution action requires the active mining phase',
+        );
+      }
+      if (typeof action !== 'function') {
+        throw new Error('isolated Ergo execution action is required');
+      }
+      activeOperation = 'execution';
+      try {
+        const initialSnapshot = await waitForCommonIndexedSnapshot(
+          primary,
+          witness,
+        );
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        recheckRuntimeFiles(input, runtime);
+
+        const executionTargetIdentityDigestHex =
+          deriveExecutionTargetIdentityDigestHex(input, runtime, binding);
+        const processBindingDigestHex = sha256CanonicalJson({
+          schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+          executionTargetIdentityDigestHex,
+          primaryProcessId: processId(primary),
+          witnessProcessId: processId(witness),
+          initialSnapshot,
+        }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_EXECUTION_PROCESS_V1');
+        const target = Object.freeze({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: true as const,
+          witnessReadOnly: true as const,
+        });
+        const assertActiveProcesses = (): void => {
+          if (
+            state !== 'action' || primary === undefined || witness === undefined
+            || runtime === undefined || primary.mode !== 'mining'
+          ) {
+            throw new Error('isolated Ergo execution processes are not active');
+          }
+          assertOwnedNodeIdentity(input, runtime, primary);
+          assertOwnedNodeIdentity(input, runtime, witness);
+          assertOwnedListenerBindings(primary, witness);
+          recheckRuntimeFiles(input, runtime);
+        };
+        OWNED_EXECUTION_TARGET_BINDINGS.set(target, Object.freeze({
+          processBindingDigestHex,
+          executionTargetIdentityDigestHex,
+          assertActiveProcesses,
+        }));
+        state = 'action';
+        ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_EXECUTION_TARGETS.delete(target);
+        }
+        state = 'mining';
+
+        await stopOwnedNode(primary, true);
+        primary = undefined;
+        await stopOwnedNode(witness, true);
+        witness = undefined;
+        assertPortsUnowned(OWNED_PORTS);
+        recheckRuntimeFiles(input, runtime);
+
+        primary = spawnOwnedNode(input, runtime, 'primary', 'non-mining');
+        const finalSnapshot = await waitForMinimumIndexedSnapshot(primary);
+        witness = spawnOwnedNode(input, runtime, 'witness', 'non-mining');
+        await waitForExactSnapshot(witness, finalSnapshot, STARTUP_TIMEOUT_MS);
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        await assertStableExactSnapshot(primary, witness, finalSnapshot);
+        recheckRuntimeFiles(input, runtime);
+        state = 'read-only';
+
+        const receipt: SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt =
+          Object.freeze({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+            version: 1 as const,
+            primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+            witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+            primaryMiningDuringAction: true as const,
+            witnessReadOnlyDuringAction: true as const,
+            buildIdentityDigestHex: input.buildIdentityDigestHex,
+            executableIdentityDigestHex: input.executableIdentityDigestHex,
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            initialSnapshot,
+            finalSnapshot,
+          });
+        return Object.freeze({ value, receipt });
+      } catch (error) {
+        return await failWithCleanup(error);
+      } finally {
+        activeOperation = undefined;
+      }
+    },
     withMiningStoppedReadOnlyTarget: async <T>(
       action: (
         target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
@@ -394,8 +591,36 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
           witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
           miningStopped: true as const,
         });
+        const processBindingDigestHex = deriveProcessBindingDigestHex(
+          input,
+          runtime,
+          frozenSnapshot,
+        );
+        OWNED_READ_ONLY_TARGET_BINDINGS.set(target, Object.freeze({
+          processBindingDigestHex,
+          executionTargetIdentityDigestHex:
+            deriveExecutionTargetIdentityDigestHex(input, runtime, binding),
+          assertActiveProcesses: () => {
+            if (
+              state !== 'action' || primary === undefined || witness === undefined
+              || runtime === undefined
+            ) {
+              throw new Error('isolated Ergo read-only processes are not active');
+            }
+            assertOwnedNodeIdentity(input, runtime, primary);
+            assertOwnedNodeIdentity(input, runtime, witness);
+            assertOwnedListenerBindings(primary, witness);
+            recheckRuntimeFiles(input, runtime);
+          },
+        }));
         state = 'action';
-        const value = await runManagedAction(action, target);
+        ACTIVE_OWNED_READ_ONLY_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_READ_ONLY_TARGETS.delete(target);
+        }
         state = 'read-only';
 
         await assertStableExactSnapshot(primary, witness, frozenSnapshot);
@@ -404,21 +629,6 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         assertOwnedListenerBindings(primary, witness);
         recheckRuntimeFiles(input, runtime);
 
-        const processBindingDigestHex = sha256CanonicalJson({
-          schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
-          buildIdentityDigestHex: input.buildIdentityDigestHex,
-          executableIdentityDigestHex: input.executableIdentityDigestHex,
-          configSha256Hex: runtime.configSha256Hex,
-          logbackSha256Hex: runtime.logbackSha256Hex,
-          extensionFieldsSha256Hex: sha256(Buffer.from(EXTENSION_FIELDS, 'ascii')),
-          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
-          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
-          primaryP2pPort: PRIMARY_P2P_PORT,
-          witnessP2pPort: WITNESS_P2P_PORT,
-          managedActionCompletionBudgetMs:
-            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
-          finalSnapshot: frozenSnapshot,
-        }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1');
         const receipt: SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Receipt =
           Object.freeze({
             schema:
@@ -459,6 +669,49 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
     },
     stop,
   });
+}
+
+function deriveProcessBindingDigestHex(
+  input: NormalizedProcessInput,
+  runtime: RuntimeLayout,
+  finalSnapshot: TargetSnapshot,
+): string {
+  return sha256CanonicalJson({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+    buildIdentityDigestHex: input.buildIdentityDigestHex,
+    executableIdentityDigestHex: input.executableIdentityDigestHex,
+    configSha256Hex: runtime.configSha256Hex,
+    logbackSha256Hex: runtime.logbackSha256Hex,
+    extensionFieldsSha256Hex: sha256(Buffer.from(EXTENSION_FIELDS, 'ascii')),
+    primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+    witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+    primaryP2pPort: PRIMARY_P2P_PORT,
+    witnessP2pPort: WITNESS_P2P_PORT,
+    managedActionCompletionBudgetMs:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
+    finalSnapshot,
+  }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1');
+}
+
+function deriveExecutionTargetIdentityDigestHex(
+  input: NormalizedProcessInput,
+  runtime: RuntimeLayout,
+  binding: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1>,
+): string {
+  return sha256CanonicalJson({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+    buildIdentityDigestHex: input.buildIdentityDigestHex,
+    executableIdentityDigestHex: input.executableIdentityDigestHex,
+    configSha256Hex: runtime.configSha256Hex,
+    logbackSha256Hex: runtime.logbackSha256Hex,
+    extensionFieldsSha256Hex: sha256(Buffer.from(EXTENSION_FIELDS, 'ascii')),
+    quickDevnetGenesisStateDigestHex: QUICK_DEVNET_GENESIS_STATE_DIGEST_HEX,
+    miningTargetPublicKeyHex: binding.miningTargetPublicKeyHex,
+    primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+    witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+    primaryP2pPort: PRIMARY_P2P_PORT,
+    witnessP2pPort: WITNESS_P2P_PORT,
+  }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_EXECUTION_TARGET_V1');
 }
 
 function normalizeProcessInput(
@@ -787,6 +1040,29 @@ async function waitForMinimumIndexedSnapshot(
       throw new Error(`${node.role} has not observed and indexed enough signer rewards`);
     }
     return snapshot;
+  });
+}
+
+async function waitForCommonIndexedSnapshot(
+  primary: Readonly<OwnedNode>,
+  witness: Readonly<OwnedNode>,
+): Promise<Readonly<TargetSnapshot>> {
+  return await retryNode(primary, MINING_TIMEOUT_MS, async () => {
+    assertLive(witness);
+    const [primarySnapshot, witnessSnapshot] = await Promise.all([
+      readTargetSnapshot(primary),
+      readTargetSnapshot(witness),
+    ]);
+    if (
+      primarySnapshot.fullHeight < MINIMUM_MINED_HEIGHT
+      || primarySnapshot.indexedHeight !== primarySnapshot.fullHeight
+      || witnessSnapshot.indexedHeight !== witnessSnapshot.fullHeight
+      || primarySnapshot.fullHeight !== witnessSnapshot.fullHeight
+      || primarySnapshot.headerIdHex !== witnessSnapshot.headerIdHex
+    ) {
+      throw new Error('isolated Ergo execution pair has not reached one common tip');
+    }
+    return primarySnapshot;
   });
 }
 
@@ -1341,11 +1617,9 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise(resolvePromise => setTimeout(resolvePromise, milliseconds));
 }
 
-async function runManagedAction<T>(
-  action: (
-    target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
-  ) => Promise<T>,
-  target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+async function runManagedAction<TTarget extends object, T>(
+  action: (target: Readonly<TTarget>) => Promise<T>,
+  target: Readonly<TTarget>,
 ): Promise<T> {
   const startedAtMs = performance.now();
   const value = await action(target);
@@ -1373,7 +1647,7 @@ export function assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBud
   }
   if (completedAtMs - startedAtMs > completionBudgetMs) {
     throw new Error(
-      'isolated Ergo managed read-only action exceeded its completion budget',
+      'isolated Ergo managed action exceeded its completion budget',
     );
   }
 }

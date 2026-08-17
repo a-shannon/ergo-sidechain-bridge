@@ -23,6 +23,17 @@ const submissionNodeMock = vi.hoisted(() => ({
   post: vi.fn(),
 }));
 
+const executionProcessMock = vi.hoisted(() => ({
+  target: Object.freeze({
+    primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+    witnessNodeOrigin: 'http://127.0.0.1:9052' as const,
+    primaryMining: true as const,
+    witnessReadOnly: true as const,
+  }),
+  processBindingDigestHex: '99'.repeat(32),
+  reconciliationIdentityDigestHex: '98'.repeat(32),
+}));
+
 const publicKeyBytes = Uint8Array.from([2, ...Array(32).fill(0x42)]);
 const publicKeyHex = Buffer.from(publicKeyBytes).toString('hex');
 
@@ -44,6 +55,21 @@ vi.mock('@fleet-sdk/wallet', () => ({
 vi.mock('@fleet-sdk/core', () => ({
   ErgoAddress: {
     fromBase58: () => ({ ergoTree: `0008cd${publicKeyHex}` }),
+  },
+}));
+
+vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: (
+    value: unknown,
+  ) => {
+    if (value !== executionProcessMock.target) {
+      throw new Error('synthetic execution target provenance is missing');
+    }
+    return Object.freeze({
+      processBindingDigestHex: executionProcessMock.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        executionProcessMock.reconciliationIdentityDigestHex,
+    });
   },
 }));
 
@@ -592,6 +618,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
       journal: {
         reserve: () => ({
           durableAttemptDigestHex: '95'.repeat(32),
+          reconciliationIdentityDigestHex: '98'.repeat(32),
           durableArtifact: Object.freeze({ role: 'durable-attempt' }),
         }),
         finalize: ({ submission }) => ({
@@ -603,7 +630,9 @@ describe('separate authenticated check signer and checker capabilities', () => {
         },
       },
       transport:
-        createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(),
+        createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
+          executionProcessMock.target,
+        ),
       confirmationObserver: {
         observe: async () => ({
           status: 'not_found',
@@ -612,6 +641,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
           observationDigestHex: '97'.repeat(32),
           confirmationHeight: null,
           confirmationHeaderIdHex: null,
+          observerArtifact: Object.freeze({ role: 'confirmation-observer' }),
         }),
       },
     };
@@ -626,6 +656,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
       targetGenesisHeaderIdHex: genesisHeaderId,
       expectedTxId: firstTxId,
       sourceBoxId,
+      inputBoxIds: [sourceBoxId],
       attemptedAtHeight: 100,
       nodeOrigin: 'http://127.0.0.1:9051',
       unsignedTransaction: setup.eip12Tx,

@@ -48,6 +48,19 @@ const node = vi.hoisted(() => ({
   post: vi.fn(),
 }));
 
+const processBoundary = vi.hoisted(() => ({
+  reconciliationIdentityDigestHex: '10'.repeat(32),
+  processBindingDigestHex: '11'.repeat(32),
+  assertionCount: 0,
+  expireAfterAssertion: Number.POSITIVE_INFINITY,
+  target: Object.freeze({
+    primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+    witnessNodeOrigin: 'http://127.0.0.1:9052' as const,
+    primaryMining: true as const,
+    witnessReadOnly: true as const,
+  }),
+}));
+
 vi.mock('./fleet-signer.js', () => ({
   assertLocalWasmSignedCheckCandidateProvenance: (value: unknown) => {
     if (value !== boundary.signedCandidate) {
@@ -72,6 +85,25 @@ vi.mock('axios', () => ({
   },
 }));
 
+vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: (
+    value: unknown,
+  ) => {
+    processBoundary.assertionCount += 1;
+    if (
+      value !== processBoundary.target
+      || processBoundary.assertionCount > processBoundary.expireAfterAssertion
+    ) {
+      throw new Error('synthetic execution target provenance is missing');
+    }
+    return Object.freeze({
+      processBindingDigestHex: processBoundary.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        processBoundary.reconciliationIdentityDigestHex,
+    });
+  },
+}));
+
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
@@ -91,6 +123,8 @@ const JOURNAL_DIGEST = '0c'.repeat(32);
 const CONFIRMATION_DIGEST = '0d'.repeat(32);
 
 beforeEach(() => {
+  processBoundary.assertionCount = 0;
+  processBoundary.expireAfterAssertion = Number.POSITIVE_INFINITY;
   boundary.consumed = false;
   boundary.consume.mockReset();
   boundary.consume.mockImplementation(async (
@@ -151,6 +185,8 @@ function ports(overrides: Readonly<{
     journal: {
       reserve: () => ({
         durableAttemptDigestHex: ATTEMPT_DIGEST,
+        reconciliationIdentityDigestHex:
+          processBoundary.reconciliationIdentityDigestHex,
         durableArtifact: Object.freeze({ role: 'durable-attempt' }),
       }),
       finalize: ({ submission }) => ({
@@ -162,7 +198,9 @@ function ports(overrides: Readonly<{
       },
     },
     transport:
-      createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(),
+      createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
+        processBoundary.target,
+      ),
     confirmationObserver: {
       observe: async () => ({
         status: 'not_found',
@@ -171,6 +209,7 @@ function ports(overrides: Readonly<{
         observationDigestHex: CONFIRMATION_DIGEST,
         confirmationHeight: null,
         confirmationHeaderIdHex: null,
+        observerArtifact: Object.freeze({ role: 'confirmation-observer' }),
       }),
     },
   };
@@ -187,6 +226,7 @@ async function execute(overrides: Readonly<{
     targetGenesisHeaderIdHex: GENESIS_HEADER_ID,
     expectedTxId: overrides.expectedTxId ?? boundary.expectedTxId,
     sourceBoxId: SOURCE_BOX_ID,
+    inputBoxIds: [SOURCE_BOX_ID],
     attemptedAtHeight: 720,
     nodeOrigin: boundary.nodeOrigin,
     unsignedTransaction: Object.freeze({ inputs: [{ boxId: SOURCE_BOX_ID }] }),
@@ -295,5 +335,16 @@ describe('isolated devnet checked submission transport V1', () => {
       submittedTxId: null,
     });
     expect(node.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an execution target that expires after transport construction', async () => {
+    processBoundary.expireAfterAssertion = 1;
+
+    await expect(execute()).resolves.toMatchObject({
+      status: 'ambiguous',
+      submittedTxId: null,
+    });
+    expect(node.post).not.toHaveBeenCalled();
+    expect(boundary.consume).not.toHaveBeenCalled();
   });
 });

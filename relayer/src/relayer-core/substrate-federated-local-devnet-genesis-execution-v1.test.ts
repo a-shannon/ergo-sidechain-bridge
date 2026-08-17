@@ -26,6 +26,8 @@ const RESPONSE_DIGEST = hex('0b');
 const JOURNAL_DIGEST = hex('0c');
 const CONFIRMATION_DIGEST = hex('0d');
 const CONFIRMATION_HEADER_ID = hex('0e');
+const RECONCILIATION_IDENTITY = hex('0f');
+const OBSERVER_ARTIFACT = Object.freeze({ role: 'confirmation-observer' });
 
 function input(
   patch: Partial<SubstrateFederatedLocalDevnetGenesisExecutionInput> = {},
@@ -36,6 +38,7 @@ function input(
     targetGenesisHeaderIdHex: GENESIS_HEADER_ID,
     expectedTxId: EXPECTED_TX_ID,
     sourceBoxId: SOURCE_BOX_ID,
+    inputBoxIds: [SOURCE_BOX_ID],
     attemptedAtHeight: 720,
     nodeOrigin: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
     unsignedTransaction: Object.freeze({ inputs: [{ boxId: SOURCE_BOX_ID }] }),
@@ -66,6 +69,7 @@ function fixture(options: FixtureOptions = {}) {
     reserved = true;
     return {
       durableAttemptDigestHex: ATTEMPT_DIGEST,
+      reconciliationIdentityDigestHex: RECONCILIATION_IDENTITY,
       durableArtifact: Object.freeze({ candidate }),
     };
   });
@@ -107,6 +111,7 @@ function fixture(options: FixtureOptions = {}) {
       observationDigestHex: CONFIRMATION_DIGEST,
       confirmationHeight: 722,
       confirmationHeaderIdHex: CONFIRMATION_HEADER_ID,
+      observerArtifact: OBSERVER_ARTIFACT,
     };
   });
   const ports: SubstrateFederatedLocalDevnetGenesisExecutionPorts = {
@@ -329,6 +334,7 @@ describe('substrate federated local-devnet genesis execution V1', () => {
         observationDigestHex: CONFIRMATION_DIGEST,
         confirmationHeight: null,
         confirmationHeaderIdHex: null,
+        observerArtifact: OBSERVER_ARTIFACT,
       },
     });
 
@@ -368,6 +374,7 @@ describe('substrate federated local-devnet genesis execution V1', () => {
         observationDigestHex: CONFIRMATION_DIGEST,
         confirmationHeight: null,
         confirmationHeaderIdHex: null,
+        observerArtifact: OBSERVER_ARTIFACT,
       },
     });
 
@@ -411,11 +418,49 @@ describe('substrate federated local-devnet genesis execution V1', () => {
         observationDigestHex: CONFIRMATION_DIGEST,
         confirmationHeight: 722,
         confirmationHeaderIdHex: CONFIRMATION_HEADER_ID,
+        observerArtifact: OBSERVER_ARTIFACT,
       },
     });
     await expect(executeSubstrateFederatedLocalDevnetGenesisV1(
       input(),
       shallow.ports,
     )).rejects.toThrow(/lacks consistent final depth/);
+  });
+
+  it('binds an exact non-empty, unique, source-first input set', () => {
+    expect(() => admitSubstrateFederatedLocalDevnetGenesisExecutionV1(input({
+      inputBoxIds: [],
+    }))).toThrow(/at least one input box/);
+    expect(() => admitSubstrateFederatedLocalDevnetGenesisExecutionV1(input({
+      inputBoxIds: [SOURCE_BOX_ID, SOURCE_BOX_ID],
+    }))).toThrow(/must be unique/);
+    expect(() => admitSubstrateFederatedLocalDevnetGenesisExecutionV1(input({
+      inputBoxIds: [hex('10'), SOURCE_BOX_ID],
+    }))).toThrow(/source box must be the first input/);
+
+    const oneInput = admitSubstrateFederatedLocalDevnetGenesisExecutionV1(
+      input(),
+    );
+    const twoInputs = admitSubstrateFederatedLocalDevnetGenesisExecutionV1(
+      input({
+        inputBoxIds: [SOURCE_BOX_ID, hex('10')],
+        unsignedTransaction: Object.freeze({
+          inputs: [{ boxId: SOURCE_BOX_ID }, { boxId: hex('10') }],
+        }),
+      }),
+    );
+    expect(twoInputs.inputBoxIds).toEqual([SOURCE_BOX_ID, hex('10')]);
+    expect(twoInputs.admissionDigestHex).not.toBe(oneInput.admissionDigestHex);
+
+    expect(() => admitSubstrateFederatedLocalDevnetGenesisExecutionV1(input({
+      inputBoxIds: [SOURCE_BOX_ID, hex('10')],
+    }))).toThrow(/differ from the unsigned transaction inputs/);
+    expect(() => admitSubstrateFederatedLocalDevnetGenesisExecutionV1(input({
+      unsignedTransaction: Object.freeze({
+        get inputs() {
+          return [{ boxId: SOURCE_BOX_ID }];
+        },
+      }),
+    }))).toThrow(/inputs must be an own data property/);
   });
 });

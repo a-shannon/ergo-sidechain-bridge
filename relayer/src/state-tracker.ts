@@ -856,6 +856,9 @@ export type ErgoOperationalTransactionAttemptStatus =
   | 'abandoned'
   | 'quarantined';
 
+export const ERGO_OPERATIONAL_DEFINITIVE_TRANSPORT_REJECTION_REASON =
+  'definitive transport rejection; no transaction effect possible' as const;
+
 export interface ErgoOperationalTransactionAttempt {
   schema: typeof ERGO_OPERATIONAL_TRANSACTION_SCHEMA;
   operationProfile: ErgoOperationalTransactionProfile;
@@ -14215,6 +14218,63 @@ export class StateTracker {
     };
   }
 
+  rejectErgoOperationalTransactionAttempt(input: {
+    expectedTxId: string;
+    durableAttemptDigestHex: string;
+    responseDigestHex: string;
+  }): {
+    attempt: ErgoOperationalTransactionAttempt;
+    journalDigestHex: string;
+  } {
+    this.assertWritable('reject Ergo operational transaction attempt');
+    const expectedTxId = normalizeFixedHex(
+      input.expectedTxId,
+      32,
+      'Ergo operational expected transaction ID',
+    );
+    const durableAttemptDigestHex = normalizeFixedHex(
+      input.durableAttemptDigestHex,
+      32,
+      'Ergo operational durable attempt digest',
+    );
+    const responseDigestHex = normalizeFixedHex(
+      input.responseDigestHex,
+      32,
+      'Ergo operational rejection response digest',
+    );
+    const result = this.db.prepare(`
+      UPDATE ergo_operational_transaction_attempts
+      SET status = 'abandoned',
+          response_digest = ?,
+          abandonment_reason = ?,
+          submission_finalized_at = datetime('now'),
+          updated_at = datetime('now')
+      WHERE expected_tx_id = ?
+        AND durable_attempt_digest = ?
+        AND status = 'pending'
+        AND submission_disposition IS NULL
+        AND submitted_tx_id IS NULL
+    `).run(
+      responseDigestHex,
+      ERGO_OPERATIONAL_DEFINITIVE_TRANSPORT_REJECTION_REASON,
+      expectedTxId,
+      durableAttemptDigestHex,
+    );
+    if (result.changes !== 1) {
+      throw new Error(
+        'Ergo operational attempt cannot record definitive rejection from its current state',
+      );
+    }
+    const attempt = this.getErgoOperationalTransactionAttempt(expectedTxId);
+    if (!attempt) {
+      throw new Error('rejected Ergo operational attempt is unavailable');
+    }
+    return {
+      attempt,
+      journalDigestHex: ergoOperationalAttemptJournalDigestHex(attempt),
+    };
+  }
+
   confirmErgoOperationalTransactionAttempt(input: {
     expectedTxId: string;
     confirmationHeight: number;
@@ -14258,6 +14318,15 @@ export class StateTracker {
           throw new Error('confirmed DUP operational attempt lacks committed AVL history');
         }
         return current;
+      }
+      if (
+        current.status === 'abandoned'
+        && current.abandonmentReason
+          === ERGO_OPERATIONAL_DEFINITIVE_TRANSPORT_REJECTION_REASON
+      ) {
+        throw new Error(
+          'definitively rejected Ergo operational attempt requires quarantine on later observation',
+        );
       }
       const result = this.db.prepare(`
         UPDATE ergo_operational_transaction_attempts

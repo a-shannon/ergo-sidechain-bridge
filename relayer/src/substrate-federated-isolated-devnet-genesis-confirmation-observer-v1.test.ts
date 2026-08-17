@@ -1,0 +1,230 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const processBoundary = vi.hoisted(() => ({
+  active: true,
+  processBindingDigestHex: '11'.repeat(32),
+  reconciliationIdentityDigestHex: '12'.repeat(32),
+  target: Object.freeze({
+    primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+    witnessNodeOrigin: 'http://127.0.0.1:9052' as const,
+    primaryMining: true as const,
+    witnessReadOnly: true as const,
+  }),
+}));
+
+const rpc = vi.hoisted(() => ({
+  primaryGet: vi.fn(),
+  witnessGet: vi.fn(),
+}));
+
+vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: (
+    value: unknown,
+  ) => {
+    if (!processBoundary.active || value !== processBoundary.target) {
+      throw new Error(
+        'isolated Ergo execution target is not owned by the active mining action',
+      );
+    }
+    return Object.freeze({
+      processBindingDigestHex: processBoundary.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        processBoundary.reconciliationIdentityDigestHex,
+    });
+  },
+}));
+
+vi.mock('axios', () => ({
+  default: {
+    create: (config: Readonly<{ baseURL?: string }>) => ({
+      get: config.baseURL === 'http://127.0.0.1:9051'
+        ? rpc.primaryGet
+        : rpc.witnessGet,
+    }),
+    isAxiosError: (error: unknown) =>
+      typeof error === 'object'
+      && error !== null
+      && (error as { isAxiosError?: unknown }).isAxiosError === true,
+  },
+}));
+
+import {
+  assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
+  createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+} from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+
+const GENESIS_HEADER_ID = '21'.repeat(32);
+const TX_ID = '22'.repeat(32);
+const INCLUSION_HEADER_ID = '23'.repeat(32);
+
+beforeEach(() => {
+  processBoundary.active = true;
+  rpc.primaryGet.mockReset();
+  rpc.witnessGet.mockReset();
+});
+
+describe('isolated devnet genesis confirmation observer V1', () => {
+  it('binds a dual-node canonical confirmation to the active process target', async () => {
+    installCanonicalResponses();
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+
+    const confirmation = await observer.observe(
+      TX_ID,
+      processBoundary.target.primaryNodeOrigin,
+    );
+
+    expect(confirmation).toMatchObject({
+      status: 'confirmed',
+      confirmations: 10,
+      observedAtHeight: 19,
+      confirmationHeight: 10,
+      confirmationHeaderIdHex: INCLUSION_HEADER_ID,
+    });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        confirmation!.observerArtifact,
+        processBoundary.reconciliationIdentityDigestHex,
+        GENESIS_HEADER_ID,
+        TX_ID,
+        confirmation!.observationDigestHex,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        { ...confirmation!.observerArtifact },
+        processBoundary.reconciliationIdentityDigestHex,
+        GENESIS_HEADER_ID,
+        TX_ID,
+        confirmation!.observationDigestHex,
+      )
+    ).toThrow(/lacks exact process provenance/);
+
+    processBoundary.active = false;
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        confirmation!.observerArtifact,
+        processBoundary.reconciliationIdentityDigestHex,
+        GENESIS_HEADER_ID,
+        TX_ID,
+        confirmation!.observationDigestHex,
+      )
+    ).toThrow(/not owned by the active mining action/);
+  });
+
+  it('rejects confirmation artifact reuse against another genesis', async () => {
+    installCanonicalResponses();
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+    const confirmation = await observer.observe(
+      TX_ID,
+      processBoundary.target.primaryNodeOrigin,
+    );
+
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        confirmation!.observerArtifact,
+        processBoundary.reconciliationIdentityDigestHex,
+        'ff'.repeat(32),
+        TX_ID,
+        confirmation!.observationDigestHex,
+      )
+    ).toThrow(/lacks exact process provenance/);
+  });
+
+  it('rejects cloned and expired process capabilities', async () => {
+    installCanonicalResponses();
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        { ...processBoundary.target },
+        GENESIS_HEADER_ID,
+      )
+    ).toThrow(/not owned by the active mining action/);
+
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+    processBoundary.active = false;
+    await expect(observer.observe(TX_ID, processBoundary.target.primaryNodeOrigin))
+      .rejects.toThrow(/not owned by the active mining action/);
+  });
+
+  it('fails closed when only one node observes the transaction', async () => {
+    installCanonicalResponses();
+    rpc.witnessGet.mockImplementation(async (path: string) => {
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
+      if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+      if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+        throw { isAxiosError: true, response: { status: 404 } };
+      }
+      throw new Error(`unexpected witness path ${path}`);
+    });
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+
+    await expect(observer.observe(TX_ID, processBoundary.target.primaryNodeOrigin))
+      .rejects.toThrow(/transaction observations disagree/);
+  });
+
+  it('rejects a canonical inclusion-header disagreement', async () => {
+    installCanonicalResponses();
+    rpc.witnessGet.mockImplementation(async (path: string) => {
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
+      if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+      if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+        return { data: transaction(10) };
+      }
+      if (path === '/blocks/at/10') return { data: ['24'.repeat(32)] };
+      throw new Error(`unexpected witness path ${path}`);
+    });
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+
+    await expect(observer.observe(TX_ID, processBoundary.target.primaryNodeOrigin))
+      .rejects.toThrow(/not in its canonical inclusion header/);
+  });
+});
+
+function installCanonicalResponses(): void {
+  rpc.primaryGet.mockImplementation(async (path: string) => {
+    if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
+    if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+    if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+      return { data: transaction(11) };
+    }
+    if (path === '/blocks/at/10') return { data: [INCLUSION_HEADER_ID] };
+    throw new Error(`unexpected primary path ${path}`);
+  });
+  rpc.witnessGet.mockImplementation(async (path: string) => {
+    if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
+    if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+    if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+      return { data: transaction(10) };
+    }
+    if (path === '/blocks/at/10') return { data: [INCLUSION_HEADER_ID] };
+    throw new Error(`unexpected witness path ${path}`);
+  });
+}
+
+function transaction(confirmations: number): Readonly<Record<string, unknown>> {
+  return Object.freeze({
+    id: TX_ID,
+    numConfirmations: confirmations,
+    inclusionHeight: 10,
+    headerId: INCLUSION_HEADER_ID,
+  });
+}
