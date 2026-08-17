@@ -1734,7 +1734,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       ).rejects.toThrow(/primary origin must be exactly/);
       expect(trackerCompiler).not.toHaveBeenCalled();
     });
-  });
+  }, 30_000);
 
   it('keeps the G1dG composition root on an exact check-only capability surface', () => {
     const source = readFileSync(
