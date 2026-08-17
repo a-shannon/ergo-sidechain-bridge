@@ -13,7 +13,75 @@ import {
 import { tmpdir } from 'os';
 import { join } from 'path';
 import Database from 'better-sqlite3';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it as vitestIt, vi } from 'vitest';
+
+interface StateTrackerTestShard {
+  readonly index: number;
+  readonly count: number;
+}
+
+const stateTrackerTestShard = parseStateTrackerTestShard(
+  process.env.STATE_TRACKER_TEST_SHARD,
+);
+let stateTrackerTestOrdinal = 0;
+
+function parseStateTrackerTestShard(
+  raw: string | undefined,
+): StateTrackerTestShard | undefined {
+  if (!raw) return undefined;
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(raw);
+  if (!match) {
+    throw new Error(
+      `STATE_TRACKER_TEST_SHARD must use <index>/<count>; got ${raw}`,
+    );
+  }
+  const index = Number(match[1]);
+  const count = Number(match[2]);
+  if (index > count) {
+    throw new Error(
+      `STATE_TRACKER_TEST_SHARD index must be <= count; got ${raw}`,
+    );
+  }
+  return { index, count };
+}
+
+function shouldRunStateTrackerTest(): boolean {
+  const ordinal = stateTrackerTestOrdinal;
+  stateTrackerTestOrdinal += 1;
+  if (!stateTrackerTestShard) return true;
+  return ordinal % stateTrackerTestShard.count === stateTrackerTestShard.index - 1;
+}
+
+function stateTrackerIt(
+  ...args: Parameters<typeof vitestIt>
+): ReturnType<typeof vitestIt> {
+  const target = shouldRunStateTrackerTest() ? vitestIt : vitestIt.skip;
+  return target(...args);
+}
+
+type StateTrackerEachRunner = (
+  name: string | Function,
+  fn: (...args: any[]) => unknown,
+  options?: Parameters<typeof vitestIt>[2],
+) => void;
+
+function stateTrackerItEach(
+  cases: Parameters<typeof vitestIt.each>[0],
+): StateTrackerEachRunner {
+  return (name, fn, options): void => {
+    for (const testCase of cases as unknown as readonly unknown[]) {
+      const target = shouldRunStateTrackerTest() ? vitestIt : vitestIt.skip;
+      const each = target.each(
+        [testCase] as unknown as Parameters<typeof vitestIt.each>[0],
+      ) as unknown as StateTrackerEachRunner;
+      each(name, fn, options);
+    }
+  };
+}
+
+const it = Object.assign(stateTrackerIt, vitestIt, {
+  each: stateTrackerItEach,
+}) as typeof vitestIt;
 
 vi.mock('./authenticated-settlement-candidate.js', () => ({
   assertNativeVerifiedAuthenticatedSettlementCandidateProvenance: vi.fn(),

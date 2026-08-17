@@ -11,7 +11,8 @@ interface ShardedTestTarget {
   envName:
     | 'ISOLATED_DEVNET_LAUNCH_TEST_SHARD'
     | 'RELEASE_GATE_TEST_SHARD'
-    | 'RELEASE_NOTES_TEST_SHARD';
+    | 'RELEASE_NOTES_TEST_SHARD'
+    | 'STATE_TRACKER_TEST_SHARD';
   shardCount: number;
 }
 
@@ -27,6 +28,10 @@ const SHARDED_TEST_TARGETS = new Map<string, ShardedTestTarget>([
   [
     'src/release-notes-evidence.test.ts',
     { envName: 'RELEASE_NOTES_TEST_SHARD', shardCount: 8 },
+  ],
+  [
+    'src/state-tracker.test.ts',
+    { envName: 'STATE_TRACKER_TEST_SHARD', shardCount: 4 },
   ],
 ]);
 const ISOLATED_TEST_TARGETS = new Set([

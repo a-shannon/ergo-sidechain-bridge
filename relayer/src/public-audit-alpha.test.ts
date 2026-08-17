@@ -357,6 +357,9 @@ describe('public audit alpha bootstrap', () => {
       "{ envName: 'ISOLATED_DEVNET_LAUNCH_TEST_SHARD', shardCount: 16 }",
     );
     expect(boundedVitestRunner).toContain(
+      "{ envName: 'STATE_TRACKER_TEST_SHARD', shardCount: 4 }",
+    );
+    expect(boundedVitestRunner).toContain(
       "const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'",
     );
     expect(boundedVitestRunner).toContain('? 15_000');
