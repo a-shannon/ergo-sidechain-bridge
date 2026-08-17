@@ -348,7 +348,7 @@ describe('public audit alpha bootstrap', () => {
       "--start-after must leave at least one collected test file to execute",
     );
     expect(boundedVitestRunner).toContain(
-      "{ envName: 'RELEASE_GATE_TEST_SHARD', shardCount: 32 }",
+      "{ envName: 'RELEASE_GATE_TEST_SHARD', shardCount: 64 }",
     );
     expect(boundedVitestRunner).toContain(
       "const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'",

@@ -15,7 +15,7 @@ interface ShardedTestTarget {
 const SHARDED_TEST_TARGETS = new Map<string, ShardedTestTarget>([
   [
     'src/release-gate.test.ts',
-    { envName: 'RELEASE_GATE_TEST_SHARD', shardCount: 32 },
+    { envName: 'RELEASE_GATE_TEST_SHARD', shardCount: 64 },
   ],
   [
     'src/release-notes-evidence.test.ts',
