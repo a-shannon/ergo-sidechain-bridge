@@ -112,7 +112,7 @@ function fixture(options: FixtureOptions = {}) {
       confirmations: 10,
       observedAtHeight: 731,
       observationDigestHex: CONFIRMATION_DIGEST,
-      confirmationHeight: 722,
+      confirmationHeight: 721,
       confirmationHeaderIdHex: CONFIRMATION_HEADER_ID,
       observerArtifact: OBSERVER_ARTIFACT,
     };
@@ -441,13 +441,29 @@ describe('substrate federated local-devnet genesis execution V1', () => {
       missingArtifact.ports,
     )).rejects.toThrow(/revalidation artifact/);
 
+    const inclusionInclusiveDepth = fixture({
+      confirmation: {
+        status: 'confirmed',
+        confirmations: 10,
+        observedAtHeight: 731,
+        observationDigestHex: CONFIRMATION_DIGEST,
+        confirmationHeight: 722,
+        confirmationHeaderIdHex: CONFIRMATION_HEADER_ID,
+        observerArtifact: OBSERVER_ARTIFACT,
+      },
+    });
+    await expect(executeSubstrateFederatedLocalDevnetGenesisV1(
+      input(),
+      inclusionInclusiveDepth.ports,
+    )).rejects.toThrow(/lacks consistent final depth/);
+
     const shallow = fixture({
       confirmation: {
         status: 'confirmed',
         confirmations: 9,
         observedAtHeight: 730,
         observationDigestHex: CONFIRMATION_DIGEST,
-        confirmationHeight: 722,
+        confirmationHeight: 721,
         confirmationHeaderIdHex: CONFIRMATION_HEADER_ID,
         observerArtifact: OBSERVER_ARTIFACT,
       },

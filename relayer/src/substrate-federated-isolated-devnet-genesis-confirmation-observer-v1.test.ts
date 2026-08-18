@@ -80,7 +80,7 @@ describe('isolated devnet genesis confirmation observer V1', () => {
     expect(confirmation).toMatchObject({
       status: 'confirmed',
       confirmations: 10,
-      observedAtHeight: 19,
+      observedAtHeight: 20,
       confirmationHeight: 10,
       confirmationHeaderIdHex: INCLUSION_HEADER_ID,
     });
@@ -141,7 +141,7 @@ describe('isolated devnet genesis confirmation observer V1', () => {
   it('rejects a genuine pending artifact wrapped as a fabricated confirmation', async () => {
     installCanonicalResponses();
     rpc.primaryGet.mockImplementation(async (path: string) => {
-      if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
       if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
       if (path === `/blockchain/transaction/byId/${TX_ID}`) {
         return { data: transaction(9) };
@@ -185,11 +185,31 @@ describe('isolated devnet genesis confirmation observer V1', () => {
           ...pending!,
           status: 'confirmed' as const,
           confirmations: 10,
-          confirmationHeight: 10,
+          confirmationHeight: 9,
           confirmationHeaderIdHex: INCLUSION_HEADER_ID,
         }),
       )
     ).toThrow(/fields differ from the observed artifact/);
+  });
+
+  it('rejects an inclusion-inclusive confirmation count', async () => {
+    installCanonicalResponses();
+    rpc.primaryGet.mockImplementation(async (path: string) => {
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
+      if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+      if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+        return { data: transaction(11) };
+      }
+      throw new Error(`unexpected primary path ${path}`);
+    });
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+
+    await expect(observer.observe(TX_ID, processBoundary.target.primaryNodeOrigin))
+      .rejects.toThrow(/primary confirmation depth is inconsistent/);
   });
 
   it('rejects cloned and expired process capabilities', async () => {
@@ -234,7 +254,7 @@ describe('isolated devnet genesis confirmation observer V1', () => {
   it('rejects a canonical inclusion-header disagreement', async () => {
     installCanonicalResponses();
     rpc.witnessGet.mockImplementation(async (path: string) => {
-      if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
       if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
       if (path === `/blockchain/transaction/byId/${TX_ID}`) {
         return { data: transaction(10) };
@@ -258,13 +278,13 @@ function installCanonicalResponses(): void {
     if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
     if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
     if (path === `/blockchain/transaction/byId/${TX_ID}`) {
-      return { data: transaction(11) };
+      return { data: transaction(10) };
     }
     if (path === '/blocks/at/10') return { data: [INCLUSION_HEADER_ID] };
     throw new Error(`unexpected primary path ${path}`);
   });
   rpc.witnessGet.mockImplementation(async (path: string) => {
-    if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
+    if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
     if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
     if (path === `/blockchain/transaction/byId/${TX_ID}`) {
       return { data: transaction(10) };

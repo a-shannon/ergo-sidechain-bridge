@@ -387,7 +387,7 @@ async function confirmedInclusion(
     transaction.inclusionHeight,
     `isolated genesis ${role} transaction inclusion height`,
   );
-  if (fullHeight - height + 1 !== confirmations) {
+  if (fullHeight - height !== confirmations) {
     throw new Error(`isolated genesis ${role} confirmation depth is inconsistent`);
   }
   const canonicalHeaderResponse = await client.get(`/blocks/at/${height}`);

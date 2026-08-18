@@ -83,6 +83,8 @@ describe('active Ergo operational daemon boundaries', () => {
     expect(stateTracker).toContain(
       'INSERT OR IGNORE INTO avl_tree_history (key_hex, value_hex)',
     );
+    expect(source).toContain('?? currentHeight - confirmations,');
+    expect(source).not.toContain('currentHeight - confirmations + 1');
   });
 
   it('reopens or rebinds confirmed operational history after reorg', () => {
@@ -110,6 +112,12 @@ describe('active Ergo operational daemon boundaries', () => {
     );
     expect(canonicalHeaderIndex).toBeGreaterThan(observeIndex);
     expect(reopenAfterHeaderIndex).toBeGreaterThan(canonicalHeaderIndex);
+    expect(source).toContain(
+      'currentHeight - attempt.confirmationHeight\n          < ERGO_OPERATIONAL_FINAL_CONFIRMATIONS',
+    );
+    expect(source).not.toContain(
+      'currentHeight - attempt.confirmationHeight + 1',
+    );
     expect(source).not.toContain('this.state.removeAvlKey(');
     expect(source).not.toContain('submitDupHeartbeatTouch');
     expect(source).not.toContain('npostDirect');

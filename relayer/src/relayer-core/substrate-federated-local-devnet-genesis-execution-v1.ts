@@ -765,7 +765,7 @@ export function normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
     if (
       confirmationHeight === 0
       || confirmations < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS
-      || observedAtHeight - confirmationHeight + 1 !== confirmations
+      || observedAtHeight - confirmationHeight !== confirmations
     ) {
       throw new Error('genesis confirmation lacks consistent final depth');
     }

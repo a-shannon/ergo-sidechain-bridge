@@ -150,7 +150,7 @@ function confirmed(
     confirmations: 10,
     observedAtHeight: 731,
     observationDigestHex: CONFIRMATION_DIGEST,
-    confirmationHeight: 722,
+    confirmationHeight: 721,
     confirmationHeaderIdHex: CONFIRMATION_HEADER_ID,
     observerArtifact: OBSERVER_ARTIFACT,
     ...patch,
@@ -596,7 +596,7 @@ describe('substrate federated local-devnet genesis journal V1', () => {
 
       await expect(adapter.revalidateConfirmed(observer(confirmed({
         observedAtHeight: 809,
-        confirmationHeight: 800,
+        confirmationHeight: 799,
         confirmationHeaderIdHex: movedHeader,
       })))).resolves.toBe(1);
       expect(state.getConfirmedErgoOperationalTransactionAttempts(
@@ -604,7 +604,7 @@ describe('substrate federated local-devnet genesis journal V1', () => {
       )).toEqual([
         expect.objectContaining({
           expectedTxId: EXPECTED_TX_ID,
-          confirmationHeight: 800,
+          confirmationHeight: 799,
           confirmationHeaderId: movedHeader,
         }),
       ]);

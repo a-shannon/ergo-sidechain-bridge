@@ -343,7 +343,7 @@ function confirmation(checked: any) {
     confirmations: 10,
     observedAtHeight: 139,
     observationDigestHex: hex('78'),
-    confirmationHeight: 130,
+    confirmationHeight: 129,
     confirmationHeaderIdHex: hex('79'),
     observerArtifact,
   });
@@ -500,7 +500,7 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
       Object.freeze({
         ...trackerConfirmation,
         observedAtHeight: 140,
-        confirmationHeight: 131,
+        confirmationHeight: 130,
       }),
     )).toThrow('confirmation artifact is not exact');
     authorizer.acknowledgeCanonicalConfirmation(

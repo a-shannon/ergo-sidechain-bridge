@@ -327,7 +327,7 @@ describe('devnet reward consolidation execution lifecycle', () => {
           return {
             status: 'confirmed' as const,
             confirmations: 10,
-            observedAtHeight: 112,
+            observedAtHeight: 113,
             observationDigestHex: '66'.repeat(32),
             confirmationHeight: 103,
             confirmationHeaderIdHex: '67'.repeat(32),
@@ -452,6 +452,24 @@ describe('devnet reward consolidation execution lifecycle', () => {
         status: 'confirmed' as const,
         confirmations: 10,
         observedAtHeight: 103,
+        observationDigestHex: '66'.repeat(32),
+        confirmationHeight: 103,
+        confirmationHeaderIdHex: '67'.repeat(32),
+      })),
+    });
+    await expect(executeDevnetRewardConsolidation({
+      plan: candidate,
+      expectedTxId: 'aa'.repeat(32),
+    }, dependencies)).rejects.toThrow(/depth is inconsistent/i);
+  });
+
+  it('rejects an inclusion-inclusive final count', async () => {
+    const candidate = plan();
+    const dependencies = ports(candidate, [], {
+      observe: vi.fn(async () => ({
+        status: 'confirmed' as const,
+        confirmations: 10,
+        observedAtHeight: 112,
         observationDigestHex: '66'.repeat(32),
         confirmationHeight: 103,
         confirmationHeaderIdHex: '67'.repeat(32),

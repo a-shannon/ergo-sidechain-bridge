@@ -636,7 +636,7 @@ function confirmation(expectedTxId: string, index: number, round: number) {
     observedTxId: expectedTxId,
     confirmations: 10,
     confirmationHeight: 110 + index + (round * 10),
-    observedAtHeight: 119 + index + (round * 10),
+    observedAtHeight: 120 + index + (round * 10),
     confirmationHeaderIdHex: digest(String(index + 1 + round)),
     observationDigestHex: digest(String(index + 4 + round)),
     observerArtifact: {},
