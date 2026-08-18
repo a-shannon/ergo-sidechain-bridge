@@ -344,6 +344,10 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
     canonicalWorktreeRoot,
   );
   const systemDriveRoot = parse(systemRoot).root;
+  const systemDrive = systemDriveRoot.replace(/[\\/]+$/u, '');
+  if (!/^[A-Za-z]:$/u.test(systemDrive)) {
+    throw new Error('SystemDrive could not be derived from SystemRoot');
+  }
   const comSpec = safeEnvironmentPath(
     process.env.ComSpec ?? process.env.COMSPEC,
     'ComSpec',
@@ -366,6 +370,7 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
       systemDriveRoot,
     ),
     SystemRoot: systemRoot,
+    SystemDrive: systemDrive,
     WINDIR: systemRoot,
     ComSpec: comSpec,
     TEMP: runtimeRoot,

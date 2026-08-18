@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, parse, resolve } from 'node:path';
 
 import {
   beforeEach,
@@ -383,6 +383,9 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       const childPath = environment.Path?.split(delimiter) ?? [];
       expect(childPath).toContain(externalBin);
       expect(childPath).not.toContain(npmBin);
+      expect(environment.SystemDrive).toBe(
+        parse(environment.SystemRoot ?? '').root.replace(/[\\/]+$/u, ''),
+      );
 
       process.env.LIB = npmBin;
       expect(() => childEnvironment(worktreeRoot)).toThrow(

@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, parse, resolve } from 'node:path';
 
 import {
   inspectConsensusSourceBaseline,
@@ -1434,6 +1434,26 @@ function minimalToolEnvironment(): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {};
   for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP']) {
     if (process.env[key]) environment[key] = process.env[key];
+  }
+  if (process.platform === 'win32') {
+    const configuredSystemRoot = process.env.SystemRoot
+      ?? process.env.SYSTEMROOT
+      ?? process.env.WINDIR;
+    if (configuredSystemRoot === undefined || !isAbsolute(configuredSystemRoot)) {
+      throw new Error('SystemRoot must be one absolute Windows directory');
+    }
+    const canonicalSystemRoot = realpathSync(configuredSystemRoot);
+    const expectedSystemDrive = parse(canonicalSystemRoot).root.replace(/[\\/]+$/u, '');
+    const systemDrive = process.env.SystemDrive;
+    if (systemDrive === undefined || !/^[A-Za-z]:$/u.test(systemDrive)) {
+      throw new Error('SystemDrive must be one Windows drive designator');
+    }
+    if (systemDrive.toUpperCase() !== expectedSystemDrive.toUpperCase()) {
+      throw new Error('SystemDrive must match the canonical SystemRoot drive');
+    }
+    environment.SystemRoot = canonicalSystemRoot;
+    environment.WINDIR = canonicalSystemRoot;
+    environment.SystemDrive = expectedSystemDrive;
   }
   return environment;
 }

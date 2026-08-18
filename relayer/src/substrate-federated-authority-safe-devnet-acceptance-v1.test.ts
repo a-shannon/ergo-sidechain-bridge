@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -363,9 +363,13 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
   it.runIf(process.platform === 'win32')(
     'passes the explicit MSVC discovery environment into the isolated build',
     async () => {
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+      expect(systemRoot).toBeTruthy();
+      const systemDrive = parse(systemRoot ?? '').root.replace(/[\\/]+$/u, '');
       vi.stubEnv('LIB', 'C:\\toolchain\\lib');
       vi.stubEnv('LIBPATH', 'C:\\toolchain\\libpath');
       vi.stubEnv('INCLUDE', 'C:\\toolchain\\include');
+      vi.stubEnv('SystemDrive', systemDrive);
 
       await acceptSubstrateFederatedAuthoritySafeDevnetV1(input());
 
@@ -376,7 +380,35 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
         LIB: 'C:\\toolchain\\lib',
         LIBPATH: 'C:\\toolchain\\libpath',
         INCLUDE: 'C:\\toolchain\\include',
+        SystemDrive: systemDrive,
       });
+    },
+  );
+
+  it.runIf(process.platform === 'win32')(
+    'rejects a malformed Windows drive before launching Cargo',
+    async () => {
+      vi.stubEnv('SystemDrive', 'C:\\unexpected');
+
+      await expect(
+        acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+      ).rejects.toThrow('SystemDrive must be one Windows drive designator');
+      expect(mocks.runProcess).not.toHaveBeenCalled();
+    },
+  );
+
+  it.runIf(process.platform === 'win32')(
+    'rejects a valid Windows drive that differs from SystemRoot',
+    async () => {
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+      expect(systemRoot).toBeTruthy();
+      const systemDrive = parse(systemRoot ?? '').root.replace(/[\\/]+$/u, '');
+      vi.stubEnv('SystemDrive', systemDrive.toUpperCase() === 'C:' ? 'D:' : 'C:');
+
+      await expect(
+        acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+      ).rejects.toThrow('SystemDrive must match the canonical SystemRoot drive');
+      expect(mocks.runProcess).not.toHaveBeenCalled();
     },
   );
 
