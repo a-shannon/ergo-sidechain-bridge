@@ -224,19 +224,11 @@ function parseSanitizedExecutionReceipt(
   ) {
     throw new Error('genesis setup execution receipt identity is unsupported');
   }
-  const buildIdentityDigestHex = assertExactBuildReceipt(receipt.build);
-  const process = assertExactExecutionProcessReceipt(receipt.process);
-  if (process.buildIdentityDigestHex !== buildIdentityDigestHex) {
-    throw new Error('genesis setup build and process identities differ');
-  }
-  assertExactLifecycleReceipt(
+  const process = assertExactSubstrateFederatedIsolatedDevnetSetupReceiptV1(
+    receipt.build,
+    receipt.process,
     receipt.lifecycle,
-    process.executionTargetIdentityDigestHex,
-  );
-  assertExactTransactions(
     receipt.transactions,
-    process.initialHeight,
-    process.finalHeight,
   );
   assertExpectedBooleanRecord(receipt.checks, {
     exactLockedPatchedNodeBuiltBeforeSignerCreation: true,
@@ -282,8 +274,45 @@ function parseSanitizedExecutionReceipt(
   return receipt;
 }
 
+export function assertExactSubstrateFederatedIsolatedDevnetSetupReceiptV1(
+  buildValue: unknown,
+  processValue: unknown,
+  lifecycleValue: unknown,
+  transactionsValue: unknown,
+): Readonly<{
+  buildIdentityDigestHex: string;
+  processBindingDigestHex: string;
+  executionTargetIdentityDigestHex: string;
+  initialHeight: number;
+  finalHeight: number;
+}> {
+  const buildIdentityDigestHex = assertExactBuildReceipt(buildValue);
+  const process = assertExactExecutionProcessReceipt(processValue);
+  if (process.buildIdentityDigestHex !== buildIdentityDigestHex) {
+    throw new Error('genesis setup build and process identities differ');
+  }
+  assertExactLifecycleReceipt(
+    lifecycleValue,
+    process.executionTargetIdentityDigestHex,
+  );
+  assertExactTransactions(
+    transactionsValue,
+    process.initialHeight,
+    process.finalHeight,
+  );
+  return Object.freeze({
+    buildIdentityDigestHex,
+    processBindingDigestHex: process.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      process.executionTargetIdentityDigestHex,
+    initialHeight: process.initialHeight,
+    finalHeight: process.finalHeight,
+  });
+}
+
 function assertExactExecutionProcessReceipt(value: unknown): Readonly<{
   buildIdentityDigestHex: string;
+  processBindingDigestHex: string;
   executionTargetIdentityDigestHex: string;
   initialHeight: number;
   finalHeight: number;
@@ -323,7 +352,7 @@ function assertExactExecutionProcessReceipt(value: unknown): Readonly<{
     32,
     'genesis setup process executable identity',
   );
-  fixedHex(
+  const processBindingDigestHex = fixedHex(
     receipt.processBindingDigestHex,
     32,
     'genesis setup process binding',
@@ -343,6 +372,7 @@ function assertExactExecutionProcessReceipt(value: unknown): Readonly<{
   }
   return Object.freeze({
     buildIdentityDigestHex,
+    processBindingDigestHex,
     executionTargetIdentityDigestHex,
     initialHeight,
     finalHeight,
