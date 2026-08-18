@@ -209,6 +209,54 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
       .rejects.toThrow(/target changed during discovery/i);
   });
 
+  it('retries one torn info and best-header snapshot before accepting an exact pair', async () => {
+    const states = nodeStates({ delay1: delay1Boxes });
+    installNodeMocks(states);
+    const primaryInfoHeights: number[] = [];
+    vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getInfo')
+      .mockImplementation(async function (
+        this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+      ) {
+        const current = states.get(this.observationSourceId)!;
+        const isPrimary = this.observationSourceId
+          === SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+        const fullHeight = isPrimary && primaryInfoHeights.length === 0
+          ? current.tipHeight - 1
+          : current.tipHeight;
+        if (isPrimary) primaryInfoHeights.push(fullHeight);
+        return { network: current.network, fullHeight };
+      });
+
+    const report = await discoverSubstrateFederatedRewardInputsV2(signer());
+
+    expect(report.target).toMatchObject({
+      tipHeight: 120,
+      tipHeaderIdHex: TIP_HEADER_ID,
+    });
+    expect(primaryInfoHeights).toEqual([119, 120, 120]);
+  });
+
+  it('fails closed after the bounded snapshot retry count is exhausted', async () => {
+    const states = nodeStates({ delay1: delay1Boxes });
+    installNodeMocks(states);
+    const primaryInfoHeights: number[] = [];
+    vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getInfo')
+      .mockImplementation(async function (
+        this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+      ) {
+        const current = states.get(this.observationSourceId)!;
+        const isPrimary = this.observationSourceId
+          === SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+        const fullHeight = isPrimary ? current.tipHeight - 1 : current.tipHeight;
+        if (isPrimary) primaryInfoHeights.push(fullHeight);
+        return { network: current.network, fullHeight };
+      });
+
+    await expect(discoverSubstrateFederatedRewardInputsV2(signer()))
+      .rejects.toThrow(/heights disagree after 3 bounded attempts/i);
+    expect(primaryInfoHeights).toEqual([119, 119, 119]);
+  });
+
   it('V2 excludes validated post-anchor rewards across a canonical extension', async () => {
     const rewardTree = deriveDevnetRewardErgoTreeHexForDelay(PUBLIC_KEY_HEX, 1);
     const boxes = await rewardBoxesForCandidates(rewardTree, [

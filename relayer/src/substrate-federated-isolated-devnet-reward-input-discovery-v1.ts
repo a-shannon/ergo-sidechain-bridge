@@ -52,6 +52,7 @@ const REPORT_DIGEST_DOMAIN =
 const REPORT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_REWARD_INPUT_DISCOVERY_V2';
 const MAX_CANONICAL_EXTENSION_HEADERS = 4_096;
+const MAX_STABLE_SNAPSHOT_ATTEMPTS = 3;
 const REWARD_DELAYS = [1, 720] as const;
 const DISCOVERIES = new WeakSet<object>();
 const DISCOVERIES_V2 = new WeakSet<object>();
@@ -703,47 +704,54 @@ async function readSnapshotBoundRewardBoxSet(
 async function observeSnapshot(
   client: AuthenticatedSpvTrackerReadOnlyNodeClient,
 ): Promise<TargetSnapshot> {
-  const info = plainRecord(await client.getInfo(), 'fixed Ergo node info');
-  const network = normalizeAuthenticatedSpvTrackerNodeNetwork(
-    info.network ?? info.networkType,
-    'fixed Ergo node',
-  );
-  if (network !== 'devnet') {
-    throw new Error('fixed reward-input discovery requires the devnet network');
+  for (let attempt = 1; attempt <= MAX_STABLE_SNAPSHOT_ATTEMPTS; attempt += 1) {
+    const info = plainRecord(await client.getInfo(), 'fixed Ergo node info');
+    const network = normalizeAuthenticatedSpvTrackerNodeNetwork(
+      info.network ?? info.networkType,
+      'fixed Ergo node',
+    );
+    if (network !== 'devnet') {
+      throw new Error('fixed reward-input discovery requires the devnet network');
+    }
+    const tipHeight = nonnegativeSafeInteger(
+      info.fullHeight,
+      'fixed Ergo node full height',
+    );
+    const bestHeader = plainRecord(
+      await client.getBestHeader(),
+      'fixed Ergo best header',
+    );
+    if (
+      nonnegativeSafeInteger(bestHeader.height, 'fixed Ergo best-header height')
+      !== tipHeight
+    ) {
+      if (attempt < MAX_STABLE_SNAPSHOT_ATTEMPTS) continue;
+      throw new Error(
+        'fixed Ergo node info and best-header heights disagree after '
+        + `${MAX_STABLE_SNAPSHOT_ATTEMPTS} bounded attempts`,
+      );
+    }
+    const tipHeaderIdHex = fixedHex32(
+      bestHeader.id,
+      'fixed Ergo best-header ID',
+    );
+    const genesisHeaderIds = await client.getBlockHeaderIdsAtHeight(
+      GENESIS_HEADER_HEIGHT,
+    );
+    if (genesisHeaderIds.length !== 1) {
+      throw new Error('fixed Ergo target must expose exactly one height-1 header');
+    }
+    return Object.freeze({
+      network,
+      genesisHeaderIdHex: fixedHex32(
+        genesisHeaderIds[0],
+        'fixed Ergo genesis header ID',
+      ),
+      tipHeight,
+      tipHeaderIdHex,
+    });
   }
-  const tipHeight = nonnegativeSafeInteger(
-    info.fullHeight,
-    'fixed Ergo node full height',
-  );
-  const bestHeader = plainRecord(
-    await client.getBestHeader(),
-    'fixed Ergo best header',
-  );
-  if (
-    nonnegativeSafeInteger(bestHeader.height, 'fixed Ergo best-header height')
-    !== tipHeight
-  ) {
-    throw new Error('fixed Ergo node info and best-header heights disagree');
-  }
-  const tipHeaderIdHex = fixedHex32(
-    bestHeader.id,
-    'fixed Ergo best-header ID',
-  );
-  const genesisHeaderIds = await client.getBlockHeaderIdsAtHeight(
-    GENESIS_HEADER_HEIGHT,
-  );
-  if (genesisHeaderIds.length !== 1) {
-    throw new Error('fixed Ergo target must expose exactly one height-1 header');
-  }
-  return Object.freeze({
-    network,
-    genesisHeaderIdHex: fixedHex32(
-      genesisHeaderIds[0],
-      'fixed Ergo genesis header ID',
-    ),
-    tipHeight,
-    tipHeaderIdHex,
-  });
+  throw new Error('fixed Ergo node snapshot attempt bound is unreachable');
 }
 
 async function assertCanonicalSnapshotExtension(
