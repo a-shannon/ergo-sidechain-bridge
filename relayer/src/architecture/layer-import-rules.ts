@@ -55,6 +55,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Set([
+      'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
       'substrate-federated-authority-safe-devnet-history-v1.ts',
       'substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.ts',
@@ -69,7 +70,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts',
       'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts',
       'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
+      'substrate-federated-isolated-devnet-peg-in-candidate-v1.ts',
       'substrate-federated-local-devnet-genesis-journal-v1.ts',
+      'substrate-federated-settlement-family-v1.ts',
     ]),
   ],
   [
@@ -95,6 +98,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Map([
+      [
+        'peg-in-causal-admission-v2.ts',
+        new Set(['PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION']),
+      ],
       [
         'state-tracker.ts',
         new Set(['StateTracker']),
@@ -142,9 +149,11 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-reward-input-discovery-v1.ts',
         new Set([
+          'assertSubstrateFederatedRewardInputDiscoveryV2Provenance',
           'discoverSubstrateFederatedRewardInputsV2',
           'SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN',
           'SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN',
+          'SubstrateFederatedRewardInputDiscoveryV2',
         ]),
       ],
       [
@@ -159,8 +168,17 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         new Set([
+          'SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-peg-in-candidate-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetPegInCandidateV1',
+          'buildSubstrateFederatedIsolatedDevnetPegInCandidateV1',
+          'SubstrateFederatedIsolatedDevnetPegInCandidateV1',
         ]),
       ],
       [
@@ -193,6 +211,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'createSubstrateFederatedLocalDevnetGenesisJournalV1',
           'SubstrateFederatedLocalDevnetGenesisJournalV1',
         ]),
+      ],
+      [
+        'substrate-federated-settlement-family-v1.ts',
+        new Set(['decodeSubstrateFederatedSettlementFamilyV1Profile']),
       ],
     ]),
   ],
@@ -268,7 +290,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js',
-        new Set(['discoverSubstrateFederatedRewardInputsV2']),
+        new Set([
+          'assertSubstrateFederatedRewardInputDiscoveryV2Provenance',
+          'discoverSubstrateFederatedRewardInputsV2',
+        ]),
       ],
       [
         '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
@@ -312,11 +337,17 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Set([
       'RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input',
+      'RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input',
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
+      'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
+      'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
     ]),
   ],
 ]);

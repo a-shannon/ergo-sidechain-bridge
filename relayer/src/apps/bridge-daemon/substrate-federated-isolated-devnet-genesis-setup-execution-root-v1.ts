@@ -10,8 +10,14 @@ import {
   sha256CanonicalJson,
 } from '../../ergo-settlement-core/strict-json.js';
 import {
+  PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+} from '../../peg-in-causal-admission-v2.js';
+import {
   buildSubstrateFederatedCheckpointProfileV1,
 } from '../../profiles/substrate-federated-v1/checkpoint-statement.js';
+import {
+  decodeSubstrateFederatedSettlementFamilyV1Profile,
+} from '../../substrate-federated-settlement-family-v1.js';
 import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
   normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
@@ -52,9 +58,11 @@ import {
   type SubstrateFederatedIsolatedDevnetPacketSessionV1,
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
+  assertSubstrateFederatedRewardInputDiscoveryV2Provenance,
   discoverSubstrateFederatedRewardInputsV2,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+  type SubstrateFederatedRewardInputDiscoveryV2,
 } from '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
@@ -63,9 +71,15 @@ import {
   type SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
 } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import type {
+  SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+  buildSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
+} from '../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
@@ -87,11 +101,19 @@ import {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-genesis-setup-execution-root.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-candidate-execution-root.v1' as const;
 
 const ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1';
+const PEG_IN_CANDIDATE_ROOT_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1';
 const STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_V1';
+const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_V1';
+const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1';
 const FEDERATION_EPOCH = '1';
 const MAX_ADMISSION_VALIDITY_BLOCKS = '64';
 const CONFIRMATION_POLL_MS = 250;
@@ -132,11 +154,43 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_
     STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
   );
 
+const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST = Object.freeze({
+  schema:
+    'e2s.substrate-federated-isolated-devnet-peg-in-candidate-static-execution.v1',
+  version: 1 as const,
+  setupStaticExecutionManifestDigestHex:
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  operations: Object.freeze([
+    'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
+    'discoverSubstrateFederatedRewardInputsV2',
+    'assertSubstrateFederatedRewardInputDiscoveryV2Provenance',
+    'buildSubstrateFederatedIsolatedDevnetPegInCandidateV1',
+    'assertSubstrateFederatedIsolatedDevnetPegInCandidateV1',
+    'discoverSubstrateFederatedRewardInputsV2.postCandidateRevalidation',
+    'assertSubstrateFederatedRewardInputDiscoveryV2Provenance.postCandidateRevalidation',
+  ]),
+  exposedCapabilities: Object.freeze([]),
+});
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1 =
+  sha256CanonicalJson(
+    PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST,
+    PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
+  );
+
 export interface RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
   readonly build:
     Readonly<BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input>;
   readonly lifecycle:
     Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapLifecycleV1Input>;
+}
+
+export interface RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input
+extends RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
+  readonly pegIn: Readonly<{
+    readonly amountNanoErg: string;
+    readonly recipientAddressHex: string;
+  }>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt {
@@ -206,6 +260,91 @@ export interface SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1 {
     Readonly<SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt>;
 }
 
+export interface SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA;
+  readonly version: 1;
+  readonly status:
+    'setup_confirmed_and_unsigned_peg_in_candidate_constructed';
+  readonly staticExecutionManifestDigestHex: string;
+  readonly build:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
+  readonly process:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  readonly setup: Readonly<{
+    readonly lifecycle:
+      SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['lifecycle'];
+    readonly transactions:
+      SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'];
+  }>;
+  readonly pegIn: Readonly<{
+    readonly fundingObservation: Readonly<{
+      readonly reportDigestHex: string;
+      readonly observedAt: string;
+      readonly primaryNodeOrigin:
+        typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+      readonly witnessNodeOrigin:
+        typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+      readonly genesisHeaderIdHex: string;
+      readonly tipHeight: number;
+      readonly tipHeaderIdHex: string;
+      readonly sourceFundingBoxIdHex: string;
+      readonly sourceFundingBoxDigestHex: string;
+      readonly postCandidateReportDigestHex: string;
+      readonly postCandidateTipHeight: number;
+      readonly postCandidateTipHeaderIdHex: string;
+    }>;
+    readonly candidate:
+      Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
+  }>;
+  readonly checks: Readonly<{
+    readonly setupAndFundingObservedInOneTargetLifetime: true;
+    readonly allSetupLineagesRevalidatedAfterCandidateConstruction: true;
+    readonly exactDualNodeFundingObservationConsumed: true;
+    readonly sourceFundingDistinctFromSetupInputsAndOutputs: true;
+    readonly sourceFundingRevalidatedAfterCandidateConstruction: true;
+    readonly deterministicUnsignedCandidateConstructed: true;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localSyntheticCompatibilityOnly: true;
+    readonly localSetupTargetNodeAcceptanceEstablished: true;
+    readonly localSetupSubmissionExecuted: true;
+    readonly localSetupBroadcastExecuted: true;
+    readonly localSetupCanonicalConfirmationEstablished: true;
+    readonly localSourceFundingObservationEstablished: true;
+    readonly localSourceFundingReobservationEstablished: true;
+    readonly valuePathNodeCheckPerformed: false;
+    readonly valuePathSigningAuthorityEstablished: false;
+    readonly valuePathSubmissionAuthorityEstablished: false;
+    readonly valuePathBroadcastAuthorityEstablished: false;
+    readonly sourceLockConsumptionEstablished: false;
+    readonly reserveLineageEstablished: false;
+    readonly mintAuthorized: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+    readonly sourceConsensusIndependentlyAuthenticated: false;
+    readonly ergoConsensusIndependentlyAuthenticated: false;
+    readonly profileActivated: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1 {
+  readonly receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt>;
+}
+
+interface PegInCandidatePlanV1 {
+  readonly amountNanoErg: string;
+  readonly recipientAddressHex: string;
+}
+
 /**
  * The only static FED-6-LAB root that may connect checked setup candidates to
  * the local `/transactions` transport. It accepts no replaceable runtime port.
@@ -214,9 +353,148 @@ export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRo
   input:
     Readonly<RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1>> {
-  const built = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
-    input.build,
+  const { buildReceipt, managed } = await runManagedCampaign(input, undefined);
+
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA,
+    version: 1 as const,
+    status: 'three_local_setup_transactions_canonically_confirmed' as const,
+    staticExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    build: buildReceipt,
+    process: managed.receipt,
+    lifecycle: managed.value.lifecycle,
+    transactions: managed.value.transactions,
+    checks: {
+      exactLockedPatchedNodeBuiltBeforeSignerCreation: true as const,
+      staticExecutionModulesBound: true as const,
+      replacementPortAccepted: false as const,
+      exactCheckedCandidatesConsumedOnce: true as const,
+      exactCanonicalRoleOrderEnforced: true as const,
+      durableReservationPrecededTransport: true as const,
+      predecessorConfirmationPrecededSuccessorAuthorization: true as const,
+      allConfirmedAttemptsRevalidatedBeforeTeardown: true as const,
+      temporaryJournalRemovedAfterResolution: true as const,
+      returnedValueContainsCapabilities: false as const,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true as const,
+      localSetupTargetNodeAcceptanceEstablished: true as const,
+      localSetupSubmissionExecuted: true as const,
+      localSetupBroadcastExecuted: true as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+      processLossRecoveryEstablished: false as const,
+      sourceConsensusIndependentlyAuthenticated: false as const,
+      ergoConsensusIndependentlyAuthenticated: false as const,
+      profileActivated: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+  };
+  const receipt = finalizeReceipt(body, ROOT_RECEIPT_DIGEST_DOMAIN);
+  return Object.freeze({ receipt });
+}
+
+/**
+ * Static FED-6-LAB root for the next value-path boundary. It retains the exact
+ * setup target only long enough to revalidate setup and construct one unsigned
+ * candidate from a fresh dual-node funding observation.
+ */
+export async function runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1(
+  input:
+    Readonly<RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1>> {
+  const pegInPlan = normalizePegInCandidatePlan(input.pegIn);
+  const { buildReceipt, managed } = await runManagedCampaign(input, pegInPlan);
+  const pegIn = managed.value.pegIn;
+  if (pegIn === undefined) {
+    throw new Error('isolated devnet peg-in candidate was not constructed');
+  }
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA,
+    version: 1 as const,
+    status:
+      'setup_confirmed_and_unsigned_peg_in_candidate_constructed' as const,
+    staticExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    build: buildReceipt,
+    process: managed.receipt,
+    setup: {
+      lifecycle: managed.value.lifecycle,
+      transactions: managed.value.transactions,
+    },
+    pegIn,
+    checks: {
+      setupAndFundingObservedInOneTargetLifetime: true as const,
+      allSetupLineagesRevalidatedAfterCandidateConstruction: true as const,
+      exactDualNodeFundingObservationConsumed: true as const,
+      sourceFundingDistinctFromSetupInputsAndOutputs: true as const,
+      sourceFundingRevalidatedAfterCandidateConstruction: true as const,
+      deterministicUnsignedCandidateConstructed: true as const,
+      returnedValueContainsCapabilities: false as const,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true as const,
+      localSetupTargetNodeAcceptanceEstablished: true as const,
+      localSetupSubmissionExecuted: true as const,
+      localSetupBroadcastExecuted: true as const,
+      localSetupCanonicalConfirmationEstablished: true as const,
+      localSourceFundingObservationEstablished: true as const,
+      localSourceFundingReobservationEstablished: true as const,
+      valuePathNodeCheckPerformed: false as const,
+      valuePathSigningAuthorityEstablished: false as const,
+      valuePathSubmissionAuthorityEstablished: false as const,
+      valuePathBroadcastAuthorityEstablished: false as const,
+      sourceLockConsumptionEstablished: false as const,
+      reserveLineageEstablished: false as const,
+      mintAuthorized: false as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+      sourceConsensusIndependentlyAuthenticated: false as const,
+      ergoConsensusIndependentlyAuthenticated: false as const,
+      profileActivated: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+  };
+  const receipt = finalizeReceipt(
+    body,
+    PEG_IN_CANDIDATE_ROOT_RECEIPT_DIGEST_DOMAIN,
   );
+  return Object.freeze({ receipt });
+}
+
+interface ManagedCampaignExecutionV1 {
+  readonly buildReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
+  readonly managed: Readonly<{
+    readonly value: Readonly<ExecutionActionResult>;
+    readonly receipt:
+      Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  }>;
+}
+
+async function runManagedCampaign(
+  input:
+    Readonly<RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input>,
+  pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
+): Promise<Readonly<ManagedCampaignExecutionV1>> {
+  const buildInput = input.build;
+  const lifecycleInput = input.lifecycle;
+  const built = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
+    buildInput,
+  );
+  assertCapabilityFreePlainData(built, 'isolated devnet node build result');
+  deepFreeze(built);
   let setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
   let packetSession:
@@ -224,12 +502,7 @@ export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRo
   let nodeSession:
     Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1>
     | undefined;
-  let managed:
-    Readonly<{
-      readonly value: Readonly<ExecutionActionResult>;
-      readonly receipt:
-        Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
-    }> | undefined;
+  let managed: ManagedCampaignExecutionV1['managed'] | undefined;
   const journalRoots = new Set<string>();
   let failure: unknown;
 
@@ -261,14 +534,18 @@ export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRo
     await nodeSession.startMining();
     managed = await nodeSession.withMiningActiveExecutionTarget(
       async target => await executeManagedSetupAction(
-        input.lifecycle,
+        lifecycleInput,
         setupSession!,
-         packetSession!,
-         profilePins,
-         target,
-         journalRoots,
-       ),
-     );
+        packetSession!,
+        profilePins,
+        target,
+        journalRoots,
+        pegInPlan,
+      ),
+    );
+    assertCapabilityFreePlainData(managed, 'isolated devnet managed result');
+    deepFreeze(managed);
+    assertManagedCampaignBindings(built.receipt, managed);
   } catch (error) {
     failure = error;
   }
@@ -317,55 +594,7 @@ export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRo
   if (managed === undefined) {
     throw new Error('isolated genesis setup execution produced no result');
   }
-
-  const body = {
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA,
-    version: 1 as const,
-    status: 'three_local_setup_transactions_canonically_confirmed' as const,
-    staticExecutionManifestDigestHex:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
-    build: built.receipt,
-    process: managed.receipt,
-    lifecycle: managed.value.lifecycle,
-    transactions: managed.value.transactions,
-    checks: {
-      exactLockedPatchedNodeBuiltBeforeSignerCreation: true as const,
-      staticExecutionModulesBound: true as const,
-      replacementPortAccepted: false as const,
-      exactCheckedCandidatesConsumedOnce: true as const,
-      exactCanonicalRoleOrderEnforced: true as const,
-      durableReservationPrecededTransport: true as const,
-      predecessorConfirmationPrecededSuccessorAuthorization: true as const,
-      allConfirmedAttemptsRevalidatedBeforeTeardown: true as const,
-      temporaryJournalRemovedAfterResolution: true as const,
-      returnedValueContainsCapabilities: false as const,
-    },
-    boundaries: {
-      localSyntheticCompatibilityOnly: true as const,
-      localSetupTargetNodeAcceptanceEstablished: true as const,
-      localSetupSubmissionExecuted: true as const,
-      localSetupBroadcastExecuted: true as const,
-      publicNetworkUsed: false as const,
-      realFundsUsed: false as const,
-      existingWalletMaterialUsed: false as const,
-      processLossRecoveryEstablished: false as const,
-      sourceConsensusIndependentlyAuthenticated: false as const,
-      ergoConsensusIndependentlyAuthenticated: false as const,
-      profileActivated: false as const,
-      fundsAuthorityEstablished: false as const,
-      gate5Closed: false as const,
-      trustlessStatusEstablished: false as const,
-      productionReadinessEstablished: false as const,
-    },
-  };
-  const receipt = deepFreeze({
-    ...body,
-    receiptDigestHex: sha256CanonicalJson(body, ROOT_RECEIPT_DIGEST_DOMAIN),
-  });
-  assertNoCapabilityValue(receipt);
-  assertNoLocalPathValue(receipt);
-  return Object.freeze({ receipt });
+  return Object.freeze({ buildReceipt: built.receipt, managed });
 }
 
 interface ExecutionActionResult {
@@ -373,6 +602,8 @@ interface ExecutionActionResult {
     SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['lifecycle'];
   readonly transactions:
     SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'];
+  readonly pegIn?:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'];
 }
 
 async function executeManagedSetupAction(
@@ -385,6 +616,7 @@ async function executeManagedSetupAction(
     Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input['expectedProfilePins']>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   journalRoots: Set<string>,
+  pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
 ): Promise<Readonly<ExecutionActionResult>> {
   const completionDeadline = Date.now() + ACTION_COMPLETION_BUDGET_MS;
   const sourceHistory =
@@ -500,11 +732,37 @@ async function executeManagedSetupAction(
     if (await journal.revalidateConfirmed(observer) !== ROLE_ORDER.length) {
       throw new Error('isolated genesis confirmed attempt count changed');
     }
-    const finalTransactions = await refreshCanonicalReceiptConfirmations(
+    let finalTransactions = await refreshCanonicalReceiptConfirmations(
       transactions,
       observer,
       completionDeadline,
     );
+    let pegIn:
+      SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']
+      | undefined;
+    if (pegInPlan !== undefined) {
+      pegIn = await buildManagedPegInCandidate(
+        pegInPlan,
+        setupSession,
+        batch,
+        target,
+        Math.max(...finalTransactions.map(value => value.confirmationHeight)),
+      );
+      assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
+        authorizer,
+        target,
+      );
+      if (await journal.revalidateConfirmed(observer) !== ROLE_ORDER.length) {
+        throw new Error(
+          'isolated genesis setup changed after peg-in candidate construction',
+        );
+      }
+      finalTransactions = await refreshCanonicalReceiptConfirmations(
+        finalTransactions,
+        observer,
+        completionDeadline,
+      );
+    }
     actionResult = deepFreeze({
       lifecycle: {
         federationProfileIdHex: profilePins.federationProfileIdHex,
@@ -519,6 +777,7 @@ async function executeManagedSetupAction(
           targetBinding.executionTargetIdentityDigestHex,
       },
       transactions: finalTransactions,
+      ...(pegIn === undefined ? {} : { pegIn }),
     });
   } catch (error) {
     actionFailure = error;
@@ -548,6 +807,203 @@ async function executeManagedSetupAction(
     throw new Error('isolated genesis managed action produced no result');
   }
   return actionResult;
+}
+
+async function buildManagedPegInCandidate(
+  plan: Readonly<PegInCandidatePlanV1>,
+  setupSession:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  minimumSetupConfirmationHeight: number,
+): Promise<
+  SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']
+> {
+  const fundingObservation =
+    await discoverSubstrateFederatedRewardInputsV2(setupSession.signer);
+  assertCapabilityFreePlainData(
+    fundingObservation,
+    'isolated devnet peg-in funding observation',
+  );
+  deepFreeze(fundingObservation);
+  assertSubstrateFederatedRewardInputDiscoveryV2Provenance(
+    fundingObservation,
+  );
+  assertPegInFundingObservation(
+    fundingObservation,
+    setupSession,
+    batch,
+    target,
+    minimumSetupConfirmationHeight,
+  );
+  const sourceFundingInput = fundingObservation.genesisInputs.tracker;
+  const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(
+    batch.familyCompilerBinding.profile,
+  );
+  const candidate =
+    await buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+      batch,
+      target,
+      sourceFundingInput,
+      sourceIntent: {
+        formatVersion: PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+        sourceNetworkIdHex: profile.sourceNetworkIdHex,
+        sidechainIdHex: profile.sidechainIdHex,
+        bridgeAddressHex: profile.bridgeAddressHex,
+        tokenAddressHex: profile.tokenAddressHex,
+        settlementProfileIdHex: profile.settlementProfileIdHex,
+        admissionProfileIdHex:
+          batch.familyCompilerBinding.profile.familyIdHex,
+        sourceAssetIdHex: profile.settlementAssetIdHex,
+        amountNanoErg: plan.amountNanoErg,
+        recipientAddressHex: plan.recipientAddressHex,
+      },
+      depositorErgoTreeHex: setupSession.signer.p2pkErgoTreeHex,
+      creationHeights: {
+        currentErgoHeight: fundingObservation.target.tipHeight,
+        sourceLockCreation: fundingObservation.target.tipHeight,
+        reserveTransition: fundingObservation.target.tipHeight,
+      },
+    });
+  assertCapabilityFreePlainData(candidate, 'isolated devnet peg-in candidate');
+  deepFreeze(candidate);
+  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+    candidate,
+    batch,
+    target,
+  );
+  const sourceFundingBoxDigestHex = sha256CanonicalJson(
+    sourceFundingInput,
+    PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN,
+  );
+  if (
+    packet.boxes.sourceFundingInput.boxId !== sourceFundingInput.boxId
+    || sha256CanonicalJson(
+      packet.boxes.sourceFundingInput,
+      PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN,
+    ) !== sourceFundingBoxDigestHex
+  ) {
+    throw new Error('isolated devnet peg-in funding identity changed');
+  }
+  const postCandidateFundingObservation =
+    await discoverSubstrateFederatedRewardInputsV2(setupSession.signer);
+  assertCapabilityFreePlainData(
+    postCandidateFundingObservation,
+    'isolated devnet post-candidate funding observation',
+  );
+  deepFreeze(postCandidateFundingObservation);
+  assertSubstrateFederatedRewardInputDiscoveryV2Provenance(
+    postCandidateFundingObservation,
+  );
+  assertPegInFundingObservation(
+    postCandidateFundingObservation,
+    setupSession,
+    batch,
+    target,
+    fundingObservation.target.tipHeight,
+  );
+  const postCandidateSourceFundingInput =
+    postCandidateFundingObservation.genesisInputs.tracker;
+  if (
+    postCandidateSourceFundingInput.boxId !== sourceFundingInput.boxId
+    || sha256CanonicalJson(
+      postCandidateSourceFundingInput,
+      PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN,
+    ) !== sourceFundingBoxDigestHex
+  ) {
+    throw new Error(
+      'isolated devnet peg-in funding changed after candidate construction',
+    );
+  }
+  return deepFreeze({
+    fundingObservation: {
+      reportDigestHex: fundingObservation.reportDigestHex,
+      observedAt: fundingObservation.observedAt,
+      primaryNodeOrigin: fundingObservation.sources.primaryNodeOrigin,
+      witnessNodeOrigin: fundingObservation.sources.witnessNodeOrigin,
+      genesisHeaderIdHex: fundingObservation.target.genesisHeaderIdHex,
+      tipHeight: fundingObservation.target.tipHeight,
+      tipHeaderIdHex: fundingObservation.target.tipHeaderIdHex,
+      sourceFundingBoxIdHex: sourceFundingInput.boxId,
+      sourceFundingBoxDigestHex,
+      postCandidateReportDigestHex:
+        postCandidateFundingObservation.reportDigestHex,
+      postCandidateTipHeight: postCandidateFundingObservation.target.tipHeight,
+      postCandidateTipHeaderIdHex:
+        postCandidateFundingObservation.target.tipHeaderIdHex,
+    },
+    candidate,
+  });
+}
+
+function assertPegInFundingObservation(
+  funding:
+    Readonly<SubstrateFederatedRewardInputDiscoveryV2>,
+  setupSession:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  minimumSetupConfirmationHeight: number,
+): void {
+  const setupBoxIds = new Set(batch.orderedTransactions.flatMap(transaction => [
+    transaction.issuance.genesisInputBoxIdHex,
+    transaction.issuance.predictedStateOutput.boxIdHex,
+  ]));
+  const setupTransactionIds = new Set(
+    batch.orderedTransactions.map(transaction =>
+      transaction.issuance.unsignedTransactionIdHex
+    ),
+  );
+  const fundingBoxIds = Object.values(funding.genesisBoxIds);
+  const fundingInputs = Object.values(funding.genesisInputs);
+  if (
+    funding.sources.primaryNodeOrigin !== target.primaryNodeOrigin
+    || funding.sources.witnessNodeOrigin !== target.witnessNodeOrigin
+    || funding.target.genesisHeaderIdHex
+      !== batch.request.target.genesisHeaderIdHex
+    || funding.target.tipHeight < minimumSetupConfirmationHeight
+    || funding.signer.publicKeyHex !== setupSession.signer.publicKeyHex
+    || funding.signer.p2pkErgoTreeHex
+      !== setupSession.signer.p2pkErgoTreeHex
+    || fundingBoxIds.length !== 3
+    || new Set(fundingBoxIds).size !== fundingBoxIds.length
+    || fundingBoxIds.some(boxId => setupBoxIds.has(boxId))
+    || fundingInputs.some(input =>
+      setupTransactionIds.has(input.transactionId)
+    )
+  ) {
+    throw new Error(
+      'isolated devnet peg-in funding observation is not a fresh setup successor',
+    );
+  }
+}
+
+function assertManagedCampaignBindings(
+  buildReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>,
+  managed: ManagedCampaignExecutionV1['managed'],
+): void {
+  const process = managed.receipt;
+  const lifecycle = managed.value.lifecycle;
+  const candidate = managed.value.pegIn?.candidate;
+  if (
+    process.buildIdentityDigestHex !== buildReceipt.buildIdentityDigestHex
+    || process.primaryNodeOrigin
+      !== SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
+    || process.witnessNodeOrigin
+      !== SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN
+    || process.executionTargetIdentityDigestHex
+      !== lifecycle.executionTargetIdentityDigestHex
+    || (candidate !== undefined
+      && (candidate.target.processBindingDigestHex
+          !== process.processBindingDigestHex
+        || candidate.target.executionTargetIdentityDigestHex
+          !== process.executionTargetIdentityDigestHex))
+  ) {
+    throw new Error('isolated devnet managed process binding changed');
+  }
 }
 
 function executionInput(
@@ -854,19 +1310,6 @@ function disposeSession(
   }
 }
 
-function assertNoCapabilityValue(value: unknown): void {
-  if (typeof value === 'function') {
-    throw new Error('isolated genesis receipt contains a capability');
-  }
-  if (Array.isArray(value)) {
-    for (const entry of value) assertNoCapabilityValue(entry);
-    return;
-  }
-  if (value !== null && typeof value === 'object') {
-    for (const entry of Object.values(value)) assertNoCapabilityValue(entry);
-  }
-}
-
 function assertNoLocalPathValue(value: unknown): void {
   if (
     typeof value === 'string'
@@ -885,10 +1328,155 @@ function assertNoLocalPathValue(value: unknown): void {
   }
 }
 
-function deepFreeze<T>(value: T): Readonly<T> {
-  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const entry of Object.values(value)) deepFreeze(entry);
+function normalizePegInCandidatePlan(
+  input:
+    Readonly<RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input['pegIn']>,
+): Readonly<PegInCandidatePlanV1> {
+  assertCapabilityFreePlainData(input, 'isolated devnet peg-in plan');
+  assertExactObjectKeys(
+    input,
+    ['amountNanoErg', 'recipientAddressHex'],
+    'isolated devnet peg-in plan',
+  );
+  const { amountNanoErg, recipientAddressHex } = input;
+  if (!/^[1-9]\d*$/u.test(amountNanoErg)) {
+    throw new Error(
+      'isolated devnet peg-in amount must be canonical positive nanoERG',
+    );
+  }
+  const amount = BigInt(amountNanoErg);
+  if (amount < 1_000_000n || amount > 0x7fff_ffff_ffff_ffffn) {
+    throw new Error('isolated devnet peg-in amount is outside Ergo Long bounds');
+  }
+  if (
+    !/^[0-9a-f]{40}$/u.test(recipientAddressHex)
+    || /^0+$/u.test(recipientAddressHex)
+  ) {
+    throw new Error(
+      'isolated devnet peg-in recipient must be canonical nonzero 20-byte hex',
+    );
+  }
+  return Object.freeze({ amountNanoErg, recipientAddressHex });
+}
+
+function finalizeReceipt<T extends object>(
+  body: T,
+  digestDomain: string,
+): Readonly<T & { readonly receiptDigestHex: string }> {
+  assertCapabilityFreePlainData(body, 'isolated devnet receipt body');
+  assertNoLocalPathValue(body);
+  deepFreeze(body);
+  const receipt = {
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(body, digestDomain),
+  };
+  assertCapabilityFreePlainData(receipt, 'isolated devnet receipt');
+  assertNoLocalPathValue(receipt);
+  return deepFreeze(receipt);
+}
+
+function assertCapabilityFreePlainData(
+  value: unknown,
+  label: string,
+  seen = new Set<object>(),
+  active = new Set<object>(),
+): void {
+  if (
+    value === null
+    || typeof value === 'string'
+    || typeof value === 'boolean'
+    || (typeof value === 'number' && Number.isFinite(value))
+  ) {
+    return;
+  }
+  if (typeof value !== 'object') {
+    throw new Error(`${label} must contain capability-free plain data only`);
+  }
+  if (active.has(value)) {
+    throw new Error(`${label} must not contain cyclic data`);
+  }
+  if (seen.has(value)) return;
+  const isArray = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (
+    isArray
+      ? prototype !== Array.prototype
+      : prototype !== Object.prototype && prototype !== null
+  ) {
+    throw new Error(`${label} must not contain custom prototypes`);
+  }
+  seen.add(value);
+  active.add(value);
+  const keys: PropertyKey[] = [
+    ...Object.getOwnPropertyNames(value),
+    ...Object.getOwnPropertySymbols(value),
+  ];
+  if (keys.some(key => typeof key === 'symbol')) {
+    throw new Error(`${label} must not contain symbol-keyed data`);
+  }
+  if (isArray) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, String(index))) {
+        throw new Error(`${label} must not contain sparse arrays`);
+      }
+    }
+  }
+  for (const key of keys) {
+    if (typeof key !== 'string') {
+      throw new Error(`${label} must not contain symbol-keyed data`);
+    }
+    if (key === 'length' && isArray) continue;
+    if (
+      isArray
+      && (!/^(?:0|[1-9]\d*)$/u.test(key)
+        || Number(key) >= value.length)
+    ) {
+      throw new Error(`${label} must not contain non-index array fields`);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+    if (
+      descriptor.get !== undefined
+      || descriptor.set !== undefined
+      || descriptor.enumerable !== true
+    ) {
+      throw new Error(`${label} must contain enumerable data fields only`);
+    }
+    assertCapabilityFreePlainData(descriptor.value, label, seen, active);
+  }
+  active.delete(value);
+}
+
+function assertExactObjectKeys(
+  value: object,
+  expectedKeys: readonly string[],
+  label: string,
+): void {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const actual = Object.keys(value).sort();
+  const expected = [...expectedKeys].sort();
+  if (
+    actual.length !== expected.length
+    || actual.some((key, index) => key !== expected[index])
+  ) {
+    throw new Error(`${label} contains unknown or missing fields`);
+  }
+}
+
+function deepFreeze<T>(value: T, seen = new Set<object>()): Readonly<T> {
+  if (value !== null && typeof value === 'object' && !seen.has(value)) {
+    seen.add(value);
+    for (const key of [
+      ...Object.getOwnPropertyNames(value),
+      ...Object.getOwnPropertySymbols(value),
+    ]) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor !== undefined && 'value' in descriptor) {
+        deepFreeze(descriptor.value, seen);
+      }
+    }
+    if (!Object.isFrozen(value)) Object.freeze(value);
   }
   return value;
 }

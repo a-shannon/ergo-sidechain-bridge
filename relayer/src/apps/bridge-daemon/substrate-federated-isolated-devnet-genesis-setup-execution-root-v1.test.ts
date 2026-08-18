@@ -22,7 +22,11 @@ const mocked = vi.hoisted(() => ({
   packet: vi.fn(),
   sourceHistory: vi.fn(),
   rewardDiscovery: vi.fn(),
+  rewardDiscoveryAssert: vi.fn(),
   ergoHistory: vi.fn(),
+  familyDecode: vi.fn(),
+  pegInCandidateBuild: vi.fn(),
+  pegInCandidateAssert: vi.fn(),
   execute: vi.fn(),
   revalidator: vi.fn(),
   observer: vi.fn(),
@@ -50,9 +54,20 @@ vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => (
   collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocked.sourceHistory,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js', () => ({
+  assertSubstrateFederatedRewardInputDiscoveryV2Provenance:
+    mocked.rewardDiscoveryAssert,
   discoverSubstrateFederatedRewardInputsV2: mocked.rewardDiscovery,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'http://127.0.0.1:9051',
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'http://127.0.0.1:9052',
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1:
+    mocked.pegInCandidateAssert,
+  buildSubstrateFederatedIsolatedDevnetPegInCandidateV1:
+    mocked.pegInCandidateBuild,
+}));
+vi.mock('../../substrate-federated-settlement-family-v1.js', () => ({
+  decodeSubstrateFederatedSettlementFamilyV1Profile: mocked.familyDecode,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', () => ({
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2:
@@ -96,7 +111,9 @@ vi.mock('../../state-tracker.js', () => ({
 
 import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
@@ -108,6 +125,10 @@ describe('isolated devnet genesis setup execution root V1', () => {
   let observerPort: ReturnType<typeof validObserver>;
   let authorizerPort: ReturnType<typeof validAuthorizer>;
   let journalPort: ReturnType<typeof validJournal>;
+  let rewardDiscoveryCount: number;
+  let fundingObservation: ReturnType<typeof validPegInFundingObservation>;
+  let postCandidateFundingObservation:
+    ReturnType<typeof validPegInFundingObservation>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -117,6 +138,13 @@ describe('isolated devnet genesis setup execution root V1', () => {
     authorizerPort = validAuthorizer(order);
     journalPort = validJournal(order);
     processSession = validProcessSession(order);
+    rewardDiscoveryCount = 0;
+    fundingObservation = validPegInFundingObservation();
+    postCandidateFundingObservation = structuredClone(fundingObservation);
+    postCandidateFundingObservation.reportDigestHex = digest('d');
+    postCandidateFundingObservation.observedAt = '2026-08-18T09:01:00.000Z';
+    postCandidateFundingObservation.target.tipHeight = 131;
+    postCandidateFundingObservation.target.tipHeaderIdHex = digest('e');
 
     mocked.build.mockImplementation(async () => {
       order.push('build');
@@ -151,13 +179,32 @@ describe('isolated devnet genesis setup execution root V1', () => {
       return { source: 'history' };
     });
     mocked.rewardDiscovery.mockImplementation(async () => {
-      order.push('ergo:rewards');
-      return { rewards: 'observed' };
+      rewardDiscoveryCount += 1;
+      if (rewardDiscoveryCount === 1) {
+        order.push('ergo:rewards');
+        return { rewards: 'observed' };
+      }
+      if (rewardDiscoveryCount === 2) {
+        order.push('ergo:rewards:peg-in');
+        return fundingObservation;
+      }
+      order.push('ergo:rewards:peg-in:revalidate');
+      return postCandidateFundingObservation;
+    });
+    mocked.rewardDiscoveryAssert.mockImplementation(value => {
+      order.push('peg-in:funding:assert');
+      if (
+        value !== fundingObservation
+        && value !== postCandidateFundingObservation
+      ) {
+        throw new Error('funding observation provenance changed');
+      }
     });
     mocked.ergoHistory.mockImplementation(async () => {
       order.push('ergo:history');
       return { ergo: 'history' };
     });
+    mocked.familyDecode.mockReturnValue(validFamilyProfile());
     mocked.revalidator.mockReturnValue({
       revalidate: vi.fn(async (_checked, phase) => ({
         sourceBoxId: digest('1'),
@@ -193,6 +240,17 @@ describe('isolated devnet genesis setup execution root V1', () => {
     });
     mocked.journal.mockReturnValue(journalPort);
     mocked.execute.mockImplementation(executeThroughPorts(order));
+    mocked.pegInCandidateBuild.mockImplementation(async input => {
+      order.push('peg-in:candidate:build');
+      return validPegInCandidate(
+        input.sourceFundingInput,
+        currentBatch.targetBinding,
+      );
+    });
+    mocked.pegInCandidateAssert.mockImplementation(candidate => {
+      order.push('peg-in:candidate:assert');
+      return candidate.depositPacket;
+    });
   });
 
   it('broadcasts and confirms the exact three setup roles in canonical order', async () => {
@@ -268,6 +326,207 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /(?:^|[^A-Za-z])[A-Za-z]:[\\/]/u,
     );
+  });
+
+  it('constructs one unsigned peg-in candidate after fresh same-lifetime funding observation', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1(
+        pegInRootInput(),
+      );
+
+    expect(order.indexOf('ack:pooledReserve')).toBeLessThan(
+      order.indexOf('ergo:rewards:peg-in'),
+    );
+    expect(order.indexOf('peg-in:funding:assert')).toBeLessThan(
+      order.indexOf('peg-in:candidate:build'),
+    );
+    expect(order.indexOf('peg-in:candidate:build')).toBeLessThan(
+      order.indexOf('ergo:rewards:peg-in:revalidate'),
+    );
+    expect(order.indexOf('ergo:rewards:peg-in:revalidate')).toBeLessThan(
+      order.lastIndexOf('journal:revalidate'),
+    );
+    expect(order.lastIndexOf('journal:revalidate')).toBeLessThan(
+      order.indexOf('execution:leave'),
+    );
+    expect(journalPort.revalidateConfirmed).toHaveBeenCalledTimes(2);
+    expect(mocked.assertConfirmed).toHaveBeenCalledTimes(2);
+    expect(mocked.rewardDiscoveryAssert).toHaveBeenCalledTimes(2);
+    expect(mocked.pegInCandidateBuild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        batch: currentBatch,
+        sourceFundingInput: fundingObservation.genesisInputs.tracker,
+        depositorErgoTreeHex: setupSigner().p2pkErgoTreeHex,
+        creationHeights: {
+          currentErgoHeight: fundingObservation.target.tipHeight,
+          sourceLockCreation: fundingObservation.target.tipHeight,
+          reserveTransition: fundingObservation.target.tipHeight,
+        },
+        sourceIntent: expect.objectContaining({
+          amountNanoErg: '5000000',
+          recipientAddressHex: 'b1'.repeat(20),
+        }),
+      }),
+    );
+    expect(result.receipt).toMatchObject({
+      status: 'setup_confirmed_and_unsigned_peg_in_candidate_constructed',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+      checks: {
+        setupAndFundingObservedInOneTargetLifetime: true,
+        allSetupLineagesRevalidatedAfterCandidateConstruction: true,
+        exactDualNodeFundingObservationConsumed: true,
+        sourceFundingDistinctFromSetupInputsAndOutputs: true,
+        sourceFundingRevalidatedAfterCandidateConstruction: true,
+        deterministicUnsignedCandidateConstructed: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        localSetupCanonicalConfirmationEstablished: true,
+        localSourceFundingObservationEstablished: true,
+        localSourceFundingReobservationEstablished: true,
+        valuePathNodeCheckPerformed: false,
+        valuePathSigningAuthorityEstablished: false,
+        valuePathSubmissionAuthorityEstablished: false,
+        valuePathBroadcastAuthorityEstablished: false,
+        sourceLockConsumptionEstablished: false,
+        reserveLineageEstablished: false,
+        mintAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(result.receipt.pegIn.fundingObservation.sourceFundingBoxIdHex)
+      .toBe(fundingObservation.genesisInputs.tracker.boxId);
+    expect(result.receipt.pegIn.fundingObservation.postCandidateReportDigestHex)
+      .toBe(postCandidateFundingObservation.reportDigestHex);
+    expect(result.receipt.pegIn.fundingObservation.postCandidateTipHeight)
+      .toBe(131);
+    expect(mocked.stateClose).toHaveBeenCalledTimes(1);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+    expect(containsFunction(result)).toBe(false);
+  });
+
+  it.each([
+    ['reused setup input', () => {
+      fundingObservation.genesisBoxIds.tracker = digest('1');
+      fundingObservation.genesisInputs.tracker.boxId = digest('1');
+    }],
+    ['wrong target genesis', () => {
+      fundingObservation.target.genesisHeaderIdHex = digest('f');
+    }],
+    ['observation before setup confirmation', () => {
+      fundingObservation.target.tipHeight = 121;
+    }],
+    ['setup transaction output', () => {
+      fundingObservation.genesisInputs.tracker.transactionId =
+        currentBatch.orderedTransactions[0]!.issuance.unsignedTransactionIdHex;
+    }],
+  ])('rejects peg-in funding with %s', async (_label, mutate) => {
+    mutate();
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/funding observation is not a fresh setup successor/);
+    expect(mocked.pegInCandidateBuild).not.toHaveBeenCalled();
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects funding drift after candidate construction', async () => {
+    postCandidateFundingObservation.genesisBoxIds.tracker = digest('f');
+    postCandidateFundingObservation.genesisInputs.tracker.boxId = digest('f');
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/funding changed after candidate construction/);
+    expect(mocked.pegInCandidateBuild).toHaveBeenCalledTimes(1);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a process receipt bound to another target', async () => {
+    processSession.withMiningActiveExecutionTarget.mockImplementationOnce(
+      async action => {
+        order.push('execution:enter');
+        const value = await action(executionTarget());
+        order.push('execution:leave');
+        return {
+          value,
+          receipt: {
+            ...processReceipt(),
+            executionTargetIdentityDigestHex: digest('f'),
+          },
+        };
+      },
+    );
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/managed process binding changed/);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['alternating accessor', (receipt: Record<PropertyKey, unknown>) => {
+      let reads = 0;
+      Object.defineProperty(receipt, 'buildIdentityDigestHex', {
+        enumerable: true,
+        get: () => digest(reads++ === 0 ? '3' : 'f'),
+      });
+    }],
+    ['custom prototype', (receipt: Record<PropertyKey, unknown>) => {
+      Object.setPrototypeOf(receipt, { hiddenCapability: () => undefined });
+    }],
+    ['symbol capability', (receipt: Record<PropertyKey, unknown>) => {
+      receipt[Symbol('hidden')] = () => undefined;
+    }],
+    ['non-enumerable capability', (receipt: Record<PropertyKey, unknown>) => {
+      Object.defineProperty(receipt, 'hiddenCapability', {
+        enumerable: false,
+        value: () => undefined,
+      });
+    }],
+  ])('rejects producer-owned %s data', async (_label, mutate) => {
+    const build = validBuild();
+    mutate(build.receipt as unknown as Record<PropertyKey, unknown>);
+    mocked.build.mockResolvedValueOnce(build);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
+        rootInput(),
+      ),
+    ).rejects.toThrow(/capability-free plain data|custom prototypes|symbol-keyed|enumerable data fields/);
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('rejects setup rollback detected after candidate construction', async () => {
+    journalPort.revalidateConfirmed
+      .mockResolvedValueOnce(3)
+      .mockResolvedValueOnce(2);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/setup changed after peg-in candidate construction/);
+    expect(mocked.pegInCandidateBuild).toHaveBeenCalledTimes(1);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects invalid peg-in data before building or starting a target', async () => {
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1({
+        ...(pegInRootInput() as unknown as Record<string, unknown>),
+        pegIn: {
+          amountNanoErg: '05000000',
+          recipientAddressHex: 'b1'.repeat(20),
+        },
+      } as never),
+    ).rejects.toThrow(/amount must be canonical/);
+    expect(mocked.build).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
   });
 
   it('does not authorize a successor when predecessor confirmation fails', async () => {
@@ -578,6 +837,9 @@ function setupBatch() {
       processBindingDigestHex: digest('5'),
       executionTargetIdentityDigestHex: digest('6'),
     },
+    familyCompilerBinding: {
+      profile: { familyIdHex: digest('f') },
+    },
     orderedTransactions: setupTransactions(),
   };
 }
@@ -693,6 +955,94 @@ function rootInput() {
       relayerArtifacts: {},
     },
   } as never;
+}
+
+function pegInRootInput() {
+  return {
+    ...(rootInput() as unknown as Record<string, unknown>),
+    pegIn: {
+      amountNanoErg: '5000000',
+      recipientAddressHex: 'b1'.repeat(20),
+    },
+  } as never;
+}
+
+function validPegInFundingObservation() {
+  const rewardBox = (boxId: string, transactionId: string, index: number) => ({
+    boxId,
+    value: '1000000000',
+    ergoTree: '00',
+    assets: [],
+    additionalRegisters: {},
+    creationHeight: 50 + index,
+    transactionId,
+    index,
+  });
+  return {
+    reportDigestHex: digest('c'),
+    observedAt: '2026-08-18T09:00:00.000Z',
+    sources: {
+      primaryNodeOrigin: 'http://127.0.0.1:9051',
+      witnessNodeOrigin: 'http://127.0.0.1:9052',
+    },
+    target: {
+      genesisHeaderIdHex: digest('a'),
+      tipHeight: 130,
+      tipHeaderIdHex: digest('b'),
+    },
+    signer: {
+      publicKeyHex: setupSigner().publicKeyHex,
+      p2pkErgoTreeHex: setupSigner().p2pkErgoTreeHex,
+    },
+    genesisBoxIds: {
+      tracker: digest('c'),
+      duplicatePrevention: digest('d'),
+      pooledReserve: digest('e'),
+    },
+    genesisInputs: {
+      tracker: rewardBox(digest('c'), digest('7'), 0),
+      duplicatePrevention: rewardBox(digest('d'), digest('8'), 0),
+      pooledReserve: rewardBox(digest('e'), digest('9'), 0),
+    },
+  };
+}
+
+function validFamilyProfile() {
+  return {
+    sourceNetworkIdHex: digest('1'),
+    sidechainIdHex: digest('2'),
+    bridgeAddressHex: '03'.repeat(20),
+    tokenAddressHex: '04'.repeat(20),
+    settlementProfileIdHex: digest('5'),
+    settlementAssetIdHex: digest('6'),
+  };
+}
+
+function validPegInCandidate(
+  sourceFundingInput: Record<string, unknown>,
+  targetBinding: Readonly<{
+    processBindingDigestHex: string;
+    executionTargetIdentityDigestHex: string;
+  }>,
+) {
+  return {
+    schema: 'e2s.substrate-federated-isolated-devnet-peg-in-candidate.v1',
+    version: 1,
+    status: 'unsigned_non_authorizing_candidate',
+    candidateDigestHex: digest('7'),
+    target: { ...targetBinding },
+    depositPacket: {
+      boxes: { sourceFundingInput: structuredClone(sourceFundingInput) },
+    },
+    boundaries: {
+      nodeCheckPerformed: false,
+      signingAuthorityEstablished: false,
+      submissionAuthorityEstablished: false,
+      broadcastAuthorityEstablished: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+    },
+  };
 }
 
 const ROLE_ORDER = [
