@@ -1,3 +1,4 @@
+# This runner is digest-pinned; its repository and working-tree bytes use LF.
 $ErrorActionPreference = 'Stop'
 
 function ConvertFrom-BridgeBase64([string] $Value, [string] $Label) {

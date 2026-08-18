@@ -114,6 +114,7 @@ relayer/src/substrate-federated-settlement-family-v1.test.ts text eol=lf
 relayer/src/scripts/build-substrate-federated-settlement-family-v1-compiler-fixture.ts text eol=lf
 validity-proof/consumer-jvm/BridgeSubstrateFederatedSettlementFamilyV1CompilerSpec.scala text eol=lf
 validity-proof/consumer-jvm/run-substrate-federated-settlement-family-v1.ps1 text eol=lf
+relayer/src/scripts/windows-job-process.ps1 text eol=lf
 relayer/src/substrate-federated-burn-settlement-v1.ts text eol=lf
 relayer/src/substrate-federated-burn-settlement-v1-fixture.ts text eol=lf
 relayer/src/substrate-federated-burn-settlement-v1.test.ts text eol=lf

@@ -53,7 +53,7 @@ describe('isolated devnet Ergo node build V1', () => {
       projectSbtVersion: '1.11.1',
       buildProcessRunner: 'reviewed-windows-job-object-v1',
       windowsJobProcessRunnerSha256Hex:
-        'e16275e019e8cbb30325317fd405d80682d8f3b92e853aa2989ffe917c62c28b',
+        'c7ab6ff55e275eb4e1298b1bcc6ce57d1e7cb7b0f0eb4c47f41c61f3895f9f6e',
       buildTimeoutMs: 900_000,
       buildTerminationGraceMs: 10_000,
       buildMaxOutputBytes: 16_777_216,
