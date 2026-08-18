@@ -6,6 +6,8 @@ import type {
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import {
   createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2,
+  SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input,
+  SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input,
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
@@ -63,6 +65,20 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   ) => Promise<Readonly<
     SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt
   >>;
+  readonly checkPegInSourceLockRetainingSigner: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt
+  >>;
+  readonly checkPegInCommittedVault: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
+  >>;
 }
 
 /**
@@ -87,7 +103,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     throw error;
   }
   let state:
-    'open' | 'running' | 'setup-complete' | 'check-complete' | 'closed' = 'open';
+    | 'open'
+    | 'running'
+    | 'setup-complete'
+    | 'source-lock-check-complete'
+    | 'check-complete'
+    | 'closed' = 'open';
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   const close = (): void => {
     MINING_CREDENTIALS.delete(session);
@@ -99,9 +120,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     }
   };
   const consume = async <T>(
-    expectedState: 'open' | 'setup-complete',
+    expectedState: 'open' | 'setup-complete' | 'source-lock-check-complete',
     operation: () => Promise<T>,
-    successState: 'setup-complete' | 'check-complete' | 'closed',
+    successState:
+      | 'setup-complete'
+      | 'source-lock-check-complete'
+      | 'check-complete'
+      | 'closed',
   ): Promise<T> => {
     if (state !== expectedState) {
       throw new Error(
@@ -132,9 +157,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
         throw new Error('isolated fixed setup-check session is running');
       }
       if (
-        state === 'open'
-        || state === 'setup-complete'
-        || state === 'check-complete'
+          state === 'open'
+          || state === 'setup-complete'
+          || state === 'source-lock-check-complete'
+          || state === 'check-complete'
       ) {
         close();
       }
@@ -164,6 +190,24 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     ) => consume(
       'setup-complete',
       () => execution.checkPegInSourceLock(input, target),
+      'check-complete',
+    ),
+    checkPegInSourceLockRetainingSigner: async (
+      input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'setup-complete',
+      () => execution.checkPegInSourceLockRetainingSigner(input, target),
+      'source-lock-check-complete',
+    ),
+    checkPegInCommittedVault: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+      >,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'source-lock-check-complete',
+      () => execution.checkPegInCommittedVault(input, target),
       'check-complete',
     ),
   });

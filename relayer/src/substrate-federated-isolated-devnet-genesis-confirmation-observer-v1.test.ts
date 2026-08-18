@@ -51,6 +51,7 @@ vi.mock('axios', () => ({
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+  reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
 } from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 
 const GENESIS_HEADER_ID = '21'.repeat(32);
@@ -136,6 +137,43 @@ describe('isolated devnet genesis confirmation observer V1', () => {
         confirmation!,
       )
     ).toThrow(/lacks exact process provenance/);
+  });
+
+  it('reobserves the exact transaction through the artifact-owned observer', async () => {
+    installCanonicalResponses();
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+    const first = await observer.observe(
+      TX_ID,
+      processBoundary.target.primaryNodeOrigin,
+    );
+    const replacementHeaderId = '25'.repeat(32);
+    installCanonicalResponses({
+      fullHeight: 21,
+      inclusionHeight: 11,
+      inclusionHeaderId: replacementHeaderId,
+    });
+
+    const latest =
+      await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
+        artifact: first!.observerArtifact,
+        expectedReconciliationIdentityDigestHex:
+          processBoundary.reconciliationIdentityDigestHex,
+        expectedTargetGenesisHeaderIdHex: GENESIS_HEADER_ID,
+        expectedTxId: TX_ID,
+        priorConfirmation: first!,
+      });
+
+    expect(latest).toMatchObject({
+      status: 'confirmed',
+      observedAtHeight: 21,
+      confirmationHeight: 11,
+      confirmationHeaderIdHex: replacementHeaderId,
+    });
+    expect(latest.observerArtifact).not.toBe(first!.observerArtifact);
   });
 
   it('rejects a genuine pending artifact wrapped as a fabricated confirmation', async () => {
@@ -273,32 +311,62 @@ describe('isolated devnet genesis confirmation observer V1', () => {
   });
 });
 
-function installCanonicalResponses(): void {
+function installCanonicalResponses(
+  input: Readonly<{
+    fullHeight?: number;
+    inclusionHeight?: number;
+    inclusionHeaderId?: string;
+  }> = {},
+): void {
+  const fullHeight = input.fullHeight ?? 20;
+  const inclusionHeight = input.inclusionHeight ?? 10;
+  const inclusionHeaderId = input.inclusionHeaderId ?? INCLUSION_HEADER_ID;
+  const confirmations = fullHeight - inclusionHeight;
   rpc.primaryGet.mockImplementation(async (path: string) => {
-    if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
+    if (path === '/info') return { data: { network: 'devnet', fullHeight } };
     if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
     if (path === `/blockchain/transaction/byId/${TX_ID}`) {
-      return { data: transaction(10) };
+      return {
+        data: transaction(
+          confirmations,
+          inclusionHeight,
+          inclusionHeaderId,
+        ),
+      };
     }
-    if (path === '/blocks/at/10') return { data: [INCLUSION_HEADER_ID] };
+    if (path === `/blocks/at/${inclusionHeight}`) {
+      return { data: [inclusionHeaderId] };
+    }
     throw new Error(`unexpected primary path ${path}`);
   });
   rpc.witnessGet.mockImplementation(async (path: string) => {
-    if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
+    if (path === '/info') return { data: { network: 'devnet', fullHeight } };
     if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
     if (path === `/blockchain/transaction/byId/${TX_ID}`) {
-      return { data: transaction(10) };
+      return {
+        data: transaction(
+          confirmations,
+          inclusionHeight,
+          inclusionHeaderId,
+        ),
+      };
     }
-    if (path === '/blocks/at/10') return { data: [INCLUSION_HEADER_ID] };
+    if (path === `/blocks/at/${inclusionHeight}`) {
+      return { data: [inclusionHeaderId] };
+    }
     throw new Error(`unexpected witness path ${path}`);
   });
 }
 
-function transaction(confirmations: number): Readonly<Record<string, unknown>> {
+function transaction(
+  confirmations: number,
+  inclusionHeight = 10,
+  headerId = INCLUSION_HEADER_ID,
+): Readonly<Record<string, unknown>> {
   return Object.freeze({
     id: TX_ID,
     numConfirmations: confirmations,
-    inclusionHeight: 10,
-    headerId: INCLUSION_HEADER_ID,
+    inclusionHeight,
+    headerId,
   });
 }

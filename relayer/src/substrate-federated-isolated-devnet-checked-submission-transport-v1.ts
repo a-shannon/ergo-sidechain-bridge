@@ -24,10 +24,18 @@ import {
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
 } from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1,
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1,
+  type SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1,
+} from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1,
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
   type SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
 } from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+import {
+  assertSubstrateFederatedLocalDevnetPegInCommittedVaultDurableAttemptV1,
+} from './substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
@@ -44,7 +52,7 @@ const SUBMISSION_RESPONSE_DIGEST_DOMAIN =
 
 type Transport =
   SubstrateFederatedLocalDevnetGenesisExecutionPorts['transport'];
-type SourceLockSubmitter =
+type PegInSubmitter =
   ErgoOperationalTransactionExecutionPorts['submitter'];
 type AcceptedOrAmbiguousSubmission = Exclude<
   SubstrateFederatedLocalDevnetGenesisSubmission,
@@ -158,7 +166,7 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubm
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1>,
-): Readonly<SourceLockSubmitter> {
+): Readonly<PegInSubmitter> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(
@@ -205,6 +213,103 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubm
         || typeof exactSignedCandidate.signedTransactionBytesLength !== 'number'
       ) {
         throw new Error('isolated source-lock transport requires exact signed bytes');
+      }
+      const submissionHandle = checked.checkerArtifact;
+      assertLocalWasmCheckedSubmissionHandleV1Provenance(submissionHandle);
+      const exactHandle =
+        submissionHandle as Readonly<LocalWasmCheckedSubmissionHandleV1>;
+      assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+        exactHandle,
+        binding,
+      );
+      assertExactAttemptBinding(
+        exactHandle,
+        exactSignedCandidate,
+        admission.expectedTxId,
+        checked.signed.nodeOrigin,
+        checked.signed.signedTransactionDigestHex,
+        checked.checkResponseDigestHex,
+      );
+      return await consumeLocalWasmCheckedSubmissionHandleV1(
+        exactHandle,
+        exactSignedCandidate,
+        async signedTransaction => await submitExactTransaction(
+          signedTransaction,
+          admission.expectedTxId,
+          attempt.durableAttemptDigestHex,
+          attempt.authorization.authorizationDigestHex,
+          exactHandle,
+          binding,
+        ),
+      );
+    },
+  });
+}
+
+/** Submit one exact source-lock-to-reserve transition after its authorization. */
+export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>,
+): Readonly<PegInSubmitter> {
+  const binding =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(
+    authorizer,
+    target,
+  );
+  if (
+    target.primaryNodeOrigin
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
+    || target.primaryMining !== true
+    || target.witnessReadOnly !== true
+  ) {
+    throw new Error(
+      'isolated committed-vault transport target binding is invalid',
+    );
+  }
+  return Object.freeze({
+    submit: async attempt => {
+      const current =
+        assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      if (
+        current.processBindingDigestHex !== binding.processBindingDigestHex
+        || current.executionTargetIdentityDigestHex
+          !== binding.executionTargetIdentityDigestHex
+      ) {
+        throw new Error(
+          'isolated committed-vault transport process binding changed',
+        );
+      }
+      assertSubstrateFederatedLocalDevnetPegInCommittedVaultDurableAttemptV1(
+        authorizer,
+        attempt,
+      );
+      assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+        authorizer,
+        attempt.authorization,
+      );
+      const checked = attempt.authorization.revalidated.checked;
+      const admission = checked.signed.admission;
+      if (
+        checked.signed.nodeOrigin
+          !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
+      ) {
+        throw new Error(
+          'isolated committed-vault transport target origin changed',
+        );
+      }
+      const signedCandidate = checked.signed.signerArtifact;
+      assertLocalWasmSignedCheckCandidateProvenance(signedCandidate);
+      const exactSignedCandidate =
+        signedCandidate as LocalWasmExactBytesSignedCheckCandidate;
+      if (
+        typeof exactSignedCandidate.signedTransactionBytesSha256Hex !== 'string'
+        || typeof exactSignedCandidate.signedTransactionBytesLength !== 'number'
+      ) {
+        throw new Error(
+          'isolated committed-vault transport requires exact signed bytes',
+        );
       }
       const submissionHandle = checked.checkerArtifact;
       assertLocalWasmCheckedSubmissionHandleV1Provenance(submissionHandle);

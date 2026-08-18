@@ -28,6 +28,7 @@ const mocked = vi.hoisted(() => ({
   pegInCandidateBuild: vi.fn(),
   pegInCandidateAssert: vi.fn(),
   pegInSourceLockCheck: vi.fn(),
+  pegInSourceLockRetainingCheck: vi.fn(),
   pegInSourceLockPromote: vi.fn(),
   pegInSourceLockDiscard: vi.fn(),
   ownedRewardDiscovery: vi.fn(),
@@ -36,6 +37,13 @@ const mocked = vi.hoisted(() => ({
   pegInSourceLockJournal: vi.fn(),
   pegInSourceLockOutputObserve: vi.fn(),
   pegInSourceLockOutputAssert: vi.fn(),
+  pegInCommittedVaultCheck: vi.fn(),
+  pegInCommittedVaultPromote: vi.fn(),
+  pegInCommittedVaultAuthorizationSession: vi.fn(),
+  pegInCommittedVaultTransport: vi.fn(),
+  pegInCommittedVaultJournal: vi.fn(),
+  pegInCommittedVaultOutputObserve: vi.fn(),
+  pegInCommittedVaultOutputAssert: vi.fn(),
   execute: vi.fn(),
   revalidator: vi.fn(),
   observer: vi.fn(),
@@ -76,6 +84,8 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () =
     mocked.pegInCandidateBuild,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
+  promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1:
+    mocked.pegInCommittedVaultPromote,
   discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
     mocked.pegInSourceLockDiscard,
   promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
@@ -114,6 +124,12 @@ vi.mock('../../substrate-federated-isolated-devnet-checked-submission-transport-
     mocked.transport,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1:
     mocked.pegInSourceLockTransport,
+  createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1:
+    mocked.pegInCommittedVaultTransport,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js', () => ({
+  createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1:
+    mocked.pegInCommittedVaultAuthorizationSession,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1:
@@ -129,12 +145,22 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-output-obs
   observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1:
     mocked.pegInSourceLockOutputObserve,
 }));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1:
+    mocked.pegInCommittedVaultOutputAssert,
+  observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1:
+    mocked.pegInCommittedVaultOutputObserve,
+}));
 vi.mock('../../substrate-federated-local-devnet-genesis-journal-v1.js', () => ({
   createSubstrateFederatedLocalDevnetGenesisJournalV1: mocked.journal,
 }));
 vi.mock('../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js', () => ({
   createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1:
     mocked.pegInSourceLockJournal,
+}));
+vi.mock('../../substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js', () => ({
+  createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1:
+    mocked.pegInCommittedVaultJournal,
 }));
 vi.mock('../../state-tracker.js', () => ({
   StateTracker: class {
@@ -147,10 +173,12 @@ vi.mock('../../state-tracker.js', () => ({
 import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -223,6 +251,9 @@ describe('isolated devnet genesis setup execution root V1', () => {
           return currentBatch;
         }),
         checkPegInSourceLock: mocked.pegInSourceLockCheck,
+        checkPegInSourceLockRetainingSigner:
+          mocked.pegInSourceLockRetainingCheck,
+        checkPegInCommittedVault: mocked.pegInCommittedVaultCheck,
       };
     });
     mocked.claim.mockReturnValue(MINING_CREDENTIAL);
@@ -338,6 +369,10 @@ describe('isolated devnet genesis setup execution root V1', () => {
       order.push('peg-in:source-lock:check');
       return validPegInSourceLockCheck(input, currentBatch.targetBinding);
     });
+    mocked.pegInSourceLockRetainingCheck.mockImplementation(async input => {
+      order.push('peg-in:source-lock:check:retain-signer');
+      return validPegInSourceLockCheck(input, currentBatch.targetBinding);
+    });
     mocked.pegInSourceLockPromote.mockImplementation(receipt => {
       order.push('peg-in:source-lock:promote');
       return validPegInSourceLockExecutionCheck(receipt);
@@ -407,6 +442,110 @@ describe('isolated devnet genesis setup execution root V1', () => {
       if (value.schema
         !== 'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-output-observation.v1') {
         throw new Error('source-lock output observation changed');
+      }
+    });
+    mocked.pegInCommittedVaultCheck.mockImplementation(async input => {
+      order.push('peg-in:committed-vault:check');
+      return validPegInCommittedVaultCheck(input, currentBatch.targetBinding);
+    });
+    mocked.pegInCommittedVaultPromote.mockImplementation(receipt => {
+      order.push('peg-in:committed-vault:promote');
+      return validPegInCommittedVaultExecutionCheck(receipt);
+    });
+    mocked.pegInCommittedVaultAuthorizationSession.mockImplementation(() => {
+      const preTransportObservation =
+        validPegInCommittedVaultPreTransportObservation();
+      return {
+        revalidator: {
+          revalidate: vi.fn(async () => {
+            order.push('peg-in:committed-vault:revalidate');
+            return { revalidationDigestHex: digest('a') };
+          }),
+        },
+        broadcastAuthorizer: {
+          schema:
+            'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer.v1',
+          authorize: vi.fn(revalidated => {
+            order.push('peg-in:committed-vault:authorize');
+            return {
+              authorizationDigestHex: digest('b'),
+              authorizationArtifact: { revalidated },
+            };
+          }),
+        },
+        takePreTransportObservation: vi.fn(() => {
+          order.push('peg-in:committed-vault:take-pre-transport');
+          return preTransportObservation;
+        }),
+      };
+    });
+    mocked.pegInCommittedVaultTransport.mockImplementation(() => ({
+      submit: vi.fn(async attempt => {
+        order.push('peg-in:committed-vault:transport');
+        return {
+          status: 'accepted' as const,
+          submittedTxId: attempt.authorization.revalidated.checked.signed
+            .admission.expectedTxId,
+          responseDigestHex: digest('c'),
+        };
+      }),
+    }));
+    let committedVaultReconciliationCount = 0;
+    const latestCommittedVaultConfirmation = Object.freeze({
+      ...confirmation(digest('9'), 4, 1),
+      confirmationHeight: 139,
+      observedAtHeight: 141,
+    });
+    const outputBoundCommittedVaultConfirmation = Object.freeze({
+      ...latestCommittedVaultConfirmation,
+      confirmationHeight: 140,
+      observedAtHeight: 142,
+      confirmationHeaderIdHex: digest('7'),
+      observationDigestHex: digest('8'),
+    });
+    mocked.pegInCommittedVaultJournal.mockImplementation(() => ({
+      journal: {
+        reserve: vi.fn(authorization => {
+          order.push('peg-in:committed-vault:journal:reserve');
+          return {
+            durableAttemptDigestHex: digest('d'),
+            durableArtifact: { authorization },
+          };
+        }),
+        finalize: vi.fn(({ submission }) => {
+          order.push('peg-in:committed-vault:journal:finalize');
+          return {
+            status: submission.status,
+            journalDigestHex: digest('e'),
+          };
+        }),
+      },
+      reconcileActive: vi.fn(async () => {
+        committedVaultReconciliationCount += 1;
+        const status = committedVaultReconciliationCount === 1
+          ? 'none' as const
+          : 'confirmed' as const;
+        order.push(`peg-in:committed-vault:journal:reconcile:${status}`);
+        return status;
+      }),
+      revalidateConfirmed: vi.fn(async () => {
+        order.push('peg-in:committed-vault:journal:revalidate');
+        return [latestCommittedVaultConfirmation];
+      }),
+    }));
+    mocked.pegInCommittedVaultOutputObserve.mockImplementation(async input => {
+      order.push('peg-in:committed-vault:outputs');
+      if (input.confirmation !== latestCommittedVaultConfirmation) {
+        throw new Error('stale committed-vault confirmation was consumed');
+      }
+      return validPegInCommittedVaultOutputObservation(
+        outputBoundCommittedVaultConfirmation,
+      );
+    });
+    mocked.pegInCommittedVaultOutputAssert.mockImplementation(value => {
+      if (value.schema
+        !== 'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-output-observation.v1') {
+        throw new Error('committed-vault output observation changed');
       }
     });
   });
@@ -699,6 +838,100 @@ describe('isolated devnet genesis setup execution root V1', () => {
           journalDigestHex: digest('6'),
           outputObservation: {
             status: 'exact_source_spent_and_refundable_outputs_unspent',
+          },
+        },
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it('consumes the confirmed source lock into the exact committed reserve and stops before mint', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1(
+        pegInRootInput(),
+      );
+
+    expect(mocked.pegInSourceLockCheck).not.toHaveBeenCalled();
+    expect(mocked.pegInSourceLockRetainingCheck).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('peg-in:source-lock:outputs')).toBeLessThan(
+      order.indexOf('peg-in:committed-vault:check'),
+    );
+    expect(order.indexOf('peg-in:committed-vault:check')).toBeLessThan(
+      order.indexOf('peg-in:committed-vault:promote'),
+    );
+    expect(order.indexOf('peg-in:committed-vault:revalidate')).toBeLessThan(
+      order.indexOf('peg-in:committed-vault:authorize'),
+    );
+    expect(order.indexOf('peg-in:committed-vault:authorize')).toBeLessThan(
+      order.indexOf('peg-in:committed-vault:journal:reserve'),
+    );
+    expect(order.indexOf('peg-in:committed-vault:journal:reserve')).toBeLessThan(
+      order.indexOf('peg-in:committed-vault:transport'),
+    );
+    expect(order.indexOf('peg-in:committed-vault:transport')).toBeLessThan(
+      order.indexOf('observe:committedVault'),
+    );
+    expect(order.indexOf('observe:committedVault')).toBeLessThan(
+      order.indexOf('peg-in:committed-vault:outputs'),
+    );
+    expect(mocked.pegInCommittedVaultCheck).toHaveBeenCalledWith({
+      reservePredecessorBoxIdHex: digest('a'),
+      sourceLockBoxIdHex: digest('b'),
+      transitionFeeFundingBoxIdHex: digest('d'),
+      unsignedTransaction: expect.objectContaining({ txId: digest('9') }),
+    }, executionTarget());
+    expect(result.receipt).toMatchObject({
+      status: 'peg_in_source_lock_consumed_into_committed_reserve',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+      checks: {
+        sourceLockConfirmedBeforeCommittedVaultCheck: true,
+        exactThreeInputTransitionCheckedAndRevalidated: true,
+        freshJvmCheckPrecededAuthorization: true,
+        durableReservationPrecededTransport: true,
+        exactTransitionInputsSpentAndReserveSuccessorObserved: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        sourceLockCreationConfirmed: true,
+        sourceLockStillRefundable: false,
+        sourceLockConsumptionEstablished: true,
+        reserveLineageEstablished: true,
+        depositCommitmentStateEstablished: true,
+        mintAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+      pegIn: {
+        committedVaultCheck: {
+          status: 'PASS',
+          unsignedTransactionIdHex: digest('9'),
+        },
+        committedVaultExecution: {
+          expectedTxId: digest('9'),
+          transportStatus: 'accepted',
+          durableAttemptDigestHex: digest('d'),
+          journalDigestHex: digest('e'),
+          confirmationDigestHex: digest('8'),
+          confirmationHeight: 140,
+          confirmationHeaderIdHex: digest('7'),
+          preTransportObservation: {
+            observedTipHeight: 136,
+          },
+          outputObservation: {
+            status:
+              'exact_transition_inputs_spent_and_reserve_successor_unspent',
+            boundaries: {
+              sourceLockConsumptionEstablished: true,
+              reserveLineageEstablished: true,
+              mintAuthorized: false,
+              gate5Closed: false,
+            },
           },
         },
       },
@@ -1110,6 +1343,16 @@ function validObserver(order: string[]) {
           observedAtHeight: 140,
         } as const;
       }
+      if (expectedTxId === digest('9')) {
+        const round = observationCount.get(expectedTxId) ?? 0;
+        observationCount.set(expectedTxId, round + 1);
+        order.push('observe:committedVault');
+        return {
+          ...confirmation(expectedTxId, 4, round),
+          confirmationHeight: 138,
+          observedAtHeight: 140,
+        } as const;
+      }
       const index = setupTransactions().findIndex(value =>
         value.issuance.unsignedTransactionIdHex === expectedTxId
       );
@@ -1449,20 +1692,70 @@ function validPegInCandidate(
     executionTargetIdentityDigestHex: string;
   }>,
 ) {
+  const eip12Box = (
+    boxId: string,
+    transactionId: string,
+    index: number,
+  ) => ({
+    boxId,
+    value: '5000000',
+    ergoTree: '00',
+    assets: [],
+    additionalRegisters: {},
+    creationHeight: 130,
+    transactionId,
+    index,
+  });
+  const reservePredecessor = eip12Box(digest('a'), digest('6'), 0);
+  const sourceLock = eip12Box(digest('b'), digest('8'), 0);
+  const transitionFeeFunding = eip12Box(digest('d'), digest('8'), 1);
+  const sourceChange = eip12Box(digest('c'), digest('8'), 2);
+  const sourceMinerFee = eip12Box(digest('e'), digest('8'), 3);
+  const reserveSuccessor = eip12Box(digest('f'), digest('9'), 0);
+  const transitionMinerFee = eip12Box(digest('0'), digest('9'), 1);
+  const asOutputCandidate = (
+    box: ReturnType<typeof eip12Box>,
+  ) => ({
+    value: box.value,
+    ergoTree: box.ergoTree,
+    assets: box.assets,
+    additionalRegisters: box.additionalRegisters,
+    creationHeight: box.creationHeight,
+  });
   const sourceLockCreation = {
     txId: digest('8'),
     eip12Tx: {
       inputs: [{ ...structuredClone(sourceFundingInput), extension: {} }],
       dataInputs: [],
-      outputs: [{
-        value: '5000000',
-        ergoTree: '00',
-        assets: [],
-        additionalRegisters: {},
-        creationHeight: 130,
-      }],
+      outputs: [
+        asOutputCandidate(sourceLock),
+        asOutputCandidate(transitionFeeFunding),
+        asOutputCandidate(sourceChange),
+        asOutputCandidate(sourceMinerFee),
+      ],
     },
-    outputs: [],
+    outputs: [
+      sourceLock,
+      transitionFeeFunding,
+      sourceChange,
+      sourceMinerFee,
+    ],
+  };
+  const reserveTransition = {
+    txId: digest('9'),
+    eip12Tx: {
+      inputs: [
+        { ...reservePredecessor, extension: { '0': '0e20' } },
+        { ...sourceLock, extension: {} },
+        { ...transitionFeeFunding, extension: {} },
+      ],
+      dataInputs: [],
+      outputs: [
+        asOutputCandidate(reserveSuccessor),
+        asOutputCandidate(transitionMinerFee),
+      ],
+    },
+    outputs: [reserveSuccessor, transitionMinerFee],
   };
   return {
     schema: 'e2s.substrate-federated-isolated-devnet-peg-in-candidate.v1',
@@ -1471,8 +1764,14 @@ function validPegInCandidate(
     candidateDigestHex: digest('7'),
     target: { ...targetBinding },
     depositPacket: {
-      boxes: { sourceFundingInput: structuredClone(sourceFundingInput) },
-      transactions: { sourceLockCreation },
+      boxes: {
+        sourceFundingInput: structuredClone(sourceFundingInput),
+        reservePredecessor,
+        sourceLock,
+        transitionFeeFunding,
+        reserveSuccessor,
+      },
+      transactions: { sourceLockCreation, reserveTransition },
     },
     boundaries: {
       nodeCheckPerformed: false,
@@ -1584,6 +1883,164 @@ function validPegInSourceLockOutputObservation() {
       fundsAuthorityEstablished: false,
       gate5Closed: false,
     }),
+  } as const);
+}
+
+function validPegInCommittedVaultCheck(
+  input: Readonly<{
+    reservePredecessorBoxIdHex: string;
+    sourceLockBoxIdHex: string;
+    transitionFeeFundingBoxIdHex: string;
+    unsignedTransaction: Readonly<{ txId: string }>;
+  }>,
+  targetBinding: Readonly<{
+    processBindingDigestHex: string;
+    executionTargetIdentityDigestHex: string;
+  }>,
+) {
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-check.v1',
+    version: 1,
+    status: 'PASS',
+    reservePredecessorBoxIdHex: input.reservePredecessorBoxIdHex,
+    sourceLockBoxIdHex: input.sourceLockBoxIdHex,
+    transitionFeeFundingBoxIdHex: input.transitionFeeFundingBoxIdHex,
+    unsignedTransactionIdHex: input.unsignedTransaction.txId,
+    unsignedTransactionDigestHex: digest('1'),
+    signedTransactionIdHex: input.unsignedTransaction.txId,
+    signedTransactionCanonicalJsonSha256Hex: digest('2'),
+    signedTransactionBytesSha256Hex: digest('3'),
+    signedTransactionBytesLength: 750,
+    checkResponseSha256Hex: digest('4'),
+    target: { ...targetBinding },
+    signer: {
+      derivation: 'wasm-root',
+      publicKeyHex: setupSigner().publicKeyHex,
+      p2pkErgoTreeHex: setupSigner().p2pkErgoTreeHex,
+      stateContextTipHeight: 136,
+      stateContextTipIdHex: digest('2'),
+    },
+    checker: {
+      nodeOrigin: 'http://127.0.0.1:9051',
+      path: '/transactions/check',
+      method: 'POST',
+      transportPolicy: 'no-redirect-no-proxy',
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true,
+      exactProcessOwnedTargetBound: true,
+      exactThreeInputTransitionBound: true,
+      localWasmRootSigningPerformed: true,
+      localJvmNodeCheckPassed: true,
+      signedTransactionBytesPersisted: false,
+      submissionAuthorityEstablished: false,
+      broadcastAuthorityEstablished: false,
+      sourceLockConsumptionEstablished: false,
+      reserveLineageEstablished: false,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    },
+    receiptDigestHex: digest('5'),
+  } as const;
+}
+
+function validPegInCommittedVaultExecutionCheck(
+  receipt: ReturnType<typeof validPegInCommittedVaultCheck>,
+) {
+  const signedCandidate = Object.freeze({
+    profile: 'synthetic-committed-vault-signed-candidate',
+    txId: receipt.signedTransactionIdHex,
+    signedTransactionDigestHex:
+      receipt.signedTransactionCanonicalJsonSha256Hex,
+  });
+  const submissionHandle = Object.freeze({
+    profile: 'synthetic-committed-vault-submission-handle',
+    checkResponseDigestHex: receipt.checkResponseSha256Hex,
+  });
+  return Object.freeze({
+    receipt,
+    signedCandidate,
+    checkedAcceptance: Object.freeze({
+      checked: Object.freeze({ status: 'PASS' }),
+      submissionHandle,
+    }),
+  });
+}
+
+function validPegInCommittedVaultPreTransportObservation() {
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-pre-transport-observation.v1',
+    version: 1,
+    status: 'exact_transition_inputs_unspent_and_dual_node_equal',
+    expectedTxId: digest('9'),
+    reservePredecessorBoxIdHex: digest('a'),
+    sourceLockBoxIdHex: digest('b'),
+    transitionFeeFundingBoxIdHex: digest('d'),
+    sourceLockConfirmationHeight: 135,
+    sourceLockConfirmationDigestHex: digest('9'),
+    observedTipHeight: 136,
+    observedTipHeaderIdHex: digest('2'),
+    processBindingDigestHex: digest('5'),
+    executionTargetIdentityDigestHex: digest('6'),
+    primaryObservationDigestHex: digest('7'),
+    witnessObservationDigestHex: digest('7'),
+    boundaries: Object.freeze({
+      exactDualLoopbackNodesAgreed: true,
+      originalSourceFundingRemainsSpent: true,
+      exactReservePredecessorUnspent: true,
+      exactSourceLockUnspent: true,
+      exactTransitionFeeFundingUnspent: true,
+      sourceLockConsumptionEstablished: false,
+      reserveLineageEstablished: false,
+      mintAuthorized: false,
+    }),
+    observationDigestHex: digest('8'),
+  } as const);
+}
+
+function validPegInCommittedVaultOutputObservation(
+  exactConfirmation = confirmation(digest('9'), 4, 0),
+) {
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-output-observation.v1',
+    version: 1,
+    status: 'exact_transition_inputs_spent_and_reserve_successor_unspent',
+    expectedTxId: digest('9'),
+    sourceFundingBoxIdHex: digest('c'),
+    reservePredecessorBoxIdHex: digest('a'),
+    sourceLockBoxIdHex: digest('b'),
+    transitionFeeFundingBoxIdHex: digest('d'),
+    reserveSuccessorBoxIdHex: digest('f'),
+    confirmationHeight: exactConfirmation.confirmationHeight,
+    confirmationHeaderIdHex: exactConfirmation.confirmationHeaderIdHex,
+    confirmationObservationDigestHex: exactConfirmation.observationDigestHex,
+    observedTipHeight: exactConfirmation.observedAtHeight,
+    observedTipHeaderIdHex: exactConfirmation.confirmationHeaderIdHex,
+    processBindingDigestHex: digest('5'),
+    executionTargetIdentityDigestHex: digest('6'),
+    primaryObservationDigestHex: digest('7'),
+    witnessObservationDigestHex: digest('7'),
+    boundaries: Object.freeze({
+      exactDualLoopbackNodesAgreed: true,
+      originalSourceFundingRemainsSpent: true,
+      exactReservePredecessorSpent: true,
+      exactSourceLockSpent: true,
+      exactTransitionFeeFundingSpent: true,
+      exactReserveSuccessorUnspent: true,
+      sourceLockConsumptionEstablished: true,
+      reserveLineageEstablished: true,
+      depositCommitmentStateEstablished: true,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+    }),
+    observationDigestHex: digest('9'),
   } as const);
 }
 

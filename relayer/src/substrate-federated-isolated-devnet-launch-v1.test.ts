@@ -354,6 +354,7 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1,
   promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
@@ -1951,6 +1952,145 @@ describe('Substrate federated isolated-devnet launch V1', () => {
           session.signer,
         )
       ).toThrow(/lacks active process provenance/);
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
+  it('retains the signer through source-lock check and consumes it after one committed-vault check', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+      await session.runForExecutionRetainingPegInSigner({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+
+      const sourceFundingInput = await isolatedPegInFundingInput(803);
+      const reservePredecessor = await isolatedPegInFundingInput(802);
+      const sourceLockCreation = await materializeUnsignedTransaction({
+        inputs: [{ ...sourceFundingInput, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: 10_000_000n,
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: 7_800_000n,
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in committed-vault source-lock fixture');
+      const sourceLock = sourceLockCreation.outputs[0]!;
+      const transitionFeeFunding = sourceLockCreation.outputs[1]!;
+      const reserveTransition = await materializeUnsignedTransaction({
+        inputs: [{
+          ...reservePredecessor,
+          extension: {
+            '0': encodeCollByteRegister(Buffer.from('00', 'hex')),
+          },
+        }, {
+          ...sourceLock,
+          extension: {},
+        }, {
+          ...transitionFeeFunding,
+          extension: {},
+        }],
+        dataInputs: [],
+        outputs: [{
+          value: 30_000_000n,
+          ergoTree: reservePredecessor.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in committed-vault continuation fixture');
+
+      await expect(session.checkPegInCommittedVault({
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransaction: reserveTransition,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent/);
+
+      await session.checkPegInSourceLockRetainingSigner({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget);
+      const check = await session.checkPegInCommittedVault({
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransaction: reserveTransition,
+      }, mocks.executionTarget);
+
+      expect(check).toMatchObject({
+        status: 'PASS',
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransactionIdHex: reserveTransition.txId,
+        signedTransactionIdHex: reserveTransition.txId,
+        checker: {
+          nodeOrigin: 'http://127.0.0.1:9051',
+          path: '/transactions/check',
+        },
+        boundaries: {
+          exactThreeInputTransitionBound: true,
+          localWasmRootSigningPerformed: true,
+          localJvmNodeCheckPassed: true,
+          sourceLockConsumptionEstablished: false,
+          reserveLineageEstablished: false,
+          mintAuthorized: false,
+          fundsAuthorityEstablished: false,
+        },
+      });
+      const promoted =
+        promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+          check,
+          mocks.executionTarget,
+        );
+      expect(promoted.signedCandidate.txId).toBe(reserveTransition.txId);
+      expect(promoted.checkedAcceptance.submissionHandle.txId).toBe(
+        reserveTransition.txId,
+      );
+      expect(() =>
+        promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+          check,
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact execution provenance/);
+      expect(mocks.prepareSetupCheckBatch).toHaveBeenCalledTimes(3);
+      expect(mocks.checkSetupTransaction).toHaveBeenCalledTimes(5);
+      await expect(session.checkPegInCommittedVault({
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransaction: reserveTransition,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent/);
+      expect(() => session.dispose()).not.toThrow();
     }, session.signer.publicKeyHex);
   }, 30_000);
 

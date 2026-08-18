@@ -38,11 +38,18 @@ const boundary = vi.hoisted(() => {
     schema:
       'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer.v1',
   });
+  const committedVaultAuthorizer = Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer.v1',
+  });
   const authorizationArtifact = Object.freeze({
     role: 'lab-authorization',
   });
   const sourceLockAuthorizationArtifact = Object.freeze({
     role: 'source-lock-lab-authorization',
+  });
+  const committedVaultAuthorizationArtifact = Object.freeze({
+    role: 'committed-vault-lab-authorization',
   });
   return {
     expectedTxId,
@@ -54,8 +61,10 @@ const boundary = vi.hoisted(() => {
     checkedHandle,
     authorizer,
     sourceLockAuthorizer,
+    committedVaultAuthorizer,
     authorizationArtifact,
     sourceLockAuthorizationArtifact,
+    committedVaultAuthorizationArtifact,
     handleProcessBindingDigestHex: '11'.repeat(32),
     handleExecutionTargetIdentityDigestHex: '10'.repeat(32),
     signedTransaction: Object.freeze({ id: expectedTxId, proofs: ['opaque'] }),
@@ -66,6 +75,11 @@ const boundary = vi.hoisted(() => {
 
 const node = vi.hoisted(() => ({
   post: vi.fn(),
+}));
+
+const journalBoundary = vi.hoisted(() => ({
+  durableArtifact: Object.freeze({ role: 'committed-vault-durable-attempt' }),
+  assertDurableAttempt: vi.fn(),
 }));
 
 vi.mock(
@@ -124,6 +138,47 @@ vi.mock(
         throw new Error('synthetic source-lock authorization is missing');
       }
     },
+  }),
+);
+
+vi.mock(
+  './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1: (
+      value: unknown,
+      target: unknown,
+    ) => {
+      if (
+        value !== boundary.committedVaultAuthorizer
+        || target !== processBoundary.target
+      ) {
+        throw new Error(
+          'synthetic committed-vault authorizer provenance is missing',
+        );
+      }
+    },
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1: (
+      value: unknown,
+      authorization: Readonly<{ authorizationArtifact?: unknown }>,
+    ) => {
+      if (
+        value !== boundary.committedVaultAuthorizer
+        || authorization.authorizationArtifact
+          !== boundary.committedVaultAuthorizationArtifact
+      ) {
+        throw new Error(
+          'synthetic committed-vault authorization is missing',
+        );
+      }
+    },
+  }),
+);
+
+vi.mock(
+  './substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js',
+  () => ({
+    assertSubstrateFederatedLocalDevnetPegInCommittedVaultDurableAttemptV1:
+      journalBoundary.assertDurableAttempt,
   }),
 );
 
@@ -202,9 +257,11 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+  createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
+  PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   executeErgoOperationalTransaction,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
@@ -221,6 +278,8 @@ const AUTHORIZATION_DIGEST = '09'.repeat(32);
 const ATTEMPT_DIGEST = '0a'.repeat(32);
 const JOURNAL_DIGEST = '0c'.repeat(32);
 const CONFIRMATION_DIGEST = '0d'.repeat(32);
+const SOURCE_LOCK_BOX_ID = '16'.repeat(32);
+const TRANSITION_FEE_BOX_ID = '17'.repeat(32);
 
 beforeEach(() => {
   processBoundary.processBindingDigestHex = '11'.repeat(32);
@@ -246,6 +305,14 @@ beforeEach(() => {
     return await consume(boundary.signedTransaction);
   });
   node.post.mockReset();
+  journalBoundary.assertDurableAttempt.mockReset();
+  journalBoundary.assertDurableAttempt.mockImplementation(
+    (_authorizer, attempt) => {
+      if (attempt.durableArtifact !== journalBoundary.durableArtifact) {
+        throw new Error('synthetic durable journal provenance is missing');
+      }
+    },
+  );
 });
 
 function ports(overrides: Readonly<{
@@ -439,6 +506,116 @@ describe('isolated devnet checked submission transport V1', () => {
     expect(node.post).toHaveBeenCalledTimes(1);
     expect(node.post.mock.calls[0]?.[0]).toBe('http://127.0.0.1:9051/transactions');
     expect(node.post.mock.calls[0]?.[1]).toBe(boundary.signedTransaction);
+  });
+
+  it('uses the exact checked bytes once for the committed-vault authorization', async () => {
+    node.post.mockResolvedValue({
+      status: 200,
+      data: boundary.expectedTxId,
+    });
+    const transport =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
+        processBoundary.target,
+        boundary.committedVaultAuthorizer as any,
+      );
+
+    const result = await executeErgoOperationalTransaction({
+      operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+      expectedTxId: boundary.expectedTxId,
+      sourceBoxId: SOURCE_BOX_ID,
+      inputBoxIds: [SOURCE_BOX_ID, SOURCE_LOCK_BOX_ID, TRANSITION_FEE_BOX_ID],
+      attemptedAtHeight: 720,
+      targetSidechainHeight: null,
+      targetSidechainBlockHashHex: null,
+      heartbeatKeyHex: null,
+      unsignedTransaction: Object.freeze({
+        inputs: [
+          { boxId: SOURCE_BOX_ID },
+          { boxId: SOURCE_LOCK_BOX_ID },
+          { boxId: TRANSITION_FEE_BOX_ID },
+        ],
+      }),
+    }, {
+      signer: {
+        sign: async () => ({
+          nodeOrigin: boundary.nodeOrigin,
+          signedTransactionDigestHex: boundary.signedTransactionDigestHex,
+          signerArtifact: boundary.signedCandidate,
+        }),
+      },
+      checker: {
+        check: async () => ({
+          checkResponseDigestHex: boundary.checkResponseDigestHex,
+          checkerArtifact: boundary.checkedHandle,
+        }),
+      },
+      revalidator: {
+        revalidate: async () => ({ revalidationDigestHex: POST_CHECK_DIGEST }),
+      },
+      broadcastAuthorizer: {
+        authorize: () => ({
+          authorizationDigestHex: AUTHORIZATION_DIGEST,
+          authorizationArtifact:
+            boundary.committedVaultAuthorizationArtifact,
+        }),
+      },
+      journal: {
+        reserve: () => ({
+          durableAttemptDigestHex: ATTEMPT_DIGEST,
+          durableArtifact: journalBoundary.durableArtifact,
+        }),
+        finalize: ({ submission }) => ({
+          status: submission.status,
+          journalDigestHex: JOURNAL_DIGEST,
+        }),
+      },
+      submitter: transport,
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      expectedTxId: boundary.expectedTxId,
+      submittedTxId: boundary.expectedTxId,
+      durableAttemptRecorded: true,
+    });
+    expect(node.post).toHaveBeenCalledTimes(1);
+    expect(node.post.mock.calls[0]?.[0]).toBe(
+      'http://127.0.0.1:9051/transactions',
+    );
+    expect(node.post.mock.calls[0]?.[1]).toBe(boundary.signedTransaction);
+    expect(boundary.consume).toHaveBeenCalledTimes(1);
+    expect(journalBoundary.assertDurableAttempt).toHaveBeenCalledTimes(1);
+    expect(node.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects forged durability evidence before consuming bytes or posting', async () => {
+    const transport =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
+        processBoundary.target,
+        boundary.committedVaultAuthorizer as any,
+      );
+
+    const submission = await transport.submit({
+      authorization: {
+        revalidated: {
+          checked: {
+            signed: {
+              admission: { expectedTxId: boundary.expectedTxId },
+            },
+          },
+        },
+      },
+      durableAttemptDigestHex: ATTEMPT_DIGEST,
+      durableArtifact: Object.freeze({ role: 'forged-attempt' }),
+    } as never).then(
+      () => 'submitted' as const,
+      error => error as Error,
+    );
+
+    expect(submission).toBeInstanceOf(Error);
+    expect((submission as Error).message).toMatch(/journal provenance is missing/);
+    expect(boundary.consume).not.toHaveBeenCalled();
+    expect(node.post).not.toHaveBeenCalled();
   });
 
   it('contains a forged authorization before consuming signed bytes', async () => {

@@ -289,6 +289,46 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifac
   }
 }
 
+export async function reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+  input: Readonly<{
+    artifact: object;
+    expectedReconciliationIdentityDigestHex: string;
+    expectedTargetGenesisHeaderIdHex: string;
+    expectedTxId: string;
+    priorConfirmation: SubstrateFederatedLocalDevnetGenesisConfirmation;
+  }>,
+): Promise<SubstrateFederatedLocalDevnetGenesisConfirmation> {
+  assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+    input.artifact,
+    input.expectedReconciliationIdentityDigestHex,
+    input.expectedTargetGenesisHeaderIdHex,
+    input.expectedTxId,
+    input.priorConfirmation,
+  );
+  const material = ARTIFACTS.get(input.artifact)!;
+  const expectedTxId = fixedHex32(
+    input.expectedTxId,
+    'expected isolated genesis confirmation transaction ID',
+  );
+  const latest = await material.observer.observe(
+    expectedTxId,
+    SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
+  );
+  if (latest === null) {
+    throw new Error('isolated genesis confirmation reobservation is unavailable');
+  }
+  const normalized =
+    normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(latest);
+  assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+    normalized.observerArtifact,
+    input.expectedReconciliationIdentityDigestHex,
+    input.expectedTargetGenesisHeaderIdHex,
+    expectedTxId,
+    normalized,
+  );
+  return normalized;
+}
+
 async function observeExactTargetIdentity(
   primaryClient: ReturnType<typeof axios.create>,
   witnessClient: ReturnType<typeof axios.create>,
