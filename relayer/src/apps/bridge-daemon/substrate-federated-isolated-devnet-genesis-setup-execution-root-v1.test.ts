@@ -1172,7 +1172,9 @@ describe('isolated devnet genesis setup execution root V1', () => {
         runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
           rootInput(),
         ),
-      ).rejects.toThrow(/confirmation remained unavailable/);
+      ).rejects.toThrow(
+        /isolated setup:tracker transaction confirmation remained unavailable/,
+      );
       expect(order.filter(value => value.startsWith('execute:'))).toEqual([
         'execute:tracker',
       ]);

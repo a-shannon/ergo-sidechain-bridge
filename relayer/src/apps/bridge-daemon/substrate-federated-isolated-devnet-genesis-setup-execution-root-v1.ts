@@ -1393,6 +1393,7 @@ async function executeManagedSetupAction(
         observer,
         transaction.issuance.unsignedTransactionIdHex,
         completionDeadline,
+        `setup:${role}`,
       );
       const reconciliation = await journal.reconcileActive(observer);
       if (
@@ -1918,6 +1919,7 @@ async function executeManagedPegInSourceLock(
     observer,
     sourceLockCreation.txId,
     completionDeadline,
+    'source-lock',
   );
   if (await sourceLockJournal.reconcileActive(observer) !== 'confirmed') {
     throw new Error('source-lock durable reconciliation did not confirm');
@@ -2131,6 +2133,7 @@ async function executeManagedPegInCommittedVault(
     observer,
     reserveTransition.txId,
     completionDeadline,
+    'committed-vault',
   );
   if (await committedVaultJournal.reconcileActive(observer) !== 'confirmed') {
     throw new Error('committed-vault durable reconciliation did not confirm');
@@ -2462,6 +2465,7 @@ async function waitForCanonicalConfirmation(
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   expectedTxId: string,
   deadline: number,
+  stage: string,
 ): Promise<Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>> {
   let lastObservationFailure: unknown;
   for (;;) {
@@ -2480,7 +2484,7 @@ async function waitForCanonicalConfirmation(
     if (rawObservation === null) {
       if (Date.now() >= deadline) {
         throw new Error(
-          'isolated genesis transaction confirmation remained unavailable before the managed deadline',
+          `isolated ${stage} transaction confirmation remained unavailable before the managed deadline`,
           lastObservationFailure === undefined
             ? undefined
             : { cause: lastObservationFailure },
@@ -2502,7 +2506,7 @@ async function waitForCanonicalConfirmation(
     }
     if (Date.now() >= deadline) {
       throw new Error(
-        `isolated genesis transaction remained ${observation.status} before the managed deadline`,
+        `isolated ${stage} transaction remained ${observation.status} before the managed deadline`,
       );
     }
     await delay(CONFIRMATION_POLL_MS);
@@ -2525,6 +2529,7 @@ async function refreshCanonicalReceiptConfirmations(
       observer,
       transaction.expectedTxId,
       deadline,
+      `setup-refresh:${transaction.role}`,
     );
     refreshed.push(Object.freeze({
       ...transaction,
