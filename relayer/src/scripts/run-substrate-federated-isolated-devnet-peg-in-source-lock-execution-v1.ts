@@ -446,23 +446,30 @@ function safeEnvironmentPathList(
     ) {
       throw new Error(`${label} contains an unsafe path`);
     }
-    let status;
+    let path: string;
     try {
-      status = lstatSync(entry);
+      path = explicitExistingLocalNonSensitivePath(
+        entry,
+        label,
+        'directory',
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
       throw error;
     }
-    if (!status.isDirectory() || status.isSymbolicLink()) {
-      throw new Error(`${label} contains a non-directory path`);
+    if (
+      canonicalPathIdentity(path) === canonicalPathIdentity(canonicalWorktreeRoot)
+      || isPathInside(canonicalWorktreeRoot, path)
+    ) {
+      if (label === 'Path') continue;
+      throw new Error(`${label} must remain outside the worktree`);
     }
-    const path = safeEnvironmentPath(
-      entry,
-      label,
-      'directory',
-      canonicalWorktreeRoot,
-      systemDriveRoot,
-    );
+    if (
+      canonicalPathIdentity(parse(path).root)
+        !== canonicalPathIdentity(systemDriveRoot)
+    ) {
+      throw new Error(`${label} must remain on the local system drive`);
+    }
     if (!paths.some(existing =>
       canonicalPathIdentity(existing) === canonicalPathIdentity(path)
     )) {

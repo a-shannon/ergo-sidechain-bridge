@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 
 import {
   beforeEach,
@@ -65,6 +65,7 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.js';
 import {
+  childEnvironment,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 import {
@@ -368,6 +369,29 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
         restoreEnvironment('JAVA_HOME', originalJavaHome);
       }
     });
+  });
+
+  it('filters npm-injected worktree PATH entries before worker launch', () => {
+    const originalPath = process.env.Path;
+    const originalLib = process.env.LIB;
+    const worktreeRoot = resolve(process.cwd(), '..', '..');
+    const npmBin = resolve(process.cwd(), 'node_modules', '.bin');
+    const externalBin = dirname(process.execPath);
+    process.env.Path = [npmBin, externalBin].join(delimiter);
+    try {
+      const environment = childEnvironment(worktreeRoot);
+      const childPath = environment.Path?.split(delimiter) ?? [];
+      expect(childPath).toContain(externalBin);
+      expect(childPath).not.toContain(npmBin);
+
+      process.env.LIB = npmBin;
+      expect(() => childEnvironment(worktreeRoot)).toThrow(
+        'LIB must remain outside the worktree',
+      );
+    } finally {
+      restoreEnvironment('Path', originalPath);
+      restoreEnvironment('LIB', originalLib);
+    }
   });
 
   it('rejects occupied, in-worktree, and linked output paths before launch', async () => {
