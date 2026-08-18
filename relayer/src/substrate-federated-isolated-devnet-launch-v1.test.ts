@@ -106,6 +106,9 @@ import {
   deriveLocalWasmRootSignerPublicIdentity,
 } from './local-wasm-root-signer-public-identity.js';
 import {
+  PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+} from './peg-in-causal-admission-v2.js';
+import {
   buildSubstrateFederatedCheckpointProfileV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
@@ -350,6 +353,10 @@ import {
   assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+  buildSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
@@ -1721,7 +1728,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     }, session.signer.publicKeyHex);
   }, 30_000);
 
-  it('carries the exact live JVM family binding into the execution batch', async () => {
+  it('carries the exact live JVM family binding into the unsigned peg-in producer', async () => {
     const session =
       await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
     await withPortableReplayFixture(async fixture => {
@@ -1745,6 +1752,123 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       });
       expect(batch.familyCompilerBinding.profile.familyIdHex)
         .toBe(fixture.compilerMocks.familyReceipt.profile.familyIdHex);
+      const actualFamilyModule = await vi.importActual<
+        typeof import('./substrate-federated-settlement-family-v1.js')
+      >('./substrate-federated-settlement-family-v1.js');
+      const profile =
+        actualFamilyModule.decodeSubstrateFederatedSettlementFamilyV1Profile(
+          batch.familyCompilerBinding.profile,
+        );
+      mocks.familyProfile = profile as unknown as Record<string, unknown>;
+      const setupCreationHeight =
+        batch.orderedTransactions[2]!.issuance.predictedStateOutput
+          .creationHeight;
+      const sourceFundingHeight = setupCreationHeight + 1;
+      const transitionHeight = setupCreationHeight + 2;
+      const sourceFundingInput = await isolatedPegInFundingInput(
+        sourceFundingHeight,
+      );
+      const pegInInput = {
+        batch,
+        target: mocks.executionTarget,
+        sourceFundingInput,
+        sourceIntent: {
+          formatVersion: PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+          sourceNetworkIdHex: profile.sourceNetworkIdHex,
+          sidechainIdHex: profile.sidechainIdHex,
+          bridgeAddressHex: profile.bridgeAddressHex,
+          tokenAddressHex: profile.tokenAddressHex,
+          settlementProfileIdHex: profile.settlementProfileIdHex,
+          admissionProfileIdHex: batch.familyCompilerBinding.profile.familyIdHex,
+          sourceAssetIdHex: profile.settlementAssetIdHex,
+          amountNanoErg: '5000000',
+          recipientAddressHex: 'b1'.repeat(20),
+        },
+        depositorErgoTreeHex: FUNDING_TREE,
+        creationHeights: {
+          currentErgoHeight: transitionHeight,
+          sourceLockCreation: transitionHeight,
+          reserveTransition: transitionHeight,
+        },
+      } as const;
+      const pegInCandidate =
+        await buildSubstrateFederatedIsolatedDevnetPegInCandidateV1(pegInInput);
+      expect(
+        assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+          pegInCandidate,
+          batch,
+          mocks.executionTarget,
+        ),
+      ).toBe(pegInCandidate.depositPacket);
+      expect(pegInCandidate.setup.pooledReserveBoxIdHex).toBe(
+        batch.orderedTransactions[2]!.issuance.predictedStateOutput.boxIdHex,
+      );
+      expect(pegInCandidate.depositPacket.reserve).toMatchObject({
+        predecessorDepositCount: 0,
+        successorDepositCount: 1,
+        inputLiabilityNanoErg: '0',
+        outputLiabilityNanoErg: '5000000',
+      });
+      expect(pegInCandidate.boundaries).toMatchObject({
+        deterministicUnsignedDepositConstructed: true,
+        setupCanonicalConfirmationEstablished: false,
+        mintAuthorized: false,
+        profileActivated: false,
+        targetNodeAcceptanceEstablished: false,
+        nodeCheckPerformed: false,
+        signingAuthorityEstablished: false,
+        submissionAuthorityEstablished: false,
+        broadcastAuthorityEstablished: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+      });
+      let batchReads = 0;
+      let targetReads = 0;
+      const accessorCandidate =
+        await buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+          get batch() {
+            batchReads += 1;
+            return batchReads === 1 ? batch : structuredClone(batch);
+          },
+          get target() {
+            targetReads += 1;
+            return targetReads === 1
+              ? mocks.executionTarget
+              : structuredClone(mocks.executionTarget);
+          },
+          sourceFundingInput,
+          sourceIntent: pegInInput.sourceIntent,
+          depositorErgoTreeHex: pegInInput.depositorErgoTreeHex,
+          creationHeights: pegInInput.creationHeights,
+        });
+      expect(batchReads).toBe(1);
+      expect(targetReads).toBe(1);
+      expect(
+        assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+          accessorCandidate,
+          batch,
+          mocks.executionTarget,
+        ),
+      ).toBe(accessorCandidate.depositPacket);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+          structuredClone(pegInCandidate),
+          batch,
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks process provenance/);
+      await expect(
+        buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+          ...pegInInput,
+          batch: structuredClone(batch),
+        }),
+      ).rejects.toThrow(/lacks exact process provenance/);
+      await expect(
+        buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+          ...pegInInput,
+          familyBinding: batch.familyCompilerBinding,
+        } as any),
+      ).rejects.toThrow(/unknown or missing fields/);
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
           structuredClone(batch),
@@ -3920,6 +4044,20 @@ function configureSetupCheckCapabilities(
   });
 }
 
+async function isolatedPegInFundingInput(
+  creationHeight: number,
+): Promise<Eip12Box> {
+  const transaction = await materializeUnsignedTransaction({
+    inputs: [{ ...BASE_GENESIS_INPUT, extension: {} }],
+    dataInputs: [],
+    outputs: [
+      isolatedGenesisSeed('20000000', FUNDING_TREE, creationHeight),
+      isolatedGenesisSeed('280000000', FUNDING_TREE, creationHeight),
+    ],
+  }, 'isolated federated peg-in funding fixture');
+  return transaction.outputs[0]!;
+}
+
 function configureFixedSetupCheckRunnerRuntime(
   fixture: PortableReplayFixture,
 ): void {
@@ -4145,13 +4283,17 @@ async function freshLocalSettlementObservation(
   } as any;
 }
 
-function isolatedGenesisSeed(value: string, ergoTree = FUNDING_TREE) {
+function isolatedGenesisSeed(
+  value: string,
+  ergoTree = FUNDING_TREE,
+  creationHeight = 110,
+) {
   return {
     value,
     ergoTree,
     assets: [],
     additionalRegisters: {},
-    creationHeight: 110,
+    creationHeight,
   };
 }
 
