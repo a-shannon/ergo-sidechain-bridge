@@ -711,7 +711,7 @@ function executionReceipt() {
     version: 1,
     status: 'setup_confirmed_and_peg_in_source_lock_node_check_passed',
     staticExecutionManifestDigestHex:
-      '9f3e2d80de28b12bd11d575998f102219208f924608e6138edc96fb10a27ee4e',
+      '863900bbef60e43e1207f85c3dab855bb524c43cbfd84ef8a58e7520b9b417da',
     build,
     process: processReceipt,
     setup,

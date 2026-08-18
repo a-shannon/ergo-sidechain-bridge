@@ -154,6 +154,9 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+} from '../../scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-receipt-v1.js';
 
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
 
@@ -928,6 +931,14 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(source).toContain('replacementPortAccepted: false');
     expect(source).not.toMatch(/export interface .*Deps/u);
     expect(source).not.toContain('process.env');
+  });
+
+  it('keeps the check receipt parser pinned to the exact static manifest', () => {
+    expect(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    ).toBe(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    );
   });
 });
 

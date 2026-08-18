@@ -31,8 +31,8 @@ const CANDIDATE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_V1';
 const DEPOSIT_PACKET_SCHEMA =
   'e2s.substrate-federated-pooled-reserve-deposit.v1';
-const EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_HEX =
-  '9f3e2d80de28b12bd11d575998f102219208f924608e6138edc96fb10a27ee4e';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1 =
+  '863900bbef60e43e1207f85c3dab855bb524c43cbfd84ef8a58e7520b9b417da' as const;
 const SETUP_ROLE_ORDER = Object.freeze([
   'tracker',
   'duplicatePrevention',
@@ -317,7 +317,7 @@ function validateRootReceipt(
     || receipt.status
       !== 'setup_confirmed_and_peg_in_source_lock_node_check_passed'
     || receipt.staticExecutionManifestDigestHex
-      !== EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_HEX
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1
   ) {
     throw new Error('peg-in source-lock root receipt identity changed');
   }
@@ -399,7 +399,7 @@ function validateRootReceipt(
     root: Object.freeze({
       schema: ROOT_RECEIPT_SCHEMA,
       staticExecutionManifestDigestHex:
-        EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_HEX,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
       receiptDigestHex: rootReceiptDigestHex,
     }),
     buildIdentityDigestHex: process.buildIdentityDigestHex,
@@ -988,7 +988,7 @@ function validateProjectedReceipt(receipt: Readonly<Record<string, unknown>>): v
   if (
     root.schema !== ROOT_RECEIPT_SCHEMA
     || root.staticExecutionManifestDigestHex
-      !== EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_HEX
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1
   ) {
     throw new Error('worker root projection changed');
   }
