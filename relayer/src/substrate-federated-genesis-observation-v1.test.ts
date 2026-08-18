@@ -43,7 +43,9 @@ interface NodeStateOptions {
   readonly tipIds?: readonly string[];
   readonly tipHeights?: readonly number[];
   readonly genesisIds?: readonly string[];
+  readonly headerIdsByHeight?: ReadonlyMap<number, readonly string[]>;
   readonly boxes?: ReadonlyMap<string, unknown>;
+  readonly boxJsonResponsesById?: ReadonlyMap<string, readonly (unknown | null)[]>;
   readonly sigmaByBoxId?: ReadonlyMap<string, string>;
   readonly missingBoxId?: string;
   readonly binaryOverride?: ReadonlyMap<string, unknown>;
@@ -56,11 +58,14 @@ interface NodeState {
   readonly tipIds: readonly string[];
   readonly tipHeights: readonly number[];
   readonly genesisIds: readonly string[];
+  readonly headerIdsByHeight: ReadonlyMap<number, readonly string[]>;
   readonly boxes: ReadonlyMap<string, unknown>;
+  readonly boxJsonResponsesById: ReadonlyMap<string, readonly (unknown | null)[]>;
   readonly sigmaByBoxId: ReadonlyMap<string, string>;
   readonly missingBoxId?: string;
   readonly binaryOverride: ReadonlyMap<string, unknown>;
   readonly responseDelayMs: number;
+  readonly boxJsonReads: Map<string, number>;
   infoReads: number;
   tipReads: number;
   requestsCompleted: number;
@@ -140,11 +145,14 @@ function nodeState(
     tipIds: options.tipIds ?? [TIP_HEADER_ID, TIP_HEADER_ID],
     tipHeights: options.tipHeights ?? options.fullHeights ?? [120, 120],
     genesisIds: options.genesisIds ?? [GENESIS_HEADER_ID],
+    headerIdsByHeight: options.headerIdsByHeight ?? new Map(),
     boxes: options.boxes ?? boxesById(fixture),
+    boxJsonResponsesById: options.boxJsonResponsesById ?? new Map(),
     sigmaByBoxId: options.sigmaByBoxId ?? fixture.sigmaByBoxId,
     missingBoxId: options.missingBoxId,
     binaryOverride: options.binaryOverride ?? new Map(),
     responseDelayMs: options.responseDelayMs ?? 0,
+    boxJsonReads: new Map(),
     infoReads: 0,
     tipReads: 0,
     requestsCompleted: 0,
@@ -172,7 +180,16 @@ function nodeServer(state: NodeState): Server {
           height: state.tipHeights[Math.min(index, state.tipHeights.length - 1)],
         }]);
       }
-      if (path === '/blocks/at/1') return sendJson(response, 200, state.genesisIds);
+      const headersAtHeight = path.match(/^\/blocks\/at\/(\d+)$/);
+      if (headersAtHeight) {
+        const height = Number(headersAtHeight[1]);
+        const ids = height === 1
+          ? state.genesisIds
+          : state.headerIdsByHeight.get(height);
+        return ids === undefined
+          ? sendJson(response, 404, {})
+          : sendJson(response, 200, ids);
+      }
       const boxBinary = path.match(/^\/utxo\/byIdBinary\/([0-9a-f]{64})$/);
       if (boxBinary) {
         const boxId = boxBinary[1];
@@ -189,8 +206,14 @@ function nodeServer(state: NodeState): Server {
       if (boxJson) {
         const boxId = boxJson[1];
         if (boxId === state.missingBoxId) return sendJson(response, 404, {});
-        const box = state.boxes.get(boxId);
+        const sequence = state.boxJsonResponsesById.get(boxId);
+        const readIndex = state.boxJsonReads.get(boxId) ?? 0;
+        state.boxJsonReads.set(boxId, readIndex + 1);
+        const box = sequence === undefined
+          ? state.boxes.get(boxId)
+          : sequence[Math.min(readIndex, sequence.length - 1)];
         return box === undefined
+          || box === null
           ? sendJson(response, 404, {})
           : sendJson(response, 200, box);
       }
@@ -438,6 +461,137 @@ describe('Substrate federated genesis observation V1', () => {
     expect(context.witnessState.infoReads).toBe(3);
     expect(context.witnessState.tipReads).toBe(3);
     expect(context.witnessState.requestsCompleted).toBe(14);
+  });
+
+  it('retries an advancing canonical tip and reports only a stable matching tip', async () => {
+    const fixture = await genesisFixture();
+    const nextTipHeaderId = '95'.repeat(32);
+    const advancingNode = {
+      fullHeights: [120, 121, 121, 121],
+      tipHeights: [120, 121, 121, 121],
+      tipIds: [TIP_HEADER_ID, nextTipHeaderId, nextTipHeaderId, nextTipHeaderId],
+      headerIdsByHeight: new Map([[120, [TIP_HEADER_ID, '96'.repeat(32)]]]),
+    } as const;
+    const { report, context } = await observe(fixture, {
+      primary: advancingNode,
+      witness: advancingNode,
+    });
+
+    expect(report.target).toEqual({
+      network: 'devnet',
+      genesisHeaderHeight: 1,
+      genesisHeaderIdHex: GENESIS_HEADER_ID,
+      tipHeight: 121,
+      tipHeaderIdHex: nextTipHeaderId,
+    });
+    expect(context.primaryState.requestsCompleted).toBe(25);
+    expect(context.witnessState.requestsCompleted).toBe(25);
+  });
+
+  it('rejects tip regression and replacement of an advancing observation anchor', async () => {
+    const fixture = await genesisFixture();
+    await expect(observe(fixture, {
+      witness: {
+        fullHeights: [120, 119],
+        tipHeights: [120, 119],
+        tipIds: [TIP_HEADER_ID, '95'.repeat(32)],
+      },
+    })).rejects.toThrow(/height regressed during genesis-box observation/i);
+    await expect(observe(fixture, {
+      witness: {
+        fullHeights: [120, 121],
+        tipHeights: [120, 121],
+        tipIds: [TIP_HEADER_ID, '95'.repeat(32)],
+        headerIdsByHeight: new Map([[
+          120,
+          ['96'.repeat(32), TIP_HEADER_ID],
+        ]]),
+      },
+    })).rejects.toThrow(/observation anchor left the best chain/i);
+  });
+
+  it('rejects a box that disappears before the advancing-tip retry completes', async () => {
+    const fixture = await genesisFixture();
+    await expect(observe(fixture, {
+      witness: {
+        fullHeights: [120, 121, 121, 121],
+        tipHeights: [120, 121, 121, 121],
+        tipIds: [
+          TIP_HEADER_ID,
+          '95'.repeat(32),
+          '95'.repeat(32),
+          '95'.repeat(32),
+        ],
+        headerIdsByHeight: new Map([[120, [TIP_HEADER_ID]]]),
+        boxJsonResponsesById: new Map([[
+          fixture.tracker.boxId,
+          [fixture.tracker, null],
+        ]]),
+      },
+    })).rejects.toThrow(/tracker genesis box is not present in the current UTXO view/i);
+  });
+
+  it('fails closed when canonical advancement exhausts the stable observation bound', async () => {
+    const fixture = await genesisFixture();
+    const tip121 = '95'.repeat(32);
+    const tip122 = '96'.repeat(32);
+    const tip123 = '97'.repeat(32);
+    await expect(observe(fixture, {
+      witness: {
+        fullHeights: [120, 121, 121, 122, 122, 123],
+        tipHeights: [120, 121, 121, 122, 122, 123],
+        tipIds: [TIP_HEADER_ID, tip121, tip121, tip122, tip122, tip123],
+        headerIdsByHeight: new Map([
+          [120, [TIP_HEADER_ID]],
+          [121, [tip121]],
+          [122, [tip122]],
+        ]),
+      },
+    })).rejects.toThrow(/stable Ergo genesis-box observation remained unavailable/i);
+  });
+
+  it('retries a lagging source pair until both stable observations match', async () => {
+    const fixture = await genesisFixture();
+    const nextTipHeaderId = '95'.repeat(32);
+    const { report } = await observe(fixture, {
+      primary: {
+        fullHeights: [120, 120, 121, 121],
+        tipHeights: [120, 120, 121, 121],
+        tipIds: [TIP_HEADER_ID, TIP_HEADER_ID, nextTipHeaderId, nextTipHeaderId],
+      },
+      witness: {
+        fullHeights: [120, 121, 121, 121],
+        tipHeights: [120, 121, 121, 121],
+        tipIds: [
+          TIP_HEADER_ID,
+          nextTipHeaderId,
+          nextTipHeaderId,
+          nextTipHeaderId,
+        ],
+        headerIdsByHeight: new Map([[120, [TIP_HEADER_ID]]]),
+      },
+    });
+
+    expect(report.target).toMatchObject({
+      tipHeight: 121,
+      tipHeaderIdHex: nextTipHeaderId,
+    });
+  });
+
+  it('fails closed when stable source tips remain persistently different', async () => {
+    const fixture = await genesisFixture();
+    await expect(observe(fixture, {
+      primary: {
+        fullHeights: [120],
+        tipHeights: [120],
+        tipIds: [TIP_HEADER_ID],
+      },
+      witness: {
+        fullHeights: [121],
+        tipHeights: [121],
+        tipIds: ['95'.repeat(32)],
+      },
+    })).rejects.toThrow(/target snapshots disagree/i);
   });
 
   it('fails closed after the bounded node snapshot retry count is exhausted', async () => {
