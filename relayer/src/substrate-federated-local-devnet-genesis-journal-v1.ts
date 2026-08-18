@@ -240,7 +240,7 @@ export function createSubstrateFederatedLocalDevnetGenesisJournalV1(input: {
         reconciliationIdentityDigestHex,
         material.marker.targetGenesisHeaderIdHex,
         material.marker.expectedTxId,
-        exact.observationDigestHex,
+        exact,
       );
       const confirmed = state.confirmErgoOperationalTransactionAttempt({
         expectedTxId: material.marker.expectedTxId,
@@ -485,7 +485,7 @@ async function observeExact(
     reconciliationIdentityDigestHex,
     targetGenesisHeaderIdHex,
     expectedTxId,
-    exact.observationDigestHex,
+    exact,
   );
   return exact;
 }

@@ -4,6 +4,7 @@ import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
+  normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
   type SubstrateFederatedLocalDevnetGenesisConfirmation,
   type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
@@ -235,7 +236,7 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifac
   expectedReconciliationIdentityDigestHex: string,
   expectedTargetGenesisHeaderIdHexValue: string,
   expectedTxIdValue: string,
-  expectedObservationDigestHexValue: string,
+  expectedConfirmation: SubstrateFederatedLocalDevnetGenesisConfirmation,
 ): void {
   const material = ARTIFACTS.get(artifact);
   const expectedTargetGenesisHeaderIdHex = fixedHex32(
@@ -246,15 +247,15 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifac
     expectedTxIdValue,
     'expected isolated genesis confirmation transaction ID',
   );
-  const expectedObservationDigestHex = fixedHex32(
-    expectedObservationDigestHexValue,
-    'expected isolated genesis observation digest',
+  const exact = normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
+    expectedConfirmation,
   );
   if (
     material === undefined
     || material.targetGenesisHeaderIdHex !== expectedTargetGenesisHeaderIdHex
     || material.expectedTxId !== expectedTxId
-    || material.observationDigestHex !== expectedObservationDigestHex
+    || material.observationDigestHex !== exact.observationDigestHex
+    || exact.observerArtifact !== artifact
   ) {
     throw new Error(
       'isolated genesis confirmation artifact lacks exact process provenance',
@@ -264,6 +265,28 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifac
     material.observer,
     expectedReconciliationIdentityDigestHex,
   );
+  const observerMaterial = OBSERVERS.get(material.observer)!;
+  const recomputedObservationDigestHex = sha256CanonicalJson({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVER_V1_SCHEMA,
+    processBindingDigestHex: observerMaterial.binding.processBindingDigestHex,
+    reconciliationIdentityDigestHex:
+      observerMaterial.binding.executionTargetIdentityDigestHex,
+    nodeOrigin: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
+    targetGenesisHeaderIdHex: expectedTargetGenesisHeaderIdHex,
+    expectedTxId,
+    observedTxId: exact.status === 'not_found' ? null : expectedTxId,
+    status: exact.status,
+    confirmations: exact.confirmations,
+    observedAtHeight: exact.observedAtHeight,
+    confirmationHeight: exact.confirmationHeight,
+    confirmationHeaderIdHex: exact.confirmationHeaderIdHex,
+  }, OBSERVATION_DIGEST_DOMAIN);
+  if (recomputedObservationDigestHex !== exact.observationDigestHex) {
+    throw new Error(
+      'isolated genesis confirmation fields differ from the observed artifact',
+    );
+  }
 }
 
 async function observeExactTargetIdentity(

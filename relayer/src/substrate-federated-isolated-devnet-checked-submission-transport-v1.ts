@@ -16,6 +16,11 @@ import {
   type SubstrateFederatedLocalDevnetGenesisSubmission,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+  type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+} from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
   type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
@@ -38,9 +43,15 @@ type Transport =
  */
 export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
 ): Readonly<Transport> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
+    authorizer,
+    target,
+  );
   if (
     target.primaryNodeOrigin
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
@@ -65,6 +76,17 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
       }
       const checked =
         attempt.candidate.authorization.revalidated.checked;
+      assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
+        authorizer,
+        attempt.candidate.authorization.authorizationArtifact,
+        {
+          revalidated: attempt.candidate.authorization.revalidated,
+          preTransportEvidence:
+            attempt.candidate.authorization.preTransportEvidence,
+          authorizationDigestHex:
+            attempt.candidate.authorization.authorizationDigestHex,
+        },
+      );
       const admission = checked.signed.admission;
       if (
         admission.nodeOrigin

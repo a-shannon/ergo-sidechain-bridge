@@ -309,8 +309,11 @@ describe('broadcast surface isolation', () => {
 
   it('keeps the FED-6-LAB checked transport dormant and outside no-submit roots', () => {
     const sources = productionSources();
+    const authorizerFile =
+      'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts';
     const transportFile =
       'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
+    const authorizer = readFileSync(join(srcRoot, authorizerFile), 'utf-8');
     const transport = readFileSync(join(srcRoot, transportFile), 'utf-8');
     const frozenNoSubmit = [
       'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
@@ -348,6 +351,18 @@ describe('broadcast surface isolation', () => {
     )).toEqual([transportFile]);
     expect(filesImporting(
       sources,
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+    )).toEqual([]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+    )).toEqual([authorizerFile]);
+    expect(filesImporting(
+      sources,
+      'assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1',
+    )).toEqual([transportFile]);
+    expect(filesImporting(
+      sources,
       'takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2',
     )).toEqual([
       'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
@@ -363,8 +378,16 @@ describe('broadcast surface isolation', () => {
     expect(transport).toContain('proxy: false');
     expect(transport).not.toContain('npostDirect');
     expect(transport).not.toContain('API_KEY');
+    expect(authorizer).not.toContain("'/transactions'");
+    expect(authorizer).not.toContain('axios');
+    expect(authorizer).not.toContain('consumeLocalWasmCheckedSubmissionHandleV1');
+    expect(authorizer).not.toContain('process.env');
+    expect(authorizer).not.toMatch(/\bverified\s*:\s*true\b/u);
     expect(frozenNoSubmit).not.toContain(
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    );
+    expect(frozenNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
     );
     expect(frozenNoSubmit).not.toContain(
       'consumeLocalWasmCheckedSubmissionHandleV1',

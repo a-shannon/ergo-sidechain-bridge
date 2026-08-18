@@ -30,6 +30,13 @@ const boundary = vi.hoisted(() => {
       transportPolicy: 'no-redirect-no-proxy',
     }),
   });
+  const authorizer = Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v1',
+  });
+  const authorizationArtifact = Object.freeze({
+    role: 'lab-authorization',
+  });
   return {
     expectedTxId,
     signedTransactionDigestHex,
@@ -38,6 +45,8 @@ const boundary = vi.hoisted(() => {
     nodeOrigin,
     signedCandidate,
     checkedHandle,
+    authorizer,
+    authorizationArtifact,
     handleProcessBindingDigestHex: '11'.repeat(32),
     handleExecutionTargetIdentityDigestHex: '10'.repeat(32),
     signedTransaction: Object.freeze({ id: expectedTxId, proofs: ['opaque'] }),
@@ -49,6 +58,36 @@ const boundary = vi.hoisted(() => {
 const node = vi.hoisted(() => ({
   post: vi.fn(),
 }));
+
+vi.mock(
+  './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1: (
+      value: unknown,
+      target: unknown,
+    ) => {
+      if (
+        value !== boundary.authorizer
+        || target !== processBoundary.target
+      ) {
+        throw new Error('synthetic broadcast authorizer provenance is missing');
+      }
+    },
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1: (
+      value: unknown,
+      artifact: unknown,
+      expectation: Readonly<{ authorizationDigestHex: string }>,
+    ) => {
+      if (
+        value !== boundary.authorizer
+        || artifact !== boundary.authorizationArtifact
+        || expectation.authorizationDigestHex !== AUTHORIZATION_DIGEST
+      ) {
+        throw new Error('synthetic broadcast authorization is missing');
+      }
+    },
+  }),
+);
 
 const processBoundary = vi.hoisted(() => ({
   reconciliationIdentityDigestHex: '10'.repeat(32),
@@ -170,6 +209,7 @@ beforeEach(() => {
 function ports(overrides: Readonly<{
   signedTransactionDigestHex?: string;
   checkResponseDigestHex?: string;
+  authorizationArtifact?: object;
 }> = {}): SubstrateFederatedLocalDevnetGenesisExecutionPorts {
   return {
     signer: {
@@ -204,7 +244,8 @@ function ports(overrides: Readonly<{
     broadcastAuthorizer: {
       authorize: () => ({
         authorizationDigestHex: AUTHORIZATION_DIGEST,
-        authorizationArtifact: Object.freeze({ role: 'lab-authorization' }),
+        authorizationArtifact: overrides.authorizationArtifact
+          ?? boundary.authorizationArtifact,
       }),
     },
     journal: {
@@ -225,6 +266,7 @@ function ports(overrides: Readonly<{
     transport:
       createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
         processBoundary.target,
+        boundary.authorizer as any,
       ),
     confirmationObserver: {
       observe: async () => ({
@@ -244,6 +286,7 @@ async function execute(overrides: Readonly<{
   expectedTxId?: string;
   signedTransactionDigestHex?: string;
   checkResponseDigestHex?: string;
+  authorizationArtifact?: object;
 }> = {}) {
   return await executeSubstrateFederatedLocalDevnetGenesisV1({
     role: 'tracker',
@@ -285,6 +328,24 @@ describe('isolated devnet checked submission transport V1', () => {
     expect(JSON.stringify(node.post.mock.calls[0]?.[2])).not.toMatch(
       /api[_-]?key|authorization|cookie|proxy.*true/i,
     );
+  });
+
+  it('contains a forged authorization before consuming signed bytes', async () => {
+    node.post.mockResolvedValue({
+      status: 200,
+      data: boundary.expectedTxId,
+    });
+
+    await expect(execute({
+      authorizationArtifact: Object.freeze({ role: 'forged-authorization' }),
+    })).resolves.toMatchObject({
+      status: 'ambiguous',
+      submittedTxId: null,
+      confirmationStatus: 'not_found',
+    });
+    expect(boundary.consumed).toBe(false);
+    expect(boundary.consume).not.toHaveBeenCalled();
+    expect(node.post).not.toHaveBeenCalled();
   });
 
   it('contains a handle checked under a replaced execution process', async () => {

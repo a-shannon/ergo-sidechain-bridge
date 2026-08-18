@@ -31,14 +31,16 @@ vi.mock(
       expectedReconciliationIdentityDigestHex: string,
       expectedTargetGenesisHeaderIdHex: string,
       expectedTxId: string,
-      expectedObservationDigestHex: string,
+      expectedConfirmation: Readonly<Record<string, unknown>>,
     ) => {
       if (
         value.reconciliationIdentityDigestHex
           !== expectedReconciliationIdentityDigestHex
         || value.targetGenesisHeaderIdHex !== expectedTargetGenesisHeaderIdHex
         || value.expectedTxId !== expectedTxId
-        || value.observationDigestHex !== expectedObservationDigestHex
+        || value.observationDigestHex
+          !== expectedConfirmation.observationDigestHex
+        || expectedConfirmation.observerArtifact !== value
       ) {
         throw new Error('synthetic confirmation artifact provenance is missing');
       }

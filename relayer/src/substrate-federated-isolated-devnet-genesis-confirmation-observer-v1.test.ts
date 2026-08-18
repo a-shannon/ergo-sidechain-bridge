@@ -90,7 +90,7 @@ describe('isolated devnet genesis confirmation observer V1', () => {
         processBoundary.reconciliationIdentityDigestHex,
         GENESIS_HEADER_ID,
         TX_ID,
-        confirmation!.observationDigestHex,
+        confirmation!,
       )
     ).not.toThrow();
     expect(() =>
@@ -99,7 +99,7 @@ describe('isolated devnet genesis confirmation observer V1', () => {
         processBoundary.reconciliationIdentityDigestHex,
         GENESIS_HEADER_ID,
         TX_ID,
-        confirmation!.observationDigestHex,
+        confirmation!,
       )
     ).toThrow(/lacks exact process provenance/);
 
@@ -110,7 +110,7 @@ describe('isolated devnet genesis confirmation observer V1', () => {
         processBoundary.reconciliationIdentityDigestHex,
         GENESIS_HEADER_ID,
         TX_ID,
-        confirmation!.observationDigestHex,
+        confirmation!,
       )
     ).toThrow(/not owned by the active mining action/);
   });
@@ -133,9 +133,63 @@ describe('isolated devnet genesis confirmation observer V1', () => {
         processBoundary.reconciliationIdentityDigestHex,
         'ff'.repeat(32),
         TX_ID,
-        confirmation!.observationDigestHex,
+        confirmation!,
       )
     ).toThrow(/lacks exact process provenance/);
+  });
+
+  it('rejects a genuine pending artifact wrapped as a fabricated confirmation', async () => {
+    installCanonicalResponses();
+    rpc.primaryGet.mockImplementation(async (path: string) => {
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 20 } };
+      if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+      if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+        return { data: transaction(9) };
+      }
+      throw new Error(`unexpected primary path ${path}`);
+    });
+    rpc.witnessGet.mockImplementation(async (path: string) => {
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 19 } };
+      if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
+      if (path === `/blockchain/transaction/byId/${TX_ID}`) {
+        return { data: transaction(9) };
+      }
+      throw new Error(`unexpected witness path ${path}`);
+    });
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+    const pending = await observer.observe(
+      TX_ID,
+      processBoundary.target.primaryNodeOrigin,
+    );
+    expect(pending).toMatchObject({ status: 'pending', confirmations: 9 });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        pending!.observerArtifact,
+        processBoundary.reconciliationIdentityDigestHex,
+        GENESIS_HEADER_ID,
+        TX_ID,
+        pending!,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        pending!.observerArtifact,
+        processBoundary.reconciliationIdentityDigestHex,
+        GENESIS_HEADER_ID,
+        TX_ID,
+        Object.freeze({
+          ...pending!,
+          status: 'confirmed' as const,
+          confirmations: 10,
+          confirmationHeight: 10,
+          confirmationHeaderIdHex: INCLUSION_HEADER_ID,
+        }),
+      )
+    ).toThrow(/fields differ from the observed artifact/);
   });
 
   it('rejects cloned and expired process capabilities', async () => {

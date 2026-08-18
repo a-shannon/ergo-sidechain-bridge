@@ -34,6 +34,14 @@ const executionProcessMock = vi.hoisted(() => ({
   reconciliationIdentityDigestHex: '98'.repeat(32),
 }));
 
+const broadcastAuthorizationMock = vi.hoisted(() => ({
+  authorizer: Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v1',
+  }),
+  artifact: Object.freeze({ role: 'authorization' }),
+}));
+
 const publicKeyBytes = Uint8Array.from([2, ...Array(32).fill(0x42)]);
 const publicKeyHex = Buffer.from(publicKeyBytes).toString('hex');
 
@@ -72,6 +80,36 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
     });
   },
 }));
+
+vi.mock(
+  './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1: (
+      value: unknown,
+      target: unknown,
+    ) => {
+      if (
+        value !== broadcastAuthorizationMock.authorizer
+        || target !== executionProcessMock.target
+      ) {
+        throw new Error('synthetic broadcast authorizer provenance is missing');
+      }
+    },
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1: (
+      value: unknown,
+      artifact: unknown,
+      expectation: Readonly<{ authorizationDigestHex: string }>,
+    ) => {
+      if (
+        value !== broadcastAuthorizationMock.authorizer
+        || artifact !== broadcastAuthorizationMock.artifact
+        || expectation.authorizationDigestHex !== '94'.repeat(32)
+      ) {
+        throw new Error('synthetic broadcast authorization is missing');
+      }
+    },
+  }),
+);
 
 vi.mock('ergo-lib-wasm-nodejs', () => {
   class BlockHeaders {
@@ -649,7 +687,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
       broadcastAuthorizer: {
         authorize: () => ({
           authorizationDigestHex: '94'.repeat(32),
-          authorizationArtifact: Object.freeze({ role: 'authorization' }),
+          authorizationArtifact: broadcastAuthorizationMock.artifact,
         }),
       },
       journal: {
@@ -669,6 +707,7 @@ describe('separate authenticated check signer and checker capabilities', () => {
       transport:
         createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
           executionProcessMock.target,
+          broadcastAuthorizationMock.authorizer as any,
         ),
       confirmationObserver: {
         observe: async () => ({
