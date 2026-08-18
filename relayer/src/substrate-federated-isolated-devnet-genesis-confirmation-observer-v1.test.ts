@@ -116,6 +116,66 @@ describe('isolated devnet genesis confirmation observer V1', () => {
     ).toThrow(/not owned by the active mining action/);
   });
 
+  it('accepts confirmation depth observed while both node tips advance', async () => {
+    installCanonicalResponses({
+      primaryFullHeights: [20, 21],
+      witnessFullHeights: [20, 21],
+      primaryConfirmations: 10,
+      witnessConfirmations: 11,
+    });
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+
+    const confirmation = await observer.observe(
+      TX_ID,
+      processBoundary.target.primaryNodeOrigin,
+    );
+
+    expect(confirmation).toMatchObject({
+      status: 'confirmed',
+      confirmations: 10,
+      observedAtHeight: 20,
+      confirmationHeight: 10,
+      confirmationHeaderIdHex: INCLUSION_HEADER_ID,
+    });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+        confirmation!.observerArtifact,
+        processBoundary.reconciliationIdentityDigestHex,
+        GENESIS_HEADER_ID,
+        TX_ID,
+        confirmation!,
+      )
+    ).not.toThrow();
+  });
+
+  it.each(['primary', 'witness'] as const)(
+    'rejects %s node-height regression across one observation',
+    async regressingRole => {
+      installCanonicalResponses({
+        primaryFullHeights: regressingRole === 'primary'
+          ? [20, 19]
+          : [20, 20],
+        witnessFullHeights: regressingRole === 'witness'
+          ? [20, 19]
+          : [20, 20],
+      });
+      const observer =
+        createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+          processBoundary.target,
+          GENESIS_HEADER_ID,
+        );
+
+      await expect(observer.observe(
+        TX_ID,
+        processBoundary.target.primaryNodeOrigin,
+      )).rejects.toThrow(/node height regressed during observation/);
+    },
+  );
+
   it('rejects confirmation artifact reuse against another genesis', async () => {
     installCanonicalResponses();
     const observer =
@@ -250,6 +310,23 @@ describe('isolated devnet genesis confirmation observer V1', () => {
       .rejects.toThrow(/primary confirmation depth is inconsistent/);
   });
 
+  it('rejects a confirmation depth below the pre-observation height', async () => {
+    installCanonicalResponses({
+      primaryFullHeights: [21, 22],
+      witnessFullHeights: [21, 22],
+      primaryConfirmations: 10,
+      witnessConfirmations: 10,
+    });
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+
+    await expect(observer.observe(TX_ID, processBoundary.target.primaryNodeOrigin))
+      .rejects.toThrow(/primary confirmation depth is inconsistent/);
+  });
+
   it('rejects cloned and expired process capabilities', async () => {
     installCanonicalResponses();
     expect(() =>
@@ -314,6 +391,10 @@ describe('isolated devnet genesis confirmation observer V1', () => {
 function installCanonicalResponses(
   input: Readonly<{
     fullHeight?: number;
+    primaryFullHeights?: readonly [number, number];
+    witnessFullHeights?: readonly [number, number];
+    primaryConfirmations?: number;
+    witnessConfirmations?: number;
     inclusionHeight?: number;
     inclusionHeaderId?: string;
   }> = {},
@@ -322,13 +403,26 @@ function installCanonicalResponses(
   const inclusionHeight = input.inclusionHeight ?? 10;
   const inclusionHeaderId = input.inclusionHeaderId ?? INCLUSION_HEADER_ID;
   const confirmations = fullHeight - inclusionHeight;
+  const primaryFullHeights = input.primaryFullHeights
+    ?? [fullHeight, fullHeight];
+  const witnessFullHeights = input.witnessFullHeights
+    ?? [fullHeight, fullHeight];
+  let primaryInfoReads = 0;
+  let witnessInfoReads = 0;
   rpc.primaryGet.mockImplementation(async (path: string) => {
-    if (path === '/info') return { data: { network: 'devnet', fullHeight } };
+    if (path === '/info') {
+      return {
+        data: {
+          network: 'devnet',
+          fullHeight: primaryFullHeights[Math.min(primaryInfoReads++, 1)],
+        },
+      };
+    }
     if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
     if (path === `/blockchain/transaction/byId/${TX_ID}`) {
       return {
         data: transaction(
-          confirmations,
+          input.primaryConfirmations ?? confirmations,
           inclusionHeight,
           inclusionHeaderId,
         ),
@@ -340,12 +434,19 @@ function installCanonicalResponses(
     throw new Error(`unexpected primary path ${path}`);
   });
   rpc.witnessGet.mockImplementation(async (path: string) => {
-    if (path === '/info') return { data: { network: 'devnet', fullHeight } };
+    if (path === '/info') {
+      return {
+        data: {
+          network: 'devnet',
+          fullHeight: witnessFullHeights[Math.min(witnessInfoReads++, 1)],
+        },
+      };
+    }
     if (path === '/blocks/at/1') return { data: [GENESIS_HEADER_ID] };
     if (path === `/blockchain/transaction/byId/${TX_ID}`) {
       return {
         data: transaction(
-          confirmations,
+          input.witnessConfirmations ?? confirmations,
           inclusionHeight,
           inclusionHeaderId,
         ),

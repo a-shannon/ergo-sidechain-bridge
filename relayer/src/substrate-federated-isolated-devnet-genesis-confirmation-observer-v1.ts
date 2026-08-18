@@ -94,7 +94,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         expectedTxIdValue,
         'isolated genesis expected transaction ID',
       );
-      const identity = await observeExactTargetIdentity(
+      const identityBefore = await observeExactTargetIdentity(
         primaryClient,
         witnessClient,
         targetGenesisHeaderIdHex,
@@ -103,13 +103,21 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         readTransaction(primaryClient, expectedTxId, 'primary'),
         readTransaction(witnessClient, expectedTxId, 'witness'),
       ]);
+      // Mining may advance between the identity and transaction reads. The
+      // second identity bounds each node's reported depth without freezing it.
+      const identityAfter = await observeExactTargetIdentity(
+        primaryClient,
+        witnessClient,
+        targetGenesisHeaderIdHex,
+      );
+      assertNonRegressingIdentity(identityBefore, identityAfter);
       if (primaryTransaction === null && witnessTransaction === null) {
         return createObservation(observer, binding, {
           status: 'not_found',
           expectedTxId,
           observedTxId: null,
           confirmations: 0,
-          observedAtHeight: identity.observedAtHeight,
+          observedAtHeight: identityAfter.observedAtHeight,
           confirmationHeight: null,
           confirmationHeaderIdHex: null,
           targetGenesisHeaderIdHex,
@@ -150,7 +158,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
           expectedTxId,
           observedTxId,
           confirmations,
-          observedAtHeight: identity.observedAtHeight,
+          observedAtHeight: identityAfter.observedAtHeight,
           confirmationHeight: null,
           confirmationHeaderIdHex: null,
           targetGenesisHeaderIdHex,
@@ -159,14 +167,16 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
       const primaryInclusion = await confirmedInclusion(
         primaryClient,
         primaryTransaction,
-        identity.primaryHeight,
+        identityBefore.primaryHeight,
+        identityAfter.primaryHeight,
         primaryConfirmations,
         'primary',
       );
       const witnessInclusion = await confirmedInclusion(
         witnessClient,
         witnessTransaction,
-        identity.witnessHeight,
+        identityBefore.witnessHeight,
+        identityAfter.witnessHeight,
         witnessConfirmations,
         'witness',
       );
@@ -176,12 +186,13 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
       ) {
         throw new Error('isolated genesis canonical inclusion observations disagree');
       }
+      const confirmedObservedAtHeight = primaryInclusion.height + confirmations;
       return createObservation(observer, binding, {
         status: 'confirmed',
         expectedTxId,
         observedTxId,
         confirmations,
-        observedAtHeight: identity.observedAtHeight,
+        observedAtHeight: confirmedObservedAtHeight,
         confirmationHeight: primaryInclusion.height,
         confirmationHeaderIdHex: primaryInclusion.headerIdHex,
         targetGenesisHeaderIdHex,
@@ -419,7 +430,8 @@ function confirmationCount(
 async function confirmedInclusion(
   client: ReturnType<typeof axios.create>,
   transaction: Readonly<Record<string, unknown>>,
-  fullHeight: number,
+  fullHeightBefore: number,
+  fullHeightAfter: number,
   confirmations: number,
   role: 'primary' | 'witness',
 ): Promise<Readonly<{ height: number; headerIdHex: string }>> {
@@ -427,7 +439,11 @@ async function confirmedInclusion(
     transaction.inclusionHeight,
     `isolated genesis ${role} transaction inclusion height`,
   );
-  if (fullHeight - height !== confirmations) {
+  const confirmationObservationHeight = height + confirmations;
+  if (
+    confirmationObservationHeight < fullHeightBefore
+    || confirmationObservationHeight > fullHeightAfter
+  ) {
     throw new Error(`isolated genesis ${role} confirmation depth is inconsistent`);
   }
   const canonicalHeaderResponse = await client.get(`/blocks/at/${height}`);
@@ -445,6 +461,24 @@ async function confirmedInclusion(
     );
   }
   return Object.freeze({ height, headerIdHex });
+}
+
+function assertNonRegressingIdentity(
+  before: Readonly<{
+    primaryHeight: number;
+    witnessHeight: number;
+  }>,
+  after: Readonly<{
+    primaryHeight: number;
+    witnessHeight: number;
+  }>,
+): void {
+  if (
+    after.primaryHeight < before.primaryHeight
+    || after.witnessHeight < before.witnessHeight
+  ) {
+    throw new Error('isolated genesis node height regressed during observation');
+  }
 }
 
 interface ObservationInputV1 {
