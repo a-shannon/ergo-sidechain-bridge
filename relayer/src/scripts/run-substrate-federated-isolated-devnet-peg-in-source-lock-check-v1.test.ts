@@ -51,6 +51,9 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.js';
 import {
+  runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCommandFromArgumentsV1,
+} from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
+import {
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckWorkerFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-check-worker-v1.js';
 import {
@@ -81,10 +84,17 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
     mocked.process.mockImplementation(async input => {
       const requestShaIndex = input.args.indexOf('--expected-request-sha256');
       const requestSha = input.args[requestShaIndex + 1];
+      const executionWorker = input.args[1].endsWith(
+        'run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-worker-v1.ts',
+      );
       return {
         pid: 1234,
         exitCode: 0,
-        stdout: `${canonicalJson(workerReceipt(requestSha))}\n`,
+        stdout: `${canonicalJson(
+          executionWorker
+            ? executionWorkerReceipt(requestSha)
+            : workerReceipt(requestSha),
+        )}\n`,
         stderr: '',
       };
     });
@@ -180,6 +190,168 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       } finally {
         restoreEnvironment('NODE_OPTIONS', originalNodeOptions);
         restoreEnvironment('E2S_UNSAFE_TEST_VALUE', originalUnsafe);
+      }
+    });
+  });
+
+  it('publishes one create-only source-lock execution receipt', async () => {
+    await withFixture(async fixture => {
+      const originalNodeOptions = process.env.NODE_OPTIONS;
+      const originalUnsafe = process.env.E2S_UNSAFE_TEST_VALUE;
+      const originalTemp = process.env.TEMP;
+      const originalTmp = process.env.TMP;
+      process.env.NODE_OPTIONS = '--inspect';
+      process.env.E2S_UNSAFE_TEST_VALUE = 'must-not-cross';
+      process.env.TEMP = process.cwd();
+      process.env.TMP = process.cwd();
+      try {
+        const result = await runExecutionCommand(fixture);
+        const expected = executionCommandReceipt(fixture.requestSha256Hex);
+        expect(result).toEqual({
+          status: 'isolated_peg_in_source_lock_execution_receipt_published',
+          receiptDigestHex: expected.receiptDigestHex,
+        });
+        expect(readFileSync(fixture.outputPath, 'utf8'))
+          .toBe(`${canonicalJson(expected)}\n`);
+        expect(expected.boundaries).toMatchObject({
+          sourceLockCreationConfirmed: true,
+          sourceLockStillRefundable: true,
+          sourceLockConsumptionEstablished: false,
+          reserveLineageEstablished: false,
+          mintAuthorized: false,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+        });
+
+        const processInput = mocked.process.mock.calls[0]?.[0];
+        expect(processInput).toMatchObject({
+          executablePath: process.execPath,
+          cwd: process.cwd(),
+          timeoutMs: 90 * 60_000,
+          terminationGraceMs: 30_000,
+          maxStdoutBytes: 2 * 1024 * 1024,
+          maxStderrBytes: 64 * 1024,
+          label: 'isolated peg-in source-lock execution worker',
+        });
+        expect(processInput.args).toEqual([
+          'node_modules/tsx/dist/cli.mjs',
+          expect.stringMatching(
+            /run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-worker-v1\.ts$/u,
+          ),
+          '--request',
+          fixture.requestPath,
+          '--expected-request-sha256',
+          fixture.requestSha256Hex,
+          '--amount-nano-erg',
+          AMOUNT_NANO_ERG,
+          '--recipient-address-hex',
+          RECIPIENT_ADDRESS_HEX,
+        ]);
+        expect(processInput.env.NODE_OPTIONS).toBeUndefined();
+        expect(processInput.env.E2S_UNSAFE_TEST_VALUE).toBeUndefined();
+        expect(processInput.env.TEMP).toBe(
+          resolve(process.cwd(), '..', '..', '..'),
+        );
+        expect(processInput.env.TMP).toBe(processInput.env.TEMP);
+      } finally {
+        restoreEnvironment('NODE_OPTIONS', originalNodeOptions);
+        restoreEnvironment('E2S_UNSAFE_TEST_VALUE', originalUnsafe);
+        restoreEnvironment('TEMP', originalTemp);
+        restoreEnvironment('TMP', originalTmp);
+      }
+    });
+  });
+
+  it('keeps execution publication create-only across path races', async () => {
+    await withFixture(async fixture => {
+      writeFileSync(fixture.outputPath, 'occupied\n', 'utf8');
+      await expect(runExecutionCommand(fixture)).rejects.toThrow(
+        'must not already exist',
+      );
+      expect(mocked.process).not.toHaveBeenCalled();
+      rmSync(fixture.outputPath);
+
+      const inWorktreeOutput = resolve(
+        process.cwd(),
+        `.e2s-source-lock-execution-test-${process.pid}.json`,
+      );
+      await expect(runExecutionCommand({
+        ...fixture,
+        outputPath: inWorktreeOutput,
+      })).rejects.toThrow('must remain outside the worktree');
+      expect(mocked.process).not.toHaveBeenCalled();
+
+      const realParent = join(fixture.root, 'execution-output-parent');
+      const linkedParent = join(fixture.root, 'linked-execution-output-parent');
+      mkdirSync(realParent);
+      symlinkSync(realParent, linkedParent, 'junction');
+      await expect(runExecutionCommand({
+        ...fixture,
+        outputPath: join(linkedParent, 'receipt.json'),
+      })).rejects.toThrow('must be one regular directory');
+      expect(mocked.process).not.toHaveBeenCalled();
+
+      mocked.process.mockImplementationOnce(async input => {
+        writeFileSync(fixture.outputPath, 'raced output\n', 'utf8');
+        const requestShaIndex = input.args.indexOf(
+          '--expected-request-sha256',
+        );
+        return {
+          pid: 1234,
+          exitCode: 0,
+          stdout: `${canonicalJson(executionWorkerReceipt(
+            input.args[requestShaIndex + 1],
+          ))}\n`,
+          stderr: '',
+        };
+      });
+      await expect(runExecutionCommand(fixture)).rejects.toThrow(
+        'must not already exist',
+      );
+      expect(readFileSync(fixture.outputPath, 'utf8')).toBe('raced output\n');
+    });
+  });
+
+  it('rejects execution worker diagnostics and rehashed authority drift', async () => {
+    await withFixture(async fixture => {
+      const validReceipt = executionWorkerReceipt(fixture.requestSha256Hex);
+      mocked.process.mockResolvedValueOnce({
+        pid: 1234,
+        exitCode: 0,
+        stdout: `${canonicalJson(validReceipt)}\n`,
+        stderr: 'unexpected diagnostic\n',
+      });
+      await expect(runExecutionCommand(fixture)).rejects.toThrow(
+        'emitted diagnostics',
+      );
+
+      const drift = structuredClone(validReceipt) as any;
+      drift.boundaries.mintAuthorized = true;
+      refreshExecutionWorkerReceiptDigest(drift);
+      mocked.process.mockResolvedValueOnce({
+        pid: 1234,
+        exitCode: 0,
+        stdout: `${canonicalJson(drift)}\n`,
+        stderr: '',
+      });
+      await expect(runExecutionCommand(fixture)).rejects.toThrow(
+        'execution worker boundaries changed',
+      );
+      expect(() => readFileSync(fixture.outputPath, 'utf8')).toThrow();
+    });
+  });
+
+  it('rejects inherited runtime paths inside the worktree', async () => {
+    await withFixture(async fixture => {
+      const originalJavaHome = process.env.JAVA_HOME;
+      process.env.JAVA_HOME = process.cwd();
+      try {
+        await expect(runExecutionCommand(fixture)).rejects.toThrow(
+          'JAVA_HOME must remain outside the worktree',
+        );
+        expect(mocked.process).not.toHaveBeenCalled();
+      } finally {
+        restoreEnvironment('JAVA_HOME', originalJavaHome);
       }
     });
   });
@@ -351,6 +523,18 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
         'receipt.json',
       ]),
     ).rejects.toThrow('plan is invalid');
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCommandFromArgumentsV1([
+        '--request',
+        'request.json',
+        '--amount-nano-erg',
+        '0',
+        '--recipient-address-hex',
+        RECIPIENT_ADDRESS_HEX,
+        '--output',
+        'receipt.json',
+      ]),
+    ).rejects.toThrow('execution plan is invalid');
     expect(mocked.loader).not.toHaveBeenCalled();
     expect(mocked.root).not.toHaveBeenCalled();
     expect(mocked.process).not.toHaveBeenCalled();
@@ -367,6 +551,10 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-worker-v1.ts',
       import.meta.url,
     ), 'utf8');
+    const executionLauncher = readFileSync(new URL(
+      './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.ts',
+      import.meta.url,
+    ), 'utf8');
     expect(launcher).not.toMatch(
       /dotenv|ergo-client|state-tracker|node-wallet|checked-submission-transport/iu,
     );
@@ -378,6 +566,12 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
     );
     expect(executionWorker).not.toMatch(
       /dotenv|ergo-client|state-tracker|node-wallet|checked-submission-transport/iu,
+    );
+    expect(executionLauncher).not.toMatch(
+      /dotenv|ergo-client|state-tracker|node-wallet|checked-submission-transport/iu,
+    );
+    expect(executionLauncher).not.toContain(
+      'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
     );
     expect(worker.match(
       /runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1/gu,
@@ -397,6 +591,9 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
     expect(executionWorker).toContain(
       "process.stderr.write('isolated source-lock execution worker failed\\n')",
     );
+    expect(executionLauncher).toContain(
+      "process.stderr.write('isolated peg-in source-lock execution failed\\n')",
+    );
 
     const packageJson = JSON.parse(readFileSync(
       resolve(process.cwd(), 'package.json'),
@@ -408,6 +605,13 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       ],
     ).toBe(
       'npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.ts',
+    );
+    expect(
+      packageJson.scripts[
+        'federated:isolated:peg-in-source-lock:execute-local'
+      ],
+    ).toBe(
+      'npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.ts',
     );
   });
 
@@ -648,6 +852,22 @@ async function runCommand(fixture: Readonly<{
   ]);
 }
 
+async function runExecutionCommand(fixture: Readonly<{
+  requestPath: string;
+  outputPath: string;
+}>): Promise<unknown> {
+  return runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCommandFromArgumentsV1([
+    '--request',
+    fixture.requestPath,
+    '--amount-nano-erg',
+    AMOUNT_NANO_ERG,
+    '--recipient-address-hex',
+    RECIPIENT_ADDRESS_HEX,
+    '--output',
+    fixture.outputPath,
+  ]);
+}
+
 async function withFixture(
   operation: (fixture: Readonly<{
     root: string;
@@ -713,6 +933,53 @@ function commandReceipt(commandRequestSha256Hex: string) {
     receiptDigestHex: sha256CanonicalJson(
       body,
       'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_COMMAND_RECEIPT_V1',
+    ),
+  };
+}
+
+function executionCommandReceipt(commandRequestSha256Hex: string) {
+  const body = {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-execution-command-receipt.v1',
+    version: 1,
+    status: 'request_bound_local_peg_in_source_lock_execution_completed',
+    commandRequestSha256Hex,
+    pegIn: {
+      amountNanoErg: AMOUNT_NANO_ERG,
+      recipientAddressHex: RECIPIENT_ADDRESS_HEX,
+    },
+    executionReceipt: executionWorkerReceipt(commandRequestSha256Hex),
+    checks: {
+      exactRequestBytesBoundAcrossParentAndWorker: true,
+      exactPegInPlanBoundAcrossParentAndWorker: true,
+      executionReceiptValidatedBeforePublication: true,
+      workerExitedBeforePublication: true,
+      outputConfinementRevalidatedImmediatelyBeforePublication: true,
+      createOnlyPublicationUsed: true,
+    },
+    boundaries: {
+      sourceLockCreationConfirmed: true,
+      sourceLockStillRefundable: true,
+      signedTransactionBytesReturnedOrPersisted: false,
+      physicalSecretMemoryErasureEstablished: false,
+      hostileSameUserProcessAttestationEstablished: false,
+      independentExecutionAttestationEstablished: false,
+      sourceLockConsumptionEstablished: false,
+      reserveLineageEstablished: false,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      publicNetworkUsed: false,
+      realFundsUsed: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    },
+  };
+  return {
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(
+      body,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_COMMAND_RECEIPT_V1',
     ),
   };
 }
