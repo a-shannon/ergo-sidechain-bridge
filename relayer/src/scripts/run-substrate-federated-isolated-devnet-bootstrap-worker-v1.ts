@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -102,6 +103,36 @@ function loadCanonicalBootstrapRequest(
   bridgeRoot: string,
   worktreeRoot: string,
 ): Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input> {
+  return loadCanonicalBootstrapRequestInternal(
+    requestPath,
+    bridgeRoot,
+    worktreeRoot,
+  );
+}
+
+export function loadCanonicalBootstrapRequestBoundToSha256(
+  requestPath: string,
+  bridgeRoot: string,
+  worktreeRoot: string,
+  expectedRequestSha256Hex: string,
+): Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input> {
+  if (!/^[0-9a-f]{64}$/u.test(expectedRequestSha256Hex)) {
+    throw new Error('bootstrap request digest is invalid');
+  }
+  return loadCanonicalBootstrapRequestInternal(
+    requestPath,
+    bridgeRoot,
+    worktreeRoot,
+    expectedRequestSha256Hex,
+  );
+}
+
+function loadCanonicalBootstrapRequestInternal(
+  requestPath: string,
+  bridgeRoot: string,
+  worktreeRoot: string,
+  expectedRequestSha256Hex?: string,
+): Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input> {
   const requestFile = readBoundedRegularFile(
     explicitExistingLocalNonSensitivePath(
       requestPath,
@@ -111,6 +142,13 @@ function loadCanonicalBootstrapRequest(
     'bootstrap request',
     MAX_REQUEST_BYTES,
   );
+  if (
+    expectedRequestSha256Hex !== undefined
+    && createHash('sha256').update(requestFile.bytes).digest('hex')
+      !== expectedRequestSha256Hex
+  ) {
+    throw new Error('bootstrap request bytes changed after parent validation');
+  }
   let source: string;
   try {
     source = UTF8_DECODER.decode(requestFile.bytes);

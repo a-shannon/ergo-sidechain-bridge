@@ -237,7 +237,7 @@ function parseSanitizedRootReceipt(stdout: string): Record<string, unknown> {
   return receipt;
 }
 
-function assertExactBuildReceipt(value: unknown): string {
+export function assertExactBuildReceipt(value: unknown): string {
   const build = exactRecord(value, [
     'schema',
     'version',

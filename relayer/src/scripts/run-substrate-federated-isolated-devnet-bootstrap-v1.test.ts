@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdtempSync,
@@ -61,6 +62,7 @@ import {
   runSubstrateFederatedIsolatedDevnetBootstrapCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-v1.js';
 import {
+  loadCanonicalBootstrapRequestBoundToSha256,
   runSubstrateFederatedIsolatedDevnetBootstrapWorkerFromArgumentsV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_BOOTSTRAP_COMMAND_REQUEST_V1_SCHEMA,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
@@ -119,6 +121,26 @@ describe('isolated devnet tracked no-submit bootstrap command V1', () => {
       expect(JSON.stringify(receipt)).not.toContain(
         fixture.request.sourceTarget.signedLegacyOwnerMintTransactionHex,
       );
+    });
+  });
+
+  it('binds execution loading to the exact request bytes validated by the parent', async () => {
+    await withFixture(async fixture => {
+      const expectedRequestSha256Hex = createHash('sha256')
+        .update(readFileSync(fixture.requestPath))
+        .digest('hex');
+      expect(() => loadCanonicalBootstrapRequestBoundToSha256(
+        fixture.requestPath,
+        resolve(process.cwd(), '..'),
+        resolve(process.cwd(), '..', '..'),
+        expectedRequestSha256Hex,
+      )).not.toThrow();
+      expect(() => loadCanonicalBootstrapRequestBoundToSha256(
+        fixture.requestPath,
+        resolve(process.cwd(), '..'),
+        resolve(process.cwd(), '..', '..'),
+        '0'.repeat(64),
+      )).toThrow('changed after parent validation');
     });
   });
 

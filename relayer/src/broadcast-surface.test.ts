@@ -361,6 +361,19 @@ describe('broadcast surface isolation', () => {
     )).toEqual([executionRoot, authorizerFile]);
     expect(filesImporting(
       sources,
+      'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
+    )).toEqual([
+      'scripts/run-substrate-federated-isolated-devnet-genesis-setup-worker-v1.ts',
+    ]);
+    expect(filesContainingIdentifier(
+      sources,
+      'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
+    )).toEqual([
+      executionRoot,
+      'scripts/run-substrate-federated-isolated-devnet-genesis-setup-worker-v1.ts',
+    ]);
+    expect(filesImporting(
+      sources,
       'assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1',
     )).toEqual([transportFile]);
     expect(filesImporting(
