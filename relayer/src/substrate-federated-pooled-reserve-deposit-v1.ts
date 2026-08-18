@@ -20,10 +20,12 @@ import {
   type PegInSourceIntentV2,
 } from './peg-in-causal-admission-v2.js';
 import {
-  assertSubstrateFederatedSettlementFamilyV1Identity,
+  assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
+  type SubstrateFederatedSettlementFamilyCompilerBindingV1,
+} from './substrate-federated-settlement-family-compiler-binding-v1.js';
+import {
   decodeSubstrateFederatedSettlementFamilyV1Profile,
   type SubstrateFederatedSettlementFamilyV1DecodedProfile,
-  type SubstrateFederatedSettlementFamilyV1Identity,
 } from './substrate-federated-settlement-family-v1.js';
 import {
   materializeUnsignedTransaction,
@@ -71,8 +73,8 @@ export interface SubstrateFederatedPooledReserveDepositHeightsV1 {
 }
 
 export interface BuildSubstrateFederatedPooledReserveDepositV1Input {
-  readonly familyIdentity:
-    Readonly<SubstrateFederatedSettlementFamilyV1Identity>;
+  readonly familyBinding:
+    Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
   readonly sourceFundingInput: Eip12Box;
   readonly reserveState: SubstrateFederatedPooledReserveStateV1;
   readonly sourceIntent: PegInSourceIntentV2;
@@ -87,6 +89,12 @@ export interface SubstrateFederatedPooledReserveDepositV1Packet {
   readonly version: 1;
   readonly trustModel: 'federated_non_trustless';
   readonly familyIdHex: string;
+  readonly familyCompiler: Readonly<{
+    readonly bindingDigestHex: string;
+    readonly provenanceKind:
+      SubstrateFederatedSettlementFamilyCompilerBindingV1['provenance']['kind'];
+    readonly provenanceDigestHex: string;
+  }>;
   readonly sourceIntentHex: string;
   readonly depositCommitmentHex: string;
   readonly depositInsertProofHex: string;
@@ -150,15 +158,15 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
   rawInput: Readonly<BuildSubstrateFederatedPooledReserveDepositV1Input>,
 ): Promise<Readonly<SubstrateFederatedPooledReserveDepositV1Packet>> {
   assertExactKeys(rawInput, [
-    'familyIdentity',
+    'familyBinding',
     'sourceFundingInput',
     'reserveState',
     'sourceIntent',
     'depositorErgoTreeHex',
     'creationHeights',
   ], 'substrate federated pooled-reserve deposit input', ['fees']);
-  const family = rawInput.familyIdentity;
-  assertSubstrateFederatedSettlementFamilyV1Identity(family);
+  const family = rawInput.familyBinding;
+  assertSubstrateFederatedSettlementFamilyCompilerBindingV1(family);
   const snapshot = {
     sourceFundingInput: structuredClone(rawInput.sourceFundingInput),
     reserveState: structuredClone(rawInput.reserveState),
@@ -217,7 +225,7 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
     sourceIntentHex,
     sourceAmount,
     sourceLockPropositionHex:
-      family.contracts.sourceLock.receipt.propositionHex,
+      family.contracts.sourceLock.propositionHex,
     depositorErgoTreeHex,
     creationFee: fees.sourceLockCreation,
     transitionFee: fees.reserveTransition,
@@ -280,7 +288,7 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
   );
   const reserveSuccessor: Eip12OutputCandidate = {
     value: outputValue,
-    ergoTree: family.contracts.pooledReserve.receipt.propositionHex,
+    ergoTree: family.contracts.pooledReserve.propositionHex,
     assets: [{
       tokenId: family.profile.pooledReserveNftIdHex,
       amount: '1',
@@ -342,6 +350,11 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
     version: 1 as const,
     trustModel: 'federated_non_trustless' as const,
     familyIdHex: family.profile.familyIdHex,
+    familyCompiler: {
+      bindingDigestHex: family.bindingDigestHex,
+      provenanceKind: family.provenance.kind,
+      provenanceDigestHex: family.provenance.digestHex,
+    },
     sourceIntentHex,
     depositCommitmentHex,
     depositInsertProofHex: insertion.insert_proof_hex,
@@ -503,7 +516,7 @@ function normalizeReserveState(
 
 function assertReservePredecessor(input: {
   reserve: Eip12Box;
-  family: Readonly<SubstrateFederatedSettlementFamilyV1Identity>;
+  family: Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
   depositHistory: readonly SubstrateFederatedDepositHistoryEntryV1[];
 }): {
   inputDigestHex: string;
@@ -526,7 +539,7 @@ function assertReservePredecessor(input: {
   ));
   if (
     reserve.ergoTree
-      !== input.family.contracts.pooledReserve.receipt.propositionHex
+      !== input.family.contracts.pooledReserve.propositionHex
     || reserve.assets.length !== 1
     || reserve.assets[0]?.tokenId
       !== input.family.profile.pooledReserveNftIdHex
@@ -649,7 +662,7 @@ async function buildSourceLockCreation(input: {
 }
 
 function assertExactSourceLockCreation(input: {
-  family: Readonly<SubstrateFederatedSettlementFamilyV1Identity>;
+  family: Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
   sourceFunding: Eip12Box;
   sourceLockCreation: MaterializedUnsignedTransaction;
   sourceIntentHex: string;
@@ -677,7 +690,7 @@ function assertExactSourceLockCreation(input: {
       !== BigInt(input.sourceFunding.value)
     || sourceLock?.value !== input.sourceAmount.toString()
     || sourceLock?.ergoTree
-      !== input.family.contracts.sourceLock.receipt.propositionHex
+      !== input.family.contracts.sourceLock.propositionHex
     || sourceLock.assets.length !== 0
     || Object.keys(sourceLock.additionalRegisters).sort().join(',') !== 'R4,R5'
     || sourceLock.additionalRegisters.R4 !== encodeCollByteRegister(Buffer.from(
@@ -721,7 +734,7 @@ function assertExactSourceLockCreation(input: {
 }
 
 function assertExactReserveTransition(input: {
-  family: Readonly<SubstrateFederatedSettlementFamilyV1Identity>;
+  family: Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
   reservePredecessor: Eip12Box;
   sourceLock: Eip12Box;
   transitionFeeFunding: Eip12Box;
@@ -760,11 +773,11 @@ function assertExactReserveTransition(input: {
         + BigInt(input.sourceLock.value)
         + BigInt(input.transitionFeeFunding.value)
     || input.sourceLock.ergoTree
-      !== input.family.contracts.sourceLock.receipt.propositionHex
+      !== input.family.contracts.sourceLock.propositionHex
     || input.sourceLock.value !== input.sourceAmount.toString()
     || successor?.value !== input.outputValue.toString()
     || successor.ergoTree
-      !== input.family.contracts.pooledReserve.receipt.propositionHex
+      !== input.family.contracts.pooledReserve.propositionHex
     || successor.assets.length !== 1
     || successor.assets[0]?.tokenId
       !== input.family.profile.pooledReserveNftIdHex

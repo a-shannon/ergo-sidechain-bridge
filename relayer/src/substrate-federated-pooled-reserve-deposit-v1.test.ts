@@ -20,6 +20,9 @@ import {
   getSubstrateFederatedSettlementFamilyV1FixtureIdentity,
 } from './substrate-federated-burn-settlement-v1-fixture.js';
 import {
+  bindSubstrateFederatedSettlementFamilyCompilerIdentityV1,
+} from './substrate-federated-settlement-family-compiler-binding-v1.js';
+import {
   decodeSubstrateFederatedSettlementFamilyV1Profile,
   SUBSTRATE_FEDERATED_SETTLEMENT_SOURCE_REFUND_DELAY_BLOCKS,
 } from './substrate-federated-settlement-family-v1.js';
@@ -58,6 +61,11 @@ describe('substrate federated pooled-reserve deposit V1', () => {
     expect(second).toEqual(first);
     assertSubstrateFederatedPooledReserveDepositV1Packet(first);
     expect(first.trustModel).toBe('federated_non_trustless');
+    expect(first.familyCompiler).toEqual({
+      bindingDigestHex: baseInput.familyBinding.bindingDigestHex,
+      provenanceKind: 'validated-frozen-batch',
+      provenanceDigestHex: baseInput.familyBinding.provenance.digestHex,
+    });
     expect(first.transactions.sourceLockCreation.outputs).toHaveLength(4);
     expect(first.transactions.reserveTransition.eip12Tx.inputs.map(
       input => input.boxId,
@@ -380,6 +388,11 @@ describe('substrate federated pooled-reserve deposit V1', () => {
   });
 
   it('rejects cloned packets without same-process provenance', async () => {
+    await expect(buildSubstrateFederatedPooledReserveDepositV1({
+      ...buildInput(),
+      familyBinding: structuredClone(baseInput.familyBinding),
+    })).rejects.toThrow(/compiler binding lacks same-process provenance/i);
+
     const packet = await buildSubstrateFederatedPooledReserveDepositV1(
       buildInput(),
     );
@@ -399,19 +412,21 @@ function buildInput(): BuildSubstrateFederatedPooledReserveDepositV1Input {
       creationHeights: baseInput.creationHeights,
       fees: baseInput.fees,
     }),
-    familyIdentity: baseInput.familyIdentity,
+    familyBinding: baseInput.familyBinding,
   };
 }
 
 async function buildFixtureInput():
 Promise<BuildSubstrateFederatedPooledReserveDepositV1Input> {
   const family = getSubstrateFederatedSettlementFamilyV1FixtureIdentity();
+  const familyBinding =
+    bindSubstrateFederatedSettlementFamilyCompilerIdentityV1(family);
   const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(
     family.profile,
   );
   const [sourceFundingInput, reservePredecessor] = await materializeBoxes();
   return {
-    familyIdentity: family,
+    familyBinding,
     sourceFundingInput,
     reserveState: {
       predecessor: reservePredecessor,
@@ -440,6 +455,8 @@ Promise<BuildSubstrateFederatedPooledReserveDepositV1Input> {
 
 async function materializeBoxes(): Promise<readonly [Eip12Box, Eip12Box]> {
   const family = getSubstrateFederatedSettlementFamilyV1FixtureIdentity();
+  const familyBinding =
+    bindSubstrateFederatedSettlementFamilyCompilerIdentityV1(family);
   const outputs = await materializeCandidates([{
       value: '20000000',
       ergoTree: P2PK_TREE,
@@ -448,7 +465,7 @@ async function materializeBoxes(): Promise<readonly [Eip12Box, Eip12Box]> {
       creationHeight: 100,
     }, {
       value: '2000000',
-      ergoTree: family.contracts.pooledReserve.receipt.propositionHex,
+      ergoTree: familyBinding.contracts.pooledReserve.propositionHex,
       assets: [{
         tokenId: family.profile.pooledReserveNftIdHex,
         amount: '1',
