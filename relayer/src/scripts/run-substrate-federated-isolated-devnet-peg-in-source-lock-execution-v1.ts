@@ -251,12 +251,14 @@ function normalizePegInPlan(
   return Object.freeze({ amountNanoErg, recipientAddressHex });
 }
 
-function publishCreateOnlyReceipt(path: string, bytes: Uint8Array): void {
+export function publishCreateOnlyReceipt(
+  path: string,
+  bytes: Uint8Array,
+  stagingPrefix = '.e2s-peg-in-source-lock-execution-receipt-',
+  receiptLabel = 'isolated source-lock execution staged receipt',
+): void {
   const parentPath = dirname(path);
-  const stagingDirectory = mkdtempSync(join(
-    parentPath,
-    '.e2s-peg-in-source-lock-execution-receipt-',
-  ));
+  const stagingDirectory = mkdtempSync(join(parentPath, stagingPrefix));
   const stagingPath = join(stagingDirectory, 'receipt.json');
   let executionError: unknown;
   let finalReceiptCommitted = false;
@@ -264,7 +266,7 @@ function publishCreateOnlyReceipt(path: string, bytes: Uint8Array): void {
     writeNewFile(
       stagingPath,
       bytes,
-      'isolated source-lock execution staged receipt',
+      receiptLabel,
     );
     const staged = lstatSync(stagingPath);
     if (
@@ -301,12 +303,16 @@ function publishCreateOnlyReceipt(path: string, bytes: Uint8Array): void {
   }
 }
 
-function assertCreateOnlyOutput(value: string, worktreeRoot: string): string {
+export function assertCreateOnlyOutput(
+  value: string,
+  worktreeRoot: string,
+  label = 'peg-in source-lock execution receipt output',
+): string {
   const outputPath = explicitLocalNonSensitivePath(
     value,
-    'peg-in source-lock execution receipt output',
+    label,
   );
-  assertPathAbsent(outputPath, 'peg-in source-lock execution receipt output');
+  assertPathAbsent(outputPath, label);
   const parentPath = dirname(outputPath);
   const parent = lstatSync(parentPath);
   const canonicalParent = realpathSync(parentPath);
@@ -328,7 +334,7 @@ function assertCreateOnlyOutput(value: string, worktreeRoot: string): string {
   return outputPath;
 }
 
-function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
+export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
   const canonicalWorktreeRoot = realpathSync(worktreeRoot);
   const systemRoot = safeEnvironmentPath(
     process.env.SystemRoot ?? process.env.SYSTEMROOT
@@ -487,7 +493,7 @@ function explicitLocalNonSensitivePath(value: unknown, label: string): string {
   return path;
 }
 
-function explicitExistingLocalNonSensitivePath(
+export function explicitExistingLocalNonSensitivePath(
   value: unknown,
   label: string,
   kind: 'file' | 'directory',
@@ -507,7 +513,10 @@ function explicitExistingLocalNonSensitivePath(
   return path;
 }
 
-function assertNoLocalPathValue(value: unknown): void {
+export function assertNoLocalPathValue(
+  value: unknown,
+  label = 'peg-in source-lock execution receipt',
+): void {
   const visit = (current: unknown): void => {
     if (
       typeof current === 'string'
@@ -517,7 +526,7 @@ function assertNoLocalPathValue(value: unknown): void {
       )
     ) {
       throw new Error(
-        'peg-in source-lock execution receipt must not contain local paths',
+        `${label} must not contain local paths`,
       );
     }
     if (Array.isArray(current)) current.forEach(visit);

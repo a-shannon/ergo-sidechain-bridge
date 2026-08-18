@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -19,6 +20,7 @@ import {
 } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
+  committedVaultRoot: vi.fn(),
   executionRoot: vi.fn(),
   loader: vi.fn(),
   process: vi.fn(),
@@ -32,6 +34,8 @@ vi.mock(
       mocked.root,
     runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1:
       mocked.executionRoot,
+    runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1:
+      mocked.committedVaultRoot,
   }),
 );
 vi.mock(
@@ -47,6 +51,16 @@ import {
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
 import { encodePegInSourceIntentV2Hex } from '../peg-in-causal-admission-v2.js';
+import {
+  runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCommandFromArgumentsV1,
+} from './run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-v1.js';
+import {
+  runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionWorkerFromArgumentsV1,
+} from './run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-worker-v1.js';
+import {
+  buildSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionWorkerReceiptV1,
+  parseSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionWorkerReceiptV1,
+} from './run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-receipt-v1.js';
 import {
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.js';
@@ -836,6 +850,358 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
   });
 });
 
+describe('isolated devnet peg-in committed-vault execution command V1', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocked.loader.mockReturnValue(Object.freeze({
+      build: Object.freeze({ source: 'canonical-request' }),
+      lifecycle: Object.freeze({ source: 'canonical-request' }),
+    }));
+    mocked.committedVaultRoot.mockResolvedValue({
+      receipt: committedVaultExecutionReceipt(),
+    });
+    mocked.process.mockImplementation(async input => {
+      const requestShaIndex = input.args.indexOf('--expected-request-sha256');
+      const requestSha = input.args[requestShaIndex + 1];
+      return {
+        pid: 1234,
+        exitCode: 0,
+        stdout: `${canonicalJson(
+          committedVaultExecutionWorkerReceipt(requestSha),
+        )}\n`,
+        stderr: '',
+      };
+    });
+  });
+
+  it('maps one request-bound plan only into the committed-vault execution root', async () => {
+    const requestPath = resolve(tmpdir(), 'fed6lab-committed-vault-request.json');
+    const expectedRequestSha256Hex = 'f'.repeat(64);
+    const receipt =
+      await runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionWorkerFromArgumentsV1([
+        '--request',
+        requestPath,
+        '--expected-request-sha256',
+        expectedRequestSha256Hex,
+        '--amount-nano-erg',
+        AMOUNT_NANO_ERG,
+        '--recipient-address-hex',
+        RECIPIENT_ADDRESS_HEX,
+      ]);
+
+    expect(mocked.committedVaultRoot).toHaveBeenCalledTimes(1);
+    expect(mocked.committedVaultRoot).toHaveBeenCalledWith({
+      ...mocked.loader.mock.results[0]?.value,
+      pegIn: {
+        amountNanoErg: AMOUNT_NANO_ERG,
+        recipientAddressHex: RECIPIENT_ADDRESS_HEX,
+      },
+    });
+    expect(receipt).toEqual(
+      committedVaultExecutionWorkerReceipt(expectedRequestSha256Hex),
+    );
+    expect(receipt.boundaries).toMatchObject({
+      sourceLockCreationConfirmed: true,
+      sourceLockStillRefundable: false,
+      sourceLockConsumptionEstablished: true,
+      reserveLineageEstablished: true,
+      depositCommitmentStateEstablished: true,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+    });
+    expect(canonicalJson(receipt)).not.toMatch(
+      /signedTransactionBytesHex|mnemonic|privateKey/iu,
+    );
+    expect(canonicalJson(receipt)).not.toMatch(
+      /(?<![A-Za-z0-9])[A-Za-z]:[\\/]/u,
+    );
+  });
+
+  it('runs one disposable worker and publishes one validated create-only receipt', async () => {
+    await withFixture(async fixture => {
+      const result =
+        await runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCommandFromArgumentsV1([
+          '--request',
+          fixture.requestPath,
+          '--amount-nano-erg',
+          AMOUNT_NANO_ERG,
+          '--recipient-address-hex',
+          RECIPIENT_ADDRESS_HEX,
+          '--output',
+          fixture.outputPath,
+        ]);
+      const published = JSON.parse(
+        readFileSync(fixture.outputPath, 'utf8'),
+      ) as any;
+      expect(result).toEqual({
+        status: 'isolated_peg_in_committed_vault_execution_receipt_published',
+        receiptDigestHex: published.receiptDigestHex,
+      });
+      expect(published).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-execution-command-receipt.v1',
+        version: 1,
+        status:
+          'request_bound_local_peg_in_committed_vault_execution_completed',
+        commandRequestSha256Hex: fixture.requestSha256Hex,
+        boundaries: {
+          sourceLockStillRefundable: false,
+          sourceLockConsumptionEstablished: true,
+          reserveLineageEstablished: true,
+          depositCommitmentStateEstablished: true,
+          mintAuthorized: false,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+        },
+      });
+      const { receiptDigestHex, ...body } = published;
+      expect(receiptDigestHex).toBe(sha256CanonicalJson(
+        body,
+        'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_COMMAND_RECEIPT_V1',
+      ));
+      const processInput = mocked.process.mock.calls[0]?.[0];
+      expect(processInput).toMatchObject({
+        executablePath: process.execPath,
+        cwd: process.cwd(),
+        timeoutMs: 90 * 60_000,
+        terminationGraceMs: 30_000,
+        maxStdoutBytes: 4 * 1024 * 1024,
+        maxStderrBytes: 64 * 1024,
+        label: 'isolated peg-in committed-vault execution worker',
+      });
+      expect(processInput.args).toEqual([
+        'node_modules/tsx/dist/cli.mjs',
+        expect.stringMatching(
+          /run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-worker-v1\.ts$/u,
+        ),
+        '--request',
+        fixture.requestPath,
+        '--expected-request-sha256',
+        fixture.requestSha256Hex,
+        '--amount-nano-erg',
+        AMOUNT_NANO_ERG,
+        '--recipient-address-hex',
+        RECIPIENT_ADDRESS_HEX,
+      ]);
+    });
+  });
+
+  it('fails closed before publication on occupied output or invalid worker output', async () => {
+    await withFixture(async fixture => {
+      writeFileSync(fixture.outputPath, 'occupied\n', 'utf8');
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCommandFromArgumentsV1([
+          '--request',
+          fixture.requestPath,
+          '--amount-nano-erg',
+          AMOUNT_NANO_ERG,
+          '--recipient-address-hex',
+          RECIPIENT_ADDRESS_HEX,
+          '--output',
+          fixture.outputPath,
+        ]),
+      ).rejects.toThrow('must not already exist');
+      expect(readFileSync(fixture.outputPath, 'utf8')).toBe('occupied\n');
+      expect(mocked.process).not.toHaveBeenCalled();
+      rmSync(fixture.outputPath);
+
+      mocked.process.mockResolvedValueOnce({
+        pid: 1234,
+        exitCode: 0,
+        stdout: '{}\n',
+        stderr: '',
+      });
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCommandFromArgumentsV1([
+          '--request',
+          fixture.requestPath,
+          '--amount-nano-erg',
+          AMOUNT_NANO_ERG,
+          '--recipient-address-hex',
+          RECIPIENT_ADDRESS_HEX,
+          '--output',
+          fixture.outputPath,
+        ]),
+      ).rejects.toThrow('fields differ from V1');
+      expect(existsSync(fixture.outputPath)).toBe(false);
+
+      mocked.process.mockResolvedValueOnce({
+        pid: 1234,
+        exitCode: 0,
+        stdout: `${canonicalJson(
+          committedVaultExecutionWorkerReceipt(fixture.requestSha256Hex),
+        )}\n`,
+        stderr: 'unexpected diagnostics',
+      });
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCommandFromArgumentsV1([
+          '--request',
+          fixture.requestPath,
+          '--amount-nano-erg',
+          AMOUNT_NANO_ERG,
+          '--recipient-address-hex',
+          RECIPIENT_ADDRESS_HEX,
+          '--output',
+          fixture.outputPath,
+        ]),
+      ).rejects.toThrow('worker emitted diagnostics');
+      expect(existsSync(fixture.outputPath)).toBe(false);
+    });
+  });
+
+  it('rejects independently rehashed transition, check, and observation mutations', () => {
+    const successorMismatch = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    successorMismatch.pegIn.committedVaultExecution.outputObservation
+      .reserveSuccessorBoxIdHex = 'e'.repeat(64);
+    refreshCommittedVaultOutputObservationDigest(successorMismatch);
+    refreshCommittedVaultExecutionRootDigest(successorMismatch);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      successorMismatch,
+    )).toThrow('committed-vault output binding changed');
+
+    const unsafeCheck = structuredClone(committedVaultExecutionReceipt()) as any;
+    unsafeCheck.pegIn.committedVaultCheck.boundaries.mintAuthorized = true;
+    refreshCommittedVaultCheckDigest(unsafeCheck);
+    refreshCommittedVaultExecutionRootDigest(unsafeCheck);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      unsafeCheck,
+    )).toThrow('committed-vault check boundaries changed');
+
+    const disagreement = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    disagreement.pegIn.committedVaultExecution.preTransportObservation
+      .witnessObservationDigestHex = 'f'.repeat(64);
+    refreshCommittedVaultPreTransportObservationDigest(disagreement);
+    refreshCommittedVaultExecutionRootDigest(disagreement);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      disagreement,
+    )).toThrow('committed-vault pre-transport binding changed');
+
+    const staleConfirmation = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    staleConfirmation.pegIn.committedVaultExecution.outputObservation
+      .confirmationHeaderIdHex = 'f'.repeat(64);
+    refreshCommittedVaultOutputObservationDigest(staleConfirmation);
+    refreshCommittedVaultExecutionRootDigest(staleConfirmation);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      staleConfirmation,
+    )).toThrow('committed-vault execution chronology or binding changed');
+  });
+
+  it('binds the committed-vault JVM check between source confirmation and transport', () => {
+    const beforeSourceConfirmation = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    beforeSourceConfirmation.pegIn.committedVaultCheck.signer
+      .stateContextTipHeight = 144;
+    refreshCommittedVaultCheckDigest(beforeSourceConfirmation);
+    refreshCommittedVaultExecutionRootDigest(beforeSourceConfirmation);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      beforeSourceConfirmation,
+    )).toThrow('committed-vault check chronology changed');
+
+    const wrongSourceHeader = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    wrongSourceHeader.pegIn.committedVaultCheck.signer.stateContextTipHeight =
+      145;
+    wrongSourceHeader.pegIn.committedVaultCheck.signer.stateContextTipIdHex =
+      'f'.repeat(64);
+    refreshCommittedVaultCheckDigest(wrongSourceHeader);
+    refreshCommittedVaultExecutionRootDigest(wrongSourceHeader);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      wrongSourceHeader,
+    )).toThrow('committed-vault check chronology changed');
+
+    const afterPreTransport = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    afterPreTransport.pegIn.committedVaultCheck.signer.stateContextTipHeight =
+      147;
+    refreshCommittedVaultCheckDigest(afterPreTransport);
+    refreshCommittedVaultExecutionRootDigest(afterPreTransport);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      afterPreTransport,
+    )).toThrow('committed-vault execution chronology or binding changed');
+
+    const wrongPreTransportHeader = structuredClone(
+      committedVaultExecutionReceipt(),
+    ) as any;
+    wrongPreTransportHeader.pegIn.committedVaultCheck.signer
+      .stateContextTipIdHex = 'f'.repeat(64);
+    refreshCommittedVaultCheckDigest(wrongPreTransportHeader);
+    refreshCommittedVaultExecutionRootDigest(wrongPreTransportHeader);
+    expect(() => committedVaultExecutionWorkerReceipt(
+      'f'.repeat(64),
+      wrongPreTransportHeader,
+    )).toThrow('committed-vault execution chronology or binding changed');
+  });
+
+  it('rejects a coordinated projection substitution outside the committed root', () => {
+    const projected = structuredClone(
+      committedVaultExecutionWorkerReceipt('f'.repeat(64)),
+    ) as any;
+    projected.execution.durableAttemptDigestHex = 'f'.repeat(64);
+    refreshCommittedVaultExecutionWorkerReceiptDigest(projected);
+    expect(() =>
+      parseSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionWorkerReceiptV1(
+        `${canonicalJson(projected)}\n`,
+        'f'.repeat(64),
+        Object.freeze({
+          amountNanoErg: AMOUNT_NANO_ERG,
+          recipientAddressHex: RECIPIENT_ADDRESS_HEX,
+        }),
+      )
+    ).toThrow('projection differs from committed root');
+  });
+
+  it('keeps the launcher capability-free and exposes the exact guarded npm command', () => {
+    const worker = readFileSync(new URL(
+      './run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-worker-v1.ts',
+      import.meta.url,
+    ), 'utf8');
+    const launcher = readFileSync(new URL(
+      './run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-v1.ts',
+      import.meta.url,
+    ), 'utf8');
+    expect(worker).not.toMatch(
+      /dotenv|ergo-client|state-tracker|node-wallet|checked-submission-transport/iu,
+    );
+    expect(launcher).not.toMatch(
+      /dotenv|ergo-client|state-tracker|node-wallet|checked-submission-transport/iu,
+    );
+    expect(launcher).not.toContain(
+      'runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
+    );
+    expect(worker.match(
+      /runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1/gu,
+    )).toHaveLength(2);
+    const packageJson = JSON.parse(readFileSync(
+      resolve(process.cwd(), 'package.json'),
+      'utf8',
+    )) as { scripts: Record<string, string> };
+    expect(
+      packageJson.scripts[
+        'federated:isolated:peg-in-committed-vault:execute-local'
+      ],
+    ).toBe(
+      'npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-v1.ts',
+    );
+  });
+});
+
 async function runCommand(fixture: Readonly<{
   requestPath: string;
   outputPath: string;
@@ -1057,6 +1423,11 @@ function executionReceipt() {
     eip12Tx: {},
     outputs: [],
   };
+  const reserveTransition = {
+    txId: '7'.repeat(64),
+    eip12Tx: {},
+    outputs: [],
+  };
   const sourceFundingBoxDigestHex = sha256CanonicalJson(
     sourceFundingBox,
     'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1',
@@ -1087,14 +1458,14 @@ function executionReceipt() {
     reserve: {},
     transactions: {
       sourceLockCreation: sourceLockTransaction,
-      reserveTransition: {},
+      reserveTransition,
     },
     boxes: {
       sourceFundingInput: sourceFundingBox,
       sourceLock: { boxId: 'a'.repeat(64) },
       transitionFeeFunding: { boxId: 'b'.repeat(64) },
-      reservePredecessor: {},
-      reserveSuccessor: {},
+      reservePredecessor: { boxId: 'c'.repeat(64) },
+      reserveSuccessor: { boxId: 'd'.repeat(64) },
     },
     invariants: {
       exactFederatedFamilyBound: true,
@@ -1423,6 +1794,289 @@ function sourceLockExecutionReceipt() {
       'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1',
     ),
   };
+}
+
+function committedVaultExecutionWorkerReceipt(
+  commandRequestSha256Hex: string,
+  root = committedVaultExecutionReceipt(),
+) {
+  return buildSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionWorkerReceiptV1(
+    root,
+    commandRequestSha256Hex,
+    Object.freeze({
+      amountNanoErg: AMOUNT_NANO_ERG,
+      recipientAddressHex: RECIPIENT_ADDRESS_HEX,
+    }),
+  );
+}
+
+function committedVaultExecutionReceipt() {
+  const sourceLock = sourceLockExecutionReceipt();
+  const packet = sourceLock.pegIn.candidate.depositPacket;
+  const reserveTransition = packet.transactions.reserveTransition;
+  const sourceFundingBoxIdHex = packet.boxes.sourceFundingInput.boxId;
+  const reservePredecessorBoxIdHex = packet.boxes.reservePredecessor.boxId;
+  const sourceLockBoxIdHex = packet.boxes.sourceLock.boxId;
+  const transitionFeeFundingBoxIdHex =
+    packet.boxes.transitionFeeFunding.boxId;
+  const reserveSuccessorBoxIdHex = packet.boxes.reserveSuccessor.boxId;
+  const expectedTxId = reserveTransition.txId;
+  const sourceLockConfirmation = sourceLock.pegIn.sourceLockExecution;
+  const preTransportObservationBody = {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-pre-transport-observation.v1',
+    version: 1,
+    status: 'exact_transition_inputs_unspent_and_dual_node_equal',
+    expectedTxId,
+    reservePredecessorBoxIdHex,
+    sourceLockBoxIdHex,
+    transitionFeeFundingBoxIdHex,
+    sourceLockConfirmationHeight: sourceLockConfirmation.confirmationHeight,
+    sourceLockConfirmationDigestHex:
+      sourceLockConfirmation.confirmationDigestHex,
+    observedTipHeight: 146,
+    observedTipHeaderIdHex: '1'.repeat(64),
+    processBindingDigestHex: sourceLock.process.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      sourceLock.process.executionTargetIdentityDigestHex,
+    primaryObservationDigestHex: '2'.repeat(64),
+    witnessObservationDigestHex: '2'.repeat(64),
+    boundaries: {
+      exactDualLoopbackNodesAgreed: true,
+      originalSourceFundingRemainsSpent: true,
+      exactReservePredecessorUnspent: true,
+      exactSourceLockUnspent: true,
+      exactTransitionFeeFundingUnspent: true,
+      sourceLockConsumptionEstablished: false,
+      reserveLineageEstablished: false,
+      mintAuthorized: false,
+    },
+  };
+  const preTransportObservation = {
+    ...preTransportObservationBody,
+    observationDigestHex: sha256CanonicalJson(
+      preTransportObservationBody,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_PRE_TRANSPORT_OBSERVATION_V1',
+    ),
+  };
+  const committedVaultCheckBody = {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-check.v1',
+    version: 1,
+    status: 'PASS',
+    reservePredecessorBoxIdHex,
+    sourceLockBoxIdHex,
+    transitionFeeFundingBoxIdHex,
+    unsignedTransactionIdHex: expectedTxId,
+    unsignedTransactionDigestHex: sha256CanonicalJson(
+      reserveTransition,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_TRANSACTION_V1',
+    ),
+    signedTransactionIdHex: expectedTxId,
+    signedTransactionCanonicalJsonSha256Hex: '3'.repeat(64),
+    signedTransactionBytesSha256Hex: '4'.repeat(64),
+    signedTransactionBytesLength: 2345,
+    checkResponseSha256Hex: '5'.repeat(64),
+    target: {
+      processBindingDigestHex: sourceLock.process.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        sourceLock.process.executionTargetIdentityDigestHex,
+    },
+    signer: {
+      derivation: 'wasm-root',
+      publicKeyHex: sourceLock.pegIn.sourceLockCheck.signer.publicKeyHex,
+      p2pkErgoTreeHex: sourceLock.pegIn.sourceLockCheck.signer.p2pkErgoTreeHex,
+      stateContextTipHeight: 146,
+      stateContextTipIdHex: preTransportObservationBody.observedTipHeaderIdHex,
+    },
+    checker: {
+      nodeOrigin: 'http://127.0.0.1:9051',
+      path: '/transactions/check',
+      method: 'POST',
+      transportPolicy: 'no-redirect-no-proxy',
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true,
+      exactProcessOwnedTargetBound: true,
+      exactThreeInputTransitionBound: true,
+      localWasmRootSigningPerformed: true,
+      localJvmNodeCheckPassed: true,
+      signedTransactionBytesPersisted: false,
+      submissionAuthorityEstablished: false,
+      broadcastAuthorityEstablished: false,
+      sourceLockConsumptionEstablished: false,
+      reserveLineageEstablished: false,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    },
+  };
+  const committedVaultCheck = {
+    ...committedVaultCheckBody,
+    receiptDigestHex: sha256CanonicalJson(
+      committedVaultCheckBody,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_CHECK_V1',
+    ),
+  };
+  const confirmationHeight = 148;
+  const confirmationHeaderIdHex = '7'.repeat(64);
+  const confirmationObservationDigestHex = '8'.repeat(64);
+  const outputObservationBody = {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-output-observation.v1',
+    version: 1,
+    status: 'exact_transition_inputs_spent_and_reserve_successor_unspent',
+    expectedTxId,
+    sourceFundingBoxIdHex,
+    reservePredecessorBoxIdHex,
+    sourceLockBoxIdHex,
+    transitionFeeFundingBoxIdHex,
+    reserveSuccessorBoxIdHex,
+    confirmationHeight,
+    confirmationHeaderIdHex,
+    confirmationObservationDigestHex,
+    observedTipHeight: 150,
+    observedTipHeaderIdHex: sourceLock.process.finalSnapshot.headerIdHex,
+    processBindingDigestHex: sourceLock.process.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      sourceLock.process.executionTargetIdentityDigestHex,
+    primaryObservationDigestHex: '9'.repeat(64),
+    witnessObservationDigestHex: '9'.repeat(64),
+    boundaries: {
+      exactDualLoopbackNodesAgreed: true,
+      originalSourceFundingRemainsSpent: true,
+      exactReservePredecessorSpent: true,
+      exactSourceLockSpent: true,
+      exactTransitionFeeFundingSpent: true,
+      exactReserveSuccessorUnspent: true,
+      sourceLockConsumptionEstablished: true,
+      reserveLineageEstablished: true,
+      depositCommitmentStateEstablished: true,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+    },
+  };
+  const outputObservation = {
+    ...outputObservationBody,
+    observationDigestHex: sha256CanonicalJson(
+      outputObservationBody,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_OBSERVATION_V1',
+    ),
+  };
+  const body = {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-execution-root.v1',
+    version: 1,
+    status: 'peg_in_source_lock_consumed_into_committed_reserve',
+    staticExecutionManifestDigestHex:
+      '3089d13a6066a9cbde0f8d23af3d1bc1d197f8fe1fcfe40e7d4e610a4f51521e',
+    build: sourceLock.build,
+    process: sourceLock.process,
+    setup: sourceLock.setup,
+    pegIn: {
+      ...sourceLock.pegIn,
+      committedVaultCheck,
+      committedVaultExecution: {
+        expectedTxId,
+        transportStatus: 'accepted',
+        durableAttemptDigestHex: 'a'.repeat(64),
+        journalDigestHex: 'b'.repeat(64),
+        confirmationDigestHex: confirmationObservationDigestHex,
+        confirmationHeight,
+        confirmationHeaderIdHex,
+        preTransportObservation,
+        outputObservation,
+      },
+    },
+    checks: {
+      sourceLockConfirmedBeforeCommittedVaultCheck: true,
+      exactThreeInputTransitionCheckedAndRevalidated: true,
+      freshJvmCheckPrecededAuthorization: true,
+      durableReservationPrecededTransport: true,
+      exactLoopbackTransportConsumedCheckedBytesOnce: true,
+      canonicalConfirmationObservedByBothNodes: true,
+      exactTransitionInputsSpentAndReserveSuccessorObserved: true,
+      returnedValueContainsCapabilities: false,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true,
+      valuePathLocalSyntheticSigningPerformed: true,
+      valuePathJvmNodeCheckPassed: true,
+      valuePathSubmissionExecuted: true,
+      valuePathBroadcastExecuted: true,
+      sourceLockCreationConfirmed: true,
+      sourceLockStillRefundable: false,
+      sourceLockConsumptionEstablished: true,
+      reserveLineageEstablished: true,
+      depositCommitmentStateEstablished: true,
+      mintAuthorized: false,
+      publicNetworkUsed: false,
+      realFundsUsed: false,
+      existingWalletMaterialUsed: false,
+      processLossRecoveryEstablished: false,
+      sourceConsensusIndependentlyAuthenticated: false,
+      ergoConsensusIndependentlyAuthenticated: false,
+      profileActivated: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    },
+  };
+  return {
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(
+      body,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1',
+    ),
+  };
+}
+
+function refreshCommittedVaultCheckDigest(root: any): void {
+  const check = root.pegIn.committedVaultCheck;
+  const { receiptDigestHex: _digest, ...body } = check;
+  check.receiptDigestHex = sha256CanonicalJson(
+    body,
+    'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_CHECK_V1',
+  );
+}
+
+function refreshCommittedVaultPreTransportObservationDigest(root: any): void {
+  const observation =
+    root.pegIn.committedVaultExecution.preTransportObservation;
+  const { observationDigestHex: _digest, ...body } = observation;
+  observation.observationDigestHex = sha256CanonicalJson(
+    body,
+    'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_PRE_TRANSPORT_OBSERVATION_V1',
+  );
+}
+
+function refreshCommittedVaultOutputObservationDigest(root: any): void {
+  const observation = root.pegIn.committedVaultExecution.outputObservation;
+  const { observationDigestHex: _digest, ...body } = observation;
+  observation.observationDigestHex = sha256CanonicalJson(
+    body,
+    'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_OBSERVATION_V1',
+  );
+}
+
+function refreshCommittedVaultExecutionRootDigest(root: any): void {
+  const { receiptDigestHex: _digest, ...body } = root;
+  root.receiptDigestHex = sha256CanonicalJson(
+    body,
+    'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1',
+  );
+}
+
+function refreshCommittedVaultExecutionWorkerReceiptDigest(receipt: any): void {
+  const { receiptDigestHex: _digest, ...body } = receipt;
+  receipt.receiptDigestHex = sha256CanonicalJson(
+    body,
+    'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_WORKER_RECEIPT_V1',
+  );
 }
 
 function sourceIntentHex(amountNanoErg: string): string {
