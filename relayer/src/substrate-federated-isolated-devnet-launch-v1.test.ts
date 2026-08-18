@@ -345,10 +345,12 @@ import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
-  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
+} from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
@@ -2167,6 +2169,13 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       ),
       'utf8',
     );
+    const signerBinding = readFileSync(
+      new URL(
+        './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts',
+        import.meta.url,
+      ),
+      'utf8',
+    );
     const signerIdentity = readFileSync(
       new URL(
         './local-wasm-root-signer-public-identity.ts',
@@ -2183,15 +2192,21 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
       './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
+      './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+      './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
     ]);
     expect([
       ...runner.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/gu),
-    ].map(match => match[1])).toEqual([
-      './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
-    ]);
+    ].map(match => match[1])).toEqual([]);
     expect(runner).not.toMatch(
-      /\bexport\s+(?:async\s+)?function\s+(?:registerSignerBinding|revokeSignerBinding)\b/u,
+      /\bexport\s+(?:async\s+)?function\s+(?:registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2|revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2)\b/u,
     );
+    expect([
+      ...signerBinding.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    ].map(match => match[1])).toEqual([
+      './substrate-federated-isolated-devnet-mining-credential-v1.js',
+    ]);
+    expect(signerBinding).not.toMatch(/\bimport\s*\(/u);
     const executionImports = [
       ...execution.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
     ].map(match => match[1]);
@@ -2214,10 +2229,10 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './strict-json.js',
       './unsigned-ergo-transaction.js',
     ]);
-    expect(`${runner}\n${execution}\n${signerIdentity}`).not.toMatch(
+    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}`).not.toMatch(
       /process\.env|node:(?:fs|http|https|net|tls|child_process)|profile-registry|state-tracker/iu,
     );
-    expect(`${runner}\n${execution}\n${signerIdentity}`).not.toMatch(
+    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}`).not.toMatch(
       /\b(?:signTransactionForSubmission|submitSigned|npost|broadcastTransaction|getSignerKeys|fetch\s*\()/u,
     );
     expect(signerIdentity.match(/\bimport\s*\(/gu) ?? []).toHaveLength(1);

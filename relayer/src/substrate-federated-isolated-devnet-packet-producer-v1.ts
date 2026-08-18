@@ -53,7 +53,7 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
   type SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
-} from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+} from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 import {
   produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_ARTIFACT_FILES_V1,

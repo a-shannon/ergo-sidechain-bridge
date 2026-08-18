@@ -116,6 +116,18 @@ describe.skipIf(process.platform !== 'win32')(
       await expect(session.stop()).resolves.toBeUndefined();
     });
 
+    it('hands the setup-issued mining credential to the inert process owner', async () => {
+      const setup =
+        await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBindingForSigner(setup.signer),
+        claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(setup),
+      );
+      await expect(session.stop()).resolves.toBeUndefined();
+      expect(() => setup.dispose()).not.toThrow();
+    });
+
     it('joins managed action completion before any overrun cleanup', () => {
       expect(
         SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,

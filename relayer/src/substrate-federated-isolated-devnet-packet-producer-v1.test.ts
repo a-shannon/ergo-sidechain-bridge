@@ -97,7 +97,7 @@ vi.mock(
 );
 
 vi.mock(
-  './substrate-federated-isolated-devnet-setup-check-runner-v2.js',
+  './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
   () => ({
     assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance:
       vi.fn((value: unknown) => {
@@ -577,10 +577,10 @@ describe('isolated-devnet portable packet producer', () => {
       import.meta.url,
     ), 'utf8');
     expect(source).toContain(
-      "from './substrate-federated-isolated-devnet-setup-check-runner-v2.js'",
+      "from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js'",
     );
     expect(source).not.toMatch(
-      /createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2|registerSignerBinding|revokeSignerBinding/u,
+      /createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2|registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2|revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2/u,
     );
     expect(source).not.toMatch(/from ['"](?:node:https?|\.\/fleet-signer|.*submitter|.*broadcaster)/u);
     expect(source).not.toMatch(/\bfetch\s*\(|\bprocess\.env\b|\/transactions\/check/u);

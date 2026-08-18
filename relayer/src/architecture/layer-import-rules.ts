@@ -491,6 +491,63 @@ const CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS: ReadonlyMap<
   ],
 ]);
 
+const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, ReadonlySet<string>>
+> = new Map([
+  [
+    'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts',
+    new Map([
+      [
+        'registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
+        new Set([
+          'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+        ]),
+      ],
+      [
+        'revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
+        new Set([
+          'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+        ]),
+      ],
+    ]),
+  ],
+  [
+    'substrate-federated-isolated-devnet-mining-credential-v1.ts',
+    new Map([
+      [
+        'issueSubstrateFederatedIsolatedDevnetMiningCredentialV1',
+        new Set([
+          'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+        ]),
+      ],
+      [
+        'consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
+        new Set([
+          'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        ]),
+      ],
+      [
+        'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
+        new Set([
+          'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+          'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+        ]),
+      ],
+    ]),
+  ],
+]);
+
+const REVIEWED_UNCLASSIFIED_COMPUTED_RUNTIME_IMPORTS: ReadonlyMap<
+  string,
+  ReadonlySet<Extract<ModuleImportForm, 'dynamic-import' | 'require'>>
+> = new Map([
+  [
+    'authenticated-spv-tracker-jvm-avl-differential.ts',
+    new Set(['require']),
+  ],
+]);
+
 const CAPABILITY_RESTRICTED_LAYER_FORBIDDEN_GLOBALS = new Set([
   'Bun',
   'Deno',
@@ -536,6 +593,7 @@ interface CollectedModuleSpecifier {
   line: number;
   form: ModuleImportForm;
   bindings: Array<{ imported: string; local: string }>;
+  typeOnly: boolean;
 }
 
 function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpecifier[] {
@@ -545,6 +603,7 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
     node: ts.StringLiteralLike,
     form: ModuleImportForm,
     bindings: Array<{ imported: string; local: string }> = [],
+    typeOnly = false,
   ): void => {
     const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
     imports.push({
@@ -552,6 +611,7 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
       line: line + 1,
       form,
       bindings,
+      typeOnly,
     });
   };
 
@@ -561,9 +621,19 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
       if (!clause) {
         addSpecifier(node.moduleSpecifier, 'side-effect-import');
       } else if (clause.name) {
-        addSpecifier(node.moduleSpecifier, 'default-or-mixed-import');
+        addSpecifier(
+          node.moduleSpecifier,
+          'default-or-mixed-import',
+          [],
+          clause.isTypeOnly,
+        );
       } else if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
-        addSpecifier(node.moduleSpecifier, 'namespace-import');
+        addSpecifier(
+          node.moduleSpecifier,
+          'namespace-import',
+          [],
+          clause.isTypeOnly,
+        );
       } else if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
         addSpecifier(
           node.moduleSpecifier,
@@ -572,6 +642,8 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
             imported: element.propertyName?.text ?? element.name.text,
             local: element.name.text,
           })),
+          clause.isTypeOnly
+            || clause.namedBindings.elements.every(element => element.isTypeOnly),
         );
       } else {
         addSpecifier(node.moduleSpecifier, 'default-or-mixed-import');
@@ -581,7 +653,12 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
       && node.moduleSpecifier
       && ts.isStringLiteralLike(node.moduleSpecifier)
     ) {
-      addSpecifier(node.moduleSpecifier, 'export');
+      const named = node.exportClause && ts.isNamedExports(node.exportClause)
+        ? node.exportClause
+        : undefined;
+      const typeOnly = node.isTypeOnly
+        || (named !== undefined && named.elements.every(element => element.isTypeOnly));
+      addSpecifier(node.moduleSpecifier, 'export', [], typeOnly);
     } else if (
       ts.isImportEqualsDeclaration(node)
       && ts.isExternalModuleReference(node.moduleReference)
@@ -594,7 +671,7 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
       && ts.isLiteralTypeNode(node.argument)
       && ts.isStringLiteralLike(node.argument.literal)
     ) {
-      addSpecifier(node.argument.literal, 'import-type');
+      addSpecifier(node.argument.literal, 'import-type', [], true);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       if (node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])) {
         addSpecifier(node.arguments[0], 'dynamic-import');
@@ -605,6 +682,7 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
           line: line + 1,
           form: 'dynamic-import',
           bindings: [],
+          typeOnly: false,
         });
       }
     } else if (
@@ -621,6 +699,7 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
           line: line + 1,
           form: 'require',
           bindings: [],
+          typeOnly: false,
         });
       }
     }
@@ -643,6 +722,71 @@ function inspectFileRestrictedImportBindings(
   if (!allowedBindings) return [];
 
   return inspectRestrictedImportBindings(file, imported, allowedBindings);
+}
+
+function inspectExclusiveRuntimeAuthorityImport(
+  file: string,
+  imported: CollectedModuleSpecifier,
+  knownFiles: ReadonlySet<string>,
+): LayerImportViolation[] {
+  if (imported.value === null) {
+    if (
+      classifyBridgeLayer(file) === null
+      && (imported.form === 'dynamic-import' || imported.form === 'require')
+      && !REVIEWED_UNCLASSIFIED_COMPUTED_RUNTIME_IMPORTS
+        .get(file)?.has(imported.form)
+    ) {
+      return [{
+        file,
+        line: imported.line,
+        importSpecifier: null,
+        message:
+          'unclassified runtime modules require a static string import target',
+      }];
+    }
+    return [];
+  }
+  if (!imported.value.startsWith('.') || imported.typeOnly) {
+    return [];
+  }
+  const resolved = resolveRelativeImport(file, imported.value, knownFiles);
+  if (resolved === null) return [];
+  const restrictedBindings =
+    EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS.get(resolved);
+  if (restrictedBindings === undefined) return [];
+  if (imported.form !== 'named-import') {
+    return [{
+      file,
+      line: imported.line,
+      importSpecifier: imported.value,
+      message:
+        `exclusive authority module must use named runtime imports: ${imported.value}`,
+    }];
+  }
+
+  const violations: LayerImportViolation[] = [];
+  for (const binding of imported.bindings) {
+    const owners = restrictedBindings.get(binding.imported);
+    if (owners === undefined) continue;
+    if (!owners.has(file)) {
+      violations.push({
+        file,
+        line: imported.line,
+        importSpecifier: imported.value,
+        message:
+          `exclusive authority import has the wrong owner: ${imported.value}#${binding.imported}`,
+      });
+    } else if (binding.local !== binding.imported) {
+      violations.push({
+        file,
+        line: imported.line,
+        importSpecifier: imported.value,
+        message:
+          `exclusive authority import must not be aliased: ${imported.value}#${binding.imported}`,
+      });
+    }
+  }
+  return violations;
 }
 
 function inspectRestrictedImportBindings(
@@ -1209,10 +1353,18 @@ export function inspectLayerImports(
 
   for (const [file, source] of normalizedFiles) {
     const sourceLayer = classifyBridgeLayer(file);
+    const parsed = layerProgram.sourceFile(file);
+    const imports = collectModuleSpecifiers(parsed);
+    for (const imported of imports) {
+      violations.push(...inspectExclusiveRuntimeAuthorityImport(
+        file,
+        imported,
+        knownFiles,
+      ));
+    }
     if (sourceLayer === null) continue;
 
     adjacency.set(file, new Set());
-    const parsed = layerProgram.sourceFile(file);
     if (
       sourceLayer === 'ergo-settlement-core'
       || sourceLayer === 'relayer-core'
@@ -1246,7 +1398,7 @@ export function inspectLayerImports(
       }
     }
 
-    for (const imported of collectModuleSpecifiers(parsed)) {
+    for (const imported of imports) {
       violations.push(...inspectFileRestrictedImportBindings(file, imported));
 
       if (imported.value === null) {

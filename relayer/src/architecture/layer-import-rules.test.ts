@@ -116,6 +116,65 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('reserves isolated signer and mining authority imports to exact owners', () => {
+    const signerBinding =
+      'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts';
+    const miningCredential =
+      'substrate-federated-isolated-devnet-mining-credential-v1.ts';
+    const runner =
+      'substrate-federated-isolated-devnet-setup-check-runner-v2.ts';
+    const execution =
+      'substrate-federated-isolated-devnet-setup-check-execution-v2.ts';
+    expect(inspect({
+      [signerBinding]: 'export const registry = true;',
+      [miningCredential]: 'export const credential = true;',
+      [runner]: `
+        import {
+          registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+          revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+        } from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+      `,
+      [execution]: `
+        import {
+          issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+          revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+        } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+      `,
+      'authenticated-spv-tracker-jvm-avl-differential.ts': `
+        declare const runtimePath: string;
+        export const pinnedWasm = require(runtimePath);
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [signerBinding]: 'export const registry = true;',
+      [miningCredential]: 'export const credential = true;',
+      'forged-provenance.ts': `
+        import {
+          registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+        } from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+        import {
+          issueSubstrateFederatedIsolatedDevnetMiningCredentialV1 as issue,
+        } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+      `,
+      'namespace-forgery.ts': `
+        import * as registry from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+      `,
+      'computed-forgery.ts': `
+        const authorityModule =
+          './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+        export async function forge() {
+          return import(authorityModule);
+        }
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'unclassified runtime modules require a static string import target',
+      'exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js#registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
+      'exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-mining-credential-v1.js#issueSubstrateFederatedIsolatedDevnetMiningCredentialV1',
+      'exclusive authority module must use named runtime imports: ./substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+    ]);
+  });
+
   it('limits the isolated-devnet execution root to its reviewed broadcast bindings', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
