@@ -53,6 +53,26 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
     ]),
   ],
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+    new Set([
+      'state-tracker.ts',
+      'substrate-federated-authority-safe-devnet-history-v1.ts',
+      'substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.ts',
+      'substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts',
+      'substrate-federated-isolated-devnet-ergo-node-build-v1.ts',
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+      'substrate-federated-isolated-devnet-reward-input-discovery-v1.ts',
+      'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+      'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+      'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
+      'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts',
+      'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts',
+      'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
+      'substrate-federated-local-devnet-genesis-journal-v1.ts',
+    ]),
+  ],
+  [
     'apps/bridge-daemon/substrate-federated-dual-node-recovery-composition-v1.ts',
     new Set([
       'substrate-federated-authority-safe-devnet-process-v1.ts',
@@ -72,6 +92,110 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+    new Map([
+      [
+        'state-tracker.ts',
+        new Set(['StateTracker']),
+      ],
+      [
+        'substrate-federated-authority-safe-devnet-history-v1.ts',
+        new Set(['collectSubstrateFederatedAuthoritySafeDevnetHistoryV1']),
+      ],
+      [
+        'substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.ts',
+        new Set([
+          'RunSubstrateFederatedIsolatedDevnetBootstrapLifecycleV1Input',
+          'SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-ergo-node-build-v1.ts',
+        new Set([
+          'buildSubstrateFederatedIsolatedDevnetErgoNodeV1',
+          'BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input',
+          'SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
+          'SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt',
+          'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1',
+          'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts',
+        new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1']),
+      ],
+      [
+        'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetPacketSessionV1',
+          'ProduceSubstrateFederatedIsolatedDevnetPacketV1Input',
+          'SubstrateFederatedIsolatedDevnetPacketSessionV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-reward-input-discovery-v1.ts',
+        new Set([
+          'discoverSubstrateFederatedRewardInputsV1',
+          'SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN',
+          'SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+        new Set([
+          'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
+          'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+          'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+          'SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+        new Set([
+          'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
+          'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
+          'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts',
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+          'SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
+        new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1']),
+      ],
+      [
+        'substrate-federated-local-devnet-genesis-journal-v1.ts',
+        new Set([
+          'createSubstrateFederatedLocalDevnetGenesisJournalV1',
+          'SubstrateFederatedLocalDevnetGenesisJournalV1',
+        ]),
+      ],
+    ]),
+  ],
   [
     'apps/bridge-daemon/substrate-federated-dual-node-recovery-composition-v1.ts',
     new Map([
@@ -110,6 +234,89 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'OwnedAuthoritySafeDevnetRecoveryTimelineV1ObservationInput',
         ]),
       ],
+    ]),
+  ],
+]);
+
+const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, ReadonlySet<string>>
+> = new Map([
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+    new Map([
+      ['../../state-tracker.js', new Set(['StateTracker'])],
+      [
+        '../../substrate-federated-authority-safe-devnet-history-v1.js',
+        new Set(['collectSubstrateFederatedAuthoritySafeDevnetHistoryV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js',
+        new Set(['buildSubstrateFederatedIsolatedDevnetErgoNodeV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+        new Set(['createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js',
+        new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-packet-producer-v1.js',
+        new Set(['createSubstrateFederatedIsolatedDevnetPacketSessionV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js',
+        new Set(['discoverSubstrateFederatedRewardInputsV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
+        new Set([
+          'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
+          'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js',
+        new Set(['createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
+          'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js',
+        new Set(['createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1']),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js',
+        new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1']),
+      ],
+      [
+        '../../substrate-federated-local-devnet-genesis-journal-v1.js',
+        new Set(['createSubstrateFederatedLocalDevnetGenesisJournalV1']),
+      ],
+    ]),
+  ],
+]);
+
+const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
+  string,
+  ReadonlySet<string>
+> = new Map([
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+    new Set([
+      'RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input',
+      'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
+      'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
     ]),
   ],
 ]);
@@ -365,11 +572,96 @@ function inspectRestrictedImportBindings(
   return violations;
 }
 
+function collectReviewedAppExportViolations(
+  file: string,
+  sourceFile: ts.SourceFile,
+  allowedBindings: ReadonlySet<string>,
+): LayerImportViolation[] {
+  const violations: LayerImportViolation[] = [];
+  const addViolation = (node: ts.Node, binding: string): void => {
+    if (allowedBindings.has(binding)) return;
+    const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    violations.push({
+      file,
+      line: line + 1,
+      importSpecifier: null,
+      message: `reviewed app root export is not allowlisted: ${binding}`,
+    });
+  };
+  const exported = (node: ts.Node): boolean =>
+    ts.canHaveModifiers(node)
+    && (ts.getModifiers(node)?.some(
+      modifier => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    ) ?? false);
+
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportAssignment(statement)) {
+      addViolation(statement, 'default');
+      continue;
+    }
+    if (ts.isExportDeclaration(statement)) {
+      if (!statement.exportClause || !ts.isNamedExports(statement.exportClause)) {
+        addViolation(statement, '*');
+        continue;
+      }
+      for (const element of statement.exportClause.elements) {
+        if (
+          element.propertyName
+          && element.propertyName.text !== element.name.text
+        ) {
+          const { line } = sourceFile.getLineAndCharacterOfPosition(
+            element.getStart(sourceFile),
+          );
+          violations.push({
+            file,
+            line: line + 1,
+            importSpecifier: null,
+            message:
+              `reviewed app root export must not be aliased: ${element.propertyName.text}#${element.name.text}`,
+          });
+        }
+        addViolation(element, element.name.text);
+      }
+      continue;
+    }
+    if (!exported(statement)) continue;
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name)) {
+          addViolation(declaration.name, declaration.name.text);
+        } else {
+          addViolation(declaration.name, '<destructured>');
+        }
+      }
+      continue;
+    }
+    if (
+      (
+        ts.isFunctionDeclaration(statement)
+        || ts.isClassDeclaration(statement)
+        || ts.isInterfaceDeclaration(statement)
+        || ts.isTypeAliasDeclaration(statement)
+        || ts.isEnumDeclaration(statement)
+        || ts.isModuleDeclaration(statement)
+      )
+      && statement.name
+    ) {
+      addViolation(statement.name, statement.name.text);
+      continue;
+    }
+    addViolation(statement, '<anonymous>');
+  }
+  return violations;
+}
+
 function collectCapabilityRestrictedLayerViolations(
   file: string,
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
-  sourceLayer: CapabilityRestrictedBridgeLayer,
+  sourceLayer: BridgeLayer,
+  restrictedFileBindings:
+    ReadonlyMap<string, ReadonlySet<string>> | undefined =
+      CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS.get(file),
 ): LayerImportViolation[] {
   const violations: LayerImportViolation[] = [];
   const addViolation = (node: ts.Node, message: string): void => {
@@ -516,7 +808,6 @@ function collectCapabilityRestrictedLayerViolations(
     string,
     { moduleSpecifier: string; binding: string }
   >();
-  const restrictedFileBindings = CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS.get(file);
   if (restrictedFileBindings) {
     for (const statement of sourceFile.statements) {
       if (
@@ -612,10 +903,16 @@ function collectCapabilityRestrictedLayerViolations(
           restricted.moduleSpecifier !== 'node:crypto'
           && ts.isCallExpression(node.parent)
           && node.parent.expression === node;
+        const isReviewedStateTrackerConstruction =
+          sourceLayer === 'apps'
+          && restricted.binding === 'StateTracker'
+          && ts.isNewExpression(node.parent)
+          && node.parent.expression === node;
         if (
           !isReviewedEcdhCall
           && !isReviewedCryptoFactoryCall
           && !isReviewedDirectCall
+          && !isReviewedStateTrackerConstruction
         ) {
           addViolation(
             node,
@@ -815,6 +1112,26 @@ export function inspectLayerImports(
         layerProgram.checker,
         sourceLayer,
       ));
+    } else if (sourceLayer === 'apps') {
+      const restrictedBindings =
+        REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS.get(file);
+      if (restrictedBindings) {
+        violations.push(...collectCapabilityRestrictedLayerViolations(
+          file,
+          parsed,
+          layerProgram.checker,
+          sourceLayer,
+          restrictedBindings,
+        ));
+      }
+      const allowedExports = REVIEWED_APP_PUBLIC_EXPORT_BINDINGS.get(file);
+      if (allowedExports) {
+        violations.push(...collectReviewedAppExportViolations(
+          file,
+          parsed,
+          allowedExports,
+        ));
+      }
     }
 
     for (const imported of collectModuleSpecifiers(parsed)) {

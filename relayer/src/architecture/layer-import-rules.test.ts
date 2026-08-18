@@ -116,6 +116,101 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('limits the isolated-devnet execution root to its reviewed broadcast bindings', () => {
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const authorizerTarget =
+      'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts';
+    const transportTarget =
+      'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1,
+          createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+        } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
+        import {
+          createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+        } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+      `,
+      [authorizerTarget]: 'export const authorizer = true;',
+      [transportTarget]: 'export const transport = true;',
+    })).toEqual([]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          authorizeUnreviewedBroadcast,
+        } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
+      `,
+      [authorizerTarget]: 'export const authorizer = true;',
+    }).map(violation => violation.message)).toEqual([
+      'restricted capability import binding is not allowlisted: ../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js#authorizeUnreviewedBroadcast',
+    ]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+        } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+        export const escapedTransport =
+          createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1;
+      `,
+      [transportTarget]: 'export const transport = true;',
+    }).map(violation => violation.message)).toEqual([
+      'reviewed app root export is not allowlisted: escapedTransport',
+      'restricted capability binding must not escape its reviewed call: ../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js#createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    ]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+        } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+        export function leakedTransport(target: unknown, authorizer: unknown) {
+          return createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
+            target,
+            authorizer,
+          );
+        }
+      `,
+      [transportTarget]: 'export const transport = true;',
+    }).map(violation => violation.message)).toEqual([
+      'reviewed app root export is not allowlisted: leakedTransport',
+    ]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+        } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+        function leakedTransport(target: unknown, authorizer: unknown) {
+          return createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
+            target,
+            authorizer,
+          );
+        }
+        export {
+          leakedTransport as runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
+        };
+      `,
+      [transportTarget]: 'export const transport = true;',
+    }).map(violation => violation.message)).toEqual([
+      'reviewed app root export must not be aliased: leakedTransport#runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
+    ]);
+
+    expect(inspect({
+      'apps/bridge-daemon/other-execution-root.ts': `
+        import {
+          createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+        } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+      `,
+      [transportTarget]: 'export const transport = true;',
+    }).map(violation => violation.message)).toEqual([
+      `apps must not import an unclassified legacy module: ${transportTarget}`,
+    ]);
+  });
+
   it('limits the dual-node recovery composition seam to its reviewed process producer', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-dual-node-recovery-composition-v1.ts';

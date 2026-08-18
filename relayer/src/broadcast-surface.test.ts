@@ -309,6 +309,8 @@ describe('broadcast surface isolation', () => {
 
   it('keeps the FED-6-LAB checked transport dormant and outside no-submit roots', () => {
     const sources = productionSources();
+    const executionRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const authorizerFile =
       'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts';
     const transportFile =
@@ -344,19 +346,19 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
-    )).toEqual([]);
+    )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(
       sources,
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
-    )).toEqual([transportFile]);
+    )).toEqual([executionRoot, transportFile]);
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
-    )).toEqual([]);
+    )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
-    )).toEqual([authorizerFile]);
+    )).toEqual([executionRoot, authorizerFile]);
     expect(filesImporting(
       sources,
       'assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1',
