@@ -20,6 +20,7 @@ export const SUBSTRATE_FEDERATED_GENESIS_OBSERVATION_V1_SCHEMA =
 
 const GENESIS_HEADER_HEIGHT = 1;
 const MAX_SIGMA_BOX_BYTES = 1024 * 1024;
+const MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS = 3;
 const ENVIRONMENT_NETWORKS: Readonly<Record<string, string>> = Object.freeze({
   local: 'local',
   development: 'development',
@@ -529,37 +530,48 @@ async function observeNodeSnapshot(
   source: SubstrateFederatedGenesisNodeSource,
   profile: SubstrateFederatedGenesisTargetProfileV1,
 ): Promise<NodeSnapshot> {
-  const info = record(await source.getInfo(), 'Ergo node info');
-  const network = normalizeAuthenticatedSpvTrackerNodeNetwork(
-    info.network ?? info.networkType,
-    'observed Ergo node',
-  );
-  if (network !== profile.expectedNetwork) {
-    throw new Error('observed Ergo node network does not match the federated target profile');
+  for (
+    let attempt = 1;
+    attempt <= MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS;
+    attempt += 1
+  ) {
+    const info = record(await source.getInfo(), 'Ergo node info');
+    const network = normalizeAuthenticatedSpvTrackerNodeNetwork(
+      info.network ?? info.networkType,
+      'observed Ergo node',
+    );
+    if (network !== profile.expectedNetwork) {
+      throw new Error('observed Ergo node network does not match the federated target profile');
+    }
+    const tipHeight = nonnegativeSafeInteger(info.fullHeight, 'Ergo node full height');
+    const bestHeader = record(await source.getBestHeader(), 'Ergo best header');
+    const bestHeaderHeight = nonnegativeSafeInteger(
+      bestHeader.height,
+      'Ergo best-header height',
+    );
+    if (bestHeaderHeight !== tipHeight) {
+      if (attempt < MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS) continue;
+      throw new Error(
+        'Ergo node info and best-header heights do not match after '
+        + `${MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS} bounded attempts`,
+      );
+    }
+    const tipHeaderIdHex = fixedHex(bestHeader.id, 32, 'Ergo best-header ID');
+    const genesisIds = await source.getBlockHeaderIdsAtHeight(GENESIS_HEADER_HEIGHT);
+    if (!Array.isArray(genesisIds) || genesisIds.length !== 1) {
+      throw new Error('Ergo target must expose exactly one height-1 genesis header');
+    }
+    const genesisHeaderIdHex = fixedHex(
+      genesisIds[0],
+      32,
+      'observed genesis header ID',
+    );
+    if (genesisHeaderIdHex !== profile.expectedGenesisHeaderIdHex) {
+      throw new Error('observed genesis header does not match the federated target profile');
+    }
+    return Object.freeze({ network, genesisHeaderIdHex, tipHeight, tipHeaderIdHex });
   }
-  const tipHeight = nonnegativeSafeInteger(info.fullHeight, 'Ergo node full height');
-  const bestHeader = record(await source.getBestHeader(), 'Ergo best header');
-  const bestHeaderHeight = nonnegativeSafeInteger(
-    bestHeader.height,
-    'Ergo best-header height',
-  );
-  const tipHeaderIdHex = fixedHex(bestHeader.id, 32, 'Ergo best-header ID');
-  if (bestHeaderHeight !== tipHeight) {
-    throw new Error('Ergo node info and best-header heights do not match');
-  }
-  const genesisIds = await source.getBlockHeaderIdsAtHeight(GENESIS_HEADER_HEIGHT);
-  if (!Array.isArray(genesisIds) || genesisIds.length !== 1) {
-    throw new Error('Ergo target must expose exactly one height-1 genesis header');
-  }
-  const genesisHeaderIdHex = fixedHex(
-    genesisIds[0],
-    32,
-    'observed genesis header ID',
-  );
-  if (genesisHeaderIdHex !== profile.expectedGenesisHeaderIdHex) {
-    throw new Error('observed genesis header does not match the federated target profile');
-  }
-  return Object.freeze({ network, genesisHeaderIdHex, tipHeight, tipHeaderIdHex });
+  throw new Error('Ergo node snapshot attempt bound is unreachable');
 }
 
 async function observeBox(

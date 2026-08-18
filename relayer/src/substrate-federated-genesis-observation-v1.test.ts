@@ -419,9 +419,40 @@ describe('Substrate federated genesis observation V1', () => {
     await expect(observe(fixture, {
       witness: { tipIds: ['96'.repeat(32), '96'.repeat(32)] },
     })).rejects.toThrow(/target snapshots disagree/i);
-    await expect(observe(fixture, {
-      witness: { tipHeights: [119, 119] },
-    })).rejects.toThrow(/info and best-header heights do not match/i);
+  });
+
+  it('retries one torn node-info and best-header snapshot before accepting an exact pair', async () => {
+    const fixture = await genesisFixture();
+    const { report, context } = await observe(fixture, {
+      witness: {
+        fullHeights: [119, 120, 120],
+        tipHeights: [120, 120, 120],
+        tipIds: [TIP_HEADER_ID, TIP_HEADER_ID, TIP_HEADER_ID],
+      },
+    });
+
+    expect(report.target).toMatchObject({
+      tipHeight: 120,
+      tipHeaderIdHex: TIP_HEADER_ID,
+    });
+    expect(context.witnessState.infoReads).toBe(3);
+    expect(context.witnessState.tipReads).toBe(3);
+    expect(context.witnessState.requestsCompleted).toBe(14);
+  });
+
+  it('fails closed after the bounded node snapshot retry count is exhausted', async () => {
+    const fixture = await genesisFixture();
+    await withNodePair(fixture, {
+      witness: { tipHeights: [119, 119, 119] },
+    }, async context => {
+      const profile = buildSubstrateFederatedGenesisTargetProfileV1(
+        profileInput(fixture, context),
+      );
+      await expect(observeSubstrateFederatedGenesisV1(profile))
+        .rejects.toThrow(/heights do not match after 3 bounded attempts/i);
+      expect(context.witnessState.infoReads).toBe(3);
+      expect(context.witnessState.tipReads).toBe(3);
+    });
   });
 
   it('awaits both bounded source observations before returning a failure', async () => {
