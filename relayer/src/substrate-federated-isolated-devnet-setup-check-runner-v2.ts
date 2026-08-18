@@ -5,6 +5,8 @@ import type {
   SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import type {
+  SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input,
+  SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import type {
@@ -50,6 +52,18 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   ) => Promise<Readonly<
     SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
   >>;
+  readonly runForExecutionRetainingPegInSigner: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  >>;
+  readonly checkPegInSourceLock: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt
+  >>;
 }
 
 /**
@@ -73,22 +87,43 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     execution.dispose();
     throw error;
   }
-  let state: 'open' | 'running' | 'closed' = 'open';
+  let state:
+    'open' | 'running' | 'setup-complete' | 'check-complete' | 'closed' = 'open';
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
-  const consume = async <T>(operation: () => Promise<T>): Promise<T> => {
-    if (state !== 'open') {
-      throw new Error(
-        'isolated fixed setup-check session is already consumed or disposed',
-      );
-    }
+  const close = (): void => {
     MINING_CREDENTIALS.delete(session);
     revokeSignerBinding(signer);
-    state = 'running';
     try {
-      return await operation();
+      execution.dispose();
     } finally {
       state = 'closed';
-      execution.dispose();
+    }
+  };
+  const consume = async <T>(
+    expectedState: 'open' | 'setup-complete',
+    operation: () => Promise<T>,
+    successState: 'setup-complete' | 'check-complete' | 'closed',
+  ): Promise<T> => {
+    if (state !== expectedState) {
+      throw new Error(
+        expectedState === 'open'
+          ? 'isolated fixed setup-check session is already consumed or disposed'
+          : 'isolated peg-in signer continuation is absent, consumed, or disposed',
+      );
+    }
+    if (expectedState === 'open') MINING_CREDENTIALS.delete(session);
+    state = 'running';
+    try {
+      const result = await operation();
+      if (successState === 'closed') {
+        close();
+      } else {
+        state = successState;
+      }
+      return result;
+    } catch (error) {
+      close();
+      throw error;
     }
   };
   session = Object.freeze({
@@ -97,23 +132,41 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       if (state === 'running') {
         throw new Error('isolated fixed setup-check session is running');
       }
-      if (state === 'open') {
-        MINING_CREDENTIALS.delete(session);
-        revokeSignerBinding(signer);
-        try {
-          execution.dispose();
-        } finally {
-          state = 'closed';
-        }
+      if (
+        state === 'open'
+        || state === 'setup-complete'
+        || state === 'check-complete'
+      ) {
+        close();
       }
     },
     run: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
-    ) => consume(() => execution.run(input)),
+    ) => consume('open', () => execution.run(input), 'closed'),
     runForExecution: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
       target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-    ) => consume(() => execution.runForExecution(input, target)),
+    ) => consume(
+      'open',
+      () => execution.runForExecution(input, target),
+      'closed',
+    ),
+    runForExecutionRetainingPegInSigner: async (
+      input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'open',
+      () => execution.runForExecutionRetainingPegInSigner(input, target),
+      'setup-complete',
+    ),
+    checkPegInSourceLock: async (
+      input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'setup-complete',
+      () => execution.checkPegInSourceLock(input, target),
+      'check-complete',
+    ),
   });
   MINING_CREDENTIALS.set(session, execution.miningCredential);
   return session;

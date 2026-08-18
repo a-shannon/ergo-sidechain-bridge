@@ -168,6 +168,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         new Set([
+          'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt',
           'SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
@@ -342,12 +343,17 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
+      'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1Receipt',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXECUTION_ROOT_V1_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
+      'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
     ]),
   ],
 ]);

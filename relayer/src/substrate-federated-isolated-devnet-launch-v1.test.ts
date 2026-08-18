@@ -257,6 +257,7 @@ vi.mock('./fleet-signer.js', async importOriginal => {
   return {
     ...actual,
     prepareLocalWasmRootCheckCandidates: mocks.prepareSetupCheckBatch,
+    prepareLocalWasmRootCheckCandidatesFromNode: mocks.prepareSetupCheckBatch,
     checkSignedTransaction: mocks.checkSetupTransaction,
     promoteLocalWasmCheckedTransactionForSubmissionV1:
       mocks.promoteSetupTransaction,
@@ -1878,6 +1879,126 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     }, session.signer.publicKeyHex);
   }, 30_000);
 
+  it('retains one synthetic signer continuation for one source-lock JVM check', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+      await session.runForExecutionRetainingPegInSigner({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+
+      const sourceFundingInput = await isolatedPegInFundingInput(803);
+      const sourceLockCreation = await materializeUnsignedTransaction({
+        inputs: [{ ...sourceFundingInput, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: BigInt(sourceFundingInput.value) - BigInt(MINER_FEE),
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in source-lock continuation fixture');
+      const check = await session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget);
+
+      expect(check).toMatchObject({
+        status: 'PASS',
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransactionIdHex: sourceLockCreation.txId,
+        signedTransactionIdHex: sourceLockCreation.txId,
+        checker: {
+          nodeOrigin: 'http://127.0.0.1:9051',
+          path: '/transactions/check',
+        },
+        boundaries: {
+          exactTransactionAndSourceBoxBound: true,
+          localWasmRootSigningPerformed: true,
+          localJvmNodeCheckPassed: true,
+          submissionAuthorityEstablished: false,
+          broadcastAuthorityEstablished: false,
+        },
+      });
+      expect(check).not.toHaveProperty('candidateDigestHex');
+      expect(check).not.toHaveProperty('sourceFundingBoxDigestHex');
+      expect(mocks.prepareSetupCheckBatch).toHaveBeenCalledTimes(2);
+      expect(mocks.checkSetupTransaction).toHaveBeenCalledTimes(4);
+      await expect(session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent, consumed/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          session.signer,
+        )
+      ).not.toThrow();
+      session.dispose();
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          session.signer,
+        )
+      ).toThrow(/lacks active process provenance/);
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
+  it('revokes the retained signer when the source-lock JVM check fails', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+      await session.runForExecutionRetainingPegInSigner({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+      const sourceFundingInput = await isolatedPegInFundingInput(803);
+      const sourceLockCreation = await materializeUnsignedTransaction({
+        inputs: [{ ...sourceFundingInput, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: BigInt(sourceFundingInput.value) - BigInt(MINER_FEE),
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in failed source-lock check fixture');
+      mocks.checkSetupTransaction.mockResolvedValueOnce(null);
+
+      await expect(session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget)).rejects.toThrow(/JVM node check failed/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          session.signer,
+        )
+      ).toThrow(/lacks active process provenance/);
+      await expect(session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent, consumed/);
+      expect(() => session.dispose()).not.toThrow();
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
   it('disposes an unused signer-first session before packet construction', async () => {
     const session =
       await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
@@ -2078,6 +2199,8 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       'node:crypto',
       'ethers',
       './fleet-signer.js',
+      './ergo-unsigned-transaction.js',
+      './substrate-federated-settlement-family-compiler-binding-v1.js',
       './local-wasm-root-signer-public-identity.js',
       './relayer-core/devnet-reward-consolidation.js',
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
@@ -2089,6 +2212,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
       './substrate-federated-isolated-devnet-setup-check-v2.js',
       './strict-json.js',
+      './unsigned-ergo-transaction.js',
     ]);
     expect(`${runner}\n${execution}\n${signerIdentity}`).not.toMatch(
       /process\.env|node:(?:fs|http|https|net|tls|child_process)|profile-registry|state-tracker/iu,

@@ -3,10 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { Mnemonic } from 'ethers';
 
 import {
+  checkSignedTransaction,
+  prepareLocalWasmRootCheckCandidatesFromNode,
   promoteLocalWasmCheckedTransactionForSubmissionV1,
   type LocalWasmCheckedSubmissionAcceptanceV1,
   type LocalWasmExactBytesSignedCheckCandidate,
 } from './fleet-signer.js';
+import { deriveUnsignedTransactionId } from './ergo-unsigned-transaction.js';
 import {
   assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
   bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
@@ -57,6 +60,7 @@ import {
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import { sha256CanonicalJson } from './strict-json.js';
+import type { MaterializedUnsignedTransaction } from './unsigned-ergo-transaction.js';
 
 const PRIMARY_NODE_ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS_NODE_ORIGIN = 'http://127.0.0.1:9052';
@@ -66,6 +70,14 @@ const DECLARED_IDENTITY_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FIXED_SETUP_CHECK_DECLARATION_V2';
 const OBSERVATION_ATTEMPTS = 40;
 const OBSERVATION_RETRY_MS = 250;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-check.v1' as const;
+const PEG_IN_SOURCE_LOCK_CHECK_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1';
+const PEG_IN_SOURCE_LOCK_TRANSACTION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_TRANSACTION_V1';
+const PEG_IN_SOURCE_LOCK_CHECK_RESPONSE_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_RESPONSE_V1';
 const EXECUTION_BATCHES = new WeakMap<
   object,
   Readonly<{
@@ -114,6 +126,74 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   ) => Promise<Readonly<
     SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
   >>;
+  readonly runForExecutionRetainingPegInSigner: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  >>;
+  readonly checkPegInSourceLock: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt
+  >>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input {
+  readonly sourceFundingBoxIdHex: string;
+  readonly unsignedTransaction:
+    Readonly<MaterializedUnsignedTransaction>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1_SCHEMA;
+  readonly version: 1;
+  readonly status: 'PASS';
+  readonly sourceFundingBoxIdHex: string;
+  readonly unsignedTransactionIdHex: string;
+  readonly unsignedTransactionDigestHex: string;
+  readonly signedTransactionIdHex: string;
+  readonly signedTransactionCanonicalJsonSha256Hex: string;
+  readonly signedTransactionBytesSha256Hex: string;
+  readonly signedTransactionBytesLength: number;
+  readonly checkResponseSha256Hex: string;
+  readonly target: Readonly<{
+    readonly processBindingDigestHex: string;
+    readonly executionTargetIdentityDigestHex: string;
+  }>;
+  readonly signer: Readonly<{
+    readonly derivation: 'wasm-root';
+    readonly publicKeyHex: string;
+    readonly p2pkErgoTreeHex: string;
+    readonly stateContextTipHeight: number;
+    readonly stateContextTipIdHex: string;
+  }>;
+  readonly checker: Readonly<{
+    readonly nodeOrigin: string;
+    readonly path: '/transactions/check';
+    readonly method: 'POST';
+    readonly transportPolicy: 'no-redirect-no-proxy';
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localSyntheticCompatibilityOnly: true;
+    readonly exactProcessOwnedTargetBound: true;
+    readonly exactTransactionAndSourceBoxBound: true;
+    readonly localWasmRootSigningPerformed: true;
+    readonly localJvmNodeCheckPassed: true;
+    readonly signedTransactionBytesPersisted: false;
+    readonly submissionAuthorityEstablished: false;
+    readonly broadcastAuthorityEstablished: false;
+    readonly sourceLockConsumptionEstablished: false;
+    readonly reserveLineageEstablished: false;
+    readonly mintAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
 }
 
 export interface SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2 {
@@ -201,23 +281,68 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         mnemonic,
         identity.publicKeyHex,
       );
-    let state: 'open' | 'running' | 'closed' = 'open';
-    const consume = async <T>(operation: (activeMnemonic: string) => Promise<T>) => {
-      if (state !== 'open') {
+    let state: 'open' | 'running' | 'setup-complete' | 'closed' = 'open';
+    const close = (): void => {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        miningCredential,
+      );
+      mnemonic = '';
+      state = 'closed';
+    };
+    const consume = async <T>(
+      expectedState: 'open' | 'setup-complete',
+      operation: (activeMnemonic: string) => Promise<T>,
+      retainAfterSuccess: boolean,
+    ): Promise<T> => {
+      if (state !== expectedState) {
         throw new Error(
-          'isolated fixed setup-check session is already consumed or disposed',
+          expectedState === 'open'
+            ? 'isolated fixed setup-check session is already consumed or disposed'
+            : 'isolated peg-in signer continuation is absent, consumed, or disposed',
         );
       }
       state = 'running';
       try {
-        return await operation(mnemonic);
-      } finally {
-        revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
-          miningCredential,
-        );
-        mnemonic = '';
-        state = 'closed';
+        const result = await operation(mnemonic);
+        if (retainAfterSuccess) {
+          state = 'setup-complete';
+        } else {
+          close();
+        }
+        return result;
+      } catch (error) {
+        close();
+        throw error;
       }
+    };
+    const runForExecution = async (
+      input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      retainPegInSigner: boolean,
+      activeMnemonic: string,
+    ): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>> => {
+      const expectedTargetBinding =
+        assertExecutionTargetMatchesOrigins(target, input);
+      const result = await runFixedSetupCheck(input, activeMnemonic);
+      const batch = promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+        executionReceipt: result.executionReceipt,
+        request: result.request,
+        expectedTargetBinding,
+        target,
+      });
+      const familyBatch =
+        attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
+          batch,
+          result.familyCompilerBinding,
+          target,
+        );
+      if (retainPegInSigner) {
+        assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
+          familyBatch,
+          target,
+        );
+      }
+      return familyBatch;
     };
     return Object.freeze({
       signer,
@@ -226,37 +351,57 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         if (state === 'running') {
           throw new Error('isolated fixed setup-check session is running');
         }
-        if (state === 'open') {
-          revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
-            miningCredential,
-          );
-          mnemonic = '';
-          state = 'closed';
+        if (state === 'open' || state === 'setup-complete') {
+          close();
         }
       },
       run: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
-      ) => consume(async activeMnemonic =>
-        (await runFixedSetupCheck(input, activeMnemonic)).receipt),
+      ) => consume(
+        'open',
+        async activeMnemonic =>
+          (await runFixedSetupCheck(input, activeMnemonic)).receipt,
+        false,
+      ),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-      ) => consume(async activeMnemonic => {
-        const expectedTargetBinding =
-          assertExecutionTargetMatchesOrigins(target, input);
-        const result = await runFixedSetupCheck(input, activeMnemonic);
-        const batch = promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
-          executionReceipt: result.executionReceipt,
-          request: result.request,
-          expectedTargetBinding,
+      ) => consume(
+        'open',
+        activeMnemonic => runForExecution(
+          input,
           target,
-        });
-        return attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
-          batch,
-          result.familyCompilerBinding,
+          false,
+          activeMnemonic,
+        ),
+        false,
+      ),
+      runForExecutionRetainingPegInSigner: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume(
+        'open',
+        activeMnemonic => runForExecution(
+          input,
           target,
-        );
-      }),
+          true,
+          activeMnemonic,
+        ),
+        true,
+      ),
+      checkPegInSourceLock: async (
+        input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume(
+        'setup-complete',
+        activeMnemonic => runPegInSourceLockCheck(
+          input,
+          target,
+          signer,
+          activeMnemonic,
+        ),
+        false,
+      ),
     });
   } catch (error) {
     mnemonic = '';
@@ -397,6 +542,179 @@ function assertExecutionTargetMatchesOrigins(
     throw new Error('isolated setup execution target differs from its request');
   }
   return binding;
+}
+
+async function runPegInSourceLockCheck(
+  inputValue:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  expectedSigner:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSignerV2>,
+  mnemonic: string,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>> {
+  const input = capturePegInSourceLockCheckInput(inputValue);
+  const before = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+    target,
+  );
+  const nodeOrigin = exactOrigin(
+    target.primaryNodeOrigin,
+    PRIMARY_NODE_ORIGIN,
+    'peg-in checker',
+  );
+  if (
+    target.witnessNodeOrigin !== WITNESS_NODE_ORIGIN
+    || target.primaryMining !== true
+    || target.witnessReadOnly !== true
+  ) {
+    throw new Error('isolated peg-in check target differs from the owned pair');
+  }
+  const transaction = input.unsignedTransaction;
+  const independentlyDerivedId = fixedHex(
+    await deriveUnsignedTransactionId(transaction.eip12Tx),
+    32,
+    'isolated peg-in independently derived transaction ID',
+  );
+  if (
+    independentlyDerivedId !== transaction.txId
+    || transaction.eip12Tx.inputs.length !== 1
+    || transaction.eip12Tx.inputs[0]?.boxId !== input.sourceFundingBoxIdHex
+    || transaction.eip12Tx.dataInputs.length !== 0
+  ) {
+    throw new Error('isolated peg-in source-lock transaction binding changed');
+  }
+  const unsignedTransactionDigestHex = sha256CanonicalJson(
+    transaction,
+    PEG_IN_SOURCE_LOCK_TRANSACTION_DIGEST_DOMAIN,
+  );
+  const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
+    mnemonic,
+    networkPrefix: expectedSigner.networkPrefix,
+    nodeOrigin,
+    candidates: [{
+      role: 'peg-in-source-lock',
+      eip12Tx: transaction.eip12Tx,
+      expectedTxId: transaction.txId,
+    }],
+  });
+  const prepared = batch.candidates[0];
+  if (
+    batch.derivation !== 'wasm-root'
+    || batch.pubKeyHex !== expectedSigner.publicKeyHex
+    || batch.ergoTreeHex !== expectedSigner.p2pkErgoTreeHex
+    || batch.candidates.length !== 1
+    || prepared === undefined
+    || prepared.role !== 'peg-in-source-lock'
+    || prepared.expectedTxId !== transaction.txId
+    || prepared.signedCandidate.txId !== transaction.txId
+  ) {
+    throw new Error('isolated peg-in source-lock signer binding changed');
+  }
+  const checked = await checkSignedTransaction(
+    prepared.signedCandidate,
+    'isolated local peg-in source-lock check',
+    nodeOrigin,
+  );
+  if (checked === null) {
+    throw new Error('isolated local peg-in source-lock JVM node check failed');
+  }
+  const signedBytesDigestHex = fixedHex(
+    checked.signedTransactionBytesSha256Hex,
+    32,
+    'isolated peg-in signed transaction bytes digest',
+  );
+  const signedBytesLength = positiveSafeInteger(
+    checked.signedTransactionBytesLength,
+    'isolated peg-in signed transaction bytes length',
+  );
+  if (
+    checked.txId !== transaction.txId
+    || checked.signedTransactionDigestHex
+      !== prepared.signedCandidate.signedTransactionDigestHex
+    || signedBytesDigestHex
+      !== prepared.signedCandidate.signedTransactionBytesSha256Hex
+    || signedBytesLength
+      !== prepared.signedCandidate.signedTransactionBytesLength
+    || checked.signerContext.pubKeyHex !== expectedSigner.publicKeyHex
+    || checked.signerContext.ergoTreeHex !== expectedSigner.p2pkErgoTreeHex
+    || checked.signerContext.stateContextTipHeight !== batch.stateContextTipHeight
+    || checked.signerContext.stateContextTipIdHex !== batch.stateContextTipIdHex
+    || checked.checkerIdentity.nodeOrigin !== nodeOrigin
+    || checked.checkerIdentity.path !== '/transactions/check'
+    || checked.checkerIdentity.method !== 'POST'
+    || checked.checkerIdentity.transportPolicy !== 'no-redirect-no-proxy'
+  ) {
+    throw new Error('isolated peg-in signer and JVM node receipt disagree');
+  }
+  const after = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+    target,
+  );
+  if (
+    after.processBindingDigestHex !== before.processBindingDigestHex
+    || after.executionTargetIdentityDigestHex
+      !== before.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('isolated peg-in execution target changed during check');
+  }
+  const body = Object.freeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1_SCHEMA,
+    version: 1 as const,
+    status: 'PASS' as const,
+    sourceFundingBoxIdHex: input.sourceFundingBoxIdHex,
+    unsignedTransactionIdHex: transaction.txId,
+    unsignedTransactionDigestHex,
+    signedTransactionIdHex: checked.txId,
+    signedTransactionCanonicalJsonSha256Hex:
+      checked.signedTransactionDigestHex,
+    signedTransactionBytesSha256Hex: signedBytesDigestHex,
+    signedTransactionBytesLength: signedBytesLength,
+    checkResponseSha256Hex: sha256CanonicalJson({
+      role: 'peg-in-source-lock',
+      response: checked.checkResult,
+    }, PEG_IN_SOURCE_LOCK_CHECK_RESPONSE_DIGEST_DOMAIN),
+    target: Object.freeze({
+      processBindingDigestHex: after.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        after.executionTargetIdentityDigestHex,
+    }),
+    signer: Object.freeze({
+      derivation: 'wasm-root' as const,
+      publicKeyHex: expectedSigner.publicKeyHex,
+      p2pkErgoTreeHex: expectedSigner.p2pkErgoTreeHex,
+      stateContextTipHeight: batch.stateContextTipHeight,
+      stateContextTipIdHex: batch.stateContextTipIdHex,
+    }),
+    checker: Object.freeze({
+      nodeOrigin,
+      path: '/transactions/check' as const,
+      method: 'POST' as const,
+      transportPolicy: 'no-redirect-no-proxy' as const,
+    }),
+    boundaries: Object.freeze({
+      localSyntheticCompatibilityOnly: true as const,
+      exactProcessOwnedTargetBound: true as const,
+      exactTransactionAndSourceBoxBound: true as const,
+      localWasmRootSigningPerformed: true as const,
+      localJvmNodeCheckPassed: true as const,
+      signedTransactionBytesPersisted: false as const,
+      submissionAuthorityEstablished: false as const,
+      broadcastAuthorityEstablished: false as const,
+      sourceLockConsumptionEstablished: false as const,
+      reserveLineageEstablished: false as const,
+      mintAuthorized: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    }),
+  });
+  return Object.freeze({
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(
+      body,
+      PEG_IN_SOURCE_LOCK_CHECK_DIGEST_DOMAIN,
+    ),
+  });
 }
 
 /** Reconstruct G1dA-G1dF and perform G1dG without wider capabilities. */
@@ -634,4 +952,128 @@ function captureInput(
     primaryNodeOrigin: descriptors.primaryNodeOrigin!.value,
     witnessNodeOrigin: descriptors.witnessNodeOrigin!.value,
   }) as RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input;
+}
+
+function capturePegInSourceLockCheckInput(
+  input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input> {
+  assertPlainData(input, 'isolated peg-in source-lock check input');
+  const keys = Object.keys(input).sort();
+  const expectedKeys = [
+    'sourceFundingBoxIdHex',
+    'unsignedTransaction',
+  ];
+  if (keys.join('\0') !== expectedKeys.join('\0')) {
+    throw new Error('isolated peg-in source-lock check input fields are invalid');
+  }
+  const transaction = input.unsignedTransaction;
+  if (
+    transaction === null
+    || typeof transaction !== 'object'
+    || Array.isArray(transaction)
+    || Object.keys(transaction).sort().join('\0') !== 'eip12Tx\0outputs\0txId'
+    || transaction.eip12Tx === null
+    || typeof transaction.eip12Tx !== 'object'
+    || !Array.isArray(transaction.eip12Tx.inputs)
+    || !Array.isArray(transaction.eip12Tx.dataInputs)
+    || !Array.isArray(transaction.eip12Tx.outputs)
+    || !Array.isArray(transaction.outputs)
+  ) {
+    throw new Error('isolated peg-in source-lock transaction shape is invalid');
+  }
+  return Object.freeze({
+    sourceFundingBoxIdHex: fixedHex(
+      input.sourceFundingBoxIdHex,
+      32,
+      'isolated peg-in source funding box ID',
+    ),
+    unsignedTransaction: structuredClone(transaction),
+  });
+}
+
+function assertPlainData(
+  value: unknown,
+  label: string,
+  seen = new Set<object>(),
+): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new Error(`${label} contains a non-finite number`);
+    return;
+  }
+  if (typeof value !== 'object') {
+    throw new Error(`${label} contains non-data capability material`);
+  }
+  if (seen.has(value)) throw new Error(`${label} contains a cycle`);
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) {
+      if (Object.getPrototypeOf(value) !== Array.prototype) {
+        throw new Error(`${label} contains a custom array prototype`);
+      }
+      const keys = Reflect.ownKeys(value);
+      const expected = [
+        ...Array.from({ length: value.length }, (_, index) => String(index)),
+        'length',
+      ];
+      if (
+        keys.length !== expected.length
+        || keys.some((key, index) => key !== expected[index])
+      ) {
+        throw new Error(`${label} contains sparse, symbol, or extra array fields`);
+      }
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        if (
+          descriptor === undefined
+          || !descriptor.enumerable
+          || !('value' in descriptor)
+        ) {
+          throw new Error(`${label} array entries must be enumerable data properties`);
+        }
+        assertPlainData(descriptor.value, `${label}[${index}]`, seen);
+      }
+      return;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(`${label} contains a custom object prototype`);
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== 'string') {
+        throw new Error(`${label} contains symbol fields`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined
+        || !descriptor.enumerable
+        || !('value' in descriptor)
+      ) {
+        throw new Error(`${label}.${key} must be an enumerable data property`);
+      }
+      assertPlainData(descriptor.value, `${label}.${key}`, seen);
+    }
+  } finally {
+    seen.delete(value);
+  }
+}
+
+function fixedHex(value: unknown, bytes: number, label: string): string {
+  if (
+    typeof value !== 'string'
+    || value.length !== bytes * 2
+    || !/^[0-9a-f]+$/u.test(value)
+  ) {
+    throw new Error(`${label} must be canonical ${bytes}-byte lowercase hex`);
+  }
+  return value;
+}
+
+function positiveSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) {
+    throw new Error(`${label} must be a positive safe integer`);
+  }
+  return Number(value);
 }

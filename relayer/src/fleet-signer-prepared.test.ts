@@ -215,6 +215,7 @@ import {
   consumeLocalWasmCheckedSubmissionHandleV1,
   prepareLocalWasmCheckSigner,
   prepareLocalWasmRootCheckCandidates,
+  prepareLocalWasmRootCheckCandidatesFromNode,
   prepareLocalWasmRootCheckSigner,
   promoteLocalWasmCheckedTransactionForSubmissionV1,
   signTransactionForCheck,
@@ -440,6 +441,26 @@ describe('prepared local WASM check signer', () => {
     );
     expect(signerMock.rootDerivations).toBe(1);
     expect(signerMock.fleetDerivations).toBe(0);
+  });
+
+  it('keeps exact header collection inside the root check signer boundary', async () => {
+    const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
+      mnemonic: 'synthetic root batch input',
+      networkPrefix: 16,
+      nodeOrigin: 'http://127.0.0.1:9052',
+      candidates: [candidate('peg-in-source-lock', firstTxId, 1)],
+    });
+
+    expect(nodeMock.ngetDirect).toHaveBeenCalledTimes(1);
+    expect(nodeMock.ngetDirect).toHaveBeenCalledWith(
+      '/blocks/lastHeaders/10',
+      'http://127.0.0.1:9052',
+    );
+    expect(batch.candidates).toHaveLength(1);
+    expect(batch.candidates[0]).toMatchObject({
+      role: 'peg-in-source-lock',
+      expectedTxId: firstTxId,
+    });
   });
 });
 

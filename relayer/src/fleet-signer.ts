@@ -677,6 +677,25 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
 }
 
 /**
+ * Read the exact signing context from one fixed node and root-sign a check-only
+ * batch. Network access remains inside the signer/checker boundary.
+ */
+export async function prepareLocalWasmRootCheckCandidatesFromNode(input: {
+  mnemonic: string;
+  networkPrefix: number;
+  nodeOrigin: string;
+  candidates: readonly LocalWasmCheckCandidate[];
+}): Promise<PreparedLocalWasmRootCheckBatch> {
+  const { ngetDirect } = await import('./ergo-helpers.js');
+  const nodeOrigin = normalizeNodeOrigin(input.nodeOrigin);
+  return prepareLocalWasmRootCheckCandidates({
+    ...input,
+    nodeOrigin,
+    headers: await ngetDirect('/blocks/lastHeaders/10', nodeOrigin),
+  });
+}
+
+/**
  * Sign one exact EIP-12 transaction for a separately authorized submitter.
  *
  * This function has no broadcast capability. Callers provide the exact
