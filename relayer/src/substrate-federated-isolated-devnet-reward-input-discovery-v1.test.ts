@@ -6,10 +6,15 @@ import {
   AuthenticatedSpvTrackerReadOnlyNodeClient,
 } from './authenticated-spv-tracker-read-only-node-client.js';
 import {
+  computeErgoHeaderId,
+  type ErgoHeaderIdentityFields,
+} from './ergo-settlement-core/ergo-header-id.js';
+import {
   deriveDevnetRewardErgoTreeHexForDelay,
 } from './relayer-core/devnet-reward-consolidation.js';
 import {
   discoverSubstrateFederatedRewardInputsV1,
+  discoverSubstrateFederatedRewardInputsV2,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
   type SubstrateFederatedRewardSignerBindingV1,
@@ -42,6 +47,8 @@ interface MockNodeState {
   tipHeight: number;
   tipHeaderIdHex: string;
   genesisHeaderIds: string[];
+  headerIdsByHeight: Map<number, string[]>;
+  headersById: Map<string, Record<string, unknown>>;
   boxesByAddress: Map<string, readonly Eip12Box[]>;
 }
 
@@ -187,6 +194,87 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
 
     await expect(discoverSubstrateFederatedRewardInputsV1(signer()))
       .rejects.toThrow(/reward inventory changed during discovery/i);
+  });
+
+  it('keeps V1 strict when the target extends during discovery', async () => {
+    const states = nodeStates({ delay1: delay1Boxes });
+    installNodeMocks(states, PUBLIC_KEY_HEX, input => {
+      const current = states.get(input.source)!;
+      current.tipHeight = 121;
+      current.tipHeaderIdHex = '33'.repeat(32);
+      return input.boxes;
+    });
+
+    await expect(discoverSubstrateFederatedRewardInputsV1(signer()))
+      .rejects.toThrow(/target changed during discovery/i);
+  });
+
+  it('V2 excludes validated post-anchor rewards across a canonical extension', async () => {
+    const rewardTree = deriveDevnetRewardErgoTreeHexForDelay(PUBLIC_KEY_HEX, 1);
+    const boxes = await rewardBoxesForCandidates(rewardTree, [
+      { value: '75000000', creationHeight: 100 },
+      { value: '75000000', creationHeight: 100 },
+      { value: '75000000', creationHeight: 100 },
+      { value: '75000000', creationHeight: 121 },
+    ]);
+    const states = nodeStates({ delay1: boxes });
+    for (const current of states.values()) {
+      current.headerIdsByHeight.set(120, ['44'.repeat(32), TIP_HEADER_ID]);
+    }
+    installNodeMocks(states, PUBLIC_KEY_HEX, input => {
+      const current = states.get(input.source)!;
+      if (current.tipHeight === 120) {
+        appendHeader(current, TIP_HEADER_ID, 121, 'canonical-extension');
+      }
+      return input.boxes;
+    });
+
+    const report = await discoverSubstrateFederatedRewardInputsV2(signer());
+
+    expect(report.target).toMatchObject({
+      tipHeight: 120,
+      tipHeaderIdHex: TIP_HEADER_ID,
+    });
+    expect(report.inventory).toMatchObject({
+      anchorRewardBoxCount: 3,
+      matureRewardBoxCount: 3,
+      usableRewardBoxCount: 3,
+    });
+    expect(Object.values(report.genesisInputs).every(
+      box => box.creationHeight === 100,
+    )).toBe(true);
+  });
+
+  it.each([
+    {
+      name: 'same-height replacement',
+      mutate: (state: MockNodeState) => {
+        state.tipHeaderIdHex = '35'.repeat(32);
+      },
+    },
+    {
+      name: 'rollback below the anchor',
+      mutate: (state: MockNodeState) => {
+        state.tipHeight = 119;
+        state.tipHeaderIdHex = '36'.repeat(32);
+      },
+    },
+    {
+      name: 'extension on a replacement parent',
+      mutate: (state: MockNodeState) => {
+        appendHeader(state, '37'.repeat(32), 121, 'replacement-extension');
+      },
+    },
+  ])('V2 rejects $name', async ({ mutate }) => {
+    const states = nodeStates({ delay1: delay1Boxes });
+    installNodeMocks(states, PUBLIC_KEY_HEX, input => {
+      const current = states.get(input.source)!;
+      if (input.readIndex === 0) mutate(current);
+      return input.boxes;
+    });
+
+    await expect(discoverSubstrateFederatedRewardInputsV2(signer()))
+      .rejects.toThrow(/target changed during discovery/i);
   });
 
   it('rejects ambiguous active reward-delay profiles', async () => {
@@ -360,6 +448,11 @@ function nodeStates(input: Readonly<{
     tipHeight: input.tipHeight ?? 120,
     tipHeaderIdHex: TIP_HEADER_ID,
     genesisHeaderIds: [GENESIS_HEADER_ID],
+    headerIdsByHeight: new Map([
+      [1, [GENESIS_HEADER_ID]],
+      [input.tipHeight ?? 120, [TIP_HEADER_ID]],
+    ]),
+    headersById: new Map(),
     boxesByAddress: new Map([
       ['reward-delay-1', input.delay1 ?? []],
       ['reward-delay-720', input.delay720 ?? []],
@@ -369,6 +462,61 @@ function nodeStates(input: Readonly<{
     [SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, create()],
     [SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, create()],
   ]);
+}
+
+function appendHeader(
+  state: MockNodeState,
+  parentId: string,
+  height: number,
+  label: string,
+): string {
+  const identity: ErgoHeaderIdentityFields = {
+    version: 2,
+    parentId: Buffer.from(parentId, 'hex'),
+    adProofsRoot: fixedBytes(`${label}-ad-${height}`, 32),
+    stateRoot: fixedBytes(`${label}-state-${height}`, 33),
+    transactionsRoot: fixedBytes(`${label}-transactions-${height}`, 32),
+    timestamp: 1_730_000_000_000n + BigInt(height),
+    nBits: 117_440_511,
+    height,
+    extensionHash: fixedBytes(`${label}-extension-${height}`, 32),
+    votes: Buffer.alloc(3),
+    unparsedBytes: Buffer.alloc(0),
+    powSolution: {
+      publicKey: Buffer.from(PUBLIC_KEY_HEX, 'hex'),
+      nonce: Buffer.from(height.toString(16).padStart(16, '0'), 'hex'),
+    },
+  };
+  const id = computeErgoHeaderId(identity).toString('hex');
+  state.headersById.set(id, {
+    id,
+    parentId,
+    height,
+    version: identity.version,
+    adProofsRoot: Buffer.from(identity.adProofsRoot).toString('hex'),
+    stateRoot: Buffer.from(identity.stateRoot).toString('hex'),
+    transactionsRoot: Buffer.from(identity.transactionsRoot).toString('hex'),
+    timestamp: Number(identity.timestamp),
+    nBits: identity.nBits,
+    extensionHash: Buffer.from(identity.extensionHash).toString('hex'),
+    powSolutions: {
+      pk: PUBLIC_KEY_HEX,
+      n: Buffer.from(identity.powSolution.nonce).toString('hex'),
+    },
+    votes: '000000',
+  });
+  state.tipHeight = height;
+  state.tipHeaderIdHex = id;
+  return id;
+}
+
+function fixedBytes(label: string, length: number): Buffer {
+  const bytes = Buffer.alloc(length);
+  const seed = Buffer.from(label, 'utf8');
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = seed[index % seed.length]!;
+  }
+  return bytes;
 }
 
 function installNodeMocks(
@@ -406,8 +554,22 @@ function installNodeMocks(
     'getBlockHeaderIdsAtHeight',
   ).mockImplementation(async function (
     this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+    height,
   ) {
-    return [...state(this).genesisHeaderIds];
+    const current = state(this);
+    return [...(
+      current.headerIdsByHeight.get(height)
+      ?? (height === 1 ? current.genesisHeaderIds : [])
+    )];
+  });
+  vi.spyOn(
+    AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+    'getBlockHeaderById',
+  ).mockImplementation(async function (
+    this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+    headerId,
+  ) {
+    return state(this).headersById.get(headerId) ?? null;
   });
   vi.spyOn(
     AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,

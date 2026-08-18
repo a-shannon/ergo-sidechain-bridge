@@ -129,7 +129,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         'substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts',
-        new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1']),
+        new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2']),
       ],
       [
         'substrate-federated-isolated-devnet-packet-producer-v1.ts',
@@ -142,7 +142,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-reward-input-discovery-v1.ts',
         new Set([
-          'discoverSubstrateFederatedRewardInputsV1',
+          'discoverSubstrateFederatedRewardInputsV2',
           'SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN',
           'SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN',
         ]),
@@ -260,7 +260,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js',
-        new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1']),
+        new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2']),
       ],
       [
         '../../substrate-federated-isolated-devnet-packet-producer-v1.js',
@@ -268,7 +268,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js',
-        new Set(['discoverSubstrateFederatedRewardInputsV1']),
+        new Set(['discoverSubstrateFederatedRewardInputsV2']),
       ],
       [
         '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',

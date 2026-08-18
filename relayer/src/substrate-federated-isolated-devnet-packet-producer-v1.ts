@@ -30,7 +30,11 @@ import {
 } from './substrate-federated-isolated-devnet-contract-artifacts-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V2_SCHEMA,
   type SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
+  type SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetErgoHistoryV1,
@@ -107,7 +111,10 @@ export interface ProduceSubstrateFederatedIsolatedDevnetPacketV1Input {
   readonly sourceHistory:
     Readonly<SubstrateFederatedAuthoritySafeDevnetHistoryV1>;
   readonly ergoHistory:
-    Readonly<SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1>;
+    Readonly<
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
+    >;
   readonly expectedProfilePins: Readonly<{
     readonly federationProfileIdHex: string;
     readonly sourceAttestationKeySetDigestHex: string;
@@ -279,6 +286,33 @@ export function assertSubstrateFederatedIsolatedDevnetPacketV1Provenance(
   }
 }
 
+function assertAcceptedErgoHistoryProvenance(
+  value: Readonly<
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
+  >,
+): void {
+  if (
+    value.receipt.schema
+      === SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V1_SCHEMA
+  ) {
+    assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance(
+      value,
+    );
+    return;
+  }
+  if (
+    value.receipt.schema
+      === SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_ARTIFACTS_V2_SCHEMA
+  ) {
+    assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(
+      value,
+    );
+    return;
+  }
+  throw new Error('isolated Ergo history schema is unsupported');
+}
+
 async function producePacket(
   input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
   signers: readonly SourceSigner[],
@@ -289,9 +323,7 @@ async function producePacket(
   assertSubstrateFederatedAuthoritySafeDevnetHistoryV1Provenance(
     captured.sourceHistory,
   );
-  assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance(
-    captured.ergoHistory,
-  );
+  assertAcceptedErgoHistoryProvenance(captured.ergoHistory);
   const sourceArtifacts = snapshotSourceHistory(captured.sourceHistory);
   const ergoArtifacts = snapshotErgoHistory(captured.ergoHistory);
   const sourceReceipt = captured.sourceHistory.receipt;
@@ -561,7 +593,8 @@ function captureInput(
       SubstrateFederatedAuthoritySafeDevnetHistoryV1
     >,
     ergoHistory: record.ergoHistory as Readonly<
-      SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+      | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
     >,
     expectedProfilePins: Object.freeze({
       federationProfileIdHex:
@@ -598,8 +631,10 @@ function snapshotSourceHistory(
 }
 
 function snapshotErgoHistory(
-  history:
-    Readonly<SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1>,
+  history: Readonly<
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1
+    | SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2
+  >,
 ) {
   return Object.freeze({
     greatestWorkHeaders:

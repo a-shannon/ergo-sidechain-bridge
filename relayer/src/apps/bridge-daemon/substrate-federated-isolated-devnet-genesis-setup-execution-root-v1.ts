@@ -44,7 +44,7 @@ import {
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
-  collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
+  collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
 } from '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
@@ -52,7 +52,7 @@ import {
   type SubstrateFederatedIsolatedDevnetPacketSessionV1,
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
-  discoverSubstrateFederatedRewardInputsV1,
+  discoverSubstrateFederatedRewardInputsV2,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
 } from '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
@@ -113,8 +113,8 @@ const STATIC_EXECUTION_MANIFEST = Object.freeze({
     'createSubstrateFederatedIsolatedDevnetPacketSessionV1',
     'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
     'collectSubstrateFederatedAuthoritySafeDevnetHistoryV1',
-    'discoverSubstrateFederatedRewardInputsV1',
-    'collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1',
+    'discoverSubstrateFederatedRewardInputsV2',
+    'collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2',
     'setupSession.runForExecution',
     'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1',
     'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
@@ -391,11 +391,11 @@ async function executeManagedSetupAction(
     await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
       input.sourceHistory,
     );
-  const rewardInputs = await discoverSubstrateFederatedRewardInputsV1(
+  const rewardInputs = await discoverSubstrateFederatedRewardInputsV2(
     setupSession.signer,
   );
   const ergoHistory =
-    await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1(
+    await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(
       rewardInputs,
     );
   const packet = await packetSession.produce({

@@ -50,12 +50,12 @@ vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => (
   collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocked.sourceHistory,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js', () => ({
-  discoverSubstrateFederatedRewardInputsV1: mocked.rewardDiscovery,
+  discoverSubstrateFederatedRewardInputsV2: mocked.rewardDiscovery,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN: 'http://127.0.0.1:9051',
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN: 'http://127.0.0.1:9052',
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', () => ({
-  collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1:
+  collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2:
     mocked.ergoHistory,
 }));
 vi.mock('../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js', () => ({

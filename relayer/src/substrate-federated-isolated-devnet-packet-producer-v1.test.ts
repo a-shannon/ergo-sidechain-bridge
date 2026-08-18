@@ -38,6 +38,28 @@ const mocks = vi.hoisted(() => ({
   tamperRelayerSetDigest: false,
   ergoAdmissionSigner: undefined as any,
   packetSignerBinding: undefined as any,
+  ergoHistoryV1Provenance: vi.fn((value: any) => {
+    if (
+      value !== mocks.ergoHistory
+      || value?.receipt?.schema
+        !== 'e2s.substrate-federated-isolated-devnet-ergo-history-artifacts.v1'
+    ) {
+      throw new Error(
+        'isolated-devnet Ergo history artifacts lack process provenance',
+      );
+    }
+  }),
+  ergoHistoryV2Provenance: vi.fn((value: any) => {
+    if (
+      value !== mocks.ergoHistory
+      || value?.receipt?.schema
+        !== 'e2s.substrate-federated-isolated-devnet-ergo-history-artifacts.v2'
+    ) {
+      throw new Error(
+        'snapshot-anchored Ergo history artifacts lack process provenance',
+      );
+    }
+  }),
 }));
 
 vi.mock(
@@ -67,13 +89,9 @@ vi.mock(
     return {
       ...actual,
       assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance:
-        vi.fn((value: unknown) => {
-          if (value !== mocks.ergoHistory) {
-            throw new Error(
-              'isolated-devnet Ergo history artifacts lack process provenance',
-            );
-          }
-        }),
+        mocks.ergoHistoryV1Provenance,
+      assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance:
+        mocks.ergoHistoryV2Provenance,
     };
   },
 );
@@ -320,6 +338,7 @@ const temporaryRoots: string[] = [];
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 
 beforeEach(() => {
+  vi.clearAllMocks();
   mocks.sourceHistory = sourceHistory();
   mocks.ergoHistory = ergoHistory();
   mocks.trackerInputs = [];
@@ -400,6 +419,26 @@ describe('isolated-devnet portable packet producer', () => {
     );
     expect(packet.signatures.map((value: any) => value.signerPublicKeyHex))
       .toEqual(session.signer.sourceAttestationPublicKeysHex.slice(0, 2));
+  });
+
+  it('consumes the exact snapshot-anchored V2 Ergo history producer', async () => {
+    mocks.ergoHistory = ergoHistory(2);
+    const session = packetSession();
+
+    const result = await session.produce(packetInput());
+
+    assertSubstrateFederatedIsolatedDevnetPacketV1Provenance(result);
+    expect(result.receipt.status).toBe(
+      'process_owned_portable_packet_replayed',
+    );
+    expect(mocks.ergoHistoryV2Provenance).toHaveBeenCalledTimes(1);
+    expect(mocks.ergoHistoryV1Provenance).not.toHaveBeenCalled();
+
+    const copied = structuredClone(mocks.ergoHistory);
+    const copiedSession = packetSession();
+    await expect(
+      copiedSession.produce(packetInput(mocks.sourceHistory, copied)),
+    ).rejects.toThrow(/lack process provenance/u);
   });
 
   it('snapshots mutable source history before the first asynchronous compiler', async () => {
@@ -644,7 +683,7 @@ function sourceHistory() {
   };
 }
 
-function ergoHistory() {
+function ergoHistory(version: 1 | 2 = 1) {
   const genesisBoxIds = {
     tracker: 'e1'.repeat(32),
     duplicatePrevention: 'e2'.repeat(32),
@@ -653,9 +692,11 @@ function ergoHistory() {
   return {
     receipt: {
       schema:
-        'e2s.substrate-federated-isolated-devnet-ergo-history-artifacts.v1',
-      version: 1,
-      status: 'matching_non_authorizing_ergo_history',
+        `e2s.substrate-federated-isolated-devnet-ergo-history-artifacts.v${version}`,
+      version,
+      status: version === 1
+        ? 'matching_non_authorizing_ergo_history'
+        : 'matching_non_authorizing_snapshot_anchored_ergo_history',
       reportDigestHex: 'e4'.repeat(32),
       target: {
         network: 'devnet',

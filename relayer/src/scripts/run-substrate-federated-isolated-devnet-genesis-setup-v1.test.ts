@@ -388,7 +388,7 @@ function executionReceipt() {
     version: 1,
     status: 'three_local_setup_transactions_canonically_confirmed',
     staticExecutionManifestDigestHex:
-      '5cf51ec78b4079b4c8d2cb88b781bd89a7e6b8fe4e8fe190e314c1894b3c4f57',
+      '429dda22a5e5e3c0b62a03bb3c8bd3eacb7339e6603bcf58f6d07ffbbb79adc5',
     build,
     process: {
       schema: 'e2s.substrate-federated-isolated-devnet-ergo-node-process.v1',
