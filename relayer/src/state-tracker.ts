@@ -97,6 +97,7 @@ import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   SCS_ORACLE_UPDATE_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
   type ErgoOperationalTransactionProfile,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
@@ -968,6 +969,8 @@ function normalizeErgoOperationalTransactionProfile(
     && value !== DUP_HEARTBEAT_OPERATION_PROFILE
     && value !== DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
     && value !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
+    && value
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
   ) {
     throw new Error('unknown Ergo operational transaction profile');
   }
@@ -1051,6 +1054,8 @@ function normalizeErgoOperationalContext(input: {
     input.operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
+    || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
   ) {
     if (
       input.targetSidechainHeight != null
@@ -1092,6 +1097,8 @@ function normalizeErgoOperationalReconciliationIdentity(
     operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
     || operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
+    || operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
   ) {
     return normalizeFixedHex(
       String(value),
@@ -4538,7 +4545,8 @@ export class StateTracker {
             '${SCS_ORACLE_UPDATE_OPERATION_PROFILE}',
             '${DUP_HEARTBEAT_OPERATION_PROFILE}',
             '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
-            '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}'
+            '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
+            '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}'
           )
         ),
         CHECK (
@@ -4572,6 +4580,13 @@ export class StateTracker {
           )
           OR (
             operation_profile = '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}'
+            AND target_sidechain_height IS NULL
+            AND target_sidechain_block_hash IS NULL
+            AND heartbeat_key_hex IS NULL
+            AND reconciliation_identity_digest IS NOT NULL
+          )
+          OR (
+            operation_profile = '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}'
             AND target_sidechain_height IS NULL
             AND target_sidechain_block_hash IS NULL
             AND heartbeat_key_hex IS NULL
@@ -4637,7 +4652,8 @@ export class StateTracker {
           '${SCS_ORACLE_UPDATE_OPERATION_PROFILE}',
           '${DUP_HEARTBEAT_OPERATION_PROFILE}',
           '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
-          '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}'
+          '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
+          '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}'
         )
           AND status IN ('pending', 'accepted', 'ambiguous');
 
@@ -13979,6 +13995,8 @@ export class StateTracker {
           operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
           || operationProfile
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
+          || operationProfile
+            === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
         )
         && this.getActiveErgoOperationalTransactionAttempts(operationProfile).length !== 0
       ) {

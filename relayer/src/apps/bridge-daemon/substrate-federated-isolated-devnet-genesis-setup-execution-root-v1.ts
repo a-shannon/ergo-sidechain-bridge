@@ -19,6 +19,13 @@ import {
   decodeSubstrateFederatedSettlementFamilyV1Profile,
 } from '../../substrate-federated-settlement-family-v1.js';
 import {
+  runErgoOperationalTransaction,
+} from './ergo-operational-transaction.js';
+import {
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  type ErgoOperationalExecutionResult,
+} from '../../relayer-core/ergo-operational-transaction-lifecycle.js';
+import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
   normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
@@ -72,9 +79,14 @@ import {
 } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt,
+  SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1,
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
+} from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1,
+  promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1,
 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
@@ -83,7 +95,20 @@ import {
 } from '../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+  createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+} from '../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+import {
+  discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
+  type SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1,
+} from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
+  observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1,
+  type SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
+} from '../../substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
@@ -99,6 +124,9 @@ import {
   createSubstrateFederatedLocalDevnetGenesisJournalV1,
   type SubstrateFederatedLocalDevnetGenesisJournalV1,
 } from '../../substrate-federated-local-devnet-genesis-journal-v1.js';
+import {
+  createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1,
+} from '../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-genesis-setup-execution-root.v1' as const;
@@ -106,6 +134,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT
   'e2s.substrate-federated-isolated-devnet-peg-in-candidate-execution-root.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXECUTION_ROOT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-check-execution-root.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-execution-root.v1' as const;
 
 const ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1';
@@ -113,12 +143,16 @@ const PEG_IN_CANDIDATE_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1';
 const PEG_IN_SOURCE_LOCK_CHECK_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXECUTION_ROOT_V1';
+const PEG_IN_SOURCE_LOCK_ROOT_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1';
 const STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_V1';
 const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_V1';
 const PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_V1';
+const PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_V1';
 const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1';
 const FEDERATION_EPOCH = '1';
@@ -169,11 +203,11 @@ const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST = Object.freeze({
     SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   operations: Object.freeze([
     'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
-    'discoverSubstrateFederatedRewardInputsV2',
+    'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
     'assertSubstrateFederatedRewardInputDiscoveryV2Provenance',
     'buildSubstrateFederatedIsolatedDevnetPegInCandidateV1',
     'assertSubstrateFederatedIsolatedDevnetPegInCandidateV1',
-    'discoverSubstrateFederatedRewardInputsV2.postCandidateRevalidation',
+    'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1.postCandidateRevalidation',
     'assertSubstrateFederatedRewardInputDiscoveryV2Provenance.postCandidateRevalidation',
   ]),
   exposedCapabilities: Object.freeze([]),
@@ -194,7 +228,7 @@ const PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST = Object.freeze({
   operations: Object.freeze([
     'setupSession.runForExecutionRetainingPegInSigner',
     'setupSession.checkPegInSourceLock',
-    'discoverSubstrateFederatedRewardInputsV2.postCheckRevalidation',
+    'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1.postCheckRevalidation',
     'assertSubstrateFederatedRewardInputDiscoveryV2Provenance.postCheckRevalidation',
   ]),
   exposedCapabilities: Object.freeze([]),
@@ -204,6 +238,31 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC
   sha256CanonicalJson(
     PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST,
     PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
+  );
+
+const PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST = Object.freeze({
+  schema:
+    'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-static-execution.v1',
+  version: 1 as const,
+  checkStaticExecutionManifestDigestHex:
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  operations: Object.freeze([
+    'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
+    'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1.preTransportRevalidation',
+    'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+    'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
+    'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    'runErgoOperationalTransaction',
+    'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+    'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1',
+  ]),
+  exposedCapabilities: Object.freeze([]),
+});
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1 =
+  sha256CanonicalJson(
+    PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST,
+    PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
   );
 
 export interface RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
@@ -324,11 +383,25 @@ export interface SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Re
       readonly postCheckReportDigestHex?: string;
       readonly postCheckTipHeight?: number;
       readonly postCheckTipHeaderIdHex?: string;
+      readonly preTransportReportDigestHex?: string;
+      readonly preTransportTipHeight?: number;
+      readonly preTransportTipHeaderIdHex?: string;
     }>;
     readonly candidate:
       Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
     readonly sourceLockCheck?:
       Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>;
+    readonly sourceLockExecution?: Readonly<{
+      readonly expectedTxId: string;
+      readonly transportStatus: 'accepted' | 'reconciled';
+      readonly durableAttemptDigestHex: string;
+      readonly journalDigestHex: string;
+      readonly confirmationDigestHex: string;
+      readonly confirmationHeight: number;
+      readonly confirmationHeaderIdHex: string;
+      readonly outputObservation:
+        Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
+    }>;
   }>;
   readonly checks: Readonly<{
     readonly setupAndFundingObservedInOneTargetLifetime: true;
@@ -439,6 +512,75 @@ export interface SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRo
   >;
 }
 
+export interface SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA;
+  readonly version: 1;
+  readonly status: 'peg_in_source_lock_creation_canonically_confirmed';
+  readonly staticExecutionManifestDigestHex: string;
+  readonly build:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
+  readonly process:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  readonly setup:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['setup'];
+  readonly pegIn: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1Receipt['pegIn']
+    & {
+      readonly sourceLockExecution: NonNullable<
+        SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']['sourceLockExecution']
+      >;
+      readonly fundingObservation: Readonly<
+        SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1Receipt['pegIn']['fundingObservation']
+        & {
+          readonly preTransportReportDigestHex: string;
+          readonly preTransportTipHeight: number;
+          readonly preTransportTipHeaderIdHex: string;
+        }
+      >;
+    }
+  >;
+  readonly checks: Readonly<{
+    readonly exactCheckedCandidatePromotedOnce: true;
+    readonly sourceFundingRevalidatedImmediatelyBeforeAuthorization: true;
+    readonly durableReservationPrecededTransport: true;
+    readonly exactLoopbackTransportConsumedCheckedBytesOnce: true;
+    readonly canonicalConfirmationObservedByBothNodes: true;
+    readonly exactSourceSpentAndOutputsObserved: true;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localSyntheticCompatibilityOnly: true;
+    readonly valuePathLocalSyntheticSigningPerformed: true;
+    readonly valuePathJvmNodeCheckPassed: true;
+    readonly valuePathSubmissionExecuted: true;
+    readonly valuePathBroadcastExecuted: true;
+    readonly sourceLockCreationConfirmed: true;
+    readonly sourceLockStillRefundable: true;
+    readonly sourceLockConsumptionEstablished: false;
+    readonly reserveLineageEstablished: false;
+    readonly mintAuthorized: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+    readonly processLossRecoveryEstablished: false;
+    readonly sourceConsensusIndependentlyAuthenticated: false;
+    readonly ergoConsensusIndependentlyAuthenticated: false;
+    readonly profileActivated: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1 {
+  readonly receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1Receipt
+  >;
+}
+
 interface PegInCandidatePlanV1 {
   readonly amountNanoErg: string;
   readonly recipientAddressHex: string;
@@ -512,7 +654,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInCandidateExecution
   const { buildReceipt, managed } = await runManagedCampaign(
     input,
     pegInPlan,
-    false,
+    'candidate',
   );
   const pegIn = managed.value.pegIn;
   if (pegIn === undefined) {
@@ -588,7 +730,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExe
   const { buildReceipt, managed } = await runManagedCampaign(
     input,
     pegInPlan,
-    true,
+    'check-source-lock',
   );
   const pegIn = managed.value.pegIn;
   if (
@@ -654,6 +796,90 @@ export async function runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExe
   return Object.freeze({ receipt });
 }
 
+/**
+ * Execute only the refundable source-lock creation on the owned LAB devnet.
+ * The successor reserve transition and every mint authority remain absent.
+ */
+export async function runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+  input:
+    Readonly<RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1>> {
+  const pegInPlan = normalizePegInCandidatePlan(input.pegIn);
+  const { buildReceipt, managed } = await runManagedCampaign(
+    input,
+    pegInPlan,
+    'execute-source-lock',
+  );
+  const pegIn = managed.value.pegIn;
+  if (
+    pegIn === undefined
+    || pegIn.sourceLockCheck === undefined
+    || pegIn.sourceLockExecution === undefined
+    || pegIn.fundingObservation.postCheckReportDigestHex === undefined
+    || pegIn.fundingObservation.postCheckTipHeight === undefined
+    || pegIn.fundingObservation.postCheckTipHeaderIdHex === undefined
+    || pegIn.fundingObservation.preTransportReportDigestHex === undefined
+    || pegIn.fundingObservation.preTransportTipHeight === undefined
+    || pegIn.fundingObservation.preTransportTipHeaderIdHex === undefined
+  ) {
+    throw new Error('isolated devnet peg-in source-lock execution was incomplete');
+  }
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA,
+    version: 1 as const,
+    status: 'peg_in_source_lock_creation_canonically_confirmed' as const,
+    staticExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    build: buildReceipt,
+    process: managed.receipt,
+    setup: {
+      lifecycle: managed.value.lifecycle,
+      transactions: managed.value.transactions,
+    },
+    pegIn: pegIn as SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1Receipt['pegIn'],
+    checks: {
+      exactCheckedCandidatePromotedOnce: true as const,
+      sourceFundingRevalidatedImmediatelyBeforeAuthorization: true as const,
+      durableReservationPrecededTransport: true as const,
+      exactLoopbackTransportConsumedCheckedBytesOnce: true as const,
+      canonicalConfirmationObservedByBothNodes: true as const,
+      exactSourceSpentAndOutputsObserved: true as const,
+      returnedValueContainsCapabilities: false as const,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true as const,
+      valuePathLocalSyntheticSigningPerformed: true as const,
+      valuePathJvmNodeCheckPassed: true as const,
+      valuePathSubmissionExecuted: true as const,
+      valuePathBroadcastExecuted: true as const,
+      sourceLockCreationConfirmed: true as const,
+      sourceLockStillRefundable: true as const,
+      sourceLockConsumptionEstablished: false as const,
+      reserveLineageEstablished: false as const,
+      mintAuthorized: false as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+      processLossRecoveryEstablished: false as const,
+      sourceConsensusIndependentlyAuthenticated: false as const,
+      ergoConsensusIndependentlyAuthenticated: false as const,
+      profileActivated: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+  };
+  const receipt = finalizeReceipt(
+    body,
+    PEG_IN_SOURCE_LOCK_ROOT_RECEIPT_DIGEST_DOMAIN,
+  );
+  return Object.freeze({ receipt });
+}
+
+type PegInActionV1 = 'candidate' | 'check-source-lock' | 'execute-source-lock';
+
 interface ManagedCampaignExecutionV1 {
   readonly buildReceipt:
     Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
@@ -668,7 +894,7 @@ async function runManagedCampaign(
   input:
     Readonly<RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input>,
   pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
-  checkSourceLock = false,
+  pegInAction: PegInActionV1 = 'candidate',
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   const buildInput = input.build;
   const lifecycleInput = input.lifecycle;
@@ -723,7 +949,7 @@ async function runManagedCampaign(
         target,
         journalRoots,
         pegInPlan,
-        checkSourceLock,
+        pegInAction,
       ),
     );
     assertCapabilityFreePlainData(managed, 'isolated devnet managed result');
@@ -789,6 +1015,16 @@ interface ExecutionActionResult {
     SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'];
 }
 
+const MANAGED_PEG_IN_SOURCE_LOCK_MATERIAL = new WeakMap<
+  object,
+  Readonly<{
+    postCheckFundingObservation:
+      Readonly<SubstrateFederatedRewardInputDiscoveryV2>;
+    postCheckOwnedFundingObservation:
+      Readonly<SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1>;
+  }>
+>();
+
 async function executeManagedSetupAction(
   input: Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapLifecycleV1Input>,
   setupSession:
@@ -800,7 +1036,7 @@ async function executeManagedSetupAction(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   journalRoots: Set<string>,
   pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
-  checkSourceLock: boolean,
+  pegInAction: PegInActionV1,
 ): Promise<Readonly<ExecutionActionResult>> {
   const completionDeadline = Date.now() + ACTION_COMPLETION_BUDGET_MS;
   const sourceHistory =
@@ -825,7 +1061,7 @@ async function executeManagedSetupAction(
     primaryNodeOrigin: target.primaryNodeOrigin,
     witnessNodeOrigin: target.witnessNodeOrigin,
   };
-  const batch = checkSourceLock
+  const batch = pegInAction !== 'candidate'
     ? await setupSession.runForExecutionRetainingPegInSigner(
       setupExecutionInput,
       target,
@@ -937,8 +1173,23 @@ async function executeManagedSetupAction(
         batch,
         target,
         Math.max(...finalTransactions.map(value => value.confirmationHeight)),
-        checkSourceLock,
+        pegInAction !== 'candidate',
       );
+      if (pegInAction === 'check-source-lock') {
+        discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
+          pegIn.sourceLockCheck!,
+        );
+      } else if (pegInAction === 'execute-source-lock') {
+        pegIn = await executeManagedPegInSourceLock(
+          pegIn,
+          batch,
+          target,
+          setupSession,
+          state,
+          observer,
+          completionDeadline,
+        );
+      }
       assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
         authorizer,
         target,
@@ -1012,8 +1263,12 @@ async function buildManagedPegInCandidate(
 ): Promise<
   SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']
 > {
-  const fundingObservation =
-    await discoverSubstrateFederatedRewardInputsV2(setupSession.signer);
+  const ownedFundingObservation =
+    await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(
+      setupSession.signer,
+      target,
+    );
+  const fundingObservation = ownedFundingObservation.observation;
   assertCapabilityFreePlainData(
     fundingObservation,
     'isolated devnet peg-in funding observation',
@@ -1078,8 +1333,13 @@ async function buildManagedPegInCandidate(
   ) {
     throw new Error('isolated devnet peg-in funding identity changed');
   }
+  const postCandidateOwnedFundingObservation =
+    await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(
+      setupSession.signer,
+      target,
+    );
   const postCandidateFundingObservation =
-    await discoverSubstrateFederatedRewardInputsV2(setupSession.signer);
+    postCandidateOwnedFundingObservation.observation;
   assertCapabilityFreePlainData(
     postCandidateFundingObservation,
     'isolated devnet post-candidate funding observation',
@@ -1113,6 +1373,9 @@ async function buildManagedPegInCandidate(
     | undefined;
   let postCheckFundingObservation:
     Readonly<SubstrateFederatedRewardInputDiscoveryV2> | undefined;
+  let postCheckOwnedFundingObservation:
+    Readonly<SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1>
+    | undefined;
   if (checkSourceLock) {
     sourceLockCheck = await setupSession.checkPegInSourceLock({
       sourceFundingBoxIdHex: sourceFundingInput.boxId,
@@ -1146,8 +1409,12 @@ async function buildManagedPegInCandidate(
     ) {
       throw new Error('isolated devnet peg-in source-lock check binding changed');
     }
-    postCheckFundingObservation =
-      await discoverSubstrateFederatedRewardInputsV2(setupSession.signer);
+    postCheckOwnedFundingObservation =
+      await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(
+        setupSession.signer,
+        target,
+      );
+    postCheckFundingObservation = postCheckOwnedFundingObservation.observation;
     assertCapabilityFreePlainData(
       postCheckFundingObservation,
       'isolated devnet post-check funding observation',
@@ -1177,7 +1444,7 @@ async function buildManagedPegInCandidate(
       );
     }
   }
-  return deepFreeze({
+  const result = deepFreeze({
     fundingObservation: {
       reportDigestHex: fundingObservation.reportDigestHex,
       observedAt: fundingObservation.observedAt,
@@ -1206,6 +1473,248 @@ async function buildManagedPegInCandidate(
     candidate,
     ...(sourceLockCheck === undefined ? {} : { sourceLockCheck }),
   });
+  if (
+    postCheckFundingObservation !== undefined
+    && postCheckOwnedFundingObservation !== undefined
+  ) {
+    MANAGED_PEG_IN_SOURCE_LOCK_MATERIAL.set(result, Object.freeze({
+      postCheckFundingObservation,
+      postCheckOwnedFundingObservation,
+    }));
+  }
+  return result;
+}
+
+async function executeManagedPegInSourceLock(
+  pegIn:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']>,
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  setupSession:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+  state: StateTracker,
+  observer:
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  completionDeadline: number,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']>> {
+  const material = MANAGED_PEG_IN_SOURCE_LOCK_MATERIAL.get(pegIn);
+  const sourceLockCheck = pegIn.sourceLockCheck;
+  if (material === undefined || sourceLockCheck === undefined) {
+    throw new Error('isolated source-lock execution material is unavailable');
+  }
+  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+    pegIn.candidate,
+    batch,
+    target,
+  );
+  const sourceFundingBox = packet.boxes.sourceFundingInput;
+  const preTransportOwnedFundingObservation =
+    await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(
+      setupSession.signer,
+      target,
+    );
+  const preTransport = preTransportOwnedFundingObservation.observation;
+  assertCapabilityFreePlainData(
+    preTransport,
+    'isolated devnet pre-transport funding observation',
+  );
+  deepFreeze(preTransport);
+  assertSubstrateFederatedRewardInputDiscoveryV2Provenance(preTransport);
+  assertPegInFundingObservation(
+    preTransport,
+    setupSession,
+    batch,
+    target,
+    material.postCheckFundingObservation.target.tipHeight,
+  );
+  if (
+    preTransport.genesisInputs.tracker.boxId !== sourceFundingBox.boxId
+    || sha256CanonicalJson(
+      preTransport.genesisInputs.tracker,
+      PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN,
+    ) !== pegIn.fundingObservation.sourceFundingBoxDigestHex
+  ) {
+    throw new Error(
+      'isolated devnet peg-in funding changed before source-lock authorization',
+    );
+  }
+  const executionCheck:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1> =
+    promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
+      sourceLockCheck,
+      target,
+    );
+  const sourceLockAuthorizer =
+    createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1({
+      target,
+      batch,
+      candidate: pegIn.candidate,
+      executionCheck,
+      postCheck: material.postCheckOwnedFundingObservation,
+      preTransport: preTransportOwnedFundingObservation,
+    });
+  const sourceLockJournal =
+    createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1({
+      state,
+      authorizer: sourceLockAuthorizer,
+      reconciliationIdentityDigestHex:
+        batch.targetBinding.executionTargetIdentityDigestHex,
+      targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+    });
+  if (await sourceLockJournal.reconcileActive(observer) !== 'none') {
+    throw new Error('unexpected prior source-lock attempt was reconciled');
+  }
+  const sourceLockTransport =
+    createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(
+      target,
+      sourceLockAuthorizer,
+    );
+  const sourceLockCreation = packet.transactions.sourceLockCreation;
+  const sourceLockCreationHeight =
+    sourceLockCreation.eip12Tx.outputs[0]?.creationHeight;
+  if (
+    !Number.isSafeInteger(sourceLockCreationHeight)
+    || Number(sourceLockCreationHeight) < 0
+  ) {
+    throw new Error('isolated source-lock creation height is invalid');
+  }
+  const execution = await runErgoOperationalTransaction({
+    operationProfile:
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+    expectedTxId: sourceLockCreation.txId,
+    sourceBoxId: sourceFundingBox.boxId,
+    inputBoxIds: [sourceFundingBox.boxId],
+    attemptedAtHeight: Number(sourceLockCreationHeight),
+    targetSidechainHeight: null,
+    targetSidechainBlockHashHex: null,
+    heartbeatKeyHex: null,
+    unsignedTransaction: sourceLockCreation.eip12Tx,
+  }, {
+    sign: async admission => {
+      assertSourceLockOperationalAdmission(
+        admission,
+        executionCheck,
+        sourceLockCreation.eip12Tx,
+        sourceFundingBox.boxId,
+      );
+      return Object.freeze({
+        nodeOrigin: target.primaryNodeOrigin,
+        signedTransactionDigestHex:
+          executionCheck.receipt.signedTransactionCanonicalJsonSha256Hex,
+        signerArtifact: executionCheck.signedCandidate,
+      });
+    },
+    check: async signed => {
+      if (
+        signed.signerArtifact !== executionCheck.signedCandidate
+        || signed.signedTransactionDigestHex
+          !== executionCheck.receipt.signedTransactionCanonicalJsonSha256Hex
+      ) {
+        throw new Error('isolated source-lock checked signer binding changed');
+      }
+      return Object.freeze({
+        checkResponseDigestHex:
+          executionCheck.checkedAcceptance.submissionHandle
+            .checkResponseDigestHex,
+        checkerArtifact:
+          executionCheck.checkedAcceptance.submissionHandle,
+      });
+    },
+    revalidate: async () => Object.freeze({
+      revalidationDigestHex: sourceLockAuthorizer.revalidationDigestHex,
+    }),
+    authorize: revalidated => sourceLockAuthorizer.authorize(revalidated),
+    reserve: authorization => sourceLockJournal.journal.reserve(authorization),
+    finalize: input => sourceLockJournal.journal.finalize(input),
+    submit: attempt => sourceLockTransport.submit(attempt),
+  });
+  assertSourceLockTransportExecution(execution, sourceLockCreation.txId);
+  const confirmation = await waitForCanonicalConfirmation(
+    observer,
+    sourceLockCreation.txId,
+    completionDeadline,
+  );
+  if (await sourceLockJournal.reconcileActive(observer) !== 'confirmed') {
+    throw new Error('source-lock durable reconciliation did not confirm');
+  }
+  if (await sourceLockJournal.revalidateConfirmed(observer) !== 1) {
+    throw new Error('source-lock confirmed attempt count changed');
+  }
+  const outputObservation =
+    await observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1({
+      target,
+      batch,
+      candidate: pegIn.candidate,
+      confirmation,
+    });
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
+    outputObservation,
+    target,
+  );
+  assertCapabilityFreePlainData(
+    outputObservation,
+    'isolated source-lock output observation',
+  );
+  return deepFreeze({
+    ...pegIn,
+    fundingObservation: {
+      ...pegIn.fundingObservation,
+      preTransportReportDigestHex: preTransport.reportDigestHex,
+      preTransportTipHeight: preTransport.target.tipHeight,
+      preTransportTipHeaderIdHex: preTransport.target.tipHeaderIdHex,
+    },
+    sourceLockExecution: {
+      expectedTxId: sourceLockCreation.txId,
+      transportStatus: execution.status === 'accepted'
+        ? 'accepted' as const
+        : 'reconciled' as const,
+      durableAttemptDigestHex: execution.durableAttemptDigestHex,
+      journalDigestHex: execution.journalDigestHex,
+      confirmationDigestHex: confirmation.observationDigestHex,
+      confirmationHeight: confirmation.confirmationHeight!,
+      confirmationHeaderIdHex: confirmation.confirmationHeaderIdHex!,
+      outputObservation,
+    },
+  });
+}
+
+function assertSourceLockOperationalAdmission(
+  admission: Parameters<
+    Parameters<typeof runErgoOperationalTransaction>[1]['sign']
+  >[0],
+  executionCheck:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1>,
+  unsignedTransaction: unknown,
+  sourceFundingBoxIdHex: string,
+): void {
+  if (
+    admission.operationProfile
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+    || admission.expectedTxId !== executionCheck.receipt.unsignedTransactionIdHex
+    || admission.sourceBoxId !== sourceFundingBoxIdHex
+    || admission.inputBoxIds.length !== 1
+    || admission.inputBoxIds[0] !== sourceFundingBoxIdHex
+    || admission.unsignedTransaction !== unsignedTransaction
+  ) {
+    throw new Error('isolated source-lock operational admission changed');
+  }
+}
+
+function assertSourceLockTransportExecution(
+  execution: ErgoOperationalExecutionResult,
+  expectedTxId: string,
+): asserts execution is Extract<
+  ErgoOperationalExecutionResult,
+  Readonly<{ status: 'accepted' | 'ambiguous' }>
+> {
+  if (
+    (execution.status !== 'accepted' && execution.status !== 'ambiguous')
+    || execution.expectedTxId !== expectedTxId
+    || execution.durableAttemptRecorded !== true
+  ) {
+    throw new Error('isolated source-lock transaction was not transported');
+  }
 }
 
 function assertPegInFundingObservation(

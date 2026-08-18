@@ -28,6 +28,14 @@ const mocked = vi.hoisted(() => ({
   pegInCandidateBuild: vi.fn(),
   pegInCandidateAssert: vi.fn(),
   pegInSourceLockCheck: vi.fn(),
+  pegInSourceLockPromote: vi.fn(),
+  pegInSourceLockDiscard: vi.fn(),
+  ownedRewardDiscovery: vi.fn(),
+  pegInSourceLockAuthorizer: vi.fn(),
+  pegInSourceLockTransport: vi.fn(),
+  pegInSourceLockJournal: vi.fn(),
+  pegInSourceLockOutputObserve: vi.fn(),
+  pegInSourceLockOutputAssert: vi.fn(),
   execute: vi.fn(),
   revalidator: vi.fn(),
   observer: vi.fn(),
@@ -67,6 +75,12 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () =
   buildSubstrateFederatedIsolatedDevnetPegInCandidateV1:
     mocked.pegInCandidateBuild,
 }));
+vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
+  discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
+    mocked.pegInSourceLockDiscard,
+  promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
+    mocked.pegInSourceLockPromote,
+}));
 vi.mock('../../substrate-federated-settlement-family-v1.js', () => ({
   decodeSubstrateFederatedSettlementFamilyV1Profile: mocked.familyDecode,
 }));
@@ -98,9 +112,29 @@ vi.mock('../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-
 vi.mock('../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1:
     mocked.transport,
+  createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1:
+    mocked.pegInSourceLockTransport,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js', () => ({
+  createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1:
+    mocked.pegInSourceLockAuthorizer,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
+  discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1:
+    mocked.ownedRewardDiscovery,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1:
+    mocked.pegInSourceLockOutputAssert,
+  observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1:
+    mocked.pegInSourceLockOutputObserve,
 }));
 vi.mock('../../substrate-federated-local-devnet-genesis-journal-v1.js', () => ({
   createSubstrateFederatedLocalDevnetGenesisJournalV1: mocked.journal,
+}));
+vi.mock('../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js', () => ({
+  createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1:
+    mocked.pegInSourceLockJournal,
 }));
 vi.mock('../../state-tracker.js', () => ({
   StateTracker: class {
@@ -114,9 +148,11 @@ import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
@@ -133,6 +169,8 @@ describe('isolated devnet genesis setup execution root V1', () => {
   let postCandidateFundingObservation:
     ReturnType<typeof validPegInFundingObservation>;
   let postCheckFundingObservation:
+    ReturnType<typeof validPegInFundingObservation>;
+  let preTransportFundingObservation:
     ReturnType<typeof validPegInFundingObservation>;
 
   beforeEach(() => {
@@ -155,6 +193,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
     postCheckFundingObservation.observedAt = '2026-08-18T09:02:00.000Z';
     postCheckFundingObservation.target.tipHeight = 132;
     postCheckFundingObservation.target.tipHeaderIdHex = digest('0');
+    preTransportFundingObservation = structuredClone(fundingObservation);
+    preTransportFundingObservation.reportDigestHex = digest('6');
+    preTransportFundingObservation.observedAt = '2026-08-18T09:03:00.000Z';
+    preTransportFundingObservation.target.tipHeight = 133;
+    preTransportFundingObservation.target.tipHeaderIdHex = digest('1');
 
     mocked.build.mockImplementation(async () => {
       order.push('build');
@@ -207,15 +250,29 @@ describe('isolated devnet genesis setup execution root V1', () => {
         order.push('ergo:rewards:peg-in:revalidate');
         return postCandidateFundingObservation;
       }
-      order.push('ergo:rewards:peg-in:post-check');
-      return postCheckFundingObservation;
+      if (rewardDiscoveryCount === 4) {
+        order.push('ergo:rewards:peg-in:post-check');
+        return postCheckFundingObservation;
+      }
+      order.push('ergo:rewards:peg-in:pre-transport');
+      return preTransportFundingObservation;
     });
+    mocked.ownedRewardDiscovery.mockImplementation(async () => ({
+      schema:
+        'e2s.substrate-federated-isolated-devnet-owned-reward-input-discovery.v1',
+      observation: await mocked.rewardDiscovery(),
+      processBindingDigestHex:
+        currentBatch.targetBinding.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        currentBatch.targetBinding.executionTargetIdentityDigestHex,
+    }));
     mocked.rewardDiscoveryAssert.mockImplementation(value => {
       order.push('peg-in:funding:assert');
       if (
         value !== fundingObservation
         && value !== postCandidateFundingObservation
         && value !== postCheckFundingObservation
+        && value !== preTransportFundingObservation
       ) {
         throw new Error('funding observation provenance changed');
       }
@@ -274,6 +331,77 @@ describe('isolated devnet genesis setup execution root V1', () => {
     mocked.pegInSourceLockCheck.mockImplementation(async input => {
       order.push('peg-in:source-lock:check');
       return validPegInSourceLockCheck(input, currentBatch.targetBinding);
+    });
+    mocked.pegInSourceLockPromote.mockImplementation(receipt => {
+      order.push('peg-in:source-lock:promote');
+      return validPegInSourceLockExecutionCheck(receipt);
+    });
+    mocked.pegInSourceLockDiscard.mockImplementation(() => {
+      order.push('peg-in:source-lock:discard');
+    });
+    mocked.pegInSourceLockAuthorizer.mockImplementation(() => ({
+      schema:
+        'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer.v1',
+      revalidationDigestHex: digest('2'),
+      authorize: vi.fn(revalidated => {
+        order.push('peg-in:source-lock:authorize');
+        return {
+          authorizationDigestHex: digest('3'),
+          authorizationArtifact: { revalidated },
+        };
+      }),
+    }));
+    mocked.pegInSourceLockTransport.mockImplementation(() => ({
+      submit: vi.fn(async attempt => {
+        order.push('peg-in:source-lock:transport');
+        return {
+          status: 'accepted' as const,
+          submittedTxId: attempt.authorization.revalidated.checked.signed
+            .admission.expectedTxId,
+          responseDigestHex: digest('4'),
+        };
+      }),
+    }));
+    let sourceLockReconciliationCount = 0;
+    mocked.pegInSourceLockJournal.mockImplementation(() => ({
+      journal: {
+        reserve: vi.fn(authorization => {
+          order.push('peg-in:source-lock:journal:reserve');
+          return {
+            durableAttemptDigestHex: digest('5'),
+            durableArtifact: { authorization },
+          };
+        }),
+        finalize: vi.fn(({ submission }) => {
+          order.push('peg-in:source-lock:journal:finalize');
+          return {
+            status: submission.status,
+            journalDigestHex: digest('6'),
+          };
+        }),
+      },
+      reconcileActive: vi.fn(async () => {
+        sourceLockReconciliationCount += 1;
+        const status = sourceLockReconciliationCount === 1
+          ? 'none' as const
+          : 'confirmed' as const;
+        order.push(`peg-in:source-lock:journal:reconcile:${status}`);
+        return status;
+      }),
+      revalidateConfirmed: vi.fn(async () => {
+        order.push('peg-in:source-lock:journal:revalidate');
+        return 1;
+      }),
+    }));
+    mocked.pegInSourceLockOutputObserve.mockImplementation(async () => {
+      order.push('peg-in:source-lock:outputs');
+      return validPegInSourceLockOutputObservation();
+    });
+    mocked.pegInSourceLockOutputAssert.mockImplementation(value => {
+      if (value.schema
+        !== 'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-output-observation.v1') {
+        throw new Error('source-lock output observation changed');
+      }
     });
   });
 
@@ -488,6 +616,87 @@ describe('isolated devnet genesis setup execution root V1', () => {
       .toBe(postCheckFundingObservation.reportDigestHex);
     expect(result.receipt.pegIn.sourceLockCheck.signedTransactionIdHex)
       .toBe(digest('8'));
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it('reserves, submits, confirms, and observes only the refundable source-lock creation', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+        pegInRootInput(),
+      );
+
+    expect(order.indexOf('peg-in:source-lock:check')).toBeLessThan(
+      order.indexOf('ergo:rewards:peg-in:pre-transport'),
+    );
+    expect(order.indexOf('ergo:rewards:peg-in:pre-transport')).toBeLessThan(
+      order.indexOf('peg-in:source-lock:promote'),
+    );
+    expect(order.indexOf('peg-in:source-lock:journal:reserve')).toBeLessThan(
+      order.indexOf('peg-in:source-lock:transport'),
+    );
+    expect(order.indexOf('peg-in:source-lock:transport')).toBeLessThan(
+      order.indexOf('observe:sourceLock'),
+    );
+    expect(order.indexOf('observe:sourceLock')).toBeLessThan(
+      order.indexOf('peg-in:source-lock:outputs'),
+    );
+    expect(mocked.pegInSourceLockPromote).toHaveBeenCalledTimes(1);
+    expect(mocked.pegInSourceLockDiscard).not.toHaveBeenCalled();
+    expect(mocked.pegInSourceLockOutputObserve).toHaveBeenCalledWith({
+      target: executionTarget(),
+      batch: currentBatch,
+      candidate: expect.any(Object),
+      confirmation: expect.objectContaining({
+        status: 'confirmed',
+        confirmationHeight: 113,
+      }),
+    });
+    expect(result.receipt).toMatchObject({
+      status: 'peg_in_source_lock_creation_canonically_confirmed',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+      checks: {
+        exactCheckedCandidatePromotedOnce: true,
+        sourceFundingRevalidatedImmediatelyBeforeAuthorization: true,
+        durableReservationPrecededTransport: true,
+        exactLoopbackTransportConsumedCheckedBytesOnce: true,
+        canonicalConfirmationObservedByBothNodes: true,
+        exactSourceSpentAndOutputsObserved: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        valuePathSubmissionExecuted: true,
+        valuePathBroadcastExecuted: true,
+        sourceLockCreationConfirmed: true,
+        sourceLockStillRefundable: true,
+        sourceLockConsumptionEstablished: false,
+        reserveLineageEstablished: false,
+        mintAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+      pegIn: {
+        fundingObservation: {
+          preTransportReportDigestHex:
+            preTransportFundingObservation.reportDigestHex,
+          preTransportTipHeight: 133,
+        },
+        sourceLockExecution: {
+          expectedTxId: digest('8'),
+          transportStatus: 'accepted',
+          durableAttemptDigestHex: digest('5'),
+          journalDigestHex: digest('6'),
+          outputObservation: {
+            status: 'exact_source_spent_and_refundable_outputs_unspent',
+          },
+        },
+      },
+    });
     expect(containsFunction(result)).toBe(false);
     expect(JSON.stringify(result)).not.toMatch(
       /(?:signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
@@ -794,6 +1003,12 @@ function validObserver(order: string[]) {
       'e2s.substrate-federated-isolated-devnet-genesis-confirmation-observer.v1',
     reconciliationIdentityDigestHex: digest('6'),
     observe: vi.fn(async (expectedTxId: string) => {
+      if (expectedTxId === digest('8')) {
+        const round = observationCount.get(expectedTxId) ?? 0;
+        observationCount.set(expectedTxId, round + 1);
+        order.push('observe:sourceLock');
+        return confirmation(expectedTxId, 3, round);
+      }
       const index = setupTransactions().findIndex(value =>
         value.issuance.unsignedTransactionIdHex === expectedTxId
       );
@@ -1225,6 +1440,50 @@ function validPegInSourceLockCheck(
     },
     receiptDigestHex: digest('5'),
   } as const;
+}
+
+function validPegInSourceLockExecutionCheck(
+  receipt: ReturnType<typeof validPegInSourceLockCheck>,
+) {
+  const signedCandidate = Object.freeze({
+    profile: 'synthetic-source-lock-signed-candidate',
+    txId: receipt.signedTransactionIdHex,
+    signedTransactionDigestHex:
+      receipt.signedTransactionCanonicalJsonSha256Hex,
+  });
+  const submissionHandle = Object.freeze({
+    profile: 'synthetic-source-lock-submission-handle',
+    checkResponseDigestHex: receipt.checkResponseSha256Hex,
+  });
+  return Object.freeze({
+    receipt,
+    signedCandidate,
+    checkedAcceptance: Object.freeze({
+      checked: Object.freeze({ status: 'PASS' }),
+      submissionHandle,
+    }),
+  });
+}
+
+function validPegInSourceLockOutputObservation() {
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-output-observation.v1',
+    version: 1,
+    status: 'exact_source_spent_and_refundable_outputs_unspent',
+    expectedTxId: digest('8'),
+    observationDigestHex: digest('9'),
+    boundaries: Object.freeze({
+      sourceFundingSpent: true,
+      sourceLockUnspentAndRefundable: true,
+      transitionFeeFundingUnspent: true,
+      sourceLockConsumptionEstablished: false,
+      reserveLineageEstablished: false,
+      mintAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+    }),
+  } as const);
 }
 
 const ROLE_ORDER = [

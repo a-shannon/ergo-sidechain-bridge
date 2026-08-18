@@ -63,6 +63,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-ergo-node-build-v1.ts',
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
       'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+      'substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts',
       'substrate-federated-isolated-devnet-reward-input-discovery-v1.ts',
       'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
       'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
@@ -71,7 +72,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts',
       'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-candidate-v1.ts',
+      'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts',
+      'substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.ts',
       'substrate-federated-local-devnet-genesis-journal-v1.ts',
+      'substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts',
       'substrate-federated-settlement-family-v1.ts',
     ]),
   ],
@@ -157,6 +161,13 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         ]),
       ],
       [
+        'substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts',
+        new Set([
+          'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+          'SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1',
+        ]),
+      ],
+      [
         'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
         new Set([
           'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
@@ -169,9 +180,12 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         new Set([
           'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt',
+          'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1',
           'SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
+          'discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
+          'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
         ]),
       ],
       [
@@ -186,6 +200,21 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
         new Set([
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+          'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts',
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
+          'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1',
+          'SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
         ]),
       ],
       [
@@ -211,6 +240,12 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedLocalDevnetGenesisJournalV1',
           'SubstrateFederatedLocalDevnetGenesisJournalV1',
+        ]),
+      ],
+      [
+        'substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts',
+        new Set([
+          'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
         ]),
       ],
       [
@@ -297,6 +332,12 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         ]),
       ],
       [
+        '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js',
+        new Set([
+          'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+        ]),
+      ],
+      [
         '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
         new Set([
           'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
@@ -304,8 +345,31 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         ]),
       ],
       [
+        '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js',
+        new Set([
+          'discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
+          'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
+        ]),
+      ],
+      [
         '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js',
-        new Set(['createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1']),
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+          'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js',
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
+          'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1',
+        ]),
       ],
       [
         '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
@@ -326,6 +390,12 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-local-devnet-genesis-journal-v1.js',
         new Set(['createSubstrateFederatedLocalDevnetGenesisJournalV1']),
       ],
+      [
+        '../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js',
+        new Set([
+          'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
+        ]),
+      ],
     ]),
   ],
 ]);
@@ -345,15 +415,20 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
+      'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1Receipt',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
+      'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
     ]),
   ],
 ]);

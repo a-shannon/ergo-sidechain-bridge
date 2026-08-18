@@ -34,8 +34,15 @@ const boundary = vi.hoisted(() => {
     schema:
       'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v1',
   });
+  const sourceLockAuthorizer = Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer.v1',
+  });
   const authorizationArtifact = Object.freeze({
     role: 'lab-authorization',
+  });
+  const sourceLockAuthorizationArtifact = Object.freeze({
+    role: 'source-lock-lab-authorization',
   });
   return {
     expectedTxId,
@@ -46,7 +53,9 @@ const boundary = vi.hoisted(() => {
     signedCandidate,
     checkedHandle,
     authorizer,
+    sourceLockAuthorizer,
     authorizationArtifact,
+    sourceLockAuthorizationArtifact,
     handleProcessBindingDigestHex: '11'.repeat(32),
     handleExecutionTargetIdentityDigestHex: '10'.repeat(32),
     signedTransaction: Object.freeze({ id: expectedTxId, proofs: ['opaque'] }),
@@ -84,6 +93,35 @@ vi.mock(
         || expectation.authorizationDigestHex !== AUTHORIZATION_DIGEST
       ) {
         throw new Error('synthetic broadcast authorization is missing');
+      }
+    },
+  }),
+);
+
+vi.mock(
+  './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1: (
+      value: unknown,
+      target: unknown,
+    ) => {
+      if (
+        value !== boundary.sourceLockAuthorizer
+        || target !== processBoundary.target
+      ) {
+        throw new Error('synthetic source-lock authorizer provenance is missing');
+      }
+    },
+    assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1: (
+      value: unknown,
+      authorization: Readonly<{ authorizationArtifact?: unknown }>,
+    ) => {
+      if (
+        value !== boundary.sourceLockAuthorizer
+        || authorization.authorizationArtifact
+          !== boundary.sourceLockAuthorizationArtifact
+      ) {
+        throw new Error('synthetic source-lock authorization is missing');
       }
     },
   }),
@@ -164,7 +202,11 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+  createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  executeErgoOperationalTransaction,
+} from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
   type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
@@ -328,6 +370,75 @@ describe('isolated devnet checked submission transport V1', () => {
     expect(JSON.stringify(node.post.mock.calls[0]?.[2])).not.toMatch(
       /api[_-]?key|authorization|cookie|proxy.*true/i,
     );
+  });
+
+  it('uses the same exact-byte one-shot transport for the dedicated source-lock authorization', async () => {
+    node.post.mockResolvedValue({
+      status: 200,
+      data: boundary.expectedTxId,
+    });
+    const transport =
+      createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(
+        processBoundary.target,
+        boundary.sourceLockAuthorizer as any,
+      );
+
+    const result = await executeErgoOperationalTransaction({
+      operationProfile:
+        'e2s.substrate-federated-local-devnet-peg-in-source-lock-operation.v1',
+      expectedTxId: boundary.expectedTxId,
+      sourceBoxId: SOURCE_BOX_ID,
+      inputBoxIds: [SOURCE_BOX_ID],
+      attemptedAtHeight: 720,
+      targetSidechainHeight: null,
+      targetSidechainBlockHashHex: null,
+      heartbeatKeyHex: null,
+      unsignedTransaction: Object.freeze({ inputs: [{ boxId: SOURCE_BOX_ID }] }),
+    }, {
+      signer: {
+        sign: async () => ({
+          nodeOrigin: boundary.nodeOrigin,
+          signedTransactionDigestHex: boundary.signedTransactionDigestHex,
+          signerArtifact: boundary.signedCandidate,
+        }),
+      },
+      checker: {
+        check: async () => ({
+          checkResponseDigestHex: boundary.checkResponseDigestHex,
+          checkerArtifact: boundary.checkedHandle,
+        }),
+      },
+      revalidator: {
+        revalidate: async () => ({ revalidationDigestHex: POST_CHECK_DIGEST }),
+      },
+      broadcastAuthorizer: {
+        authorize: () => ({
+          authorizationDigestHex: AUTHORIZATION_DIGEST,
+          authorizationArtifact: boundary.sourceLockAuthorizationArtifact,
+        }),
+      },
+      journal: {
+        reserve: () => ({
+          durableAttemptDigestHex: ATTEMPT_DIGEST,
+          durableArtifact: Object.freeze({ role: 'source-lock-attempt' }),
+        }),
+        finalize: ({ submission }) => ({
+          status: submission.status,
+          journalDigestHex: JOURNAL_DIGEST,
+        }),
+      },
+      submitter: transport,
+    });
+
+    expect(result).toMatchObject({
+      status: 'accepted',
+      expectedTxId: boundary.expectedTxId,
+      submittedTxId: boundary.expectedTxId,
+      durableAttemptRecorded: true,
+    });
+    expect(node.post).toHaveBeenCalledTimes(1);
+    expect(node.post.mock.calls[0]?.[0]).toBe('http://127.0.0.1:9051/transactions');
+    expect(node.post.mock.calls[0]?.[1]).toBe(boundary.signedTransaction);
   });
 
   it('contains a forged authorization before consuming signed bytes', async () => {

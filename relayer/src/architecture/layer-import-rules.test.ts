@@ -121,6 +121,10 @@ describe('layer import rules', () => {
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const authorizerTarget =
       'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts';
+    const sourceLockAuthorizerTarget =
+      'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts';
+    const ownedRewardDiscoveryTarget =
+      'substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts';
     const transportTarget =
       'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
     expect(inspect({
@@ -131,9 +135,18 @@ describe('layer import rules', () => {
         } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
         import {
           createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+          createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
         } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+        import {
+          createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+        } from '../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+        import {
+          discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
+        } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
       `,
       [authorizerTarget]: 'export const authorizer = true;',
+      [sourceLockAuthorizerTarget]: 'export const authorizer = true;',
+      [ownedRewardDiscoveryTarget]: 'export const discovery = true;',
       [transportTarget]: 'export const transport = true;',
     })).toEqual([]);
 
@@ -208,6 +221,17 @@ describe('layer import rules', () => {
       [transportTarget]: 'export const transport = true;',
     }).map(violation => violation.message)).toEqual([
       `apps must not import an unclassified legacy module: ${transportTarget}`,
+    ]);
+
+    expect(inspect({
+      'apps/bridge-daemon/other-execution-root.ts': `
+        import {
+          createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+        } from '../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+      `,
+      [sourceLockAuthorizerTarget]: 'export const authorizer = true;',
+    }).map(violation => violation.message)).toEqual([
+      `apps must not import an unclassified legacy module: ${sourceLockAuthorizerTarget}`,
     ]);
   });
 

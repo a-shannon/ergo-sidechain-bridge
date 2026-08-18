@@ -8,6 +8,7 @@ import {
   promoteLocalWasmCheckedTransactionForSubmissionV1,
   type LocalWasmCheckedSubmissionAcceptanceV1,
   type LocalWasmExactBytesSignedCheckCandidate,
+  type LocalWasmOpaqueCheckResult,
 } from './fleet-signer.js';
 import { deriveUnsignedTransactionId } from './ergo-unsigned-transaction.js';
 import {
@@ -91,6 +92,33 @@ const FAMILY_EXECUTION_BATCHES = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     familyCompilerBinding:
       Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  }>
+>();
+const PEG_IN_SOURCE_LOCK_CHECK_MATERIAL = new WeakMap<
+  object,
+  Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    binding:
+      Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+    signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
+    checked: Readonly<LocalWasmOpaqueCheckResult>;
+  }>
+>();
+
+export interface SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1 {
+  readonly receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>;
+  readonly signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
+  readonly checkedAcceptance:
+    Readonly<LocalWasmCheckedSubmissionAcceptanceV1>;
+}
+
+const PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS = new WeakMap<
+  object,
+  Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    binding:
+      Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
   }>
 >();
 
@@ -194,6 +222,86 @@ export interface SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt {
     readonly productionReadinessEstablished: false;
   }>;
   readonly receiptDigestHex: string;
+}
+
+/** Promote the exact in-process source-lock check once inside the static LAB root. */
+export function promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
+  receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1> {
+  const material = PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.get(receipt);
+  const current =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (
+    material === undefined
+    || material.target !== target
+    || material.binding.processBindingDigestHex
+      !== current.processBindingDigestHex
+    || material.binding.executionTargetIdentityDigestHex
+      !== current.executionTargetIdentityDigestHex
+    || receipt.target.processBindingDigestHex
+      !== current.processBindingDigestHex
+    || receipt.target.executionTargetIdentityDigestHex
+      !== current.executionTargetIdentityDigestHex
+  ) {
+    throw new Error(
+      'isolated peg-in source-lock check lacks exact execution provenance',
+    );
+  }
+  PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.delete(receipt);
+  const promoted = Object.freeze({
+    receipt,
+    signedCandidate: material.signedCandidate,
+    checkedAcceptance:
+      promoteLocalWasmCheckedTransactionForSubmissionV1(
+        material.signedCandidate,
+        material.checked,
+        current,
+      ),
+  });
+  PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS.set(promoted, Object.freeze({
+    target,
+    binding: current,
+  }));
+  return promoted;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1(
+  value:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const material = PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS.get(value);
+  const current =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (
+    material === undefined
+    || material.target !== target
+    || material.binding.processBindingDigestHex
+      !== current.processBindingDigestHex
+    || material.binding.executionTargetIdentityDigestHex
+      !== current.executionTargetIdentityDigestHex
+    || value.receipt.target.processBindingDigestHex
+      !== current.processBindingDigestHex
+    || value.receipt.target.executionTargetIdentityDigestHex
+      !== current.executionTargetIdentityDigestHex
+    || value.signedCandidate.txId !== value.receipt.signedTransactionIdHex
+    || value.checkedAcceptance.submissionHandle.txId
+      !== value.receipt.signedTransactionIdHex
+  ) {
+    throw new Error(
+      'isolated peg-in source-lock execution check binding changed',
+    );
+  }
+  return current;
+}
+
+export function discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
+  receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>,
+): void {
+  PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.delete(receipt);
 }
 
 export interface SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2 {
@@ -708,13 +816,20 @@ async function runPegInSourceLockCheck(
       productionReadinessEstablished: false as const,
     }),
   });
-  return Object.freeze({
+  const receipt = Object.freeze({
     ...body,
     receiptDigestHex: sha256CanonicalJson(
       body,
       PEG_IN_SOURCE_LOCK_CHECK_DIGEST_DOMAIN,
     ),
   });
+  PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.set(receipt, Object.freeze({
+    target,
+    binding: after,
+    signedCandidate: prepared.signedCandidate,
+    checked,
+  }));
+  return receipt;
 }
 
 /** Reconstruct G1dA-G1dF and perform G1dG without wider capabilities. */

@@ -10,6 +10,9 @@ import {
   type LocalWasmExactBytesSignedCheckCandidate,
 } from './fleet-signer.js';
 import {
+  type ErgoOperationalTransactionExecutionPorts,
+} from './relayer-core/ergo-operational-transaction-lifecycle.js';
+import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
   assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1,
   type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
@@ -20,6 +23,11 @@ import {
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
 } from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1,
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+  type SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+} from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
@@ -36,6 +44,12 @@ const SUBMISSION_RESPONSE_DIGEST_DOMAIN =
 
 type Transport =
   SubstrateFederatedLocalDevnetGenesisExecutionPorts['transport'];
+type SourceLockSubmitter =
+  ErgoOperationalTransactionExecutionPorts['submitter'];
+type AcceptedOrAmbiguousSubmission = Exclude<
+  SubstrateFederatedLocalDevnetGenesisSubmission,
+  Readonly<{ status: 'rejected' }>
+>;
 
 /**
  * Create the only transport that may consume a FED-6-LAB checked submission
@@ -139,6 +153,91 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
   });
 }
 
+/** Submit one exact source-lock creation after its dedicated authorization. */
+export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1>,
+): Readonly<SourceLockSubmitter> {
+  const binding =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(
+    authorizer,
+    target,
+  );
+  if (
+    target.primaryNodeOrigin
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
+    || target.primaryMining !== true
+    || target.witnessReadOnly !== true
+  ) {
+    throw new Error('isolated source-lock transport target binding is invalid');
+  }
+  return Object.freeze({
+    submit: async attempt => {
+      const current =
+        assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      if (
+        current.processBindingDigestHex !== binding.processBindingDigestHex
+        || current.executionTargetIdentityDigestHex
+          !== binding.executionTargetIdentityDigestHex
+      ) {
+        throw new Error('isolated source-lock transport process binding changed');
+      }
+      assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+        authorizer,
+        attempt.authorization,
+      );
+      const checked = attempt.authorization.revalidated.checked;
+      const admission = checked.signed.admission;
+      if (
+        checked.signed.nodeOrigin
+          !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
+      ) {
+        throw new Error('isolated source-lock transport target origin changed');
+      }
+      const signedCandidate = checked.signed.signerArtifact;
+      assertLocalWasmSignedCheckCandidateProvenance(signedCandidate);
+      const exactSignedCandidate =
+        signedCandidate as LocalWasmExactBytesSignedCheckCandidate;
+      if (
+        typeof exactSignedCandidate.signedTransactionBytesSha256Hex !== 'string'
+        || typeof exactSignedCandidate.signedTransactionBytesLength !== 'number'
+      ) {
+        throw new Error('isolated source-lock transport requires exact signed bytes');
+      }
+      const submissionHandle = checked.checkerArtifact;
+      assertLocalWasmCheckedSubmissionHandleV1Provenance(submissionHandle);
+      const exactHandle =
+        submissionHandle as Readonly<LocalWasmCheckedSubmissionHandleV1>;
+      assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+        exactHandle,
+        binding,
+      );
+      assertExactAttemptBinding(
+        exactHandle,
+        exactSignedCandidate,
+        admission.expectedTxId,
+        checked.signed.nodeOrigin,
+        checked.signed.signedTransactionDigestHex,
+        checked.checkResponseDigestHex,
+      );
+      return await consumeLocalWasmCheckedSubmissionHandleV1(
+        exactHandle,
+        exactSignedCandidate,
+        async signedTransaction => await submitExactTransaction(
+          signedTransaction,
+          admission.expectedTxId,
+          attempt.durableAttemptDigestHex,
+          attempt.authorization.authorizationDigestHex,
+          exactHandle,
+          binding,
+        ),
+      );
+    },
+  });
+}
+
 function assertExactAttemptBinding(
   handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
   signedCandidate: LocalWasmExactBytesSignedCheckCandidate,
@@ -171,7 +270,7 @@ async function submitExactTransaction(
   handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
   binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
-): Promise<SubstrateFederatedLocalDevnetGenesisSubmission> {
+): Promise<AcceptedOrAmbiguousSubmission> {
   try {
     const response = await axios.post(
       `${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN}${SUBMISSION_PATH}`,
@@ -232,7 +331,7 @@ async function submitExactTransaction(
 
 function ambiguousResponse(
   input: SubmissionDigestInput,
-): SubstrateFederatedLocalDevnetGenesisSubmission {
+): AcceptedOrAmbiguousSubmission {
   return Object.freeze({
     status: 'ambiguous' as const,
     submittedTxId: null,

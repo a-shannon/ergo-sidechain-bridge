@@ -307,15 +307,21 @@ describe('broadcast surface isolation', () => {
     ]);
   });
 
-  it('keeps the FED-6-LAB checked transport dormant and outside no-submit roots', () => {
+  it('keeps the FED-6-LAB checked transport confined to its static execution root', () => {
     const sources = productionSources();
     const executionRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const authorizerFile =
       'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts';
+    const sourceLockAuthorizerFile =
+      'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts';
     const transportFile =
       'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
     const authorizer = readFileSync(join(srcRoot, authorizerFile), 'utf-8');
+    const sourceLockAuthorizer = readFileSync(
+      join(srcRoot, sourceLockAuthorizerFile),
+      'utf-8',
+    );
     const transport = readFileSync(join(srcRoot, transportFile), 'utf-8');
     const frozenNoSubmit = [
       'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
@@ -353,12 +359,32 @@ describe('broadcast surface isolation', () => {
     )).toEqual([executionRoot, transportFile]);
     expect(filesImporting(
       sources,
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    )).toEqual([executionRoot]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    )).toEqual([executionRoot, transportFile]);
+    expect(filesImporting(
+      sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
     )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
     )).toEqual([executionRoot, authorizerFile]);
+    expect(filesImporting(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+    )).toEqual([executionRoot]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+    )).toEqual([executionRoot, sourceLockAuthorizerFile]);
+    expect(filesImporting(
+      sources,
+      'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+    )).toEqual([executionRoot]);
     expect(filesImporting(
       sources,
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
@@ -376,6 +402,13 @@ describe('broadcast surface isolation', () => {
       sources,
       'assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1',
     )).toEqual([transportFile]);
+    expect(filesImporting(
+      sources,
+      'assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1',
+    )).toEqual([
+      'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
+      'substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts',
+    ]);
     expect(filesImporting(
       sources,
       'takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2',
@@ -398,11 +431,23 @@ describe('broadcast surface isolation', () => {
     expect(authorizer).not.toContain('consumeLocalWasmCheckedSubmissionHandleV1');
     expect(authorizer).not.toContain('process.env');
     expect(authorizer).not.toMatch(/\bverified\s*:\s*true\b/u);
+    expect(sourceLockAuthorizer).not.toContain("'/transactions'");
+    expect(sourceLockAuthorizer).not.toContain('axios');
+    expect(sourceLockAuthorizer)
+      .not.toContain('consumeLocalWasmCheckedSubmissionHandleV1');
+    expect(sourceLockAuthorizer).not.toContain('process.env');
+    expect(sourceLockAuthorizer).not.toMatch(/\bverified\s*:\s*true\b/u);
     expect(frozenNoSubmit).not.toContain(
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
     );
     expect(frozenNoSubmit).not.toContain(
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+    );
+    expect(frozenNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    );
+    expect(frozenNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
     );
     expect(frozenNoSubmit).not.toContain(
       'consumeLocalWasmCheckedSubmissionHandleV1',
