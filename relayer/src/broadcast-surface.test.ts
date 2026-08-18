@@ -400,6 +400,25 @@ describe('broadcast surface isolation', () => {
     ]);
     expect(filesImporting(
       sources,
+      'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
+    )).toEqual([
+      'scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-check-worker-v1.ts',
+    ]);
+    expect(filesImporting(
+      sources,
+      'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
+    )).toEqual([
+      'scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-worker-v1.ts',
+    ]);
+    expect(filesContainingIdentifier(
+      sources,
+      'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
+    )).toEqual([
+      executionRoot,
+      'scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-worker-v1.ts',
+    ]);
+    expect(filesImporting(
+      sources,
       'assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1',
     )).toEqual([transportFile]);
     expect(filesImporting(

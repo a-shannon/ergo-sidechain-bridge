@@ -155,6 +155,9 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_EXPECTED_STATIC_MANIFEST_DIGEST_V1,
+} from '../../scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-receipt-v1.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from '../../scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-receipt-v1.js';
 
@@ -654,7 +657,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       candidate: expect.any(Object),
       confirmation: expect.objectContaining({
         status: 'confirmed',
-        confirmationHeight: 113,
+        confirmationHeight: 135,
       }),
     });
     expect(result.receipt).toMatchObject({
@@ -704,6 +707,81 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /(?:signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
     );
+  });
+
+  it('rejects post-check observation after pre-transport authorization', async () => {
+    postCheckFundingObservation.target.tipHeight = 134;
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/funding observation is not a fresh setup successor/);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects confirmation before pre-transport authorization', async () => {
+    preTransportFundingObservation.target.tipHeight = 136;
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/source-lock execution chronology changed/);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects confirmation after the managed process final height', async () => {
+    processSession.withMiningActiveExecutionTarget.mockImplementationOnce(
+      async action => {
+        order.push('execution:enter');
+        const value = await action(executionTarget());
+        order.push('execution:leave');
+        return { value, receipt: processReceipt(134) };
+      },
+    );
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/source-lock execution chronology changed/);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects signed material hidden in an opaque candidate subtree', async () => {
+    mocked.pegInCandidateBuild.mockImplementationOnce(async input => {
+      const candidate = structuredClone(validPegInCandidate(
+        input.sourceFundingInput,
+        currentBatch.targetBinding,
+      )) as any;
+      candidate.depositPacket.reserve = {
+        signedTransactionBytesHex: 'ab'.repeat(64),
+      };
+      return candidate;
+    });
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/signed or capability material/);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects cyclic data hidden in an opaque candidate subtree', async () => {
+    mocked.pegInCandidateBuild.mockImplementationOnce(async input => {
+      const candidate = structuredClone(validPegInCandidate(
+        input.sourceFundingInput,
+        currentBatch.targetBinding,
+      )) as any;
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      candidate.depositPacket.reserve = cyclic;
+      return candidate;
+    });
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+        pegInRootInput(),
+      ),
+    ).rejects.toThrow(/must not contain cyclic data/);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a check receipt that is not bound to the exact unsigned transaction', async () => {
@@ -940,6 +1018,14 @@ describe('isolated devnet genesis setup execution root V1', () => {
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
     );
   });
+
+  it('keeps the execution receipt parser pinned to the exact static manifest', () => {
+    expect(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_EXPECTED_STATIC_MANIFEST_DIGEST_V1,
+    ).toBe(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    );
+  });
 });
 
 function executeThroughPorts(order: string[]) {
@@ -1018,7 +1104,11 @@ function validObserver(order: string[]) {
         const round = observationCount.get(expectedTxId) ?? 0;
         observationCount.set(expectedTxId, round + 1);
         order.push('observe:sourceLock');
-        return confirmation(expectedTxId, 3, round);
+        return {
+          ...confirmation(expectedTxId, 3, round),
+          confirmationHeight: 135,
+          observedAtHeight: 140,
+        } as const;
       }
       const index = setupTransactions().findIndex(value =>
         value.issuance.unsignedTransactionIdHex === expectedTxId
@@ -1128,7 +1218,7 @@ function validBuild() {
   };
 }
 
-function processReceipt() {
+function processReceipt(finalHeight = 140) {
   return {
     schema: 'e2s.substrate-federated-isolated-devnet-ergo-node-process.v1',
     version: 1,
@@ -1148,8 +1238,8 @@ function processReceipt() {
     },
     finalSnapshot: {
       network: 'devnet',
-      fullHeight: 140,
-      indexedHeight: 140,
+      fullHeight: finalHeight,
+      indexedHeight: finalHeight,
       headerIdHex: digest('b'),
     },
   } as const;

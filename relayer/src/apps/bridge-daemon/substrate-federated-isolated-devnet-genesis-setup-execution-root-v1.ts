@@ -26,6 +26,9 @@ import {
   type ErgoOperationalExecutionResult,
 } from '../../relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
+import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
   normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
@@ -824,6 +827,24 @@ export async function runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutio
   ) {
     throw new Error('isolated devnet peg-in source-lock execution was incomplete');
   }
+  const postCheckTipHeight = pegIn.fundingObservation.postCheckTipHeight;
+  const preTransportTipHeight = pegIn.fundingObservation.preTransportTipHeight;
+  const confirmationHeight = pegIn.sourceLockExecution.confirmationHeight;
+  const finalFullHeight = managed.receipt.finalSnapshot.fullHeight;
+  const finalIndexedHeight = managed.receipt.finalSnapshot.indexedHeight;
+  if (
+    ![postCheckTipHeight, preTransportTipHeight, confirmationHeight,
+      finalFullHeight, finalIndexedHeight]
+      .every(height => Number.isSafeInteger(height) && height >= 0)
+    || postCheckTipHeight > preTransportTipHeight
+    || preTransportTipHeight > confirmationHeight
+    || confirmationHeight > finalFullHeight
+    || confirmationHeight > finalIndexedHeight
+  ) {
+    throw new Error(
+      'isolated devnet peg-in source-lock execution chronology changed',
+    );
+  }
   const body = {
     schema:
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA,
@@ -1094,7 +1115,7 @@ async function executeManagedSetupAction(
   journalRoots.add(localStateRoot);
   const markerDirectory = join(localStateRoot, 'attempt-markers');
   mkdirSync(markerDirectory);
-  const state = new StateTracker(join(localStateRoot, 'state-store'));
+  const state = createIsolatedDevnetStateTracker(localStateRoot);
   let actionResult: Readonly<ExecutionActionResult> | undefined;
   let actionFailure: unknown;
   try {
@@ -1493,7 +1514,7 @@ async function executeManagedPegInSourceLock(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
-  state: StateTracker,
+  state: ReturnType<typeof createIsolatedDevnetStateTracker>,
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   completionDeadline: number,
@@ -2090,6 +2111,10 @@ function disposeSession(
   }
 }
 
+function createIsolatedDevnetStateTracker(localStateRoot: string) {
+  return new StateTracker(join(localStateRoot, 'state-store'));
+}
+
 function assertNoLocalPathValue(value: unknown): void {
   if (
     typeof value === 'string'
@@ -2143,14 +2168,14 @@ function finalizeReceipt<T extends object>(
   body: T,
   digestDomain: string,
 ): Readonly<T & { readonly receiptDigestHex: string }> {
-  assertCapabilityFreePlainData(body, 'isolated devnet receipt body');
+  assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(body);
   assertNoLocalPathValue(body);
   deepFreeze(body);
   const receipt = {
     ...body,
     receiptDigestHex: sha256CanonicalJson(body, digestDomain),
   };
-  assertCapabilityFreePlainData(receipt, 'isolated devnet receipt');
+  assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(receipt);
   assertNoLocalPathValue(receipt);
   return deepFreeze(receipt);
 }
