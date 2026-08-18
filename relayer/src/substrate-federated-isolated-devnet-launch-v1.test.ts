@@ -347,6 +347,7 @@ import {
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
@@ -1717,6 +1718,39 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         primaryNodeOrigin: 'http://127.0.0.1:9051',
         witnessNodeOrigin: 'http://127.0.0.1:9052',
       })).rejects.toThrow(/session is already consumed/);
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
+  it('carries the exact live JVM family binding into the execution batch', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+
+      const batch = await session.runForExecution({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+
+      expect(
+        assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
+          batch,
+          mocks.executionTarget,
+        ),
+      ).toBe(batch.familyCompilerBinding);
+      expect(batch.familyCompilerBinding.provenance).toEqual({
+        kind: 'same-process-pinned-jvm',
+        digestHex: fixture.compilerMocks.familyReceipt.receiptDigestHex,
+      });
+      expect(batch.familyCompilerBinding.profile.familyIdHex)
+        .toBe(fixture.compilerMocks.familyReceipt.profile.familyIdHex);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
+          structuredClone(batch),
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact process provenance/);
     }, session.signer.publicKeyHex);
   }, 30_000);
 

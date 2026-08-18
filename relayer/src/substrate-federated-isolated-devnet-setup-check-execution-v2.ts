@@ -8,6 +8,11 @@ import {
   type LocalWasmExactBytesSignedCheckCandidate,
 } from './fleet-signer.js';
 import {
+  assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
+  bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
+  type SubstrateFederatedSettlementFamilyCompilerBindingV1,
+} from './substrate-federated-settlement-family-compiler-binding-v1.js';
+import {
   deriveLocalWasmRootSignerPublicIdentity,
 } from './local-wasm-root-signer-public-identity.js';
 import {
@@ -68,6 +73,14 @@ const EXECUTION_BATCHES = new WeakMap<
     binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
   }>
 >();
+const FAMILY_EXECUTION_BATCHES = new WeakMap<
+  object,
+  Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    familyCompilerBinding:
+      Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  }>
+>();
 
 export interface RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input {
   readonly portableReplayInput:
@@ -98,7 +111,9 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>>;
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  >>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2 {
@@ -122,6 +137,12 @@ export interface SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 {
   >[];
 }
 
+export interface SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  extends SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 {
+  readonly familyCompilerBinding:
+    Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+}
+
 interface FixedSetupCheckRunV2 {
   readonly receipt:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>;
@@ -129,6 +150,8 @@ interface FixedSetupCheckRunV2 {
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>;
   readonly request:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>;
+  readonly familyCompilerBinding:
+    Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetSetupExecutionPromotionV2Input {
@@ -222,12 +245,17 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         const expectedTargetBinding =
           assertExecutionTargetMatchesOrigins(target, input);
         const result = await runFixedSetupCheck(input, activeMnemonic);
-        return promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+        const batch = promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
           executionReceipt: result.executionReceipt,
           request: result.request,
           expectedTargetBinding,
           target,
         });
+        return attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
+          batch,
+          result.familyCompilerBinding,
+          target,
+        );
       }),
     });
   } catch (error) {
@@ -333,6 +361,27 @@ export function assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
   return current;
 }
 
+export function assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1> {
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(batch, target);
+  const material = FAMILY_EXECUTION_BATCHES.get(batch);
+  if (
+    material === undefined
+    || material.target !== target
+    || material.familyCompilerBinding !== batch.familyCompilerBinding
+  ) {
+    throw new Error(
+      'isolated setup family execution batch lacks exact process provenance',
+    );
+  }
+  assertSubstrateFederatedSettlementFamilyCompilerBindingV1(
+    material.familyCompilerBinding,
+  );
+  return material.familyCompilerBinding;
+}
+
 function assertExecutionTargetMatchesOrigins(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   input: Readonly<{ primaryNodeOrigin: string; witnessNodeOrigin: string }>,
@@ -371,6 +420,20 @@ async function runFixedSetupCheck(
   );
   const continuation =
     takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1(replay);
+  const sourceAndCompilerInput = continuation.sourceAndCompilerInput;
+  const familyCompilerBinding =
+    bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1({
+      receipt: sourceAndCompilerInput.familyReceipt,
+      expectedInput: {
+        trackerRequest: sourceAndCompilerInput.trackerRequest,
+        trackerReceipt: sourceAndCompilerInput.trackerReceipt,
+        templates: sourceAndCompilerInput.familyTemplates,
+        duplicatePreventionGenesisInputBoxIdHex:
+          continuation.genesisBoxIds.duplicatePrevention,
+        pooledReserveGenesisInputBoxIdHex:
+          continuation.genesisBoxIds.pooledReserve,
+      },
+    });
   const profile = buildTargetProfile(
     replay.reportDigestHex,
     continuation.expectedSettlementGenesisHeaderIdHex,
@@ -382,7 +445,7 @@ async function runFixedSetupCheck(
   const retainedObservation = await observeWithRetry(profile);
   const settlementTarget =
     buildSubstrateFederatedIsolatedDevnetSettlementTargetV2({
-      ...continuation.sourceAndCompilerInput,
+      ...sourceAndCompilerInput,
       settlementTargetProfile: profile,
       settlementObservation: retainedObservation,
     });
@@ -406,7 +469,38 @@ async function runFixedSetupCheck(
     structuredClone(executionReceipt),
     request,
   );
-  return Object.freeze({ receipt, executionReceipt, request });
+  return Object.freeze({
+    receipt,
+    executionReceipt,
+    request,
+    familyCompilerBinding,
+  });
+}
+
+function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  familyCompilerBinding:
+    Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2> {
+  const targetBinding =
+    assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(batch, target);
+  assertSubstrateFederatedSettlementFamilyCompilerBindingV1(
+    familyCompilerBinding,
+  );
+  const result = Object.freeze({
+    ...batch,
+    familyCompilerBinding,
+  });
+  EXECUTION_BATCHES.set(result, Object.freeze({
+    target,
+    binding: targetBinding,
+  }));
+  FAMILY_EXECUTION_BATCHES.set(result, Object.freeze({
+    target,
+    familyCompilerBinding,
+  }));
+  return result;
 }
 
 function buildTargetProfile(

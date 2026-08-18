@@ -5,7 +5,7 @@ import type {
   SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import type {
-  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
@@ -47,7 +47,9 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>>;
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  >>;
 }
 
 /**
