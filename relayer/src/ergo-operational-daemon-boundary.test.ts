@@ -6,11 +6,11 @@ import { describe, expect, it } from 'vitest';
 const daemon = readFileSync(
   join(process.cwd(), 'src', 'relayer-daemon.ts'),
   'utf8',
-);
+).replace(/\r\n?/g, '\n');
 const stateTracker = readFileSync(
   join(process.cwd(), 'src', 'state-tracker.ts'),
   'utf8',
-);
+).replace(/\r\n?/g, '\n');
 
 function methodSource(startMarker: string, endMarker: string): string {
   const start = daemon.indexOf(startMarker);
