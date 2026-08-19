@@ -136,6 +136,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
         new Set([
           'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
           'SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt',
           'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1',
           'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
@@ -250,6 +251,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts',
         new Set([
           'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1',
           'SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
         ]),
       ],
@@ -342,7 +344,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
-        new Set(['createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1']),
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
+        ]),
       ],
       [
         '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js',
@@ -423,7 +428,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js',
-        new Set(['createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1']),
+        new Set([
+          'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1',
+        ]),
       ],
       [
         '../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js',
@@ -443,6 +451,29 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js',
         new Set([
           'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
+        ]),
+      ],
+    ]),
+  ],
+]);
+
+const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, ReadonlySet<string>>
+> = new Map([
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+    new Map([
+      [
+        '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+        new Set([
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js',
+        new Set([
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1',
         ]),
       ],
     ]),
@@ -1218,11 +1249,18 @@ function collectCapabilityRestrictedLayerViolations(
           && restricted.binding === 'StateTracker'
           && ts.isNewExpression(node.parent)
           && node.parent.expression === node;
+        const isReviewedReadOnlyValue =
+          sourceLayer === 'apps'
+          && REVIEWED_APP_READ_ONLY_VALUE_BINDINGS
+            .get(file)
+            ?.get(restricted.moduleSpecifier)
+            ?.has(restricted.binding) === true;
         if (
           !isReviewedEcdhCall
           && !isReviewedCryptoFactoryCall
           && !isReviewedDirectCall
           && !isReviewedStateTrackerConstruction
+          && !isReviewedReadOnlyValue
         ) {
           addViolation(
             node,

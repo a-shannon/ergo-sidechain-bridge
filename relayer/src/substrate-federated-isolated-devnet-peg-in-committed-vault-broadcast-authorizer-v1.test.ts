@@ -12,9 +12,12 @@ const mocks = vi.hoisted(() => ({
   normalizeEip12Box: vi.fn(),
   boxes: new Map<string, unknown>(),
   tipCalls: new Map<string, number>(),
+  tipResponses: new Map<
+    string,
+    Array<Readonly<{ height: number; id: string }>>
+  >(),
   tipHeight: 101,
   tipIdHex: '',
-  driftAfterFreshCheck: false,
 }));
 
 vi.mock('./authenticated-spv-tracker-read-only-node-client.js', () => ({
@@ -28,11 +31,12 @@ vi.mock('./authenticated-spv-tracker-read-only-node-client.js', () => ({
     async getBestHeader() {
       const calls = (mocks.tipCalls.get(this.origin) ?? 0) + 1;
       mocks.tipCalls.set(this.origin, calls);
+      const responses = mocks.tipResponses.get(this.origin);
+      const configured = responses?.[calls - 1] ?? responses?.at(-1);
+      if (configured !== undefined) return configured;
       return {
         id: mocks.tipIdHex,
-        height:
-          mocks.tipHeight
-          + (mocks.driftAfterFreshCheck && calls >= 3 ? 1 : 0),
+        height: mocks.tipHeight,
       };
     }
 
@@ -290,9 +294,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.boxes.clear();
   mocks.tipCalls.clear();
+  mocks.tipResponses.clear();
   mocks.tipHeight = 101;
   mocks.tipIdHex = hex('40');
-  mocks.driftAfterFreshCheck = false;
   mocks.assertTarget.mockImplementation(value => {
     if (value !== TARGET) throw new Error('target provenance missing');
     return BINDING;
@@ -366,17 +370,182 @@ describe('isolated committed-vault broadcast authorizer V1', () => {
     ).toThrow(/already claimed/);
   });
 
-  it('rejects concurrent revalidation and tip drift during the fresh check', async () => {
+  it('rejects concurrent revalidation while the first attempt is active', async () => {
     const f = fixture();
     const session =
       createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
         f.input as never,
       );
-    mocks.driftAfterFreshCheck = true;
 
     const first = session.revalidator.revalidate(f.checked as never);
     await expect(session.revalidator.revalidate(f.checked as never))
       .rejects.toThrow(/one-shot/);
-    await expect(first).rejects.toThrow(/tip changed during fresh JVM check/);
+    await expect(first).resolves.toMatchObject({
+      revalidationDigestHex: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+  });
+
+  it('reruns the fresh JVM check after the tip advances', async () => {
+    const f = fixture();
+    const advancedTip = { height: 102, id: hex('41') };
+    for (const origin of [PRIMARY, WITNESS]) {
+      mocks.tipResponses.set(origin, [
+        { height: 101, id: hex('40') },
+        { height: 101, id: hex('40') },
+        advancedTip,
+        advancedTip,
+      ]);
+    }
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+
+    const revalidation = await session.revalidator.revalidate(f.checked as never);
+    const revalidated = Object.freeze({
+      checked: f.checked,
+      revalidationDigestHex: revalidation.revalidationDigestHex,
+    });
+    session.broadcastAuthorizer.authorize(revalidated as never);
+
+    expect(session.takePreTransportObservation()).toMatchObject({
+      observedTipHeight: 102,
+      observedTipHeaderIdHex: hex('41'),
+    });
+    expect(mocks.tipCalls.get(PRIMARY)).toBe(6);
+    expect(mocks.tipCalls.get(WITNESS)).toBe(6);
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails closed when a tip advance makes the transaction expire', async () => {
+    const f = fixture();
+    const advancedTip = { height: 10_000, id: hex('41') };
+    for (const origin of [PRIMARY, WITNESS]) {
+      mocks.tipResponses.set(origin, [
+        { height: 101, id: hex('40') },
+        { height: 101, id: hex('40') },
+        advancedTip,
+        advancedTip,
+      ]);
+    }
+    mocks.checkSignedTransaction
+      .mockResolvedValueOnce(f.freshCheck)
+      .mockResolvedValueOnce(null);
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+
+    await expect(session.revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(/fresh JVM check rejected/);
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries an advancing input snapshot and returns only the stable view', async () => {
+    const f = fixture();
+    const advancedTip = { height: 102, id: hex('41') };
+    for (const origin of [PRIMARY, WITNESS]) {
+      mocks.tipResponses.set(origin, [
+        { height: 101, id: hex('40') },
+        advancedTip,
+        advancedTip,
+        advancedTip,
+        advancedTip,
+        advancedTip,
+      ]);
+    }
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+    const revalidation = await session.revalidator.revalidate(f.checked as never);
+    session.broadcastAuthorizer.authorize(Object.freeze({
+      checked: f.checked,
+      revalidationDigestHex: revalidation.revalidationDigestHex,
+    }) as never);
+
+    expect(session.takePreTransportObservation()).toMatchObject({
+      observedTipHeight: 102,
+      observedTipHeaderIdHex: hex('41'),
+    });
+    expect(mocks.tipCalls.get(PRIMARY)).toBe(6);
+    expect(mocks.tipCalls.get(WITNESS)).toBe(6);
+  });
+
+  it.each([
+    ['regression', { height: 100, id: hex('42') }, /tip regressed/],
+    ['same-height replacement', { height: 101, id: hex('43') }, /tip replaced or reused/],
+    ['height-changing ID reuse', { height: 102, id: hex('40') }, /tip replaced or reused/],
+  ] as const)('rejects a %s inside an input snapshot', async (_label, changedTip, error) => {
+    const f = fixture();
+    mocks.tipResponses.set(PRIMARY, [
+      { height: 101, id: hex('40') },
+      changedTip,
+    ]);
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+
+    await expect(session.revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(error);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when one input disappears after the fresh JVM check', async () => {
+    const f = fixture();
+    mocks.checkSignedTransaction.mockImplementationOnce(async () => {
+      mocks.boxes.delete(hex('23'));
+      return f.freshCheck;
+    });
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+
+    await expect(session.revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(/transition input is unavailable/);
+  });
+
+  it('bounds retries when an input snapshot never stabilizes', async () => {
+    const f = fixture();
+    mocks.tipResponses.set(PRIMARY, Array.from({ length: 6 }, (_, index) => ({
+      height: 101 + index,
+      id: (41 + index).toString(16).padStart(2, '0').repeat(32),
+    })));
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+
+    await expect(session.revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(/tip did not stabilize during input observation/);
+    expect(mocks.tipCalls.get(PRIMARY)).toBe(6);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it('bounds retries when the tip never stabilizes around the fresh JVM check', async () => {
+    const f = fixture();
+    const tips = [
+      { height: 101, id: hex('40') },
+      { height: 101, id: hex('40') },
+      { height: 102, id: hex('41') },
+      { height: 102, id: hex('41') },
+      { height: 103, id: hex('42') },
+      { height: 103, id: hex('42') },
+      { height: 104, id: hex('43') },
+      { height: 104, id: hex('43') },
+    ];
+    for (const origin of [PRIMARY, WITNESS]) {
+      mocks.tipResponses.set(origin, tips);
+    }
+    const session =
+      createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+        f.input as never,
+      );
+
+    await expect(session.revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(/tip did not stabilize around fresh JVM check/);
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(3);
   });
 });

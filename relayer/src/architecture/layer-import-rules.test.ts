@@ -193,6 +193,14 @@ describe('layer import rules', () => {
           createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
         } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
         import {
+          createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
+        } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        import {
+          createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1,
+        } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+        import {
           createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
           createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
         } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
@@ -204,6 +212,10 @@ describe('layer import rules', () => {
         } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
       `,
       [authorizerTarget]: 'export const authorizer = true;',
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts':
+        'export const process = true;',
+      'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts':
+        'export const observer = true;',
       [sourceLockAuthorizerTarget]: 'export const authorizer = true;',
       [ownedRewardDiscoveryTarget]: 'export const discovery = true;',
       [transportTarget]: 'export const transport = true;',

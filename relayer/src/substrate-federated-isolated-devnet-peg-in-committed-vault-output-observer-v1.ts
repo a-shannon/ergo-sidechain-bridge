@@ -33,6 +33,7 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_O
 
 const OBSERVATION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_OBSERVATION_V1';
+const NODE_STATE_OBSERVATION_MAX_ATTEMPTS = 3;
 
 export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1 {
   readonly schema:
@@ -125,28 +126,7 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
   const witness = new AuthenticatedSpvTrackerReadOnlyNodeClient(
     input.target.witnessNodeOrigin,
   );
-  const primaryState = await observeNodeState(
-    primary,
-    packet.boxes.sourceFundingInput.boxId,
-    packet.boxes.reservePredecessor.boxId,
-    packet.boxes.sourceLock.boxId,
-    packet.boxes.transitionFeeFunding.boxId,
-    packet.boxes.reserveSuccessor,
-    'primary',
-  );
-  const witnessState = await observeNodeState(
-    witness,
-    packet.boxes.sourceFundingInput.boxId,
-    packet.boxes.reservePredecessor.boxId,
-    packet.boxes.sourceLock.boxId,
-    packet.boxes.transitionFeeFunding.boxId,
-    packet.boxes.reserveSuccessor,
-    'witness',
-  );
-  if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
-    throw new Error('isolated committed-vault output observations disagree');
-  }
-  const latestConfirmation =
+  const initialConfirmation =
     await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
       artifact: confirmation.observerArtifact,
       expectedReconciliationIdentityDigestHex:
@@ -157,42 +137,66 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       priorConfirmation: confirmation,
     });
   if (
-    latestConfirmation.status !== 'confirmed'
-    || latestConfirmation.confirmationHeight === null
-    || latestConfirmation.confirmationHeaderIdHex === null
+    initialConfirmation.status !== 'confirmed'
+    || initialConfirmation.confirmationHeight === null
+    || initialConfirmation.confirmationHeaderIdHex === null
   ) {
     throw new Error(
       'isolated committed-vault output observation requires refreshed canonical confirmation',
     );
   }
-  const [rawPrimaryTipAfterConfirmation, rawWitnessTipAfterConfirmation] =
-    await Promise.all([
-      primary.getBestHeader(),
-      witness.getBestHeader(),
-    ]);
-  const primaryTipAfterConfirmation = normalizeBestHeader(
-    rawPrimaryTipAfterConfirmation,
-    'isolated committed-vault primary post-confirmation tip',
-  );
-  const witnessTipAfterConfirmation = normalizeBestHeader(
-    rawWitnessTipAfterConfirmation,
-    'isolated committed-vault witness post-confirmation tip',
-  );
-  if (
-    canonicalJson(primaryTipAfterConfirmation)
-      !== canonicalJson(primaryState.tip)
-    || canonicalJson(witnessTipAfterConfirmation)
-      !== canonicalJson(witnessState.tip)
-  ) {
-    throw new Error(
-      'isolated committed-vault tip changed while refreshing canonical confirmation',
-    );
+  const [primaryState, witnessState] = await Promise.all([
+    observeNodeState(
+      primary,
+      packet.boxes.sourceFundingInput.boxId,
+      packet.boxes.reservePredecessor.boxId,
+      packet.boxes.sourceLock.boxId,
+      packet.boxes.transitionFeeFunding.boxId,
+      packet.boxes.reserveSuccessor,
+      'primary',
+    ),
+    observeNodeState(
+      witness,
+      packet.boxes.sourceFundingInput.boxId,
+      packet.boxes.reservePredecessor.boxId,
+      packet.boxes.sourceLock.boxId,
+      packet.boxes.transitionFeeFunding.boxId,
+      packet.boxes.reserveSuccessor,
+      'witness',
+    ),
+  ]);
+  if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
+    throw new Error('isolated committed-vault output observations disagree');
   }
   if (
-    latestConfirmation.observedAtHeight !== primaryState.tip.height
+    initialConfirmation.observedAtHeight > primaryState.tip.height
   ) {
     throw new Error(
-      'isolated committed-vault confirmation snapshot does not match stable output tip',
+      'isolated committed-vault initial confirmation snapshot is ahead of the stable output tip',
+    );
+  }
+  const latestConfirmation =
+    await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
+      artifact: initialConfirmation.observerArtifact,
+      expectedReconciliationIdentityDigestHex:
+        binding.executionTargetIdentityDigestHex,
+      expectedTargetGenesisHeaderIdHex:
+        input.batch.request.target.genesisHeaderIdHex,
+      expectedTxId,
+      priorConfirmation: initialConfirmation,
+    });
+  if (
+    latestConfirmation.status !== 'confirmed'
+    || latestConfirmation.confirmationHeight === null
+    || latestConfirmation.confirmationHeaderIdHex === null
+  ) {
+    throw new Error(
+      'isolated committed-vault output observation requires final canonical confirmation',
+    );
+  }
+  if (latestConfirmation.observedAtHeight < primaryState.tip.height) {
+    throw new Error(
+      'isolated committed-vault final confirmation snapshot is behind the stable output tip',
     );
   }
   const current =
@@ -301,75 +305,95 @@ async function observeNodeState(
   reserveSuccessor: Eip12Box;
   digestHex: string;
 }>> {
-  const tipBefore = normalizeBestHeader(
-    await client.getBestHeader(),
-    `isolated committed-vault ${label} pre-output tip`,
+  for (let attempt = 0; attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS; attempt += 1) {
+    const tipBefore = normalizeBestHeader(
+      await client.getBestHeader(),
+      `isolated committed-vault ${label} pre-output tip`,
+    );
+    const [
+      sourceFunding,
+      reservePredecessor,
+      sourceLock,
+      transitionFeeFunding,
+      rawReserveSuccessor,
+    ] = await Promise.all([
+      client.getBoxByIdOrNull(sourceFundingBoxIdHex),
+      client.getBoxByIdOrNull(reservePredecessorBoxIdHex),
+      client.getBoxByIdOrNull(sourceLockBoxIdHex),
+      client.getBoxByIdOrNull(transitionFeeFundingBoxIdHex),
+      client.getBoxByIdOrNull(expectedReserveSuccessor.boxId),
+    ]);
+    const tipAfter = normalizeBestHeader(
+      await client.getBestHeader(),
+      `isolated committed-vault ${label} post-output tip`,
+    );
+    if (
+      sourceFunding !== null
+      || reservePredecessor !== null
+      || sourceLock !== null
+      || transitionFeeFunding !== null
+    ) {
+      throw new Error(
+        `isolated committed-vault ${label} still reports a transition input`,
+      );
+    }
+    if (rawReserveSuccessor === null) {
+      throw new Error(
+        `isolated committed-vault ${label} reserve successor is unavailable`,
+      );
+    }
+    const reserveSuccessor = await normalizeEip12Box(
+      rawReserveSuccessor,
+      `isolated committed-vault ${label} reserve successor`,
+    );
+    if (
+      canonicalJson(reserveSuccessor)
+        !== canonicalJson(expectedReserveSuccessor)
+    ) {
+      throw new Error(
+        `isolated committed-vault ${label} reserve successor bytes changed`,
+      );
+    }
+    if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
+      const body = Object.freeze({
+        sourceFundingBoxIdHex,
+        sourceFundingPresent: false as const,
+        reservePredecessorBoxIdHex,
+        reservePredecessorPresent: false as const,
+        sourceLockBoxIdHex,
+        sourceLockPresent: false as const,
+        transitionFeeFundingBoxIdHex,
+        transitionFeeFundingPresent: false as const,
+        tip: tipAfter,
+        reserveSuccessor,
+      });
+      return Object.freeze({
+        ...body,
+        digestHex: sha256CanonicalJson(body, OBSERVATION_DIGEST_DOMAIN),
+      });
+    }
+    assertTipAdvancedWithoutReplacement(tipBefore, tipAfter, label);
+  }
+  throw new Error(
+    `isolated committed-vault ${label} tip did not stabilize during output observation`,
   );
-  const [
-    sourceFunding,
-    reservePredecessor,
-    sourceLock,
-    transitionFeeFunding,
-    rawReserveSuccessor,
-  ] = await Promise.all([
-    client.getBoxByIdOrNull(sourceFundingBoxIdHex),
-    client.getBoxByIdOrNull(reservePredecessorBoxIdHex),
-    client.getBoxByIdOrNull(sourceLockBoxIdHex),
-    client.getBoxByIdOrNull(transitionFeeFundingBoxIdHex),
-    client.getBoxByIdOrNull(expectedReserveSuccessor.boxId),
-  ]);
-  const tipAfter = normalizeBestHeader(
-    await client.getBestHeader(),
-    `isolated committed-vault ${label} post-output tip`,
-  );
-  if (canonicalJson(tipBefore) !== canonicalJson(tipAfter)) {
+}
+
+function assertTipAdvancedWithoutReplacement(
+  before: Readonly<{ height: number; idHex: string }>,
+  after: Readonly<{ height: number; idHex: string }>,
+  label: string,
+): void {
+  if (after.height < before.height) {
     throw new Error(
-      `isolated committed-vault ${label} tip changed during output observation`,
+      `isolated committed-vault ${label} tip regressed during output observation`,
     );
   }
-  if (
-    sourceFunding !== null
-    || reservePredecessor !== null
-    || sourceLock !== null
-    || transitionFeeFunding !== null
-  ) {
+  if (after.height === before.height || after.idHex === before.idHex) {
     throw new Error(
-      `isolated committed-vault ${label} still reports a transition input`,
+      `isolated committed-vault ${label} tip replaced or reused during output observation`,
     );
   }
-  if (rawReserveSuccessor === null) {
-    throw new Error(
-      `isolated committed-vault ${label} reserve successor is unavailable`,
-    );
-  }
-  const reserveSuccessor = await normalizeEip12Box(
-    rawReserveSuccessor,
-    `isolated committed-vault ${label} reserve successor`,
-  );
-  if (
-    canonicalJson(reserveSuccessor)
-      !== canonicalJson(expectedReserveSuccessor)
-  ) {
-    throw new Error(
-      `isolated committed-vault ${label} reserve successor bytes changed`,
-    );
-  }
-  const body = Object.freeze({
-    sourceFundingBoxIdHex,
-    sourceFundingPresent: false as const,
-    reservePredecessorBoxIdHex,
-    reservePredecessorPresent: false as const,
-    sourceLockBoxIdHex,
-    sourceLockPresent: false as const,
-    transitionFeeFundingBoxIdHex,
-    transitionFeeFundingPresent: false as const,
-    tip: tipAfter,
-    reserveSuccessor,
-  });
-  return Object.freeze({
-    ...body,
-    digestHex: sha256CanonicalJson(body, OBSERVATION_DIGEST_DOMAIN),
-  });
 }
 
 function normalizeBestHeader(

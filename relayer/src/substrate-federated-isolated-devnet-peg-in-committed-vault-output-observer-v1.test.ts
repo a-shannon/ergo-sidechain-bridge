@@ -118,6 +118,13 @@ const REFRESHED_CONFIRMATION = Object.freeze({
   observationDigestHex: hex('20'),
   observerArtifact: Object.freeze({ role: 'refreshed-confirmation' }),
 });
+const FINAL_CONFIRMATION = Object.freeze({
+  ...REFRESHED_CONFIRMATION,
+  confirmations: 11,
+  observedAtHeight: 212,
+  observationDigestHex: hex('2a'),
+  observerArtifact: Object.freeze({ role: 'final-confirmation' }),
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -147,18 +154,25 @@ beforeEach(() => {
     },
   );
   mocks.reobserveConfirmation.mockImplementation(async input => {
+    const prior = input.priorConfirmation;
     if (
-      input.artifact !== CONFIRMATION.observerArtifact
+      input.artifact !== prior.observerArtifact
       || input.expectedReconciliationIdentityDigestHex
         !== BINDING.executionTargetIdentityDigestHex
       || input.expectedTargetGenesisHeaderIdHex !== GENESIS_ID
       || input.expectedTxId !== TX_ID
       || input.priorConfirmation.confirmationHeaderIdHex
-        !== CONFIRMATION_HEADER_ID
+        !== prior.confirmationHeaderIdHex
     ) {
       throw new Error('confirmation reobservation binding changed');
     }
-    return REFRESHED_CONFIRMATION;
+    if (prior.observerArtifact === CONFIRMATION.observerArtifact) {
+      return REFRESHED_CONFIRMATION;
+    }
+    if (prior.observerArtifact === REFRESHED_CONFIRMATION.observerArtifact) {
+      return FINAL_CONFIRMATION;
+    }
+    throw new Error('confirmation reobservation predecessor changed');
   });
   mocks.getBox.mockImplementation((_origin: string, boxId: string) => {
     if (boxId === SUCCESSOR_ID) return RESERVE_SUCCESSOR;
@@ -199,7 +213,7 @@ describe('isolated committed-vault output observer V1', () => {
       confirmationHeight: 201,
       confirmationHeaderIdHex: REFRESHED_CONFIRMATION_HEADER_ID,
       confirmationObservationDigestHex:
-        REFRESHED_CONFIRMATION.observationDigestHex,
+        FINAL_CONFIRMATION.observationDigestHex,
       observedTipHeight: 211,
       observedTipHeaderIdHex: OBSERVED_TIP_ID,
       boundaries: {
@@ -253,26 +267,30 @@ describe('isolated committed-vault output observer V1', () => {
     ).rejects.toThrow(/reserve successor bytes changed/);
   });
 
-  it('rejects a tip change while output boxes are being observed', async () => {
-    let primaryReads = 0;
+  it('retries an advancing tip and returns only the stable output view', async () => {
+    const reads = new Map<string, number>();
     mocks.getBestHeader.mockImplementation((origin: string) => {
-      if (origin !== PRIMARY) {
-        return { height: 211, id: OBSERVED_TIP_ID };
-      }
-      primaryReads += 1;
-      return primaryReads === 1
+      const count = (reads.get(origin) ?? 0) + 1;
+      reads.set(origin, count);
+      return count === 1
         ? { height: 211, id: OBSERVED_TIP_ID }
         : { height: 212, id: hex('1d') };
     });
 
-    await expect(
-      observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+    const observation =
+      await observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
         target: TARGET as never,
         batch: BATCH as never,
         candidate: CANDIDATE as never,
         confirmation: CONFIRMATION as never,
-      }),
-    ).rejects.toThrow(/tip changed during output observation/);
+      });
+
+    expect(observation).toMatchObject({
+      observedTipHeight: 212,
+      observedTipHeaderIdHex: hex('1d'),
+    });
+    expect(reads.get(PRIMARY)).toBe(4);
+    expect(reads.get(WITNESS)).toBe(4);
   });
 
   it('rejects stable but different primary and witness tips', async () => {
@@ -304,17 +322,19 @@ describe('isolated committed-vault output observer V1', () => {
         candidate: CANDIDATE as never,
         confirmation: CONFIRMATION as never,
       }),
-    ).rejects.toThrow(/confirmation snapshot does not match stable output tip/);
+    ).rejects.toThrow(/initial confirmation snapshot is ahead of the stable output tip/);
   });
 
   it('rejects a shallow H2 re-inclusion after the supplied H1 was reorged', async () => {
-    mocks.reobserveConfirmation.mockResolvedValue({
-      ...REFRESHED_CONFIRMATION,
-      status: 'pending',
-      confirmations: 1,
-      confirmationHeight: null,
-      confirmationHeaderIdHex: null,
-    });
+    mocks.reobserveConfirmation
+      .mockResolvedValueOnce(REFRESHED_CONFIRMATION)
+      .mockResolvedValueOnce({
+        ...FINAL_CONFIRMATION,
+        status: 'pending',
+        confirmations: 1,
+        confirmationHeight: null,
+        confirmationHeaderIdHex: null,
+      });
 
     await expect(
       observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
@@ -323,19 +343,52 @@ describe('isolated committed-vault output observer V1', () => {
         candidate: CANDIDATE as never,
         confirmation: CONFIRMATION as never,
       }),
-    ).rejects.toThrow(/requires refreshed canonical confirmation/);
+    ).rejects.toThrow(/requires final canonical confirmation/);
   });
 
-  it('rejects a tip change after the canonical confirmation refresh', async () => {
+  it('accepts a stable output view after the refreshed confirmation height', async () => {
+    mocks.getBestHeader.mockReturnValue({ height: 212, id: hex('21') });
+
+    const observation =
+      await observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      });
+
+    expect(observation).toMatchObject({
+      confirmationHeight: 201,
+      observedTipHeight: 212,
+      observedTipHeaderIdHex: hex('21'),
+    });
+  });
+
+  it('rejects an output snapshot that outruns the final confirmation', async () => {
+    mocks.getBestHeader.mockReturnValue({ height: 213, id: hex('22') });
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      }),
+    ).rejects.toThrow(/final confirmation snapshot is behind the stable output tip/);
+  });
+
+  it.each([
+    ['regression', { height: 210, id: hex('22') }, /tip regressed/],
+    ['same-height replacement', { height: 211, id: hex('23') }, /tip replaced or reused/],
+    ['height-changing ID reuse', { height: 212, id: OBSERVED_TIP_ID }, /tip replaced or reused/],
+  ] as const)('rejects a %s inside an output snapshot', async (_label, changedTip, error) => {
     let primaryReads = 0;
     mocks.getBestHeader.mockImplementation((origin: string) => {
-      if (origin !== PRIMARY) {
-        return { height: 211, id: OBSERVED_TIP_ID };
-      }
+      if (origin !== PRIMARY) return { height: 211, id: OBSERVED_TIP_ID };
       primaryReads += 1;
-      return primaryReads < 3
+      return primaryReads === 1
         ? { height: 211, id: OBSERVED_TIP_ID }
-        : { height: 212, id: hex('21') };
+        : changedTip;
     });
 
     await expect(
@@ -345,7 +398,29 @@ describe('isolated committed-vault output observer V1', () => {
         candidate: CANDIDATE as never,
         confirmation: CONFIRMATION as never,
       }),
-    ).rejects.toThrow(/tip changed while refreshing canonical confirmation/);
+    ).rejects.toThrow(error);
+  });
+
+  it('bounds retries when an output snapshot never stabilizes', async () => {
+    const reads = new Map<string, number>();
+    mocks.getBestHeader.mockImplementation((origin: string) => {
+      const count = (reads.get(origin) ?? 0) + 1;
+      reads.set(origin, count);
+      return {
+        height: 211 + count,
+        id: (40 + count).toString(16).padStart(2, '0').repeat(32),
+      };
+    });
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      }),
+    ).rejects.toThrow(/tip did not stabilize during output observation/);
+    expect(reads.get(PRIMARY)).toBe(6);
   });
 
   it('rejects copied output evidence without process provenance', async () => {
