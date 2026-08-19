@@ -310,7 +310,7 @@ export function assertExactBuildReceipt(value: unknown): string {
     || buildAction.processRunner !== 'reviewed-windows-job-object-v1'
     || buildAction.timeoutMs !== 900_000
     || buildAction.terminationGraceMs !== 10_000
-    || buildAction.maxOutputBytes !== 16_777_216
+    || buildAction.maxOutputBytes !== 33_554_432
     || !safeArtifactName(buildAction.artifactName)
     || !positiveSafeInteger(buildAction.artifactBytes)
   ) {

@@ -20,7 +20,7 @@
   "windowsJobProcessRunnerSha256": "c7ab6ff55e275eb4e1298b1bcc6ce57d1e7cb7b0f0eb4c47f41c61f3895f9f6e",
   "buildTimeoutMs": 900000,
   "buildTerminationGraceMs": 10000,
-  "buildMaxOutputBytes": 16777216,
+  "buildMaxOutputBytes": 33554432,
   "assemblyDirectory": "target/scala-2.12",
   "assemblyNamePattern": "^ergo-.*\\.jar$",
   "minimumAssemblyBytes": 33554432

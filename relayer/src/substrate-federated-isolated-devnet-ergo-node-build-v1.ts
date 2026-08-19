@@ -58,7 +58,7 @@ interface NodeBuildLockV1 {
   readonly windowsJobProcessRunnerSha256: string;
   readonly buildTimeoutMs: 900_000;
   readonly buildTerminationGraceMs: 10_000;
-  readonly buildMaxOutputBytes: 16_777_216;
+  readonly buildMaxOutputBytes: 33_554_432;
   readonly assemblyDirectory: 'target/scala-2.12';
   readonly assemblyNamePattern: '^ergo-.*\\.jar$';
   readonly minimumAssemblyBytes: 33_554_432;
@@ -102,7 +102,7 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt {
     readonly processRunnerSha256Hex: string;
     readonly timeoutMs: 900_000;
     readonly terminationGraceMs: 10_000;
-    readonly maxOutputBytes: 16_777_216;
+    readonly maxOutputBytes: 33_554_432;
     readonly artifactName: string;
     readonly artifactBytes: number;
     readonly artifactSha256Hex: string;
@@ -442,7 +442,7 @@ function loadBuildLock(bridgeRoot: string): Readonly<NodeBuildLockV1> {
     || parsed.buildProcessRunner !== 'reviewed-windows-job-object-v1'
     || parsed.buildTimeoutMs !== 900_000
     || parsed.buildTerminationGraceMs !== 10_000
-    || parsed.buildMaxOutputBytes !== 16_777_216
+    || parsed.buildMaxOutputBytes !== 33_554_432
     || parsed.assemblyDirectory !== 'target/scala-2.12'
     || parsed.assemblyNamePattern !== LOCKED_ASSEMBLY_NAME_PATTERN
     || parsed.minimumAssemblyBytes !== 33_554_432

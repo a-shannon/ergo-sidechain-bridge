@@ -2150,7 +2150,7 @@ function buildReceipt() {
       processRunnerSha256Hex: '9'.repeat(64),
       timeoutMs: 900_000,
       terminationGraceMs: 10_000,
-      maxOutputBytes: 16_777_216,
+      maxOutputBytes: 33_554_432,
       artifactName: 'ergo-node.jar',
       artifactBytes: 123_456,
       artifactSha256Hex: 'a'.repeat(64),

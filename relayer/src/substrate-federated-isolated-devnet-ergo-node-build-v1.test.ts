@@ -56,7 +56,7 @@ describe('isolated devnet Ergo node build V1', () => {
         'c7ab6ff55e275eb4e1298b1bcc6ce57d1e7cb7b0f0eb4c47f41c61f3895f9f6e',
       buildTimeoutMs: 900_000,
       buildTerminationGraceMs: 10_000,
-      buildMaxOutputBytes: 16_777_216,
+      buildMaxOutputBytes: 33_554_432,
     });
     expect(JSON.stringify(lock)).not.toMatch(/[A-Za-z]:[\\/]/u);
   });
@@ -151,6 +151,7 @@ describe('isolated devnet Ergo node build V1', () => {
       ),
       'utf8',
     )) as Record<string, unknown>;
+    const canonicalPatchSha256 = canonical.ergoPatchSha256;
     canonical.extraAuthority = true;
     writeFileSync(
       join(
@@ -175,6 +176,19 @@ describe('isolated devnet Ergo node build V1', () => {
     expect(() =>
       inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(root)
     ).toThrow(/32-byte lowercase hexadecimal/);
+
+    canonical.ergoPatchSha256 = canonicalPatchSha256;
+    canonical.buildMaxOutputBytes = 16_777_216;
+    writeFileSync(
+      join(
+        sources,
+        'substrate-federated-isolated-devnet-node-build-lock-v1.json',
+      ),
+      JSON.stringify(canonical),
+    );
+    expect(() =>
+      inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(root)
+    ).toThrow(/constants differ/);
   });
 
   it('keeps the concrete builder shell-free and capability-free', () => {
