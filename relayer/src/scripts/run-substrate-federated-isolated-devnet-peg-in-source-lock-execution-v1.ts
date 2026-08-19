@@ -8,7 +8,7 @@ import {
   rmdirSync,
   unlinkSync,
 } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join, parse, resolve } from 'node:path';
+import { delimiter, dirname, isAbsolute, join, resolve, win32 } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
@@ -343,31 +343,37 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
     'directory',
     canonicalWorktreeRoot,
   );
-  const systemDriveRoot = parse(systemRoot).root;
+  const systemDriveRoot = localWindowsDriveRoot(systemRoot, 'SystemRoot');
+  const worktreeDriveRoot = localWindowsDriveRoot(
+    canonicalWorktreeRoot,
+    'worktree root',
+  );
+  const allowedDriveRoots = [systemDriveRoot, worktreeDriveRoot].filter(
+    (root, index, roots) => roots.findIndex(candidate =>
+      canonicalPathIdentity(candidate) === canonicalPathIdentity(root)
+    ) === index,
+  );
   const systemDrive = systemDriveRoot.replace(/[\\/]+$/u, '');
-  if (!/^[A-Za-z]:$/u.test(systemDrive)) {
-    throw new Error('SystemDrive could not be derived from SystemRoot');
-  }
   const comSpec = safeEnvironmentPath(
     process.env.ComSpec ?? process.env.COMSPEC,
     'ComSpec',
     'file',
     canonicalWorktreeRoot,
-    systemDriveRoot,
+    [systemDriveRoot],
   );
   const runtimeRoot = safeEnvironmentPath(
     dirname(canonicalWorktreeRoot),
     'isolated worker runtime root',
     'directory',
     canonicalWorktreeRoot,
-    systemDriveRoot,
+    [worktreeDriveRoot],
   );
   const environment: NodeJS.ProcessEnv = {
     Path: safeEnvironmentPathList(
       process.env.Path ?? process.env.PATH,
       'Path',
       canonicalWorktreeRoot,
-      systemDriveRoot,
+      allowedDriveRoots,
     ),
     SystemRoot: systemRoot,
     SystemDrive: systemDrive,
@@ -391,7 +397,7 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
         key,
         'directory',
         canonicalWorktreeRoot,
-        systemDriveRoot,
+        allowedDriveRoots,
       );
     }
   }
@@ -402,7 +408,7 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
         value,
         key,
         canonicalWorktreeRoot,
-        systemDriveRoot,
+        allowedDriveRoots,
       );
     }
   }
@@ -414,7 +420,7 @@ function safeEnvironmentPath(
   label: string,
   kind: 'file' | 'directory',
   canonicalWorktreeRoot: string,
-  expectedDriveRoot = parse(canonicalWorktreeRoot).root,
+  allowedDriveRoots?: readonly string[],
 ): string {
   const path = explicitExistingLocalNonSensitivePath(value, label, kind);
   if (
@@ -424,10 +430,10 @@ function safeEnvironmentPath(
     throw new Error(`${label} must remain outside the worktree`);
   }
   if (
-    canonicalPathIdentity(parse(path).root)
-      !== canonicalPathIdentity(expectedDriveRoot)
+    allowedDriveRoots !== undefined
+    && !environmentPathUsesAllowedLocalDrive(path, allowedDriveRoots)
   ) {
-    throw new Error(`${label} must remain on the local system drive`);
+    throw new Error(`${label} must remain on an allowed local drive`);
   }
   return path;
 }
@@ -436,7 +442,7 @@ function safeEnvironmentPathList(
   value: unknown,
   label: string,
   canonicalWorktreeRoot: string,
-  systemDriveRoot: string,
+  allowedDriveRoots: readonly string[],
 ): string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`${label} must contain local executable directories`);
@@ -469,11 +475,8 @@ function safeEnvironmentPathList(
       if (label === 'Path') continue;
       throw new Error(`${label} must remain outside the worktree`);
     }
-    if (
-      canonicalPathIdentity(parse(path).root)
-        !== canonicalPathIdentity(systemDriveRoot)
-    ) {
-      throw new Error(`${label} must remain on the local system drive`);
+    if (!environmentPathUsesAllowedLocalDrive(path, allowedDriveRoots)) {
+      throw new Error(`${label} must remain on an allowed local drive`);
     }
     if (!paths.some(existing =>
       canonicalPathIdentity(existing) === canonicalPathIdentity(path)
@@ -485,6 +488,29 @@ function safeEnvironmentPathList(
     throw new Error(`${label} must contain local executable directories`);
   }
   return paths.join(delimiter);
+}
+
+export function environmentPathUsesAllowedLocalDrive(
+  path: string,
+  allowedDriveRoots: readonly string[],
+): boolean {
+  const driveRoot = win32.parse(path).root;
+  return isWindowsLocalDriveRoot(driveRoot) && allowedDriveRoots.some(root =>
+    isWindowsLocalDriveRoot(root)
+      && canonicalPathIdentity(root) === canonicalPathIdentity(driveRoot)
+  );
+}
+
+function localWindowsDriveRoot(path: string, label: string): string {
+  const driveRoot = win32.parse(path).root;
+  if (!isWindowsLocalDriveRoot(driveRoot)) {
+    throw new Error(`${label} must resolve to one local Windows drive`);
+  }
+  return driveRoot;
+}
+
+function isWindowsLocalDriveRoot(value: string): boolean {
+  return /^[A-Za-z]:[\\/]$/u.test(value);
 }
 
 function explicitLocalNonSensitivePath(value: unknown, label: string): string {

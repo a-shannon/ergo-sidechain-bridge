@@ -66,6 +66,7 @@ import {
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.js';
 import {
   childEnvironment,
+  environmentPathUsesAllowedLocalDrive,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 import {
@@ -87,7 +88,7 @@ const RECIPIENT_ADDRESS_HEX = '11'.repeat(20);
 
 describe('isolated devnet peg-in source-lock check command V1', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocked.loader.mockReturnValue(Object.freeze({
       build: Object.freeze({ source: 'canonical-request' }),
       lifecycle: Object.freeze({ source: 'canonical-request' }),
@@ -395,6 +396,25 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       restoreEnvironment('Path', originalPath);
       restoreEnvironment('LIB', originalLib);
     }
+  });
+
+  it('allows only the explicit system and worktree drives', () => {
+    expect(environmentPathUsesAllowedLocalDrive(
+      'D:\\isolated-node\\node.exe',
+      ['C:\\', 'D:\\'],
+    )).toBe(true);
+    expect(environmentPathUsesAllowedLocalDrive(
+      'd:\\isolated-node\\node.exe',
+      ['C:\\', 'D:\\'],
+    )).toBe(true);
+    expect(environmentPathUsesAllowedLocalDrive(
+      'E:\\unexpected\\node.exe',
+      ['C:\\', 'D:\\'],
+    )).toBe(false);
+    expect(environmentPathUsesAllowedLocalDrive(
+      '\\\\server\\share\\node.exe',
+      ['C:\\', 'D:\\'],
+    )).toBe(false);
   });
 
   it('rejects occupied, in-worktree, and linked output paths before launch', async () => {
