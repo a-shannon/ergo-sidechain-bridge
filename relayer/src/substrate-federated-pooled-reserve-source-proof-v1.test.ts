@@ -20,6 +20,8 @@ import {
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
   POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4,
+  buildFederatedPooledReserveSourceProofProfileV1,
+  buildFederatedPooledReserveSourceProofResultFieldsForProfileV1,
   decodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
   decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
   deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
@@ -32,6 +34,7 @@ import {
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
   createFederatedPooledReserveSourceProofV1Fixture,
+  signFederatedPooledReserveSourceProofResultForProfileV1Fixture,
 } from './substrate-federated-pooled-reserve-source-proof-v1.test-helper.js';
 import type {
   ValidityApplicationPooledReserveMintReservationStatementV4,
@@ -347,13 +350,55 @@ describe('substrate federated pooled-reserve source proof V1', () => {
         request,
         fixture.result,
         fixture.signatures,
-      )).toThrow(/differs from the exact profile-bound request/);
+      )).toThrow(/does not select the exact federated pooled-reserve proof profile/);
     expect(() =>
       deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
         substitutedProfile,
         request,
         fixture.result,
-      )).toThrow(/differs from the exact profile-bound request/);
+      )).toThrow(/does not select the exact federated pooled-reserve proof profile/);
+
+    const selectedProfile =
+      buildFederatedPooledReserveSourceProofProfileV1(substitutedProfile);
+    const selectedRequest = {
+      ...request,
+      runtimeProfile: {
+        ...request.runtimeProfile,
+        sourceProofProfileIdHex: selectedProfile.proofProfileIdHex,
+      },
+    };
+    const selectedResult =
+      buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
+        substitutedProfile,
+        selectedRequest,
+      );
+    const selectedSignatures =
+      signFederatedPooledReserveSourceProofResultForProfileV1Fixture({
+        profile: substitutedProfile,
+        request: selectedRequest,
+        result: selectedResult,
+      });
+    const verified =
+      verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
+        substitutedProfile,
+        selectedRequest,
+        selectedResult,
+        selectedSignatures,
+      );
+
+    expect(selectedProfile.proofProfileIdHex).not.toBe(
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX,
+    );
+    expect(selectedResult.requestDigestHex).not.toBe(
+      fixture.result.requestDigestHex,
+    );
+    expect(verified.resultIdHex).toBe(
+      deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        selectedResult,
+      ),
+    );
   });
 });
 

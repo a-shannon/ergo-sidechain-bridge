@@ -11,10 +11,12 @@ import {
   POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4,
   buildFederatedPooledReserveSourceProofResultFieldsV1,
   deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex,
+  deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
   deriveFederatedPooledReserveSourceProofResultIdV1Hex,
   encodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
   encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
   type FederatedPooledReserveSourceProofRequestV1,
+  type FederatedPooledReserveSourceProofProfileV1Input,
   type FederatedPooledReserveSourceProofResultFieldsV1,
   type FederatedPooledReserveSourceProofSignatureV1,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
@@ -57,6 +59,30 @@ export function signFederatedPooledReserveSourceProofResultV1Fixture(
 ): readonly FederatedPooledReserveSourceProofSignatureV1[] {
   const resultIdHex =
     deriveFederatedPooledReserveSourceProofResultIdV1Hex(result);
+  return signResultIdFixture(resultIdHex, signerIndexes);
+}
+
+export function signFederatedPooledReserveSourceProofResultForProfileV1Fixture(
+  input: Readonly<{
+    readonly profile: FederatedPooledReserveSourceProofProfileV1Input;
+    readonly request: FederatedPooledReserveSourceProofRequestV1;
+    readonly result: FederatedPooledReserveSourceProofResultFieldsV1;
+    readonly signerIndexes?: readonly number[];
+  }>,
+): readonly FederatedPooledReserveSourceProofSignatureV1[] {
+  const resultIdHex =
+    deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+      input.profile,
+      input.request,
+      input.result,
+    );
+  return signResultIdFixture(resultIdHex, input.signerIndexes ?? [0, 1]);
+}
+
+function signResultIdFixture(
+  resultIdHex: string,
+  signerIndexes: readonly number[],
+): readonly FederatedPooledReserveSourceProofSignatureV1[] {
   const attestationDigest = Buffer.from(
     deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(
       resultIdHex,

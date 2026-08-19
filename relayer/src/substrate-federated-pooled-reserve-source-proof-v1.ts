@@ -332,9 +332,10 @@ export function deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1
   profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
   request: FederatedPooledReserveSourceProofRequestV1,
 ): string {
+  const normalizedProfile = normalizeProofProfileInput(profile);
   return deriveRequestDigestForProfile(
-    normalizeProofProfileInput(profile),
-    normalizeRequest(request),
+    normalizedProfile,
+    normalizeRequestForProfile(normalizedProfile, request),
   );
 }
 
@@ -352,7 +353,7 @@ export function buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
   request: FederatedPooledReserveSourceProofRequestV1,
 ): Readonly<FederatedPooledReserveSourceProofResultFieldsV1> {
   const normalizedProfile = normalizeProofProfileInput(profile);
-  const normalized = normalizeRequest(request);
+  const normalized = normalizeRequestForProfile(normalizedProfile, request);
   return deepFreeze({
     formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
     federationEpoch: normalizedProfile.federationEpoch.toString(),
@@ -400,7 +401,7 @@ export function deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
   const normalizedProfile = normalizeProofProfileInput(profile);
   const normalized = normalizeResultForProfileAndRequest(
     normalizedProfile,
-    normalizeRequest(request),
+    normalizeRequestForProfile(normalizedProfile, request),
     result,
   );
   return domainHash(PROOF_RESULT_DOMAIN, encodeResultHashBody(normalized));
@@ -424,7 +425,7 @@ export function verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
   const normalizedProfile = normalizeProofProfileInput(profile);
   const normalizedResult = normalizeResultForProfileAndRequest(
     normalizedProfile,
-    normalizeRequest(request),
+    normalizeRequestForProfile(normalizedProfile, request),
     result,
   );
   const normalizedSignatures = normalizeSignaturesForProfile(
@@ -730,6 +731,16 @@ export function verifyFederatedPooledReserveSourceProofReferenceConformanceV1(in
 function normalizeRequest(
   value: FederatedPooledReserveSourceProofRequestV1,
 ): NormalizedRequest {
+  return normalizeRequestForProfile(
+    normalizeProofProfileInput(referenceSourceProofProfileInput()),
+    value,
+  );
+}
+
+function normalizeRequestForProfile(
+  profile: NormalizedProofProfile,
+  value: FederatedPooledReserveSourceProofRequestV1,
+): NormalizedRequest {
   const request = exactRecord(
     value,
     [
@@ -751,13 +762,15 @@ function normalizeRequest(
     );
   if (
     runtimeProfile.sourceProofSystemIdHex
-      !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX
+      !== profile.proofSystemIdHex
     || runtimeProfile.sourceProofProfileIdHex
-      !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX
+      !== profile.proofProfileIdHex
   ) {
-    throw new Error(
-      'runtime profile does not select the static federated pooled-reserve proof family',
-    );
+    const referenceProfileIdHex =
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX;
+    throw new Error(profile.proofProfileIdHex === referenceProfileIdHex
+      ? 'runtime profile does not select the static federated pooled-reserve proof family'
+      : 'runtime profile does not select the exact federated pooled-reserve proof profile');
   }
   const statementHex = fixedBytesHex(
     request.statementHex,
