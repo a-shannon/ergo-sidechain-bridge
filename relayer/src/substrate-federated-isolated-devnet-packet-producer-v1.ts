@@ -1,10 +1,4 @@
-import {
-  createHash,
-  createPublicKey,
-  generateKeyPairSync,
-  sign,
-  type KeyObject,
-} from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   lstatSync,
   readFileSync,
@@ -42,7 +36,6 @@ import {
   buildSubstrateFederatedIsolatedDevnetLaunchStatementV1,
   buildSubstrateFederatedIsolatedDevnetRelayerClosureV1,
   deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1,
-  type SubstrateFederatedIsolatedDevnetLaunchSignatureV1,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA,
@@ -54,6 +47,13 @@ import {
   assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
   type SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
 } from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD_V1,
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance,
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
+  type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
+} from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import {
   produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_ARTIFACT_FILES_V1,
@@ -73,9 +73,9 @@ import {
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-packet-producer.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT =
-  3 as const;
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD =
-  2 as const;
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD_V1;
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1';
@@ -96,11 +96,6 @@ const MAX_ADMISSION_VALIDITY_BLOCKS = '64';
 const ERGO_ADMISSION_THRESHOLD = 1 as const;
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const RESULTS = new WeakSet<object>();
-
-type SourceSigner = Readonly<{
-  readonly privateKey: KeyObject;
-  readonly publicKeyHex: string;
-}>;
 
 interface ByteArtifactV1 {
   readonly sizeBytes: number;
@@ -210,18 +205,16 @@ export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
   assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
     ergoAdmissionSigner,
   );
-  let signers = Array.from(
-    { length: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT },
-    sourceSigner,
-  ).sort((left, right) => compareStrings(
-    left.publicKeyHex,
-    right.publicKeyHex,
-  ));
+  const sourceAttestation =
+    createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1({
+      ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+      ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+    });
   const signer = deepFreeze({
     sourceAttestationThreshold:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD,
+      sourceAttestation.binding.sourceAttestationThreshold,
     sourceAttestationPublicKeysHex:
-      signers.map(value => value.publicKeyHex),
+      sourceAttestation.binding.sourceAttestationPublicKeysHex,
     ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
     ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
   });
@@ -233,7 +226,7 @@ export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
         throw new Error('isolated packet session is running');
       }
       if (state === 'open') {
-        signers = [];
+        sourceAttestation.dispose();
         state = 'closed';
       }
     },
@@ -248,9 +241,12 @@ export function createSubstrateFederatedIsolatedDevnetPacketSessionV1(
         assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
           ergoAdmissionSigner,
         );
-        return await producePacket(input, signers, signer);
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance(
+          sourceAttestation,
+        );
+        return await producePacket(input, sourceAttestation, signer);
       } finally {
-        signers = [];
+        sourceAttestation.dispose();
         state = 'closed';
       }
     },
@@ -315,7 +311,9 @@ function assertAcceptedErgoHistoryProvenance(
 
 async function producePacket(
   input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
-  signers: readonly SourceSigner[],
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+  >,
   signerBinding:
     Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV1>> {
@@ -467,10 +465,7 @@ async function producePacket(
     ergoHistory,
     relayerClosure,
   });
-  const signatures = signExactThreshold(
-    signers,
-    statement.attestationDigestHex,
-  );
+  const signatures = sourceAttestation.signLaunchStatement(statement);
   const baseline = buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1({
     statement,
     signatures,
@@ -739,41 +734,6 @@ function assertExpectedProfilePins(
       throw new Error(`isolated portable packet ${label} pin differs`);
     }
   }
-}
-
-function signExactThreshold(
-  signers: readonly SourceSigner[],
-  digestHex: string,
-): readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[] {
-  if (
-    signers.length
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT
-  ) {
-    throw new Error('isolated packet source-attestation capability is unavailable');
-  }
-  return deepFreeze(signers.slice(
-    0,
-    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD,
-  ).map(value => ({
-    signerPublicKeyHex: value.publicKeyHex,
-    signatureHex: sign(
-      null,
-      Buffer.from(digestHex, 'hex'),
-      value.privateKey,
-    ).toString('hex'),
-  })));
-}
-
-function sourceSigner(): SourceSigner {
-  const { privateKey } = generateKeyPairSync('ed25519');
-  const publicKeyDer = createPublicKey(privateKey).export({
-    format: 'der',
-    type: 'spki',
-  });
-  return Object.freeze({
-    privateKey,
-    publicKeyHex: Buffer.from(publicKeyDer).subarray(-32).toString('hex'),
-  });
 }
 
 function readRelayerArtifacts(

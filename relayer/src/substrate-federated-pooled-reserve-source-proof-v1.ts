@@ -23,6 +23,7 @@ export const POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4 = 4 
 export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1 = 1n;
 export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1 = 2 as const;
 export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1 = 64n;
+export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_SIGNERS_V1 = 8 as const;
 export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_INNER_SCALE_BYTES_V1 = 540 as const;
 export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_OUTER_SCALE_BYTES_V4 = 623 as const;
 
@@ -53,6 +54,27 @@ export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_
     '0x22fc297792f0b6ffc0bfcfdb7edb0c0aa14e025a365ec0e342e86e3829cb74b6',
     '0xdb995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d',
   ] as const);
+
+export interface FederatedPooledReserveSourceProofProfileV1Input {
+  readonly federationEpoch: string | number | bigint;
+  readonly threshold: number;
+  readonly signerPublicKeysHex: readonly string[];
+  readonly maxValidityBlocks: string | number | bigint;
+  readonly verifierProfileIdHex: string;
+}
+
+export interface FederatedPooledReserveSourceProofProfileV1 {
+  readonly formatVersion:
+    typeof FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1;
+  readonly federationEpoch: string;
+  readonly threshold: number;
+  readonly signerPublicKeysHex: readonly string[];
+  readonly sourceAttestationKeySetDigestHex: string;
+  readonly maxValidityBlocks: string;
+  readonly verifierProfileIdHex: string;
+  readonly proofSystemIdHex: string;
+  readonly proofProfileIdHex: string;
+}
 
 export const FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX =
   domainHash(PROOF_SYSTEM_DOMAIN, Buffer.alloc(0));
@@ -107,6 +129,13 @@ export interface FederatedPooledReserveSourceProofSignatureV1 {
 
 export interface FederatedPooledReserveSourceProofEnvelopeV1 {
   readonly result: FederatedPooledReserveSourceProofResultFieldsV1;
+  readonly signatures: readonly FederatedPooledReserveSourceProofSignatureV1[];
+}
+
+export interface FederatedPooledReserveSourceProofSignatureVerificationV1 {
+  readonly resultIdHex: string;
+  readonly attestationDigestHex: string;
+  readonly signatureSetDigestHex: string;
   readonly signatures: readonly FederatedPooledReserveSourceProofSignatureV1[];
 }
 
@@ -181,7 +210,7 @@ type NormalizedResult = Readonly<{
   formatVersion: 1;
   federationEpoch: bigint;
   sourceAttestationKeySetDigestHex: string;
-  sourceAttestationThreshold: 2;
+  sourceAttestationThreshold: number;
   requestDigestHex: string;
   sourceLockBoxCanonicalBlake2b256Hex: string;
   reserveTransitionTransactionCanonicalBlake2b256Hex: string;
@@ -193,6 +222,18 @@ type NormalizedResult = Readonly<{
   verifierProfileIdHex: string;
   issuedAtNativeHeight: bigint;
   expiresAtNativeHeight: bigint;
+}>;
+
+type NormalizedProofProfile = Readonly<{
+  formatVersion: 1;
+  federationEpoch: bigint;
+  threshold: number;
+  signerPublicKeysHex: readonly string[];
+  sourceAttestationKeySetDigestHex: string;
+  maxValidityBlocks: bigint;
+  verifierProfileIdHex: string;
+  proofSystemIdHex: string;
+  proofProfileIdHex: string;
 }>;
 
 type NormalizedRequest = Readonly<{
@@ -208,28 +249,69 @@ type NormalizedRequest = Readonly<{
 }>;
 
 export function deriveFederatedPooledReserveSourceKeySetDigestV1Hex(): string {
+  return deriveFederatedPooledReserveSourceKeySetDigestForKeysV1Hex(
+    FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
+  );
+}
+
+export function deriveFederatedPooledReserveSourceProofProfileIdV1Hex(): string {
+  return buildFederatedPooledReserveSourceProofProfileV1(
+    referenceSourceProofProfileInput(),
+  ).proofProfileIdHex;
+}
+
+export function deriveFederatedPooledReserveSourceKeySetDigestForKeysV1Hex(
+  signerPublicKeysHex: readonly string[],
+): string {
+  const keys = normalizeSourceProofSignerKeys(signerPublicKeysHex);
   return domainHash(SOURCE_KEY_SET_DOMAIN, Buffer.concat([
-    uint16Be(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX.length),
-    ...FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX.map(
+    uint16Be(keys.length),
+    ...keys.map(
       value => fixedBytes(value, 32, 'source-attestation public key', true),
     ),
   ]));
 }
 
-export function deriveFederatedPooledReserveSourceProofProfileIdV1Hex(): string {
+export function buildFederatedPooledReserveSourceProofProfileV1(
+  input: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+): Readonly<FederatedPooledReserveSourceProofProfileV1> {
+  const normalized = normalizeProofProfileInput(input);
+  return deepFreeze({
+    formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
+    federationEpoch: normalized.federationEpoch.toString(),
+    threshold: normalized.threshold,
+    signerPublicKeysHex: normalized.signerPublicKeysHex,
+    sourceAttestationKeySetDigestHex:
+      normalized.sourceAttestationKeySetDigestHex,
+    maxValidityBlocks: normalized.maxValidityBlocks.toString(),
+    verifierProfileIdHex: normalized.verifierProfileIdHex,
+    proofSystemIdHex: normalized.proofSystemIdHex,
+    proofProfileIdHex: normalized.proofProfileIdHex,
+  });
+}
+
+export function deriveFederatedPooledReserveSourceProofProfileIdForInputV1Hex(
+  input: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+): string {
+  return buildFederatedPooledReserveSourceProofProfileV1(input).proofProfileIdHex;
+}
+
+function deriveProofProfileIdFromNormalized(
+  profile: Readonly<Omit<NormalizedProofProfile, 'proofProfileIdHex'>>,
+): string {
   return domainHash(PROOF_PROFILE_DOMAIN, Buffer.concat([
     Buffer.from([FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1]),
-    uint64Be(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1),
+    uint64Be(profile.federationEpoch),
     fixedBytes(
-      FEDERATED_POOLED_RESERVE_SOURCE_KEY_SET_DIGEST_V1_HEX,
+      profile.sourceAttestationKeySetDigestHex,
       32,
       'source-attestation key-set digest',
       true,
     ),
-    uint16Be(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1),
-    uint64Be(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1),
+    uint16Be(profile.threshold),
+    uint64Be(profile.maxValidityBlocks),
     fixedBytes(
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
+      profile.verifierProfileIdHex,
       32,
       'source-proof verifier profile ID',
       true,
@@ -240,22 +322,47 @@ export function deriveFederatedPooledReserveSourceProofProfileIdV1Hex(): string 
 export function deriveFederatedPooledReserveSourceProofRequestDigestV1Hex(
   request: FederatedPooledReserveSourceProofRequestV1,
 ): string {
-  return deriveRequestDigest(normalizeRequest(request));
+  return deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1Hex(
+    referenceSourceProofProfileInput(),
+    request,
+  );
+}
+
+export function deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1Hex(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+): string {
+  return deriveRequestDigestForProfile(
+    normalizeProofProfileInput(profile),
+    normalizeRequest(request),
+  );
 }
 
 export function buildFederatedPooledReserveSourceProofResultFieldsV1(
   request: FederatedPooledReserveSourceProofRequestV1,
 ): Readonly<FederatedPooledReserveSourceProofResultFieldsV1> {
+  return buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
+    referenceSourceProofProfileInput(),
+    request,
+  );
+}
+
+export function buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+): Readonly<FederatedPooledReserveSourceProofResultFieldsV1> {
+  const normalizedProfile = normalizeProofProfileInput(profile);
   const normalized = normalizeRequest(request);
   return deepFreeze({
     formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
-    federationEpoch:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1.toString(),
+    federationEpoch: normalizedProfile.federationEpoch.toString(),
     sourceAttestationKeySetDigestHex:
-      FEDERATED_POOLED_RESERVE_SOURCE_KEY_SET_DIGEST_V1_HEX,
-    sourceAttestationThreshold:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
-    requestDigestHex: deriveRequestDigest(normalized),
+      normalizedProfile.sourceAttestationKeySetDigestHex,
+    sourceAttestationThreshold: normalizedProfile.threshold,
+    requestDigestHex: deriveRequestDigestForProfile(
+      normalizedProfile,
+      normalized,
+    ),
     sourceLockBoxCanonicalBlake2b256Hex:
       blake2b256Hex(normalized.evidence.sourceLockBoxCanonicalHex),
     reserveTransitionTransactionCanonicalBlake2b256Hex:
@@ -272,8 +379,7 @@ export function buildFederatedPooledReserveSourceProofResultFieldsV1(
       blake2b256Hex(normalized.evidence.finalityProofCanonicalHex),
     verifierExecutableSha256Hex:
       normalized.evidence.verifierExecutableSha256Hex,
-    verifierProfileIdHex:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
+    verifierProfileIdHex: normalizedProfile.verifierProfileIdHex,
     issuedAtNativeHeight: normalized.issuedAtNativeHeight.toString(),
     expiresAtNativeHeight: normalized.expiresAtNativeHeight.toString(),
   });
@@ -286,6 +392,20 @@ export function deriveFederatedPooledReserveSourceProofResultIdV1Hex(
   return domainHash(PROOF_RESULT_DOMAIN, encodeResultHashBody(normalized));
 }
 
+export function deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+  result: FederatedPooledReserveSourceProofResultFieldsV1,
+): string {
+  const normalizedProfile = normalizeProofProfileInput(profile);
+  const normalized = normalizeResultForProfileAndRequest(
+    normalizedProfile,
+    normalizeRequest(request),
+    result,
+  );
+  return domainHash(PROOF_RESULT_DOMAIN, encodeResultHashBody(normalized));
+}
+
 export function deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(
   resultIdHex: string,
 ): string {
@@ -293,6 +413,48 @@ export function deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(
     PROOF_ATTESTATION_DOMAIN,
     fixedBytes(resultIdHex, 32, 'source-proof result ID', true),
   );
+}
+
+export function verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+  result: FederatedPooledReserveSourceProofResultFieldsV1,
+  signatures: readonly FederatedPooledReserveSourceProofSignatureV1[],
+): Readonly<FederatedPooledReserveSourceProofSignatureVerificationV1> {
+  const normalizedProfile = normalizeProofProfileInput(profile);
+  const normalizedResult = normalizeResultForProfileAndRequest(
+    normalizedProfile,
+    normalizeRequest(request),
+    result,
+  );
+  const normalizedSignatures = normalizeSignaturesForProfile(
+    normalizedProfile,
+    signatures,
+  );
+  const resultIdHex = domainHash(
+    PROOF_RESULT_DOMAIN,
+    encodeResultHashBody(normalizedResult),
+  );
+  const attestationDigestHex =
+    deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(resultIdHex);
+  verifySignatures(normalizedSignatures, attestationDigestHex);
+  return deepFreeze({
+    resultIdHex,
+    attestationDigestHex,
+    signatureSetDigestHex: domainHash(
+      PROOF_SIGNATURE_SET_DOMAIN,
+      Buffer.concat(normalizedSignatures.flatMap(signature => [
+        fixedBytes(
+          signature.signerPublicKeyHex,
+          32,
+          'signature public key',
+          true,
+        ),
+        fixedBytes(signature.signatureHex, 64, 'Ed25519 signature'),
+      ])),
+    ),
+    signatures: normalizedSignatures,
+  });
 }
 
 export function encodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex(
@@ -707,7 +869,117 @@ function assertStatementMatchesRuntimeProfile(
   }
 }
 
+function referenceSourceProofProfileInput(): Readonly<
+  FederatedPooledReserveSourceProofProfileV1Input
+> {
+  return Object.freeze({
+    federationEpoch:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
+    threshold: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
+    signerPublicKeysHex:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
+    maxValidityBlocks:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1,
+    verifierProfileIdHex:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
+  });
+}
+
+function normalizeProofProfileInput(
+  value: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+): NormalizedProofProfile {
+  const profile = exactRecord(
+    value,
+    [
+      'federationEpoch',
+      'maxValidityBlocks',
+      'signerPublicKeysHex',
+      'threshold',
+      'verifierProfileIdHex',
+    ],
+    'federated pooled-reserve source-proof profile',
+  );
+  const federationEpoch = uint64(profile.federationEpoch, 'federation epoch');
+  const maxValidityBlocks = uint64(
+    profile.maxValidityBlocks,
+    'source-proof maximum validity blocks',
+  );
+  const signerPublicKeysHex = normalizeSourceProofSignerKeys(
+    profile.signerPublicKeysHex as readonly string[],
+  );
+  if (
+    federationEpoch === 0n
+    || maxValidityBlocks === 0n
+    || maxValidityBlocks > 1_024n
+    || !Number.isSafeInteger(profile.threshold)
+    || (profile.threshold as number) < 2
+    || (profile.threshold as number) > signerPublicKeysHex.length
+  ) {
+    throw new Error('federated pooled-reserve source-proof profile is invalid');
+  }
+  const sourceAttestationKeySetDigestHex =
+    deriveFederatedPooledReserveSourceKeySetDigestForKeysV1Hex(
+      signerPublicKeysHex,
+    );
+  const base = {
+    formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
+    federationEpoch,
+    threshold: profile.threshold as number,
+    signerPublicKeysHex,
+    sourceAttestationKeySetDigestHex,
+    maxValidityBlocks,
+    verifierProfileIdHex: fixedBytesHex(
+      profile.verifierProfileIdHex,
+      32,
+      'source-proof verifier profile ID',
+      true,
+    ),
+    proofSystemIdHex:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX,
+  } as const;
+  return deepFreeze({
+    ...base,
+    proofProfileIdHex: deriveProofProfileIdFromNormalized(base),
+  });
+}
+
+function normalizeSourceProofSignerKeys(
+  values: readonly string[],
+): readonly string[] {
+  if (
+    !Array.isArray(values)
+    || values.length < 2
+    || values.length > FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_SIGNERS_V1
+  ) {
+    throw new Error('federated pooled-reserve source-proof key set is invalid');
+  }
+  const normalized = values.map((value, index) => fixedBytesHex(
+    value,
+    32,
+    `source-attestation public key ${index}`,
+    true,
+  ));
+  for (let index = 1; index < normalized.length; index += 1) {
+    if (normalized[index - 1]! >= normalized[index]!) {
+      throw new Error(
+        'federated pooled-reserve source-proof keys are not canonical',
+      );
+    }
+  }
+  return deepFreeze(normalized);
+}
+
 function normalizeResult(
+  value: FederatedPooledReserveSourceProofResultFieldsV1,
+): NormalizedResult {
+  return normalizeResultForProfile(
+    normalizeProofProfileInput(referenceSourceProofProfileInput()),
+    value,
+  );
+}
+
+function normalizeResultForProfile(
+  profile: NormalizedProofProfile,
   value: FederatedPooledReserveSourceProofResultFieldsV1,
 ): NormalizedResult {
   const result = exactRecord(
@@ -735,23 +1007,22 @@ function normalizeResult(
     result.formatVersion
       !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1
     || uint64(result.federationEpoch, 'federation epoch')
-      !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1
+      !== profile.federationEpoch
     || result.sourceAttestationThreshold
-      !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1
+      !== profile.threshold
   ) {
     throw new Error('federated pooled-reserve source-proof result profile is invalid');
   }
   const normalized = {
     formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
-    federationEpoch: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
+    federationEpoch: profile.federationEpoch,
     sourceAttestationKeySetDigestHex: fixedBytesHex(
       result.sourceAttestationKeySetDigestHex,
       32,
       'source-attestation key-set digest',
       true,
     ),
-    sourceAttestationThreshold:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
+    sourceAttestationThreshold: profile.threshold,
     requestDigestHex: fixedBytesHex(
       result.requestDigestHex,
       32,
@@ -817,13 +1088,30 @@ function normalizeResult(
   } as const;
   if (
     normalized.sourceAttestationKeySetDigestHex
-      !== FEDERATED_POOLED_RESERVE_SOURCE_KEY_SET_DIGEST_V1_HEX
+      !== profile.sourceAttestationKeySetDigestHex
     || normalized.verifierProfileIdHex
-      !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX
+      !== profile.verifierProfileIdHex
   ) {
     throw new Error('federated pooled-reserve source-proof result is not static-profile bound');
   }
   return deepFreeze(normalized);
+}
+
+function normalizeResultForProfileAndRequest(
+  profile: NormalizedProofProfile,
+  request: NormalizedRequest,
+  value: FederatedPooledReserveSourceProofResultFieldsV1,
+): NormalizedResult {
+  const result = normalizeResultForProfile(profile, value);
+  if (
+    result.requestDigestHex
+      !== deriveRequestDigestForProfile(profile, request)
+  ) {
+    throw new Error(
+      'federated pooled-reserve source-proof result differs from the exact profile-bound request',
+    );
+  }
+  return result;
 }
 
 function normalizeInnerEnvelope(
@@ -909,9 +1197,19 @@ function normalizeOuterEnvelope(
 function normalizeSignatures(
   values: readonly FederatedPooledReserveSourceProofSignatureV1[],
 ): readonly FederatedPooledReserveSourceProofSignatureV1[] {
+  return normalizeSignaturesForProfile(
+    normalizeProofProfileInput(referenceSourceProofProfileInput()),
+    values,
+  );
+}
+
+function normalizeSignaturesForProfile(
+  profile: NormalizedProofProfile,
+  values: readonly FederatedPooledReserveSourceProofSignatureV1[],
+): readonly FederatedPooledReserveSourceProofSignatureV1[] {
   if (
     !Array.isArray(values)
-    || values.length !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1
+    || values.length !== profile.threshold
   ) {
     throw new Error(
       'federated pooled-reserve proof must contain the exact threshold signature set',
@@ -939,7 +1237,7 @@ function normalizeSignatures(
   });
   for (const [index, signature] of normalized.entries()) {
     if (
-      !FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX.some(
+      !profile.signerPublicKeysHex.some(
         key => key === signature.signerPublicKeyHex,
       )
     ) {
@@ -996,6 +1294,16 @@ function verifySignatures(
 }
 
 function deriveRequestDigest(request: NormalizedRequest): string {
+  return deriveRequestDigestForProfile(
+    normalizeProofProfileInput(referenceSourceProofProfileInput()),
+    request,
+  );
+}
+
+function deriveRequestDigestForProfile(
+  profile: NormalizedProofProfile,
+  request: NormalizedRequest,
+): string {
   return blake2b256Hex(Buffer.concat([
     Buffer.from(PROOF_REQUEST_DOMAIN, 'ascii'),
     fixedBytes(request.runtimeProfileIdHex, 32, 'runtime profile ID', true),
@@ -1007,25 +1315,25 @@ function deriveRequestDigest(request: NormalizedRequest): string {
       true,
     ),
     fixedBytes(
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX,
+      profile.proofSystemIdHex,
       32,
       'source-proof system ID',
       true,
     ),
     fixedBytes(
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX,
+      profile.proofProfileIdHex,
       32,
       'source-proof profile ID',
       true,
     ),
-    uint64Be(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1),
+    uint64Be(profile.federationEpoch),
     fixedBytes(
-      FEDERATED_POOLED_RESERVE_SOURCE_KEY_SET_DIGEST_V1_HEX,
+      profile.sourceAttestationKeySetDigestHex,
       32,
       'source-attestation key-set digest',
       true,
     ),
-    uint16Be(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1),
+    uint16Be(profile.threshold),
     uint64Be(request.issuedAtNativeHeight),
     uint64Be(request.expiresAtNativeHeight),
   ]));

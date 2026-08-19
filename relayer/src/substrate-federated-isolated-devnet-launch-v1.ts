@@ -371,6 +371,12 @@ export interface BuildSubstrateFederatedIsolatedDevnetLaunchStatementV1Input {
     Readonly<SubstrateFederatedIsolatedDevnetRelayerClosureV1>;
 }
 
+export interface DeriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1Input {
+  readonly statementDigestHex: string;
+  readonly sourceAttestationKeySetDigestHex: string;
+  readonly sourceAttestationThreshold: number;
+}
+
 export interface SubstrateFederatedIsolatedDevnetLaunchSignatureV1 {
   readonly signerPublicKeyHex: string;
   readonly signatureHex: string;
@@ -688,16 +694,47 @@ export function buildSubstrateFederatedIsolatedDevnetLaunchStatementV1(
   const statement = deepFreeze({
     ...body,
     statementDigestHex,
-    attestationDigestHex: sha256CanonicalJson({
-      statementDigestHex,
-      sourceAttestationKeySetDigestHex:
-        input.target.federation.sourceAttestationKeySetDigestHex,
-      sourceAttestationThreshold:
-        input.target.federation.sourceAttestationThreshold,
-    }, ATTESTATION_DIGEST_DOMAIN),
+    attestationDigestHex:
+      deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
+        statementDigestHex,
+        sourceAttestationKeySetDigestHex:
+          input.target.federation.sourceAttestationKeySetDigestHex,
+        sourceAttestationThreshold:
+          input.target.federation.sourceAttestationThreshold,
+      }),
   });
   launchStatements.add(statement);
   return statement;
+}
+
+export function deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1(
+  input: Readonly<
+    DeriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1Input
+  >,
+): string {
+  exactRecord(
+    input,
+    [
+      'sourceAttestationKeySetDigestHex',
+      'sourceAttestationThreshold',
+      'statementDigestHex',
+    ],
+    'isolated-devnet launch-attestation digest input',
+  );
+  return sha256CanonicalJson({
+    statementDigestHex: digest(
+      input.statementDigestHex,
+      'launch statement digest',
+    ),
+    sourceAttestationKeySetDigestHex: digest(
+      input.sourceAttestationKeySetDigestHex,
+      'launch source-attestation key-set digest',
+    ),
+    sourceAttestationThreshold: positiveInteger(
+      input.sourceAttestationThreshold,
+      'launch source-attestation threshold',
+    ),
+  }, ATTESTATION_DIGEST_DOMAIN);
 }
 
 export function buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1(
@@ -709,7 +746,9 @@ export function buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1(
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV1> {
   exactRecord(input, ['statement', 'signatures'], 'isolated-devnet launch-baseline input');
-  assertLaunchStatement(input.statement);
+  assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance(
+    input.statement,
+  );
   const signatures = normalizeAndVerifySignatures(input.signatures, input.statement);
   const signatureSetDigestHex = sha256CanonicalJson(
     signatures,
@@ -1827,7 +1866,7 @@ function assertRelayerClosure(
   }
 }
 
-function assertLaunchStatement(
+export function assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance(
   value: unknown,
 ): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1> {
   if (value === null || typeof value !== 'object' || !launchStatements.has(value)) {

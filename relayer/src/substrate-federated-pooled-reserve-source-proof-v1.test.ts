@@ -10,16 +10,22 @@ import {
 } from './pooled-reserve-mint-reservation-runtime-profile-v4-codec.js';
 import {
   FEDERATED_POOLED_RESERVE_SOURCE_KEY_SET_DIGEST_V1_HEX,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_INNER_SCALE_BYTES_V1,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_OUTER_SCALE_BYTES_V4,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
   POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4,
   decodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
   decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
+  deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
   encodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
   encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
+  verifyFederatedPooledReserveSourceProofSignaturesForProfileV1,
   verifyFederatedPooledReserveSourceProofReferenceConformanceV1,
   type FederatedPooledReserveSourceProofRequestV1,
   type FederatedPooledReserveSourceProofSignatureV1,
@@ -318,6 +324,36 @@ describe('substrate federated pooled-reserve source proof V1', () => {
         replaceHexBytes(fixture.sourceProofEnvelopeScaleHex, 81, 'fd00'),
       ),
     ).toThrow(/not minimally encoded/);
+  });
+
+  it('rejects a signed result substituted under a different dynamic profile', () => {
+    const request = createRustInteropRequest();
+    const fixture = createFederatedPooledReserveSourceProofV1Fixture({ request });
+    const substitutedProfile = {
+      federationEpoch:
+        FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
+      threshold: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
+      signerPublicKeysHex:
+        FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
+      maxValidityBlocks:
+        FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1 + 1n,
+      verifierProfileIdHex:
+        FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
+    };
+
+    expect(() =>
+      verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
+        substitutedProfile,
+        request,
+        fixture.result,
+        fixture.signatures,
+      )).toThrow(/differs from the exact profile-bound request/);
+    expect(() =>
+      deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+        substitutedProfile,
+        request,
+        fixture.result,
+      )).toThrow(/differs from the exact profile-bound request/);
   });
 });
 

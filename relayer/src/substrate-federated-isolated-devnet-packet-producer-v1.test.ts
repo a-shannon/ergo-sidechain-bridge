@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   tamperRelayerSetDigest: false,
   ergoAdmissionSigner: undefined as any,
   packetSignerBinding: undefined as any,
+  launchStatements: new WeakSet<object>(),
   ergoHistoryV1Provenance: vi.fn((value: any) => {
     if (
       value !== mocks.ergoHistory
@@ -192,8 +193,14 @@ vi.mock(
           return Object.freeze({
             descriptorDigestHex: 'b1'.repeat(32),
             federation: Object.freeze({
+              federationProfileIdHex:
+                input.trackerRequest.profile.profileIdHex,
+              sourceAttestationPublicKeysHex:
+                input.trackerRequest.profile.sourceAttestationPublicKeysHex,
               sourceAttestationKeySetDigestHex:
                 input.trackerRequest.profile.sourceAttestationKeySetDigestHex,
+              sourceAttestationThreshold:
+                input.trackerRequest.profile.sourceAttestationThreshold,
             }),
             lineages: Object.freeze({
               tracker: Object.freeze({
@@ -223,15 +230,37 @@ vi.mock(
       buildSubstrateFederatedIsolatedDevnetLaunchStatementV1:
         vi.fn((input: any) => {
           mocks.statementInputs.push(input);
-          return Object.freeze({
+          const statementDigestHex = 'b4'.repeat(32);
+          const statement = Object.freeze({
             schema:
               'e2s.substrate-federated-isolated-devnet-launch-statement.v1',
             version: 1,
             target: input.target,
             activationGenerationIdHex: input.activationGenerationIdHex,
-            statementDigestHex: 'b4'.repeat(32),
-            attestationDigestHex: 'b5'.repeat(32),
+            statementDigestHex,
+            attestationDigestHex:
+              actual.deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
+                statementDigestHex,
+                sourceAttestationKeySetDigestHex:
+                  input.target.federation.sourceAttestationKeySetDigestHex,
+                sourceAttestationThreshold:
+                  input.target.federation.sourceAttestationThreshold,
+              }),
           });
+          mocks.launchStatements.add(statement);
+          return statement;
+        }),
+      assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance:
+        vi.fn((value: unknown) => {
+          if (
+            value === null
+            || typeof value !== 'object'
+            || !mocks.launchStatements.has(value)
+          ) {
+            throw new Error(
+              'isolated-devnet launch statement lacks process provenance',
+            );
+          }
         }),
       buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1:
         vi.fn((input: any) => {
