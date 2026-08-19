@@ -56,6 +56,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   type SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt,
   type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
@@ -132,6 +133,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1,
   type SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import {
@@ -184,7 +186,21 @@ const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
 const FEDERATION_EPOCH = '1';
 const MAX_ADMISSION_VALIDITY_BLOCKS = '64';
 const CONFIRMATION_POLL_MS = 250;
-const ACTION_COMPLETION_BUDGET_MS = 9 * 60_000;
+const TRANSACTION_CONFIRMATION_BUDGET_MS = 2 * 60_000;
+const MAX_CONFIRMATION_WINDOWS = 11;
+const NON_CONFIRMATION_ACTION_BUDGET_MS = 8 * 60_000;
+const ACTION_COMPLETION_BUDGET_MS =
+  (MAX_CONFIRMATION_WINDOWS * TRANSACTION_CONFIRMATION_BUDGET_MS)
+  + NON_CONFIRMATION_ACTION_BUDGET_MS;
+
+if (
+  TRANSACTION_CONFIRMATION_BUDGET_MS
+    <= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1
+  || ACTION_COMPLETION_BUDGET_MS
+    >= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1
+) {
+  throw new Error('isolated managed confirmation timing envelope is invalid');
+}
 
 const ROLE_ORDER = Object.freeze([
   'tracker',
@@ -1302,7 +1318,7 @@ async function executeManagedSetupAction(
   pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
   pegInAction: PegInActionV1,
 ): Promise<Readonly<ExecutionActionResult>> {
-  const completionDeadline = Date.now() + ACTION_COMPLETION_BUDGET_MS;
+  const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
   const sourceHistory =
     await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
       input.sourceHistory,
@@ -1386,6 +1402,7 @@ async function executeManagedSetupAction(
           journal,
           transport,
           observer,
+          completionDeadline,
         ),
       );
       assertTransportExecution(execution, role, transaction);
@@ -1484,6 +1501,7 @@ async function executeManagedSetupAction(
         completionDeadline,
       );
     }
+    assertManagedActionDeadline(completionDeadline, 'completion');
     actionResult = deepFreeze({
       lifecycle: {
         federationProfileIdHex: profilePins.federationProfileIdHex,
@@ -1912,7 +1930,13 @@ async function executeManagedPegInSourceLock(
     authorize: revalidated => sourceLockAuthorizer.authorize(revalidated),
     reserve: authorization => sourceLockJournal.journal.reserve(authorization),
     finalize: input => sourceLockJournal.journal.finalize(input),
-    submit: attempt => sourceLockTransport.submit(attempt),
+    submit: attempt => {
+      assertFullConfirmationWindowAvailable(
+        completionDeadline,
+        'source-lock',
+      );
+      return sourceLockTransport.submit(attempt);
+    },
   });
   assertSourceLockTransportExecution(execution, sourceLockCreation.txId);
   const confirmation = await waitForCanonicalConfirmation(
@@ -2120,7 +2144,13 @@ async function executeManagedPegInCommittedVault(
     reserve: authorization =>
       committedVaultJournal.journal.reserve(authorization),
     finalize: input => committedVaultJournal.journal.finalize(input),
-    submit: attempt => committedVaultTransport.submit(attempt),
+    submit: attempt => {
+      assertFullConfirmationWindowAvailable(
+        completionDeadline,
+        'committed-vault',
+      );
+      return committedVaultTransport.submit(attempt);
+    },
   });
   assertCommittedVaultTransportExecution(execution, reserveTransition.txId);
   const preTransportObservation =
@@ -2369,6 +2399,7 @@ function executionPorts(
   transport: SubstrateFederatedLocalDevnetGenesisExecutionPorts['transport'],
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  completionDeadline: number,
 ): Readonly<SubstrateFederatedLocalDevnetGenesisExecutionPorts> {
   return Object.freeze({
     signer: Object.freeze({
@@ -2409,7 +2440,16 @@ function executionPorts(
     revalidator,
     broadcastAuthorizer: authorizer,
     journal: journal.journal,
-    transport,
+    transport: Object.freeze({
+      ...transport,
+      submit: (attempt: Parameters<typeof transport.submit>[0]) => {
+        assertFullConfirmationWindowAvailable(
+          completionDeadline,
+          `setup:${role}`,
+        );
+        return transport.submit(attempt);
+      },
+    }),
     confirmationObserver: observer,
   });
 }
@@ -2464,11 +2504,33 @@ async function waitForCanonicalConfirmation(
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   expectedTxId: string,
-  deadline: number,
+  completionDeadline: number,
   stage: string,
 ): Promise<Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>> {
+  let observedAt = performance.now();
+  if (
+    !Number.isFinite(observedAt)
+    || !Number.isFinite(completionDeadline)
+    || observedAt >= completionDeadline
+  ) {
+    throw new Error(
+      `isolated ${stage} transaction exceeded the managed action deadline`,
+    );
+  }
+  const deadline = Math.min(
+    completionDeadline,
+    observedAt + TRANSACTION_CONFIRMATION_BUDGET_MS,
+  );
   let lastObservationFailure: unknown;
   for (;;) {
+    const beforeObservation = performance.now();
+    if (!Number.isFinite(beforeObservation) || beforeObservation < observedAt) {
+      throw new Error('isolated confirmation monotonic clock regressed');
+    }
+    observedAt = beforeObservation;
+    if (observedAt >= deadline) {
+      throw confirmationDeadlineError(stage, lastObservationFailure);
+    }
     let rawObservation:
       SubstrateFederatedLocalDevnetGenesisConfirmation | null;
     try {
@@ -2481,16 +2543,20 @@ async function waitForCanonicalConfirmation(
       lastObservationFailure = error;
       rawObservation = null;
     }
+    const afterObservation = performance.now();
+    if (!Number.isFinite(afterObservation) || afterObservation < observedAt) {
+      throw new Error('isolated confirmation monotonic clock regressed');
+    }
+    observedAt = afterObservation;
+    if (observedAt >= deadline) {
+      throw rawObservation === null
+        ? confirmationDeadlineError(stage, lastObservationFailure)
+        : new Error(
+            `isolated ${stage} transaction confirmation exceeded its deadline`,
+          );
+    }
     if (rawObservation === null) {
-      if (Date.now() >= deadline) {
-        throw new Error(
-          `isolated ${stage} transaction confirmation remained unavailable before the managed deadline`,
-          lastObservationFailure === undefined
-            ? undefined
-            : { cause: lastObservationFailure },
-        );
-      }
-      await delay(CONFIRMATION_POLL_MS);
+      await delay(Math.min(CONFIRMATION_POLL_MS, deadline - observedAt));
       continue;
     }
     const observation =
@@ -2504,12 +2570,51 @@ async function waitForCanonicalConfirmation(
     ) {
       return observation;
     }
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `isolated ${stage} transaction remained ${observation.status} before the managed deadline`,
+    await delay(Math.min(CONFIRMATION_POLL_MS, deadline - observedAt));
+  }
+}
+
+function confirmationDeadlineError(
+  stage: string,
+  lastObservationFailure: unknown,
+): Error {
+  return lastObservationFailure === undefined
+    ? new Error(
+        `isolated ${stage} transaction confirmation exceeded its deadline`,
+      )
+    : new Error(
+        `isolated ${stage} transaction confirmation remained unavailable before its deadline`,
+        { cause: lastObservationFailure },
       );
-    }
-    await delay(CONFIRMATION_POLL_MS);
+}
+
+function assertFullConfirmationWindowAvailable(
+  completionDeadline: number,
+  stage: string,
+): void {
+  const now = performance.now();
+  if (
+    !Number.isFinite(now)
+    || !Number.isFinite(completionDeadline)
+    || now + TRANSACTION_CONFIRMATION_BUDGET_MS > completionDeadline
+  ) {
+    throw new Error(
+      `isolated ${stage} transaction lacks a full confirmation window before the managed action deadline`,
+    );
+  }
+}
+
+function assertManagedActionDeadline(
+  completionDeadline: number,
+  stage: string,
+): void {
+  const now = performance.now();
+  if (
+    !Number.isFinite(now)
+    || !Number.isFinite(completionDeadline)
+    || now >= completionDeadline
+  ) {
+    throw new Error(`isolated managed action exceeded its deadline at ${stage}`);
   }
 }
 

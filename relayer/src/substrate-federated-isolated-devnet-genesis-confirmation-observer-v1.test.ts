@@ -15,6 +15,14 @@ const processBoundary = vi.hoisted(() => ({
 const rpc = vi.hoisted(() => ({
   primaryGet: vi.fn(),
   witnessGet: vi.fn(),
+  clientConfigs: [] as Array<Readonly<{
+    baseURL?: string;
+    timeout?: number;
+  }>>,
+  requests: [] as Array<Readonly<{
+    origin: string;
+    path: string;
+  }>>,
 }));
 
 vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
@@ -36,11 +44,18 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 
 vi.mock('axios', () => ({
   default: {
-    create: (config: Readonly<{ baseURL?: string }>) => ({
-      get: config.baseURL === 'http://127.0.0.1:9051'
-        ? rpc.primaryGet
-        : rpc.witnessGet,
-    }),
+    create: (config: Readonly<{ baseURL?: string; timeout?: number }>) => {
+      rpc.clientConfigs.push(config);
+      return {
+        get: (path: string) => {
+          const origin = config.baseURL ?? '';
+          rpc.requests.push({ origin, path });
+          return origin === 'http://127.0.0.1:9051'
+            ? rpc.primaryGet(path)
+            : rpc.witnessGet(path);
+        },
+      };
+    },
     isAxiosError: (error: unknown) =>
       typeof error === 'object'
       && error !== null
@@ -52,6 +67,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
   reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1,
 } from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 
 const GENESIS_HEADER_ID = '21'.repeat(32);
@@ -62,9 +78,47 @@ beforeEach(() => {
   processBoundary.active = true;
   rpc.primaryGet.mockReset();
   rpc.witnessGet.mockReset();
+  rpc.clientConfigs.length = 0;
+  rpc.requests.length = 0;
 });
 
 describe('isolated devnet genesis confirmation observer V1', () => {
+  it('bounds the exact five-wave confirmed observation topology', async () => {
+    installCanonicalResponses();
+    const observer =
+      createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        processBoundary.target,
+        GENESIS_HEADER_ID,
+      );
+    await observer.observe(TX_ID, processBoundary.target.primaryNodeOrigin);
+
+    expect(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1,
+    ).toBe(50_000);
+    expect(rpc.clientConfigs).toHaveLength(2);
+    expect(rpc.clientConfigs.every(config => config.timeout === 10_000)).toBe(true);
+    expect(rpc.requests).toEqual([
+      { origin: processBoundary.target.primaryNodeOrigin, path: '/info' },
+      { origin: processBoundary.target.primaryNodeOrigin, path: '/blocks/at/1' },
+      { origin: processBoundary.target.witnessNodeOrigin, path: '/info' },
+      { origin: processBoundary.target.witnessNodeOrigin, path: '/blocks/at/1' },
+      {
+        origin: processBoundary.target.primaryNodeOrigin,
+        path: `/blockchain/transaction/byId/${TX_ID}`,
+      },
+      {
+        origin: processBoundary.target.witnessNodeOrigin,
+        path: `/blockchain/transaction/byId/${TX_ID}`,
+      },
+      { origin: processBoundary.target.primaryNodeOrigin, path: '/info' },
+      { origin: processBoundary.target.primaryNodeOrigin, path: '/blocks/at/1' },
+      { origin: processBoundary.target.witnessNodeOrigin, path: '/info' },
+      { origin: processBoundary.target.witnessNodeOrigin, path: '/blocks/at/1' },
+      { origin: processBoundary.target.primaryNodeOrigin, path: '/blocks/at/10' },
+      { origin: processBoundary.target.witnessNodeOrigin, path: '/blocks/at/10' },
+    ]);
+  });
+
   it('binds a dual-node canonical confirmation to the active process target', async () => {
     installCanonicalResponses();
     const observer =

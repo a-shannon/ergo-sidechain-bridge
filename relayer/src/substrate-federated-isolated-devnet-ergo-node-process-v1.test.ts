@@ -131,18 +131,18 @@ describe.skipIf(process.platform !== 'win32')(
     it('joins managed action completion before any overrun cleanup', () => {
       expect(
         SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
-      ).toBe(600_000);
+      ).toBe(1_860_000);
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
           1_000,
-          601_000,
+          1_861_000,
           SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
         )
       ).not.toThrow();
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
           1_000,
-          601_001,
+          1_861_001,
           SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
         )
       ).toThrow(/exceeded its completion budget/);

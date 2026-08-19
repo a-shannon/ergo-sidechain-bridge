@@ -59,6 +59,8 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () =>
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1: mocked.process,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1:
+    31 * 60_000,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', () => ({
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2: mocked.claim,
@@ -112,6 +114,8 @@ vi.mock('../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js', (
 vi.mock('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1:
     mocked.observer,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1:
+    50_000,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1:
@@ -188,6 +192,9 @@ import {
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXPECTED_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from '../../scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-receipt-v1.js';
+import type {
+  SubstrateFederatedLocalDevnetGenesisConfirmation,
+} from '../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
 
@@ -848,6 +855,86 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
   });
 
+  it('starts a fresh bounded confirmation window after source-lock transport', async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const baselineObserve = observerPort.observe.getMockImplementation();
+    if (baselineObserve === undefined) {
+      throw new Error('observer mock is unavailable');
+    }
+    let sourceLockPending = true;
+    observerPort.observe.mockImplementation(async (...args) => {
+      if (args[0] === digest('8') && sourceLockPending) {
+        sourceLockPending = false;
+        order.push('observe:sourceLock:pending');
+        now += 60_000;
+        return {
+          status: 'pending' as const,
+          confirmations: 1,
+          observedAtHeight: 135,
+          observationDigestHex: digest('2'),
+          confirmationHeight: null,
+          confirmationHeaderIdHex: null,
+          observerArtifact: {},
+        };
+      }
+      return await baselineObserve(...args);
+    });
+    mocked.pegInSourceLockTransport.mockImplementationOnce(() => ({
+      submit: vi.fn(async attempt => {
+        order.push('peg-in:source-lock:transport');
+        now = 9 * 60_000 + 1;
+        return {
+          status: 'accepted' as const,
+          submittedTxId: attempt.authorization.revalidated.checked.signed
+            .admission.expectedTxId,
+          responseDigestHex: digest('4'),
+        };
+      }),
+    }));
+
+    try {
+      const result =
+        await runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+          pegInRootInput(),
+        );
+
+      expect(result.receipt.status)
+        .toBe('peg_in_source_lock_creation_canonically_confirmed');
+      expect(order).toContain('observe:sourceLock:pending');
+      expect(order).toContain('peg-in:source-lock:outputs');
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('rejects a confirmation returned after its monotonic transaction window', async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const baselineObserve = observerPort.observe.getMockImplementation();
+    if (baselineObserve === undefined) {
+      throw new Error('observer mock is unavailable');
+    }
+    observerPort.observe.mockImplementation(async (...args) => {
+      const observation = await baselineObserve(...args);
+      if (args[0] === digest('8')) now += 2 * 60_000 + 1;
+      return observation;
+    });
+
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1(
+          pegInRootInput(),
+        ),
+      ).rejects.toThrow(/source-lock transaction confirmation exceeded its deadline/);
+      expect(order).toContain('peg-in:source-lock:transport');
+      expect(order).not.toContain('peg-in:source-lock:outputs');
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('consumes the confirmed source lock into the exact committed reserve and stops before mint', async () => {
     const result =
       await runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1(
@@ -940,6 +1027,47 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /(?:signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
     );
+  });
+
+  it('fits all eleven committed-vault confirmation windows inside the action envelope', async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const baselineObserve = observerPort.observe.getMockImplementation();
+    if (baselineObserve === undefined) {
+      throw new Error('observer mock is unavailable');
+    }
+    let confirmationCalls = 0;
+    observerPort.observe.mockImplementation(async (...args) => {
+      confirmationCalls += 1;
+      now += 119_000;
+      return await baselineObserve(...args);
+    });
+    mocked.pegInSourceLockTransport.mockImplementationOnce(() => ({
+      submit: vi.fn(async attempt => {
+        order.push('peg-in:source-lock:transport');
+        now += 7 * 60_000;
+        return {
+          status: 'accepted' as const,
+          submittedTxId: attempt.authorization.revalidated.checked.signed
+            .admission.expectedTxId,
+          responseDigestHex: digest('4'),
+        };
+      }),
+    }));
+
+    try {
+      const result =
+        await runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1(
+          pegInRootInput(),
+        );
+
+      expect(result.receipt.status)
+        .toBe('peg_in_source_lock_consumed_into_committed_reserve');
+      expect(confirmationCalls).toBe(11);
+      expect(now).toBeLessThan(30 * 60_000);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('rejects post-check observation after pre-transport authorization', async () => {
@@ -1161,12 +1289,12 @@ describe('isolated devnet genesis setup execution root V1', () => {
   });
 
   it('does not authorize a successor when predecessor confirmation fails', async () => {
-    const clock = vi.spyOn(Date, 'now')
-      .mockReturnValueOnce(0)
-      .mockReturnValue(9 * 60_000 + 1);
-    observerPort.observe.mockRejectedValue(
-      new Error('dual-node confirmation disagreement'),
-    );
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    observerPort.observe.mockImplementation(async () => {
+      now = 2 * 60_000 + 1;
+      throw new Error('dual-node confirmation disagreement');
+    });
     try {
       await expect(
         runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
@@ -1186,14 +1314,41 @@ describe('isolated devnet genesis setup execution root V1', () => {
     }
   });
 
+  it('does not transport when the managed action lacks a full confirmation window', async () => {
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const baselineAuthorize = authorizerPort.authorize.getMockImplementation();
+    if (baselineAuthorize === undefined) {
+      throw new Error('authorizer mock is unavailable');
+    }
+    authorizerPort.authorize.mockImplementation((...args) => {
+      const authorization = baselineAuthorize(...args);
+      now = 28 * 60_000 + 1;
+      return authorization;
+    });
+
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
+          rootInput(),
+        ),
+      ).rejects.toThrow(/lacks a full confirmation window/);
+      expect(order).not.toContain('transport:tracker');
+      expect(order).not.toContain('ack:tracker');
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('retains the journal if an unresolved attempt outlives proven node cleanup', async () => {
     const before = localJournalDirectories();
-    const clock = vi.spyOn(Date, 'now')
-      .mockReturnValueOnce(0)
-      .mockReturnValue(9 * 60_000 + 1);
-    observerPort.observe.mockRejectedValue(
-      new Error('dual-node confirmation disagreement'),
-    );
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    observerPort.observe.mockImplementation(async () => {
+      now = 2 * 60_000 + 1;
+      throw new Error('dual-node confirmation disagreement');
+    });
     processSession.stop.mockRejectedValue(new Error('node termination unproven'));
     try {
       await expect(
@@ -1334,7 +1489,9 @@ function validObserver(order: string[]) {
     schema:
       'e2s.substrate-federated-isolated-devnet-genesis-confirmation-observer.v1',
     reconciliationIdentityDigestHex: digest('6'),
-    observe: vi.fn(async (expectedTxId: string) => {
+    observe: vi.fn(async (
+      expectedTxId: string,
+    ): Promise<Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>> => {
       if (expectedTxId === digest('8')) {
         const round = observationCount.get(expectedTxId) ?? 0;
         observationCount.set(expectedTxId, round + 1);
