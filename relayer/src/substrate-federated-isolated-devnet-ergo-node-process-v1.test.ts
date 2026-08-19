@@ -79,11 +79,13 @@ describe.skipIf(process.platform !== 'win32')(
           'genesisStateDigestHex = "840ca0b8aec2d7a6c4f1589ca6070c8a5ed5924c835cdb8f816aa773b6fe1b6302"',
         );
         if (role === 'primary' && mode === 'mining') {
+          expect(config).toContain('internalMinerPollingInterval = 8s');
           expect(config).toContain(
             'wallet.testMnemonic = ${?E2S_FED6G1DI3B_EPHEMERAL_MINING_MNEMONIC}',
           );
           expect(config).toContain('wallet.testKeysQty = 1');
         } else {
+          expect(config).not.toContain('internalMinerPollingInterval');
           expect(config).not.toMatch(/testMnemonic|testKeysQty/iu);
         }
         expect(config).not.toMatch(/testMnemonic\s*=\s*["']|secretStorage/iu);

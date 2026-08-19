@@ -893,6 +893,7 @@ export function buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1(
     `    miningPubKeyHex = "${binding.miningTargetPublicKeyHex}"`,
     `    mining = ${primaryMining ? 'true' : 'false'}`,
     `    offlineGeneration = ${primaryMining ? 'true' : 'false'}`,
+    ...(primaryMining ? ['    internalMinerPollingInterval = 8s'] : []),
     '    useExternalMiner = false',
     '    extraIndex = true',
     '    minimalFeeAmount = 0',
