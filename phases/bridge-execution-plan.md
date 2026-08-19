@@ -1248,7 +1248,7 @@ atomically. Historical SCALE discriminants remain stable and the new error is
 appended at index 28.
 
 The locked Frontier patch has SHA-256
-`e75150b4c7a078cfa73446da904c8d33bfb8a304c396dda09a4fb9e3031ec36b`.
+`533a2928f6d3063e6e3a434b81cb23ea501e1365affe585d2b6b6cec301d27e3`.
 The original FED-1 semantic source changes remain limited to
 `template/runtime/src/peg_in_causal_source_proof.rs`,
 `template/runtime/src/peg_in_pooled_reserve_reservation.rs`,
