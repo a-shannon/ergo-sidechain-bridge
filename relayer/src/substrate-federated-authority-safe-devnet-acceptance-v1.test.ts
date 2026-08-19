@@ -537,13 +537,19 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
   });
 
   it('rejects a fresh binary whose built-in runtime does not reproduce the pinned base spec', async () => {
+    const changedBaseSpec = baseSpec() as Record<string, unknown>;
+    changedBaseSpec.protocolId = 'different-built-runtime';
+    const observedDigest = sha256(Buffer.from(JSON.stringify(changedBaseSpec)));
+    const expectedDigest = sha256(input().baseSpecBytes);
     mutateReproducedBaseSpec = value => {
       value.protocolId = 'different-built-runtime';
     };
 
     await expect(
       acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/did not reproduce the pinned base chain spec/);
+    ).rejects.toThrow(
+      `freshly built Frontier binary did not reproduce the pinned base chain spec: observed ${observedDigest}, expected ${expectedDigest}`,
+    );
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
   });
 

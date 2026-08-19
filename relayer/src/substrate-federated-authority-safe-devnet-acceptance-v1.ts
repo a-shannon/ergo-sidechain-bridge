@@ -525,6 +525,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     });
     assertExpectedBuildSpecStderr(reproducedBaseResult.stderr);
     const reproducedBaseBytes = Buffer.from(reproducedBaseResult.stdout, 'utf8');
+    const reproducedBaseSha256Hex = sha256(reproducedBaseBytes);
     const suppliedBaseSpecBytes = 'baseSpecBytes' in input
       ? Buffer.from(input.baseSpecBytes)
       : undefined;
@@ -533,10 +534,11 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       && !reproducedBaseBytes.equals(suppliedBaseSpecBytes)
     ) {
       throw new Error(
-        'freshly built Frontier binary did not reproduce the pinned base chain spec',
+        'freshly built Frontier binary did not reproduce the pinned base '
+        + `chain spec: observed ${reproducedBaseSha256Hex}, expected `
+        + input.expectedBaseSpecSha256Hex,
       );
     }
-    const reproducedBaseSha256Hex = sha256(reproducedBaseBytes);
     if (
       suppliedBaseSpecBytes === undefined
       && reproducedBaseSha256Hex !== input.expectedBaseSpecSha256Hex
