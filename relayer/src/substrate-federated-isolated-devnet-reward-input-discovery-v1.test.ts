@@ -64,7 +64,10 @@ beforeAll(async () => {
   );
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('Substrate federated isolated-devnet reward input discovery V1', () => {
   it('consumes the exact public binding exposed by a fresh signer-first session', async () => {
@@ -255,6 +258,113 @@ describe('Substrate federated isolated-devnet reward input discovery V1', () => 
     await expect(discoverSubstrateFederatedRewardInputsV2(signer()))
       .rejects.toThrow(/heights disagree after 3 bounded attempts/i);
     expect(primaryInfoHeights).toEqual([119, 119, 119]);
+  });
+
+  it('retries complete dual observations until both nodes expose one exact snapshot', async () => {
+    const delay = vi.spyOn(globalThis, 'setTimeout');
+    const states = nodeStates({ delay1: delay1Boxes });
+    installNodeMocks(states);
+    const witnessInfoHeights: number[] = [];
+    vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getInfo')
+      .mockImplementation(async function (
+        this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+      ) {
+        const current = states.get(this.observationSourceId)!;
+        const isWitness = this.observationSourceId
+          === SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+        const fullHeight = isWitness && witnessInfoHeights.length < 2
+          ? current.tipHeight - 1
+          : current.tipHeight;
+        if (isWitness) witnessInfoHeights.push(fullHeight);
+        return { network: current.network, fullHeight };
+      });
+    vi.spyOn(
+      AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+      'getBestHeader',
+    ).mockImplementation(async function (
+      this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+    ) {
+      const current = states.get(this.observationSourceId)!;
+      const isWitness = this.observationSourceId
+        === SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+      return isWitness && witnessInfoHeights.length <= 2
+        ? { id: '93'.repeat(32), height: current.tipHeight - 1 }
+        : { id: current.tipHeaderIdHex, height: current.tipHeight };
+    });
+
+    const report = await discoverSubstrateFederatedRewardInputsV2(signer());
+
+    expect(report.target).toMatchObject({
+      tipHeight: 120,
+      tipHeaderIdHex: TIP_HEADER_ID,
+    });
+    expect(witnessInfoHeights).toEqual([119, 119, 120, 120]);
+    expect(delay).toHaveBeenCalledWith(expect.any(Function), 250);
+  });
+
+  it('fails closed when complete dual observations never converge', async () => {
+    vi.useFakeTimers();
+    const begin = vi.spyOn(
+      AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+      'beginAuthenticatedTrackerReconstruction',
+    );
+    const end = vi.spyOn(
+      AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+      'endAuthenticatedTrackerReconstruction',
+    );
+    const states = nodeStates({ delay1: delay1Boxes });
+    states.get(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN)!
+      .boxesByAddress.set('reward-delay-1', delay1Boxes.slice(0, 3));
+    installNodeMocks(states);
+
+    const discovery = discoverSubstrateFederatedRewardInputsV2(signer());
+    const rejection = expect(discovery)
+      .rejects.toThrow(/observations disagree after 40 bounded attempts/i);
+    await vi.runAllTimersAsync();
+    await rejection;
+    expect(begin).toHaveBeenCalledTimes(2);
+    expect(end).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps both aggregate budgets active until sibling observation failure settles', async () => {
+    const begin = vi.spyOn(
+      AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+      'beginAuthenticatedTrackerReconstruction',
+    );
+    const end = vi.spyOn(
+      AuthenticatedSpvTrackerReadOnlyNodeClient.prototype,
+      'endAuthenticatedTrackerReconstruction',
+    );
+    const states = nodeStates({ delay1: delay1Boxes });
+    installNodeMocks(states);
+    let releaseWitness!: () => void;
+    const witnessGate = new Promise<void>(resolve => {
+      releaseWitness = resolve;
+    });
+    vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getInfo')
+      .mockImplementation(async function (
+        this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+      ) {
+        const current = states.get(this.observationSourceId)!;
+        if (
+          this.observationSourceId
+          === SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
+        ) {
+          throw new Error('primary observation failed');
+        }
+        await witnessGate;
+        return { network: current.network, fullHeight: current.tipHeight };
+      });
+
+    const discovery = discoverSubstrateFederatedRewardInputsV2(signer());
+    const rejection = expect(discovery)
+      .rejects.toThrow(/primary observation failed/i);
+    expect(begin).toHaveBeenCalledTimes(2);
+    expect(end).not.toHaveBeenCalled();
+
+    releaseWitness();
+    await rejection;
+    expect(end).toHaveBeenCalledTimes(2);
   });
 
   it('V2 excludes validated post-anchor rewards across a canonical extension', async () => {

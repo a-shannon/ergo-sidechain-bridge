@@ -53,6 +53,9 @@ const REPORT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_REWARD_INPUT_DISCOVERY_V2';
 const MAX_CANONICAL_EXTENSION_HEADERS = 4_096;
 const MAX_STABLE_SNAPSHOT_ATTEMPTS = 3;
+const MAX_MATCHING_DUAL_OBSERVATION_ATTEMPTS = 40;
+const DUAL_OBSERVATION_RETRY_DELAY_MS = 250;
+const DUAL_OBSERVATION_RECONSTRUCTION_DEADLINE_MS = 12_000;
 const REWARD_DELAYS = [1, 720] as const;
 const DISCOVERIES = new WeakSet<object>();
 const DISCOVERIES_V2 = new WeakSet<object>();
@@ -373,19 +376,23 @@ export async function discoverSubstrateFederatedRewardInputsV2(
   const signer = normalizeSigner(signerInput);
   const primary = new AuthenticatedSpvTrackerReadOnlyNodeClient(
     SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+    {
+      reconstructionDeadlineMs:
+        DUAL_OBSERVATION_RECONSTRUCTION_DEADLINE_MS,
+    },
   );
   const witness = new AuthenticatedSpvTrackerReadOnlyNodeClient(
     SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+    {
+      reconstructionDeadlineMs:
+        DUAL_OBSERVATION_RECONSTRUCTION_DEADLINE_MS,
+    },
   );
-  const [primaryObservation, witnessObservation] = await Promise.all([
-    observeSourceV2(primary, signer),
-    observeSourceV2(witness, signer),
-  ]);
-  if (canonicalJson(primaryObservation) !== canonicalJson(witnessObservation)) {
-    throw new Error(
-      'fixed dual-loopback snapshot-anchored reward observations disagree',
-    );
-  }
+  const primaryObservation = await observeMatchingSourcesV2(
+    primary,
+    witness,
+    signer,
+  );
 
   const qualifying = primaryObservation.profiles.map(profile => {
     const requiredAgeBlocks = profile.rewardDelayBlocks
@@ -490,6 +497,57 @@ export async function discoverSubstrateFederatedRewardInputsV2(
   });
   DISCOVERIES_V2.add(report);
   return report;
+}
+
+async function observeMatchingSourcesV2(
+  primary: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  witness: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  signer: Readonly<SubstrateFederatedRewardSignerBindingV1>,
+): Promise<Readonly<SourceObservation>> {
+  primary.beginAuthenticatedTrackerReconstruction();
+  try {
+    witness.beginAuthenticatedTrackerReconstruction();
+    try {
+      for (
+        let attempt = 1;
+        attempt <= MAX_MATCHING_DUAL_OBSERVATION_ATTEMPTS;
+        attempt += 1
+      ) {
+        const [primaryResult, witnessResult] = await Promise.allSettled([
+          observeSourceWithinBudgetV2(primary, signer),
+          observeSourceWithinBudgetV2(witness, signer),
+        ]);
+        if (primaryResult.status === 'rejected') {
+          throw primaryResult.reason;
+        }
+        if (witnessResult.status === 'rejected') {
+          throw witnessResult.reason;
+        }
+        const primaryObservation = primaryResult.value;
+        const witnessObservation = witnessResult.value;
+        if (
+          canonicalJson(primaryObservation)
+          === canonicalJson(witnessObservation)
+        ) {
+          return primaryObservation;
+        }
+        if (attempt < MAX_MATCHING_DUAL_OBSERVATION_ATTEMPTS) {
+          await new Promise(resolve => setTimeout(
+            resolve,
+            DUAL_OBSERVATION_RETRY_DELAY_MS,
+          ));
+        }
+      }
+      throw new Error(
+        'fixed dual-loopback snapshot-anchored reward observations disagree after '
+        + `${MAX_MATCHING_DUAL_OBSERVATION_ATTEMPTS} bounded attempts`,
+      );
+    } finally {
+      witness.endAuthenticatedTrackerReconstruction();
+    }
+  } finally {
+    primary.endAuthenticatedTrackerReconstruction();
+  }
 }
 
 export function assertSubstrateFederatedRewardInputDiscoveryV2Provenance(
@@ -597,18 +655,6 @@ async function readNormalizedRewardBoxSet(
   boxes.sort((left, right) => left.creationHeight - right.creationHeight
     || left.boxId.localeCompare(right.boxId));
   return boxes;
-}
-
-async function observeSourceV2(
-  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
-  signer: Readonly<SubstrateFederatedRewardSignerBindingV1>,
-): Promise<Readonly<SourceObservation>> {
-  client.beginAuthenticatedTrackerReconstruction();
-  try {
-    return await observeSourceWithinBudgetV2(client, signer);
-  } finally {
-    client.endAuthenticatedTrackerReconstruction();
-  }
 }
 
 async function observeSourceWithinBudgetV2(
