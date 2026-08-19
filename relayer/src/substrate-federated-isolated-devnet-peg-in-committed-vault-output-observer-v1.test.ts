@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   assertTarget: vi.fn(),
   getBox: vi.fn(),
   getBestHeader: vi.fn(),
+  getBlockHeaderById: vi.fn(),
   normalizeBox: vi.fn(async value => value),
 }));
 
@@ -21,6 +22,9 @@ vi.mock('./authenticated-spv-tracker-read-only-node-client.js', () => ({
     }
     getBestHeader() {
       return mocks.getBestHeader(this.origin);
+    }
+    getBlockHeaderById(headerId: string) {
+      return mocks.getBlockHeaderById(this.origin, headerId);
     }
   },
 }));
@@ -43,9 +47,15 @@ vi.mock('./unsigned-ergo-transaction.js', () => ({
 }));
 
 import {
+  encodePegInSourceIntentV2Hex,
+} from './peg-in-causal-admission-v2.js';
+import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1,
   observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
+import {
+  buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+} from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 
 const hex = (byte: string): string => byte.repeat(32);
 const PRIMARY = 'http://127.0.0.1:9051';
@@ -59,6 +69,21 @@ const TX_ID = hex('16');
 const GENESIS_ID = hex('17');
 const CONFIRMATION_HEADER_ID = hex('18');
 const OBSERVED_TIP_ID = hex('1c');
+const FAMILY_ID = hex('31');
+const DEPOSIT_COMMITMENT = hex('32');
+const RESERVE_DIGEST = `01${hex('33')}`;
+const SOURCE_INTENT_HEX = encodePegInSourceIntentV2Hex({
+  formatVersion: 2,
+  sourceNetworkIdHex: `0x${hex('34')}`,
+  sidechainIdHex: `0x${hex('35')}`,
+  bridgeAddressHex: `0x${'36'.repeat(20)}`,
+  tokenAddressHex: `0x${'37'.repeat(20)}`,
+  settlementProfileIdHex: `0x${hex('38')}`,
+  admissionProfileIdHex: `0x${FAMILY_ID}`,
+  sourceAssetIdHex: `0x${hex('00')}`,
+  amountNanoErg: '10000',
+  recipientAddressHex: `0x${'39'.repeat(20)}`,
+});
 const BINDING = Object.freeze({
   processBindingDigestHex: hex('19'),
   executionTargetIdentityDigestHex: hex('1a'),
@@ -85,6 +110,14 @@ const RESERVE_SUCCESSOR = Object.freeze({
   index: 0,
 });
 const PACKET = Object.freeze({
+  familyIdHex: FAMILY_ID,
+  familyCompiler: Object.freeze({ bindingDigestHex: hex('3a') }),
+  sourceIntentHex: SOURCE_INTENT_HEX,
+  depositCommitmentHex: DEPOSIT_COMMITMENT,
+  reserve: Object.freeze({
+    outputDigestHex: RESERVE_DIGEST,
+    outputLiabilityNanoErg: '10000',
+  }),
   boxes: Object.freeze({
     sourceFundingInput: Object.freeze({ boxId: SOURCE_ID }),
     reservePredecessor: Object.freeze({ boxId: RESERVE_ID }),
@@ -96,7 +129,7 @@ const PACKET = Object.freeze({
     reserveTransition: Object.freeze({ txId: TX_ID }),
   }),
 });
-const CANDIDATE = Object.freeze({});
+const CANDIDATE = Object.freeze({ candidateDigestHex: hex('3b') });
 const CONFIRMATION = Object.freeze({
   status: 'confirmed' as const,
   expectedTxId: TX_ID,
@@ -125,6 +158,50 @@ const FINAL_CONFIRMATION = Object.freeze({
   observationDigestHex: hex('2a'),
   observerArtifact: Object.freeze({ role: 'final-confirmation' }),
 });
+
+function headerFixture(): Map<string, Readonly<{
+  id: string;
+  parentId: string;
+  height: number;
+}>> {
+  const ids = new Map<number, string>();
+  ids.set(201, REFRESHED_CONFIRMATION_HEADER_ID);
+  for (let height = 202; height < 211; height += 1) {
+    ids.set(height, (height - 120).toString(16).padStart(2, '0').repeat(32));
+  }
+  ids.set(211, OBSERVED_TIP_ID);
+  const headers = new Map<string, Readonly<{
+    id: string;
+    parentId: string;
+    height: number;
+  }>>();
+  for (let height = 201; height <= 211; height += 1) {
+    const id = ids.get(height)!;
+    headers.set(id, Object.freeze({
+      id,
+      parentId: height === 201 ? hex('30') : ids.get(height - 1)!,
+      height,
+    }));
+  }
+  for (const id of [hex('1d'), hex('21')]) {
+    headers.set(id, Object.freeze({
+      id,
+      parentId: OBSERVED_TIP_ID,
+      height: 212,
+    }));
+  }
+  headers.set(hex('22'), Object.freeze({
+    id: hex('22'),
+    parentId: hex('21'),
+    height: 213,
+  }));
+  headers.set(hex('1e'), Object.freeze({
+    id: hex('1e'),
+    parentId: ids.get(210)!,
+    height: 211,
+  }));
+  return headers;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -190,6 +267,10 @@ beforeEach(() => {
     height: 211,
     id: OBSERVED_TIP_ID,
   });
+  const headers = headerFixture();
+  mocks.getBlockHeaderById.mockImplementation(
+    (_origin: string, headerId: string) => headers.get(headerId) ?? null,
+  );
 });
 
 describe('isolated committed-vault output observer V1', () => {
@@ -214,6 +295,9 @@ describe('isolated committed-vault output observer V1', () => {
       confirmationHeaderIdHex: REFRESHED_CONFIRMATION_HEADER_ID,
       confirmationObservationDigestHex:
         FINAL_CONFIRMATION.observationDigestHex,
+      finalityTargetHeight: 211,
+      finalityTargetHeaderIdHex: OBSERVED_TIP_ID,
+      requiredSuccessorDepth: 10,
       observedTipHeight: 211,
       observedTipHeaderIdHex: OBSERVED_TIP_ID,
       boundaries: {
@@ -225,7 +309,12 @@ describe('isolated committed-vault output observer V1', () => {
         sourceLockConsumptionEstablished: true,
         reserveLineageEstablished: true,
         depositCommitmentStateEstablished: true,
+        exactRequiredDepthAncestryObserved: true,
+        exactFinalityTargetSelected: true,
+        ergoPowAuthenticated: false,
         mintAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
       },
     });
     expect(() =>
@@ -234,6 +323,64 @@ describe('isolated committed-vault output observer V1', () => {
         TARGET as never,
       )
     ).not.toThrow();
+  });
+
+  it('joins the real observation provenance to one canonical mint-reservation draft', async () => {
+    const observation =
+      await observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      });
+    const draft =
+      buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        committedVaultObservation: observation,
+      });
+
+    expect(draft).toMatchObject({
+      statement: {
+        lineageProfileIdHex: `0x${FAMILY_ID}`,
+        sourceLockBoxIdHex: `0x${LOCK_ID}`,
+        reserveTransitionTransactionIdHex: `0x${TX_ID}`,
+        depositCommitmentHex: `0x${DEPOSIT_COMMITMENT}`,
+        successorReserveBoxIdHex: `0x${SUCCESSOR_ID}`,
+        successorReserveDigestHex: `0x${RESERVE_DIGEST}`,
+        inclusionHeaderIdHex: `0x${REFRESHED_CONFIRMATION_HEADER_ID}`,
+        targetHeaderIdHex: `0x${OBSERVED_TIP_ID}`,
+      },
+      boundary: {
+        runtimeProfileBound: false,
+        sourceAttestationEstablished: false,
+        runtimeReservationWritten: false,
+        mintExecuted: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+      },
+    });
+
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        committedVaultObservation: { ...observation },
+      })
+    ).toThrow(/lacks provenance/);
+
+    const foreignCandidate = { ...CANDIDATE };
+    mocks.assertCandidate.mockReturnValueOnce(PACKET);
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: foreignCandidate as never,
+        committedVaultObservation: observation,
+      })
+    ).toThrow(/does not bind the exact candidate/);
   });
 
   it('rejects an unspent transition input and a changed reserve successor', async () => {
@@ -289,8 +436,45 @@ describe('isolated committed-vault output observer V1', () => {
       observedTipHeight: 212,
       observedTipHeaderIdHex: hex('1d'),
     });
-    expect(reads.get(PRIMARY)).toBe(4);
-    expect(reads.get(WITNESS)).toBe(4);
+    expect(reads.get(PRIMARY)).toBe(6);
+    expect(reads.get(WITNESS)).toBe(6);
+  });
+
+  it('rejects a stable replacement of the exact finality target after final confirmation', async () => {
+    const oldTipId = hex('1d');
+    const replacementTipId = hex('2c');
+    const replacementTargetId = hex('2d');
+    const headers = headerFixture();
+    headers.set(replacementTargetId, Object.freeze({
+      id: replacementTargetId,
+      parentId: headers.get(OBSERVED_TIP_ID)!.parentId,
+      height: 211,
+    }));
+    headers.set(replacementTipId, Object.freeze({
+      id: replacementTipId,
+      parentId: replacementTargetId,
+      height: 212,
+    }));
+    mocks.getBlockHeaderById.mockImplementation(
+      (_origin: string, headerId: string) => headers.get(headerId) ?? null,
+    );
+    const reads = new Map<string, number>();
+    mocks.getBestHeader.mockImplementation((origin: string) => {
+      const count = (reads.get(origin) ?? 0) + 1;
+      reads.set(origin, count);
+      return count <= 2
+        ? { height: 212, id: oldTipId }
+        : { height: 212, id: replacementTipId };
+    });
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      }),
+    ).rejects.toThrow(/finality target changed during observation/);
   });
 
   it('rejects stable but different primary and witness tips', async () => {
@@ -344,6 +528,45 @@ describe('isolated committed-vault output observer V1', () => {
         confirmation: CONFIRMATION as never,
       }),
     ).rejects.toThrow(/requires final canonical confirmation/);
+  });
+
+  it('rejects inclusion identity drift across the output snapshot', async () => {
+    mocks.reobserveConfirmation
+      .mockResolvedValueOnce(REFRESHED_CONFIRMATION)
+      .mockResolvedValueOnce({
+        ...FINAL_CONFIRMATION,
+        confirmationHeaderIdHex: hex('2b'),
+      });
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      }),
+    ).rejects.toThrow(/canonical inclusion changed/);
+  });
+
+  it('rejects a broken exact-depth parent chain', async () => {
+    const headers = headerFixture();
+    const target = headers.get(OBSERVED_TIP_ID)!;
+    headers.set(OBSERVED_TIP_ID, {
+      ...target,
+      parentId: hex('ff'),
+    });
+    mocks.getBlockHeaderById.mockImplementation(
+      (_origin: string, headerId: string) => headers.get(headerId) ?? null,
+    );
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+        target: TARGET as never,
+        batch: BATCH as never,
+        candidate: CANDIDATE as never,
+        confirmation: CONFIRMATION as never,
+      }),
+    ).rejects.toThrow(/finality header is unavailable/);
   });
 
   it('accepts a stable output view after the refreshed confirmation height', async () => {

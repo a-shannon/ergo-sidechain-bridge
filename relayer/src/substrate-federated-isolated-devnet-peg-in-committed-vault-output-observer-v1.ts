@@ -21,6 +21,9 @@ import {
   type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import type {
+  SubstrateFederatedPooledReserveDepositV1Packet,
+} from './substrate-federated-pooled-reserve-deposit-v1.js';
+import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
@@ -34,6 +37,9 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_O
 const OBSERVATION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_OBSERVATION_V1';
 const NODE_STATE_OBSERVATION_MAX_ATTEMPTS = 3;
+const FINALITY_TARGET_MAX_TIP_LAG = 64;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1 =
+  10 as const;
 
 export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1 {
   readonly schema:
@@ -49,6 +55,11 @@ export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObserv
   readonly confirmationHeight: number;
   readonly confirmationHeaderIdHex: string;
   readonly confirmationObservationDigestHex: string;
+  readonly finalityTargetHeight: number;
+  readonly finalityTargetHeaderIdHex: string;
+  readonly requiredSuccessorDepth:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1;
+  readonly finalityPathHeaderIdsHex: readonly string[];
   readonly observedTipHeight: number;
   readonly observedTipHeaderIdHex: string;
   readonly processBindingDigestHex: string;
@@ -65,6 +76,9 @@ export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObserv
     readonly sourceLockConsumptionEstablished: true;
     readonly reserveLineageEstablished: true;
     readonly depositCommitmentStateEstablished: true;
+    readonly exactRequiredDepthAncestryObserved: true;
+    readonly exactFinalityTargetSelected: true;
+    readonly ergoPowAuthenticated: false;
     readonly mintAuthorized: false;
     readonly fundsAuthorityEstablished: false;
     readonly gate5Closed: false;
@@ -78,6 +92,11 @@ const OBSERVATIONS = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+    batch:
+      Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>;
+    candidate:
+      Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV1Packet>;
   }>
 >();
 
@@ -153,6 +172,8 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       packet.boxes.sourceLock.boxId,
       packet.boxes.transitionFeeFunding.boxId,
       packet.boxes.reserveSuccessor,
+      initialConfirmation.confirmationHeight,
+      initialConfirmation.confirmationHeaderIdHex,
       'primary',
     ),
     observeNodeState(
@@ -162,6 +183,8 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       packet.boxes.sourceLock.boxId,
       packet.boxes.transitionFeeFunding.boxId,
       packet.boxes.reserveSuccessor,
+      initialConfirmation.confirmationHeight,
+      initialConfirmation.confirmationHeaderIdHex,
       'witness',
     ),
   ]);
@@ -194,9 +217,51 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       'isolated committed-vault output observation requires final canonical confirmation',
     );
   }
+  if (
+    latestConfirmation.confirmationHeight
+      !== initialConfirmation.confirmationHeight
+    || latestConfirmation.confirmationHeaderIdHex
+      !== initialConfirmation.confirmationHeaderIdHex
+  ) {
+    throw new Error(
+      'isolated committed-vault canonical inclusion changed during observation',
+    );
+  }
   if (latestConfirmation.observedAtHeight < primaryState.tip.height) {
     throw new Error(
       'isolated committed-vault final confirmation snapshot is behind the stable output tip',
+    );
+  }
+  const [latestPrimaryFinality, latestWitnessFinality] = await Promise.all([
+    observeStableFinality(
+      primary,
+      latestConfirmation.confirmationHeight,
+      latestConfirmation.confirmationHeaderIdHex,
+      'primary',
+    ),
+    observeStableFinality(
+      witness,
+      latestConfirmation.confirmationHeight,
+      latestConfirmation.confirmationHeaderIdHex,
+      'witness',
+    ),
+  ]);
+  if (
+    canonicalJson(latestPrimaryFinality)
+      !== canonicalJson(latestWitnessFinality)
+  ) {
+    throw new Error(
+      'isolated committed-vault finality reobservations disagree',
+    );
+  }
+  if (
+    canonicalJson(latestPrimaryFinality.finality)
+      !== canonicalJson(primaryState.finality)
+    || canonicalJson(latestWitnessFinality.finality)
+      !== canonicalJson(witnessState.finality)
+  ) {
+    throw new Error(
+      'isolated committed-vault finality target changed during observation',
     );
   }
   const current =
@@ -226,6 +291,11 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
     confirmationHeaderIdHex: latestConfirmation.confirmationHeaderIdHex,
     confirmationObservationDigestHex:
       latestConfirmation.observationDigestHex,
+    finalityTargetHeight: primaryState.finality.targetHeight,
+    finalityTargetHeaderIdHex: primaryState.finality.targetHeaderIdHex,
+    requiredSuccessorDepth:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1,
+    finalityPathHeaderIdsHex: primaryState.finality.pathHeaderIdsHex,
     observedTipHeight: primaryState.tip.height,
     observedTipHeaderIdHex: primaryState.tip.idHex,
     processBindingDigestHex: current.processBindingDigestHex,
@@ -243,6 +313,9 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       sourceLockConsumptionEstablished: true as const,
       reserveLineageEstablished: true as const,
       depositCommitmentStateEstablished: true as const,
+      exactRequiredDepthAncestryObserved: true as const,
+      exactFinalityTargetSelected: true as const,
+      ergoPowAuthenticated: false as const,
       mintAuthorized: false as const,
       fundsAuthorityEstablished: false as const,
       gate5Closed: false as const,
@@ -255,8 +328,46 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       OBSERVATION_DIGEST_DOMAIN,
     ),
   });
-  OBSERVATIONS.set(observation, Object.freeze({ target: input.target, binding }));
+  OBSERVATIONS.set(observation, Object.freeze({
+    target: input.target,
+    binding,
+    batch: input.batch,
+    candidate: input.candidate,
+    packet,
+  }));
   return observation;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1(
+  observation:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  candidate:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedPooledReserveDepositV1Packet> {
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
+    observation,
+    target,
+  );
+  const material = OBSERVATIONS.get(observation);
+  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+    candidate,
+    batch,
+    target,
+  );
+  if (
+    material === undefined
+    || material.batch !== batch
+    || material.candidate !== candidate
+    || material.packet !== packet
+  ) {
+    throw new Error(
+      'isolated committed-vault output observation does not bind the exact candidate',
+    );
+  }
+  return packet;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
@@ -291,6 +402,8 @@ async function observeNodeState(
   sourceLockBoxIdHex: string,
   transitionFeeFundingBoxIdHex: string,
   expectedReserveSuccessor: Eip12Box,
+  confirmationHeight: number,
+  confirmationHeaderIdHex: string,
   label: string,
 ): Promise<Readonly<{
   sourceFundingBoxIdHex: string;
@@ -303,6 +416,11 @@ async function observeNodeState(
   transitionFeeFundingPresent: false;
   tip: Readonly<{ height: number; idHex: string }>;
   reserveSuccessor: Eip12Box;
+  finality: Readonly<{
+    targetHeight: number;
+    targetHeaderIdHex: string;
+    pathHeaderIdsHex: readonly string[];
+  }>;
   digestHex: string;
 }>> {
   for (let attempt = 0; attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS; attempt += 1) {
@@ -355,6 +473,13 @@ async function observeNodeState(
       );
     }
     if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
+      const finality = await observeExactFinalityPath(
+        client,
+        tipAfter,
+        confirmationHeight,
+        confirmationHeaderIdHex,
+        label,
+      );
       const body = Object.freeze({
         sourceFundingBoxIdHex,
         sourceFundingPresent: false as const,
@@ -366,6 +491,7 @@ async function observeNodeState(
         transitionFeeFundingPresent: false as const,
         tip: tipAfter,
         reserveSuccessor,
+        finality,
       });
       return Object.freeze({
         ...body,
@@ -376,6 +502,132 @@ async function observeNodeState(
   }
   throw new Error(
     `isolated committed-vault ${label} tip did not stabilize during output observation`,
+  );
+}
+
+async function observeExactFinalityPath(
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  tip: Readonly<{ height: number; idHex: string }>,
+  inclusionHeight: number,
+  inclusionHeaderIdHex: string,
+  label: string,
+): Promise<Readonly<{
+  targetHeight: number;
+  targetHeaderIdHex: string;
+  pathHeaderIdsHex: readonly string[];
+}>> {
+  const targetHeight = inclusionHeight
+    + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1;
+  if (
+    !Number.isSafeInteger(targetHeight)
+    || targetHeight > 0xffff_ffff
+    || tip.height < targetHeight
+  ) {
+    throw new Error(
+      `isolated committed-vault ${label} tip has not reached the exact finality target`,
+    );
+  }
+  if (tip.height - targetHeight > FINALITY_TARGET_MAX_TIP_LAG) {
+    throw new Error(
+      `isolated committed-vault ${label} finality target is outside the bounded tip window`,
+    );
+  }
+  const descending: Array<Readonly<{
+    height: number;
+    idHex: string;
+    parentIdHex: string;
+  }>> = [];
+  let cursor = tip;
+  while (cursor.height >= inclusionHeight) {
+    const raw = await client.getBlockHeaderById(cursor.idHex);
+    if (raw === null) {
+      throw new Error(
+        `isolated committed-vault ${label} finality header is unavailable`,
+      );
+    }
+    const header = normalizeHeader(
+      raw,
+      `isolated committed-vault ${label} finality header`,
+    );
+    if (header.idHex !== cursor.idHex || header.height !== cursor.height) {
+      throw new Error(
+        `isolated committed-vault ${label} finality header identity changed`,
+      );
+    }
+    if (header.height <= targetHeight) descending.push(header);
+    if (header.height === inclusionHeight) break;
+    cursor = Object.freeze({
+      height: header.height - 1,
+      idHex: header.parentIdHex,
+    });
+  }
+  const ascending = descending.reverse();
+  if (
+    ascending.length
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1
+        + 1
+    || ascending[0]?.height !== inclusionHeight
+    || ascending[0]?.idHex !== inclusionHeaderIdHex
+    || ascending.at(-1)?.height !== targetHeight
+  ) {
+    throw new Error(
+      `isolated committed-vault ${label} finality path does not bind the canonical inclusion`,
+    );
+  }
+  for (let index = 1; index < ascending.length; index += 1) {
+    if (ascending[index]!.parentIdHex !== ascending[index - 1]!.idHex) {
+      throw new Error(
+        `isolated committed-vault ${label} finality path parent link changed`,
+      );
+    }
+  }
+  return Object.freeze({
+    targetHeight,
+    targetHeaderIdHex: ascending.at(-1)!.idHex,
+    pathHeaderIdsHex: Object.freeze(ascending.map(header => header.idHex)),
+  });
+}
+
+async function observeStableFinality(
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  inclusionHeight: number,
+  inclusionHeaderIdHex: string,
+  label: string,
+): Promise<Readonly<{
+  tip: Readonly<{ height: number; idHex: string }>;
+  finality: Readonly<{
+    targetHeight: number;
+    targetHeaderIdHex: string;
+    pathHeaderIdsHex: readonly string[];
+  }>;
+}>> {
+  for (
+    let attempt = 0;
+    attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    const tipBefore = normalizeBestHeader(
+      await client.getBestHeader(),
+      `isolated committed-vault ${label} pre-finality tip`,
+    );
+    const finality = await observeExactFinalityPath(
+      client,
+      tipBefore,
+      inclusionHeight,
+      inclusionHeaderIdHex,
+      label,
+    );
+    const tipAfter = normalizeBestHeader(
+      await client.getBestHeader(),
+      `isolated committed-vault ${label} post-finality tip`,
+    );
+    if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
+      return Object.freeze({ tip: tipAfter, finality });
+    }
+    assertTipAdvancedWithoutReplacement(tipBefore, tipAfter, label);
+  }
+  throw new Error(
+    `isolated committed-vault ${label} tip did not stabilize during finality reobservation`,
   );
 }
 
@@ -420,5 +672,23 @@ function normalizeBestHeader(
   return Object.freeze({
     height: record.height,
     idHex: record.id.toLowerCase(),
+  });
+}
+
+function normalizeHeader(
+  value: unknown,
+  label: string,
+): Readonly<{ height: number; idHex: string; parentIdHex: string }> {
+  const best = normalizeBestHeader(value, label);
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.parentId !== 'string'
+    || !/^[0-9a-fA-F]{64}$/u.test(record.parentId)
+  ) {
+    throw new Error(`${label} parent id must be 32-byte hex`);
+  }
+  return Object.freeze({
+    ...best,
+    parentIdHex: record.parentId.toLowerCase(),
   });
 }
