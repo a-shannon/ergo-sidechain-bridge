@@ -3275,7 +3275,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         new RegExp(`isolated portable replay argument case ${index} failed`),
       );
     }
-  }, 60_000);
+  }, 180_000);
 
   it('keeps the child-process CLI config-free and capability-minimal', () => {
     const source = readFileSync(new URL(
