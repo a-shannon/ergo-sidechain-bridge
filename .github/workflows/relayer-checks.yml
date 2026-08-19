@@ -22,7 +22,7 @@ on:
     branches:
       - main
       - master
-      - "fix/**"
+      - "a-shannon/**"
     paths:
       - ".github/workflows/relayer-checks.yml"
       - ".gitattributes"

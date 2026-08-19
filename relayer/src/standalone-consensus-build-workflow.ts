@@ -30,7 +30,7 @@ const EXPECTED_TRIGGER_PATHS = [
   'wasm-avl/**',
   'substrate-node',
 ] as const;
-const EXPECTED_PUSH_BRANCHES = ['main', 'master', 'fix/**'] as const;
+const EXPECTED_PUSH_BRANCHES = ['main', 'master', 'a-shannon/**'] as const;
 const FRONTIER_BUILD_COMMAND = 'cargo build --locked --release -p frontier-template-node';
 const ERGO_TEST_COMMAND = 'sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"';
 const ERGO_BUILD_COMMAND = 'sbt assembly';
