@@ -1,11 +1,3 @@
-import { canonicalJson } from '../strict-json.js';
-import {
-  loadSubstrateFederatedIsolatedDevnetPortableReplayInputV1,
-} from '../substrate-federated-isolated-devnet-portable-replay-files-v1.js';
-import {
-  replaySubstrateFederatedIsolatedDevnetPortableV1,
-} from '../substrate-federated-isolated-devnet-portable-replay-v1.js';
-
 interface Arguments {
   readonly requestPath: string;
   readonly expectedTargetDescriptorDigestHex: string;
@@ -14,6 +6,15 @@ interface Arguments {
 
 async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2));
+  const [
+    { canonicalJson },
+    { loadSubstrateFederatedIsolatedDevnetPortableReplayInputV1 },
+    { replaySubstrateFederatedIsolatedDevnetPortableV1 },
+  ] = await Promise.all([
+    import('../strict-json.js'),
+    import('../substrate-federated-isolated-devnet-portable-replay-files-v1.js'),
+    import('../substrate-federated-isolated-devnet-portable-replay-v1.js'),
+  ]);
   const input = loadSubstrateFederatedIsolatedDevnetPortableReplayInputV1(
     args.requestPath,
     {

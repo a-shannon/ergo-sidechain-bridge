@@ -3253,33 +3253,28 @@ describe('Substrate federated isolated-devnet launch V1', () => {
   }, 180_000);
 
   it('rejects malformed child-process argument grammars', async () => {
-    await withPortableReplayFixture(async fixture => {
-      const root = mkdtempSync(join(tmpdir(), 'e2s-isolated-portable-args-'));
-      try {
-        const requestPath = writePortableReplayBundle(root, fixture.input);
-        const valid = portableReplayCliArguments(
-          requestPath,
-          fixture.input.trustPins,
-        );
-        const variants = [
-          valid.slice(0, -1),
-          [...valid, '--unexpected'],
-          [valid[2]!, valid[3]!, valid[0]!, valid[1]!, valid[4]!, valid[5]!],
-          [valid[0]!, valid[1]!, valid[2]!, valid[3]!, valid[2]!, valid[5]!],
-          [valid[0]!, valid[1]!, '--unknown', valid[3]!, valid[4]!, valid[5]!],
-        ];
-        for (const [index, args] of variants.entries()) {
-          await expect(runIsolatedPortableReplayArguments(
-            args,
-            `isolated portable replay argument case ${index}`,
-          )).rejects.toThrow(
-            new RegExp(`isolated portable replay argument case ${index} failed`),
-          );
-        }
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    });
+    const valid = portableReplayCliArguments(
+      'synthetic-request-that-must-not-be-read.json',
+      {
+        expectedTargetDescriptorDigestHex: '11'.repeat(32),
+        expectedSourceAttestationKeySetDigestHex: '22'.repeat(32),
+      },
+    );
+    const variants = [
+      valid.slice(0, -1),
+      [...valid, '--unexpected'],
+      [valid[2]!, valid[3]!, valid[0]!, valid[1]!, valid[4]!, valid[5]!],
+      [valid[0]!, valid[1]!, valid[2]!, valid[3]!, valid[2]!, valid[5]!],
+      [valid[0]!, valid[1]!, '--unknown', valid[3]!, valid[4]!, valid[5]!],
+    ];
+    for (const [index, args] of variants.entries()) {
+      await expect(runIsolatedPortableReplayArguments(
+        args,
+        `isolated portable replay argument case ${index}`,
+      )).rejects.toThrow(
+        new RegExp(`isolated portable replay argument case ${index} failed`),
+      );
+    }
   }, 60_000);
 
   it('keeps the child-process CLI config-free and capability-minimal', () => {
@@ -3287,8 +3282,10 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts',
       import.meta.url,
     ), 'utf8');
-    const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)]
-      .map(match => match[1]);
+    const imports = [
+      ...source.matchAll(/from\s+['"]([^'"]+)['"]/g),
+      ...source.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map(match => match[1]);
 
     expect(imports).toEqual([
       '../strict-json.js',
