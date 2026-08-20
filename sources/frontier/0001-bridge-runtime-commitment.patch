@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index b786af92f464e4aa752034f74ca7b53e6a0b124f..9eab961342156e1c8d8538f80416d2afa6779307 100644
+index b786af92f464e4aa752034f74ca7b53e6a0b124f..8cba2caaaba8e568ecc860e0b335682dc44d877e 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -672,0 +673,6 @@ checksum = "4cbbc9d0964165b47557570cce6c952866c2678457aca742aafc9fb771d30270"
@@ -115,7 +115,58 @@ index b786af92f464e4aa752034f74ca7b53e6a0b124f..9eab961342156e1c8d8538f80416d2af
 + "ethereum",
 @@ -3512,0 +3608 @@ dependencies = [
 + "libsecp256k1",
-@@ -3536,0 +3633,52 @@ dependencies = [
+@@ -3536,0 +3633,103 @@ dependencies = [
++ "sp-io",
++ "sp-offchain",
++ "sp-runtime",
++ "sp-session",
++ "sp-transaction-pool",
++ "sp-version",
++ "substrate-wasm-builder",
++]
++
++[[package]]
++name = "frontier-template-v4-lab-runtime"
++version = "0.0.0"
++dependencies = [
++ "bytes",
++ "ergo_avltree_rust",
++ "ethereum",
++ "fp-account",
++ "fp-evm",
++ "fp-rpc",
++ "fp-self-contained",
++ "frame-benchmarking",
++ "frame-executive",
++ "frame-support",
++ "frame-system",
++ "frame-system-benchmarking",
++ "frame-system-rpc-runtime-api",
++ "libsecp256k1",
++ "pallet-aura",
++ "pallet-balances",
++ "pallet-base-fee",
++ "pallet-dynamic-fee",
++ "pallet-ethereum",
++ "pallet-evm",
++ "pallet-evm-chain-id",
++ "pallet-evm-precompile-modexp",
++ "pallet-evm-precompile-sha3fips",
++ "pallet-evm-precompile-simple",
++ "pallet-grandpa",
++ "pallet-sudo",
++ "pallet-timestamp",
++ "pallet-transaction-payment",
++ "pallet-transaction-payment-rpc-runtime-api",
++ "parity-scale-codec",
++ "scale-info",
++ "sp-api",
++ "sp-block-builder",
++ "sp-consensus-aura",
++ "sp-consensus-grandpa",
++ "sp-core",
++ "sp-genesis-builder",
++ "sp-inherents",
 + "sp-io",
 + "sp-offchain",
 + "sp-runtime",
@@ -168,10 +219,10 @@ index b786af92f464e4aa752034f74ca7b53e6a0b124f..9eab961342156e1c8d8538f80416d2af
 + "sp-genesis-builder",
 + "sp-inherents",
 + "sp-io",
-@@ -4218 +4366 @@ dependencies = [
+@@ -4218 +4417 @@ dependencies = [
 - "socket2 0.4.10",
 + "socket2 0.5.10",
-@@ -9360,0 +9509,20 @@ dependencies = [
+@@ -9360,0 +9560,20 @@ dependencies = [
 +[[package]]
 +name = "sc-consensus-grandpa-rpc"
 +version = "0.33.0"
@@ -193,10 +244,10 @@ index b786af92f464e4aa752034f74ca7b53e6a0b124f..9eab961342156e1c8d8538f80416d2af
 +]
 +
 diff --git a/Cargo.toml b/Cargo.toml
-index ffbf86fa13e07a942f81d8bd22c939638b5cc4b9..70aa50c7328f374378f1374543431a5f9604c7d8 100644
+index ffbf86fa13e07a942f81d8bd22c939638b5cc4b9..a1cad761ec6bc529b6dcc4173e0af72e8189a01d 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -2,0 +3,47 @@ members = [
+@@ -2,0 +3,48 @@ members = [
 +	"bridge/checkpoint-verifier",
 +	"bridge/finality-proof",
 +	"bridge/state-proof",
@@ -235,6 +286,7 @@ index ffbf86fa13e07a942f81d8bd22c939638b5cc4b9..70aa50c7328f374378f1374543431a5f
 +	"primitives/self-contained",
 +	"template/node",
 +	"template/runtime",
++	"template/runtime-v4-lab",
 +	"template/runtime-v4-test",
 +	"precompiles",
 +	"precompiles/macro",
@@ -244,19 +296,19 @@ index ffbf86fa13e07a942f81d8bd22c939638b5cc4b9..70aa50c7328f374378f1374543431a5f
 +	"bridge/checkpoint-verifier",
 +	"bridge/finality-proof",
 +	"bridge/state-proof",
-@@ -50,0 +98,3 @@ async-trait = "0.1"
+@@ -50,0 +99,3 @@ async-trait = "0.1"
 +base64 = "0.22.1"
 +bridge-finality-proof = { path = "bridge/finality-proof" }
 +bridge-state-proof = { path = "bridge/state-proof" }
-@@ -51,0 +102 @@ bn = { package = "substrate-bn", version = "0.6", default-features = false }
+@@ -51,0 +103 @@ bn = { package = "substrate-bn", version = "0.6", default-features = false }
 +bytes = { version = "1.0.1", default-features = false }
-@@ -55,0 +107 @@ environmental = { version = "1.1.4", default-features = false }
+@@ -55,0 +108 @@ environmental = { version = "1.1.4", default-features = false }
 +ergo-avltree-rust = { package = "ergo_avltree_rust", version = "=0.1.1", default-features = false }
-@@ -59,0 +112 @@ futures = "0.3.31"
+@@ -59,0 +113 @@ futures = "0.3.31"
 +finality-grandpa = "0.16.2"
-@@ -94,0 +148 @@ sc-consensus-grandpa = { git = "https://github.com/paritytech/polkadot-sdk", tag
+@@ -94,0 +149 @@ sc-consensus-grandpa = { git = "https://github.com/paritytech/polkadot-sdk", tag
 +sc-consensus-grandpa-rpc = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2412-6" }
-@@ -128,0 +183 @@ sp-state-machine = { git = "https://github.com/paritytech/polkadot-sdk", tag = "
+@@ -128,0 +184 @@ sp-state-machine = { git = "https://github.com/paritytech/polkadot-sdk", tag = "
 +substrate-test-client = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2412-6" }
 diff --git a/bridge/checkpoint-verifier/Cargo.toml b/bridge/checkpoint-verifier/Cargo.toml
 new file mode 100644
@@ -31266,6 +31318,450 @@ index 0000000000000000000000000000000000000000..7f08ffa7706b00667eae774d00dc57c5
 @@ -0,0 +1 @@
 +608060405234801561000f575f5ffd5b50600436106100f0575f3560e01c806370a082311161009357806395d89b411161006357806395d89b41146101ef578063a9059cbb146101f7578063dd62ed3e1461020a578063f2fde38b14610242575f5ffd5b806370a0823114610191578063715018a6146101b957806374f4f547146101c15780638da5cb5b146101d4575f5ffd5b806323b872dd116100ce57806323b872dd14610147578063313ce5671461015a57806340c10f191461016957806342966c681461017e575f5ffd5b806306fdde03146100f4578063095ea7b31461011257806318160ddd14610135575b5f5ffd5b6100fc610255565b604051610109919061078d565b60405180910390f35b6101256101203660046107dd565b6102e5565b6040519015158152602001610109565b6002545b604051908152602001610109565b610125610155366004610805565b6102fe565b60405160098152602001610109565b61017c6101773660046107dd565b610321565b005b61017c61018c36600461083f565b610337565b61013961019f366004610856565b6001600160a01b03165f9081526020819052604090205490565b61017c610344565b61017c6101cf3660046107dd565b610357565b6005546040516001600160a01b039091168152602001610109565b6100fc610369565b6101256102053660046107dd565b610378565b610139610218366004610876565b6001600160a01b039182165f90815260016020908152604080832093909416825291909152205490565b61017c610250366004610856565b610385565b606060038054610264906108a7565b80601f0160208091040260200160405190810160405280929190818152602001828054610290906108a7565b80156102db5780601f106102b2576101008083540402835291602001916102db565b820191905f5260205f20905b8154815290600101906020018083116102be57829003601f168201915b5050505050905090565b5f336102f28185856103c4565b60019150505b92915050565b5f3361030b8582856103d6565b610316858585610452565b506001949350505050565b6103296104af565b61033382826104dc565b5050565b6103413382610510565b50565b61034c6104af565b6103555f610544565b565b61035f6104af565b6103338282610510565b606060048054610264906108a7565b5f336102f2818585610452565b61038d6104af565b6001600160a01b0381166103bb57604051631e4fbdf760e01b81525f60048201526024015b60405180910390fd5b61034181610544565b6103d18383836001610595565b505050565b6001600160a01b038381165f908152600160209081526040808320938616835292905220545f1981101561044c578181101561043e57604051637dc7a0d960e11b81526001600160a01b038416600482015260248101829052604481018390526064016103b2565b61044c84848484035f610595565b50505050565b6001600160a01b03831661047b57604051634b637e8f60e11b81525f60048201526024016103b2565b6001600160a01b0382166104a45760405163ec442f0560e01b81525f60048201526024016103b2565b6103d1838383610667565b6005546001600160a01b031633146103555760405163118cdaa760e01b81523360048201526024016103b2565b6001600160a01b0382166105055760405163ec442f0560e01b81525f60048201526024016103b2565b6103335f8383610667565b6001600160a01b03821661053957604051634b637e8f60e11b81525f60048201526024016103b2565b610333825f83610667565b600580546001600160a01b038381166001600160a01b0319831681179093556040519116919082907f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0905f90a35050565b6001600160a01b0384166105be5760405163e602df0560e01b81525f60048201526024016103b2565b6001600160a01b0383166105e757604051634a1406b160e11b81525f60048201526024016103b2565b6001600160a01b038085165f908152600160209081526040808320938716835292905220829055801561044c57826001600160a01b0316846001600160a01b03167f8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b9258460405161065991815260200190565b60405180910390a350505050565b6001600160a01b038316610691578060025f82825461068691906108df565b909155506107019050565b6001600160a01b0383165f90815260208190526040902054818110156106e35760405163391434e360e21b81526001600160a01b038516600482015260248101829052604481018390526064016103b2565b6001600160a01b0384165f9081526020819052604090209082900390555b6001600160a01b03821661071d5760028054829003905561073b565b6001600160a01b0382165f9081526020819052604090208054820190555b816001600160a01b0316836001600160a01b03167fddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef8360405161078091815260200190565b60405180910390a3505050565b602081525f82518060208401528060208501604085015e5f604082850101526040601f19601f83011684010191505092915050565b80356001600160a01b03811681146107d8575f5ffd5b919050565b5f5f604083850312156107ee575f5ffd5b6107f7836107c2565b946020939093013593505050565b5f5f5f60608486031215610817575f5ffd5b610820846107c2565b925061082e602085016107c2565b929592945050506040919091013590565b5f6020828403121561084f575f5ffd5b5035919050565b5f60208284031215610866575f5ffd5b61086f826107c2565b9392505050565b5f5f60408385031215610887575f5ffd5b610890836107c2565b915061089e602084016107c2565b90509250929050565b600181811c908216806108bb57607f821691505b6020821081036108d957634e487b7160e01b5f52602260045260245ffd5b50919050565b808201808211156102f857634e487b7160e01b5f52601160045260245ffdfea2646970667358221220ff70861387a97ff867880422f8ce05acd45f5fa7a674e3a2d1d38a9ffc732fb864736f6c63430008230033
 \ No newline at end of file
+diff --git a/template/runtime-v4-lab/Cargo.toml b/template/runtime-v4-lab/Cargo.toml
+new file mode 100644
+index 0000000000000000000000000000000000000000..1ba3e2a023bfb88cff17e5a30e9cdcf0d317a385
+--- /dev/null
++++ b/template/runtime-v4-lab/Cargo.toml
+@@ -0,0 +1,130 @@
++[package]
++name = "frontier-template-v4-lab-runtime"
++version = "0.0.0"
++license = "Unlicense"
++description = "Non-publishable runtime for isolated bridge V4 federated devnet campaigns."
++publish = false
++authors = { workspace = true }
++edition = { workspace = true }
++repository = { workspace = true }
++
++[package.metadata.docs.rs]
++targets = ["x86_64-unknown-linux-gnu"]
++
++[dependencies]
++scale-codec = { workspace = true }
++scale-info = { workspace = true }
++libsecp256k1 = { workspace = true }
++bytes = { workspace = true }
++ergo-avltree-rust = { workspace = true }
++
++# Substrate
++sp-api = { workspace = true }
++sp-block-builder = { workspace = true }
++sp-consensus-aura = { workspace = true }
++sp-consensus-grandpa = { workspace = true }
++sp-core = { workspace = true }
++sp-genesis-builder = { workspace = true }
++sp-inherents = { workspace = true }
++sp-io = { workspace = true }
++sp-offchain = { workspace = true }
++sp-runtime = { workspace = true }
++sp-session = { workspace = true }
++sp-transaction-pool = { workspace = true }
++sp-version = { workspace = true }
++
++# Substrate FRAME
++frame-benchmarking = { workspace = true, optional = true }
++frame-executive = { workspace = true }
++frame-support = { workspace = true, features = ["experimental"] }
++frame-system = { workspace = true }
++frame-system-benchmarking = { workspace = true, optional = true }
++frame-system-rpc-runtime-api = { workspace = true }
++pallet-aura = { workspace = true }
++pallet-balances = { workspace = true, features = ["insecure_zero_ed"] }
++pallet-grandpa = { workspace = true }
++pallet-sudo = { workspace = true }
++pallet-timestamp = { workspace = true }
++pallet-transaction-payment = { workspace = true }
++pallet-transaction-payment-rpc-runtime-api = { workspace = true }
++
++# Frontier
++fp-account = { workspace = true, features = ["serde"] }
++fp-evm = { workspace = true, features = ["serde"] }
++fp-rpc = { workspace = true }
++fp-self-contained = { workspace = true, features = ["serde"] }
++pallet-base-fee = { workspace = true }
++pallet-dynamic-fee = { workspace = true }
++pallet-ethereum = { workspace = true }
++pallet-evm = { workspace = true }
++pallet-evm-chain-id = { workspace = true }
++pallet-evm-precompile-modexp = { workspace = true }
++pallet-evm-precompile-sha3fips = { workspace = true }
++pallet-evm-precompile-simple = { workspace = true }
++
++[build-dependencies]
++sp-core = { workspace = true, features = ["std"] }
++substrate-wasm-builder = { workspace = true, optional = true }
++
++[dev-dependencies]
++ethereum = { workspace = true, features = ["with-scale"] }
++
++[features]
++default = ["std", "with-rocksdb-weights"]
++with-rocksdb-weights = []
++with-paritydb-weights = []
++std = [
++	"scale-codec/std",
++	"scale-info/std",
++	"libsecp256k1/std",
++	"sp-api/std",
++	"sp-block-builder/std",
++	"sp-consensus-aura/std",
++	"sp-consensus-grandpa/std",
++	"sp-core/std",
++	"sp-genesis-builder/std",
++	"sp-inherents/std",
++	"sp-io/std",
++	"sp-offchain/std",
++	"sp-runtime/std",
++	"sp-session/std",
++	"sp-transaction-pool/std",
++	"sp-version/std",
++	"substrate-wasm-builder",
++	"frame-benchmarking/std",
++	"frame-executive/std",
++	"frame-support/std",
++	"frame-system/std",
++	"frame-system-rpc-runtime-api/std",
++	"frame-system-benchmarking?/std",
++	"pallet-aura/std",
++	"pallet-balances/std",
++	"pallet-grandpa/std",
++	"pallet-sudo/std",
++	"pallet-timestamp/std",
++	"pallet-transaction-payment/std",
++	"pallet-transaction-payment-rpc-runtime-api/std",
++	"fp-account/std",
++	"fp-evm/std",
++	"fp-rpc/std",
++	"fp-self-contained/std",
++	"pallet-base-fee/std",
++	"pallet-dynamic-fee/std",
++	"pallet-ethereum/std",
++	"pallet-evm/std",
++	"pallet-evm-chain-id/std",
++	"pallet-evm-precompile-modexp/std",
++	"pallet-evm-precompile-sha3fips/std",
++	"pallet-evm-precompile-simple/std",
++]
++runtime-benchmarks = [
++	"frame-benchmarking/runtime-benchmarks",
++	"frame-system-benchmarking/runtime-benchmarks",
++	"frame-system/runtime-benchmarks",
++	"pallet-balances/runtime-benchmarks",
++	"pallet-grandpa/runtime-benchmarks",
++	"pallet-timestamp/runtime-benchmarks",
++	"pallet-sudo/runtime-benchmarks",
++	"pallet-ethereum/runtime-benchmarks",
++	"pallet-evm/runtime-benchmarks",
++]
+diff --git a/template/runtime-v4-lab/build.rs b/template/runtime-v4-lab/build.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..55776414160657ea1b45266bd124fc885707d3c6
+--- /dev/null
++++ b/template/runtime-v4-lab/build.rs
+@@ -0,0 +1,204 @@
++use std::{env, fs, path::PathBuf};
++
++const PROFILE_HEX_ENV: &str = "BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX";
++const PROFILE_ID_HEX_ENV: &str = "BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX";
++const PROFILE_DOMAIN: &[u8] = b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_PROFILE_V1";
++const SOURCE_KEY_SET_DOMAIN: &[u8] = b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_KEY_SET_V1";
++const MAX_SIGNERS: usize = 8;
++
++fn main() {
++	println!("cargo:rerun-if-env-changed={PROFILE_HEX_ENV}");
++	println!("cargo:rerun-if-env-changed={PROFILE_ID_HEX_ENV}");
++
++	let profile_bytes = decode_hex_env(PROFILE_HEX_ENV);
++	let expected_profile_id = decode_fixed_hex_env::<32>(PROFILE_ID_HEX_ENV);
++	let profile = parse_profile(&profile_bytes);
++	let derived_profile_id = derive_profile_id(&profile);
++	if derived_profile_id != expected_profile_id {
++		panic!("{PROFILE_ID_HEX_ENV} does not match the canonical profile bytes");
++	}
++	let generated = render_profile(&profile, &profile_bytes, &expected_profile_id);
++	let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo must provide OUT_DIR"));
++	fs::write(out_dir.join("federated_source_proof_profile.rs"), generated)
++		.expect("write the isolated-devnet public source-proof profile");
++
++	#[cfg(feature = "std")]
++	substrate_wasm_builder::WasmBuilder::new()
++		.with_current_project()
++		.export_heap_base()
++		.import_memory()
++		.build()
++}
++
++struct Profile {
++	format_version: u8,
++	federation_epoch: u64,
++	threshold: u16,
++	signer_public_keys: Vec<[u8; 32]>,
++	max_validity_blocks: u64,
++	verifier_profile_id: [u8; 32],
++}
++
++fn parse_profile(bytes: &[u8]) -> Profile {
++	let mut cursor = 0usize;
++	let format_version = take::<1>(bytes, &mut cursor, "format version")[0];
++	let federation_epoch = u64::from_le_bytes(take(bytes, &mut cursor, "federation epoch"));
++	let threshold = u16::from_le_bytes(take(bytes, &mut cursor, "threshold"));
++	let signer_count = decode_compact_len(bytes, &mut cursor);
++	if !(2..=MAX_SIGNERS).contains(&signer_count) {
++		panic!("{PROFILE_HEX_ENV} signer count must be between 2 and {MAX_SIGNERS}");
++	}
++	let mut signer_public_keys = Vec::with_capacity(signer_count);
++	for _ in 0..signer_count {
++		signer_public_keys.push(take(bytes, &mut cursor, "signer public key"));
++	}
++	let max_validity_blocks =
++		u64::from_le_bytes(take(bytes, &mut cursor, "maximum validity blocks"));
++	let verifier_profile_id = take(bytes, &mut cursor, "verifier profile ID");
++	if cursor != bytes.len() {
++		panic!("{PROFILE_HEX_ENV} contains trailing bytes");
++	}
++	if format_version != 1
++		|| federation_epoch == 0
++		|| threshold < 2
++		|| usize::from(threshold) > signer_public_keys.len()
++		|| max_validity_blocks == 0
++		|| max_validity_blocks > 1_024
++	{
++		panic!("{PROFILE_HEX_ENV} is outside the supported V1 profile bounds");
++	}
++	if signer_public_keys.windows(2).any(|pair| pair[0] >= pair[1]) {
++		panic!("{PROFILE_HEX_ENV} signer public keys must be unique and strictly ordered");
++	}
++	if signer_public_keys.iter().any(|value| *value == [0u8; 32]) {
++		panic!("{PROFILE_HEX_ENV} signer public keys must be non-zero");
++	}
++	if verifier_profile_id == [0u8; 32] {
++		panic!("{PROFILE_HEX_ENV} verifier profile ID must be non-zero");
++	}
++
++	Profile {
++		format_version,
++		federation_epoch,
++		threshold,
++		signer_public_keys,
++		max_validity_blocks,
++		verifier_profile_id,
++	}
++}
++
++fn derive_profile_id(profile: &Profile) -> [u8; 32] {
++	let mut key_set = Vec::with_capacity(2 + profile.signer_public_keys.len() * 32);
++	key_set.extend_from_slice(&(profile.signer_public_keys.len() as u16).to_be_bytes());
++	for signer in &profile.signer_public_keys {
++		key_set.extend_from_slice(signer);
++	}
++	let key_set_digest = domain_hash(SOURCE_KEY_SET_DOMAIN, &key_set);
++
++	let mut encoded = Vec::with_capacity(1 + 8 + 32 + 2 + 8 + 32);
++	encoded.push(profile.format_version);
++	encoded.extend_from_slice(&profile.federation_epoch.to_be_bytes());
++	encoded.extend_from_slice(&key_set_digest);
++	encoded.extend_from_slice(&profile.threshold.to_be_bytes());
++	encoded.extend_from_slice(&profile.max_validity_blocks.to_be_bytes());
++	encoded.extend_from_slice(&profile.verifier_profile_id);
++	domain_hash(PROFILE_DOMAIN, &encoded)
++}
++
++fn domain_hash(domain: &[u8], bytes: &[u8]) -> [u8; 32] {
++	let mut preimage = Vec::with_capacity(domain.len() + bytes.len());
++	preimage.extend_from_slice(domain);
++	preimage.extend_from_slice(bytes);
++	sp_core::hashing::blake2_256(&preimage)
++}
++
++fn decode_compact_len(bytes: &[u8], cursor: &mut usize) -> usize {
++	let encoded = take::<1>(bytes, cursor, "SCALE signer count")[0];
++	if encoded & 0b11 != 0 {
++		panic!("{PROFILE_HEX_ENV} signer count must use canonical one-byte SCALE compact encoding");
++	}
++	usize::from(encoded >> 2)
++}
++
++fn take<const N: usize>(bytes: &[u8], cursor: &mut usize, label: &str) -> [u8; N] {
++	let end = cursor.checked_add(N).expect("profile cursor overflow");
++	let value: [u8; N] = bytes
++		.get(*cursor..end)
++		.unwrap_or_else(|| panic!("{PROFILE_HEX_ENV} is truncated at {label}"))
++		.try_into()
++		.expect("slice length is fixed");
++	*cursor = end;
++	value
++}
++
++fn decode_hex_env(name: &str) -> Vec<u8> {
++	let value = env::var(name).unwrap_or_else(|_| panic!("{name} is required for runtime-v4-lab"));
++	let digits = value
++		.strip_prefix("0x")
++		.unwrap_or_else(|| panic!("{name} must use a lowercase 0x prefix"));
++	if digits.is_empty()
++		|| digits.len() % 2 != 0
++		|| digits
++			.bytes()
++			.any(|value| !value.is_ascii_digit() && !(b'a'..=b'f').contains(&value))
++	{
++		panic!("{name} must be non-empty lowercase canonical hexadecimal bytes");
++	}
++	(0..digits.len())
++		.step_by(2)
++		.map(|offset| {
++			u8::from_str_radix(&digits[offset..offset + 2], 16)
++				.unwrap_or_else(|_| panic!("{name} must contain only hexadecimal bytes"))
++		})
++		.collect()
++}
++
++fn decode_fixed_hex_env<const N: usize>(name: &str) -> [u8; N] {
++	decode_hex_env(name)
++		.try_into()
++		.unwrap_or_else(|_| panic!("{name} must encode exactly {N} bytes"))
++}
++
++fn render_profile(
++	profile: &Profile,
++	profile_bytes: &[u8],
++	expected_profile_id: &[u8; 32],
++) -> String {
++	let keys = profile
++		.signer_public_keys
++		.iter()
++		.map(|value| render_array(value))
++		.collect::<Vec<_>>()
++		.join(",\n\t");
++	format!(
++		"pub const FORMAT_VERSION: u8 = {};\n\
++pub const FEDERATION_EPOCH: u64 = {};\n\
++pub const THRESHOLD: u16 = {};\n\
++pub const SIGNER_PUBLIC_KEYS: [[u8; 32]; {}] = [\n\t{}\n];\n\
++pub const MAX_VALIDITY_BLOCKS: u64 = {};\n\
++pub const VERIFIER_PROFILE_ID: [u8; 32] = {};\n\
++pub const PROFILE_SCALE_BYTES: [u8; {}] = {};\n\
++pub const EXPECTED_PROFILE_ID: [u8; 32] = {};\n",
++		profile.format_version,
++		profile.federation_epoch,
++		profile.threshold,
++		profile.signer_public_keys.len(),
++		keys,
++		profile.max_validity_blocks,
++		render_array(&profile.verifier_profile_id),
++		profile_bytes.len(),
++		render_array(profile_bytes),
++		render_array(expected_profile_id),
++	)
++}
++
++fn render_array(bytes: &[u8]) -> String {
++	format!(
++		"[{}]",
++		bytes
++			.iter()
++			.map(|value| format!("0x{value:02x}"))
++			.collect::<Vec<_>>()
++			.join(", ")
++	)
++}
+diff --git a/template/runtime-v4-lab/src/lib.rs b/template/runtime-v4-lab/src/lib.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff511c3528638d311679d855e12e765e42d7eed3
+--- /dev/null
++++ b/template/runtime-v4-lab/src/lib.rs
+@@ -0,0 +1,92 @@
++//! Non-publishable runtime for one isolated bridge V4 federated devnet campaign.
++
++#![cfg_attr(not(feature = "std"), no_std)]
++#![recursion_limit = "256"]
++#![allow(clippy::new_without_default, clippy::or_fun_call)]
++#![cfg_attr(feature = "runtime-benchmarks", warn(unused_crate_dependencies))]
++
++mod compiled_profile {
++	include!(concat!(
++		env!("OUT_DIR"),
++		"/federated_source_proof_profile.rs"
++	));
++}
++
++pub struct LabFederatedPooledReserveSourceProofProfileV1;
++
++impl crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveSourceProofProfileProviderV1
++	for LabFederatedPooledReserveSourceProofProfileV1
++{
++	fn profile(
++	) -> crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveSourceProofProfileV1 {
++		let signer_public_keys = compiled_profile::SIGNER_PUBLIC_KEYS
++			.to_vec()
++			.try_into()
++			.expect("the build script enforces the V1 signer bound");
++		crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveSourceProofProfileV1 {
++			format_version: compiled_profile::FORMAT_VERSION,
++			federation_epoch: compiled_profile::FEDERATION_EPOCH,
++			threshold: compiled_profile::THRESHOLD,
++			signer_public_keys,
++			max_validity_blocks: compiled_profile::MAX_VALIDITY_BLOCKS,
++			verifier_profile_id: sp_core::H256::from(compiled_profile::VERIFIER_PROFILE_ID),
++		}
++	}
++}
++
++mod runtime_configuration {
++	pub type ErgoAutolykosCommittedVaultSourceProofConsumer =
++		crate::peg_in_ergo_autolykos_committed_vault::RejectedErgoAutolykosCommittedVaultSourceProofConsumerV1;
++	pub type ErgoAutolykosCommittedVaultRuntimeStatementConsumer =
++		crate::peg_in_ergo_autolykos_committed_vault_runtime_statement::RejectedErgoAutolykosCommittedVaultRuntimeStatementConsumerV2;
++	pub type ErgoAutolykosCommittedVaultUtxoRuntimeStatementConsumer =
++		crate::peg_in_ergo_autolykos_committed_vault_utxo_runtime_statement::RejectedErgoAutolykosCommittedVaultUtxoRuntimeStatementConsumerV3;
++	pub type ErgoAutolykosCommittedVaultUtxoRuntimeStatementActivationAllowed =
++		frame_support::traits::ConstBool<false>;
++	pub type SourceProofVerifier =
++		crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveMintReservationSourceProofV1<
++			crate::LabFederatedPooledReserveSourceProofProfileV1,
++		>;
++	pub type ProfileActivationAllowed = frame_support::traits::ConstBool<true>;
++	pub type LegacyPegInMintExecutionAllowed = frame_support::traits::ConstBool<false>;
++}
++
++include!("../../runtime/src/runtime_body.rs");
++
++#[sp_version::runtime_version]
++pub const VERSION: RuntimeVersion = RuntimeVersion {
++	spec_name: Cow::Borrowed("frontier-template-v4-lab"),
++	impl_name: Cow::Borrowed("frontier-template-v4-lab"),
++	authoring_version: 1,
++	spec_version: 1,
++	impl_version: 1,
++	apis: RUNTIME_API_VERSIONS,
++	transaction_version: 1,
++	system_version: 1,
++};
++
++#[cfg(test)]
++mod lab_profile_tests {
++	use scale_codec::Encode;
++	use sp_core::H256;
++
++	use super::{compiled_profile, LabFederatedPooledReserveSourceProofProfileV1};
++	use crate::peg_in_pooled_reserve_reservation::{
++		derive_federated_pooled_reserve_source_proof_profile_id_v1,
++		validate_federated_pooled_reserve_source_proof_profile_v1,
++		FederatedPooledReserveSourceProofProfileProviderV1,
++	};
++
++	#[test]
++	fn compiled_public_profile_matches_exact_scale_bytes_and_profile_id() {
++		let profile = LabFederatedPooledReserveSourceProofProfileV1::profile();
++		validate_federated_pooled_reserve_source_proof_profile_v1(&profile)
++			.expect("the compiled LAB profile must satisfy the V1 verifier bounds");
++		assert_eq!(profile.encode(), compiled_profile::PROFILE_SCALE_BYTES);
++		assert_eq!(
++			derive_federated_pooled_reserve_source_proof_profile_id_v1(&profile)
++				.expect("the compiled LAB profile ID must be derivable"),
++			H256::from(compiled_profile::EXPECTED_PROFILE_ID),
++		);
++	}
++}
 diff --git a/template/runtime-v4-test/Cargo.toml b/template/runtime-v4-test/Cargo.toml
 new file mode 100644
 index 0000000000000000000000000000000000000000..97f49d9537c115ff1ae2b1af92249f45f88d7b0e

@@ -290,6 +290,31 @@ export function buildFederatedPooledReserveSourceProofProfileV1(
   });
 }
 
+export function encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+  input: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+): string {
+  const profile = normalizeProofProfileInput(input);
+  return `0x${Buffer.concat([
+    Buffer.from([profile.formatVersion]),
+    uint64Le(profile.federationEpoch),
+    uint16Le(profile.threshold),
+    encodeScaleCompactLength(profile.signerPublicKeysHex.length),
+    ...profile.signerPublicKeysHex.map(value => fixedBytes(
+      value,
+      32,
+      'source-attestation public key',
+      true,
+    )),
+    uint64Le(profile.maxValidityBlocks),
+    fixedBytes(
+      profile.verifierProfileIdHex,
+      32,
+      'source-proof verifier profile ID',
+      true,
+    ),
+  ]).toString('hex')}`;
+}
+
 export function deriveFederatedPooledReserveSourceProofProfileIdForInputV1Hex(
   input: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
 ): string {

@@ -8,6 +8,7 @@ import {
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
   buildFederatedPooledReserveSourceProofProfileV1,
+  encodeFederatedPooledReserveSourceProofProfileScaleV1Hex,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
@@ -30,6 +31,20 @@ describe('isolated-devnet source-attestation campaign session V1', () => {
     );
     expect(binding.federatedMintProfile.signerPublicKeysHex).toEqual(
       binding.sourceAttestationPublicKeysHex.map(value => `0x${value}`),
+    );
+    expect(binding.federatedMintProfileScaleHex).toBe(
+      encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+        {
+          federationEpoch: binding.federatedMintProfile.federationEpoch,
+          threshold: binding.federatedMintProfile.threshold,
+          signerPublicKeysHex:
+            binding.federatedMintProfile.signerPublicKeysHex,
+          maxValidityBlocks:
+            binding.federatedMintProfile.maxValidityBlocks,
+          verifierProfileIdHex:
+            binding.federatedMintProfile.verifierProfileIdHex,
+        },
+      ),
     );
     expect(binding.boundaries.runtimeProviderCompiled).toBe(false);
     expect(binding.boundaries.mintExecuted).toBe(false);

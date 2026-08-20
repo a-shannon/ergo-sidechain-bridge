@@ -24,6 +24,7 @@ import {
   deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex,
   deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1Hex,
   deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
+  encodeFederatedPooledReserveSourceProofProfileScaleV1Hex,
   encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex,
   encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex,
   verifyFederatedPooledReserveSourceProofSignaturesForProfileV1,
@@ -85,6 +86,7 @@ export interface SubstrateFederatedIsolatedDevnetSourceAttestationBindingV1 {
   readonly checkpointSourceAttestationKeySetDigestHex: string;
   readonly federatedMintProfile:
     Readonly<FederatedPooledReserveSourceProofProfileV1>;
+  readonly federatedMintProfileScaleHex: string;
   readonly checks: Readonly<{
     readonly oneFreshPublicKeySetBindsBothDomains: true;
     readonly checkpointAndMintProfileDomainsRemainDistinct: true;
@@ -257,6 +259,10 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
     checkpointSourceAttestationKeySetDigestHex:
       checkpointProfile.sourceAttestationKeySetDigestHex,
     federatedMintProfile,
+    federatedMintProfileScaleHex:
+      encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+        mintProfileInput,
+      ),
     checks: {
       oneFreshPublicKeySetBindsBothDomains: true as const,
       checkpointAndMintProfileDomainsRemainDistinct: true as const,

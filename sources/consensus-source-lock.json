@@ -19,12 +19,12 @@
     "submoduleName": "ergo-sidechain-bridge/substrate-node",
     "commit": "75329a2df49e2cc7981485392c31160929d1bd48",
     "ref": "stable2412",
-    "cargoLockBlob": "9eab961342156e1c8d8538f80416d2afa6779307",
+    "cargoLockBlob": "8cba2caaaba8e568ecc860e0b335682dc44d877e",
     "rustToolchainBlob": "ab41c50970600e50ee7bf33cd44fe538b2ca0771",
     "nodeManifestBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee",
     "runtimeManifestBlob": "5e21a2017e4656113ec5cfc383ab4a2371652351",
     "patchPath": "sources/frontier/0001-bridge-runtime-commitment.patch",
-    "patchSha256": "533a2928f6d3063e6e3a434b81cb23ea501e1365affe585d2b6b6cec301d27e3",
+    "patchSha256": "fb9cec83cd8c7fe6252603b3f02735bddf54859ad7d0d460173372e88785fa28",
     "bridgeAtomicityFixtures": [
       {
         "artifactPath": "solidity/compiled/SERG.bin",
@@ -52,13 +52,13 @@
         "path": "Cargo.lock",
         "status": "modified",
         "baseBlob": "b786af92f464e4aa752034f74ca7b53e6a0b124f",
-        "patchedBlob": "9eab961342156e1c8d8538f80416d2afa6779307"
+        "patchedBlob": "8cba2caaaba8e568ecc860e0b335682dc44d877e"
       },
       {
         "path": "Cargo.toml",
         "status": "modified",
         "baseBlob": "ffbf86fa13e07a942f81d8bd22c939638b5cc4b9",
-        "patchedBlob": "70aa50c7328f374378f1374543431a5f9604c7d8"
+        "patchedBlob": "a1cad761ec6bc529b6dcc4173e0af72e8189a01d"
       },
       {
         "path": "bridge/checkpoint-verifier/Cargo.toml",
@@ -477,6 +477,21 @@
         "path": "template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin",
         "status": "added",
         "patchedBlob": "7f08ffa7706b00667eae774d00dc57c59ec24fc6"
+      },
+      {
+        "path": "template/runtime-v4-lab/Cargo.toml",
+        "status": "added",
+        "patchedBlob": "1ba3e2a023bfb88cff17e5a30e9cdcf0d317a385"
+      },
+      {
+        "path": "template/runtime-v4-lab/build.rs",
+        "status": "added",
+        "patchedBlob": "55776414160657ea1b45266bd124fc885707d3c6"
+      },
+      {
+        "path": "template/runtime-v4-lab/src/lib.rs",
+        "status": "added",
+        "patchedBlob": "ff511c3528638d311679d855e12e765e42d7eed3"
       },
       {
         "path": "template/runtime-v4-test/Cargo.toml",
