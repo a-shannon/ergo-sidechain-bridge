@@ -330,7 +330,11 @@ function assertExactLineage(
     || !sameHex(observation.expectedTxId, transition.txId, 32)
     || !sameHex(draft.statement.successorReserveBoxIdHex, packet.boxes.reserveSuccessor.boxId, 32)
     || !sameHex(observation.reserveSuccessorBoxIdHex, packet.boxes.reserveSuccessor.boxId, 32)
-    || draft.statement.successorReserveDigestHex !== packet.reserve.outputDigestHex
+    || !sameHex(
+      draft.statement.successorReserveDigestHex,
+      packet.reserve.outputDigestHex,
+      33,
+    )
     || draft.statement.successorReserveLiabilityNanoErg
       !== packet.reserve.outputLiabilityNanoErg
     || !sameHex(draft.statement.depositCommitmentHex, packet.depositCommitmentHex, 32)

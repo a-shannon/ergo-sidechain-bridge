@@ -173,6 +173,30 @@ describe('isolated-devnet committed-reserve evidence collector V1', () => {
     expect(() => collect(mintDraft())).toThrow(/lineage differs/u);
   });
 
+  it('compares the raw WASM reserve digest with the canonical V4 statement bytes', () => {
+    const valid = mocks.packet;
+    const draft = mintDraft();
+    mocks.packet = Object.freeze({
+      ...valid,
+      reserve: Object.freeze({
+        ...valid.reserve,
+        outputDigestHex: valid.reserve.outputDigestHex.slice(2),
+      }),
+    });
+
+    expect(() => collect(draft)).not.toThrow();
+
+    const changedDigestDraft = mintDraft();
+    mocks.packet = Object.freeze({
+      ...mocks.packet,
+      reserve: Object.freeze({
+        ...mocks.packet.reserve,
+        outputDigestHex: `02${mocks.packet.reserve.outputDigestHex.slice(2)}`,
+      }),
+    });
+    expect(() => collect(changedDigestDraft)).toThrow(/lineage differs/u);
+  });
+
   it('rejects copied receipts, cross-campaign drafts, and caller evidence fields', () => {
     const draft = mintDraft();
     const receipt = collect(draft);
@@ -227,7 +251,8 @@ function mintDraft(digestByte = '31') {
       reserveTransitionTransactionIdHex:
         mocks.packet.transactions.reserveTransition.txId,
       successorReserveBoxIdHex: mocks.packet.boxes.reserveSuccessor.boxId,
-      successorReserveDigestHex: mocks.packet.reserve.outputDigestHex,
+      successorReserveDigestHex:
+        `0x${mocks.packet.reserve.outputDigestHex.replace(/^0x/u, '')}`,
       successorReserveLiabilityNanoErg:
         digestByte === 'ff'
           ? mocks.packet.reserve.outputLiabilityNanoErg
