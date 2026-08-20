@@ -73,6 +73,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceip
     Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
   readonly packetProofReceiptDigestHex: string;
   readonly sourceProofReceiptDigestHex: string;
+  readonly sourceEvidenceReceiptDigestHex: string;
   readonly targetDescriptorDigestHex: string;
   readonly runtimeProfileIdHex: string;
   readonly sourceProofProfileIdHex: string;
@@ -86,6 +87,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceip
   readonly stderrSha256Hex: string;
   readonly checks: Readonly<{
     readonly exactPacketProofProvenanceRevalidated: true;
+    readonly exactCollectedSourceEvidenceBoundaryConsumed: true;
     readonly exactSourceLockRevalidatedBeforeAndAfter: true;
     readonly exactToolchainRevalidatedBeforeAndAfter: true;
     readonly exactDynamicSourceProfileConsumed: true;
@@ -110,7 +112,8 @@ export interface SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceip
     readonly dependencyCacheContentAttested: false;
     readonly atomicSourceAndToolSnapshotEstablished: false;
     readonly exclusiveNonAdversarialSameUserExecutionRequired: true;
-    readonly callerSuppliedEvidenceBytesRemainAttestedOnly: true;
+    readonly callerSuppliedEvidenceBytesAccepted: false;
+    readonly sourceEvidenceCollectionProvenanceEstablished: true;
     readonly sourceCanonicalityIndependentlyVerified: false;
     readonly ergoPowAuthenticated: false;
     readonly externalTargetNodeAcceptanceEstablished: false;
@@ -204,6 +207,19 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
   if (CONSUMED_PACKET_PROOFS.has(proofReceipt)) {
     throw new Error('Frontier packet-proof consumer is already consumed');
   }
+  const sourceProof = proofReceipt.sourceProof;
+  if (
+    proofReceipt.checks.exactSourceEvidenceReceiptBound !== true
+    || sourceProof.checks.exactSourceEvidenceReceiptBound !== true
+    || sourceProof.boundary.evidenceBytesCallerSupplied !== false
+    || sourceProof.boundary.sourceEvidenceCollectionProvenanceEstablished
+      !== true
+    || sourceProof.boundary.sourceCanonicalityIndependentlyVerified !== false
+  ) {
+    throw new Error(
+      'Frontier packet-proof consumer requires collected source evidence',
+    );
+  }
   const frontierSourceDirectory = requireDirectory(
     record.frontierSourceDirectory,
     'patched Frontier source',
@@ -247,7 +263,6 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
     `${RECEIPT_DIGEST_DOMAIN}_SOURCE_LOCK`,
   );
 
-  const sourceProof = proofReceipt.sourceProof;
   const runtimeProfile =
     decodePooledReserveMintReservationRuntimeProfileV4ScaleHex(
       sourceProof.runtimeProfileScaleHex,
@@ -457,6 +472,10 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
     packetProof: proofReceipt,
     packetProofReceiptDigestHex: proofReceipt.receiptDigestHex,
     sourceProofReceiptDigestHex: sourceProof.receiptDigestHex,
+    sourceEvidenceReceiptDigestHex: canonicalDigestHex(
+      sourceProof.sourceEvidenceReceiptDigestHex,
+      'source-evidence receipt digest',
+    ),
     targetDescriptorDigestHex: sourceProof.targetDescriptorDigestHex,
     runtimeProfileIdHex,
     sourceProofProfileIdHex,
@@ -474,6 +493,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
     stderrSha256Hex: sha256(stderr),
     checks: {
       exactPacketProofProvenanceRevalidated: true as const,
+      exactCollectedSourceEvidenceBoundaryConsumed: true as const,
       exactSourceLockRevalidatedBeforeAndAfter: true as const,
       exactToolchainRevalidatedBeforeAndAfter: true as const,
       exactDynamicSourceProfileConsumed: true as const,
@@ -498,7 +518,8 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
       dependencyCacheContentAttested: false as const,
       atomicSourceAndToolSnapshotEstablished: false as const,
       exclusiveNonAdversarialSameUserExecutionRequired: true as const,
-      callerSuppliedEvidenceBytesRemainAttestedOnly: true as const,
+      callerSuppliedEvidenceBytesAccepted: false as const,
+      sourceEvidenceCollectionProvenanceEstablished: true as const,
       sourceCanonicalityIndependentlyVerified: false as const,
       ergoPowAuthenticated: false as const,
       externalTargetNodeAcceptanceEstablished: false as const,
@@ -515,7 +536,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
       'Source and tool identity is local exact-input evidence, not an independent build attestation.',
       'The complete build-tool closure and shared dependency-cache content are not attested.',
       'Pre/post source and tool hashes are not an atomic snapshot and require exclusive execution by a non-adversarial local OS user.',
-      'The packet evidence bytes remain attested opaque inputs in this slice.',
+      'The packet evidence bytes come from a one-shot process-proven collector receipt; their source canonicality remains federated.',
       'Independent Ergo PoW and source canonicality are not established.',
       'No external target, funds authority, Gate 5 closure, or trustless status follows.',
     ] as const,
@@ -549,6 +570,8 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerR
       !== receipt.packetProofReceiptDigestHex
     || receipt.packetProof.sourceProof.receiptDigestHex
       !== receipt.sourceProofReceiptDigestHex
+    || receipt.packetProof.sourceProof.sourceEvidenceReceiptDigestHex
+      !== receipt.sourceEvidenceReceiptDigestHex
   ) {
     throw new Error('Frontier packet-proof consumer receipt changed');
   }
@@ -1004,6 +1027,17 @@ function canonicalHex(value: unknown, bytes: number, label: string): string {
     throw new Error(`${label} must be ${bytes} canonical bytes`);
   }
   return `0x${normalized}`;
+}
+
+function canonicalDigestHex(value: unknown, label: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${label} must be 32 canonical bytes`);
+  }
+  const normalized = value.toLowerCase().replace(/^0x/u, '');
+  if (!/^[0-9a-f]{64}$/u.test(normalized)) {
+    throw new Error(`${label} must be 32 canonical bytes`);
+  }
+  return normalized;
 }
 
 function sha256(value: string): string {
