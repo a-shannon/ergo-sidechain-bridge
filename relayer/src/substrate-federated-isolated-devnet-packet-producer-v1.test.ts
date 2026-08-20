@@ -8,10 +8,11 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, sep } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -517,6 +518,7 @@ import {
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance,
+  preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
   runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
 } from './substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
 import {
@@ -1064,6 +1066,8 @@ describe('isolated-devnet portable packet producer', () => {
     expect(processInput.env.RUSTC).toBe(paths.rustcExecutablePath);
     expect(processInput.env.E2S_UNRELATED_TEST_VALUE).toBeUndefined();
     expect(processInput.label).toBe('Frontier packet-proof Cargo consumer');
+    expect(processInput.timeoutMs).toBeGreaterThan(0);
+    expect(processInput.timeoutMs).toBeLessThanOrEqual(29 * 60_000);
     expect(mocks.workspaceCleanup).toHaveBeenCalledTimes(1);
     await expect(
       runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
@@ -1073,6 +1077,76 @@ describe('isolated-devnet portable packet producer', () => {
         structuredClone(receipt),
       )
     ).toThrow(/lacks process provenance/u);
+  });
+
+  it('preflights exact canonical consumer paths without consuming a proof', () => {
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-preflight-'));
+    temporaryRoots.push(root);
+    const paths = createConsumerPaths(root);
+
+    expect(
+      preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+        ...paths,
+        offline: true,
+      }),
+    ).toEqual({ ...paths, offline: true });
+    expect(() =>
+      preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+        ...paths,
+        cargoExecutablePath: 'relative/cargo',
+        offline: true,
+      })
+    ).toThrow(/Cargo executable must be an existing regular file/u);
+    expect(() =>
+      preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+        ...paths,
+        frontierSourceDirectory:
+          `${paths.frontierSourceDirectory}${sep}..${sep}${basename(paths.frontierSourceDirectory)}`,
+        offline: true,
+      })
+    ).toThrow(/path must be canonical and non-symlinked/u);
+    const linkedRoot = join(root, 'linked-root');
+    symlinkSync(
+      root,
+      linkedRoot,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    expect(() =>
+      preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+        ...paths,
+        frontierSourceDirectory: join(
+          linkedRoot,
+          basename(paths.frontierSourceDirectory),
+        ),
+        offline: true,
+      })
+    ).toThrow(/path must be canonical and non-symlinked/u);
+    expect(mocks.runProcess).not.toHaveBeenCalled();
+  });
+
+  it('rejects an out-of-envelope consumer timeout before process execution', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-timeout-'));
+    temporaryRoots.push(root);
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
+        Object.freeze({
+          proofReceipt: packetProof,
+          ...createConsumerPaths(root),
+          offline: true,
+        }),
+        performance.now() + 31 * 60_000,
+      ),
+    ).rejects.toThrow(/deadline must be within/u);
+    expect(mocks.runProcess).not.toHaveBeenCalled();
   });
 
   it('rejects concurrent consumption of one packet proof capability', async () => {

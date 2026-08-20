@@ -65,10 +65,34 @@ import {
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
 } from '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
   type ProduceSubstrateFederatedIsolatedDevnetPacketV1Input,
+  type SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
+  type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
   type SubstrateFederatedIsolatedDevnetPacketSessionV1,
+  type SubstrateFederatedIsolatedDevnetPacketV2,
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
+import {
+  collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
+  type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
+} from '../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance,
+  preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
+  runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
+  type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2,
+  type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2,
+} from '../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
+import {
+  buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+} from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+} from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import {
   assertSubstrateFederatedRewardInputDiscoveryV2Provenance,
   discoverSubstrateFederatedRewardInputsV2,
@@ -160,6 +184,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_RO
   'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-execution-root.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-execution-root.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-mint-proof-campaign-root.v1' as const;
 
 const ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1';
@@ -171,6 +197,8 @@ const PEG_IN_SOURCE_LOCK_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1';
 const PEG_IN_COMMITTED_VAULT_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1';
+const PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1';
 const STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_V1';
 const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
@@ -181,6 +209,8 @@ const PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_V1';
 const PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_V1';
+const PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_V1';
 const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1';
 const FEDERATION_EPOCH = '1';
@@ -332,6 +362,35 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_E
     PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
   );
 
+const PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST = Object.freeze({
+  schema:
+    'e2s.substrate-federated-isolated-devnet-peg-in-mint-proof-campaign-static-execution.v1',
+  version: 1 as const,
+  committedVaultCompatibilityManifestDigestHex:
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  packetSessionReplacement: Object.freeze({
+    compatibilityOperation:
+      'createSubstrateFederatedIsolatedDevnetPacketSessionV1',
+    campaignOperation:
+      'createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2',
+    packetCompatibilityPreserved: true as const,
+    sourceAttestationRetainedUntilProofConsumption: true as const,
+  }),
+  additionalOperations: Object.freeze([
+    'buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1',
+    'collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1',
+    'packetSession.produceMintSourceProof',
+    'runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2',
+  ]),
+  exposedCapabilities: Object.freeze([]),
+});
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1 =
+  sha256CanonicalJson(
+    PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST,
+    PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
+  );
+
 export interface RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
   readonly build:
     Readonly<BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input>;
@@ -345,6 +404,12 @@ extends RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
     readonly amountNanoErg: string;
     readonly recipientAddressHex: string;
   }>;
+}
+
+export interface RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input
+extends RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input {
+  readonly frontierMintProofConsumer:
+    SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2;
 }
 
 export interface SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt {
@@ -729,6 +794,74 @@ export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRoo
 export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1 {
   readonly receipt: Readonly<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1Receipt
+  >;
+}
+
+interface SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1 {
+  readonly draft:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
+  readonly evidenceReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
+  readonly packetProof:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
+  readonly consumerReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1_SCHEMA;
+  readonly version: 1;
+  readonly status:
+    'committed_reserve_proof_consumed_by_frontier_lab';
+  readonly staticExecutionManifestDigestHex: string;
+  readonly build:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
+  readonly process:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  readonly setup:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['setup'];
+  readonly pegIn:
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1Receipt['pegIn'];
+  readonly mintProof:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>;
+  readonly checks: Readonly<{
+    readonly committedReserveAndProofConsumedInOneTargetLifetime: true;
+    readonly compatibilityPacketReplacedByBoundContinuationV2: true;
+    readonly exactCommittedReserveBoundToMintStatement: true;
+    readonly exactCollectedEvidenceBoundToPacketProof: true;
+    readonly exactPacketProofConsumedByFrontier: true;
+    readonly everyEphemeralCapabilityDisposedBeforeReturn: true;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localSyntheticCompatibilityOnly: true;
+    readonly localSetupAndValuePathBroadcastExecuted: true;
+    readonly sourceLockConsumptionEstablished: true;
+    readonly reserveLineageEstablished: true;
+    readonly depositCommitmentStateEstablished: true;
+    readonly sourceEvidenceCollectionProvenanceEstablished: true;
+    readonly frontierTestClientReservationAndMintExecuted: true;
+    readonly externalTargetNodeAcceptanceEstablished: false;
+    readonly sourceCanonicalityIndependentlyVerified: false;
+    readonly ergoPowAuthenticated: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+    readonly processLossRecoveryEstablished: false;
+    readonly profileActivated: false;
+    readonly mintAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1 {
+  readonly receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Receipt
   >;
 }
 
@@ -1154,11 +1287,120 @@ export async function runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExec
   return Object.freeze({ receipt });
 }
 
+/**
+ * Runs the complete local peg-in evidence path in one owned process lifetime.
+ * The final consumer is an in-memory Frontier TestClient; no runtime profile,
+ * external mint authority, or reusable signing/submission capability escapes.
+ */
+export async function runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1(
+  input:
+    Readonly<RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1>> {
+  const pegInPlan = normalizePegInCandidatePlan(input.pegIn);
+  const consumerPlan = normalizeFrontierMintProofConsumerPlan(
+    input.frontierMintProofConsumer,
+  );
+  const { buildReceipt, managed } = await runManagedCampaign(
+    input,
+    pegInPlan,
+    'consume-mint-proof',
+    consumerPlan,
+  );
+  const pegIn = managed.value.pegIn;
+  const mintProof = managed.value.mintProof;
+  if (
+    pegIn === undefined
+    || pegIn.sourceLockCheck === undefined
+    || pegIn.sourceLockExecution === undefined
+    || pegIn.committedVaultCheck === undefined
+    || pegIn.committedVaultExecution === undefined
+    || mintProof === undefined
+  ) {
+    throw new Error('isolated devnet peg-in mint-proof campaign was incomplete');
+  }
+  if (
+    mintProof.consumerReceipt.packetProof !== mintProof.packetProof
+    || mintProof.consumerReceipt.packetProofReceiptDigestHex
+      !== mintProof.packetProof.receiptDigestHex
+    || mintProof.consumerReceipt.sourceProofReceiptDigestHex
+      !== mintProof.packetProof.sourceProof.receiptDigestHex
+    || mintProof.consumerReceipt.sourceEvidenceReceiptDigestHex
+      !== mintProof.evidenceReceipt.receiptDigestHex
+    || mintProof.packetProof.sourceProof.sourceEvidenceReceiptDigestHex
+      !== mintProof.evidenceReceipt.receiptDigestHex
+    || mintProof.packetProof.sourceProof.mintReservationDraftDigestHex
+      !== mintProof.draft.draftDigestHex
+    || mintProof.consumerReceipt.statementIdHex
+      !== mintProof.draft.statementIdHex
+    || mintProof.consumerReceipt.mintIdentityHex
+      !== mintProof.draft.reservationKeyHex
+  ) {
+    throw new Error('isolated devnet peg-in mint-proof campaign binding changed');
+  }
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1_SCHEMA,
+    version: 1 as const,
+    status: 'committed_reserve_proof_consumed_by_frontier_lab' as const,
+    staticExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    build: buildReceipt,
+    process: managed.receipt,
+    setup: {
+      lifecycle: managed.value.lifecycle,
+      transactions: managed.value.transactions,
+    },
+    pegIn: pegIn as SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Receipt['pegIn'],
+    mintProof,
+    checks: {
+      committedReserveAndProofConsumedInOneTargetLifetime: true as const,
+      compatibilityPacketReplacedByBoundContinuationV2: true as const,
+      exactCommittedReserveBoundToMintStatement: true as const,
+      exactCollectedEvidenceBoundToPacketProof: true as const,
+      exactPacketProofConsumedByFrontier: true as const,
+      everyEphemeralCapabilityDisposedBeforeReturn: true as const,
+      returnedValueContainsCapabilities: false as const,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true as const,
+      localSetupAndValuePathBroadcastExecuted: true as const,
+      sourceLockConsumptionEstablished: true as const,
+      reserveLineageEstablished: true as const,
+      depositCommitmentStateEstablished: true as const,
+      sourceEvidenceCollectionProvenanceEstablished: true as const,
+      frontierTestClientReservationAndMintExecuted: true as const,
+      externalTargetNodeAcceptanceEstablished: false as const,
+      sourceCanonicalityIndependentlyVerified: false as const,
+      ergoPowAuthenticated: false as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+      processLossRecoveryEstablished: false as const,
+      profileActivated: false as const,
+      mintAuthorized: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+  };
+  const receipt = finalizeReceipt(
+    body,
+    PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN,
+  );
+  return Object.freeze({ receipt });
+}
+
 type PegInActionV1 =
   | 'candidate'
   | 'check-source-lock'
   | 'execute-source-lock'
-  | 'execute-committed-vault';
+  | 'execute-committed-vault'
+  | 'consume-mint-proof';
+
+type SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2 =
+  | Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1>
+  | Readonly<SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2>;
 
 interface ManagedCampaignExecutionV1 {
   readonly buildReceipt:
@@ -1175,7 +1417,18 @@ async function runManagedCampaign(
     Readonly<RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input>,
   pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
   pegInAction: PegInActionV1 = 'candidate',
+  frontierMintProofConsumer:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>
+    | undefined = undefined,
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
+  if (
+    (pegInAction === 'consume-mint-proof')
+      !== (frontierMintProofConsumer !== undefined)
+  ) {
+    throw new Error(
+      'isolated devnet Frontier mint-proof consumer must match the campaign action',
+    );
+  }
   const buildInput = input.build;
   const lifecycleInput = input.lifecycle;
   const built = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
@@ -1186,7 +1439,7 @@ async function runManagedCampaign(
   let setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
   let packetSession:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1> | undefined;
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2 | undefined;
   let nodeSession:
     Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1>
     | undefined;
@@ -1201,9 +1454,13 @@ async function runManagedCampaign(
       claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(
         setupSession,
       );
-    packetSession = createSubstrateFederatedIsolatedDevnetPacketSessionV1(
-      setupSession.signer,
-    );
+    packetSession = pegInAction === 'consume-mint-proof'
+      ? createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2(
+        setupSession.signer,
+      )
+      : createSubstrateFederatedIsolatedDevnetPacketSessionV1(
+        setupSession.signer,
+      );
     assertPacketErgoSignerMatchesSetup(packetSession, setupSession.signer);
     const profilePins = deriveExpectedProfilePins(packetSession);
     nodeSession = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
@@ -1230,6 +1487,7 @@ async function runManagedCampaign(
         journalRoots,
         pegInPlan,
         pegInAction,
+        frontierMintProofConsumer,
       ),
     );
     assertCapabilityFreePlainData(managed, 'isolated devnet managed result');
@@ -1293,6 +1551,8 @@ interface ExecutionActionResult {
     SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'];
   readonly pegIn?:
     SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'];
+  readonly mintProof?:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>;
 }
 
 const MANAGED_PEG_IN_SOURCE_LOCK_MATERIAL = new WeakMap<
@@ -1310,14 +1570,25 @@ async function executeManagedSetupAction(
   setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
   packetSession:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1>,
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2,
   profilePins:
     Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input['expectedProfilePins']>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   journalRoots: Set<string>,
   pegInPlan: Readonly<PegInCandidatePlanV1> | undefined,
   pegInAction: PegInActionV1,
+  frontierMintProofConsumer:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>
+    | undefined,
 ): Promise<Readonly<ExecutionActionResult>> {
+  if (
+    (pegInAction === 'consume-mint-proof')
+      !== (frontierMintProofConsumer !== undefined)
+  ) {
+    throw new Error(
+      'isolated devnet Frontier mint-proof consumer must match the managed action',
+    );
+  }
   const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
   const sourceHistory =
     await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
@@ -1448,6 +1719,9 @@ async function executeManagedSetupAction(
     let pegIn:
       SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']
       | undefined;
+    let mintProof:
+      Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>
+      | undefined;
     if (pegInPlan !== undefined) {
       pegIn = await buildManagedPegInCandidate(
         pegInPlan,
@@ -1464,6 +1738,7 @@ async function executeManagedSetupAction(
       } else if (
         pegInAction === 'execute-source-lock'
         || pegInAction === 'execute-committed-vault'
+        || pegInAction === 'consume-mint-proof'
       ) {
         pegIn = await executeManagedPegInSourceLock(
           pegIn,
@@ -1474,7 +1749,10 @@ async function executeManagedSetupAction(
           observer,
           completionDeadline,
         );
-        if (pegInAction === 'execute-committed-vault') {
+        if (
+          pegInAction === 'execute-committed-vault'
+          || pegInAction === 'consume-mint-proof'
+        ) {
           pegIn = await executeManagedPegInCommittedVault(
             pegIn,
             batch,
@@ -1482,6 +1760,26 @@ async function executeManagedSetupAction(
             setupSession,
             state,
             observer,
+            completionDeadline,
+          );
+        }
+        if (pegInAction === 'consume-mint-proof') {
+          if (
+            frontierMintProofConsumer === undefined
+            || !('produceMintSourceProof' in packetSession)
+          ) {
+            throw new Error(
+              'isolated devnet mint-proof campaign requires its V2 continuation and consumer',
+            );
+          }
+          assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+          mintProof = await consumeManagedPegInMintProof(
+            packetSession,
+            packet,
+            pegIn,
+            batch,
+            target,
+            frontierMintProofConsumer,
             completionDeadline,
           );
         }
@@ -1517,6 +1815,7 @@ async function executeManagedSetupAction(
       },
       transactions: finalTransactions,
       ...(pegIn === undefined ? {} : { pegIn }),
+      ...(mintProof === undefined ? {} : { mintProof }),
     });
   } catch (error) {
     actionFailure = error;
@@ -1678,7 +1977,10 @@ async function buildManagedPegInCandidate(
       sourceFundingBoxIdHex: sourceFundingInput.boxId,
       unsignedTransaction: packet.transactions.sourceLockCreation,
     };
-    sourceLockCheck = pegInAction === 'execute-committed-vault'
+    sourceLockCheck = (
+      pegInAction === 'execute-committed-vault'
+      || pegInAction === 'consume-mint-proof'
+    )
       ? await setupSession.checkPegInSourceLockRetainingSigner(
         sourceLockCheckInput,
         target,
@@ -2209,6 +2511,109 @@ async function executeManagedPegInCommittedVault(
   });
 }
 
+async function consumeManagedPegInMintProof(
+  packetSession:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2>,
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+  pegIn:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'],
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  frontierMintProofConsumer:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>,
+  completionDeadline: number,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>> {
+  const committedVaultObservation =
+    pegIn.committedVaultExecution?.outputObservation;
+  if (committedVaultObservation === undefined) {
+    throw new Error(
+      'isolated devnet mint-proof campaign requires a confirmed committed reserve',
+    );
+  }
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  const draft =
+    buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+      batch,
+      target,
+      candidate: pegIn.candidate,
+      committedVaultObservation,
+    });
+  const evidenceReceipt =
+    collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1({
+      batch,
+      target,
+      candidate: pegIn.candidate,
+      committedVaultObservation,
+      draft,
+    });
+  const issuedAtNativeHeight =
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2;
+  const packetProof = packetSession.produceMintSourceProof(packet, {
+    draft,
+    evidenceReceipt,
+    issuedAtNativeHeight,
+    expiresAtNativeHeight:
+      issuedAtNativeHeight
+      + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+  });
+  assertManagedActionDeadline(
+    completionDeadline,
+    'Frontier mint-proof consumer',
+  );
+  const consumerReceipt =
+    await runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
+      {
+        ...frontierMintProofConsumer,
+        proofReceipt: packetProof,
+      },
+      completionDeadline,
+    );
+  assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance(
+    consumerReceipt,
+  );
+  if (
+    packetProof.packetReceiptDigestHex !== packet.receipt.receiptDigestHex
+    || packetProof.targetDescriptorDigestHex
+      !== packet.receipt.targetDescriptorDigestHex
+    || packetProof.sourceProofReceiptDigestHex
+      !== packetProof.sourceProof.receiptDigestHex
+    || packetProof.sourceProof.sourceEvidenceReceiptDigestHex
+      !== evidenceReceipt.receiptDigestHex
+    || packetProof.sourceProof.mintReservationDraftDigestHex
+      !== draft.draftDigestHex
+    || packetProof.sourceProof.mintReservationStatementIdHex
+      !== draft.statementIdHex
+    || packetProof.sourceProof.mintIdentityHex !== draft.reservationKeyHex
+    || consumerReceipt.packetProof !== packetProof
+    || consumerReceipt.packetProofReceiptDigestHex
+      !== packetProof.receiptDigestHex
+    || consumerReceipt.sourceProofReceiptDigestHex
+      !== packetProof.sourceProof.receiptDigestHex
+    || consumerReceipt.sourceEvidenceReceiptDigestHex
+      !== evidenceReceipt.receiptDigestHex
+    || consumerReceipt.targetDescriptorDigestHex
+      !== packet.receipt.targetDescriptorDigestHex
+    || consumerReceipt.statementIdHex !== draft.statementIdHex
+    || consumerReceipt.mintIdentityHex !== draft.reservationKeyHex
+  ) {
+    throw new Error(
+      'isolated devnet mint-proof producer-to-consumer binding changed',
+    );
+  }
+  const material = {
+    draft,
+    evidenceReceipt,
+    packetProof,
+    consumerReceipt,
+  };
+  assertCapabilityFreePlainData(
+    material,
+    'isolated devnet peg-in mint-proof campaign material',
+  );
+  return deepFreeze(material);
+}
+
 function assertSourceLockOperationalAdmission(
   admission: Parameters<
     Parameters<typeof runErgoOperationalTransaction>[1]['sign']
@@ -2664,7 +3069,7 @@ function assertCanonicalBatch(
 
 function deriveExpectedProfilePins(
   packetSession:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1>,
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2,
 ): Readonly<
   ProduceSubstrateFederatedIsolatedDevnetPacketV1Input['expectedProfilePins']
 > {
@@ -2688,7 +3093,7 @@ function deriveExpectedProfilePins(
 
 function assertPacketErgoSignerMatchesSetup(
   packetSession:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1>,
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2,
   setupSigner:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
 ): void {
@@ -2793,6 +3198,19 @@ function normalizePegInCandidatePlan(
     );
   }
   return Object.freeze({ amountNanoErg, recipientAddressHex });
+}
+
+function normalizeFrontierMintProofConsumerPlan(
+  input:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>,
+): Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2> {
+  assertCapabilityFreePlainData(
+    input,
+    'isolated devnet Frontier mint-proof consumer plan',
+  );
+  return preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
+    input,
+  );
 }
 
 function finalizeReceipt<T extends object>(

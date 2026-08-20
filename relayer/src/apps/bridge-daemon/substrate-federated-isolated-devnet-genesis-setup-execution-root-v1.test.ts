@@ -20,6 +20,13 @@ const mocked = vi.hoisted(() => ({
   setup: vi.fn(),
   claim: vi.fn(),
   packet: vi.fn(),
+  packetContinuation: vi.fn(),
+  packetV2Assert: vi.fn(),
+  mintDraftBuild: vi.fn(),
+  evidenceCollect: vi.fn(),
+  frontierConsumerPreflight: vi.fn(),
+  frontierConsumer: vi.fn(),
+  frontierConsumerAssert: vi.fn(),
   sourceHistory: vi.fn(),
   rewardDiscovery: vi.fn(),
   rewardDiscoveryAssert: vi.fn(),
@@ -67,7 +74,27 @@ vi.mock('../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', ()
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2: mocked.setup,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-packet-producer-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance:
+    mocked.packetV2Assert,
+  createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2:
+    mocked.packetContinuation,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1: mocked.packet,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', () => ({
+  buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1:
+    mocked.mintDraftBuild,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', () => ({
+  collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1:
+    mocked.evidenceCollect,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance:
+    mocked.frontierConsumerAssert,
+  preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2:
+    mocked.frontierConsumerPreflight,
+  runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2:
+    mocked.frontierConsumer,
 }));
 vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => ({
   collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocked.sourceHistory,
@@ -178,11 +205,13 @@ import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -195,6 +224,10 @@ import {
 import type {
   SubstrateFederatedLocalDevnetGenesisConfirmation,
 } from '../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+} from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
 
@@ -213,6 +246,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ReturnType<typeof validPegInFundingObservation>;
   let preTransportFundingObservation:
     ReturnType<typeof validPegInFundingObservation>;
+  let packetV2: ReturnType<typeof validPacketV2>;
+  let mintDraft: ReturnType<typeof validMintDraft>;
+  let evidenceReceipt: ReturnType<typeof validEvidenceReceipt>;
+  let packetProof: ReturnType<typeof validPacketProof>;
+  let consumerReceipt: ReturnType<typeof validConsumerReceipt>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -239,6 +277,16 @@ describe('isolated devnet genesis setup execution root V1', () => {
     preTransportFundingObservation.observedAt = '2026-08-18T09:03:00.000Z';
     preTransportFundingObservation.target.tipHeight = 133;
     preTransportFundingObservation.target.tipHeaderIdHex = digest('1');
+    packetV2 = validPacketV2();
+    mintDraft = validMintDraft();
+    evidenceReceipt = validEvidenceReceipt(mintDraft);
+    packetProof = validPacketProof(packetV2, mintDraft, evidenceReceipt);
+    consumerReceipt = validConsumerReceipt(
+      packetV2,
+      mintDraft,
+      evidenceReceipt,
+      packetProof,
+    );
 
     mocked.build.mockImplementation(async () => {
       order.push('build');
@@ -275,6 +323,74 @@ describe('isolated devnet genesis setup execution root V1', () => {
         };
       }),
     }));
+    mocked.packetContinuation.mockImplementation(() => ({
+      signer: packetSigner(),
+      dispose: vi.fn(() => order.push('dispose:packet-v2')),
+      produce: vi.fn(async () => {
+        order.push('packet-v2:produce');
+        return packetV2;
+      }),
+      produceMintSourceProof: vi.fn((packet, input) => {
+        order.push('peg-in:mint-proof:produce');
+        if (
+          packet !== packetV2
+          || input.draft !== mintDraft
+          || input.evidenceReceipt !== evidenceReceipt
+        ) {
+          throw new Error('mint-proof continuation input binding changed');
+        }
+        return packetProof;
+      }),
+    }));
+    mocked.packetV2Assert.mockImplementation(value => {
+      order.push('packet-v2:assert');
+      if (value !== packetV2) {
+        throw new Error('packet V2 provenance changed');
+      }
+    });
+    mocked.mintDraftBuild.mockImplementation(input => {
+      order.push('peg-in:mint-proof:draft');
+      if (
+        input.batch !== currentBatch
+        || input.candidate.depositPacket === undefined
+      ) {
+        throw new Error('mint draft input binding changed');
+      }
+      return mintDraft;
+    });
+    mocked.evidenceCollect.mockImplementation(input => {
+      order.push('peg-in:mint-proof:evidence');
+      if (input.draft !== mintDraft) {
+        throw new Error('committed-reserve evidence draft binding changed');
+      }
+      return evidenceReceipt;
+    });
+    mocked.frontierConsumerPreflight.mockImplementation(input => {
+      order.push('peg-in:mint-proof:consumer:preflight');
+      return Object.freeze({ ...input });
+    });
+    mocked.frontierConsumer.mockImplementation(async (
+      input,
+      completionDeadline,
+    ) => {
+      order.push('peg-in:mint-proof:consumer');
+      if (
+        input.proofReceipt !== packetProof
+        || input.offline !== true
+        || !Number.isFinite(completionDeadline)
+        || completionDeadline <= performance.now()
+        || completionDeadline - performance.now() > 30 * 60_000
+      ) {
+        throw new Error('Frontier mint-proof consumer input binding changed');
+      }
+      return consumerReceipt;
+    });
+    mocked.frontierConsumerAssert.mockImplementation(value => {
+      order.push('peg-in:mint-proof:consumer:assert');
+      if (value !== consumerReceipt) {
+        throw new Error('Frontier mint-proof consumer provenance changed');
+      }
+    });
     mocked.process.mockReturnValue(processSession);
     mocked.sourceHistory.mockImplementation(async () => {
       order.push('source:history');
@@ -1028,6 +1144,327 @@ describe('isolated devnet genesis setup execution root V1', () => {
       /(?:signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
     );
   });
+
+  it('consumes one exact committed-reserve proof in Frontier before tearing down the campaign', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1(
+        pegInMintProofRootInput(),
+      );
+
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(mocked.packetContinuation).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('peg-in:mint-proof:consumer:preflight')).toBeLessThan(
+      order.indexOf('build'),
+    );
+    expect(mocked.pegInSourceLockCheck).not.toHaveBeenCalled();
+    expect(mocked.pegInSourceLockRetainingCheck).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('peg-in:committed-vault:outputs')).toBeLessThan(
+      order.indexOf('peg-in:mint-proof:draft'),
+    );
+    expect(order.indexOf('peg-in:mint-proof:draft')).toBeLessThan(
+      order.indexOf('peg-in:mint-proof:evidence'),
+    );
+    expect(order.indexOf('peg-in:mint-proof:evidence')).toBeLessThan(
+      order.indexOf('peg-in:mint-proof:produce'),
+    );
+    expect(order.indexOf('peg-in:mint-proof:produce')).toBeLessThan(
+      order.indexOf('peg-in:mint-proof:consumer'),
+    );
+    expect(order.indexOf('peg-in:mint-proof:consumer:assert')).toBeLessThan(
+      order.indexOf('execution:leave'),
+    );
+    expect(order.indexOf('execution:leave')).toBeLessThan(
+      order.indexOf('dispose:packet-v2'),
+    );
+    expect(mocked.mintDraftBuild).toHaveBeenCalledWith({
+      batch: currentBatch,
+      target: executionTarget(),
+      candidate: expect.objectContaining({ depositPacket: expect.any(Object) }),
+      committedVaultObservation: expect.objectContaining({
+        confirmationHeight: 140,
+      }),
+    });
+    expect(mocked.evidenceCollect).toHaveBeenCalledWith({
+      batch: currentBatch,
+      target: executionTarget(),
+      candidate: expect.objectContaining({ depositPacket: expect.any(Object) }),
+      committedVaultObservation: expect.objectContaining({
+        confirmationHeight: 140,
+      }),
+      draft: mintDraft,
+    });
+    const continuation = mocked.packetContinuation.mock.results[0]!.value;
+    expect(continuation.produceMintSourceProof).toHaveBeenCalledWith(
+      packetV2,
+      {
+        draft: mintDraft,
+        evidenceReceipt,
+        issuedAtNativeHeight:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+        expiresAtNativeHeight:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2
+          + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+      },
+    );
+    expect(mocked.frontierConsumer).toHaveBeenCalledWith(
+      {
+        frontierSourceDirectory: 'reviewed/frontier',
+        cargoExecutablePath: 'reviewed/cargo.exe',
+        rustcExecutablePath: 'reviewed/rustc.exe',
+        gitExecutablePath: 'reviewed/git.exe',
+        offline: true,
+        proofReceipt: packetProof,
+      },
+      expect.any(Number),
+    );
+    expect(result.receipt).toMatchObject({
+      status: 'committed_reserve_proof_consumed_by_frontier_lab',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+      mintProof: {
+        draft: mintDraft,
+        evidenceReceipt,
+        packetProof,
+        consumerReceipt,
+      },
+      checks: {
+        committedReserveAndProofConsumedInOneTargetLifetime: true,
+        compatibilityPacketReplacedByBoundContinuationV2: true,
+        exactCommittedReserveBoundToMintStatement: true,
+        exactCollectedEvidenceBoundToPacketProof: true,
+        exactPacketProofConsumedByFrontier: true,
+        everyEphemeralCapabilityDisposedBeforeReturn: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        sourceLockConsumptionEstablished: true,
+        reserveLineageEstablished: true,
+        depositCommitmentStateEstablished: true,
+        sourceEvidenceCollectionProvenanceEstablished: true,
+        frontierTestClientReservationAndMintExecuted: true,
+        externalTargetNodeAcceptanceEstablished: false,
+        sourceCanonicalityIndependentlyVerified: false,
+        ergoPowAuthenticated: false,
+        profileActivated: false,
+        mintAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it('rejects an invalid Frontier consumer plan before building or starting the target', async () => {
+    mocked.frontierConsumerPreflight.mockImplementationOnce(() => {
+      order.push('peg-in:mint-proof:consumer:preflight:reject');
+      throw new Error('synthetic invalid Frontier consumer path');
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1(
+        pegInMintProofRootInput(),
+      ),
+    ).rejects.toThrow('synthetic invalid Frontier consumer path');
+
+    expect(order).toEqual(['peg-in:mint-proof:consumer:preflight:reject']);
+    expect(mocked.build).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('tears down every owned capability when the Frontier proof consumer rejects', async () => {
+    mocked.frontierConsumer.mockImplementationOnce(async () => {
+      order.push('peg-in:mint-proof:consumer');
+      throw new Error('synthetic Frontier consumer rejection');
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1(
+        pegInMintProofRootInput(),
+      ),
+    ).rejects.toThrow('synthetic Frontier consumer rejection');
+
+    expect(order).toContain('peg-in:mint-proof:produce');
+    expect(order).toContain('dispose:packet-v2');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
+    expect(mocked.stateClose).toHaveBeenCalledTimes(1);
+    expect(processSession.stop).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('peg-in:mint-proof:consumer')).toBeLessThan(
+      order.indexOf('dispose:packet-v2'),
+    );
+    expect(order.indexOf('dispose:packet-v2')).toBeLessThan(
+      order.indexOf('dispose:setup'),
+    );
+    expect(order.indexOf('dispose:setup')).toBeLessThan(
+      order.indexOf('process:stop'),
+    );
+  });
+
+  it.each([
+    ['packet receipt', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        packetReceiptDigestHex: digest('f'),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['target descriptor', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        targetDescriptorDigestHex: digest('f'),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['packet source-proof receipt', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        sourceProofReceiptDigestHex: digest('f'),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['source evidence', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        sourceProof: Object.freeze({
+          ...packetProof.sourceProof,
+          sourceEvidenceReceiptDigestHex: digest('f'),
+        }),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['mint draft', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        sourceProof: Object.freeze({
+          ...packetProof.sourceProof,
+          mintReservationDraftDigestHex: digest('f'),
+        }),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['statement identity', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        sourceProof: Object.freeze({
+          ...packetProof.sourceProof,
+          mintReservationStatementIdHex: digest('f'),
+        }),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['mint identity', () => {
+      packetProof = Object.freeze({
+        ...packetProof,
+        sourceProof: Object.freeze({
+          ...packetProof.sourceProof,
+          mintIdentityHex: digest('f'),
+        }),
+      }) as never;
+      consumerReceipt = validConsumerReceipt(
+        packetV2,
+        mintDraft,
+        evidenceReceipt,
+        packetProof,
+      );
+    }],
+    ['consumer proof object', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        packetProof: structuredClone(packetProof),
+      }) as never;
+    }],
+    ['consumer receipt binding', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        packetProofReceiptDigestHex: digest('f'),
+      }) as never;
+    }],
+    ['consumer source-proof receipt', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        sourceProofReceiptDigestHex: digest('f'),
+      }) as never;
+    }],
+    ['consumer source evidence', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        sourceEvidenceReceiptDigestHex: digest('f'),
+      }) as never;
+    }],
+    ['consumer target descriptor', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        targetDescriptorDigestHex: digest('f'),
+      }) as never;
+    }],
+    ['consumer statement identity', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        statementIdHex: digest('f'),
+      }) as never;
+    }],
+    ['consumer mint identity', () => {
+      consumerReceipt = Object.freeze({
+        ...consumerReceipt,
+        mintIdentityHex: digest('f'),
+      }) as never;
+    }],
+  ] as const)(
+    'rejects an isolated %s join mutation and tears down the campaign',
+    async (_label, mutate) => {
+      mutate();
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1(
+          pegInMintProofRootInput(),
+        ),
+      ).rejects.toThrow(/binding changed/u);
+
+      expect(mocked.frontierConsumer).toHaveBeenCalledTimes(1);
+      expect(mocked.stateClose).toHaveBeenCalledTimes(1);
+      expect(order).toContain('dispose:packet-v2');
+      expect(order).toContain('dispose:setup');
+      expect(order).toContain('process:stop');
+      expect(order.indexOf('peg-in:mint-proof:consumer')).toBeLessThan(
+        order.indexOf('dispose:packet-v2'),
+      );
+    },
+  );
 
   it('fits all eleven committed-vault confirmation windows inside the action envelope', async () => {
     let now = 0;
@@ -1791,6 +2228,133 @@ function pegInRootInput() {
       recipientAddressHex: 'b1'.repeat(20),
     },
   } as never;
+}
+
+function pegInMintProofRootInput() {
+  return {
+    ...(pegInRootInput() as unknown as Record<string, unknown>),
+    frontierMintProofConsumer: {
+      frontierSourceDirectory: 'reviewed/frontier',
+      cargoExecutablePath: 'reviewed/cargo.exe',
+      rustcExecutablePath: 'reviewed/rustc.exe',
+      gitExecutablePath: 'reviewed/git.exe',
+      offline: true,
+    },
+  } as never;
+}
+
+function validPacketV2() {
+  return {
+    receipt: {
+      schema: 'e2s.substrate-federated-isolated-devnet-packet-producer.v2',
+      version: 2,
+      receiptDigestHex: digest('2'),
+      targetDescriptorDigestHex: digest('3'),
+    },
+    portableReplayInput: { packet: 'portable-v2' },
+    replay: { reportDigestHex: digest('4') },
+  } as const;
+}
+
+function validMintDraft() {
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-mint-reservation-draft.v1',
+    version: 1,
+    status: 'canonical_statement_waiting_for_source_proof',
+    statement: { formatVersion: 4 },
+    statementHex: '0x01',
+    statementIdHex: digest('5'),
+    reservationKeyHex: digest('6'),
+    provenance: {
+      candidateDigestHex: digest('7'),
+      committedVaultObservationDigestHex: digest('8'),
+      familyCompilerBindingDigestHex: digest('9'),
+      exactSameProcessCandidateAndObservationBound: true,
+    },
+    boundary: {
+      exactCommittedReserveBound: true,
+      exactFinalityTargetBound: true,
+      canonicalV4StatementConstructed: true,
+      runtimeProfileBound: false,
+      canonicalSourceProofEvidenceCollected: false,
+      sourceProofRequestConstructed: false,
+      sourceAttestationEstablished: false,
+      runtimeReservationWritten: false,
+      mintExecuted: false,
+      signingAuthorized: false,
+      submissionAuthorized: false,
+      broadcastAuthorized: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    },
+    limitations: ['synthetic test draft'],
+    draftDigestHex: digest('a'),
+  } as const;
+}
+
+function validEvidenceReceipt(draft: ReturnType<typeof validMintDraft>) {
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-committed-reserve-evidence.v1',
+    version: 1,
+    status: 'canonical_committed_reserve_evidence_collected',
+    mintReservationDraftDigestHex: draft.draftDigestHex,
+    mintReservationStatementIdHex: draft.statementIdHex,
+    mintIdentityHex: draft.reservationKeyHex,
+    evidence: { sourceLockBoxCanonicalHex: '00' },
+    receiptDigestHex: digest('b'),
+  } as const;
+}
+
+function validPacketProof(
+  packet: ReturnType<typeof validPacketV2>,
+  draft: ReturnType<typeof validMintDraft>,
+  evidence: ReturnType<typeof validEvidenceReceipt>,
+) {
+  const sourceProof = {
+    receiptDigestHex: digest('c'),
+    sourceEvidenceReceiptDigestHex: evidence.receiptDigestHex,
+    targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+    mintReservationDraftDigestHex: draft.draftDigestHex,
+    mintReservationStatementIdHex: draft.statementIdHex,
+    mintIdentityHex: draft.reservationKeyHex,
+  } as const;
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-packet-mint-source-proof.v2',
+    version: 2,
+    status: 'packet_bound_collected_federated_source_proof_produced',
+    packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+    targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+    sourceProofReceiptDigestHex: sourceProof.receiptDigestHex,
+    sourceProof,
+    receiptDigestHex: digest('d'),
+  } as const;
+}
+
+function validConsumerReceipt(
+  packet: ReturnType<typeof validPacketV2>,
+  draft: ReturnType<typeof validMintDraft>,
+  evidence: ReturnType<typeof validEvidenceReceipt>,
+  proof: ReturnType<typeof validPacketProof>,
+) {
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-frontier-mint-proof-consumer.v2',
+    version: 2,
+    status: 'packet_bound_proof_consumed_by_frontier_lab',
+    packetProof: proof,
+    packetProofReceiptDigestHex: proof.receiptDigestHex,
+    sourceProofReceiptDigestHex: proof.sourceProof.receiptDigestHex,
+    sourceEvidenceReceiptDigestHex: evidence.receiptDigestHex,
+    targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+    statementIdHex: draft.statementIdHex,
+    mintIdentityHex: draft.reservationKeyHex,
+    receiptDigestHex: digest('e'),
+  } as const;
 }
 
 function validPegInFundingObservation() {

@@ -48,6 +48,8 @@ const RECEIPT_DIGEST_DOMAIN =
 const CARGO_TEST_NAME =
   'bridge_federated_lab_reservation_tests::federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling';
 const DYNAMIC_PROOF_MARKER = 'bridge-lab-dynamic-source-proof-sha256=';
+const MAX_CONSUMER_RUNTIME_MS = 30 * 60_000;
+const POST_CARGO_REVALIDATION_BUDGET_MS = 60_000;
 const EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256 =
   '7bc185ee858c49b7f0c430decee84a7dcc3aeba69f1d8906be8c97351f60b53a';
 const RECEIPTS = new WeakSet<object>();
@@ -63,6 +65,14 @@ export interface RunSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2I
   readonly gitExecutablePath: string;
   readonly offline: boolean;
 }
+
+export type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2 =
+  Readonly<
+    Omit<
+      RunSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2Input,
+      'proofReceipt'
+    >
+  >;
 
 export interface SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2 {
   readonly schema:
@@ -133,9 +143,13 @@ export async function runSubstrateFederatedIsolatedDevnetFrontierMintProofConsum
   input: Readonly<
     RunSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2Input
   >,
+  completionDeadline: number | undefined = undefined,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2
 >> {
+  const boundedCompletionDeadline = requireConsumerCompletionDeadline(
+    completionDeadline,
+  );
   const record = exactRecord(input, [
     'cargoExecutablePath',
     'frontierSourceDirectory',
@@ -150,13 +164,20 @@ export async function runSubstrateFederatedIsolatedDevnetFrontierMintProofConsum
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     proofReceipt,
   );
+  const plan = preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+    cargoExecutablePath: record.cargoExecutablePath as string,
+    frontierSourceDirectory: record.frontierSourceDirectory as string,
+    gitExecutablePath: record.gitExecutablePath as string,
+    offline: record.offline as boolean,
+    rustcExecutablePath: record.rustcExecutablePath as string,
+  });
+  assertConsumerDeadline(
+    boundedCompletionDeadline,
+    'consumer-plan preflight',
+  );
   const guardedInput = Object.freeze({
-    cargoExecutablePath: record.cargoExecutablePath,
-    frontierSourceDirectory: record.frontierSourceDirectory,
-    gitExecutablePath: record.gitExecutablePath,
-    offline: record.offline,
+    ...plan,
     proofReceipt,
-    rustcExecutablePath: record.rustcExecutablePath,
   }) as Readonly<
     RunSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2Input
   >;
@@ -171,10 +192,47 @@ export async function runSubstrateFederatedIsolatedDevnetFrontierMintProofConsum
     return await consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
       guardedInput,
       proofReceipt,
+      boundedCompletionDeadline,
     );
   } finally {
     CONSUMING_PACKET_PROOFS.delete(proofReceipt);
   }
+}
+
+export function preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
+  input: Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2
+  >,
+): Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2> {
+  const record = exactRecord(input, [
+    'cargoExecutablePath',
+    'frontierSourceDirectory',
+    'gitExecutablePath',
+    'offline',
+    'rustcExecutablePath',
+  ], 'Frontier packet-proof consumer plan');
+  if (record.offline !== true) {
+    throw new Error('Frontier packet-proof consumer requires offline Cargo');
+  }
+  return Object.freeze({
+    cargoExecutablePath: requireRegularFile(
+      record.cargoExecutablePath,
+      'Cargo executable',
+    ),
+    frontierSourceDirectory: requireDirectory(
+      record.frontierSourceDirectory,
+      'patched Frontier source',
+    ),
+    gitExecutablePath: requireRegularFile(
+      record.gitExecutablePath,
+      'Git executable',
+    ),
+    offline: true,
+    rustcExecutablePath: requireRegularFile(
+      record.rustcExecutablePath,
+      'Rust compiler executable',
+    ),
+  });
 }
 
 async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
@@ -184,6 +242,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
   guardedProofReceipt: Readonly<
     SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
   >,
+  completionDeadline: number,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2
 >> {
@@ -262,6 +321,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
     sourceLockBefore,
     `${RECEIPT_DIGEST_DOMAIN}_SOURCE_LOCK`,
   );
+  assertConsumerDeadline(completionDeadline, 'source and tool preflight');
 
   const runtimeProfile =
     decodePooledReserveMintReservationRuntimeProfileV4ScaleHex(
@@ -405,6 +465,9 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
       frontierSourceDirectory,
       cargoHomeDirectory,
     );
+    const cargoTimeoutMs = remainingConsumerCargoBudgetMs(
+      completionDeadline,
+    );
     const result = await runBoundedProcess({
       executablePath: cargoExecutablePath,
       args: cargoArguments,
@@ -417,7 +480,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
         frontierSourceDirectory,
         rustcExecutablePath,
       }),
-      timeoutMs: 30 * 60_000,
+      timeoutMs: cargoTimeoutMs,
       maxOutputBytes: 32 * 1024 * 1024,
       maxStdoutBytes: 16 * 1024 * 1024,
       maxStderrBytes: 16 * 1024 * 1024,
@@ -433,6 +496,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
   } finally {
     workspace.cleanup();
   }
+  assertConsumerDeadline(completionDeadline, 'Cargo cleanup');
   const toolchainAfter = inspectToolchain({
     bridgeRoot,
     cargoExecutablePath,
@@ -448,6 +512,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
   ) {
     throw new Error('Frontier toolchain changed during packet-proof consumption');
   }
+  assertConsumerDeadline(completionDeadline, 'toolchain revalidation');
   const sourceLockAfter = inspectSourceLock({
     bridgeRoot,
     frontierSourceDirectory,
@@ -462,6 +527,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
   ) {
     throw new Error('Frontier source lock changed during packet-proof consumption');
   }
+  assertConsumerDeadline(completionDeadline, 'source-lock revalidation');
   CONSUMED_PACKET_PROOFS.add(proofReceipt);
 
   const body = deepFreeze({
@@ -577,6 +643,51 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerR
   }
 }
 
+function requireConsumerCompletionDeadline(value: unknown): number {
+  const now = performance.now();
+  const deadline = value === undefined
+    ? now + MAX_CONSUMER_RUNTIME_MS
+    : value;
+  if (
+    typeof deadline !== 'number'
+    || !Number.isFinite(now)
+    || !Number.isFinite(deadline)
+    || deadline <= now
+    || deadline - now > MAX_CONSUMER_RUNTIME_MS
+  ) {
+    throw new Error(
+      `Frontier packet-proof consumer deadline must be within ${MAX_CONSUMER_RUNTIME_MS} milliseconds`,
+    );
+  }
+  return deadline;
+}
+
+function remainingConsumerCargoBudgetMs(completionDeadline: number): number {
+  const remainingMs = Math.floor(
+    completionDeadline
+    - performance.now()
+    - POST_CARGO_REVALIDATION_BUDGET_MS,
+  );
+  if (!Number.isSafeInteger(remainingMs) || remainingMs <= 0) {
+    throw new Error(
+      'Frontier packet-proof consumer lacks time for Cargo and post-process revalidation',
+    );
+  }
+  return remainingMs;
+}
+
+function assertConsumerDeadline(
+  completionDeadline: number,
+  stage: string,
+): void {
+  const now = performance.now();
+  if (!Number.isFinite(now) || now >= completionDeadline) {
+    throw new Error(
+      `Frontier packet-proof consumer exceeded its deadline at ${stage}`,
+    );
+  }
+}
+
 function requireDirectory(value: unknown, label: string): string {
   if (
     typeof value !== 'string'
@@ -586,6 +697,9 @@ function requireDirectory(value: unknown, label: string): string {
     throw new Error(`${label} must be an existing directory`);
   }
   const resolved = path.resolve(value);
+  if (pathInputIdentity(value) !== pathInputIdentity(resolved)) {
+    throw new Error(`${label} path must be canonical and non-symlinked`);
+  }
   if (!existsSync(resolved)) {
     throw new Error(`${label} must be an existing directory`);
   }
@@ -593,7 +707,11 @@ function requireDirectory(value: unknown, label: string): string {
   if (!observation.isDirectory() || observation.isSymbolicLink()) {
     throw new Error(`${label} must be an existing directory`);
   }
-  return realpathSync(resolved);
+  const canonical = realpathSync(resolved);
+  if (pathIdentity(canonical) !== pathIdentity(resolved)) {
+    throw new Error(`${label} path must be canonical and non-symlinked`);
+  }
+  return canonical;
 }
 
 function requireRegularFile(value: unknown, label: string): string {
@@ -605,6 +723,9 @@ function requireRegularFile(value: unknown, label: string): string {
     throw new Error(`${label} must be an existing regular file`);
   }
   const resolved = path.resolve(value);
+  if (pathInputIdentity(value) !== pathInputIdentity(resolved)) {
+    throw new Error(`${label} path must be canonical and non-symlinked`);
+  }
   if (!existsSync(resolved)) {
     throw new Error(`${label} must be an existing regular file`);
   }
@@ -612,7 +733,20 @@ function requireRegularFile(value: unknown, label: string): string {
   if (!observation.isFile() || observation.isSymbolicLink()) {
     throw new Error(`${label} must be an existing regular file`);
   }
-  return realpathSync(resolved);
+  const canonical = realpathSync(resolved);
+  if (pathIdentity(canonical) !== pathIdentity(resolved)) {
+    throw new Error(`${label} path must be canonical and non-symlinked`);
+  }
+  return canonical;
+}
+
+function pathInputIdentity(value: string): string {
+  return process.platform === 'win32' ? value.toLowerCase() : value;
+}
+
+function pathIdentity(value: string): string {
+  const normalized = path.resolve(value);
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
 function resolveBridgeRoot(): string {

@@ -63,6 +63,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-ergo-node-build-v1.ts',
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
       'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+      'substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts',
+      'substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.ts',
+      'substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts',
+      'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
       'substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts',
       'substrate-federated-isolated-devnet-reward-input-discovery-v1.ts',
       'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
@@ -149,9 +153,45 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-packet-producer-v1.ts',
         new Set([
+          'assertSubstrateFederatedIsolatedDevnetPacketV2Provenance',
+          'createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2',
           'createSubstrateFederatedIsolatedDevnetPacketSessionV1',
           'ProduceSubstrateFederatedIsolatedDevnetPacketV1Input',
+          'SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2',
+          'SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2',
           'SubstrateFederatedIsolatedDevnetPacketSessionV1',
+          'SubstrateFederatedIsolatedDevnetPacketV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts',
+        new Set([
+          'collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1',
+          'SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance',
+          'preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2',
+          'runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2',
+          'SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2',
+          'SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts',
+        new Set([
+          'buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1',
+          'SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+        new Set([
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2',
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2',
         ]),
       ],
       [
@@ -355,7 +395,25 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-packet-producer-v1.js',
-        new Set(['createSubstrateFederatedIsolatedDevnetPacketSessionV1']),
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetPacketV2Provenance',
+          'createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2',
+          'createSubstrateFederatedIsolatedDevnetPacketSessionV1',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js',
+        new Set([
+          'collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance',
+          'preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2',
+          'runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2',
+        ]),
       ],
       [
         '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js',
@@ -489,12 +547,15 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
     new Set([
       'RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input',
+      'RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input',
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1',
+      'SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
@@ -505,6 +566,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA',
@@ -512,6 +575,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
+      'runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
     ]),
