@@ -2,7 +2,45 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
+  failNextSignature: false,
+  launchStatements: new WeakSet<object>(),
 }));
+
+vi.mock('node:crypto', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return {
+    ...actual,
+    sign: vi.fn((...args: unknown[]) => {
+      if (mocks.failNextSignature) {
+        mocks.failNextSignature = false;
+        throw new Error('injected source-attestation signature failure');
+      }
+      return (actual.sign as (...values: unknown[]) => Buffer)(...args);
+    }),
+  };
+});
+
+vi.mock(
+  './substrate-federated-isolated-devnet-launch-v1.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-launch-v1.js')
+    >();
+    return {
+      ...actual,
+      assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance:
+        vi.fn((value: unknown) => {
+          if (
+            value === null
+            || typeof value !== 'object'
+            || !mocks.launchStatements.has(value)
+          ) {
+            throw new Error('launch statement lacks process provenance');
+          }
+        }),
+    };
+  },
+);
 
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js',
@@ -34,8 +72,13 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1Provenance,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
+  type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import {
+  deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1,
+} from './substrate-federated-isolated-devnet-launch-v1.js';
 
 const h32 = (byte: string): string => `0x${byte.repeat(32)}`;
 const h20 = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -79,6 +122,8 @@ let activePacket: object | undefined;
 
 beforeEach(() => {
   activePacket = undefined;
+  mocks.failNextSignature = false;
+  mocks.launchStatements = new WeakSet<object>();
   vi.clearAllMocks();
   mocks.assertCommittedVaultForCandidate.mockImplementation(
     (observation, batch, candidate, target) => {
@@ -99,6 +144,7 @@ beforeEach(() => {
 describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
   it('joins a real same-process draft, exact lineage, profile, and one-shot signatures', () => {
     const session = sessionV1();
+    signLaunch(session);
     const draft = draftV1(session);
     const input = proofInput(draft);
 
@@ -193,6 +239,7 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     const draftSession = sessionV1();
     const draft = draftV1(draftSession);
     const foreignDraftSession = sessionV1();
+    signLaunch(foreignDraftSession);
     expect(() => foreignDraftSession.produceMintSourceProof({
       ...proofInput(draft),
       draft: structuredClone(draft),
@@ -200,6 +247,7 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     foreignDraftSession.dispose();
 
     const wrongProfileSession = sessionV1();
+    signLaunch(wrongProfileSession);
     expect(() => wrongProfileSession.produceMintSourceProof(
       proofInput(draft),
     )).toThrow(/does not select the exact federated pooled-reserve proof profile/);
@@ -211,6 +259,7 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
       ['2000', '2065'],
     ] as const) {
       const windowSession = sessionV1();
+      signLaunch(windowSession);
       const windowDraft = draftV1(windowSession);
       expect(() => windowSession.produceMintSourceProof({
         ...proofInput(windowDraft),
@@ -221,6 +270,7 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     }
 
     const unsafeNumberSession = sessionV1();
+    signLaunch(unsafeNumberSession);
     const unsafeNumberDraft = draftV1(unsafeNumberSession);
     expect(() => unsafeNumberSession.produceMintSourceProof({
       ...proofInput(unsafeNumberDraft),
@@ -232,6 +282,7 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
 
   it('rejects a lineage substitution before signing', () => {
     const session = sessionV1();
+    signLaunch(session);
     const draft = draftV1(session);
     const input = proofInput(draft);
     const bytes = Buffer.from(
@@ -253,6 +304,7 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
 
   it('makes every signed result fail against mutated request evidence', () => {
     const session = sessionV1();
+    signLaunch(session);
     const draft = draftV1(session);
     const receipt = session.produceMintSourceProof(proofInput(draft));
     const mutatedRequest = {
@@ -283,6 +335,28 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     expect(() => session.produceMintSourceProof(proofInput(draft)))
       .toThrow(/disposed/);
   });
+
+  it('rejects mint source-proof production before launch attestation', () => {
+    const session = sessionV2();
+
+    expect(() => session.produceSettlementFamilyMintSourceProof({} as never)).toThrow(
+      /requires one completed launch attestation/u,
+    );
+    session.dispose();
+  });
+
+  it('disposes the signing capability when launch signing fails', () => {
+    const session = sessionV2();
+    mocks.failNextSignature = true;
+
+    expect(() => signLaunch(session)).toThrow(
+      /injected source-attestation signature failure/u,
+    );
+    expect(() => signLaunch(session)).toThrow(/disposed/u);
+    expect(() =>
+      session.produceSettlementFamilyMintSourceProof({} as never)
+    ).toThrow(/disposed/u);
+  });
 });
 
 function sessionV1() {
@@ -290,6 +364,43 @@ function sessionV1() {
     ergoAdmissionThreshold: 1,
     ergoAdmissionPublicKeysHex: [ERGO_ADMISSION_PUBLIC_KEY_HEX],
   });
+}
+
+function sessionV2() {
+  return createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+    ergoAdmissionThreshold: 1,
+    ergoAdmissionPublicKeysHex: [ERGO_ADMISSION_PUBLIC_KEY_HEX],
+  });
+}
+
+function signLaunch(
+  session: Readonly<
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >,
+): void {
+  const statementDigestHex = 'f1'.repeat(32);
+  const federation = Object.freeze({
+    sourceAttestationKeySetDigestHex:
+      session.binding.checkpointSourceAttestationKeySetDigestHex,
+    sourceAttestationThreshold: session.binding.sourceAttestationThreshold,
+    federationProfileIdHex: session.binding.checkpointFederationProfileIdHex,
+    sourceAttestationPublicKeysHex:
+      session.binding.sourceAttestationPublicKeysHex,
+  });
+  const statement = Object.freeze({
+    statementDigestHex,
+    attestationDigestHex:
+      deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
+        statementDigestHex,
+        sourceAttestationKeySetDigestHex:
+          federation.sourceAttestationKeySetDigestHex,
+        sourceAttestationThreshold: federation.sourceAttestationThreshold,
+      }),
+    target: Object.freeze({ federation }),
+  });
+  mocks.launchStatements.add(statement);
+  session.signLaunchStatement(statement as never);
 }
 
 function draftV1(
