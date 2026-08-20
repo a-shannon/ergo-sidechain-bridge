@@ -19,12 +19,12 @@
     "submoduleName": "ergo-sidechain-bridge/substrate-node",
     "commit": "75329a2df49e2cc7981485392c31160929d1bd48",
     "ref": "stable2412",
-    "cargoLockBlob": "8cba2caaaba8e568ecc860e0b335682dc44d877e",
+    "cargoLockBlob": "c9432f90358b47a2f1a26a17aa455a7f1e05cff6",
     "rustToolchainBlob": "ab41c50970600e50ee7bf33cd44fe538b2ca0771",
-    "nodeManifestBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee",
+    "nodeManifestBlob": "82dc5f4e72862643bcd3779f667340db2a82f4a7",
     "runtimeManifestBlob": "5e21a2017e4656113ec5cfc383ab4a2371652351",
     "patchPath": "sources/frontier/0001-bridge-runtime-commitment.patch",
-    "patchSha256": "fb9cec83cd8c7fe6252603b3f02735bddf54859ad7d0d460173372e88785fa28",
+    "patchSha256": "67ebcd1a82b70c29d19c7a9128bd5370bd395ee9b7aa9a5eabb66648c096bd00",
     "bridgeAtomicityFixtures": [
       {
         "artifactPath": "solidity/compiled/SERG.bin",
@@ -52,7 +52,7 @@
         "path": "Cargo.lock",
         "status": "modified",
         "baseBlob": "b786af92f464e4aa752034f74ca7b53e6a0b124f",
-        "patchedBlob": "8cba2caaaba8e568ecc860e0b335682dc44d877e"
+        "patchedBlob": "c9432f90358b47a2f1a26a17aa455a7f1e05cff6"
       },
       {
         "path": "Cargo.toml",
@@ -422,7 +422,13 @@
         "path": "template/node/Cargo.toml",
         "status": "modified",
         "baseBlob": "67505c6b54a852fb861d3eea3c52f6a85b21af7d",
-        "patchedBlob": "e0ff835ed5d91ad09c9c155033beb376745010ee"
+        "patchedBlob": "82dc5f4e72862643bcd3779f667340db2a82f4a7"
+      },
+      {
+        "path": "template/node/src/benchmarking.rs",
+        "status": "modified",
+        "baseBlob": "2dafe1247b3dd2ffa14270e78047fcc82ffaa7a6",
+        "patchedBlob": "5039c705ae9fe50e52d380179749daf89efd52f5"
       },
       {
         "path": "template/node/src/bridge_atomicity_tests.rs",
@@ -433,25 +439,31 @@
         "path": "template/node/src/chain_spec.rs",
         "status": "modified",
         "baseBlob": "614161fa35457d3f2dec5c00ea0c58a00caa8366",
-        "patchedBlob": "01bb2232820b6fa6ded4b5eb08e7747252d93c22"
+        "patchedBlob": "652ca03312de723b2314e4935075314a79995d92"
+      },
+      {
+        "path": "template/node/src/command.rs",
+        "status": "modified",
+        "baseBlob": "2217ea21af4f51f58ba7bae3758409eb267def08",
+        "patchedBlob": "739e6ff6738a4b89ef65c3cc723be2c4d45824f8"
       },
       {
         "path": "template/node/src/main.rs",
         "status": "modified",
         "baseBlob": "0bb5dad17082a3f3a96771a7d22f0638480b4c46",
-        "patchedBlob": "11b3575f3228aa7eacee75ccfe4073e44549984e"
+        "patchedBlob": "9bdb9fe2c199b8a18e50fe21339b84a4782350cd"
       },
       {
         "path": "template/node/src/rpc/mod.rs",
         "status": "modified",
         "baseBlob": "7202d997a813fea79e176adb93553a3da949446b",
-        "patchedBlob": "da043a24a679dc2b50058970350f6bc1db72b3e8"
+        "patchedBlob": "e9074c48acb5a925c1759a187487604bc7338003"
       },
       {
         "path": "template/node/src/service.rs",
         "status": "modified",
         "baseBlob": "ef293a1293491cf1cebbc612c23a0c9c14c9eec5",
-        "patchedBlob": "18da1dda08d68879bf30ff26a6c5c2a2fe474221"
+        "patchedBlob": "afe0ef7111859d26f30e72667c4014316d1a408e"
       },
       {
         "path": "template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin",
