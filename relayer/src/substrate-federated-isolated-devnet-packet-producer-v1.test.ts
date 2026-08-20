@@ -124,6 +124,28 @@ vi.mock(
 );
 
 vi.mock(
+  './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js')
+    >();
+    return {
+      ...actual,
+      consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1:
+        vi.fn((receipt: unknown, draft: any) => {
+          if (receipt !== MINT_EVIDENCE_RECEIPT) {
+            return actual.consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(
+              receipt as never,
+              draft,
+            );
+          }
+          return MINT_EVIDENCE;
+        }),
+    };
+  },
+);
+
+vi.mock(
   './substrate-federated-authority-safe-devnet-history-v1.js',
   async importOriginal => {
     const actual = await importOriginal<
@@ -491,6 +513,9 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
+  collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
+} from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance,
   runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
 } from './substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
@@ -510,12 +535,36 @@ const h20 = (byte: string): string => `0x${byte.repeat(20)}`;
 const MINT_BATCH = Object.freeze({ role: 'mint-batch' });
 const MINT_ERGO_TARGET = Object.freeze({ role: 'mint-ergo-target' });
 const MINT_CANDIDATE = Object.freeze({ candidateDigestHex: h32('81') });
+const MINT_FINALITY_PATH = Object.freeze([
+  h32('82'),
+  h32('85'),
+  h32('86'),
+  h32('87'),
+  h32('88'),
+  h32('89'),
+  h32('8a'),
+  h32('8b'),
+  h32('8c'),
+  h32('8d'),
+  h32('83'),
+]);
 const MINT_OBSERVATION = Object.freeze({
+  expectedTxId: h32('95'),
+  sourceLockBoxIdHex: h32('96'),
+  reserveSuccessorBoxIdHex: h32('97'),
   confirmationHeight: 500,
   confirmationHeaderIdHex: h32('82'),
+  confirmationObservationDigestHex: h32('a0'),
   finalityTargetHeight: 510,
   finalityTargetHeaderIdHex: h32('83'),
   requiredSuccessorDepth: 10,
+  finalityPathHeaderIdsHex: MINT_FINALITY_PATH,
+  observedTipHeight: 512,
+  observedTipHeaderIdHex: h32('a1'),
+  processBindingDigestHex: h32('a2'),
+  executionTargetIdentityDigestHex: h32('a3'),
+  primaryObservationDigestHex: h32('a4'),
+  witnessObservationDigestHex: h32('a5'),
   observationDigestHex: h32('84'),
 });
 const MINT_EVIDENCE = Object.freeze({
@@ -526,6 +575,9 @@ const MINT_EVIDENCE = Object.freeze({
   checkpointAncestryCanonicalHex: '0x090a',
   finalityProofCanonicalHex: '0x0b0c',
   verifierExecutableSha256Hex: h32('0d'),
+});
+const MINT_EVIDENCE_RECEIPT: any = Object.freeze({
+  receiptDigestHex: h32('0e'),
 });
 
 beforeEach(() => {
@@ -752,9 +804,17 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const target = requiredTargetDescriptor();
     const draft = mintDraftForTarget(target);
+    const evidenceReceipt =
+      collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1({
+        draft,
+        batch: MINT_BATCH as never,
+        target: MINT_ERGO_TARGET as never,
+        candidate: MINT_CANDIDATE as never,
+        committedVaultObservation: MINT_OBSERVATION as never,
+      });
     const proofInput = Object.freeze({
       draft,
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -765,7 +825,8 @@ describe('isolated-devnet portable packet producer', () => {
 
     expect(receipt).toMatchObject({
       version: 2,
-      status: 'synthetic_federated_source_proof_produced',
+      status: 'collected_federated_source_proof_produced',
+      sourceEvidenceReceiptDigestHex: evidenceReceipt.receiptDigestHex,
       mintReservationDraftDigestHex: draft.draftDigestHex,
       mintReservationStatementIdHex: draft.statementIdHex,
       mintIdentityHex: draft.reservationKeyHex,
@@ -781,9 +842,12 @@ describe('isolated-devnet portable packet producer', () => {
         exactRequestResultBound: true,
         exactThresholdSignatureSetVerified: true,
         boundedValidityWindowVerified: true,
+        exactSourceEvidenceReceiptBound: true,
         oneShotCapabilityConsumed: true,
       },
       boundary: {
+        evidenceBytesCallerSupplied: false,
+        sourceEvidenceCollectionProvenanceEstablished: true,
         runtimeProfileActivated: false,
         runtimeReservationWritten: false,
         mintExecuted: false,
@@ -847,13 +911,14 @@ describe('isolated-devnet portable packet producer', () => {
     });
     expect(packetReceipt).toMatchObject({
       version: 2,
-      status: 'packet_bound_synthetic_federated_source_proof_produced',
+      status: 'packet_bound_collected_federated_source_proof_produced',
       packetReceiptDigestHex: packet.receipt.receiptDigestHex,
       targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
       sourceProofReceiptDigestHex: receipt.receiptDigestHex,
       checks: {
         exactPacketObjectBound: true,
         packetProvenanceRevalidatedImmediatelyBeforeSigning: true,
+        exactSourceEvidenceReceiptBound: true,
         callerSuppliedTargetOrRuntimeAuthorityAccepted: false,
       },
     });
@@ -884,9 +949,18 @@ describe('isolated-devnet portable packet producer', () => {
     const session = packetContinuationSession();
     const packet = await session.produce(packetInput());
     const target = requiredTargetDescriptor();
+    const draft = mintDraftForTarget(target);
+    const evidenceReceipt =
+      collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1({
+        draft,
+        batch: MINT_BATCH as never,
+        target: MINT_ERGO_TARGET as never,
+        candidate: MINT_CANDIDATE as never,
+        committedVaultObservation: MINT_OBSERVATION as never,
+      });
     const packetProof = session.produceMintSourceProof(packet, {
-      draft: mintDraftForTarget(target),
-      evidence: MINT_EVIDENCE,
+      draft,
+      evidenceReceipt,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1002,7 +1076,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1044,7 +1118,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packetA = await sessionA.produce(packetInput());
     const proofA = sessionA.produceMintSourceProof(packetA, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1052,7 +1126,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packetB = await sessionB.produce(packetInput());
     const proofB = sessionB.produceMintSourceProof(packetB, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '35',
     });
@@ -1103,7 +1177,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1140,7 +1214,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1177,7 +1251,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1210,7 +1284,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1241,7 +1315,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1273,7 +1347,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const packetProof = session.produceMintSourceProof(packet, {
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1308,7 +1382,7 @@ describe('isolated-devnet portable packet producer', () => {
     });
     const proofInput = Object.freeze({
       draft,
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1327,7 +1401,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const proofInput = Object.freeze({
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1343,7 +1417,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const proofInput = Object.freeze({
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1359,7 +1433,7 @@ describe('isolated-devnet portable packet producer', () => {
     const draft = mintDraftForTarget(requiredTargetDescriptor());
     const proofInput = Object.freeze({
       draft,
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1376,10 +1450,34 @@ describe('isolated-devnet portable packet producer', () => {
       secondPacket,
       {
         draft: secondDraft,
-        evidence: MINT_EVIDENCE,
+        evidenceReceipt: MINT_EVIDENCE_RECEIPT,
         issuedAtNativeHeight: '4',
         expiresAtNativeHeight: '36',
         targetDescriptorDigestHex: h32('ff'),
+      } as never,
+    )).toThrow(/must contain exactly/u);
+
+    const copiedEvidenceSession = packetContinuationSession();
+    const thirdPacket = await copiedEvidenceSession.produce(packetInput());
+    expect(() => copiedEvidenceSession.produceMintSourceProof(
+      thirdPacket,
+      {
+        draft: mintDraftForTarget(requiredTargetDescriptor()),
+        evidenceReceipt: structuredClone(MINT_EVIDENCE_RECEIPT),
+        issuedAtNativeHeight: '4',
+        expiresAtNativeHeight: '36',
+      },
+    )).toThrow(/evidence receipt lacks process provenance/u);
+
+    const rawEvidenceSession = packetContinuationSession();
+    const fourthPacket = await rawEvidenceSession.produce(packetInput());
+    expect(() => rawEvidenceSession.produceMintSourceProof(
+      fourthPacket,
+      {
+        draft: mintDraftForTarget(requiredTargetDescriptor()),
+        evidence: MINT_EVIDENCE,
+        issuedAtNativeHeight: '4',
+        expiresAtNativeHeight: '36',
       } as never,
     )).toThrow(/must contain exactly/u);
   });
@@ -1389,7 +1487,7 @@ describe('isolated-devnet portable packet producer', () => {
     const packet = await session.produce(packetInput());
     const proofInput = Object.freeze({
       draft: mintDraftForTarget(requiredTargetDescriptor()),
-      evidence: MINT_EVIDENCE,
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
       issuedAtNativeHeight: '4',
       expiresAtNativeHeight: '36',
     });
@@ -1615,6 +1713,29 @@ function mintDraftForTarget(
     amountNanoErg,
     recipientAddressHex: h20('91'),
   });
+  const reservePredecessor = mintEvidenceBox('98', 'b0', 0);
+  const sourceLock = mintEvidenceBox('96', 'b1', 0);
+  const transitionFeeFunding = mintEvidenceBox('99', 'b1', 1);
+  const reserveSuccessor = mintEvidenceBox('97', '95', 0);
+  const reserveTransition = Object.freeze({
+    txId: h32('95'),
+    eip12Tx: Object.freeze({
+      inputs: Object.freeze([
+        Object.freeze({ ...reservePredecessor, extension: Object.freeze({}) }),
+        Object.freeze({ ...sourceLock, extension: Object.freeze({}) }),
+        Object.freeze({ ...transitionFeeFunding, extension: Object.freeze({}) }),
+      ]),
+      dataInputs: Object.freeze([]),
+      outputs: Object.freeze([{
+        value: reserveSuccessor.value,
+        ergoTree: reserveSuccessor.ergoTree,
+        assets: reserveSuccessor.assets,
+        additionalRegisters: reserveSuccessor.additionalRegisters,
+        creationHeight: reserveSuccessor.creationHeight,
+      }]),
+    }),
+    outputs: Object.freeze([reserveSuccessor]),
+  });
   mocks.committedPacket = Object.freeze({
     familyIdHex: target.profile.familyIdHex,
     familyCompiler: Object.freeze({ bindingDigestHex: h32('92') }),
@@ -1625,11 +1746,13 @@ function mintDraftForTarget(
       outputLiabilityNanoErg: amountNanoErg,
     }),
     transactions: Object.freeze({
-      reserveTransition: Object.freeze({ txId: h32('95') }),
+      reserveTransition,
     }),
     boxes: Object.freeze({
-      sourceLock: Object.freeze({ boxId: h32('96') }),
-      reserveSuccessor: Object.freeze({ boxId: h32('97') }),
+      reservePredecessor,
+      sourceLock,
+      transitionFeeFunding,
+      reserveSuccessor,
     }),
   });
   return buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
@@ -1637,6 +1760,19 @@ function mintDraftForTarget(
     target: MINT_ERGO_TARGET as never,
     candidate: MINT_CANDIDATE as never,
     committedVaultObservation: MINT_OBSERVATION as never,
+  });
+}
+
+function mintEvidenceBox(idByte: string, txByte: string, index: number) {
+  return Object.freeze({
+    boxId: h32(idByte),
+    value: '10000000',
+    ergoTree: `0008cd02${'11'.repeat(33)}`,
+    assets: Object.freeze([]),
+    additionalRegisters: Object.freeze({}),
+    creationHeight: 490,
+    transactionId: h32(txByte),
+    index,
   });
 }
 

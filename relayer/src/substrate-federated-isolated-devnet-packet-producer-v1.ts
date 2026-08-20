@@ -265,7 +265,7 @@ export interface SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2 
   readonly schema:
     typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA;
   readonly version: 2;
-  readonly status: 'packet_bound_synthetic_federated_source_proof_produced';
+  readonly status: 'packet_bound_collected_federated_source_proof_produced';
   readonly packetReceiptDigestHex: string;
   readonly targetDescriptorDigestHex: string;
   readonly sourceProofReceiptDigestHex: string;
@@ -276,6 +276,7 @@ export interface SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2 
     readonly packetProvenanceRevalidatedImmediatelyBeforeSigning: true;
     readonly exactTargetDescriptorBound: true;
     readonly exactSourceProofReceiptBound: true;
+    readonly exactSourceEvidenceReceiptBound: true;
     readonly callerSuppliedTargetOrRuntimeAuthorityAccepted: false;
     readonly oneShotContinuationConsumed: true;
   }>;
@@ -303,7 +304,7 @@ export type ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input 
   Pick<
     ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input,
     | 'draft'
-    | 'evidence'
+    | 'evidenceReceipt'
     | 'issuedAtNativeHeight'
     | 'expiresAtNativeHeight'
   >;
@@ -494,7 +495,7 @@ export function createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV
             SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA,
           version: 2 as const,
           status:
-            'packet_bound_synthetic_federated_source_proof_produced' as const,
+            'packet_bound_collected_federated_source_proof_produced' as const,
           packetReceiptDigestHex: packet.receipt.receiptDigestHex,
           targetDescriptorDigestHex:
             packet.receipt.targetDescriptorDigestHex,
@@ -505,6 +506,7 @@ export function createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV
             packetProvenanceRevalidatedImmediatelyBeforeSigning: true as const,
             exactTargetDescriptorBound: true as const,
             exactSourceProofReceiptBound: true as const,
+            exactSourceEvidenceReceiptBound: true as const,
             callerSuppliedTargetOrRuntimeAuthorityAccepted: false as const,
             oneShotContinuationConsumed: true as const,
           },
@@ -1031,7 +1033,7 @@ function buildMintSourceProofInputForPacket(
 ): Readonly<ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input> {
   const inputRecord = exactDataRecord(input, [
     'draft',
-    'evidence',
+    'evidenceReceipt',
     'expiresAtNativeHeight',
     'issuedAtNativeHeight',
   ], 'isolated packet mint source-proof input');
@@ -1065,7 +1067,7 @@ function buildMintSourceProofInputForPacket(
   }
   return deepFreeze({
     draft,
-    evidence: inputRecord.evidence,
+    evidenceReceipt: inputRecord.evidenceReceipt,
     issuedAtNativeHeight: inputRecord.issuedAtNativeHeight,
     expiresAtNativeHeight: inputRecord.expiresAtNativeHeight,
   } as ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input);

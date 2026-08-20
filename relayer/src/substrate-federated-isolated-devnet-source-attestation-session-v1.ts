@@ -46,6 +46,10 @@ import {
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
+  consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
+  type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
+} from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance,
   deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1,
   type SubstrateFederatedIsolatedDevnetLaunchStatementV1,
@@ -250,7 +254,8 @@ export interface SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1 {
 export interface ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input {
   readonly draft:
     Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
-  readonly evidence: Readonly<FederatedPooledReserveSourceProofEvidenceV1>;
+  readonly evidenceReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
   readonly issuedAtNativeHeight: string | number | bigint;
   readonly expiresAtNativeHeight: string | number | bigint;
 }
@@ -259,8 +264,9 @@ export interface SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2 {
   readonly schema:
     typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_SOURCE_PROOF_V2_SCHEMA;
   readonly version: 2;
-  readonly status: 'synthetic_federated_source_proof_produced';
+  readonly status: 'collected_federated_source_proof_produced';
   readonly sourceAttestationBindingDigestHex: string;
+  readonly sourceEvidenceReceiptDigestHex: string;
   readonly targetDescriptorDigestHex: string;
   readonly mintReservationDraftDigestHex: string;
   readonly mintReservationStatementIdHex: string;
@@ -290,10 +296,19 @@ export interface SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2 {
     readonly exactRequestResultBound: true;
     readonly exactThresholdSignatureSetVerified: true;
     readonly boundedValidityWindowVerified: true;
+    readonly exactSourceEvidenceReceiptBound: true;
     readonly oneShotCapabilityConsumed: true;
   }>;
-  readonly boundary:
-    SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1['boundary'];
+  readonly boundary: Readonly<
+    Omit<
+      SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1['boundary'],
+      | 'evidenceBytesCallerSupplied'
+      | 'sourceEvidenceCollectionProvenanceEstablished'
+    > & {
+      readonly evidenceBytesCallerSupplied: false;
+      readonly sourceEvidenceCollectionProvenanceEstablished: true;
+    }
+  >;
   readonly limitations: readonly string[];
   readonly receiptDigestHex: string;
 }
@@ -772,7 +787,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         input,
         [
           'draft',
-          'evidence',
+          'evidenceReceipt',
           'expiresAtNativeHeight',
           'issuedAtNativeHeight',
         ],
@@ -784,6 +799,14 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(
         draft,
       );
+      const evidenceReceipt = proofInput.evidenceReceipt as Readonly<
+        SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1
+      >;
+      const evidence =
+        consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(
+          evidenceReceipt,
+          draft,
+        );
       const target = signedTarget;
       const familyDerivation = deriveRuntimeProfileForSettlementFamily(
         target,
@@ -814,7 +837,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       const request = deepFreeze({
         runtimeProfile,
         statementHex: draft.statementHex,
-        evidence: canonicalEvidence(proofInput.evidence),
+        evidence: canonicalEvidence(evidence),
         issuedAtNativeHeight: issuedAtNativeHeight.toString(),
         expiresAtNativeHeight: expiresAtNativeHeight.toString(),
       } satisfies FederatedPooledReserveSourceProofRequestV1);
@@ -888,8 +911,9 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
           schema:
             SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_SOURCE_PROOF_V2_SCHEMA,
           version: 2 as const,
-          status: 'synthetic_federated_source_proof_produced' as const,
+          status: 'collected_federated_source_proof_produced' as const,
           sourceAttestationBindingDigestHex: binding.bindingDigestHex,
+          sourceEvidenceReceiptDigestHex: evidenceReceipt.receiptDigestHex,
           targetDescriptorDigestHex: target.descriptorDigestHex,
           mintReservationDraftDigestHex: draft.draftDigestHex,
           mintReservationStatementIdHex: draft.statementIdHex,
@@ -925,11 +949,13 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
             exactRequestResultBound: true as const,
             exactThresholdSignatureSetVerified: true as const,
             boundedValidityWindowVerified: true as const,
+            exactSourceEvidenceReceiptBound: true as const,
             oneShotCapabilityConsumed: true as const,
           },
-          boundary: mintSourceProofBoundary(),
+          boundary: mintSourceProofBoundaryV2(),
           limitations: [
-            'Evidence bytes are caller supplied and only bound to the exact signed request in this slice.',
+            'Evidence bytes come from one process-proven committed-reserve collector receipt.',
+            'The collector discloses dual-RPC depth policy evidence and does not authenticate Ergo proof of work.',
             'The attestors are process-owned synthetic LAB actors; the threshold remains the source authority.',
             'The settlement-family profile is packet-bound but is not activated by this receipt.',
             'No runtime reservation, mint, funds authority, Gate 5 closure, or trustless status is established.',
@@ -1183,6 +1209,27 @@ function mintSourceProofBoundary() {
     processOwnedSyntheticCustodyOnly: true as const,
     evidenceBytesCallerSupplied: true as const,
     sourceEvidenceCollectionProvenanceEstablished: false as const,
+    sourceCanonicalityIndependentlyVerified: false as const,
+    independentAttestorCustodyEstablished: false as const,
+    runtimeProviderCompiled: false as const,
+    runtimeProfileActivated: false as const,
+    runtimeReservationWritten: false as const,
+    mintExecuted: false as const,
+    ergoTransactionSigningAuthorized: false as const,
+    submissionAuthorized: false as const,
+    broadcastAuthorized: false as const,
+    fundsAuthorityEstablished: false as const,
+    gate5Closed: false as const,
+    trustlessStatusEstablished: false as const,
+    productionReadinessEstablished: false as const,
+  });
+}
+
+function mintSourceProofBoundaryV2() {
+  return Object.freeze({
+    processOwnedSyntheticCustodyOnly: true as const,
+    evidenceBytesCallerSupplied: false as const,
+    sourceEvidenceCollectionProvenanceEstablished: true as const,
     sourceCanonicalityIndependentlyVerified: false as const,
     independentAttestorCustodyEstablished: false as const,
     runtimeProviderCompiled: false as const,
