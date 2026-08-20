@@ -60,6 +60,7 @@ const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const MAX_TOOL_BYTES = 128 * 1024 * 1024;
 const MAX_GIT_OUTPUT_BYTES = 32 * 1024 * 1024;
 const BUILD_ARCHIVE_VERSION = 1;
+const SCRATCH_DIRECTORY_PREFIX = '.e2s-rba-build-';
 
 const SOURCE_ARCHIVE_PATHS = Object.freeze([
   'relayer',
@@ -242,7 +243,7 @@ export async function produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1(
 
   const scratchDirectory = join(
     target.parentDirectory,
-    `.${basename(target.finalDirectory)}.build-${randomUUID()}`,
+    `${SCRATCH_DIRECTORY_PREFIX}${randomUUID()}`,
   );
   let scratchIdentity: BigIntStats | undefined;
   try {
