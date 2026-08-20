@@ -31327,10 +31327,10 @@ index 0000000000000000000000000000000000000000..a723c778f147e4e5b085432d68f8770c
 +}
 diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..fcf7586b4e97c38058e132221a5ccced0fa272f5
+index 0000000000000000000000000000000000000000..045d45c62f215a7643145eae55141c391cd2589b
 --- /dev/null
 +++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
-@@ -0,0 +1,1240 @@
+@@ -0,0 +1,1290 @@
 +use std::{env, sync::Arc};
 +
 +use ethereum::{
@@ -31400,6 +31400,8 @@ index 0000000000000000000000000000000000000000..fcf7586b4e97c38058e132221a5ccced
 +const TEST_CHAIN_ID: u64 = 42;
 +const TEST_GAS_PRICE: u64 = 1_000_000_000;
 +const TEST_GAS_LIMIT: u64 = 5_000_000;
++const SOURCE_PROOF_ENVELOPE_ENV: &str = "BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX";
++const DYNAMIC_SOURCE_PROOF_MARKER: &str = "bridge-lab-dynamic-source-proof-sha256=";
 +
 +type TestBackend = substrate_test_client::Backend<Block>;
 +type TestExecutor = sc_service::client::LocalCallExecutor<
@@ -32007,7 +32009,7 @@ index 0000000000000000000000000000000000000000..fcf7586b4e97c38058e132221a5ccced
 +	assert!(!bridge_runtime_code.is_empty());
 +	assert!(!token_runtime_code.is_empty());
 +	let profile = runtime_profile(&statement, 4, &bridge_runtime_code, &token_runtime_code);
-+	let proof = fixture_source_proof(&profile, &statement, 4, 36);
++	let proof = source_proof_from_environment_or_fixture(&profile, &statement, 4, 36);
 +	ReservationFixture {
 +		client,
 +		signer,
@@ -32389,6 +32391,54 @@ index 0000000000000000000000000000000000000000..fcf7586b4e97c38058e132221a5ccced
 +	validate_pooled_reserve_mint_reservation_profile_v4(&profile)
 +		.expect("LAB reservation runtime profile is canonical");
 +	profile
++}
++
++fn source_proof_from_environment_or_fixture(
++	profile: &PooledReserveMintReservationRuntimeProfileV4,
++	statement_bytes: &PooledReserveMintReservationStatementBytesV4,
++	issued_at_native_height: u64,
++	expires_at_native_height: u64,
++) -> PooledReserveMintReservationSourceProofEnvelopeV4 {
++	let encoded = match env::var(SOURCE_PROOF_ENVELOPE_ENV) {
++		Ok(value) => value,
++		Err(env::VarError::NotPresent) => {
++			return fixture_source_proof(
++				profile,
++				statement_bytes,
++				issued_at_native_height,
++				expires_at_native_height,
++			)
++		}
++		Err(error) => panic!("{SOURCE_PROOF_ENVELOPE_ENV} is not valid Unicode: {error}"),
++	};
++	assert_eq!(encoded, encoded.to_ascii_lowercase());
++	let payload = encoded
++		.strip_prefix("0x")
++		.expect("LAB source-proof envelope must use the 0x prefix");
++	assert!(!payload.is_empty() && payload.len() % 2 == 0);
++	assert!(payload.bytes().all(|byte| byte.is_ascii_hexdigit()));
++	let bytes = hex::decode(payload).expect("LAB source-proof envelope hex decodes");
++	let mut input = &bytes[..];
++	let proof = PooledReserveMintReservationSourceProofEnvelopeV4::decode(&mut input)
++		.expect("LAB source-proof envelope SCALE decodes");
++	assert!(
++		input.is_empty(),
++		"LAB source-proof envelope contains trailing bytes"
++	);
++	assert_eq!(
++		proof.encode(),
++		bytes,
++		"LAB source-proof envelope is not canonical"
++	);
++	assert_eq!(proof.proof_system_id, profile.source_proof_system_id);
++	assert_eq!(proof.proof_profile_id, profile.source_proof_profile_id);
++	assert_eq!(proof.issued_at_native_height, issued_at_native_height);
++	assert_eq!(proof.expires_at_native_height, expires_at_native_height);
++	println!(
++		"{DYNAMIC_SOURCE_PROOF_MARKER}0x{}",
++		hex::encode(sha2_256(&bytes)),
++	);
++	proof
 +}
 +
 +fn fixture_source_proof(

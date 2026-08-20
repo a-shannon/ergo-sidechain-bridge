@@ -24,6 +24,8 @@ import {
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
   buildFederatedPooledReserveSourceProofProfileV1,
   buildFederatedPooledReserveSourceProofResultFieldsForProfileV1,
+  decodeFederatedPooledReserveSourceProofProfileScaleV1Hex,
+  decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex,
   deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex,
   deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1Hex,
   deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
@@ -268,6 +270,7 @@ export interface SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2 {
   readonly runtimeProfileScaleHex: string;
   readonly runtimeProfileIdHex: string;
   readonly sourceProofProfileIdHex: string;
+  readonly sourceProofProfileScaleHex: string;
   readonly requestDigestHex: string;
   readonly request: Readonly<FederatedPooledReserveSourceProofRequestV1>;
   readonly result:
@@ -901,6 +904,8 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
               runtimeProfile,
             ),
           sourceProofProfileIdHex: federatedMintProfile.proofProfileIdHex,
+          sourceProofProfileScaleHex:
+            binding.federatedMintProfileScaleHex,
           requestDigestHex,
           request,
           result,
@@ -1038,6 +1043,80 @@ export function assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Pr
   ) {
     throw new Error(
       'isolated-devnet settlement-family mint source-proof receipt digest changed',
+    );
+  }
+  const runtimeProfile =
+    decodePooledReserveMintReservationRuntimeProfileV4ScaleHex(
+      body.runtimeProfileScaleHex,
+    );
+  const sourceProofProfileInput =
+    decodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+      body.sourceProofProfileScaleHex,
+    );
+  const sourceProofProfile =
+    buildFederatedPooledReserveSourceProofProfileV1(
+      sourceProofProfileInput,
+    );
+  const sourceProofEnvelope =
+    decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+      sourceProofProfileInput,
+      body.request,
+      body.sourceProofEnvelopeScaleHex,
+    );
+  const sourceProofProfileIdHex = fixedHex(
+    body.sourceProofProfileIdHex,
+    32,
+    'isolated-devnet source-proof profile ID',
+  );
+  if (
+    derivePooledReserveMintReservationRuntimeProfileV4IdHex(runtimeProfile)
+      !== fixedHex(
+        body.runtimeProfileIdHex,
+        32,
+        'isolated-devnet runtime profile ID',
+      )
+    || fixedHex(
+      runtimeProfile.sourceProofProfileIdHex,
+      32,
+      'isolated-devnet runtime source-proof profile ID',
+    ) !== sourceProofProfileIdHex
+    || fixedHex(
+      runtimeProfile.sourceProofSystemIdHex,
+      32,
+      'isolated-devnet runtime source-proof system ID',
+    ) !== fixedHex(
+      sourceProofProfile.proofSystemIdHex,
+      32,
+      'isolated-devnet profile source-proof system ID',
+    )
+    || fixedHex(
+      sourceProofProfile.proofProfileIdHex,
+      32,
+      'isolated-devnet decoded source-proof profile ID',
+    ) !== sourceProofProfileIdHex
+    || fixedHex(
+      sourceProofEnvelope.proofProfileIdHex,
+      32,
+      'isolated-devnet envelope source-proof profile ID',
+    ) !== sourceProofProfileIdHex
+    || sourceProofEnvelope.issuedAtNativeHeight.toString()
+      !== body.request.issuedAtNativeHeight.toString()
+    || sourceProofEnvelope.expiresAtNativeHeight.toString()
+      !== body.request.expiresAtNativeHeight.toString()
+    || canonicalBytes(
+      sourceProofEnvelope.proofBytesHex,
+      'isolated-devnet source-proof envelope bytes',
+    ) !== canonicalBytes(
+      body.proofBytesScaleHex,
+      'isolated-devnet source-proof receipt bytes',
+    )
+    || canonicalBytes(
+      body.sourceProofProfileScaleHex,
+      'isolated-devnet source-proof profile SCALE bytes',
+    ) !== body.sourceProofProfileScaleHex
+  ) {
+    throw new Error(
+      'isolated-devnet settlement-family mint source-proof profile binding changed',
     );
   }
 }

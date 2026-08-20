@@ -27,7 +27,10 @@ import {
   POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4,
   buildFederatedPooledReserveSourceProofProfileV1,
   buildFederatedPooledReserveSourceProofResultFieldsForProfileV1,
+  decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex,
   decodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
+  decodeFederatedPooledReserveSourceProofProfileScaleV1Hex,
+  decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex,
   decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
   deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex,
   deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
@@ -474,7 +477,62 @@ describe('substrate federated pooled-reserve source proof V1', () => {
       selectedOuterScaleHex.slice(2),
       'hex',
     );
+    const selectedProfileScaleHex =
+      encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+        substitutedProfile,
+      );
+    const decodedSelectedInner =
+      decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        selectedInnerScaleHex,
+      );
+    const decodedSelectedOuter =
+      decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        selectedOuterScaleHex,
+      );
 
+    expect(
+      decodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+        selectedProfileScaleHex,
+      ),
+    ).toEqual({
+      federationEpoch: BigInt(selectedProfile.federationEpoch),
+      threshold: selectedProfile.threshold,
+      signerPublicKeysHex: selectedProfile.signerPublicKeysHex,
+      maxValidityBlocks: BigInt(selectedProfile.maxValidityBlocks),
+      verifierProfileIdHex: selectedProfile.verifierProfileIdHex,
+    });
+    expect(
+      encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        decodedSelectedInner,
+      ),
+    ).toBe(selectedInnerScaleHex);
+    expect(decodedSelectedInner.signatures).toEqual(selectedSignatures);
+    expect(
+      encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        decodedSelectedInner,
+      ),
+    ).toBe(selectedOuterScaleHex);
+    expect(decodedSelectedOuter.proofSystemIdHex).toBe(
+      selectedProfile.proofSystemIdHex,
+    );
+    expect(decodedSelectedOuter.proofProfileIdHex).toBe(
+      selectedProfile.proofProfileIdHex,
+    );
+    expect(decodedSelectedOuter.issuedAtNativeHeight).toBe(
+      BigInt(selectedRequest.issuedAtNativeHeight),
+    );
+    expect(decodedSelectedOuter.expiresAtNativeHeight).toBe(
+      BigInt(selectedRequest.expiresAtNativeHeight),
+    );
+    expect(decodedSelectedOuter.proofBytesHex).toBe(selectedInnerScaleHex);
     expect(selectedInnerScaleHex.length).toBe(
       2 + FEDERATED_POOLED_RESERVE_SOURCE_PROOF_INNER_SCALE_BYTES_V1 * 2,
     );
@@ -519,6 +577,22 @@ describe('substrate federated pooled-reserve source proof V1', () => {
         request,
         selectedEnvelope,
       )).toThrow(/does not select the exact federated pooled-reserve proof profile/);
+    expect(() =>
+      decodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+        `${selectedProfileScaleHex}00`,
+      )).toThrow(/profile SCALE is invalid/);
+    expect(() =>
+      decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        referenceSourceProofProfile,
+        request,
+        selectedInnerScaleHex,
+      )).toThrow(/differs from the exact profile-bound request/);
+    expect(() =>
+      decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        referenceSourceProofProfile,
+        request,
+        selectedOuterScaleHex,
+      )).toThrow(/outer proof does not bind the exact request/);
   });
 
   it('rejects every request-derived result field mutation before encoding', () => {
@@ -631,6 +705,24 @@ describe('substrate federated pooled-reserve source proof V1', () => {
       const innerBytes = Buffer.from(innerScaleHex.slice(2), 'hex');
       const outerBytes = Buffer.from(outerScaleHex.slice(2), 'hex');
       const expectedInnerBytes = 347 + 1 + (threshold * 96);
+      const profileScaleHex =
+        encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(profile);
+      const decodedProfile =
+        decodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+          profileScaleHex,
+        );
+      const decodedInner =
+        decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          innerScaleHex,
+        );
+      const decodedOuter =
+        decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          outerScaleHex,
+        );
 
       expect(innerBytes.length, `threshold ${threshold}`).toBe(
         expectedInnerBytes,
@@ -645,6 +737,41 @@ describe('substrate federated pooled-reserve source proof V1', () => {
       expect(`0x${outerBytes.subarray(83).toString('hex')}`).toBe(
         innerScaleHex,
       );
+      expect(
+        encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+          decodedProfile,
+        ),
+        `profile threshold ${threshold}`,
+      ).toBe(profileScaleHex);
+      expect(
+        encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          decodedInner,
+        ),
+        `inner threshold ${threshold}`,
+      ).toBe(innerScaleHex);
+      expect(decodedOuter.proofBytesHex, `outer threshold ${threshold}`)
+        .toBe(innerScaleHex);
+      expect(() =>
+        decodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+          `${profileScaleHex}00`,
+        ),
+      ).toThrow(/profile SCALE is invalid|trailing data/u);
+      expect(() =>
+        decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          `${innerScaleHex}00`,
+        ),
+      ).toThrow(/must contain exactly|lowercase 0x-prefixed|trailing data/u);
+      expect(() =>
+        decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          `${outerScaleHex}00`,
+        ),
+      ).toThrow(/must contain exactly|lowercase 0x-prefixed|trailing data/u);
     }
   });
 });

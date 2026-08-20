@@ -315,6 +315,65 @@ export function encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
   ]).toString('hex')}`;
 }
 
+export function decodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
+  value: string,
+): Readonly<FederatedPooledReserveSourceProofProfileV1Input> {
+  const canonical = canonicalBytes(
+    value,
+    'federated pooled-reserve source-proof profile SCALE bytes',
+  );
+  const bytes = Buffer.from(canonical.slice(2), 'hex');
+  if (bytes.length < 12) {
+    throw new Error(
+      'federated pooled-reserve source-proof profile SCALE is truncated',
+    );
+  }
+  let offset = 0;
+  const formatVersion = bytes[offset++];
+  const federationEpoch = bytes.readBigUInt64LE(offset);
+  offset += 8;
+  const threshold = bytes.readUInt16LE(offset);
+  offset += 2;
+  const signerCount = decodeSingleByteScaleCompactLength(bytes[offset++]!);
+  const expectedLength = 1 + 8 + 2 + 1 + (signerCount * 32) + 8 + 32;
+  if (
+    formatVersion !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1
+    || signerCount < 2
+    || signerCount > FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_SIGNERS_V1
+    || bytes.length !== expectedLength
+  ) {
+    throw new Error(
+      'federated pooled-reserve source-proof profile SCALE is invalid',
+    );
+  }
+  const signerPublicKeysHex: string[] = [];
+  for (let index = 0; index < signerCount; index += 1) {
+    signerPublicKeysHex.push(sliceHex(bytes, offset, offset += 32));
+  }
+  const maxValidityBlocks = bytes.readBigUInt64LE(offset);
+  offset += 8;
+  const verifierProfileIdHex = sliceHex(bytes, offset, offset += 32);
+  if (offset !== bytes.length) {
+    throw new Error(
+      'federated pooled-reserve source-proof profile SCALE contains trailing data',
+    );
+  }
+  const decoded = deepFreeze({
+    federationEpoch,
+    threshold,
+    signerPublicKeysHex,
+    maxValidityBlocks,
+    verifierProfileIdHex,
+  });
+  buildFederatedPooledReserveSourceProofProfileV1(decoded);
+  if (encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(decoded) !== value) {
+    throw new Error(
+      'federated pooled-reserve source-proof profile SCALE is not canonical',
+    );
+  }
+  return decoded;
+}
+
 export function deriveFederatedPooledReserveSourceProofProfileIdForInputV1Hex(
   input: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
 ): string {
@@ -632,6 +691,86 @@ export function decodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex(
   return decoded;
 }
 
+export function decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+  value: string,
+): Readonly<FederatedPooledReserveSourceProofEnvelopeV1> {
+  const normalizedProfile = normalizeProofProfileInput(profile);
+  const normalizedRequest = normalizeRequestForProfile(
+    normalizedProfile,
+    request,
+  );
+  const bytes = fixedBytes(
+    value,
+    selectedProfileInnerScaleBytes(normalizedProfile),
+    'federated pooled-reserve selected-profile source-proof inner SCALE envelope',
+  );
+  let offset = 0;
+  const rawResult = {
+    formatVersion: bytes[offset++] as 1,
+    federationEpoch: bytes.readBigUInt64LE(offset),
+    sourceAttestationKeySetDigestHex: sliceHex(bytes, offset += 8, offset += 32),
+    sourceAttestationThreshold: bytes.readUInt16LE(offset),
+    requestDigestHex: sliceHex(bytes, offset += 2, offset += 32),
+    sourceLockBoxCanonicalBlake2b256Hex: sliceHex(bytes, offset, offset += 32),
+    reserveTransitionTransactionCanonicalBlake2b256Hex:
+      sliceHex(bytes, offset, offset += 32),
+    successorReserveBoxCanonicalBlake2b256Hex:
+      sliceHex(bytes, offset, offset += 32),
+    inclusionProofBlake2b256Hex: sliceHex(bytes, offset, offset += 32),
+    checkpointAncestryBlake2b256Hex: sliceHex(bytes, offset, offset += 32),
+    finalityProofBlake2b256Hex: sliceHex(bytes, offset, offset += 32),
+    verifierExecutableSha256Hex: sliceHex(bytes, offset, offset += 32),
+    verifierProfileIdHex: sliceHex(bytes, offset, offset += 32),
+    issuedAtNativeHeight: bytes.readBigUInt64LE(offset),
+    expiresAtNativeHeight: bytes.readBigUInt64LE(offset += 8),
+  };
+  offset += 8;
+  const result = normalizeResultForProfileAndRequest(
+    normalizedProfile,
+    normalizedRequest,
+    rawResult,
+  );
+  const signatureCount = decodeSingleByteScaleCompactLength(bytes[offset++]!);
+  if (signatureCount !== normalizedProfile.threshold) {
+    throw new Error(
+      'federated pooled-reserve selected-profile proof has a non-threshold signature count',
+    );
+  }
+  const rawSignatures: FederatedPooledReserveSourceProofSignatureV1[] = [];
+  for (let index = 0; index < signatureCount; index += 1) {
+    rawSignatures.push({
+      signerPublicKeyHex: sliceHex(bytes, offset, offset += 32),
+      signatureHex: sliceHex(bytes, offset, offset += 64),
+    });
+  }
+  if (offset !== bytes.length) {
+    throw new Error(
+      'federated pooled-reserve selected-profile source-proof bytes contain trailing data',
+    );
+  }
+  const decoded = deepFreeze({
+    result,
+    signatures: normalizeSignaturesForProfile(
+      normalizedProfile,
+      rawSignatures,
+    ),
+  });
+  if (
+    encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+      profile,
+      request,
+      decoded,
+    ) !== value
+  ) {
+    throw new Error(
+      'federated pooled-reserve selected-profile source-proof inner SCALE is not canonical',
+    );
+  }
+  return decoded;
+}
+
 export function encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex(
   envelope: PooledReserveMintReservationSourceProofEnvelopeV4,
 ): string {
@@ -682,6 +821,68 @@ export function decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex(
   decodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex(decoded.proofBytesHex);
   if (encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex(decoded) !== value) {
     throw new Error('pooled-reserve source-proof V4 SCALE envelope is not canonical');
+  }
+  return decoded;
+}
+
+export function decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+  value: string,
+): Readonly<PooledReserveMintReservationSourceProofEnvelopeV4> {
+  const normalizedProfile = normalizeProofProfileInput(profile);
+  const normalizedRequest = normalizeRequestForProfile(
+    normalizedProfile,
+    request,
+  );
+  const innerLength = selectedProfileInnerScaleBytes(normalizedProfile);
+  const bytes = fixedBytes(
+    value,
+    83 + innerLength,
+    'pooled-reserve selected-profile mint-reservation source-proof V4 SCALE envelope',
+  );
+  const compact = decodeTwoByteScaleCompactLength(bytes, 81);
+  if (compact.length !== innerLength || compact.bytes !== 2) {
+    throw new Error(
+      'pooled-reserve selected-profile source-proof byte length is not canonical',
+    );
+  }
+  const decoded = deepFreeze({
+    formatVersion: bytes[0] as 4,
+    proofSystemIdHex: sliceHex(bytes, 1, 33),
+    proofProfileIdHex: sliceHex(bytes, 33, 65),
+    issuedAtNativeHeight: bytes.readBigUInt64LE(65),
+    expiresAtNativeHeight: bytes.readBigUInt64LE(73),
+    proofBytesHex: sliceHex(bytes, 83, bytes.length),
+  });
+  if (
+    decoded.formatVersion
+      !== POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4
+    || decoded.proofSystemIdHex !== normalizedProfile.proofSystemIdHex
+    || decoded.proofProfileIdHex !== normalizedProfile.proofProfileIdHex
+    || decoded.issuedAtNativeHeight !== normalizedRequest.issuedAtNativeHeight
+    || decoded.expiresAtNativeHeight !== normalizedRequest.expiresAtNativeHeight
+  ) {
+    throw new Error(
+      'pooled-reserve selected-profile outer proof does not bind the exact request',
+    );
+  }
+  const inner =
+    decodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+      profile,
+      request,
+      decoded.proofBytesHex,
+    );
+  if (
+    encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+      profile,
+      request,
+      inner,
+    ) !== value
+  ) {
+    throw new Error(
+      'pooled-reserve selected-profile source-proof V4 SCALE envelope is not canonical',
+    );
   }
   return decoded;
 }

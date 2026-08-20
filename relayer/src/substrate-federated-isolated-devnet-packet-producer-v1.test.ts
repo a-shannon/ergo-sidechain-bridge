@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -25,6 +25,15 @@ import {
 } from './substrate-federated-settlement-family-v1.js';
 
 const mocks = vi.hoisted(() => ({
+  spawnSync: vi.fn(),
+  runProcess: vi.fn(),
+  inspectBaseline: vi.fn(),
+  validateToolchain: vi.fn(),
+  createBuildWorkspace: vi.fn(),
+  workspaceCleanup: vi.fn(),
+  consumerCargoTargetDirectory: undefined as string | undefined,
+  consumerCargoHomeDirectory: undefined as string | undefined,
+  cargoTestResult: undefined as any,
   sourceHistory: undefined as any,
   ergoHistory: undefined as any,
   trackerInputs: [] as any[],
@@ -70,6 +79,29 @@ const mocks = vi.hoisted(() => ({
     }
   }),
 }));
+
+vi.mock('node:child_process', () => ({
+  spawnSync: mocks.spawnSync,
+}));
+
+vi.mock('./consensus-source-baseline.js', async importOriginal => {
+  const actual = await importOriginal<
+    typeof import('./consensus-source-baseline.js')
+  >();
+  return { ...actual, inspectConsensusSourceBaseline: mocks.inspectBaseline };
+});
+
+vi.mock('./pinned-local-native-verifier-build.js', async importOriginal => {
+  const actual = await importOriginal<
+    typeof import('./pinned-local-native-verifier-build.js')
+  >();
+  return {
+    ...actual,
+    createPinnedLocalNativeBuildWorkspace: mocks.createBuildWorkspace,
+    runBoundedProcess: mocks.runProcess,
+    validateNativeVerifierToolchainLock: mocks.validateToolchain,
+  };
+});
 
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js',
@@ -459,6 +491,10 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance,
+  runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
+} from './substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
+import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
@@ -494,6 +530,36 @@ const MINT_EVIDENCE = Object.freeze({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.cargoTestResult = undefined;
+  mocks.inspectBaseline.mockReturnValue(passingConsumerSourceBaseline());
+  mocks.validateToolchain.mockReturnValue({ errors: [] });
+  mocks.spawnSync.mockImplementation((executable, arguments_, options) => {
+    if (arguments_.length === 1 && arguments_[0] === '--version') {
+      const versions: Record<string, string> = {
+        'cargo.exe': 'cargo 1.82.0 (8f40fc59f 2024-08-21)',
+        cargo: 'cargo 1.82.0 (8f40fc59f 2024-08-21)',
+        'rustc.exe': 'rustc 1.82.0 (f6e511eec 2024-10-15)',
+        rustc: 'rustc 1.82.0 (f6e511eec 2024-10-15)',
+        'git.exe': 'git version 2.54.0.windows.1',
+        git: 'git version 2.54.0.windows.1',
+      };
+      return {
+        error: undefined,
+        signal: null,
+        status: 0,
+        stdout: `${versions[basename(executable)]}\n`,
+        stderr: '',
+      };
+    }
+    throw new Error(`unexpected synchronous process: ${basename(executable)}`);
+  });
+  mocks.runProcess.mockImplementation(async input => {
+    if (mocks.cargoTestResult instanceof Error) {
+      throw mocks.cargoTestResult;
+    }
+    if (mocks.cargoTestResult !== undefined) return mocks.cargoTestResult;
+    return passingCargoProcessResult(input);
+  });
   mocks.sourceHistory = sourceHistory();
   mocks.ergoHistory = ergoHistory();
   mocks.trackerInputs = [];
@@ -526,6 +592,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
@@ -765,6 +832,9 @@ describe('isolated-devnet portable packet producer', () => {
     expect(runtimeProfile.sourceProofProfileIdHex).toBe(
       receipt.sourceProofProfileIdHex,
     );
+    expect(receipt.sourceProofProfileScaleHex).toMatch(
+      /^0x[0-9a-f]+$/u,
+    );
     expect(normalized(runtimeProfile.sourceProofSystemIdHex)).toMatch(
       /^[0-9a-f]{64}$/u,
     );
@@ -808,6 +878,425 @@ describe('isolated-devnet portable packet producer', () => {
     expect(() => session.produceMintSourceProof(packet, proofInput)).toThrow(
       /requires one completed packet/u,
     );
+  });
+
+  it('feeds only the exact packet-bound dynamic proof into the atomic Frontier consumer', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const target = requiredTargetDescriptor();
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(target),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-proof-consumer-'));
+    temporaryRoots.push(root);
+    const paths = createConsumerPaths(root);
+    vi.stubEnv('E2S_UNRELATED_TEST_VALUE', 'must-not-leak');
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...paths,
+      offline: true,
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+        ...input,
+        proofReceipt: structuredClone(packetProof),
+      })
+    ).rejects.toThrow(/lacks process provenance/u);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2({
+        ...input,
+        targetDescriptorDigestHex: h32('ff'),
+      } as never)
+    ).rejects.toThrow(/must contain exactly/u);
+
+    const receipt =
+      await runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input);
+
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance(
+        receipt,
+      )
+    ).not.toThrow();
+    expect(receipt).toMatchObject({
+      status: 'packet_bound_proof_consumed_by_frontier_lab',
+      packetProofReceiptDigestHex: packetProof.receiptDigestHex,
+      sourceProofReceiptDigestHex: packetProof.sourceProof.receiptDigestHex,
+      checks: {
+        exactPacketProofProvenanceRevalidated: true,
+        exactSourceLockRevalidatedBeforeAndAfter: true,
+        exactToolchainRevalidatedBeforeAndAfter: true,
+        exactDynamicSourceProfileConsumed: true,
+        exactDynamicSourceProofEnvelopeConsumed: true,
+        exactDynamicSourceProofMarkerConsumed: true,
+        directParentReservationAndMintAcceptedAtomically: true,
+        unreservedSiblingRejectedAtomically: true,
+        callerSuppliedAuthorityFieldsAccepted: false,
+        toolsAuthenticatedBeforeFirstExecution: true,
+        freshConsumerOwnedCargoTargetUsed: true,
+        configurationIsolatedCargoHomeUsed: true,
+        cargoProcessTreeContainedBeforeCleanup: true,
+      },
+      boundary: {
+        isolatedTestClientOnly: true,
+        localSourceAndToolIdentityOnly: true,
+        completeBuildToolClosureVerified: false,
+        dependencyCacheContentAttested: false,
+        atomicSourceAndToolSnapshotEstablished: false,
+        exclusiveNonAdversarialSameUserExecutionRequired: true,
+        sourceCanonicalityIndependentlyVerified: false,
+        ergoPowAuthenticated: false,
+        externalTargetNodeAcceptanceEstablished: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(mocks.spawnSync).toHaveBeenCalledTimes(6);
+    expect(mocks.runProcess).toHaveBeenCalledTimes(1);
+    const cargoCall = mocks.runProcess.mock.calls.find(
+      ([processInput]) => processInput.args[0] === 'test',
+    );
+    expect(cargoCall).toBeDefined();
+    const [processInput] = cargoCall!;
+    expect(processInput.executablePath).toBe(paths.cargoExecutablePath);
+    expect(processInput.args).toContain(
+      'bridge_federated_lab_reservation_tests::federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling',
+    );
+    expect(processInput.args).toContain('--exact');
+    expect(processInput.env.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX)
+      .toBe(packetProof.sourceProof.sourceProofProfileScaleHex);
+    expect(processInput.env.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX)
+      .toBe(packetProof.sourceProof.sourceProofProfileIdHex);
+    expect(processInput.env.BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX)
+      .toBe(packetProof.sourceProof.sourceProofEnvelopeScaleHex);
+    expect(processInput.env.BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX)
+      .toBe(packetProof.sourceProof.request.statementHex);
+    expect(processInput.env.CARGO_NET_OFFLINE).toBe('true');
+    expect(processInput.env.CARGO_HOME).toBe(
+      mocks.consumerCargoHomeDirectory,
+    );
+    expect(processInput.env.CARGO_TARGET_DIR).toBe(
+      mocks.consumerCargoTargetDirectory,
+    );
+    expect(processInput.env.RUSTC).toBe(paths.rustcExecutablePath);
+    expect(processInput.env.E2S_UNRELATED_TEST_VALUE).toBeUndefined();
+    expect(processInput.label).toBe('Frontier packet-proof Cargo consumer');
+    expect(mocks.workspaceCleanup).toHaveBeenCalledTimes(1);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/already consumed/u);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance(
+        structuredClone(receipt),
+      )
+    ).toThrow(/lacks process provenance/u);
+  });
+
+  it('rejects concurrent consumption of one packet proof capability', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-concurrent-'));
+    temporaryRoots.push(root);
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...createConsumerPaths(root),
+      offline: true,
+    });
+    let enterProcess!: () => void;
+    const processEntered = new Promise<void>(resolvePromise => {
+      enterProcess = resolvePromise;
+    });
+    let releaseProcess!: () => void;
+    const processRelease = new Promise<void>(resolvePromise => {
+      releaseProcess = resolvePromise;
+    });
+    mocks.runProcess.mockImplementationOnce(async processInput => {
+      enterProcess();
+      await processRelease;
+      return passingCargoProcessResult(processInput);
+    });
+
+    const firstConsumption =
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input);
+    await processEntered;
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input),
+    ).rejects.toThrow(/already consumed or active/u);
+    releaseProcess();
+    await expect(firstConsumption).resolves.toBeDefined();
+    expect(mocks.runProcess).toHaveBeenCalledTimes(1);
+    expect(mocks.workspaceCleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes the same packet proof that the one-shot guard admitted', async () => {
+    const sessionA = packetContinuationSession();
+    const packetA = await sessionA.produce(packetInput());
+    const proofA = sessionA.produceMintSourceProof(packetA, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const sessionB = packetContinuationSession();
+    const packetB = await sessionB.produce(packetInput());
+    const proofB = sessionB.produceMintSourceProof(packetB, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '35',
+    });
+    const rootA = mkdtempSync(join(tmpdir(), 'bridge-frontier-guarded-proof-a-'));
+    const rootB = mkdtempSync(join(tmpdir(), 'bridge-frontier-guarded-proof-b-'));
+    temporaryRoots.push(rootA, rootB);
+    const targetInput = {
+      proofReceipt: proofA,
+      ...createConsumerPaths(rootA),
+      offline: true,
+    };
+    let proofReceiptReads = 0;
+    const substitutingInput = new Proxy(targetInput, {
+      get(target, property, receiver) {
+        if (property === 'proofReceipt') {
+          proofReceiptReads += 1;
+          return proofReceiptReads === 1 ? proofA : proofB;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const receiptA =
+      await runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
+        substitutingInput,
+      );
+
+    expect(receiptA.packetProof).toBe(proofA);
+    expect(receiptA.packetProofReceiptDigestHex).toBe(proofA.receiptDigestHex);
+    expect(proofReceiptReads).toBe(1);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
+        Object.freeze({
+          proofReceipt: proofB,
+          ...createConsumerPaths(rootB),
+          offline: true,
+        }),
+      ),
+    ).resolves.toMatchObject({
+      packetProof: proofB,
+      packetProofReceiptDigestHex: proofB.receiptDigestHex,
+    });
+    expect(mocks.runProcess).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not accept a successful Cargo exit that ran zero atomic mint tests', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-zero-tests-'));
+    temporaryRoots.push(root);
+    const paths = createConsumerPaths(root);
+    mocks.cargoTestResult = {
+      error: undefined,
+      signal: null,
+      status: 0,
+      stdout: 'test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured',
+      stderr: '',
+    };
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...paths,
+      offline: true,
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/did not execute the exact atomic mint test/u);
+    mocks.cargoTestResult = undefined;
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).resolves.toBeDefined();
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/already consumed/u);
+  });
+
+  it('requires the exact dynamic proof marker and remains retryable on failure', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-marker-'));
+    temporaryRoots.push(root);
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...createConsumerPaths(root),
+      offline: true,
+    });
+    mocks.cargoTestResult = {
+      error: undefined,
+      signal: null,
+      status: 0,
+      stdout: [
+        'running 1 test',
+        'test bridge_federated_lab_reservation_tests::federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling ... ok',
+        'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured',
+      ].join('\n'),
+      stderr: '',
+    };
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/lacks the exact dynamic proof marker/u);
+    mocks.cargoTestResult = undefined;
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).resolves.toBeDefined();
+  });
+
+  it('revalidates the source lock after Cargo and keeps a failed proof retryable', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-source-drift-'));
+    temporaryRoots.push(root);
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...createConsumerPaths(root),
+      offline: true,
+    });
+    mocks.inspectBaseline
+      .mockReturnValueOnce(passingConsumerSourceBaseline())
+      .mockReturnValueOnce({
+        ...passingConsumerSourceBaseline(),
+        status: 'BLOCKED',
+        errors: ['checkout drift'],
+      })
+      .mockReturnValue(passingConsumerSourceBaseline());
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/differs from the complete source lock/u);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).resolves.toBeDefined();
+  });
+
+  it('authenticates every build tool before its first execution and remains retryable', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-tool-prehash-'));
+    temporaryRoots.push(root);
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...createConsumerPaths(root),
+      offline: true,
+    });
+    mocks.validateToolchain
+      .mockReset()
+      .mockReturnValueOnce({ errors: ['cargo digest drift'] })
+      .mockReturnValue({ errors: [] });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/digests differ before first execution/u);
+    expect(mocks.spawnSync).not.toHaveBeenCalled();
+    expect(mocks.createBuildWorkspace).not.toHaveBeenCalled();
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects post-Cargo tool drift before invoking the changed tool and remains retryable', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-tool-posthash-'));
+    temporaryRoots.push(root);
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...createConsumerPaths(root),
+      offline: true,
+    });
+    mocks.validateToolchain
+      .mockReset()
+      .mockReturnValueOnce({ errors: [] })
+      .mockReturnValueOnce({ errors: [] })
+      .mockReturnValueOnce({ errors: ['rustc digest drift'] })
+      .mockReturnValue({ errors: [] });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/digests differ before first execution/u);
+    expect(mocks.workspaceCleanup).toHaveBeenCalledTimes(1);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects inherited Cargo configuration before Cargo and remains retryable', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const packetProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidence: MINT_EVIDENCE,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const root = mkdtempSync(join(tmpdir(), 'bridge-frontier-cargo-config-'));
+    temporaryRoots.push(root);
+    const input = Object.freeze({
+      proofReceipt: packetProof,
+      ...createConsumerPaths(root),
+      offline: true,
+    });
+    const cargoConfigDirectory = join(root, '.cargo');
+    const cargoConfigPath = join(cargoConfigDirectory, 'config.toml');
+    mkdirSync(cargoConfigDirectory);
+    writeFileSync(cargoConfigPath, '[target.any]\nrunner = "false"\n');
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).rejects.toThrow(/Cargo configuration must be absent/u);
+    expect(mocks.runProcess).not.toHaveBeenCalled();
+    rmSync(cargoConfigPath);
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(input)
+    ).resolves.toBeDefined();
   });
 
   it('consumes the packet proof capability on a cross-target draft', async () => {
@@ -1004,6 +1493,108 @@ function requiredTargetDescriptor(): any {
     throw new Error('packet test target descriptor is missing');
   }
   return mocks.targetDescriptor;
+}
+
+function createConsumerPaths(root: string) {
+  const frontierSourceDirectory = join(root, 'frontier');
+  const consumerCargoTargetDirectory = join(root, 'consumer-cargo-target');
+  const consumerCargoHomeDirectory = join(
+    consumerCargoTargetDirectory,
+    'cargo-home',
+  );
+  const toolDirectory = join(root, 'tools');
+  mkdirSync(frontierSourceDirectory);
+  mkdirSync(consumerCargoTargetDirectory);
+  mkdirSync(consumerCargoHomeDirectory);
+  mkdirSync(toolDirectory);
+  writeFileSync(join(frontierSourceDirectory, 'Cargo.lock'), 'locked-cargo');
+  writeFileSync(
+    join(frontierSourceDirectory, 'rust-toolchain.toml'),
+    '[toolchain]\nchannel = "1.82.0"\n',
+  );
+  const cargoExecutablePath = join(
+    toolDirectory,
+    process.platform === 'win32' ? 'cargo.exe' : 'cargo',
+  );
+  const rustcExecutablePath = join(
+    toolDirectory,
+    process.platform === 'win32' ? 'rustc.exe' : 'rustc',
+  );
+  const gitExecutablePath = join(
+    toolDirectory,
+    process.platform === 'win32' ? 'git.exe' : 'git',
+  );
+  writeFileSync(cargoExecutablePath, 'cargo');
+  writeFileSync(rustcExecutablePath, 'rustc');
+  writeFileSync(gitExecutablePath, 'git');
+  mocks.createBuildWorkspace.mockReturnValue({
+    buildTargetPath: consumerCargoTargetDirectory,
+    cargoHomePath: consumerCargoHomeDirectory,
+    cleanup: mocks.workspaceCleanup,
+  });
+  mocks.consumerCargoTargetDirectory = consumerCargoTargetDirectory;
+  mocks.consumerCargoHomeDirectory = consumerCargoHomeDirectory;
+  return Object.freeze({
+    frontierSourceDirectory,
+    cargoExecutablePath,
+    rustcExecutablePath,
+    gitExecutablePath,
+  });
+}
+
+function passingCargoProcessResult(input: any) {
+  const proofHex = input.env
+    .BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX as string;
+  const proofDigest = createHash('sha256')
+    .update(Buffer.from(proofHex.slice(2), 'hex'))
+    .digest('hex');
+  return {
+    pid: 1234,
+    exitCode: 0 as const,
+    stdout: [
+      `bridge-lab-dynamic-source-proof-sha256=0x${proofDigest}`,
+      'running 1 test',
+      'test bridge_federated_lab_reservation_tests::federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling ... ok',
+      '',
+      'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.01s',
+    ].join('\n'),
+    stderr: '',
+  };
+}
+
+function passingConsumerSourceBaseline() {
+  return Object.freeze({
+    schemaVersion: 1 as const,
+    kind: 'bridge-consensus-source-baseline-report' as const,
+    status: 'PASS' as const,
+    errors: [] as string[],
+    checks: Object.freeze({
+      lockBindingsValidated: true,
+      solidityBuildClosureArtifactsValidated: true,
+      frontierCheckoutRequired: true,
+      frontierCheckoutValidated: true,
+      ergoCheckoutRequired: false,
+      ergoCheckoutValidated: false,
+    }),
+    sourceIdentity: Object.freeze({
+      solidityBuildManifestSha256: '11'.repeat(32),
+      frontierCommit: '22'.repeat(20),
+      frontierPatchSha256: '33'.repeat(32),
+      ergoBaseCommit: '44'.repeat(20),
+      ergoPatchSha256: '55'.repeat(32),
+    }),
+    boundaries: Object.freeze({
+      sidechainFinalityImplemented: false,
+      runtimeCommitmentProducerImplemented: true,
+      grandpaAuthorityTransitionVerificationImplemented: true,
+      hashLinkedGrandpaVerificationImplemented: true,
+      nativeRuntimeCommitmentStateVerificationImplemented: true,
+      nativeFinalizedCheckpointVerificationImplemented: true,
+      nativeRpcProofCodecImplemented: true,
+      trustlessBurnVerificationImplemented: false,
+      gate5Closed: false,
+    }),
+  });
 }
 
 function mintDraftForTarget(
