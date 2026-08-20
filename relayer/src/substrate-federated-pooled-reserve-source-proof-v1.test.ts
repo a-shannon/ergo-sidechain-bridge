@@ -1,4 +1,9 @@
-import { createHash } from 'node:crypto';
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  sign as signMessage,
+} from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
@@ -24,11 +29,15 @@ import {
   buildFederatedPooledReserveSourceProofResultFieldsForProfileV1,
   decodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
   decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
+  deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex,
   deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex,
+  encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex,
   encodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex,
+  encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex,
   encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex,
   verifyFederatedPooledReserveSourceProofSignaturesForProfileV1,
   verifyFederatedPooledReserveSourceProofReferenceConformanceV1,
+  type FederatedPooledReserveSourceProofProfileV1Input,
   type FederatedPooledReserveSourceProofRequestV1,
   type FederatedPooledReserveSourceProofSignatureV1,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
@@ -56,6 +65,18 @@ const statementVector = JSON.parse(
     readonly reservationKeyHex: string;
   };
 };
+
+const referenceSourceProofProfile = Object.freeze({
+  federationEpoch:
+    FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
+  threshold: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
+  signerPublicKeysHex:
+    FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
+  maxValidityBlocks:
+    FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1,
+  verifierProfileIdHex:
+    FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
+}) satisfies FederatedPooledReserveSourceProofProfileV1Input;
 
 describe('substrate federated pooled-reserve source proof V1', () => {
   it('reproduces the exact Rust profile, statement and nested SCALE envelopes', () => {
@@ -103,6 +124,20 @@ describe('substrate federated pooled-reserve source proof V1', () => {
         decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleHex(
           fixture.sourceProofEnvelopeScaleHex,
         ),
+      ),
+    ).toBe(fixture.sourceProofEnvelopeScaleHex);
+    expect(
+      encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        referenceSourceProofProfile,
+        request,
+        { result: fixture.result, signatures: fixture.signatures },
+      ),
+    ).toBe(fixture.proofBytesScaleHex);
+    expect(
+      encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        referenceSourceProofProfile,
+        request,
+        { result: fixture.result, signatures: fixture.signatures },
       ),
     ).toBe(fixture.sourceProofEnvelopeScaleHex);
     expect(conformance.runtimeProfileIdHex).toBe(
@@ -329,7 +364,7 @@ describe('substrate federated pooled-reserve source proof V1', () => {
     ).toThrow(/not minimally encoded/);
   });
 
-  it('rejects a signed result substituted under a different dynamic profile', () => {
+  it('binds a signed result and its SCALE envelopes to the selected profile', () => {
     const request = createRustInteropRequest();
     const fixture = createFederatedPooledReserveSourceProofV1Fixture({ request });
     const substitutedProfile = {
@@ -399,8 +434,226 @@ describe('substrate federated pooled-reserve source proof V1', () => {
         selectedResult,
       ),
     );
+
+    const selectedEnvelope = {
+      result: selectedResult,
+      signatures: selectedSignatures,
+    };
+    const selectedInnerScaleHex =
+      encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        selectedEnvelope,
+      );
+    const selectedOuterScaleHex =
+      encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        selectedEnvelope,
+      );
+    const selectedOuterBytes = Buffer.from(
+      selectedOuterScaleHex.slice(2),
+      'hex',
+    );
+
+    expect(selectedInnerScaleHex.length).toBe(
+      2 + FEDERATED_POOLED_RESERVE_SOURCE_PROOF_INNER_SCALE_BYTES_V1 * 2,
+    );
+    expect(selectedOuterScaleHex.length).toBe(
+      2 + FEDERATED_POOLED_RESERVE_SOURCE_PROOF_OUTER_SCALE_BYTES_V4 * 2,
+    );
+    expect(selectedOuterScaleHex).not.toBe(fixture.sourceProofEnvelopeScaleHex);
+    expect(selectedOuterBytes[0]).toBe(
+      POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4,
+    );
+    expect(`0x${selectedOuterBytes.subarray(1, 33).toString('hex')}`).toBe(
+      selectedProfile.proofSystemIdHex,
+    );
+    expect(`0x${selectedOuterBytes.subarray(33, 65).toString('hex')}`).toBe(
+      selectedProfile.proofProfileIdHex,
+    );
+    expect(`0x${selectedOuterBytes.subarray(83).toString('hex')}`).toBe(
+      selectedInnerScaleHex,
+    );
+
+    expect(() =>
+      encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        {
+          result: selectedResult,
+          signatures: selectedSignatures.map((signature, index) =>
+            index === 0
+              ? { ...signature, signatureHex: mutateBytes(signature.signatureHex) }
+              : signature),
+        },
+      )).toThrow(/signature is invalid/);
+    expect(() =>
+      encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        substitutedProfile,
+        selectedRequest,
+        { result: fixture.result, signatures: fixture.signatures },
+      )).toThrow(/differs from the exact profile-bound request/);
+    expect(() =>
+      encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        substitutedProfile,
+        request,
+        selectedEnvelope,
+      )).toThrow(/does not select the exact federated pooled-reserve proof profile/);
+  });
+
+  it('rejects every request-derived result field mutation before encoding', () => {
+    const request = createRustInteropRequest();
+    const result =
+      buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
+        referenceSourceProofProfile,
+        request,
+      );
+    const fixture = createFederatedPooledReserveSourceProofV1Fixture({ request });
+    const mutations = [
+      ['sourceLockBoxCanonicalBlake2b256Hex',
+        mutateBytes(result.sourceLockBoxCanonicalBlake2b256Hex)],
+      ['reserveTransitionTransactionCanonicalBlake2b256Hex',
+        mutateBytes(result.reserveTransitionTransactionCanonicalBlake2b256Hex)],
+      ['successorReserveBoxCanonicalBlake2b256Hex',
+        mutateBytes(result.successorReserveBoxCanonicalBlake2b256Hex)],
+      ['inclusionProofBlake2b256Hex',
+        mutateBytes(result.inclusionProofBlake2b256Hex)],
+      ['checkpointAncestryBlake2b256Hex',
+        mutateBytes(result.checkpointAncestryBlake2b256Hex)],
+      ['finalityProofBlake2b256Hex',
+        mutateBytes(result.finalityProofBlake2b256Hex)],
+      ['verifierExecutableSha256Hex',
+        mutateBytes(result.verifierExecutableSha256Hex)],
+      ['issuedAtNativeHeight',
+        (BigInt(result.issuedAtNativeHeight) + 1n).toString()],
+      ['expiresAtNativeHeight',
+        (BigInt(result.expiresAtNativeHeight) - 1n).toString()],
+    ] as const;
+
+    for (const [field, value] of mutations) {
+      const mutatedResult = { ...result, [field]: value };
+      expect(() =>
+        deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+          referenceSourceProofProfile,
+          request,
+          mutatedResult,
+        ), field).toThrow(/differs from the exact profile-bound request/);
+      expect(() =>
+        encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+          referenceSourceProofProfile,
+          request,
+          { result: mutatedResult, signatures: fixture.signatures },
+        ), field).toThrow(/differs from the exact profile-bound request/);
+    }
+  });
+
+  it('encodes every allowed signature threshold with canonical SCALE widths', () => {
+    const request = createRustInteropRequest();
+    const signers = deterministicEd25519Signers(8);
+
+    for (let threshold = 2; threshold <= 8; threshold += 1) {
+      const profile = {
+        federationEpoch: 100 + threshold,
+        threshold,
+        signerPublicKeysHex: signers.map(signer => signer.publicKeyHex),
+        maxValidityBlocks:
+          FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1,
+        verifierProfileIdHex:
+          FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
+      };
+      const normalizedProfile =
+        buildFederatedPooledReserveSourceProofProfileV1(profile);
+      const selectedRequest = {
+        ...request,
+        runtimeProfile: {
+          ...request.runtimeProfile,
+          sourceProofProfileIdHex: normalizedProfile.proofProfileIdHex,
+        },
+      };
+      const result =
+        buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
+          profile,
+          selectedRequest,
+        );
+      const resultIdHex =
+        deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(
+          profile,
+          selectedRequest,
+          result,
+        );
+      const attestationDigest = Buffer.from(
+        deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(
+          resultIdHex,
+        ).slice(2),
+        'hex',
+      );
+      const signatures = signers.slice(0, threshold).map(signer => ({
+        signerPublicKeyHex: signer.publicKeyHex,
+        signatureHex: `0x${signMessage(
+          null,
+          attestationDigest,
+          signer.privateKey,
+        ).toString('hex')}`,
+      }));
+      const envelope = { result, signatures };
+      const innerScaleHex =
+        encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          envelope,
+        );
+      const outerScaleHex =
+        encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+          profile,
+          selectedRequest,
+          envelope,
+        );
+      const innerBytes = Buffer.from(innerScaleHex.slice(2), 'hex');
+      const outerBytes = Buffer.from(outerScaleHex.slice(2), 'hex');
+      const expectedInnerBytes = 347 + 1 + (threshold * 96);
+
+      expect(innerBytes.length, `threshold ${threshold}`).toBe(
+        expectedInnerBytes,
+      );
+      expect(innerBytes[347], `threshold ${threshold}`).toBe(threshold << 2);
+      expect(outerBytes.length, `threshold ${threshold}`).toBe(
+        83 + expectedInnerBytes,
+      );
+      expect(outerBytes.readUInt16LE(81), `threshold ${threshold}`).toBe(
+        (expectedInnerBytes << 2) | 1,
+      );
+      expect(`0x${outerBytes.subarray(83).toString('hex')}`).toBe(
+        innerScaleHex,
+      );
+    }
   });
 });
+
+const TEST_ED25519_PKCS8_SEED_PREFIX = Buffer.from(
+  '302e020100300506032b657004220420',
+  'hex',
+);
+
+function deterministicEd25519Signers(count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const privateKey = createPrivateKey({
+      key: Buffer.concat([
+        TEST_ED25519_PKCS8_SEED_PREFIX,
+        Buffer.alloc(32, 0x51 + index),
+      ]),
+      format: 'der',
+      type: 'pkcs8',
+    });
+    return {
+      privateKey,
+      publicKeyHex: `0x${createPublicKey(privateKey)
+        .export({ format: 'der', type: 'spki' })
+        .subarray(-32)
+        .toString('hex')}`,
+    };
+  }).sort((left, right) => left.publicKeyHex.localeCompare(right.publicKeyHex));
+}
 
 function createRustInteropRequest(
   overrides: Partial<Pick<

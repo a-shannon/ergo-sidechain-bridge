@@ -353,34 +353,13 @@ export function buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(
   request: FederatedPooledReserveSourceProofRequestV1,
 ): Readonly<FederatedPooledReserveSourceProofResultFieldsV1> {
   const normalizedProfile = normalizeProofProfileInput(profile);
-  const normalized = normalizeRequestForProfile(normalizedProfile, request);
+  const normalized = buildNormalizedResultForProfileAndRequest(
+    normalizedProfile,
+    normalizeRequestForProfile(normalizedProfile, request),
+  );
   return deepFreeze({
-    formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
-    federationEpoch: normalizedProfile.federationEpoch.toString(),
-    sourceAttestationKeySetDigestHex:
-      normalizedProfile.sourceAttestationKeySetDigestHex,
-    sourceAttestationThreshold: normalizedProfile.threshold,
-    requestDigestHex: deriveRequestDigestForProfile(
-      normalizedProfile,
-      normalized,
-    ),
-    sourceLockBoxCanonicalBlake2b256Hex:
-      blake2b256Hex(normalized.evidence.sourceLockBoxCanonicalHex),
-    reserveTransitionTransactionCanonicalBlake2b256Hex:
-      blake2b256Hex(
-        normalized.evidence.reserveTransitionTransactionCanonicalHex,
-      ),
-    successorReserveBoxCanonicalBlake2b256Hex:
-      blake2b256Hex(normalized.evidence.successorReserveBoxCanonicalHex),
-    inclusionProofBlake2b256Hex:
-      blake2b256Hex(normalized.evidence.inclusionProofCanonicalHex),
-    checkpointAncestryBlake2b256Hex:
-      blake2b256Hex(normalized.evidence.checkpointAncestryCanonicalHex),
-    finalityProofBlake2b256Hex:
-      blake2b256Hex(normalized.evidence.finalityProofCanonicalHex),
-    verifierExecutableSha256Hex:
-      normalized.evidence.verifierExecutableSha256Hex,
-    verifierProfileIdHex: normalizedProfile.verifierProfileIdHex,
+    ...normalized,
+    federationEpoch: normalized.federationEpoch.toString(),
     issuedAtNativeHeight: normalized.issuedAtNativeHeight.toString(),
     expiresAtNativeHeight: normalized.expiresAtNativeHeight.toString(),
   });
@@ -456,6 +435,108 @@ export function verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
     ),
     signatures: normalizedSignatures,
   });
+}
+
+export function encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+  envelope: FederatedPooledReserveSourceProofEnvelopeV1,
+): string {
+  const normalizedProfile = normalizeProofProfileInput(profile);
+  const normalizedRequest = normalizeRequestForProfile(
+    normalizedProfile,
+    request,
+  );
+  const record = exactRecord(
+    envelope,
+    ['result', 'signatures'],
+    'federated pooled-reserve selected-profile source-proof inner envelope',
+  );
+  const result = normalizeResultForProfileAndRequest(
+    normalizedProfile,
+    normalizedRequest,
+    record.result as FederatedPooledReserveSourceProofResultFieldsV1,
+  );
+  const signatures = normalizeSignaturesForProfile(
+    normalizedProfile,
+    record.signatures as readonly FederatedPooledReserveSourceProofSignatureV1[],
+  );
+  const resultIdHex = domainHash(
+    PROOF_RESULT_DOMAIN,
+    encodeResultHashBody(result),
+  );
+  verifySignatures(
+    signatures,
+    deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(resultIdHex),
+  );
+  const bytes = Buffer.concat([
+    encodeResultScale(result),
+    encodeScaleCompactLength(signatures.length),
+    ...signatures.flatMap(signature => [
+      fixedBytes(signature.signerPublicKeyHex, 32, 'signature public key', true),
+      fixedBytes(signature.signatureHex, 64, 'Ed25519 signature'),
+    ]),
+  ]);
+  if (bytes.length !== selectedProfileInnerScaleBytes(normalizedProfile)) {
+    throw new Error(
+      'federated pooled-reserve selected-profile inner SCALE length drifted',
+    );
+  }
+  return hex(bytes);
+}
+
+export function encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+  profile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>,
+  request: FederatedPooledReserveSourceProofRequestV1,
+  envelope: FederatedPooledReserveSourceProofEnvelopeV1,
+): string {
+  const normalizedProfile = normalizeProofProfileInput(profile);
+  const normalizedRequest = normalizeRequestForProfile(
+    normalizedProfile,
+    request,
+  );
+  const proofBytes = fixedBytes(
+    encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+      profile,
+      request,
+      envelope,
+    ),
+    selectedProfileInnerScaleBytes(normalizedProfile),
+    'federated pooled-reserve selected-profile proof bytes',
+  );
+  const compactLength = encodeScaleCompactLength(proofBytes.length);
+  if (compactLength.length !== 2) {
+    throw new Error(
+      'federated pooled-reserve selected-profile proof length is not canonical',
+    );
+  }
+  const bytes = Buffer.concat([
+    Buffer.from([
+      POOLED_RESERVE_MINT_RESERVATION_SOURCE_PROOF_FORMAT_VERSION_V4,
+    ]),
+    fixedBytes(
+      normalizedProfile.proofSystemIdHex,
+      32,
+      'source-proof system ID',
+      true,
+    ),
+    fixedBytes(
+      normalizedProfile.proofProfileIdHex,
+      32,
+      'source-proof profile ID',
+      true,
+    ),
+    uint64Le(normalizedRequest.issuedAtNativeHeight),
+    uint64Le(normalizedRequest.expiresAtNativeHeight),
+    compactLength,
+    proofBytes,
+  ]);
+  if (bytes.length !== 83 + proofBytes.length) {
+    throw new Error(
+      'federated pooled-reserve selected-profile outer SCALE length drifted',
+    );
+  }
+  return hex(bytes);
 }
 
 export function encodeFederatedPooledReserveSourceProofEnvelopeScaleV1Hex(
@@ -1116,15 +1197,55 @@ function normalizeResultForProfileAndRequest(
   value: FederatedPooledReserveSourceProofResultFieldsV1,
 ): NormalizedResult {
   const result = normalizeResultForProfile(profile, value);
-  if (
-    result.requestDigestHex
-      !== deriveRequestDigestForProfile(profile, request)
-  ) {
+  const expected = buildNormalizedResultForProfileAndRequest(profile, request);
+  if (!encodeResultScale(result).equals(encodeResultScale(expected))) {
     throw new Error(
       'federated pooled-reserve source-proof result differs from the exact profile-bound request',
     );
   }
   return result;
+}
+
+function buildNormalizedResultForProfileAndRequest(
+  profile: NormalizedProofProfile,
+  request: NormalizedRequest,
+): NormalizedResult {
+  return deepFreeze({
+    formatVersion: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
+    federationEpoch: profile.federationEpoch,
+    sourceAttestationKeySetDigestHex:
+      profile.sourceAttestationKeySetDigestHex,
+    sourceAttestationThreshold: profile.threshold,
+    requestDigestHex: deriveRequestDigestForProfile(profile, request),
+    sourceLockBoxCanonicalBlake2b256Hex:
+      blake2b256Hex(request.evidence.sourceLockBoxCanonicalHex),
+    reserveTransitionTransactionCanonicalBlake2b256Hex:
+      blake2b256Hex(
+        request.evidence.reserveTransitionTransactionCanonicalHex,
+      ),
+    successorReserveBoxCanonicalBlake2b256Hex:
+      blake2b256Hex(request.evidence.successorReserveBoxCanonicalHex),
+    inclusionProofBlake2b256Hex:
+      blake2b256Hex(request.evidence.inclusionProofCanonicalHex),
+    checkpointAncestryBlake2b256Hex:
+      blake2b256Hex(request.evidence.checkpointAncestryCanonicalHex),
+    finalityProofBlake2b256Hex:
+      blake2b256Hex(request.evidence.finalityProofCanonicalHex),
+    verifierExecutableSha256Hex:
+      request.evidence.verifierExecutableSha256Hex,
+    verifierProfileIdHex: profile.verifierProfileIdHex,
+    issuedAtNativeHeight: request.issuedAtNativeHeight,
+    expiresAtNativeHeight: request.expiresAtNativeHeight,
+  });
+}
+
+function selectedProfileInnerScaleBytes(
+  profile: NormalizedProofProfile,
+): number {
+  const resultBytes = 1 + 8 + 32 + 2 + (9 * 32) + 8 + 8;
+  const signatureCountBytes = 1;
+  const signatureBytes = profile.threshold * (32 + 64);
+  return resultBytes + signatureCountBytes + signatureBytes;
 }
 
 function normalizeInnerEnvelope(
