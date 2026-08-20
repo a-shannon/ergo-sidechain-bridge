@@ -270,6 +270,10 @@ jobs:
         working-directory: relayer
         run: npm run sources:verify -- --ergo-source ../.source-cache/ergo-node
 
+      - name: Test federated LAB no-value reservation admission
+        working-directory: relayer
+        run: npm run federated:lab:reservation:acceptance -- --frontier-source ../substrate-node
+
       - name: Test Frontier bridge commitment producer
         working-directory: substrate-node
         env:

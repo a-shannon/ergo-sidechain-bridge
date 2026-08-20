@@ -54,6 +54,7 @@
     "federated:isolated:peg-in-source-lock:check-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-check-v1.ts",
     "federated:isolated:peg-in-source-lock:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.ts",
     "federated:isolated:peg-in-committed-vault:execute-local": "npm run node:guard && tsx src/scripts/run-substrate-federated-isolated-devnet-peg-in-committed-vault-execution-v1.ts",
+    "federated:lab:reservation:acceptance": "npm run node:guard && tsx src/scripts/run-frontier-federated-lab-reservation-acceptance.ts",
     "compiler:runtime-bundle": "npm run node:guard && tsx src/scripts/prepare-authenticated-v2-runtime-bundle.ts",
     "sidechain:deployment-identity:observe": "tsx src/scripts/observe-deployment-identity.ts",
     "test:roundtrip": "tsx src/scripts/test-roundtrip.ts",

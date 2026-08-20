@@ -65,6 +65,7 @@ const EXPECTED_STEP_NAMES = [
   'Apply tracked Frontier runtime commitment patch',
   'Prepare pinned patched Ergo source',
   'Verify complete source checkouts',
+  'Test federated LAB no-value reservation admission',
   'Test Frontier bridge commitment producer',
   'Test native GRANDPA finality proof verifier',
   'Test native finalized bridge state proof verifier',
@@ -443,6 +444,10 @@ export function validateStandaloneConsensusBuildWorkflow(
     ['Verify complete source checkouts', {
       workingDirectory: 'relayer',
       run: 'npm run sources:verify -- --ergo-source ../.source-cache/ergo-node',
+    }],
+    ['Test federated LAB no-value reservation admission', {
+      workingDirectory: 'relayer',
+      run: 'npm run federated:lab:reservation:acceptance -- --frontier-source ../substrate-node',
     }],
     ['Test Frontier bridge commitment producer', {
       workingDirectory: 'substrate-node',

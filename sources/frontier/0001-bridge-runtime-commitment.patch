@@ -31325,8 +31325,962 @@ index 000000000..a723c778f
 +		account_before.nonce + U256::one(),
 +	);
 +}
+diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
+new file mode 100644
+index 000000000..54e59ad8c
+--- /dev/null
++++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
+@@ -0,0 +1,948 @@
++use std::sync::Arc;
++
++use ethereum::{
++	LegacyTransaction, LegacyTransactionMessage, TransactionAction, TransactionSignature,
++	TransactionV2 as Transaction,
++};
++use fp_rpc::EthereumRuntimeRPCApi as _;
++use futures::executor::block_on;
++use rlp::RlpStream;
++use sc_block_builder::BlockBuilderBuilder;
++use sc_client_api::{BlockBackend, StorageProvider, UsageProvider};
++use sc_consensus::{BlockImport, BlockImportParams, ForkChoiceStrategy, ImportResult, StateAction};
++use scale_codec::{Decode, Encode};
++use sp_api::{Core, ProvideRuntimeApi};
++use sp_block_builder::BlockBuilder as BlockBuilderApi;
++use sp_core::{
++	crypto::Pair as _,
++	ecdsa, ed25519,
++	hashing::{blake2_256, keccak_256, sha2_256},
++	storage::{Storage, StorageKey},
++	H160, H256, U256,
++};
++use sp_runtime::{
++	generic::{Digest, Era},
++	traits::{Block as BlockT, Header as HeaderT},
++	BuildStorage,
++};
++use substrate_test_client::{BlockOrigin, GenesisInit, TestClientBuilder};
++
++use crate::{chain_spec, selected_runtime as lab_runtime, service::HostFunctions};
++use lab_runtime::{
++	bridge_commitment::{
++		ConsumedPooledReserveMintReservationsV4, CurrentPooledReserveMintReservationProfileV4,
++		Error as BridgeCommitmentError, InvalidatedPooledReserveMintReservationsV4,
++		PendingPooledReserveMintReservationKeysV4, PendingPooledReserveMintReservationsV4,
++		PooledReserveMintReservationEnforcementActivatedV4,
++	},
++	peg_in_causal_source_proof::{
++		FederatedSourceProofSignatureV1, FederatedSourceProofSignaturesV1,
++	},
++	peg_in_pooled_reserve_reservation::{
++		derive_federated_pooled_reserve_source_key_set_digest_v1,
++		derive_federated_pooled_reserve_source_proof_attestation_digest_v1,
++		derive_federated_pooled_reserve_source_proof_profile_id_v1,
++		derive_federated_pooled_reserve_source_proof_request_digest_v1,
++		derive_federated_pooled_reserve_source_proof_result_id_v1,
++		derive_pooled_reserve_mint_identity_v4, federated_pooled_reserve_source_proof_system_id_v1,
++		validate_pooled_reserve_mint_reservation_profile_v4,
++		validate_pooled_reserve_mint_reservation_statement_v4,
++		FederatedPooledReserveSourceProofEnvelopeV1,
++		FederatedPooledReserveSourceProofProfileProviderV1,
++		FederatedPooledReserveSourceProofResultV1, PendingPooledReserveMintReservationV4,
++		PooledReserveMintReservationRuntimeProfileV4,
++		PooledReserveMintReservationSourceProofEnvelopeV4,
++		PooledReserveMintReservationStatementBytesV4,
++		FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
++		POOLED_RESERVE_MINT_RESERVATION_FORMAT_VERSION_V4,
++	},
++	AccountId, Block, BridgeCommitmentCall, Header, LabFederatedPooledReserveSourceProofProfileV1,
++	Runtime, RuntimeApi, RuntimeCall, RuntimeEvent, Signature, SignedExtra, SignedPayload,
++	UncheckedExtrinsic, VERSION,
++};
++
++const ALITH_SECRET: [u8; 32] =
++	hex_literal::hex!("5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133");
++const EVM_SECRET: [u8; 32] = ALITH_SECRET;
++const TEST_CHAIN_ID: u64 = 42;
++const TEST_GAS_PRICE: u64 = 1_000_000_000;
++const TEST_GAS_LIMIT: u64 = 5_000_000;
++
++type TestBackend = substrate_test_client::Backend<Block>;
++type TestExecutor = sc_service::client::LocalCallExecutor<
++	Block,
++	TestBackend,
++	sc_executor::WasmExecutor<HostFunctions>,
++>;
++type TestClient = sc_service::client::Client<TestBackend, TestExecutor, Block, RuntimeApi>;
++
++#[derive(Default)]
++struct GenesisParameters {
++	storage: Storage,
++}
++
++impl GenesisInit for GenesisParameters {
++	fn genesis_storage(&self) -> Storage {
++		self.storage.clone()
++	}
++}
++
++struct ReservationFixture {
++	client: Arc<TestClient>,
++	signer: ecdsa::Pair,
++	profile: PooledReserveMintReservationRuntimeProfileV4,
++	statement: PooledReserveMintReservationStatementBytesV4,
++	proof: PooledReserveMintReservationSourceProofEnvelopeV4,
++}
++
++#[test]
++fn federated_lab_reservation_is_admitted_without_evm_state_change() {
++	let fixture = activated_fixture();
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(&fixture.statement)
++		.expect("LAB reservation statement is canonical");
++	let mint_identity = validated.statement.mint_identity;
++	let before = fixture.client.usage_info().chain;
++	let bridge_address = validated.statement.source_intent.bridge_address;
++	let token_address = validated.statement.source_intent.token_address;
++	let recipient = validated.statement.source_intent.recipient;
++	let evm_owner = evm_address(H256::from(EVM_SECRET));
++	let bridge_before = evm_account(&fixture.client, before.best_hash, bridge_address);
++	let token_before = evm_account(&fixture.client, before.best_hash, token_address);
++	let supply_call = abi_call(b"totalSupply()", &[]);
++	let balance_call = abi_call(b"balanceOf(address)", &[H256::from(recipient)]);
++	let processed_call = abi_call(b"processedPegIns(bytes32)", &[mint_identity]);
++	let mint_storage_before = (
++		evm_view(
++			&fixture.client,
++			before.best_hash,
++			evm_owner,
++			token_address,
++			supply_call.clone(),
++		),
++		evm_view(
++			&fixture.client,
++			before.best_hash,
++			evm_owner,
++			token_address,
++			balance_call.clone(),
++		),
++		evm_view(
++			&fixture.client,
++			before.best_hash,
++			evm_owner,
++			bridge_address,
++			processed_call.clone(),
++		),
++	);
++
++	import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(30_000),
++			signed_extrinsic(
++				&fixture.client,
++				&fixture.signer,
++				4,
++				reservation_call(fixture.statement.clone(), fixture.proof.clone()),
++			),
++		],
++	);
++
++	let after = fixture.client.usage_info().chain;
++	assert_eq!(after.best_number, 5);
++	let profile_id = validate_pooled_reserve_mint_reservation_profile_v4(&fixture.profile)
++		.expect("LAB reservation profile is canonical");
++	let pending_bytes = storage_at(
++		&fixture.client,
++		after.best_hash,
++		&StorageKey(
++			PendingPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity)
++				.to_vec(),
++		),
++	)
++	.expect("pending reservation exists after admission");
++	let pending = PendingPooledReserveMintReservationV4::decode(&mut &pending_bytes[..])
++		.expect("pending reservation decodes canonically");
++	assert_eq!(pending.profile_id, profile_id);
++	assert_eq!(pending.statement_bytes, fixture.statement);
++	assert_eq!(pending.statement_id, validated.statement_id);
++	assert_eq!(pending.mint_identity, mint_identity);
++	assert_eq!(pending.reserved_at_native_height, 5);
++	assert_eq!(pending.expires_at_native_height, 36);
++	assert_eq!(
++		storage_at(
++			&fixture.client,
++			after.best_hash,
++			&StorageKey(
++				PendingPooledReserveMintReservationKeysV4::<Runtime>::hashed_key().to_vec(),
++			),
++		),
++		Some(vec![mint_identity].encode()),
++	);
++	assert!(storage_at(
++		&fixture.client,
++		after.best_hash,
++		&StorageKey(
++			ConsumedPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity)
++				.to_vec(),
++		),
++	)
++	.is_none());
++	assert!(storage_at(
++		&fixture.client,
++		after.best_hash,
++		&StorageKey(
++			InvalidatedPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity)
++				.to_vec(),
++		),
++	)
++	.is_none());
++	assert_eq!(
++		evm_account(&fixture.client, after.best_hash, bridge_address),
++		bridge_before
++	);
++	assert_eq!(
++		evm_account(&fixture.client, after.best_hash, token_address),
++		token_before
++	);
++	assert_eq!(
++		(
++			evm_view(
++				&fixture.client,
++				after.best_hash,
++				evm_owner,
++				token_address,
++				supply_call,
++			),
++			evm_view(
++				&fixture.client,
++				after.best_hash,
++				evm_owner,
++				token_address,
++				balance_call,
++			),
++			evm_view(
++				&fixture.client,
++				after.best_hash,
++				evm_owner,
++				bridge_address,
++				processed_call,
++			),
++		),
++		mint_storage_before,
++	);
++	assert!(fixture
++		.client
++		.runtime_api()
++		.current_transaction_statuses(after.best_hash)
++		.expect("LAB Ethereum status query succeeds")
++		.unwrap_or_default()
++		.is_empty());
++
++	assert_dispatch_rejected(
++		&fixture.client,
++		signed_extrinsic(
++			&fixture.client,
++			&fixture.signer,
++			5,
++			reservation_call(fixture.statement, fixture.proof),
++		),
++		BridgeCommitmentError::<Runtime>::PooledReserveMintReservationAlreadyExists,
++		"the same mint identity must not be reserved twice",
++	);
++}
++
++#[test]
++fn federated_lab_reservation_rejects_missing_stale_and_mismatched_authority_inputs() {
++	let missing = unactivated_fixture();
++	assert_dispatch_rejected(
++		&missing.client,
++		signed_extrinsic(
++			&missing.client,
++			&missing.signer,
++			3,
++			reservation_call(missing.statement, missing.proof),
++		),
++		BridgeCommitmentError::<Runtime>::InvalidPooledReserveMintReservationProfile,
++		"reservation without an active profile must reject",
++	);
++
++	let stale = activated_fixture();
++	let stale_proof = fixture_source_proof(&stale.profile, &stale.statement, 4, 5);
++	assert_dispatch_rejected(
++		&stale.client,
++		signed_extrinsic(
++			&stale.client,
++			&stale.signer,
++			4,
++			reservation_call(stale.statement, stale_proof),
++		),
++		BridgeCommitmentError::<Runtime>::InvalidPooledReserveMintReservationSourceProof,
++		"proof expiring at the reservation height must reject",
++	);
++
++	let wrong_profile = activated_fixture();
++	let mut wrong_profile_proof = wrong_profile.proof;
++	wrong_profile_proof.proof_profile_id = H256::repeat_byte(0x99);
++	assert_dispatch_rejected(
++		&wrong_profile.client,
++		signed_extrinsic(
++			&wrong_profile.client,
++			&wrong_profile.signer,
++			4,
++			reservation_call(wrong_profile.statement, wrong_profile_proof),
++		),
++		BridgeCommitmentError::<Runtime>::InvalidPooledReserveMintReservationSourceProof,
++		"a different source-proof profile must reject",
++	);
++
++	let wrong_application = activated_fixture();
++	let sidechain_id = wrong_application
++		.client
++		.block_hash(0)
++		.expect("genesis hash query succeeds")
++		.expect("LAB genesis exists");
++	let mismatched_statement = reservation_statement(
++		sidechain_id,
++		H160::repeat_byte(0x45),
++		H160::repeat_byte(0x55),
++		0x21,
++		0x31,
++	);
++	let mismatched_proof =
++		fixture_source_proof(&wrong_application.profile, &mismatched_statement, 4, 36);
++	assert_dispatch_rejected(
++		&wrong_application.client,
++		signed_extrinsic(
++			&wrong_application.client,
++			&wrong_application.signer,
++			4,
++			reservation_call(mismatched_statement, mismatched_proof),
++		),
++		BridgeCommitmentError::<Runtime>::InvalidPooledReserveMintReservationStatement,
++		"a different bridge application must reject",
++	);
++
++	let wrong_statement = activated_fixture();
++	let wrong_statement_validated =
++		validate_pooled_reserve_mint_reservation_statement_v4(&wrong_statement.statement)
++			.expect("LAB reservation statement is canonical");
++	let sidechain_id = wrong_statement
++		.client
++		.block_hash(0)
++		.expect("genesis hash query succeeds")
++		.expect("LAB genesis exists");
++	let rebound_statement = reservation_statement(
++		sidechain_id,
++		wrong_statement_validated
++			.statement
++			.source_intent
++			.bridge_address,
++		wrong_statement_validated
++			.statement
++			.source_intent
++			.token_address,
++		0x22,
++		0x32,
++	);
++	assert_dispatch_rejected(
++		&wrong_statement.client,
++		signed_extrinsic(
++			&wrong_statement.client,
++			&wrong_statement.signer,
++			4,
++			reservation_call(rebound_statement, wrong_statement.proof),
++		),
++		BridgeCommitmentError::<Runtime>::InvalidPooledReserveMintReservationSourceProof,
++		"a proof bound to a different deposit and reserve transition must reject",
++	);
++}
++
++fn unactivated_fixture() -> ReservationFixture {
++	let signer = ecdsa::Pair::from_seed_slice(&ALITH_SECRET).expect("Alith fixture key is valid");
++	let client = test_client();
++	assert_eq!(AccountId::from(signer.public()), alith_account());
++	let evm_secret = H256::from(EVM_SECRET);
++	let evm_owner = evm_address(evm_secret);
++	let token_address = contract_address(evm_owner, 0);
++	let bridge_address = contract_address(evm_owner, 1);
++	let token_creation_code =
++		hex::decode(include_str!("tests/res/bridge-atomicity/SERG.bin").trim())
++			.expect("pinned SERG creation bytecode decodes");
++	import_built_block(
++		&client,
++		vec![
++			timestamp_extrinsic(6_000),
++			ethereum_extrinsic(signed_legacy_transaction(
++				evm_secret,
++				0,
++				TransactionAction::Create,
++				token_creation_code,
++			)),
++		],
++	);
++
++	let mut bridge_creation_code =
++		hex::decode(include_str!("tests/res/bridge-atomicity/ErgoBridge.bin").trim())
++			.expect("pinned ErgoBridge creation bytecode decodes");
++	bridge_creation_code.extend_from_slice(H256::from(token_address).as_bytes());
++	import_built_block(
++		&client,
++		vec![
++			timestamp_extrinsic(12_000),
++			ethereum_extrinsic(signed_legacy_transaction(
++				evm_secret,
++				1,
++				TransactionAction::Create,
++				bridge_creation_code,
++			)),
++		],
++	);
++	import_built_block(
++		&client,
++		vec![
++			timestamp_extrinsic(18_000),
++			ethereum_extrinsic(signed_legacy_transaction(
++				evm_secret,
++				2,
++				TransactionAction::Call(token_address),
++				abi_call(b"transferOwnership(address)", &[H256::from(bridge_address)]),
++			)),
++		],
++	);
++
++	let deployed = client.usage_info().chain;
++	assert_eq!(deployed.best_number, 3);
++	let sidechain_id = client
++		.block_hash(0)
++		.expect("genesis hash query succeeds")
++		.expect("LAB genesis exists");
++	let statement = reservation_statement(sidechain_id, bridge_address, token_address, 0x21, 0x31);
++	let bridge_runtime_code = client
++		.runtime_api()
++		.account_code_at(deployed.best_hash, bridge_address)
++		.expect("deployed bridge runtime code query succeeds");
++	let token_runtime_code = client
++		.runtime_api()
++		.account_code_at(deployed.best_hash, token_address)
++		.expect("deployed token runtime code query succeeds");
++	assert!(!bridge_runtime_code.is_empty());
++	assert!(!token_runtime_code.is_empty());
++	let profile = runtime_profile(&statement, 4, &bridge_runtime_code, &token_runtime_code);
++	let proof = fixture_source_proof(&profile, &statement, 4, 36);
++	ReservationFixture {
++		client,
++		signer,
++		profile,
++		statement,
++		proof,
++	}
++}
++
++fn activated_fixture() -> ReservationFixture {
++	let fixture = unactivated_fixture();
++	let activate = RuntimeCall::Sudo(pallet_sudo::Call::sudo {
++		call: Box::new(RuntimeCall::BridgeCommitment(
++			BridgeCommitmentCall::activate_pooled_reserve_mint_reservation_profile_v4 {
++				profile: fixture.profile.clone(),
++			},
++		)),
++	});
++	import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(24_000),
++			signed_extrinsic(&fixture.client, &fixture.signer, 3, activate),
++		],
++	);
++	let chain = fixture.client.usage_info().chain;
++	assert_eq!(chain.best_number, 4);
++	let events = runtime_events(&fixture.client, chain.best_hash);
++	assert_eq!(
++		storage_at(
++			&fixture.client,
++			chain.best_hash,
++			&StorageKey(
++				CurrentPooledReserveMintReservationProfileV4::<Runtime>::hashed_key().to_vec(),
++			),
++		),
++		Some(fixture.profile.encode()),
++		"LAB activation events: {events:#?}",
++	);
++	assert_eq!(
++		storage_at(
++			&fixture.client,
++			chain.best_hash,
++			&StorageKey(
++				PooledReserveMintReservationEnforcementActivatedV4::<Runtime>::hashed_key()
++					.to_vec(),
++			),
++		),
++		Some(true.encode()),
++	);
++	assert!(storage_at(
++		&fixture.client,
++		chain.best_hash,
++		&StorageKey(
++			sp_core::twox_128(b"Sudo")
++				.into_iter()
++				.chain(sp_core::twox_128(b"Key"))
++				.collect()
++		),
++	)
++	.is_none());
++	fixture
++}
++
++fn test_client() -> Arc<TestClient> {
++	let mut storage = chain_spec::bridge_federated_lab_config(true)
++		.build_storage()
++		.expect("federated LAB genesis storage builds");
++	storage.top.insert(
++		sp_core::storage::well_known_keys::CODE.to_vec(),
++		lab_runtime::WASM_BINARY
++			.expect("federated LAB runtime WASM is available")
++			.to_vec(),
++	);
++	let mut builder =
++		TestClientBuilder::<Block, TestExecutor, TestBackend, GenesisParameters>::with_default_backend();
++	builder.genesis_init_mut().storage = storage;
++	let (client, _) = builder.build_with_native_executor::<RuntimeApi, _>(None);
++	Arc::new(client)
++}
++
++fn import_built_block(client: &Arc<TestClient>, extrinsics: Vec<UncheckedExtrinsic>) -> H256 {
++	let chain = client.usage_info().chain;
++	let mut builder = BlockBuilderBuilder::new(client.as_ref())
++		.on_parent_block(chain.best_hash)
++		.with_parent_block_number(chain.best_number)
++		.build()
++		.expect("federated LAB block builder starts");
++	for extrinsic in extrinsics {
++		builder
++			.push(extrinsic)
++			.expect("federated LAB extrinsic executes");
++	}
++	let block = builder.build().expect("federated LAB block builds").block;
++	let hash = block.hash();
++	let (header, body) = block.deconstruct();
++	let mut params = BlockImportParams::new(BlockOrigin::File, header);
++	params.body = Some(body);
++	params.state_action = StateAction::Execute;
++	params.fork_choice = Some(ForkChoiceStrategy::Custom(true));
++	let importer = fc_consensus::FrontierBlockImport::new(client.clone(), client.clone());
++	let result = block_on(importer.import_block(params)).expect("federated LAB block imports");
++	assert!(matches!(result, ImportResult::Imported(_)));
++	hash
++}
++
++fn assert_dispatch_rejected(
++	client: &Arc<TestClient>,
++	extrinsic: UncheckedExtrinsic,
++	expected_error: BridgeCommitmentError<Runtime>,
++	message: &str,
++) {
++	let chain = client.usage_info().chain;
++	let header = Header::new(
++		chain.best_number + 1,
++		Default::default(),
++		Default::default(),
++		chain.best_hash,
++		Digest::default(),
++	);
++	let api = client.runtime_api();
++	api.initialize_block(chain.best_hash, &header)
++		.expect("negative LAB overlay initializes");
++	let dispatch = api
++		.apply_extrinsic(chain.best_hash, extrinsic)
++		.expect("negative LAB runtime API executes")
++		.expect("negative LAB extrinsic is structurally valid");
++	assert_eq!(dispatch, Err(expected_error.into()), "{message}");
++	let after = client.usage_info().chain;
++	assert_eq!(
++		after.best_hash, chain.best_hash,
++		"{message}: best hash changed"
++	);
++	assert_eq!(
++		after.best_number, chain.best_number,
++		"{message}: best height changed",
++	);
++}
++
++fn signed_extrinsic(
++	client: &Arc<TestClient>,
++	signer: &ecdsa::Pair,
++	nonce: u32,
++	call: RuntimeCall,
++) -> UncheckedExtrinsic {
++	let genesis_hash = client
++		.block_hash(0)
++		.expect("genesis hash query succeeds")
++		.expect("LAB genesis exists");
++	let extra: SignedExtra = (
++		frame_system::CheckNonZeroSender::<Runtime>::new(),
++		frame_system::CheckSpecVersion::<Runtime>::new(),
++		frame_system::CheckTxVersion::<Runtime>::new(),
++		frame_system::CheckGenesis::<Runtime>::new(),
++		frame_system::CheckMortality::<Runtime>::from(Era::Immortal),
++		frame_system::CheckNonce::<Runtime>::from(nonce),
++		frame_system::CheckWeight::<Runtime>::new(),
++		pallet_transaction_payment::ChargeTransactionPayment::<Runtime>::from(0),
++	);
++	let payload = SignedPayload::from_raw(
++		call.clone(),
++		extra.clone(),
++		(
++			(),
++			VERSION.spec_version,
++			VERSION.transaction_version,
++			genesis_hash,
++			genesis_hash,
++			(),
++			(),
++			(),
++		),
++	);
++	let signature = payload.using_encoded(|bytes| signer.sign_prehashed(&keccak_256(bytes)));
++	UncheckedExtrinsic::new_signed(
++		call,
++		AccountId::from(signer.public()),
++		Signature::new(signature),
++		extra,
++	)
++}
++
++fn timestamp_extrinsic(now: u64) -> UncheckedExtrinsic {
++	UncheckedExtrinsic::new_bare(RuntimeCall::Timestamp(lab_runtime::TimestampCall::set {
++		now,
++	}))
++}
++
++fn ethereum_extrinsic(transaction: Transaction) -> UncheckedExtrinsic {
++	UncheckedExtrinsic::new_bare(RuntimeCall::Ethereum(pallet_ethereum::Call::transact {
++		transaction,
++	}))
++}
++
++fn evm_address(secret: H256) -> H160 {
++	let secret = libsecp256k1::SecretKey::parse_slice(secret.as_bytes())
++		.expect("valid deterministic LAB EVM fixture key");
++	let public = libsecp256k1::PublicKey::from_secret_key(&secret).serialize();
++	H160::from_slice(&keccak_256(&public[1..65])[12..])
++}
++
++fn signed_legacy_transaction(
++	secret: H256,
++	nonce: u64,
++	action: TransactionAction,
++	input: Vec<u8>,
++) -> Transaction {
++	let message = LegacyTransactionMessage {
++		nonce: U256::from(nonce),
++		gas_price: U256::from(TEST_GAS_PRICE),
++		gas_limit: U256::from(TEST_GAS_LIMIT),
++		action,
++		value: U256::zero(),
++		input: input.clone(),
++		chain_id: Some(TEST_CHAIN_ID),
++	};
++	let signing_message = libsecp256k1::Message::parse(message.hash().as_fixed_bytes());
++	let secret_key = libsecp256k1::SecretKey::parse_slice(secret.as_bytes())
++		.expect("valid deterministic LAB EVM fixture key");
++	let (signature, recovery_id) = libsecp256k1::sign(&signing_message, &secret_key);
++	let signature = signature.serialize();
++	let signature = TransactionSignature::new(
++		recovery_id.serialize() as u64 % 2 + TEST_CHAIN_ID * 2 + 35,
++		H256::from_slice(&signature[..32]),
++		H256::from_slice(&signature[32..]),
++	)
++	.expect("valid deterministic LAB EVM transaction signature");
++	Transaction::Legacy(LegacyTransaction {
++		nonce: message.nonce,
++		gas_price: message.gas_price,
++		gas_limit: message.gas_limit,
++		action: message.action,
++		value: message.value,
++		input,
++		signature,
++	})
++}
++
++fn contract_address(sender: H160, nonce: u64) -> H160 {
++	let mut rlp = RlpStream::new_list(2);
++	rlp.append(&sender);
++	rlp.append(&nonce);
++	H160::from_slice(&keccak_256(&rlp.out())[12..])
++}
++
++fn abi_call(signature: &[u8], words: &[H256]) -> Vec<u8> {
++	let mut input = Vec::with_capacity(4 + words.len() * 32);
++	input.extend_from_slice(&keccak_256(signature)[..4]);
++	for word in words {
++		input.extend_from_slice(word.as_bytes());
++	}
++	input
++}
++
++fn reservation_call(
++	statement_bytes: PooledReserveMintReservationStatementBytesV4,
++	source_proof: PooledReserveMintReservationSourceProofEnvelopeV4,
++) -> RuntimeCall {
++	RuntimeCall::BridgeCommitment(BridgeCommitmentCall::reserve_pooled_reserve_mint_v4 {
++		statement_bytes,
++		source_proof,
++	})
++}
++
++fn reservation_statement(
++	sidechain_id: H256,
++	bridge_address: H160,
++	token_address: H160,
++	source_lock_byte: u8,
++	deposit_commitment_byte: u8,
++) -> PooledReserveMintReservationStatementBytesV4 {
++	const SOURCE_INTENT_DOMAIN_V2: &[u8] = b"E2S_PEG_IN_SOURCE_INTENT_V2";
++	const SOURCE_LOCK_OFFSET: usize = 326;
++	const DEPOSIT_COMMITMENT_OFFSET: usize = 390;
++
++	let mut statement =
++		hex::decode(include_str!("tests/res/bridge-atomicity/PooledReserveStatementV4.hex").trim())
++			.expect("pinned pooled-reserve statement seed decodes");
++	statement[66..98].copy_from_slice(sidechain_id.as_bytes());
++	statement[98..118].copy_from_slice(bridge_address.as_bytes());
++	statement[118..138].copy_from_slice(token_address.as_bytes());
++	statement[SOURCE_LOCK_OFFSET..SOURCE_LOCK_OFFSET + 32].fill(source_lock_byte);
++	statement[DEPOSIT_COMMITMENT_OFFSET..DEPOSIT_COMMITMENT_OFFSET + 32]
++		.fill(deposit_commitment_byte);
++	let source_intent_id = domain_hash(SOURCE_INTENT_DOMAIN_V2, &statement[33..262]);
++	statement[262..294].copy_from_slice(source_intent_id.as_bytes());
++	let mint_identity = derive_pooled_reserve_mint_identity_v4(
++		H256::from_slice(&statement[1..33]),
++		H256::from_slice(&statement[SOURCE_LOCK_OFFSET..SOURCE_LOCK_OFFSET + 32]),
++		H256::from_slice(&statement[DEPOSIT_COMMITMENT_OFFSET..DEPOSIT_COMMITMENT_OFFSET + 32]),
++	);
++	statement[294..326].copy_from_slice(mint_identity.as_bytes());
++	let statement: PooledReserveMintReservationStatementBytesV4 = statement
++		.try_into()
++		.expect("LAB reservation statement retains its exact bound");
++	validate_pooled_reserve_mint_reservation_statement_v4(&statement)
++		.expect("LAB reservation statement is canonical");
++	statement
++}
++
++fn runtime_profile(
++	statement: &PooledReserveMintReservationStatementBytesV4,
++	activation_height: u64,
++	bridge_runtime_code: &[u8],
++	token_runtime_code: &[u8],
++) -> PooledReserveMintReservationRuntimeProfileV4 {
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(statement)
++		.expect("LAB reservation statement is canonical");
++	let intent = &validated.statement.source_intent;
++	let source_profile = LabFederatedPooledReserveSourceProofProfileV1::profile();
++	let profile = PooledReserveMintReservationRuntimeProfileV4 {
++		format_version: POOLED_RESERVE_MINT_RESERVATION_FORMAT_VERSION_V4,
++		lineage_profile_id: validated.statement.lineage_profile_id,
++		source_network_id: intent.source_network_id,
++		sidechain_id: intent.sidechain_id,
++		bridge_address: intent.bridge_address,
++		token_address: intent.token_address,
++		bridge_runtime_code_sha256: H256::from(sha2_256(bridge_runtime_code)),
++		bridge_runtime_code_bytes: bridge_runtime_code.len() as u32,
++		token_runtime_code_sha256: H256::from(sha2_256(token_runtime_code)),
++		token_runtime_code_bytes: token_runtime_code.len() as u32,
++		settlement_profile_id: intent.settlement_profile_id,
++		ergo_deposit_finality_policy_id: validated.statement.ergo_deposit_finality_policy_id,
++		source_proof_system_id: federated_pooled_reserve_source_proof_system_id_v1(),
++		source_proof_profile_id: derive_federated_pooled_reserve_source_proof_profile_id_v1(
++			&source_profile,
++		)
++		.expect("compiled LAB source-proof profile is canonical"),
++		activation_height,
++		max_pending_blocks: 64,
++	};
++	validate_pooled_reserve_mint_reservation_profile_v4(&profile)
++		.expect("LAB reservation runtime profile is canonical");
++	profile
++}
++
++fn fixture_source_proof(
++	profile: &PooledReserveMintReservationRuntimeProfileV4,
++	statement_bytes: &PooledReserveMintReservationStatementBytesV4,
++	issued_at_native_height: u64,
++	expires_at_native_height: u64,
++) -> PooledReserveMintReservationSourceProofEnvelopeV4 {
++	let source_profile = LabFederatedPooledReserveSourceProofProfileV1::profile();
++	let expected_keys = source_profile.signer_public_keys.to_vec();
++	let fixture_pairs = [0x42, 0x43, 0x41]
++		.into_iter()
++		.map(|seed| ed25519::Pair::from_seed(&[seed; 32]))
++		.collect::<Vec<_>>();
++	let fixture_keys = fixture_pairs
++		.iter()
++		.map(|pair| pair.public().0)
++		.collect::<Vec<_>>();
++	assert_eq!(
++		fixture_keys, expected_keys,
++		"LAB reservation tests require the public reference fixture profile",
++	);
++	let runtime_profile_id = validate_pooled_reserve_mint_reservation_profile_v4(profile)
++		.expect("LAB reservation runtime profile is canonical");
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(statement_bytes)
++		.expect("LAB reservation statement is canonical");
++	let proof_system_id = federated_pooled_reserve_source_proof_system_id_v1();
++	let proof_profile_id =
++		derive_federated_pooled_reserve_source_proof_profile_id_v1(&source_profile)
++			.expect("compiled LAB source-proof profile is canonical");
++	let key_set_digest = derive_federated_pooled_reserve_source_key_set_digest_v1(&source_profile)
++		.expect("compiled LAB source key set is canonical");
++	let statement_bytes_digest = H256::from(blake2_256(statement_bytes));
++	let request_digest = derive_federated_pooled_reserve_source_proof_request_digest_v1(
++		runtime_profile_id,
++		validated.statement_id,
++		statement_bytes_digest,
++		proof_system_id,
++		proof_profile_id,
++		source_profile.federation_epoch,
++		key_set_digest,
++		source_profile.threshold,
++		issued_at_native_height,
++		expires_at_native_height,
++	);
++	let mut finality_preimage = Vec::with_capacity(64);
++	finality_preimage.extend_from_slice(validated.statement.inclusion_header_id.as_bytes());
++	finality_preimage.extend_from_slice(validated.statement.target_header_id.as_bytes());
++	let result = FederatedPooledReserveSourceProofResultV1 {
++		format_version: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
++		federation_epoch: source_profile.federation_epoch,
++		source_attestation_key_set_digest: key_set_digest,
++		source_attestation_threshold: source_profile.threshold,
++		request_digest,
++		source_lock_box_canonical_blake2b256: H256::from(blake2_256(
++			validated.statement.source_lock_box_id.as_bytes(),
++		)),
++		reserve_transition_transaction_canonical_blake2b256: H256::from(blake2_256(
++			validated
++				.statement
++				.reserve_transition_transaction_id
++				.as_bytes(),
++		)),
++		successor_reserve_box_canonical_blake2b256: H256::from(blake2_256(
++			validated.statement.successor_reserve_box_id.as_bytes(),
++		)),
++		inclusion_proof_blake2b256: H256::from(blake2_256(
++			validated.statement.inclusion_header_id.as_bytes(),
++		)),
++		checkpoint_ancestry_blake2b256: H256::from(blake2_256(
++			validated.statement.target_header_id.as_bytes(),
++		)),
++		finality_proof_blake2b256: H256::from(blake2_256(&finality_preimage)),
++		verifier_executable_sha256: H256::from(sha2_256(
++			b"federated-pooled-reserve-source-proof-lab-node-fixture-v1",
++		)),
++		verifier_profile_id: source_profile.verifier_profile_id,
++		issued_at_native_height,
++		expires_at_native_height,
++	};
++	let result_id = derive_federated_pooled_reserve_source_proof_result_id_v1(&result)
++		.expect("LAB source-proof result is canonical");
++	let attestation_digest =
++		derive_federated_pooled_reserve_source_proof_attestation_digest_v1(result_id);
++	let mut signatures = fixture_pairs
++		.into_iter()
++		.take(2)
++		.map(|pair| FederatedSourceProofSignatureV1 {
++			signer_public_key: pair.public().0,
++			signature: pair.sign(attestation_digest.as_bytes()).0,
++		})
++		.collect::<Vec<_>>();
++	signatures.sort_by_key(|item| item.signer_public_key);
++	let signatures: FederatedSourceProofSignaturesV1 = signatures
++		.try_into()
++		.expect("LAB threshold signatures fit the source-proof bound");
++	let inner = FederatedPooledReserveSourceProofEnvelopeV1 { result, signatures };
++	PooledReserveMintReservationSourceProofEnvelopeV4 {
++		format_version: POOLED_RESERVE_MINT_RESERVATION_FORMAT_VERSION_V4,
++		proof_system_id,
++		proof_profile_id,
++		issued_at_native_height,
++		expires_at_native_height,
++		proof_bytes: inner
++			.encode()
++			.try_into()
++			.expect("LAB source proof fits the runtime bound"),
++	}
++}
++
++fn evm_account(client: &Arc<TestClient>, at: H256, address: H160) -> (Vec<u8>, U256, U256) {
++	let api = client.runtime_api();
++	let code = api
++		.account_code_at(at, address)
++		.expect("LAB EVM code query succeeds");
++	let account = api
++		.account_basic(at, address)
++		.expect("LAB EVM account query succeeds");
++	(code, account.nonce, account.balance)
++}
++
++fn evm_view(
++	client: &Arc<TestClient>,
++	at: H256,
++	source: H160,
++	target: H160,
++	input: Vec<u8>,
++) -> U256 {
++	let info = client
++		.runtime_api()
++		.call(
++			at,
++			source,
++			target,
++			input,
++			U256::zero(),
++			U256::from(500_000u64),
++			None,
++			None,
++			None,
++			false,
++			None,
++		)
++		.expect("LAB EVM view runtime API executes")
++		.expect("LAB EVM view dispatch succeeds");
++	assert!(matches!(info.exit_reason, evm::ExitReason::Succeed(_)));
++	assert_eq!(info.value.len(), 32);
++	U256::from_big_endian(&info.value)
++}
++
++fn storage_at(client: &Arc<TestClient>, at: H256, key: &StorageKey) -> Option<Vec<u8>> {
++	client
++		.storage(at, key)
++		.expect("federated LAB storage query succeeds")
++		.map(|data| data.0)
++}
++
++fn runtime_events(
++	client: &Arc<TestClient>,
++	at: H256,
++) -> Vec<frame_system::EventRecord<RuntimeEvent, H256>> {
++	let bytes = storage_at(
++		client,
++		at,
++		&StorageKey(frame_support::storage::storage_prefix(b"System", b"Events").to_vec()),
++	)
++	.unwrap_or_default();
++	Decode::decode(&mut &bytes[..]).expect("federated LAB runtime events decode")
++}
++
++fn alith_account() -> AccountId {
++	AccountId::from(H160(hex_literal::hex!(
++		"f24ff3a9cf04c71dbc94d0b566f7a27b94566cac"
++	)))
++}
++
++fn domain_hash(domain: &[u8], bytes: &[u8]) -> H256 {
++	let mut preimage = Vec::with_capacity(domain.len() + bytes.len());
++	preimage.extend_from_slice(domain);
++	preimage.extend_from_slice(bytes);
++	H256::from(blake2_256(&preimage))
++}
 diff --git a/template/node/src/chain_spec.rs b/template/node/src/chain_spec.rs
-index 614161fa3..652ca0331 100644
+index 614161fa3..1a7b90483 100644
 --- a/template/node/src/chain_spec.rs
 +++ b/template/node/src/chain_spec.rs
 @@ -10,7 +10,7 @@ use sp_core::ecdsa;
@@ -31381,7 +32335,7 @@ index 614161fa3..652ca0331 100644
  			// Pre-funded accounts
  			vec![
  				AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac")), // Alith
-@@ -103,17 +110,81 @@ pub fn local_testnet_config() -> ChainSpec {
+@@ -103,17 +110,82 @@ pub fn local_testnet_config() -> ChainSpec {
  			],
  			42,
  			false,
@@ -31393,6 +32347,7 @@ index 614161fa3..652ca0331 100644
 +#[cfg(feature = "bridge-federated-v4-lab-runtime")]
 +pub fn bridge_federated_lab_config(enable_manual_seal: bool) -> ChainSpec {
 +	let operator = AccountId::from(hex!("f24FF3a9CF04c71Dbc94D0b566f7A27B94566cac"));
++	let bridge_address = H160(hex!("970951a12F975E6762482ACA81E57D5A2A4e73F4"));
 +	ChainSpec::builder(
 +		WASM_BINARY.expect("LAB runtime WASM not available"),
 +		Default::default(),
@@ -31407,7 +32362,7 @@ index 614161fa3..652ca0331 100644
 +		vec![authority_keys_from_seed("Alice")],
 +		42,
 +		enable_manual_seal,
-+		None,
++		Some(bridge_address),
 +	))
 +	.build()
 +}
@@ -31464,7 +32419,7 @@ index 614161fa3..652ca0331 100644
  ) -> serde_json::Value {
  	let evm_accounts = {
  		let mut map = BTreeMap::new();
-@@ -159,8 +230,8 @@ fn testnet_genesis(
+@@ -159,8 +231,8 @@ fn testnet_genesis(
  		map
  	};
  
@@ -31475,7 +32430,7 @@ index 614161fa3..652ca0331 100644
  		"balances": {
  			"balances": endowed_accounts
  				.iter()
-@@ -173,5 +244,39 @@ fn testnet_genesis(
+@@ -173,5 +245,39 @@ fn testnet_genesis(
  		"evmChainId": { "chainId": chain_id },
  		"evm": { "accounts": evm_accounts },
  		"manualSeal": { "enable": enable_manual_seal }
@@ -31584,7 +32539,7 @@ index 2217ea21a..739e6ff67 100644
  			let runner = cli.create_runner(cmd)?;
  			match cmd {
 diff --git a/template/node/src/main.rs b/template/node/src/main.rs
-index 0bb5dad17..9bdb9fe2c 100644
+index 0bb5dad17..4598400d7 100644
 --- a/template/node/src/main.rs
 +++ b/template/node/src/main.rs
 @@ -8,6 +8,14 @@
@@ -31602,12 +32557,14 @@ index 0bb5dad17..9bdb9fe2c 100644
  #[cfg(feature = "runtime-benchmarks")]
  mod benchmarking;
  mod chain_spec;
-@@ -18,6 +26,9 @@ mod eth;
+@@ -18,6 +26,11 @@ mod eth;
  mod rpc;
  mod service;
  
 +#[cfg(all(test, not(feature = "bridge-federated-v4-lab-runtime")))]
 +mod bridge_atomicity_tests;
++#[cfg(all(test, feature = "bridge-federated-v4-lab-runtime"))]
++mod bridge_federated_lab_reservation_tests;
 +
  fn main() -> sc_cli::Result<()> {
  	command::run()
