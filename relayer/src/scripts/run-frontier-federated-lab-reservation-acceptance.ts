@@ -4,15 +4,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import {
-  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
-  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1,
-  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX,
-  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
-  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
-  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
-  deriveFederatedPooledReserveSourceProofProfileIdForInputV1Hex,
-  encodeFederatedPooledReserveSourceProofProfileScaleV1Hex,
-} from '../substrate-federated-pooled-reserve-source-proof-v1.js';
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
+} from '../substrate-federated-pooled-reserve-source-proof-profile-v1-fixture.js';
 
 type Arguments = Readonly<{
   frontierSource: string;
@@ -73,30 +67,25 @@ function requireDirectory(value: string, label: string): string {
 }
 
 function referenceProfileEnvironment(): Readonly<Record<string, string>> {
-  const input = {
-    federationEpoch:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
-    threshold: FEDERATED_POOLED_RESERVE_SOURCE_PROOF_THRESHOLD_V1,
-    signerPublicKeysHex:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_SIGNER_PUBLIC_KEYS_V1_HEX,
-    maxValidityBlocks:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_MAX_VALIDITY_BLOCKS_V1,
-    verifierProfileIdHex:
-      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_VERIFIER_PROFILE_ID_V1_HEX,
-  } as const;
-  const profileScaleHex =
-    encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(input);
-  const profileIdHex =
-    deriveFederatedPooledReserveSourceProofProfileIdForInputV1Hex(input);
-  if (profileIdHex !== FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX) {
-    throw new Error('reference federated source-proof profile identity changed');
-  }
-  if ((profileScaleHex.length - 2) / 2 !== 148) {
+  if (
+    !/^0x[0-9a-f]{296}$/.test(
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
+    )
+  ) {
     throw new Error('reference federated source-proof profile SCALE length changed');
   }
+  if (
+    !/^0x[0-9a-f]{64}$/.test(
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
+    )
+  ) {
+    throw new Error('reference federated source-proof profile identity changed');
+  }
   return {
-    BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX: profileScaleHex,
-    BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX: profileIdHex,
+    BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
+    BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
   };
 }
 

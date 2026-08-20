@@ -46,6 +46,10 @@ import {
   createFederatedPooledReserveSourceProofV1Fixture,
   signFederatedPooledReserveSourceProofResultForProfileV1Fixture,
 } from './substrate-federated-pooled-reserve-source-proof-v1.test-helper.js';
+import {
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
+} from './substrate-federated-pooled-reserve-source-proof-profile-v1-fixture.js';
 import type {
   ValidityApplicationPooledReserveMintReservationStatementV4,
 } from './validity-application-pooled-reserve-mint-reservation-v4.js';
@@ -105,14 +109,21 @@ describe('substrate federated pooled-reserve source proof V1', () => {
       '0x7449f60b842b661156c4e51592d5300d3d580c910862f175151a1116820e3a02',
     );
     expect(FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX).toBe(
-      '0x9b0b09bad81ef29e8d132786a8bfb27dc5ccc8444403b2ad4354c9b578c664ba',
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
+    );
+    expect(
+      buildFederatedPooledReserveSourceProofProfileV1(
+        referenceSourceProofProfile,
+      ).proofProfileIdHex,
+    ).toBe(
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
     );
     expect(
       encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
         referenceSourceProofProfile,
       ),
     ).toBe(
-      '0x01010000000000000002000c2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1222fc297792f0b6ffc0bfcfdb7edb0c0aa14e025a365ec0e342e86e3829cb74b6db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d40000000000000000be2efc7e753d2ac3d93a6c3968164568fa1053a47524b475728a56a1f4c813d',
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
     );
     expect(fixture.proofBytesScaleHex.length).toBe(
       2 + FEDERATED_POOLED_RESERVE_SOURCE_PROOF_INNER_SCALE_BYTES_V1 * 2,
