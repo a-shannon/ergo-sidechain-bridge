@@ -24,7 +24,7 @@
     "nodeManifestBlob": "82dc5f4e72862643bcd3779f667340db2a82f4a7",
     "runtimeManifestBlob": "5e21a2017e4656113ec5cfc383ab4a2371652351",
     "patchPath": "sources/frontier/0001-bridge-runtime-commitment.patch",
-    "patchSha256": "069cf64b91e648ef04a2b320aedfa63bd7262583a165370585638f36e8338407",
+    "patchSha256": "f1972eb4ae803a9a6181a6380282e408c4fea0f16590a1c558e709f028b393b5",
     "bridgeAtomicityFixtures": [
       {
         "artifactPath": "solidity/compiled/SERG.bin",
@@ -438,7 +438,7 @@
       {
         "path": "template/node/src/bridge_federated_lab_reservation_tests.rs",
         "status": "added",
-        "patchedBlob": "54e59ad8c4a76456e5edbd56e88419c9f7c97d10"
+        "patchedBlob": "fcf7586b4e97c38058e132221a5ccced0fa272f5"
       },
       {
         "path": "template/node/src/chain_spec.rs",

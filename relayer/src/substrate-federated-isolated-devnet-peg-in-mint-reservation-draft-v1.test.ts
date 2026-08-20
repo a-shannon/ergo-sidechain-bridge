@@ -21,10 +21,18 @@ import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_IDENTITY_V4_HEX,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_ID_V4_HEX,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX,
+} from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1-fixture.js';
 
 const h32 = (byte: string): string => `0x${byte.repeat(32)}`;
 const h20 = (byte: string): string => `0x${byte.repeat(20)}`;
 const FAMILY_ID = h32('11');
+const SIDECHAIN_ID = h32('23');
+const BRIDGE_ADDRESS = '0x970951a12f975e6762482aca81e57d5a2a4e73f4';
+const SERG_CONTRACT_ADDRESS = '0xc01ee7f10ea4af4673cfff62710e1d7792aba8f3';
 const SOURCE_LOCK_ID = h32('12');
 const TRANSITION_ID = h32('13');
 const COMMITMENT = h32('14');
@@ -35,9 +43,9 @@ const TARGET_ID = h32('18');
 const SOURCE_INTENT_HEX = encodePegInSourceIntentV2Hex({
   formatVersion: 2,
   sourceNetworkIdHex: h32('21'),
-  sidechainIdHex: h32('22'),
-  bridgeAddressHex: h20('23'),
-  tokenAddressHex: h20('24'),
+  sidechainIdHex: SIDECHAIN_ID,
+  bridgeAddressHex: BRIDGE_ADDRESS,
+  tokenAddressHex: SERG_CONTRACT_ADDRESS,
   settlementProfileIdHex: h32('25'),
   admissionProfileIdHex: FAMILY_ID,
   sourceAssetIdHex: h32('00'),
@@ -147,6 +155,15 @@ describe('isolated devnet peg-in mint-reservation draft V1', () => {
       },
     });
     expect(draft.statementHex).toHaveLength(2 + 603 * 2);
+    expect(draft.statementHex).toBe(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX,
+    );
+    expect(draft.statementIdHex).toBe(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_ID_V4_HEX,
+    );
+    expect(draft.reservationKeyHex).toBe(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_IDENTITY_V4_HEX,
+    );
     expect(() =>
       assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft)
     ).not.toThrow();

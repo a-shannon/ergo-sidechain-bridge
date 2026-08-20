@@ -1,5 +1,5 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index b786af92f..c9432f903 100644
+index b786af92f464e4aa752034f74ca7b53e6a0b124f..c9432f90358b47a2f1a26a17aa455a7f1e05cff6 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
 @@ -670,6 +670,12 @@ version = "0.2.11"
@@ -325,7 +325,7 @@ index b786af92f..c9432f903 100644
  name = "sc-consensus-manual-seal"
  version = "0.49.0"
 diff --git a/Cargo.toml b/Cargo.toml
-index ffbf86fa1..a1cad761e 100644
+index ffbf86fa13e07a942f81d8bd22c939638b5cc4b9..a1cad761ec6bc529b6dcc4173e0af72e8189a01d 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -1,5 +1,53 @@
@@ -422,7 +422,7 @@ index ffbf86fa1..a1cad761e 100644
  sp-timestamp = { git = "https://github.com/paritytech/polkadot-sdk", tag = "polkadot-stable2412-6", default-features = false }
 diff --git a/bridge/checkpoint-verifier/Cargo.toml b/bridge/checkpoint-verifier/Cargo.toml
 new file mode 100644
-index 000000000..e421b5216
+index 0000000000000000000000000000000000000000..e421b5216abc7b211e1a1b42e5723358591b5937
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/Cargo.toml
 @@ -0,0 +1,40 @@
@@ -468,7 +468,7 @@ index 000000000..e421b5216
 +path = "src/bin/bridge-rpc-proof-codec.rs"
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v2-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v2-verifier.rs
 new file mode 100644
-index 000000000..223e40d8a
+index 0000000000000000000000000000000000000000..223e40d8a8e5784b66dc22aea73c359f9ad251e3
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v2-verifier.rs
 @@ -0,0 +1,44 @@
@@ -518,7 +518,7 @@ index 000000000..223e40d8a
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v3-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v3-verifier.rs
 new file mode 100644
-index 000000000..809c181ae
+index 0000000000000000000000000000000000000000..809c181ae96ed82f092b1addc58fc1dcb55b02d9
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-mint-transition-v3-verifier.rs
 @@ -0,0 +1,44 @@
@@ -568,7 +568,7 @@ index 000000000..809c181ae
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-source-proof-result-v1-producer.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-source-proof-result-v1-producer.rs
 new file mode 100644
-index 000000000..569adb812
+index 0000000000000000000000000000000000000000..569adb812d0c7a6d5eccc10ab56dbe5f2bce891a
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-causal-source-proof-result-v1-producer.rs
 @@ -0,0 +1,35 @@
@@ -609,7 +609,7 @@ index 000000000..569adb812
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-contract-state-v1-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-contract-state-v1-verifier.rs
 new file mode 100644
-index 000000000..c78c2fe08
+index 0000000000000000000000000000000000000000..c78c2fe084654efbfde52764f73a422430e20443
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-contract-state-v1-verifier.rs
 @@ -0,0 +1,44 @@
@@ -659,7 +659,7 @@ index 000000000..c78c2fe08
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-event-v1-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-event-v1-verifier.rs
 new file mode 100644
-index 000000000..d2dbffc83
+index 0000000000000000000000000000000000000000..d2dbffc8392966cc92f1267b27b42e874b55d5ca
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-event-v1-verifier.rs
 @@ -0,0 +1,43 @@
@@ -708,7 +708,7 @@ index 000000000..d2dbffc83
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-execution-identity-v1-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-execution-identity-v1-verifier.rs
 new file mode 100644
-index 000000000..cc7a2685c
+index 0000000000000000000000000000000000000000..cc7a2685cfb4161fb7d2328edb5cbbdaad3075eb
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-execution-identity-v1-verifier.rs
 @@ -0,0 +1,44 @@
@@ -758,7 +758,7 @@ index 000000000..cc7a2685c
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-mint-transition-v1-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-mint-transition-v1-verifier.rs
 new file mode 100644
-index 000000000..c0e48665d
+index 0000000000000000000000000000000000000000..c0e48665dfc40a6244fd513da4a8111b020131eb
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-frontier-mint-transition-v1-verifier.rs
 @@ -0,0 +1,44 @@
@@ -808,7 +808,7 @@ index 000000000..c0e48665d
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-peg-in-runtime-identity-v2-verifier.rs b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-runtime-identity-v2-verifier.rs
 new file mode 100644
-index 000000000..1ae334ba3
+index 0000000000000000000000000000000000000000..1ae334ba3b95d3342a937bbc21f623b87b4b2577
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-peg-in-runtime-identity-v2-verifier.rs
 @@ -0,0 +1,43 @@
@@ -857,7 +857,7 @@ index 000000000..1ae334ba3
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/bridge-rpc-proof-codec.rs b/bridge/checkpoint-verifier/src/bin/bridge-rpc-proof-codec.rs
 new file mode 100644
-index 000000000..ac6136211
+index 0000000000000000000000000000000000000000..ac6136211f2bb97db34df2652e9aed4393a8da82
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/bridge-rpc-proof-codec.rs
 @@ -0,0 +1,61 @@
@@ -924,7 +924,7 @@ index 000000000..ac6136211
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-bridge-checkpoint-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-bridge-checkpoint-fixture.rs
 new file mode 100644
-index 000000000..e6b62c1e0
+index 0000000000000000000000000000000000000000..e6b62c1e05f9136968c0135bb7948322f16c753a
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-bridge-checkpoint-fixture.rs
 @@ -0,0 +1,30 @@
@@ -960,7 +960,7 @@ index 000000000..e6b62c1e0
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v2-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v2-fixture.rs
 new file mode 100644
-index 000000000..be39f104a
+index 0000000000000000000000000000000000000000..be39f104acbd8749e1d5664e2f23747d553d53ff
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v2-fixture.rs
 @@ -0,0 +1,7 @@
@@ -973,7 +973,7 @@ index 000000000..be39f104a
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v3-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v3-fixture.rs
 new file mode 100644
-index 000000000..132d69c1c
+index 0000000000000000000000000000000000000000..132d69c1c5b6ef490d189fd9e1cd0e480c2ede76
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-mint-transition-v3-fixture.rs
 @@ -0,0 +1,7 @@
@@ -986,7 +986,7 @@ index 000000000..132d69c1c
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-source-proof-result-v1-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-source-proof-result-v1-fixture.rs
 new file mode 100644
-index 000000000..45cc4b985
+index 0000000000000000000000000000000000000000..45cc4b9850c66de927d0f2b84431d9b211a16b9c
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-causal-source-proof-result-v1-fixture.rs
 @@ -0,0 +1,7 @@
@@ -999,7 +999,7 @@ index 000000000..45cc4b985
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-contract-state-v1-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-contract-state-v1-fixture.rs
 new file mode 100644
-index 000000000..998ea2cbe
+index 0000000000000000000000000000000000000000..998ea2cbe63099620a00263aee22934cb738ff2b
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-contract-state-v1-fixture.rs
 @@ -0,0 +1,7 @@
@@ -1012,7 +1012,7 @@ index 000000000..998ea2cbe
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-event-v1-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-event-v1-fixture.rs
 new file mode 100644
-index 000000000..c8f60c75e
+index 0000000000000000000000000000000000000000..c8f60c75e41b1d41a258038b95e21041ef984870
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-event-v1-fixture.rs
 @@ -0,0 +1,9 @@
@@ -1027,7 +1027,7 @@ index 000000000..c8f60c75e
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-execution-identity-v1-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-execution-identity-v1-fixture.rs
 new file mode 100644
-index 000000000..4293ac241
+index 0000000000000000000000000000000000000000..4293ac2411243d520ee897abd1c5f81274415a22
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-execution-identity-v1-fixture.rs
 @@ -0,0 +1,9 @@
@@ -1042,7 +1042,7 @@ index 000000000..4293ac241
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-mint-transition-v1-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-mint-transition-v1-fixture.rs
 new file mode 100644
-index 000000000..a6231c25c
+index 0000000000000000000000000000000000000000..a6231c25c476397ceafd77cff132976b0acadab1
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-frontier-mint-transition-v1-fixture.rs
 @@ -0,0 +1,7 @@
@@ -1055,7 +1055,7 @@ index 000000000..a6231c25c
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-runtime-identity-v2-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-runtime-identity-v2-fixture.rs
 new file mode 100644
-index 000000000..bbbda6f80
+index 0000000000000000000000000000000000000000..bbbda6f80a9f780624c5d0ceaf48478459ca9f78
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-runtime-identity-v2-fixture.rs
 @@ -0,0 +1,10 @@
@@ -1071,7 +1071,7 @@ index 000000000..bbbda6f80
 +}
 diff --git a/bridge/checkpoint-verifier/src/bin/generate-peg-in-state-fixture.rs b/bridge/checkpoint-verifier/src/bin/generate-peg-in-state-fixture.rs
 new file mode 100644
-index 000000000..a2b809206
+index 0000000000000000000000000000000000000000..a2b8092065e8af67227d6438e67e0a763f140388
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/bin/generate-peg-in-state-fixture.rs
 @@ -0,0 +1,11 @@
@@ -1088,7 +1088,7 @@ index 000000000..a2b809206
 +}
 diff --git a/bridge/checkpoint-verifier/src/fixture.rs b/bridge/checkpoint-verifier/src/fixture.rs
 new file mode 100644
-index 000000000..63327e8fc
+index 0000000000000000000000000000000000000000..63327e8fc683e06aa09ea1c6e1dc4df52e8d4e2c
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/fixture.rs
 @@ -0,0 +1,396 @@
@@ -1490,7 +1490,7 @@ index 000000000..63327e8fc
 +}
 diff --git a/bridge/checkpoint-verifier/src/lib.rs b/bridge/checkpoint-verifier/src/lib.rs
 new file mode 100644
-index 000000000..d9ef8c55c
+index 0000000000000000000000000000000000000000..d9ef8c55ce6c1c9a0334c821ed821814ebe39aab
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/lib.rs
 @@ -0,0 +1,759 @@
@@ -2255,7 +2255,7 @@ index 000000000..d9ef8c55c
 +}
 diff --git a/bridge/checkpoint-verifier/src/main.rs b/bridge/checkpoint-verifier/src/main.rs
 new file mode 100644
-index 000000000..969359647
+index 0000000000000000000000000000000000000000..969359647274454a238eb6c7164dfbabcfad2e07
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/main.rs
 @@ -0,0 +1,84 @@
@@ -2345,7 +2345,7 @@ index 000000000..969359647
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in.rs b/bridge/checkpoint-verifier/src/peg_in.rs
 new file mode 100644
-index 000000000..591803feb
+index 0000000000000000000000000000000000000000..591803feb43595a86ed75a41b084522f74859147
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in.rs
 @@ -0,0 +1,713 @@
@@ -3064,7 +3064,7 @@ index 000000000..591803feb
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2.rs b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2.rs
 new file mode 100644
-index 000000000..8b5370ef0
+index 0000000000000000000000000000000000000000..8b5370ef0f14dfa8bf85a375d0ab684a4956d9f1
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2.rs
 @@ -0,0 +1,588 @@
@@ -3658,7 +3658,7 @@ index 000000000..8b5370ef0
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2_fixture.rs
 new file mode 100644
-index 000000000..ba38ed9e5
+index 0000000000000000000000000000000000000000..ba38ed9e5b963922bc18531729304a94c2ee0f49
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v2_fixture.rs
 @@ -0,0 +1,513 @@
@@ -4177,7 +4177,7 @@ index 000000000..ba38ed9e5
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3.rs b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3.rs
 new file mode 100644
-index 000000000..e99788438
+index 0000000000000000000000000000000000000000..e99788438232a379db49add4039b1dabea992ae6
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3.rs
 @@ -0,0 +1,698 @@
@@ -4881,7 +4881,7 @@ index 000000000..e99788438
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3_fixture.rs
 new file mode 100644
-index 000000000..9cbe12321
+index 0000000000000000000000000000000000000000..9cbe12321e235665f274c96d6b67b8bb28dbec10
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_causal_mint_transition_v3_fixture.rs
 @@ -0,0 +1,686 @@
@@ -5573,7 +5573,7 @@ index 000000000..9cbe12321
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1.rs b/bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1.rs
 new file mode 100644
-index 000000000..cf3ba369c
+index 0000000000000000000000000000000000000000..cf3ba369c97ad60c04e6e34dd27d2f50be677711
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1.rs
 @@ -0,0 +1,749 @@
@@ -6328,7 +6328,7 @@ index 000000000..cf3ba369c
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1_fixture.rs
 new file mode 100644
-index 000000000..2c5e6b666
+index 0000000000000000000000000000000000000000..2c5e6b6669a6354546a8569a0d561e2e1dbdd9ae
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_causal_source_proof_result_v1_fixture.rs
 @@ -0,0 +1,109 @@
@@ -6443,7 +6443,7 @@ index 000000000..2c5e6b666
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_fixture.rs
 new file mode 100644
-index 000000000..681571a12
+index 0000000000000000000000000000000000000000..681571a124747396e6abd4b77d811a5edc4529d6
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_fixture.rs
 @@ -0,0 +1,280 @@
@@ -6729,7 +6729,7 @@ index 000000000..681571a12
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1.rs
 new file mode 100644
-index 000000000..782578691
+index 0000000000000000000000000000000000000000..782578691603ef2334a3e8e4118cf102228a7ff5
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1.rs
 @@ -0,0 +1,734 @@
@@ -7469,7 +7469,7 @@ index 000000000..782578691
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1_fixture.rs
 new file mode 100644
-index 000000000..74fcaf14e
+index 0000000000000000000000000000000000000000..74fcaf14e32309e5b284701d5bfffde049b742bb
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_contract_state_v1_fixture.rs
 @@ -0,0 +1,405 @@
@@ -7880,7 +7880,7 @@ index 000000000..74fcaf14e
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_event_v1.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_event_v1.rs
 new file mode 100644
-index 000000000..ca74e49c6
+index 0000000000000000000000000000000000000000..ca74e49c604b217fed30a4cd3d38305e663eb197
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_event_v1.rs
 @@ -0,0 +1,458 @@
@@ -8344,7 +8344,7 @@ index 000000000..ca74e49c6
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_event_v1_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_event_v1_fixture.rs
 new file mode 100644
-index 000000000..3708cb4ee
+index 0000000000000000000000000000000000000000..3708cb4eee7f11efb3f7f0c447f9b69b2f266adf
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_event_v1_fixture.rs
 @@ -0,0 +1,295 @@
@@ -8645,7 +8645,7 @@ index 000000000..3708cb4ee
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1.rs
 new file mode 100644
-index 000000000..23cc6f61c
+index 0000000000000000000000000000000000000000..23cc6f61c6ca98deed6f74ed9506347e90c333bb
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1.rs
 @@ -0,0 +1,751 @@
@@ -9402,7 +9402,7 @@ index 000000000..23cc6f61c
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1_fixture.rs
 new file mode 100644
-index 000000000..8f42b9ac6
+index 0000000000000000000000000000000000000000..8f42b9ac6ddade5a1a650e6b6f513d503b9a9a5c
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_execution_identity_v1_fixture.rs
 @@ -0,0 +1,261 @@
@@ -9669,7 +9669,7 @@ index 000000000..8f42b9ac6
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1.rs
 new file mode 100644
-index 000000000..b5ce9b8f3
+index 0000000000000000000000000000000000000000..b5ce9b8f3e87522debf20e26712770de0a9155fb
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1.rs
 @@ -0,0 +1,806 @@
@@ -10481,7 +10481,7 @@ index 000000000..b5ce9b8f3
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1_fixture.rs
 new file mode 100644
-index 000000000..4ae4fcebb
+index 0000000000000000000000000000000000000000..4ae4fcebbfcc1cc913d91a00ada8765210888cf0
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_frontier_mint_transition_v1_fixture.rs
 @@ -0,0 +1,849 @@
@@ -11336,7 +11336,7 @@ index 000000000..4ae4fcebb
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2.rs b/bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2.rs
 new file mode 100644
-index 000000000..23c3f1a5a
+index 0000000000000000000000000000000000000000..23c3f1a5a1e1801c2c55d97847bc2be0d4663148
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2.rs
 @@ -0,0 +1,881 @@
@@ -12223,7 +12223,7 @@ index 000000000..23c3f1a5a
 +}
 diff --git a/bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2_fixture.rs b/bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2_fixture.rs
 new file mode 100644
-index 000000000..4832766f9
+index 0000000000000000000000000000000000000000..4832766f9e947a9a2f95043e81d126bbfb25eb02
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/peg_in_runtime_identity_v2_fixture.rs
 @@ -0,0 +1,293 @@
@@ -12522,7 +12522,7 @@ index 000000000..4832766f9
 +}
 diff --git a/bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4.rs b/bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4.rs
 new file mode 100644
-index 000000000..cae1b69ac
+index 0000000000000000000000000000000000000000..cae1b69ac8759f82adcb817d54e57fd63dc43bae
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4.rs
 @@ -0,0 +1,562 @@
@@ -13090,7 +13090,7 @@ index 000000000..cae1b69ac
 +}
 diff --git a/bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4_fixture.rs b/bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4_fixture.rs
 new file mode 100644
-index 000000000..d4f654368
+index 0000000000000000000000000000000000000000..d4f6543683150ada26cd8832ed5eb3aeb2500204
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/pooled_reserve_mint_reservation_state_v4_fixture.rs
 @@ -0,0 +1,319 @@
@@ -13415,7 +13415,7 @@ index 000000000..d4f654368
 +}
 diff --git a/bridge/checkpoint-verifier/src/rpc_codec.rs b/bridge/checkpoint-verifier/src/rpc_codec.rs
 new file mode 100644
-index 000000000..d4ab4342b
+index 0000000000000000000000000000000000000000..d4ab4342bc43943730033ff30cdb120af617e541
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/src/rpc_codec.rs
 @@ -0,0 +1,557 @@
@@ -13978,7 +13978,7 @@ index 000000000..d4ab4342b
 +}
 diff --git a/bridge/checkpoint-verifier/tests/cli.rs b/bridge/checkpoint-verifier/tests/cli.rs
 new file mode 100644
-index 000000000..4382936c1
+index 0000000000000000000000000000000000000000..4382936c1184a9a09cbe63357b1062b5bd255347
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/cli.rs
 @@ -0,0 +1,107 @@
@@ -14091,7 +14091,7 @@ index 000000000..4382936c1
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs
 new file mode 100644
-index 000000000..d8bd6edfd
+index 0000000000000000000000000000000000000000..d8bd6edfd625a50dfcac83a4aa76ef9f4caa15bb
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs
 @@ -0,0 +1,54 @@
@@ -14151,7 +14151,7 @@ index 000000000..d8bd6edfd
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v3_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v3_cli.rs
 new file mode 100644
-index 000000000..116b3b869
+index 0000000000000000000000000000000000000000..116b3b86991ae7d861d4478dbef5c8a64f67e888
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v3_cli.rs
 @@ -0,0 +1,54 @@
@@ -14211,7 +14211,7 @@ index 000000000..116b3b869
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_causal_source_proof_result_v1_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_causal_source_proof_result_v1_cli.rs
 new file mode 100644
-index 000000000..96e5a4b1d
+index 0000000000000000000000000000000000000000..96e5a4b1d56cd752f3392923981163e188cc7c37
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_causal_source_proof_result_v1_cli.rs
 @@ -0,0 +1,166 @@
@@ -14383,7 +14383,7 @@ index 000000000..96e5a4b1d
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_frontier_contract_state_v1_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_frontier_contract_state_v1_cli.rs
 new file mode 100644
-index 000000000..f1b74b578
+index 0000000000000000000000000000000000000000..f1b74b5782818bbe293f8bdd73b9d91dcd331a17
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_frontier_contract_state_v1_cli.rs
 @@ -0,0 +1,54 @@
@@ -14443,7 +14443,7 @@ index 000000000..f1b74b578
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_frontier_event_v1_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_frontier_event_v1_cli.rs
 new file mode 100644
-index 000000000..072153f30
+index 0000000000000000000000000000000000000000..072153f30d36a5934fdc5d6ab670e2cd16499a97
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_frontier_event_v1_cli.rs
 @@ -0,0 +1,27 @@
@@ -14476,7 +14476,7 @@ index 000000000..072153f30
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_frontier_execution_identity_v1_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_frontier_execution_identity_v1_cli.rs
 new file mode 100644
-index 000000000..18d2b12fc
+index 0000000000000000000000000000000000000000..18d2b12fca25621736ebdffab5d0011ec907688d
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_frontier_execution_identity_v1_cli.rs
 @@ -0,0 +1,52 @@
@@ -14534,7 +14534,7 @@ index 000000000..18d2b12fc
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_frontier_mint_transition_v1_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_frontier_mint_transition_v1_cli.rs
 new file mode 100644
-index 000000000..22c77f6ae
+index 0000000000000000000000000000000000000000..22c77f6ae0299ea290fcd24e4df513838f294a3d
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_frontier_mint_transition_v1_cli.rs
 @@ -0,0 +1,54 @@
@@ -14594,7 +14594,7 @@ index 000000000..22c77f6ae
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_runtime_identity_v2_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_runtime_identity_v2_cli.rs
 new file mode 100644
-index 000000000..97155a4d8
+index 0000000000000000000000000000000000000000..97155a4d8e23bf38a8346fb79ed6d4fa804ef5dc
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/peg_in_runtime_identity_v2_cli.rs
 @@ -0,0 +1,53 @@
@@ -14653,7 +14653,7 @@ index 000000000..97155a4d8
 +}
 diff --git a/bridge/checkpoint-verifier/tests/pooled_reserve_mint_reservation_state_v4_cli.rs b/bridge/checkpoint-verifier/tests/pooled_reserve_mint_reservation_state_v4_cli.rs
 new file mode 100644
-index 000000000..0d31c13f3
+index 0000000000000000000000000000000000000000..0d31c13f311b2b6291cbde4ae70b829c6e8e3dd6
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/pooled_reserve_mint_reservation_state_v4_cli.rs
 @@ -0,0 +1,121 @@
@@ -14780,7 +14780,7 @@ index 000000000..0d31c13f3
 +}
 diff --git a/bridge/checkpoint-verifier/tests/rpc_codec_cli.rs b/bridge/checkpoint-verifier/tests/rpc_codec_cli.rs
 new file mode 100644
-index 000000000..50ae19fd6
+index 0000000000000000000000000000000000000000..50ae19fd6fa689a97ec3c5694f59acb9b7f506d2
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/rpc_codec_cli.rs
 @@ -0,0 +1,66 @@
@@ -14852,7 +14852,7 @@ index 000000000..50ae19fd6
 +}
 diff --git a/bridge/finality-proof/Cargo.toml b/bridge/finality-proof/Cargo.toml
 new file mode 100644
-index 000000000..021463765
+index 0000000000000000000000000000000000000000..021463765760f441fe588f928991af0b6bcd05a7
 --- /dev/null
 +++ b/bridge/finality-proof/Cargo.toml
 @@ -0,0 +1,20 @@
@@ -14878,7 +14878,7 @@ index 000000000..021463765
 +sp-core = { workspace = true, features = ["default"] }
 diff --git a/bridge/finality-proof/src/lib.rs b/bridge/finality-proof/src/lib.rs
 new file mode 100644
-index 000000000..042cc45d9
+index 0000000000000000000000000000000000000000..042cc45d9d59984ad16fec61bd98b7edae2f7dbb
 --- /dev/null
 +++ b/bridge/finality-proof/src/lib.rs
 @@ -0,0 +1,1707 @@
@@ -16591,7 +16591,7 @@ index 000000000..042cc45d9
 +}
 diff --git a/bridge/state-proof/Cargo.toml b/bridge/state-proof/Cargo.toml
 new file mode 100644
-index 000000000..8e4e1f263
+index 0000000000000000000000000000000000000000..8e4e1f26354023d50d43c2c4ba9a18797e4f06bc
 --- /dev/null
 +++ b/bridge/state-proof/Cargo.toml
 @@ -0,0 +1,26 @@
@@ -16623,7 +16623,7 @@ index 000000000..8e4e1f263
 +hex = { workspace = true, features = ["std"] }
 diff --git a/bridge/state-proof/src/lib.rs b/bridge/state-proof/src/lib.rs
 new file mode 100644
-index 000000000..6c5ec45b5
+index 0000000000000000000000000000000000000000..6c5ec45b50c5253424f918a5b4dad3ea543246a0
 --- /dev/null
 +++ b/bridge/state-proof/src/lib.rs
 @@ -0,0 +1,2471 @@
@@ -19100,7 +19100,7 @@ index 000000000..6c5ec45b5
 +}
 diff --git a/bridge/state-proof/src/peg_in.rs b/bridge/state-proof/src/peg_in.rs
 new file mode 100644
-index 000000000..b2153dfed
+index 0000000000000000000000000000000000000000..b2153dfed4cd503c8afcf8844f4d71e12df94f1d
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in.rs
 @@ -0,0 +1,1079 @@
@@ -20185,7 +20185,7 @@ index 000000000..b2153dfed
 +}
 diff --git a/bridge/state-proof/src/peg_in_causal_mint_transition_v2.rs b/bridge/state-proof/src/peg_in_causal_mint_transition_v2.rs
 new file mode 100644
-index 000000000..ccd4ec075
+index 0000000000000000000000000000000000000000..ccd4ec075c7997a74e5d516e3013659aff4c1a39
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_causal_mint_transition_v2.rs
 @@ -0,0 +1,743 @@
@@ -20934,7 +20934,7 @@ index 000000000..ccd4ec075
 +}
 diff --git a/bridge/state-proof/src/peg_in_causal_mint_transition_v3.rs b/bridge/state-proof/src/peg_in_causal_mint_transition_v3.rs
 new file mode 100644
-index 000000000..897218e85
+index 0000000000000000000000000000000000000000..897218e850c454783937bf9b741a5bb50f68b669
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_causal_mint_transition_v3.rs
 @@ -0,0 +1,950 @@
@@ -21890,7 +21890,7 @@ index 000000000..897218e85
 +}
 diff --git a/bridge/state-proof/src/peg_in_frontier_contract_state_v1.rs b/bridge/state-proof/src/peg_in_frontier_contract_state_v1.rs
 new file mode 100644
-index 000000000..51107280f
+index 0000000000000000000000000000000000000000..51107280f55d13174624acf2c22e40290174a31b
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_frontier_contract_state_v1.rs
 @@ -0,0 +1,969 @@
@@ -22865,7 +22865,7 @@ index 000000000..51107280f
 +}
 diff --git a/bridge/state-proof/src/peg_in_frontier_event_v1.rs b/bridge/state-proof/src/peg_in_frontier_event_v1.rs
 new file mode 100644
-index 000000000..45871de80
+index 0000000000000000000000000000000000000000..45871de80f490f41502f77d60d020e962a1285f8
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_frontier_event_v1.rs
 @@ -0,0 +1,1533 @@
@@ -24404,7 +24404,7 @@ index 000000000..45871de80
 +}
 diff --git a/bridge/state-proof/src/peg_in_frontier_execution_identity_v1.rs b/bridge/state-proof/src/peg_in_frontier_execution_identity_v1.rs
 new file mode 100644
-index 000000000..afb36a339
+index 0000000000000000000000000000000000000000..afb36a339ec3aaee77e4e2af99d92e504865e40b
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_frontier_execution_identity_v1.rs
 @@ -0,0 +1,1019 @@
@@ -25429,7 +25429,7 @@ index 000000000..afb36a339
 +}
 diff --git a/bridge/state-proof/src/peg_in_frontier_mint_transition_v1.rs b/bridge/state-proof/src/peg_in_frontier_mint_transition_v1.rs
 new file mode 100644
-index 000000000..5901da3a3
+index 0000000000000000000000000000000000000000..5901da3a316ce0bce5d69c900b5cd7f40930b8c7
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_frontier_mint_transition_v1.rs
 @@ -0,0 +1,482 @@
@@ -25917,7 +25917,7 @@ index 000000000..5901da3a3
 +}
 diff --git a/bridge/state-proof/src/peg_in_runtime_identity_v2.rs b/bridge/state-proof/src/peg_in_runtime_identity_v2.rs
 new file mode 100644
-index 000000000..7181d4846
+index 0000000000000000000000000000000000000000..7181d4846ce2313d6fd8f7bdc99f856c53f493e2
 --- /dev/null
 +++ b/bridge/state-proof/src/peg_in_runtime_identity_v2.rs
 @@ -0,0 +1,947 @@
@@ -26870,7 +26870,7 @@ index 000000000..7181d4846
 +}
 diff --git a/bridge/state-proof/src/pooled_reserve_mint_reservation_state_v4.rs b/bridge/state-proof/src/pooled_reserve_mint_reservation_state_v4.rs
 new file mode 100644
-index 000000000..634d92746
+index 0000000000000000000000000000000000000000..634d927464ef35b2b12538fb80e8e96786192307
 --- /dev/null
 +++ b/bridge/state-proof/src/pooled_reserve_mint_reservation_state_v4.rs
 @@ -0,0 +1,1349 @@
@@ -28224,7 +28224,7 @@ index 000000000..634d92746
 +	}
 +}
 diff --git a/frame/ethereum/src/lib.rs b/frame/ethereum/src/lib.rs
-index 406cc3e57..67e5f44fb 100644
+index 406cc3e571d66cd234bea3f53dc19ec2eaddec92..67e5f44fba39a40fdf194afc49a6fd7723e8817c 100644
 --- a/frame/ethereum/src/lib.rs
 +++ b/frame/ethereum/src/lib.rs
 @@ -181,6 +181,71 @@ pub enum PostLogContent {
@@ -28402,7 +28402,7 @@ index 406cc3e57..67e5f44fb 100644
  		let (weight_limit, proof_size_base_cost) = Self::transaction_weight(&transaction_data);
  		let (base_fee, _) = T::FeeCalculator::min_gas_price();
 diff --git a/frame/ethereum/src/mock.rs b/frame/ethereum/src/mock.rs
-index d14c95e21..a5315d195 100644
+index d14c95e211b8e478e552110bf338bd61dc9ff2ef..a5315d19556d5674ff33c6cf28443a8c21d8ce29 100644
 --- a/frame/ethereum/src/mock.rs
 +++ b/frame/ethereum/src/mock.rs
 @@ -19,6 +19,7 @@
@@ -28513,7 +28513,7 @@ index d14c95e21..a5315d195 100644
  impl fp_self_contained::SelfContainedCall for RuntimeCall {
  	type SignedInfo = H160;
 diff --git a/frame/ethereum/src/tests/mod.rs b/frame/ethereum/src/tests/mod.rs
-index c7b2c813c..7cd1338b5 100644
+index c7b2c813c9442875e3d30cac6b0ee3121c0b3a4a..7cd1338b5b392f0af080dd85d774547802b594a9 100644
 --- a/frame/ethereum/src/tests/mod.rs
 +++ b/frame/ethereum/src/tests/mod.rs
 @@ -16,17 +16,29 @@
@@ -28782,7 +28782,7 @@ index c7b2c813c..7cd1338b5 100644
 +	}
 +}
 diff --git a/template/node/Cargo.toml b/template/node/Cargo.toml
-index 67505c6b5..82dc5f4e7 100644
+index 67505c6b54a852fb861d3eea3c52f6a85b21af7d..82dc5f4e72862643bcd3779f667340db2a82f4a7 100644
 --- a/template/node/Cargo.toml
 +++ b/template/node/Cargo.toml
 @@ -14,6 +14,7 @@ targets = ["x86_64-unknown-linux-gnu"]
@@ -28880,7 +28880,7 @@ index 67505c6b5..82dc5f4e7 100644
 +	"frontier-template-v4-lab-runtime?/runtime-benchmarks",
  ]
 diff --git a/template/node/src/benchmarking.rs b/template/node/src/benchmarking.rs
-index 2dafe1247..5039c705a 100644
+index 2dafe1247b3dd2ffa14270e78047fcc82ffaa7a6..5039c705ae9fe50e52d380179749daf89efd52f5 100644
 --- a/template/node/src/benchmarking.rs
 +++ b/template/node/src/benchmarking.rs
 @@ -11,8 +11,8 @@ use sp_core::{ecdsa, Pair};
@@ -28895,7 +28895,7 @@ index 2dafe1247..5039c705a 100644
  
 diff --git a/template/node/src/bridge_atomicity_tests.rs b/template/node/src/bridge_atomicity_tests.rs
 new file mode 100644
-index 000000000..a723c778f
+index 0000000000000000000000000000000000000000..a723c778f147e4e5b085432d68f8770c218c9a88
 --- /dev/null
 +++ b/template/node/src/bridge_atomicity_tests.rs
 @@ -0,0 +1,2426 @@
@@ -31327,11 +31327,11 @@ index 000000000..a723c778f
 +}
 diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
 new file mode 100644
-index 000000000..54e59ad8c
+index 0000000000000000000000000000000000000000..fcf7586b4e97c38058e132221a5ccced0fa272f5
 --- /dev/null
 +++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
-@@ -0,0 +1,948 @@
-+use std::sync::Arc;
+@@ -0,0 +1,1240 @@
++use std::{env, sync::Arc};
 +
 +use ethereum::{
 +	LegacyTransaction, LegacyTransactionMessage, TransactionAction, TransactionSignature,
@@ -31380,7 +31380,7 @@ index 000000000..54e59ad8c
 +		derive_pooled_reserve_mint_identity_v4, federated_pooled_reserve_source_proof_system_id_v1,
 +		validate_pooled_reserve_mint_reservation_profile_v4,
 +		validate_pooled_reserve_mint_reservation_statement_v4,
-+		FederatedPooledReserveSourceProofEnvelopeV1,
++		ConsumedPooledReserveMintReservationV4, FederatedPooledReserveSourceProofEnvelopeV1,
 +		FederatedPooledReserveSourceProofProfileProviderV1,
 +		FederatedPooledReserveSourceProofResultV1, PendingPooledReserveMintReservationV4,
 +		PooledReserveMintReservationRuntimeProfileV4,
@@ -31586,6 +31586,254 @@ index 000000000..54e59ad8c
 +}
 +
 +#[test]
++fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
++	let fixture = activated_fixture();
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(&fixture.statement)
++		.expect("LAB reservation statement is canonical");
++	let profile_id = validate_pooled_reserve_mint_reservation_profile_v4(&fixture.profile)
++		.expect("LAB reservation profile is canonical");
++	let mint_identity = validated.statement.mint_identity;
++	let bridge_address = validated.statement.source_intent.bridge_address;
++	let token_address = validated.statement.source_intent.token_address;
++	let recipient = validated.statement.source_intent.recipient;
++	let amount = validated.statement.source_intent.amount;
++	let evm_secret = H256::from(EVM_SECRET);
++	let evm_owner = evm_address(evm_secret);
++
++	import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(30_000),
++			signed_extrinsic(
++				&fixture.client,
++				&fixture.signer,
++				4,
++				reservation_call(fixture.statement.clone(), fixture.proof.clone()),
++			),
++		],
++	);
++	let parent = fixture.client.usage_info().chain;
++	assert_eq!(parent.best_number, 5);
++	let pending_key = StorageKey(
++		PendingPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity).to_vec(),
++	);
++	let pending_keys_key =
++		StorageKey(PendingPooledReserveMintReservationKeysV4::<Runtime>::hashed_key().to_vec());
++	let consumed_key = StorageKey(
++		ConsumedPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity).to_vec(),
++	);
++	let invalidated_key = StorageKey(
++		InvalidatedPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity)
++			.to_vec(),
++	);
++	let pending_before = storage_at(&fixture.client, parent.best_hash, &pending_key)
++		.expect("direct-parent reservation exists");
++	let pending_keys_before = storage_at(&fixture.client, parent.best_hash, &pending_keys_key)
++		.expect("direct-parent reservation index exists");
++	let owner_before = fixture
++		.client
++		.runtime_api()
++		.account_basic(parent.best_hash, evm_owner)
++		.expect("LAB EVM owner query succeeds");
++	let supply_call = abi_call(b"totalSupply()", &[]);
++	let balance_call = abi_call(b"balanceOf(address)", &[H256::from(recipient)]);
++	let processed_call = abi_call(b"processedPegIns(bytes32)", &[mint_identity]);
++	let unreserved_mint_identity = H256::repeat_byte(0x91);
++	let unreserved_recipient = H160::repeat_byte(0x92);
++	let unreserved_amount = amount + 1;
++	let unreserved_processed_call =
++		abi_call(b"processedPegIns(bytes32)", &[unreserved_mint_identity]);
++	let unreserved_balance_call =
++		abi_call(b"balanceOf(address)", &[H256::from(unreserved_recipient)]);
++
++	let reserved_transaction = signed_legacy_transaction(
++		evm_secret,
++		owner_before.nonce.low_u64(),
++		TransactionAction::Call(bridge_address),
++		abi_call(
++			b"mintSERG(address,uint256,bytes32)",
++			&[
++				H256::from(recipient),
++				H256::from_low_u64_be(amount),
++				mint_identity,
++			],
++		),
++	);
++	let reserved_transaction_hash = reserved_transaction.hash();
++	let unreserved_transaction = signed_legacy_transaction(
++		evm_secret,
++		owner_before.nonce.low_u64() + 1,
++		TransactionAction::Call(bridge_address),
++		abi_call(
++			b"mintSERG(address,uint256,bytes32)",
++			&[
++				H256::from(unreserved_recipient),
++				H256::from_low_u64_be(unreserved_amount),
++				unreserved_mint_identity,
++			],
++		),
++	);
++	let rejected_extrinsics = vec![
++		timestamp_extrinsic(36_000),
++		ethereum_extrinsic(reserved_transaction.clone()),
++		ethereum_extrinsic(unreserved_transaction),
++	];
++	let mut rejected_builder = BlockBuilderBuilder::new(fixture.client.as_ref())
++		.on_parent_block(parent.best_hash)
++		.with_parent_block_number(parent.best_number)
++		.build()
++		.expect("mixed LAB mint candidate builder starts");
++	for extrinsic in rejected_extrinsics {
++		rejected_builder
++			.push(extrinsic)
++			.expect("mixed LAB mint candidate extrinsic executes before finalization");
++	}
++	let rejection = match rejected_builder.build() {
++		Ok(_) => panic!("an unreserved sibling must reject the complete LAB mint block"),
++		Err(error) => error.to_string(),
++	};
++	assert!(
++		rejection.contains("Execution aborted") || rejection.contains("wasm trap"),
++		"unexpected mixed LAB mint rejection: {rejection}",
++	);
++	let after_rejection = fixture.client.usage_info().chain;
++	assert_eq!(after_rejection.best_hash, parent.best_hash);
++	assert_eq!(after_rejection.best_number, parent.best_number);
++	assert_eq!(
++		storage_at(&fixture.client, after_rejection.best_hash, &pending_key),
++		Some(pending_before),
++	);
++	assert_eq!(
++		storage_at(
++			&fixture.client,
++			after_rejection.best_hash,
++			&pending_keys_key
++		),
++		Some(pending_keys_before),
++	);
++	assert!(storage_at(&fixture.client, after_rejection.best_hash, &consumed_key).is_none());
++	assert!(storage_at(&fixture.client, after_rejection.best_hash, &invalidated_key).is_none());
++	for (target, call) in [
++		(token_address, supply_call.clone()),
++		(token_address, balance_call.clone()),
++		(token_address, unreserved_balance_call.clone()),
++		(bridge_address, processed_call.clone()),
++		(bridge_address, unreserved_processed_call.clone()),
++	] {
++		assert_eq!(
++			evm_view(
++				&fixture.client,
++				after_rejection.best_hash,
++				evm_owner,
++				target,
++				call,
++			),
++			U256::zero(),
++		);
++	}
++
++	let imported_hash = import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(36_000),
++			ethereum_extrinsic(reserved_transaction),
++		],
++	);
++	let after = fixture.client.usage_info().chain;
++	assert_eq!(after.best_hash, imported_hash);
++	assert_eq!(after.best_number, 6);
++	assert!(storage_at(&fixture.client, after.best_hash, &pending_key).is_none());
++	let pending_keys = storage_at(&fixture.client, after.best_hash, &pending_keys_key)
++		.expect("terminal pending index remains encoded");
++	assert_eq!(
++		Vec::<H256>::decode(&mut &pending_keys[..]).expect("terminal pending index decodes"),
++		Vec::<H256>::new(),
++	);
++	let consumed = storage_at(&fixture.client, after.best_hash, &consumed_key)
++		.expect("exact direct-parent mint writes one consumed record");
++	let consumed = ConsumedPooledReserveMintReservationV4::decode(&mut &consumed[..])
++		.expect("consumed LAB reservation decodes");
++	let current_block = fixture
++		.client
++		.runtime_api()
++		.current_block(after.best_hash)
++		.expect("LAB Ethereum block query succeeds")
++		.expect("exact mint block contains one Ethereum block");
++	let statuses = fixture
++		.client
++		.runtime_api()
++		.current_transaction_statuses(after.best_hash)
++		.expect("LAB Ethereum status query succeeds")
++		.expect("exact mint block contains transaction status");
++	assert_eq!(statuses.len(), 1);
++	assert_eq!(statuses[0].transaction_hash, reserved_transaction_hash);
++	assert_eq!(
++		consumed,
++		ConsumedPooledReserveMintReservationV4 {
++			format_version: POOLED_RESERVE_MINT_RESERVATION_FORMAT_VERSION_V4,
++			profile_id,
++			statement_id: validated.statement_id,
++			mint_identity,
++			consumed_at_native_height: u64::from(after.best_number),
++			execution_block_hash: current_block.header.hash(),
++			transaction_hash: reserved_transaction_hash,
++			event_index: 1,
++		},
++	);
++	assert!(storage_at(&fixture.client, after.best_hash, &invalidated_key).is_none());
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			after.best_hash,
++			evm_owner,
++			bridge_address,
++			processed_call,
++		),
++		U256::one(),
++	);
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			after.best_hash,
++			evm_owner,
++			bridge_address,
++			unreserved_processed_call,
++		),
++		U256::zero(),
++	);
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			after.best_hash,
++			evm_owner,
++			token_address,
++			supply_call,
++		),
++		U256::from(amount),
++	);
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			after.best_hash,
++			evm_owner,
++			token_address,
++			balance_call,
++		),
++		U256::from(amount),
++	);
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			after.best_hash,
++			evm_owner,
++			token_address,
++			unreserved_balance_call,
++		),
++		U256::zero(),
++	);
++}
++
++#[test]
 +fn federated_lab_reservation_rejects_missing_stale_and_mismatched_authority_inputs() {
 +	let missing = unactivated_fixture();
 +	assert_dispatch_rejected(
@@ -31630,17 +31878,19 @@ index 000000000..54e59ad8c
 +	);
 +
 +	let wrong_application = activated_fixture();
-+	let sidechain_id = wrong_application
-+		.client
-+		.block_hash(0)
-+		.expect("genesis hash query succeeds")
-+		.expect("LAB genesis exists");
++	let wrong_application_validated =
++		validate_pooled_reserve_mint_reservation_statement_v4(&wrong_application.statement)
++			.expect("LAB reservation statement is canonical");
 +	let mismatched_statement = reservation_statement(
-+		sidechain_id,
++		&wrong_application.statement,
++		wrong_application_validated
++			.statement
++			.source_intent
++			.sidechain_id,
 +		H160::repeat_byte(0x45),
 +		H160::repeat_byte(0x55),
-+		0x21,
-+		0x31,
++		0x12,
++		0x14,
 +	);
 +	let mismatched_proof =
 +		fixture_source_proof(&wrong_application.profile, &mismatched_statement, 4, 36);
@@ -31660,13 +31910,12 @@ index 000000000..54e59ad8c
 +	let wrong_statement_validated =
 +		validate_pooled_reserve_mint_reservation_statement_v4(&wrong_statement.statement)
 +			.expect("LAB reservation statement is canonical");
-+	let sidechain_id = wrong_statement
-+		.client
-+		.block_hash(0)
-+		.expect("genesis hash query succeeds")
-+		.expect("LAB genesis exists");
 +	let rebound_statement = reservation_statement(
-+		sidechain_id,
++		&wrong_statement.statement,
++		wrong_statement_validated
++			.statement
++			.source_intent
++			.sidechain_id,
 +		wrong_statement_validated
 +			.statement
 +			.source_intent
@@ -31746,11 +31995,7 @@ index 000000000..54e59ad8c
 +
 +	let deployed = client.usage_info().chain;
 +	assert_eq!(deployed.best_number, 3);
-+	let sidechain_id = client
-+		.block_hash(0)
-+		.expect("genesis hash query succeeds")
-+		.expect("LAB genesis exists");
-+	let statement = reservation_statement(sidechain_id, bridge_address, token_address, 0x21, 0x31);
++	let statement = reservation_statement_from_environment(bridge_address, token_address);
 +	let bridge_runtime_code = client
 +		.runtime_api()
 +		.account_code_at(deployed.best_hash, bridge_address)
@@ -32027,7 +32272,56 @@ index 000000000..54e59ad8c
 +	})
 +}
 +
++fn reservation_statement_from_environment(
++	bridge_address: H160,
++	token_address: H160,
++) -> PooledReserveMintReservationStatementBytesV4 {
++	let encoded = env::var("BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX")
++		.expect("the LAB wrapper must provide one canonical reservation statement");
++	assert_eq!(encoded, encoded.to_ascii_lowercase());
++	let payload = encoded
++		.strip_prefix("0x")
++		.expect("LAB reservation statement must use the 0x prefix");
++	assert_eq!(payload.len(), 603 * 2);
++	assert!(payload.bytes().all(|byte| byte.is_ascii_hexdigit()));
++	let statement: PooledReserveMintReservationStatementBytesV4 = hex::decode(payload)
++		.expect("LAB reservation statement hex decodes")
++		.try_into()
++		.expect("LAB reservation statement retains its exact bound");
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(&statement)
++		.expect("LAB reservation statement is canonical");
++	assert_eq!(
++		validated.statement.source_intent.bridge_address,
++		bridge_address
++	);
++	assert_eq!(
++		validated.statement.source_intent.token_address,
++		token_address
++	);
++	assert_eq!(
++		validated.statement_id,
++		environment_h256("BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_ID_V4_HEX",),
++	);
++	assert_eq!(
++		validated.statement.mint_identity,
++		environment_h256("BRIDGE_LAB_FEDERATED_MINT_IDENTITY_V4_HEX"),
++	);
++	statement
++}
++
++fn environment_h256(name: &str) -> H256 {
++	let encoded = env::var(name).unwrap_or_else(|_| panic!("the LAB wrapper must provide {name}"));
++	assert_eq!(encoded, encoded.to_ascii_lowercase());
++	let payload = encoded
++		.strip_prefix("0x")
++		.unwrap_or_else(|| panic!("{name} must use the 0x prefix"));
++	assert_eq!(payload.len(), 64);
++	let bytes = hex::decode(payload).unwrap_or_else(|_| panic!("{name} must be canonical hex"));
++	H256::from_slice(&bytes)
++}
++
 +fn reservation_statement(
++	base: &PooledReserveMintReservationStatementBytesV4,
 +	sidechain_id: H256,
 +	bridge_address: H160,
 +	token_address: H160,
@@ -32038,9 +32332,7 @@ index 000000000..54e59ad8c
 +	const SOURCE_LOCK_OFFSET: usize = 326;
 +	const DEPOSIT_COMMITMENT_OFFSET: usize = 390;
 +
-+	let mut statement =
-+		hex::decode(include_str!("tests/res/bridge-atomicity/PooledReserveStatementV4.hex").trim())
-+			.expect("pinned pooled-reserve statement seed decodes");
++	let mut statement = base.to_vec();
 +	statement[66..98].copy_from_slice(sidechain_id.as_bytes());
 +	statement[98..118].copy_from_slice(bridge_address.as_bytes());
 +	statement[118..138].copy_from_slice(token_address.as_bytes());
@@ -32280,7 +32572,7 @@ index 000000000..54e59ad8c
 +	H256::from(blake2_256(&preimage))
 +}
 diff --git a/template/node/src/chain_spec.rs b/template/node/src/chain_spec.rs
-index 614161fa3..1a7b90483 100644
+index 614161fa35457d3f2dec5c00ea0c58a00caa8366..1a7b904839d323546ddd0adac208d773e624912e 100644
 --- a/template/node/src/chain_spec.rs
 +++ b/template/node/src/chain_spec.rs
 @@ -10,7 +10,7 @@ use sp_core::ecdsa;
@@ -32472,7 +32764,7 @@ index 614161fa3..1a7b90483 100644
 +	}
  }
 diff --git a/template/node/src/command.rs b/template/node/src/command.rs
-index 2217ea21a..739e6ff67 100644
+index 2217ea21af4f51f58ba7bae3758409eb267def08..739e6ff6738a4b89ef65c3cc723be2c4d45824f8 100644
 --- a/template/node/src/command.rs
 +++ b/template/node/src/command.rs
 @@ -40,6 +40,13 @@ impl SubstrateCli for Cli {
@@ -32539,7 +32831,7 @@ index 2217ea21a..739e6ff67 100644
  			let runner = cli.create_runner(cmd)?;
  			match cmd {
 diff --git a/template/node/src/main.rs b/template/node/src/main.rs
-index 0bb5dad17..4598400d7 100644
+index 0bb5dad17082a3f3a96771a7d22f0638480b4c46..4598400d7c479de8f9a922072e51d8d8cd939b51 100644
 --- a/template/node/src/main.rs
 +++ b/template/node/src/main.rs
 @@ -8,6 +8,14 @@
@@ -32570,7 +32862,7 @@ index 0bb5dad17..4598400d7 100644
  	command::run()
  }
 diff --git a/template/node/src/rpc/mod.rs b/template/node/src/rpc/mod.rs
-index 7202d997a..e9074c48a 100644
+index 7202d997a813fea79e176adb93553a3da949446b..e9074c48acb5a925c1759a187487604bc7338003 100644
 --- a/template/node/src/rpc/mod.rs
 +++ b/template/node/src/rpc/mod.rs
 @@ -10,7 +10,11 @@ use sc_client_api::{
@@ -32721,7 +33013,7 @@ index 7202d997a..e9074c48a 100644
  		io.merge(
  			// We provide the rpc handler with the sending end of the channel to allow the rpc
 diff --git a/template/node/src/service.rs b/template/node/src/service.rs
-index ef293a129..afe0ef711 100644
+index ef293a1293491cf1cebbc612c23a0c9c14c9eec5..afe0ef7111859d26f30e72667c4014316d1a408e 100644
 --- a/template/node/src/service.rs
 +++ b/template/node/src/service.rs
 @@ -19,7 +19,7 @@ use sp_consensus_aura::sr25519::{AuthorityId as AuraId, AuthorityPair as AuraPai
@@ -32828,7 +33120,7 @@ index ef293a129..afe0ef711 100644
  		}
 diff --git a/template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin b/template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin
 new file mode 100644
-index 000000000..3b94d8414
+index 0000000000000000000000000000000000000000..3b94d8414cde0ee34570d79f075a309c1b1ba7c9
 --- /dev/null
 +++ b/template/node/src/tests/res/bridge-atomicity/ErgoBridge.bin
 @@ -0,0 +1 @@
@@ -32836,7 +33128,7 @@ index 000000000..3b94d8414
 \ No newline at end of file
 diff --git a/template/node/src/tests/res/bridge-atomicity/ErgoBridge.runtime.bin b/template/node/src/tests/res/bridge-atomicity/ErgoBridge.runtime.bin
 new file mode 100644
-index 000000000..a542360b1
+index 0000000000000000000000000000000000000000..a542360b19915949e013f3fe364010d270e1e21e
 --- /dev/null
 +++ b/template/node/src/tests/res/bridge-atomicity/ErgoBridge.runtime.bin
 @@ -0,0 +1 @@
@@ -32844,14 +33136,14 @@ index 000000000..a542360b1
 \ No newline at end of file
 diff --git a/template/node/src/tests/res/bridge-atomicity/PooledReserveStatementV4.hex b/template/node/src/tests/res/bridge-atomicity/PooledReserveStatementV4.hex
 new file mode 100644
-index 000000000..7a1e640d7
+index 0000000000000000000000000000000000000000..7a1e640d7e7a2192f125bc03019deac972d583ed
 --- /dev/null
 +++ b/template/node/src/tests/res/bridge-atomicity/PooledReserveStatementV4.hex
 @@ -0,0 +1 @@
 +04c6ea4346c36acca89d68d771c6114dcb5d6f8a334017bee3de58f2a289f289750211111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222333333333333333333333333333333333333333344444444444444444444444444444444444444445555555555555555555555555555555555555555555555555555555555555555c6ea4346c36acca89d68d771c6114dcb5d6f8a334017bee3de58f2a289f28975000000000000000000000000000000000000000000000000000000000000000000000000001e84809999999999999999999999999999999999999999f03a291d05b31f636af6a8c5ffd514e62afed7f1235926a9695da9c291bc0d33117c1f7904522b0d05ce8603bf6637c161c192fe825687fda868bddd1774592baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaadddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd1818181818181818181818181818181818181818181818181818181818181818eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000001e8480666666666666666666666666666666666666666666666666666666666666666612121212121212121212121212121212121212121212121212121212121212120007a12013131313131313131313131313131313131313131313131313131313131313130007a12a0000000a
 diff --git a/template/node/src/tests/res/bridge-atomicity/SERG.bin b/template/node/src/tests/res/bridge-atomicity/SERG.bin
 new file mode 100644
-index 000000000..d62a83c57
+index 0000000000000000000000000000000000000000..d62a83c577110e4c437c11ab7075e7671d1f4388
 --- /dev/null
 +++ b/template/node/src/tests/res/bridge-atomicity/SERG.bin
 @@ -0,0 +1 @@
@@ -32859,7 +33151,7 @@ index 000000000..d62a83c57
 \ No newline at end of file
 diff --git a/template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin b/template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin
 new file mode 100644
-index 000000000..7f08ffa77
+index 0000000000000000000000000000000000000000..7f08ffa7706b00667eae774d00dc57c59ec24fc6
 --- /dev/null
 +++ b/template/node/src/tests/res/bridge-atomicity/SERG.runtime.bin
 @@ -0,0 +1 @@
@@ -32867,7 +33159,7 @@ index 000000000..7f08ffa77
 \ No newline at end of file
 diff --git a/template/runtime-v4-lab/Cargo.toml b/template/runtime-v4-lab/Cargo.toml
 new file mode 100644
-index 000000000..1ba3e2a02
+index 0000000000000000000000000000000000000000..1ba3e2a023bfb88cff17e5a30e9cdcf0d317a385
 --- /dev/null
 +++ b/template/runtime-v4-lab/Cargo.toml
 @@ -0,0 +1,130 @@
@@ -33003,7 +33295,7 @@ index 000000000..1ba3e2a02
 +]
 diff --git a/template/runtime-v4-lab/build.rs b/template/runtime-v4-lab/build.rs
 new file mode 100644
-index 000000000..557764141
+index 0000000000000000000000000000000000000000..55776414160657ea1b45266bd124fc885707d3c6
 --- /dev/null
 +++ b/template/runtime-v4-lab/build.rs
 @@ -0,0 +1,204 @@
@@ -33213,7 +33505,7 @@ index 000000000..557764141
 +}
 diff --git a/template/runtime-v4-lab/src/lib.rs b/template/runtime-v4-lab/src/lib.rs
 new file mode 100644
-index 000000000..ff511c352
+index 0000000000000000000000000000000000000000..ff511c3528638d311679d855e12e765e42d7eed3
 --- /dev/null
 +++ b/template/runtime-v4-lab/src/lib.rs
 @@ -0,0 +1,92 @@
@@ -33311,7 +33603,7 @@ index 000000000..ff511c352
 +}
 diff --git a/template/runtime-v4-test/Cargo.toml b/template/runtime-v4-test/Cargo.toml
 new file mode 100644
-index 000000000..97f49d953
+index 0000000000000000000000000000000000000000..97f49d9537c115ff1ae2b1af92249f45f88d7b0e
 --- /dev/null
 +++ b/template/runtime-v4-test/Cargo.toml
 @@ -0,0 +1,133 @@
@@ -33450,7 +33742,7 @@ index 000000000..97f49d953
 +]
 diff --git a/template/runtime-v4-test/build.rs b/template/runtime-v4-test/build.rs
 new file mode 100644
-index 000000000..902916486
+index 0000000000000000000000000000000000000000..902916486d5300683b0938601bedf8686f1fe54b
 --- /dev/null
 +++ b/template/runtime-v4-test/build.rs
 @@ -0,0 +1,8 @@
@@ -33464,7 +33756,7 @@ index 000000000..902916486
 +}
 diff --git a/template/runtime-v4-test/src/lib.rs b/template/runtime-v4-test/src/lib.rs
 new file mode 100644
-index 000000000..42da3063d
+index 0000000000000000000000000000000000000000..42da3063de313b98b8ceca92a803b3dd20229bb3
 --- /dev/null
 +++ b/template/runtime-v4-test/src/lib.rs
 @@ -0,0 +1,342 @@
@@ -33811,7 +34103,7 @@ index 000000000..42da3063d
 +	}
 +}
 diff --git a/template/runtime/Cargo.toml b/template/runtime/Cargo.toml
-index fa10710d0..5e21a2017 100644
+index fa10710d06bfc242465d5436ce58f177e2a52635..5e21a2017e4656113ec5cfc383ab4a2371652351 100644
 --- a/template/runtime/Cargo.toml
 +++ b/template/runtime/Cargo.toml
 @@ -14,6 +14,9 @@ targets = ["x86_64-unknown-linux-gnu"]
@@ -33860,7 +34152,7 @@ index fa10710d0..5e21a2017 100644
  	"sp-session/std",
 diff --git a/template/runtime/src/bridge_commitment.rs b/template/runtime/src/bridge_commitment.rs
 new file mode 100644
-index 000000000..ae7e4662c
+index 0000000000000000000000000000000000000000..ae7e4662c780a4be3d99e88a974c5a56ebb131bb
 --- /dev/null
 +++ b/template/runtime/src/bridge_commitment.rs
 @@ -0,0 +1,8102 @@
@@ -41967,7 +42259,7 @@ index 000000000..ae7e4662c
 +	}
 +}
 diff --git a/template/runtime/src/lib.rs b/template/runtime/src/lib.rs
-index 25e840602..819139e9d 100644
+index 25e8406027bbcf8d4f54d03c0135bcaa9b01ed56..819139e9d7c6b61580545782148c2c2e4aa84299 100644
 --- a/template/runtime/src/lib.rs
 +++ b/template/runtime/src/lib.rs
 @@ -6,170 +6,24 @@
@@ -43047,7 +43339,7 @@ index 25e840602..819139e9d 100644
 -}
 diff --git a/template/runtime/src/peg_in_causal_admission.rs b/template/runtime/src/peg_in_causal_admission.rs
 new file mode 100644
-index 000000000..066ceff6c
+index 0000000000000000000000000000000000000000..066ceff6cd44249fbf9806a8fc941e9d5facce82
 --- /dev/null
 +++ b/template/runtime/src/peg_in_causal_admission.rs
 @@ -0,0 +1,503 @@
@@ -43556,7 +43848,7 @@ index 000000000..066ceff6c
 +}
 diff --git a/template/runtime/src/peg_in_causal_source_proof.rs b/template/runtime/src/peg_in_causal_source_proof.rs
 new file mode 100644
-index 000000000..86e985284
+index 0000000000000000000000000000000000000000..86e98528407a1dcecf3ad0aa3ffe321e38634721
 --- /dev/null
 +++ b/template/runtime/src/peg_in_causal_source_proof.rs
 @@ -0,0 +1,740 @@
@@ -44302,7 +44594,7 @@ index 000000000..86e985284
 +}
 diff --git a/template/runtime/src/peg_in_ergo_autolykos_committed_vault.rs b/template/runtime/src/peg_in_ergo_autolykos_committed_vault.rs
 new file mode 100644
-index 000000000..a4fee6702
+index 0000000000000000000000000000000000000000..a4fee6702bbc11c741dbc6753df98239bf2518a3
 --- /dev/null
 +++ b/template/runtime/src/peg_in_ergo_autolykos_committed_vault.rs
 @@ -0,0 +1,782 @@
@@ -45090,7 +45382,7 @@ index 000000000..a4fee6702
 +}
 diff --git a/template/runtime/src/peg_in_ergo_autolykos_committed_vault_runtime_statement.rs b/template/runtime/src/peg_in_ergo_autolykos_committed_vault_runtime_statement.rs
 new file mode 100644
-index 000000000..8a25463b1
+index 0000000000000000000000000000000000000000..8a25463b16f612ce710e51144132939060b8cd03
 --- /dev/null
 +++ b/template/runtime/src/peg_in_ergo_autolykos_committed_vault_runtime_statement.rs
 @@ -0,0 +1,715 @@
@@ -45811,7 +46103,7 @@ index 000000000..8a25463b1
 +}
 diff --git a/template/runtime/src/peg_in_ergo_autolykos_committed_vault_utxo_runtime_statement.rs b/template/runtime/src/peg_in_ergo_autolykos_committed_vault_utxo_runtime_statement.rs
 new file mode 100644
-index 000000000..4b38213eb
+index 0000000000000000000000000000000000000000..4b38213ebbb0bee1f3306eb70f3c3fdf45b6140d
 --- /dev/null
 +++ b/template/runtime/src/peg_in_ergo_autolykos_committed_vault_utxo_runtime_statement.rs
 @@ -0,0 +1,597 @@
@@ -46414,7 +46706,7 @@ index 000000000..4b38213eb
 +}
 diff --git a/template/runtime/src/peg_in_ergo_autolykos_relay_runtime_witness.rs b/template/runtime/src/peg_in_ergo_autolykos_relay_runtime_witness.rs
 new file mode 100644
-index 000000000..0761509ff
+index 0000000000000000000000000000000000000000..0761509ff15d5a6625334e6acfd3441ef2cef456
 --- /dev/null
 +++ b/template/runtime/src/peg_in_ergo_autolykos_relay_runtime_witness.rs
 @@ -0,0 +1,1497 @@
@@ -47917,7 +48209,7 @@ index 000000000..0761509ff
 +}
 diff --git a/template/runtime/src/peg_in_ergo_scorex_transaction_runtime_witness.rs b/template/runtime/src/peg_in_ergo_scorex_transaction_runtime_witness.rs
 new file mode 100644
-index 000000000..bf12a4de5
+index 0000000000000000000000000000000000000000..bf12a4de59cca10c627583d091d4291183ae029c
 --- /dev/null
 +++ b/template/runtime/src/peg_in_ergo_scorex_transaction_runtime_witness.rs
 @@ -0,0 +1,1291 @@
@@ -49214,7 +49506,7 @@ index 000000000..bf12a4de5
 +}
 diff --git a/template/runtime/src/peg_in_ergo_utxo_state_runtime_witness.rs b/template/runtime/src/peg_in_ergo_utxo_state_runtime_witness.rs
 new file mode 100644
-index 000000000..c870a0053
+index 0000000000000000000000000000000000000000..c870a00533acd7224d7316761d2a3d3c578e0c4a
 --- /dev/null
 +++ b/template/runtime/src/peg_in_ergo_utxo_state_runtime_witness.rs
 @@ -0,0 +1,630 @@
@@ -49850,7 +50142,7 @@ index 000000000..c870a0053
 +}
 diff --git a/template/runtime/src/peg_in_pooled_reserve_reservation.rs b/template/runtime/src/peg_in_pooled_reserve_reservation.rs
 new file mode 100644
-index 000000000..8f3b31c10
+index 0000000000000000000000000000000000000000..8f3b31c10e95560a43fe0c9ced3964c924a2b335
 --- /dev/null
 +++ b/template/runtime/src/peg_in_pooled_reserve_reservation.rs
 @@ -0,0 +1,1689 @@
@@ -51545,7 +51837,7 @@ index 000000000..8f3b31c10
 +}
 diff --git a/template/runtime/src/runtime_body.rs b/template/runtime/src/runtime_body.rs
 new file mode 100644
-index 000000000..10daadead
+index 0000000000000000000000000000000000000000..10daadead79e7a25207549097eefd9bc8420c3cd
 --- /dev/null
 +++ b/template/runtime/src/runtime_body.rs
 @@ -0,0 +1,1246 @@
@@ -52797,49 +53089,49 @@ index 000000000..10daadead
 +}
 diff --git a/template/runtime/src/test-vectors/ergo-autolykos-v2-relay-runtime-witness-v1.hex b/template/runtime/src/test-vectors/ergo-autolykos-v2-relay-runtime-witness-v1.hex
 new file mode 100644
-index 000000000..c87ae8379
+index 0000000000000000000000000000000000000000..c87ae837958733894bb4af62a939ce0e7eb8b79b
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/ergo-autolykos-v2-relay-runtime-witness-v1.hex
 @@ -0,0 +1 @@
 +45325341525730310100000400000c3fa874c8b8b84d3bb619839d2105daea6e24b97f7fb2df352954f1935d7e7cc1ab0100000000e10200000001800300000008b80400000000de222a776449ba3424f62222f99646aa900fd8f02d988c957f411e7e1ce8df5c3eb0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175baf1fffd4452177b33c0fb3b7fd9a13b43c9f4621615b7b4c9a8541ca75e27ebb64be12239d9a179026e6cfece52b84d996cfe24244fb45897072ec740f7bdc44000000000000000000000000000000000000000000000000000000000000000103000ce3810000008000000008000000000001d4c00000000000000000000000000000000000000000000000000000011765000000000a000a0000000000000000b0244dfc267baca974a4caee06120321562784303a8a688976ae56170e4d175b00dc03adcdd43e0fb5e00544542929eb1258dec6ec46bca6c7f5b859d70b38ffce74e8f71576136a614564903242e9d8f91f0125a2a2574c0ebb69dae0a4836c6462591e7d132c7a7a9fb3b75e631923f18424bd4fe840ff4d20c574fbfd59902ca4d61939fe8eb2d3749640745e8f1748cbe74b9caed1cfe0bce8a90c6a52bd4ee6981989ceea84df30a030ec67022ffc8bdaf6f9adddcea9ce68954761506a2deac25d3483e71c0578070d5eac80ca38000000000204b680ae52835e22f12fc3c51c4cd9e18852ac4f4a8131be29920678aceeeebebc410cf43b7681f00008000e210000000185e937afc3070f909d000e218000000185ea47434a070d9e1f000e220000000185eb255e6c070ccc23000e228000000185ec290662070d4d6f000e230000000185ecfbb21a070c0d9f000e238000000185edd68ee9070cdcc5000e240000000185ee95477c070d2a65000e248000000185efb4abea070f2ef6010000000185f0a9881a000a00dc03af1fffd4452177b33c0fb3b7fd9a13b43c9f4621615b7b4c9a8541ca75e27ebb4e80d00148f30c53077197ad052e2ff07d919bb9aed0ff4da9b3b66586664f3c3bfa8e9a376e92fb55d6f42cde344b74220897053e54e606e8433c3b8b57b183ef55b17904d9e95523dc30353646612af1b23ba796bd7ee56847813a46de8f2c19c8b6ef84df30a030ec67022ffc8bdaf6f9adddcea9ce68954761506a2deac25d3483e71c0578070e05ef81ca38000000000274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891fb7f9c2a1972dfd2a00dc03834065702aac3e5f8680a5a3555665970ca4b38a945fdba7dd1aae58e8b9a6b26e97ee2c624c4fe840005c639f42141fa8cbcb2995d274bf2f90faa1a863386e5edb65f0017f8820fe3b0c16835b497cea2d8a51345b49f8a720168c04ecfcb93f54cf50bdfaf365118069b0e91be68a9d0e404fb4408508e5af04ffa969696819bad0f184df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef82ca38000000000274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f1fff00169aa8daf000dc0305faef39ee15eefc114f6797552674aae55afdf50c6fc9c7329d124e22c8d38500dd3556148ad47a3e2d28be9c281c70d8e221c2e20921f2f2b45dda443fe9b9c9e63150b78d2a9ac61a0e3c2001ea08f29bce7c93ed8d8a571ee6989f11cda8ad69b91d25d7af8455aca123b123deb4dd49e91f987014334e72ad87f92bdbeb19ceaef784df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef83ca38000000000274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891fcc6e92005087f5cc00dc03f7e111263b3dd393efda226a3d884601f98fe0d800f65b3b8ad739ceba34f8836d074d3eaf43d2b4b509feba1345ccbf32dfcf2184ef0f228b73c4b7dd3cbe5c693a20805ad5b158b6d870587a81e8c4de602f1f4d0f7ed32b25015eb9965317db1b62a80cfc715c8705f785ebd0a4955dac782c802c7cbeffea311a7c8083a219ffabfd84df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef84ca3800000000033133187bde16d8b847923852ac7fe5bfbb50a81f1c040d00850e1f776c18e1b5134f00774df974fb00dc039845cd1217e1df3bf0809d0711fb6820027f64a44dfb3b052106462b91586e9c7c09b1792206736a3da27c0386312b4f84c7784d9ba7c269b1e0d64d959e0e04f1fe63dec3f6994c5f0eb062af37df668428e02cf71ce0377ae5a5d9c164c7039df92bfda3195576bf0db7d1e19e04c740c82ec7d575965112a5a6344497b97419f2848e85df3063cca21fb7d23db5dc7df1bb5eca49619f0590f77c23d0ef9b8fdd63f2514903070e05ef85ca380000000002eeec374f4e660e117fccbfec79e6fe5cdf44ac508fa228bfc654d2973f9bdc9a528f000a74de5d2b00dc030ce718a6bcc0cb02737eb8a5971c6855d7b015491609fb9cc701748cb6be9628e864e7dccda538a215ce70fa26d8ca2f2402eec7d10959884b041d3c59c6110fe59b88ff25489fa5bde1ca07dbaa6d396ab7dc3f73a2a1181b1ffd494e1532550e30592350b2d710c299cf3c6a410625bebdfacc5ed92e4dafb1e87c8d63b53619d5eb9385df30845b1d820dd2833a5b2050fdf24664309cc06b28f4600d48edf9f1c359fd4d9a070e05ef86ca38000000000274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891f7a2400060e27968e00dc035dd4584ffe3913d5562065b51800f1a0cf06a93048acc29db5989a003b1fb3c78d6c4b5eabb99066133d8d887c5442b51dff12a8f3bdd4ccf7d2e397e2c9acfc822ca592d2b300a8de2c34ddfb8079cee702e0ff7e8699a69a32147d445c8c1d5d24b4d628675f71d211ac0677038b68140d14e9c319d8e431d77eca85b7c34219f3a89685df30845b1d820dd2833a5b2050fdf24664309cc06b28f4600d48edf9f1c359fd4d9a070e05ef87ca380000000002eeec374f4e660e117fccbfec79e6fe5cdf44ac508fa228bfc654d2973f9bdc9a3bd714bb4935ff0800dc03332b131874ee1883404cf68f0ae8fec25e0bda6a8a51e26d573cefed3efdc16629b715c2e4874bd90c28a4c1f6921d891361b1a59f2ce6c3be82a7a0a9081e70f37d9848efaf475c9d97cdc2c0aae05462b94c85557922c6ab87ac82aeb6fcef864531b5e1a956be1eedf288b902f07ae372b600f678eebbf0a73b2862011c0e19bac2a085df302a3d01274e33f864137f128b008ba7f7bf7abcd47ac94a0d05f77423e3613e84070e05ef88ca38000000000295facb78290ac2b55f1453204d49df37be5bae9f185ed6704c1ba3ee372280c178ff000a0761c93400dc038c4a6768bd29b3f04b50f9d81581d907171c24be1c31f0d95c0ef3c70f6d35e8170f1658475a319fc6612ea7c34ff8e0094e3b6a9d137759bcefe69e46a865b2e2b7273dbd33d7150394768648a9c93be16d46b3a66faf2f932b9f0cbd5103a0603de5da206b08a71985d60c11129de349422d4dab00031a5d2e0e528e4cdc4219cddea285df30c3ed672b2904c1f9cd3f035f712871970564ad72744bbe77b6c13bd90d8651d9070e05ef89ca38000000000274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891fc65c0009be24ead700dc03d40415c0018bda27de08519f3142b543366781f993088ae37d5e025a3726d694e3bfee792ec525ee232adbc3bfffcc849dfd480d174f6ed13ceed8f15bbcc60b8ac085a735a3f5d4af608bcc94e91189ced6f61895ae00f7f7beb4950c6762f4b7a98256f8d47b222529d1ab6678dd5ea6a65a4f7c373e0b5c77ed1f72989c8a199a90a685df30c3ed672b2904c1f9cd3f035f712871970564ad72744bbe77b6c13bd90d8651d9070e05ef8aca380000000002eeec374f4e660e117fccbfec79e6fe5cdf44ac508fa228bfc654d2973f9bdc9a1efc0002b41b676b00dc03af1fffd4452177b33c0fb3b7fd9a13b43c9f4621615b7b4c9a8541ca75e27ebb4e80d00148f30c53077197ad052e2ff07d919bb9aed0ff4da9b3b66586664f3c3bfa8e9a376e92fb55d6f42cde344b74220897053e54e606e8433c3b8b57b183ef55b17904d9e95523dc30353646612af1b23ba796bd7ee56847813a46de8f2c19c8b6ef84df30a030ec67022ffc8bdaf6f9adddcea9ce68954761506a2deac25d3483e71c0578070e05ef81ca38000000000274e729bb6615cbda94d9d176a2f1525068f12b330e38bbbf387232797dfd891fb7f9c2a1972dfd2a
 diff --git a/template/runtime/src/test-vectors/ergo-autolykos-v2-runtime-statement-v2-relay-witness-v1.hex b/template/runtime/src/test-vectors/ergo-autolykos-v2-runtime-statement-v2-relay-witness-v1.hex
 new file mode 100644
-index 000000000..b7f628bd6
+index 0000000000000000000000000000000000000000..b7f628bd6a7713746bcc82d7ff7cf0eeb3977da6
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/ergo-autolykos-v2-runtime-statement-v2-relay-witness-v1.hex
 @@ -0,0 +1 @@
 +453253415257303101000004000004d3a874c8b8b84d3bb619839d2105daea6e24b97f7fb2df352954f1935d7e7cc1ab0100000000e102000000010d0300000001c20400000000dbdea036a2ac422ebed72e71b4c8e261ed9a694ce85571be07dbadc69afaf4be6566666666666666666666666666666666666666666666666666666666666666664c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a932c4b44adb6b6f02545e729cd85da3330c5c4e3b37190a03aafa3e5bfdebc99c4000000000000000000000000000000000000000000000000000000000000271004000000010000008000000002000000000001d4c00000000000000000000000000000000000000000000000000000000000000001000200100000000000124f80666666666666666666666666666666666666666666666666666666666666666600d904aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0101010101010101010101010101010101010101010101010101010101010101030303030303030303030303030303030303030303030303030303030303030302020202020202020202020202020202020202020202020202020202020202020280c0a9070404040404040404040404040404040404040404040404040404040404040404010400008001000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798000000000000000000010000000000000000000000000104000001000000000000ee0980000200d9044c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a93020202020202020202020202020202020202020202020202020202020202020260de6bd37e625419e282a58b95d82a2103aa460422a4f9be38f93ca706fbd045030303030303030303030303030303030303030303030303030303030303030303c0e9b0070505050505050505050505050505050505050505050505050505050505050505010400008101000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798000000000000000300d904aa53aa3cd55ba177e002a42fb6ab9857f56e2a4fda8dd3edc05aa64044ba6a6c030303030303030303030303030303030303030303030303030303030303030305050505050505050505050505050505050505050505050505050505050505050404040404040404040404040404040404040404040404040404040404040404048093b8070606060606060606060606060606060606060606060606060606060606060606010400008201000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798000000000000000000d9044c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a93020202020202020202020202020202020202020202020202020202020202020260de6bd37e625419e282a58b95d82a2103aa460422a4f9be38f93ca706fbd045030303030303030303030303030303030303030303030303030303030303030303c0e9b0070505050505050505050505050505050505050505050505050505050505050505010400008101000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980000000000000003
 diff --git a/template/runtime/src/test-vectors/ergo-autolykos-v2-utxo-runtime-statement-v3-relay-witness-v1.hex b/template/runtime/src/test-vectors/ergo-autolykos-v2-utxo-runtime-statement-v3-relay-witness-v1.hex
 new file mode 100644
-index 000000000..57a748bc2
+index 0000000000000000000000000000000000000000..57a748bc2f664705c97e62c89cd2c8130f689713
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/ergo-autolykos-v2-utxo-runtime-statement-v3-relay-witness-v1.hex
 @@ -0,0 +1 @@
 +453253415257303101000004000004d3a874c8b8b84d3bb619839d2105daea6e24b97f7fb2df352954f1935d7e7cc1ab0100000000e102000000010d0300000001c20400000000dbdea036a2ac422ebed72e71b4c8e261ed9a694ce85571be07dbadc69afaf4be6566666666666666666666666666666666666666666666666666666666666666664c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a932c4b44adb6b6f02545e729cd85da3330c5c4e3b37190a03aafa3e5bfdebc99c4000000000000000000000000000000000000000000000000000000000000271004000000010000008000000002000000000001d4c00000000000000000000000000000000000000000000000000000000000000001000200100000000000124f80666666666666666666666666666666666666666666666666666666666666666600d904aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0101010101010101010101010101010101010101010101010101010101010101030303030303030303030303030303030303030303030303030303030303030302020202020202020202020202020202020202020202020202020202020202020280c0a9070404040404040404040404040404040404040404040404040404040404040404010400008001000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798000000000000000000010000000000000000000000000104000001000000000000ee0980000200d9044c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a93020202020202020202020202020202020202020202020202020202020202020260de6bd37e625419e282a58b95d82a2103aa460422a4f9be38f93ca706fbd045840d866bfe5cc593b4ad92f3091041914686eb20c7329abccd0e70727a2a56dd01c0e9b0070505050505050505050505050505050505050505050505050505050505050505010400008101000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798000000000000000100d904e18adb07452aa006ab4367612b171af36835d18a5e712bd51806405571bff493030303030303030303030303030303030303030303030303030303030303030305050505050505050505050505050505050505050505050505050505050505050404040404040404040404040404040404040404040404040404040404040404048093b8070606060606060606060606060606060606060606060606060606060606060606010400008201000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798000000000000000000d9044c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a93020202020202020202020202020202020202020202020202020202020202020260de6bd37e625419e282a58b95d82a2103aa460422a4f9be38f93ca706fbd045840d866bfe5cc593b4ad92f3091041914686eb20c7329abccd0e70727a2a56dd01c0e9b0070505050505050505050505050505050505050505050505050505050505050505010400008101000000000279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980000000000000001
 diff --git a/template/runtime/src/test-vectors/ergo-scorex-transaction-runtime-witness-v1.hex b/template/runtime/src/test-vectors/ergo-scorex-transaction-runtime-witness-v1.hex
 new file mode 100644
-index 000000000..b295d3806
+index 0000000000000000000000000000000000000000..b295d38069a442ac121d8d06ae12477a2d89a96e
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/ergo-scorex-transaction-runtime-witness-v1.hex
 @@ -0,0 +1 @@
 +4532535458573031010000040000033a06325e42b321c589ac598d19852cb9d4de7e11260b89c2316c2102a6ac5259b40100000000d202000000012e0300000000420400000000b099d4a695c08e3c4a1730f0563fda7ec07c43a218f09e54fe1e5cfef42ffab4bb736825614576ee8ebba529e874f0f8241f18c02515856e0801d5272d38f7393d5bb3ce0607d7e883244a43807c1c8182c9e4ab4fd092ae8f02fb65908992a5dc00240008cd02222222222222222222222222222222222222222222222222222222222222222200240008cd02111111111111111111111111111111111111111111111111111111111111111100240008cd02222222222222222222222222222222222222222222222222222222222222222204000000000000000102987ee35df12f3754ad68364ed454ce581bad419a51d16a916728230cbaf11d780000000000010001f331bf8049eb96fc651e30ba18d5f38a7e6d5bd10029fc1664316e48fe6bd4000000000001000000020000000005f5e10000240008cd02111111111111111111111111111111111111111111111111111111111111111100000070000400220e20987ee35df12f3754ad68364ed454ce581bad419a51d16a916728230cbaf11d7800160e1444444444444444444444444444444444444444440005058084af5f00260e240008cd0233333333333333333333333333333333333333333333333333333333333333330000000005f5e10000240008cd02222222222222222222222222222222222222222222222222222222222222222200000070000001165acf47053d386366a509a4a6c0ac25d3c2c46da692dc8a22df4e611894dc95015193f3db1733109f5ddc5170975391a352ebf2ba0c352dc2e85735e856b7900d80c2d72f0008cd0222222222222222222222222222222222222222222222222222222222222222226f00040e144444444444444444444444444444444444444444058084af5f0e210279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f817980e240008cd02333333333333333333333333333333333333333333333333333333333333333326892756d2ad98a149dee7f7942ef4871c825e6be2ba5edef179f189938d28cb00
 diff --git a/template/runtime/src/test-vectors/ergo-utxo-state-runtime-witness-v1.hex b/template/runtime/src/test-vectors/ergo-utxo-state-runtime-witness-v1.hex
 new file mode 100644
-index 000000000..ed454147d
+index 0000000000000000000000000000000000000000..ed454147db0d5ea84903047f5aac8440a9164fe2
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/ergo-utxo-state-runtime-witness-v1.hex
 @@ -0,0 +1 @@
 +4532555458573031010000020000028c2d7b1929093f488d83a1a25b4ada38c40237920cb88908f6aa5976b677a43a260100000001380200000001189e90fc9e2e50e3adbfddc89177277406a5ef3a70b062214b9f958960ea309050840d866bfe5cc593b4ad92f3091041914686eb20c7329abccd0e70727a2a56dd01200201024f78935151aad7a1a99af76b60a984ce11d3c2cc76a083cbdf64e5c479323bf6987ee35df12f3754ad68364ed454ce581bad419a51d16a916728230cbaf11d78000000af80c2d72f0008cd0211111111111111111111111111111111111111111111111111111111111111117000040e20987ee35df12f3754ad68364ed454ce581bad419a51d16a916728230cbaf11d780e144444444444444444444444444444444444444444058084af5f0e240008cd023333333333333333333333333333333333333333333333333333333333333333f4540c518ecba96efa9fb2aa658381ea01c865a13cfb94bb667c10c1cc6d156200038d51e4d0dd5115eb13f2ff1a68139b46bc8a9d931d517e5f50946415c7f9d250024f78935151aad7a1a99af76b60a984ce11d3c2cc76a083cbdf64e5c479323bf6ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff000000af80c2d72f0008cd0211111111111111111111111111111111111111111111111111111111111111117000040e20987ee35df12f3754ad68364ed454ce581bad419a51d16a916728230cbaf11d780e144444444444444444444444444444444444444444058084af5f0e240008cd023333333333333333333333333333333333333333333333333333333333333333f4540c518ecba96efa9fb2aa658381ea01c865a13cfb94bb667c10c1cc6d156200000400
 diff --git a/template/runtime/src/test-vectors/frontier-ergo-autolykos-committed-vault-runtime-derived-statement-v2.hex b/template/runtime/src/test-vectors/frontier-ergo-autolykos-committed-vault-runtime-derived-statement-v2.hex
 new file mode 100644
-index 000000000..f35e7dbde
+index 0000000000000000000000000000000000000000..f35e7dbde26a58d8d143d15c4ef87efcb5cda8c4
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/frontier-ergo-autolykos-committed-vault-runtime-derived-statement-v2.hex
 @@ -0,0 +1 @@
 +02ca246e127abd78a5ec82d430a7c653c29bb6674aebacdd5065de337589aefca4faf3547fb14aa43abb4f7e6a0bd11d56de4a8a8f46eb16b437df4b9aa3de0fa4874cfca9f96f1f7578dbcd697ef6c5f60664a74e4f92d9e5ee072e8234b46e2462b4f1f892d9ae47ffcb284e791ebc412491dcee7ff434f62dba01ea3de9633ca874c8b8b84d3bb619839d2105daea6e24b97f7fb2df352954f1935d7e7cc1ab091c7a5f46b962544988b3dbd7ceda5630d22ffcb37be48f02545f3c773033ee06325e42b321c589ac598d19852cb9d4de7e11260b89c2316c2102a6ac5259b499d4a695c08e3c4a1730f0563fda7ec07c43a218f09e54fe1e5cfef42ffab4bbb4a285454e8d0595c2e7e2986c7d8a9abe9e61707a5153940491a765036195f4dea036a2ac422ebed72e71b4c8e261ed9a694ce85571be07dbadc69afaf4be6566666666666666666666666666666666666666666666666666666666666666664c3acc3adc730730e37bb5eafcdbd10301528c22a5f9b229892ce95b55487a93000000802d036b0254b7bcd7328d27c402d3651f2fea4b44199c5b4122f805c7000041ac00010eb6dc950048340823f4da89130174d046d3622ad881d00cad1b43f3343308f8000000820000000000000000000000000000000000000000000000000000000000002718aa53aa3cd55ba177e002a42fb6ab9857f56e2a4fda8dd3edc05aa64044ba6a6c000000810460de6bd37e625419e282a58b95d82a2103aa460422a4f9be38f93ca706fbd045db1fe7ab62020bde5495ea16c0d9540491f676c4679c5fd3e2daf4de2405f1dd000000d900000002000000020000000000000001f4540c518ecba96efa9fb2aa658381ea01c865a13cfb94bb667c10c1cc6d156240437da636142d44f798af3a0e1d16dc3e2d76688916ace4d13db4a3725735e5000001015751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8736825614576ee8ebba529e874f0f8241f18c02515856e0801d5272d38f7393d5bb3ce0607d7e883244a43807c1c8182c9e4ab4fd092ae8f02fb65908992a5dc987ee35df12f3754ad68364ed454ce581bad419a51d16a916728230cbaf11d78000000b000000000010000000005f5e100dd364dca7dc12b811bc7119a32c7d2a86a0061b59bee7765677d1393680dac7544444444444444444444444444444444444444446ff820a7f95f293bfe924c046044177c324885167a5aa50fb42b3d150bb8938d4f78935151aad7a1a99af76b60a984ce11d3c2cc76a083cbdf64e5c479323bf6000000003a412dd0c7a8e8995a03b1832a93c395038536e5b8d165a927384ac526d07f7a0000
 diff --git a/template/runtime/src/test-vectors/frontier-ergo-autolykos-committed-vault-utxo-runtime-derived-statement-v3.hex b/template/runtime/src/test-vectors/frontier-ergo-autolykos-committed-vault-utxo-runtime-derived-statement-v3.hex
 new file mode 100644
-index 000000000..41e0d5000
+index 0000000000000000000000000000000000000000..41e0d50001f948bd001e6d35f72ac9e149038179
 --- /dev/null
 +++ b/template/runtime/src/test-vectors/frontier-ergo-autolykos-committed-vault-utxo-runtime-derived-statement-v3.hex
 @@ -0,0 +1 @@

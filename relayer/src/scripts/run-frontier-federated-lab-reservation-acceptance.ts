@@ -7,6 +7,11 @@ import {
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
 } from '../substrate-federated-pooled-reserve-source-proof-profile-v1-fixture.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_IDENTITY_V4_HEX,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_ID_V4_HEX,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX,
+} from '../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1-fixture.js';
 
 type Arguments = Readonly<{
   frontierSource: string;
@@ -81,11 +86,38 @@ function referenceProfileEnvironment(): Readonly<Record<string, string>> {
   ) {
     throw new Error('reference federated source-proof profile identity changed');
   }
+  if (
+    !/^0x[0-9a-f]{1206}$/.test(
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX,
+    )
+  ) {
+    throw new Error('reference federated mint-reservation statement changed');
+  }
+  for (const [label, value] of [
+    [
+      'statement identity',
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_ID_V4_HEX,
+    ],
+    [
+      'mint identity',
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_IDENTITY_V4_HEX,
+    ],
+  ] as const) {
+    if (!/^0x[0-9a-f]{64}$/.test(value)) {
+      throw new Error(`reference federated ${label} changed`);
+    }
+  }
   return {
     BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX:
       FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_SCALE_V1_HEX,
     BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX:
       FEDERATED_POOLED_RESERVE_SOURCE_PROOF_REFERENCE_PROFILE_ID_V1_HEX,
+    BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX,
+    BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_ID_V4_HEX:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_ID_V4_HEX,
+    BRIDGE_LAB_FEDERATED_MINT_IDENTITY_V4_HEX:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_IDENTITY_V4_HEX,
   };
 }
 
