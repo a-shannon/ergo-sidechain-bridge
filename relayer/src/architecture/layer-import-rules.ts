@@ -64,6 +64,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
       'substrate-federated-isolated-devnet-packet-producer-v1.ts',
       'substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts',
+      'substrate-federated-isolated-devnet-frontier-lab-application-v1.ts',
       'substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.ts',
       'substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts',
       'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
@@ -168,6 +169,12 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1',
           'SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-frontier-lab-application-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1',
         ]),
       ],
       [

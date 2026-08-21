@@ -86,6 +86,9 @@ import {
   type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2,
 } from '../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
+} from '../../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
 } from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
@@ -1296,6 +1299,10 @@ export async function runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignR
   input:
     Readonly<RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1>> {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: input.lifecycle.sourceHistory.acceptance.bridgeAddress,
+    tokenAddressHex: input.lifecycle.sourceHistory.acceptance.tokenAddress,
+  });
   const pegInPlan = normalizePegInCandidatePlan(input.pegIn);
   const consumerPlan = normalizeFrontierMintProofConsumerPlan(
     input.frontierMintProofConsumer,

@@ -14,6 +14,7 @@ import {
   inspectConsensusSourceBaseline,
   type ConsensusSourceBaselineReport,
 } from './consensus-source-baseline.js';
+import { decodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 import {
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
@@ -29,6 +30,9 @@ import {
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
+} from './substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   buildFederatedPooledReserveSourceProofProfileV1,
   decodeFederatedPooledReserveSourceProofProfileScaleV1Hex,
@@ -137,6 +141,23 @@ export interface SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceip
   }>;
   readonly limitations: readonly string[];
   readonly receiptDigestHex: string;
+}
+
+export function decodeSubstrateFederatedIsolatedDevnetFrontierLabMintProofStatementV2(
+  statementHex: string,
+): ReturnType<
+  typeof decodeValidityApplicationPooledReserveMintReservationStatementV4Hex
+> {
+  const statement =
+    decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(
+      statementHex,
+    );
+  const sourceIntent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: sourceIntent.bridgeAddressHex,
+    tokenAddressHex: sourceIntent.tokenAddressHex,
+  });
+  return statement;
 }
 
 export async function runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
@@ -344,7 +365,7 @@ async function consumeSubstrateFederatedIsolatedDevnetFrontierMintProofV2(
       sourceProof.sourceProofEnvelopeScaleHex,
     );
   const statement =
-    decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(
+    decodeSubstrateFederatedIsolatedDevnetFrontierLabMintProofStatementV2(
       sourceProof.request.statementHex,
     );
   const statementIdHex =

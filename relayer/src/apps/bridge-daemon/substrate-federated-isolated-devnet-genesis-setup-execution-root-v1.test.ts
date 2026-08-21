@@ -216,6 +216,10 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+} from '../../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_EXPECTED_STATIC_MANIFEST_DIGEST_V1,
 } from '../../scripts/run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-receipt-v1.js';
 import {
@@ -1282,6 +1286,32 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(mocked.process).not.toHaveBeenCalled();
   });
 
+  it('rejects a source application that the deterministic Frontier LAB cannot deploy', async () => {
+    const input = pegInMintProofRootInput() as unknown as {
+      lifecycle: {
+        sourceHistory: {
+          acceptance: {
+            bridgeAddress: string;
+          };
+        };
+      };
+    };
+    input.lifecycle.sourceHistory.acceptance.bridgeAddress =
+      '0x0606060606060606060606060606060606060606';
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1(
+        input as never,
+      ),
+    ).rejects.toThrow(
+      'Frontier LAB proof application differs from the deterministic deployment',
+    );
+
+    expect(order).toEqual([]);
+    expect(mocked.build).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
   it('tears down every owned capability when the Frontier proof consumer rejects', async () => {
     mocked.frontierConsumer.mockImplementationOnce(async () => {
       order.push('peg-in:mint-proof:consumer');
@@ -2220,7 +2250,14 @@ function rootInput() {
       sbtLauncherJarPath: 'reviewed/sbt-launch.jar',
     },
     lifecycle: {
-      sourceHistory: {},
+      sourceHistory: {
+        acceptance: {
+          bridgeAddress:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+          tokenAddress:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+        },
+      },
       relayerArtifacts: {},
     },
   } as never;
@@ -2407,8 +2444,10 @@ function validFamilyProfile() {
   return {
     sourceNetworkIdHex: digest('1'),
     sidechainIdHex: digest('2'),
-    bridgeAddressHex: '03'.repeat(20),
-    tokenAddressHex: '04'.repeat(20),
+    bridgeAddressHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1.slice(2),
+    tokenAddressHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1.slice(2),
     settlementProfileIdHex: digest('5'),
     settlementAssetIdHex: digest('6'),
   };
