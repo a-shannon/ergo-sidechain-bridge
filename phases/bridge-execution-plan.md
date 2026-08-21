@@ -1248,7 +1248,7 @@ atomically. Historical SCALE discriminants remain stable and the new error is
 appended at index 28.
 
 The locked Frontier patch has SHA-256
-`86f9377f17bcebf57128c6fb39489bbb08eeae76b6536e72211c104fd6bcade7`.
+`47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813`.
 The original FED-1 semantic source changes remain limited to
 `template/runtime/src/peg_in_causal_source_proof.rs`,
 `template/runtime/src/peg_in_pooled_reserve_reservation.rs`,
@@ -1271,9 +1271,11 @@ bytes; a fresh target campaign must instead derive the deployed sidechain identi
 from its reviewed target packet. The reservation block contains no Ethereum
 transaction status and preserves both contracts' code, nonce and balance. The V2
 packet consumer now decodes the selected profile and proof envelope, passes the
-exact dynamic envelope into this source-locked Rust matrix, requires one exact
-test result plus one proof-byte digest marker, and revalidates source and tool
-identities before and after Cargo. A candidate block containing the reserved mint
+exact dynamic envelope into this source-locked Rust matrix, and the Rust
+consumer derives both validity-window bounds from that activated profile rather
+than a fixture constant. It requires one exact test result plus one proof-byte
+digest marker, and revalidates source and tool identities before and after
+Cargo. A candidate block containing the reserved mint
 plus an unreserved sibling rejects
 without changing best block, reservation, token supply, balances or replay state;
 the corrected block then consumes the direct-parent reservation into the exact
@@ -1281,11 +1283,13 @@ mint and binds its consumed record to the imported execution block and transacti
 Replay, missing activation, stale proof, wrong proof profile, wrong application
 and rebound deposit/reserve identities remain isolated negatives. The complete
 113-file map remains
-machine-bound in `sources/consensus-source-lock.json`. The runtime and node
-atomicity matrices, source-lock replay, clean patch application, and independent
-security review pass. Main-runtime profile activation remains false. FED-1 does
-not provide a payout path, a complete dual-role federation profile, target-node
-funds authority, Gate 5 closure, or a trustless/readiness claim.
+machine-bound in `sources/consensus-source-lock.json`. The current patch applies
+cleanly and its source-lock and independent static review pass. The exact Rust
+TestClient execution and end-to-end local campaign remain pending for this patch
+digest; earlier runtime-matrix and campaign results do not close those changed
+inputs. Main-runtime profile activation remains false. FED-1 does not provide a
+payout path, a complete dual-role federation profile, target-node funds
+authority, Gate 5 closure, or a trustless/readiness claim.
 
 FED-6-LAB packet-bound proof consumption has this validation dependency map:
 

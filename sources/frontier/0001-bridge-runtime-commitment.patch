@@ -31327,10 +31327,10 @@ index 0000000000000000000000000000000000000000..a723c778f147e4e5b085432d68f8770c
 +}
 diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..045d45c62f215a7643145eae55141c391cd2589b
+index 0000000000000000000000000000000000000000..cd917a757a449f4e56704ca579eb0537ca526f04
 --- /dev/null
 +++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
-@@ -0,0 +1,1290 @@
+@@ -0,0 +1,1306 @@
 +use std::{env, sync::Arc};
 +
 +use ethereum::{
@@ -31503,7 +31503,14 @@ index 0000000000000000000000000000000000000000..045d45c62f215a7643145eae55141c39
 +	assert_eq!(pending.statement_id, validated.statement_id);
 +	assert_eq!(pending.mint_identity, mint_identity);
 +	assert_eq!(pending.reserved_at_native_height, 5);
-+	assert_eq!(pending.expires_at_native_height, 36);
++	assert_eq!(
++		pending.expires_at_native_height,
++		fixture
++			.profile
++			.activation_height
++			.checked_add(u64::from(fixture.profile.max_pending_blocks))
++			.expect("LAB source-proof validity window fits u64"),
++	);
 +	assert_eq!(
 +		storage_at(
 +			&fixture.client,
@@ -32009,7 +32016,16 @@ index 0000000000000000000000000000000000000000..045d45c62f215a7643145eae55141c39
 +	assert!(!bridge_runtime_code.is_empty());
 +	assert!(!token_runtime_code.is_empty());
 +	let profile = runtime_profile(&statement, 4, &bridge_runtime_code, &token_runtime_code);
-+	let proof = source_proof_from_environment_or_fixture(&profile, &statement, 4, 36);
++	let issued_at_native_height = profile.activation_height;
++	let expires_at_native_height = issued_at_native_height
++		.checked_add(u64::from(profile.max_pending_blocks))
++		.expect("LAB source-proof validity window fits u64");
++	let proof = source_proof_from_environment_or_fixture(
++		&profile,
++		&statement,
++		issued_at_native_height,
++		expires_at_native_height,
++	);
 +	ReservationFixture {
 +		client,
 +		signer,

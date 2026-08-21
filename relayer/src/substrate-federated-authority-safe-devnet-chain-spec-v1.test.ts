@@ -21,7 +21,7 @@ const BRIDGE_ADDRESS = `0x${'06'.repeat(20)}`;
 const TOKEN_ADDRESS = `0x${'07'.repeat(20)}`;
 const OWNER_ADDRESS = '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const FRONTIER_PATCH_SHA256 =
-  '86f9377f17bcebf57128c6fb39489bbb08eeae76b6536e72211c104fd6bcade7';
+  '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
 const FRONTIER_COMMIT = '75329a2df49e2cc7981485392c31160929d1bd48';
 const RUNTIME_CODE_HEX = '0x00';
 const RUNTIME_CODE_SHA256 = createHash('sha256')

@@ -184,6 +184,28 @@ async function loadCliModule(): Promise<any | undefined> {
   }
 }
 
+function extractAddedPatchFile(patch: string, path: string): string {
+  const marker = `diff --git a/${path} b/${path}\n`;
+  const start = patch.indexOf(marker);
+  if (start < 0) throw new Error(`patch does not add ${path}`);
+  const next = patch.indexOf('\ndiff --git ', start + marker.length);
+  const section = patch.slice(start, next < 0 ? undefined : next);
+  const sourceLines = section
+    .split('\n')
+    .filter(line => line.startsWith('+') && line !== `+++ b/${path}`)
+    .map(line => line.slice(1));
+  if (sourceLines.length === 0) throw new Error(`patch body for ${path} is empty`);
+  return sourceLines.join('\n');
+}
+
+function extractTopLevelRustFunction(source: string, name: string): string {
+  const marker = `fn ${name}(`;
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`Rust function ${name} is absent`);
+  const next = source.indexOf('\nfn ', start + marker.length);
+  return source.slice(start, next < 0 ? undefined : next);
+}
+
 describe('consensus source baseline', () => {
   it('tracks the reachable Frontier submodule and Ergo patch artifacts in the repository', () => {
     const gitmodulesPath = resolve(REPOSITORY_ROOT, '.gitmodules');
@@ -247,6 +269,62 @@ describe('consensus source baseline', () => {
       );
       expect(attributes).toContain('sources/consensus-source-lock.json text eol=lf');
     }
+  });
+
+  it('derives the LAB source-proof validity window from the activated runtime profile', () => {
+    const frontierPatch = readFileSync(
+      resolve(
+        BRIDGE_ROOT,
+        'sources',
+        'frontier',
+        '0001-bridge-runtime-commitment.patch',
+      ),
+      'utf8',
+    );
+    const rustSource = extractAddedPatchFile(
+      frontierPatch,
+      'template/node/src/bridge_federated_lab_reservation_tests.rs',
+    );
+    const fixture = extractTopLevelRustFunction(
+      rustSource,
+      'unactivated_fixture',
+    );
+    const admission = extractTopLevelRustFunction(
+      rustSource,
+      'federated_lab_reservation_is_admitted_without_evm_state_change',
+    );
+
+    expect(fixture).toContain(
+      '\tlet issued_at_native_height = profile.activation_height;',
+    );
+    expect(fixture).toContain(
+      '\tlet expires_at_native_height = issued_at_native_height\n'
+        + '\t\t.checked_add(u64::from(profile.max_pending_blocks))\n'
+        + '\t\t.expect("LAB source-proof validity window fits u64");',
+    );
+    expect(fixture).not.toMatch(
+      /let expires_at_native_height\s*=\s*\d[\d_]*;/u,
+    );
+    expect(fixture).toContain(
+      '\tlet proof = source_proof_from_environment_or_fixture(\n'
+        + '\t\t&profile,\n'
+        + '\t\t&statement,\n'
+        + '\t\tissued_at_native_height,\n'
+        + '\t\texpires_at_native_height,\n'
+        + '\t);',
+    );
+    expect(fixture).not.toMatch(
+      /source_proof_from_environment_or_fixture\(\s*&profile,\s*&statement,\s*\d[\d_]*,\s*\d[\d_]*,?\s*\)/u,
+    );
+    expect(admission).toContain(
+      '\t\tfixture\n'
+        + '\t\t\t.profile\n'
+        + '\t\t\t.activation_height\n'
+        + '\t\t\t.checked_add(u64::from(fixture.profile.max_pending_blocks))',
+    );
+    expect(admission).not.toMatch(
+      /assert_eq!\(\s*pending\.expires_at_native_height,\s*\d[\d_]*,?\s*\)/u,
+    );
   });
 
   it('pins effective LF checkout semantics for the external-fee JVM fixture closure', () => {
