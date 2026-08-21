@@ -56,12 +56,15 @@ import {
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD_V1,
+  assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance,
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance,
   assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  type ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input,
   type ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input,
+  type SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1,
   type SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
@@ -93,6 +96,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-packet-producer.v2' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-packet-mint-source-proof.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-checkpoint-attestation.v3' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT =
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD =
@@ -104,6 +109,8 @@ const RECEIPT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V2';
 const PACKET_MINT_SOURCE_PROOF_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2';
+const PACKET_CHECKPOINT_ATTESTATION_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3';
 const SOURCE_NETWORK_ID_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_NETWORK_ID_V1';
 const SIDECHAIN_ID_DOMAIN =
@@ -123,6 +130,16 @@ const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const RESULTS = new WeakSet<object>();
 const RESULTS_V2 = new WeakSet<object>();
 const PACKET_MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
+const PACKET_CHECKPOINT_ATTESTATION_V3_RECEIPTS = new WeakMap<
+  object,
+  Readonly<{
+    readonly packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
+    readonly mintSourceProof:
+      Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
+    readonly checkpointAttestation:
+      Readonly<SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1>;
+  }>
+>();
 const MINT_CONTINUATION_BINDINGS = new WeakMap<
   object,
   Readonly<PacketMintContinuationBindingV1>
@@ -300,6 +317,78 @@ export interface SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2 {
   >;
 }
 
+export interface SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA;
+  readonly version: 3;
+  readonly status: 'packet_mint_bound_synthetic_federated_checkpoint_attested';
+  readonly packetReceiptDigestHex: string;
+  readonly mintSourceProofReceiptDigestHex: string;
+  readonly sourceProofReceiptDigestHex: string;
+  readonly targetDescriptorDigestHex: string;
+  readonly checkpointAttestation:
+    Readonly<SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1>;
+  readonly checks: Readonly<{
+    readonly exactPacketObjectBound: true;
+    readonly exactMintSourceProofReceiptObjectBound: true;
+    readonly packetAndMintProvenanceRevalidatedImmediatelyBeforeCheckpoint: true;
+    readonly exactTargetDescriptorBound: true;
+    readonly packetThenMintThenCheckpointOrderingEstablished: true;
+    readonly exactCheckpointAttestationReceiptBound: true;
+    readonly oneShotContinuationConsumed: true;
+  }>;
+  readonly boundary: Readonly<{
+    readonly processOwnedSyntheticCustodyOnly: true;
+    readonly thresholdSourceAttestationVerified: true;
+    readonly independentAttestorCustodyEstablished: false;
+    readonly packetMintBeforeCheckpointLifecycleEstablished: true;
+    readonly applicationBurnReceiptBound: false;
+    readonly sourceConsensusIndependentlyVerified: false;
+    readonly deterministicSourceFinalityEstablished: false;
+    readonly ergoAnchorEstablished: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly replayInsertionEstablished: false;
+    readonly payoutAuthorized: false;
+    readonly ergoTransactionSigningAuthorized: false;
+    readonly submissionAuthorized: false;
+    readonly broadcastAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly limitations: readonly string[];
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3 {
+  readonly signer:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly dispose: () => void;
+  readonly produce: (
+    input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>;
+  readonly produceMintSourceProof: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+  >;
+  readonly produceCheckpointAttestation: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    mintSourceProof: Readonly<
+      SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+    >,
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+  >;
+}
+
 export type ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input =
   Pick<
     ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input,
@@ -458,68 +547,14 @@ export function createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV
       }
       state = 'proof_running';
       try {
-        if (
-          packet !== completedPacket
-          || completedPacketBinding === undefined
-        ) {
-          throw new Error(
-            'isolated packet mint source-proof targets a different completed packet',
-          );
-        }
-        assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
-        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+        return producePacketBoundMintSourceProofV2({
+          packet,
+          completedPacket,
+          completedPacketBinding,
+          input,
           ergoAdmissionSigner,
-        );
-        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
           sourceAttestation,
-        );
-        const sourceProof =
-          sourceAttestation.produceSettlementFamilyMintSourceProof(
-            buildMintSourceProofInputForPacket(input, completedPacketBinding),
-          );
-        assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
-          sourceProof,
-        );
-        if (
-          sourceProof.targetDescriptorDigestHex
-            !== packet.receipt.targetDescriptorDigestHex
-          || sourceProof.targetDescriptorDigestHex
-            !== completedPacketBinding.targetDescriptorDigestHex
-        ) {
-          throw new Error(
-            'isolated packet mint source-proof target binding drifted',
-          );
-        }
-        const body = deepFreeze({
-          schema:
-            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA,
-          version: 2 as const,
-          status:
-            'packet_bound_collected_federated_source_proof_produced' as const,
-          packetReceiptDigestHex: packet.receipt.receiptDigestHex,
-          targetDescriptorDigestHex:
-            packet.receipt.targetDescriptorDigestHex,
-          sourceProofReceiptDigestHex: sourceProof.receiptDigestHex,
-          sourceProof,
-          checks: {
-            exactPacketObjectBound: true as const,
-            packetProvenanceRevalidatedImmediatelyBeforeSigning: true as const,
-            exactTargetDescriptorBound: true as const,
-            exactSourceProofReceiptBound: true as const,
-            exactSourceEvidenceReceiptBound: true as const,
-            callerSuppliedTargetOrRuntimeAuthorityAccepted: false as const,
-            oneShotContinuationConsumed: true as const,
-          },
         });
-        const receipt = deepFreeze({
-          ...body,
-          receiptDigestHex: sha256CanonicalJson(
-            body,
-            PACKET_MINT_SOURCE_PROOF_V2_DIGEST_DOMAIN,
-          ),
-        });
-        PACKET_MINT_SOURCE_PROOF_V2_RECEIPTS.add(receipt);
-        return receipt;
       } finally {
         sourceAttestation.dispose();
         completedPacket = undefined;
@@ -528,6 +563,348 @@ export function createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV
       }
     },
   });
+}
+
+export function createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+  ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3
+> {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+    ergoAdmissionSigner,
+  );
+  const sourceAttestation =
+    createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+      ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+    });
+  const signer = deepFreeze({
+    sourceAttestationThreshold:
+      sourceAttestation.binding.sourceAttestationThreshold,
+    sourceAttestationPublicKeysHex:
+      sourceAttestation.binding.sourceAttestationPublicKeysHex,
+    ergoAdmissionThreshold: ERGO_ADMISSION_THRESHOLD,
+    ergoAdmissionPublicKeysHex: [ergoAdmissionSigner.publicKeyHex],
+  });
+  let state:
+    | 'fresh'
+    | 'packet_running'
+    | 'packet_ready'
+    | 'proof_running'
+    | 'mint_ready'
+    | 'checkpoint_running'
+    | 'closed' = 'fresh';
+  let completedPacket:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketV2> | undefined;
+  let completedPacketBinding:
+    Readonly<PacketMintContinuationBindingV1> | undefined;
+  let completedMintSourceProof:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>
+    | undefined;
+  const clear = (): void => {
+    completedPacket = undefined;
+    completedPacketBinding = undefined;
+    completedMintSourceProof = undefined;
+  };
+  return Object.freeze({
+    signer,
+    dispose: () => {
+      if (
+        state === 'packet_running'
+        || state === 'proof_running'
+        || state === 'checkpoint_running'
+      ) {
+        throw new Error('isolated packet checkpoint session is running');
+      }
+      if (state !== 'closed') {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+      }
+    },
+    produce: async (
+      input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+    ) => {
+      if (state !== 'fresh') {
+        throw new Error(
+          'isolated packet checkpoint session is already consumed or disposed',
+        );
+      }
+      state = 'packet_running';
+      try {
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          ergoAdmissionSigner,
+        );
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+          sourceAttestation,
+        );
+        const packet = await producePacketV2(
+          input,
+          sourceAttestation,
+          signer,
+        );
+        const mintContinuationBinding = MINT_CONTINUATION_BINDINGS.get(packet);
+        if (mintContinuationBinding === undefined) {
+          throw new Error('isolated packet mint-continuation binding is missing');
+        }
+        completedPacket = packet;
+        completedPacketBinding = mintContinuationBinding;
+        state = 'packet_ready';
+        return packet;
+      } catch (error) {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+        throw error;
+      }
+    },
+    produceMintSourceProof: (
+      packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+      input: Readonly<
+        ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+      >,
+    ) => {
+      if (state !== 'packet_ready') {
+        throw new Error(
+          'isolated packet mint source-proof requires one completed packet and is already consumed or disposed',
+        );
+      }
+      state = 'proof_running';
+      try {
+        const receipt = producePacketBoundMintSourceProofV2({
+          packet,
+          completedPacket,
+          completedPacketBinding,
+          input,
+          ergoAdmissionSigner,
+          sourceAttestation,
+        });
+        completedMintSourceProof = receipt;
+        state = 'mint_ready';
+        return receipt;
+      } catch (error) {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+        throw error;
+      }
+    },
+    produceCheckpointAttestation: (
+      packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+      mintSourceProof: Readonly<
+        SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+      >,
+      input: Readonly<
+        ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input
+      >,
+    ) => {
+      if (state !== 'mint_ready') {
+        throw new Error(
+          'isolated packet checkpoint attestation requires one completed mint source-proof and is already consumed or disposed',
+        );
+      }
+      state = 'checkpoint_running';
+      try {
+        if (
+          packet !== completedPacket
+          || mintSourceProof !== completedMintSourceProof
+          || completedPacketBinding === undefined
+        ) {
+          throw new Error(
+            'isolated packet checkpoint attestation targets a different packet or mint source-proof',
+          );
+        }
+        assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+        assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+          mintSourceProof,
+        );
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          ergoAdmissionSigner,
+        );
+        assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+          sourceAttestation,
+        );
+        if (
+          mintSourceProof.packetReceiptDigestHex
+            !== packet.receipt.receiptDigestHex
+          || mintSourceProof.targetDescriptorDigestHex
+            !== packet.receipt.targetDescriptorDigestHex
+          || mintSourceProof.targetDescriptorDigestHex
+            !== completedPacketBinding.targetDescriptorDigestHex
+        ) {
+          throw new Error(
+            'isolated packet checkpoint attestation packet or target binding drifted',
+          );
+        }
+        const checkpointAttestation =
+          sourceAttestation.produceCheckpointAttestation(input);
+        assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+          checkpointAttestation,
+        );
+        if (
+          checkpointAttestation.targetDescriptorDigestHex
+            !== packet.receipt.targetDescriptorDigestHex
+        ) {
+          throw new Error(
+            'isolated packet checkpoint attestation target binding drifted',
+          );
+        }
+        const body = deepFreeze({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA,
+          version: 3 as const,
+          status:
+            'packet_mint_bound_synthetic_federated_checkpoint_attested' as const,
+          packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+          mintSourceProofReceiptDigestHex: mintSourceProof.receiptDigestHex,
+          sourceProofReceiptDigestHex:
+            mintSourceProof.sourceProofReceiptDigestHex,
+          targetDescriptorDigestHex:
+            packet.receipt.targetDescriptorDigestHex,
+          checkpointAttestation,
+          checks: {
+            exactPacketObjectBound: true as const,
+            exactMintSourceProofReceiptObjectBound: true as const,
+            packetAndMintProvenanceRevalidatedImmediatelyBeforeCheckpoint:
+              true as const,
+            exactTargetDescriptorBound: true as const,
+            packetThenMintThenCheckpointOrderingEstablished: true as const,
+            exactCheckpointAttestationReceiptBound: true as const,
+            oneShotContinuationConsumed: true as const,
+          },
+          boundary: {
+            processOwnedSyntheticCustodyOnly: true as const,
+            thresholdSourceAttestationVerified: true as const,
+            independentAttestorCustodyEstablished: false as const,
+            packetMintBeforeCheckpointLifecycleEstablished: true as const,
+            applicationBurnReceiptBound: false as const,
+            sourceConsensusIndependentlyVerified: false as const,
+            deterministicSourceFinalityEstablished: false as const,
+            ergoAnchorEstablished: false as const,
+            trackerAdmissionEstablished: false as const,
+            replayInsertionEstablished: false as const,
+            payoutAuthorized: false as const,
+            ergoTransactionSigningAuthorized: false as const,
+            submissionAuthorized: false as const,
+            broadcastAuthorized: false as const,
+            fundsAuthorityEstablished: false as const,
+            gate5Closed: false as const,
+            trustlessStatusEstablished: false as const,
+            productionReadinessEstablished: false as const,
+          },
+          limitations: [
+            'The packet and mint proof precede this checkpoint under one synthetic process-owned session, but no application-burn receipt is bound yet.',
+            'The checkpoint attestation is a disclosed federated policy decision, not independently verified source consensus or deterministic finality.',
+            'Ergo anchoring, tracker admission, global replay insertion and payout remain separate joins.',
+            'No signing, submission, broadcast, funds authority, Gate 5 closure, trustless status or production readiness follows.',
+          ] as const,
+        });
+        const receipt = deepFreeze({
+          ...body,
+          receiptDigestHex: sha256CanonicalJson(
+            body,
+            PACKET_CHECKPOINT_ATTESTATION_V3_DIGEST_DOMAIN,
+          ),
+        });
+        PACKET_CHECKPOINT_ATTESTATION_V3_RECEIPTS.set(receipt, Object.freeze({
+          packet,
+          mintSourceProof,
+          checkpointAttestation,
+        }));
+        return receipt;
+      } finally {
+        sourceAttestation.dispose();
+        clear();
+        state = 'closed';
+      }
+    },
+  });
+}
+
+function producePacketBoundMintSourceProofV2(input: Readonly<{
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
+  completedPacket:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketV2> | undefined;
+  completedPacketBinding:
+    Readonly<PacketMintContinuationBindingV1> | undefined;
+  input: Readonly<
+    ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+  >;
+  ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >;
+  sourceAttestation: Readonly<
+    SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >;
+}>): Readonly<
+  SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+> {
+  if (
+    input.packet !== input.completedPacket
+    || input.completedPacketBinding === undefined
+  ) {
+    throw new Error(
+      'isolated packet mint source-proof targets a different completed packet',
+    );
+  }
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(input.packet);
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+    input.ergoAdmissionSigner,
+  );
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(
+    input.sourceAttestation,
+  );
+  const sourceProof =
+    input.sourceAttestation.produceSettlementFamilyMintSourceProof(
+      buildMintSourceProofInputForPacket(
+        input.input,
+        input.completedPacketBinding,
+      ),
+    );
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
+    sourceProof,
+  );
+  if (
+    sourceProof.targetDescriptorDigestHex
+      !== input.packet.receipt.targetDescriptorDigestHex
+    || sourceProof.targetDescriptorDigestHex
+      !== input.completedPacketBinding.targetDescriptorDigestHex
+  ) {
+    throw new Error(
+      'isolated packet mint source-proof target binding drifted',
+    );
+  }
+  const body = deepFreeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCHEMA,
+    version: 2 as const,
+    status: 'packet_bound_collected_federated_source_proof_produced' as const,
+    packetReceiptDigestHex: input.packet.receipt.receiptDigestHex,
+    targetDescriptorDigestHex:
+      input.packet.receipt.targetDescriptorDigestHex,
+    sourceProofReceiptDigestHex: sourceProof.receiptDigestHex,
+    sourceProof,
+    checks: {
+      exactPacketObjectBound: true as const,
+      packetProvenanceRevalidatedImmediatelyBeforeSigning: true as const,
+      exactTargetDescriptorBound: true as const,
+      exactSourceProofReceiptBound: true as const,
+      exactSourceEvidenceReceiptBound: true as const,
+      callerSuppliedTargetOrRuntimeAuthorityAccepted: false as const,
+      oneShotContinuationConsumed: true as const,
+    },
+  });
+  const receipt = deepFreeze({
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(
+      body,
+      PACKET_MINT_SOURCE_PROOF_V2_DIGEST_DOMAIN,
+    ),
+  });
+  PACKET_MINT_SOURCE_PROOF_V2_RECEIPTS.add(receipt);
+  return receipt;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPacketV1Provenance(
@@ -623,6 +1000,58 @@ export function assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofRecei
       !== body.targetDescriptorDigestHex
   ) {
     throw new Error('isolated packet mint source-proof content drifted');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+> {
+  if (value === null || typeof value !== 'object') {
+    throw new Error(
+      'isolated packet checkpoint-attestation receipt lacks process provenance',
+    );
+  }
+  const material = PACKET_CHECKPOINT_ATTESTATION_V3_RECEIPTS.get(value);
+  if (material === undefined) {
+    throw new Error(
+      'isolated packet checkpoint-attestation receipt lacks process provenance',
+    );
+  }
+  const receipt = value as Readonly<
+    SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+  >;
+  if (
+    receipt.checkpointAttestation !== material.checkpointAttestation
+    || receipt.packetReceiptDigestHex
+      !== material.packet.receipt.receiptDigestHex
+    || receipt.mintSourceProofReceiptDigestHex
+      !== material.mintSourceProof.receiptDigestHex
+    || receipt.sourceProofReceiptDigestHex
+      !== material.mintSourceProof.sourceProofReceiptDigestHex
+    || receipt.targetDescriptorDigestHex
+      !== material.packet.receipt.targetDescriptorDigestHex
+    || receipt.targetDescriptorDigestHex
+      !== material.mintSourceProof.targetDescriptorDigestHex
+    || receipt.targetDescriptorDigestHex
+      !== material.checkpointAttestation.targetDescriptorDigestHex
+  ) {
+    throw new Error('isolated packet checkpoint-attestation binding changed');
+  }
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(material.packet);
+  assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+    material.mintSourceProof,
+  );
+  assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+    material.checkpointAttestation,
+  );
+  const { receiptDigestHex, ...body } = receipt;
+  if (
+    sha256CanonicalJson(body, PACKET_CHECKPOINT_ATTESTATION_V3_DIGEST_DOMAIN)
+      !== receiptDigestHex
+  ) {
+    throw new Error('isolated packet checkpoint-attestation receipt drifted');
   }
 }
 

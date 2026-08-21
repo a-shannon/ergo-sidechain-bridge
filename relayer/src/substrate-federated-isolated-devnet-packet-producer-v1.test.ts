@@ -506,11 +506,14 @@ vi.mock(
 );
 
 import {
+  assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV1Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
   createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
@@ -521,6 +524,10 @@ import {
   preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
   runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2,
 } from './substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+} from './substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
@@ -945,6 +952,206 @@ describe('isolated-devnet portable packet producer', () => {
     expect(() => session.produceMintSourceProof(packet, proofInput)).toThrow(
       /requires one completed packet/u,
     );
+  });
+
+  it('retains one source-attestation session across packet, mint, and checkpoint', async () => {
+    const beforePacket = packetCheckpointContinuationSession();
+    expect(() => beforePacket.produceMintSourceProof(
+      {} as never,
+      {} as never,
+    )).toThrow(/requires one completed packet/u);
+    expect(() => beforePacket.produceCheckpointAttestation(
+      {} as never,
+      {} as never,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+    beforePacket.dispose();
+
+    const session = packetCheckpointContinuationSession();
+    const packet = await session.produce(packetInput());
+    expect(() => session.produceCheckpointAttestation(
+      packet,
+      {} as never,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+    const mintSourceProof = session.produceMintSourceProof(packet, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const checkpoint = session.produceCheckpointAttestation(
+      packet,
+      mintSourceProof,
+      checkpointInput(),
+    );
+
+    expect(checkpoint).toMatchObject({
+      schema:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA,
+      version: 3,
+      status: 'packet_mint_bound_synthetic_federated_checkpoint_attested',
+      packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+      mintSourceProofReceiptDigestHex: mintSourceProof.receiptDigestHex,
+      sourceProofReceiptDigestHex: mintSourceProof.sourceProofReceiptDigestHex,
+      targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+      checks: {
+        exactPacketObjectBound: true,
+        exactMintSourceProofReceiptObjectBound: true,
+        packetAndMintProvenanceRevalidatedImmediatelyBeforeCheckpoint: true,
+        exactTargetDescriptorBound: true,
+        packetThenMintThenCheckpointOrderingEstablished: true,
+        exactCheckpointAttestationReceiptBound: true,
+        oneShotContinuationConsumed: true,
+      },
+      boundary: {
+        processOwnedSyntheticCustodyOnly: true,
+        thresholdSourceAttestationVerified: true,
+        independentAttestorCustodyEstablished: false,
+        packetMintBeforeCheckpointLifecycleEstablished: true,
+        applicationBurnReceiptBound: false,
+        sourceConsensusIndependentlyVerified: false,
+        deterministicSourceFinalityEstablished: false,
+        ergoAnchorEstablished: false,
+        trackerAdmissionEstablished: false,
+        replayInsertionEstablished: false,
+        payoutAuthorized: false,
+        ergoTransactionSigningAuthorized: false,
+        submissionAuthorized: false,
+        broadcastAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(checkpoint.checkpointAttestation).toMatchObject({
+      status: 'synthetic_federated_checkpoint_attested',
+      targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+      checkpointStatement: {
+        sourceNativeBlockHeight: '7',
+        sourceNativeBlockHashHex: normalized(h32('61')),
+        executionBlockHashHex: normalized(h32('62')),
+        bridgeEventRootHex: normalized(h32('63')),
+        burnLeafCount: 1,
+        admissionValidFromErgoHeight: '2000',
+        admissionExpiresAtErgoHeight: '2064',
+      },
+      boundary: {
+        mintBeforeCheckpointLifecycleEstablished: false,
+      },
+    });
+    expect(checkpoint.checkpointAttestation.signatures).toHaveLength(2);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+        checkpoint,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+        structuredClone(checkpoint),
+      )
+    ).toThrow(/lacks process provenance/u);
+    expect(() => session.produceCheckpointAttestation(
+      packet,
+      mintSourceProof,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+    expect(() => session.produceMintSourceProof(
+      packet,
+      {} as never,
+    )).toThrow(/requires one completed packet/u);
+  });
+
+  it('rejects copied packet or mint receipts at the checkpoint boundary', async () => {
+    const copiedPacket = await checkpointReadySession();
+    expect(() => copiedPacket.session.produceCheckpointAttestation(
+      structuredClone(copiedPacket.packet),
+      copiedPacket.mintSourceProof,
+      checkpointInput(),
+    )).toThrow(/different packet or mint source-proof/u);
+    expect(() => copiedPacket.session.produceCheckpointAttestation(
+      copiedPacket.packet,
+      copiedPacket.mintSourceProof,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+
+    const copiedMint = await checkpointReadySession();
+    expect(() => copiedMint.session.produceCheckpointAttestation(
+      copiedMint.packet,
+      structuredClone(copiedMint.mintSourceProof),
+      checkpointInput(),
+    )).toThrow(/different packet or mint source-proof/u);
+    expect(() => copiedMint.session.produceCheckpointAttestation(
+      copiedMint.packet,
+      copiedMint.mintSourceProof,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+  });
+
+  it('closes the retained session after an invalid checkpoint attempt or disposal', async () => {
+    const invalid = await checkpointReadySession();
+    expect(() => invalid.session.produceCheckpointAttestation(
+      invalid.packet,
+      invalid.mintSourceProof,
+      {
+        ...checkpointInput(),
+        burnLeafCount: 0,
+      },
+    )).toThrow(/burn leaf count must be a positive uint32/u);
+    expect(() => invalid.session.produceCheckpointAttestation(
+      invalid.packet,
+      invalid.mintSourceProof,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+
+    const disposed = await checkpointReadySession();
+    disposed.session.dispose();
+    expect(() => disposed.session.produceCheckpointAttestation(
+      disposed.packet,
+      disposed.mintSourceProof,
+      checkpointInput(),
+    )).toThrow(/requires one completed mint source-proof/u);
+  });
+
+  it('closes the retained session after packet or mint production fails', async () => {
+    const failedPacket = packetCheckpointContinuationSession();
+    const invalidPacketInput = packetInput();
+    await expect(failedPacket.produce({
+      ...invalidPacketInput,
+      expectedProfilePins: {
+        ...invalidPacketInput.expectedProfilePins,
+        federationProfileIdHex: 'ff'.repeat(32),
+      },
+    })).rejects.toThrow(/profile pin differs/u);
+    await expect(failedPacket.produce(packetInput())).rejects.toThrow(
+      /already consumed or disposed/u,
+    );
+
+    const failedMint = packetCheckpointContinuationSession();
+    const packet = await failedMint.produce(packetInput());
+    expect(() => failedMint.produceMintSourceProof(
+      packet,
+      {} as never,
+    )).toThrow(/must contain exactly/u);
+    expect(() => failedMint.produceMintSourceProof(
+      packet,
+      {} as never,
+    )).toThrow(/requires one completed packet/u);
+
+    mocks.tamperTargetRuntimeProfileId = true;
+    const targetDrift = packetCheckpointContinuationSession();
+    const driftedPacket = await targetDrift.produce(packetInput());
+    expect(() => targetDrift.produceMintSourceProof(driftedPacket, {
+      draft: mintDraftForTarget(requiredTargetDescriptor()),
+      evidenceReceipt: MINT_EVIDENCE_RECEIPT,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    })).toThrow(/runtime profile ID differs/u);
+    expect(() => targetDrift.produceMintSourceProof(
+      driftedPacket,
+      {} as never,
+    )).toThrow(/requires one completed packet/u);
   });
 
   it('feeds only the exact packet-bound dynamic proof into the atomic Frontier consumer', async () => {
@@ -1913,6 +2120,39 @@ function packetContinuationSession() {
   return session;
 }
 
+function packetCheckpointContinuationSession() {
+  const session =
+    createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+      mocks.ergoAdmissionSigner,
+    );
+  mocks.packetSignerBinding = session.signer;
+  return session;
+}
+
+async function checkpointReadySession() {
+  const session = packetCheckpointContinuationSession();
+  const packet = await session.produce(packetInput());
+  const mintSourceProof = session.produceMintSourceProof(packet, {
+    draft: mintDraftForTarget(requiredTargetDescriptor()),
+    evidenceReceipt: MINT_EVIDENCE_RECEIPT,
+    issuedAtNativeHeight: '4',
+    expiresAtNativeHeight: '36',
+  });
+  return { session, packet, mintSourceProof };
+}
+
+function checkpointInput() {
+  return Object.freeze({
+    sourceNativeBlockHeight: '7',
+    sourceNativeBlockHashHex: h32('61'),
+    executionBlockHashHex: h32('62'),
+    bridgeEventRootHex: h32('63'),
+    burnLeafCount: 1,
+    admissionValidFromErgoHeight: '2000',
+    admissionExpiresAtErgoHeight: '2064',
+  });
+}
+
 function sourceHistory() {
   const artifacts = {
     acceptanceReport: Buffer.from('source-acceptance'),
@@ -1930,10 +2170,12 @@ function sourceHistory() {
     sourceRuntimeCodeSha256Hex: 'd7'.repeat(32),
     sourceRuntimeCodeBytes: 2_000_000,
     storageLayoutDigestHex: 'd8'.repeat(32),
-    bridgeAddressHex: '06'.repeat(20),
+    bridgeAddressHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1.slice(2),
     bridgeRuntimeCodeSha256Hex: 'd9'.repeat(32),
     bridgeRuntimeCodeBytes: 4_104,
-    tokenAddressHex: '07'.repeat(20),
+    tokenAddressHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1.slice(2),
     tokenRuntimeCodeSha256Hex: 'da'.repeat(32),
     tokenRuntimeCodeBytes: 2_356,
     binarySha256Hex: 'db'.repeat(32),
