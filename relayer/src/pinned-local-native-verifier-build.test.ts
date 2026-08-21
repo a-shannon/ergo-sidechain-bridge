@@ -21,6 +21,7 @@ import {
   assertPinnedGeneratedJsonVectorDigest,
   assertNoNativeBuildDescendants,
   assertPinnedGeneratedJsonVectorMatch,
+  BoundedProcessExitError,
   buildPinnedLocalNativeCargoArgs,
   buildPinnedLocalNativeReproducibleRustFlags,
   canonicalizePinnedGeneratedJsonVectorBytes,
@@ -373,6 +374,40 @@ describe('pinned local native verifier build conformance', () => {
     }
   });
 
+  it('allocates and cleans a build workspace under an explicit temporary root', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'e2s-build-root-'));
+    const sharedCargoHome = resolve(temporaryRoot, 'shared-cargo-home');
+    const sharedRegistry = resolve(sharedCargoHome, 'registry');
+    mkdirSync(sharedCargoHome);
+    mkdirSync(sharedRegistry);
+    writeFileSync(resolve(sharedRegistry, 'entry.txt'), 'shared-cache', 'utf8');
+    let workspace: ReturnType<typeof createPinnedLocalNativeBuildWorkspace> | undefined;
+    let allocatedTargetPath: string | undefined;
+    try {
+      workspace = createPinnedLocalNativeBuildWorkspace(targetPath => {
+        allocatedTargetPath = targetPath;
+        assertFreshIsolatedNativeBuildTarget(targetPath, temporaryRoot);
+      }, {
+        sharedCargoHomeRoot: sharedCargoHome,
+        temporaryDirectoryRoot: temporaryRoot,
+      });
+      expect(workspace.buildTargetPath).toBe(allocatedTargetPath);
+      expect(dirname(workspace.buildTargetPath)).toBe(temporaryRoot);
+      expect(existsSync(workspace.cargoHomePath)).toBe(true);
+      expect(readFileSync(
+        resolve(workspace.cargoHomePath, 'registry', 'entry.txt'),
+        'utf8',
+      )).toBe('shared-cache');
+      const allocatedPath = workspace.buildTargetPath;
+      workspace.cleanup();
+      workspace = undefined;
+      expect(existsSync(allocatedPath)).toBe(false);
+    } finally {
+      workspace?.cleanup();
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects process timeouts that exceed the Node timer range', async () => {
     await expect(runBoundedNativeBuildProcess({
       executablePath: process.execPath,
@@ -383,6 +418,31 @@ describe('pinned local native verifier build conformance', () => {
       maxOutputBytes: 1024,
       label: 'test native build',
     })).rejects.toThrow(/timeout exceeds the supported timer range/i);
+  });
+
+  it('retains bounded process output on a non-zero exit', async () => {
+    const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
+      executablePath: process.execPath,
+      args: [
+        '-e',
+        "process.stdout.write('producer-out'); process.stderr.write('producer-err'); process.exit(23);",
+      ],
+      cwd: bridgeRoot,
+      env: minimalTestProcessEnvironment(),
+      timeoutMs: 5_000,
+      maxOutputBytes: 1_024,
+      label: 'test bounded diagnostics',
+    }));
+
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.error).toBeInstanceOf(BoundedProcessExitError);
+    expect(outcome.error).toMatchObject({
+      stdout: 'producer-out',
+      stderr: 'producer-err',
+      message: 'test bounded diagnostics failed',
+    });
+    expect((outcome.error as BoundedProcessExitError).exitCode).not.toBe(0);
   });
 
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {

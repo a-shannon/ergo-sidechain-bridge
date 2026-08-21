@@ -1006,21 +1006,35 @@ export function createPinnedLocalNativeBuildWorkspace(
   onTargetAllocated?: (targetPath: string) => void,
   options: {
     cargoDependencyMode?: 'shared-cache' | 'private-copy-offline';
+    sharedCargoHomeRoot?: string;
+    temporaryDirectoryRoot?: string;
   } = {},
 ): {
   buildTargetPath: string;
   cargoHomePath: string;
   cleanup: () => void;
 } {
-  const buildTargetPath = mkdtempSync(join(tmpdir(), BUILD_TARGET_PREFIX));
-  const cleanup = createBuildTargetCleanup(buildTargetPath);
+  const temporaryDirectoryRoot = resolveBuildTargetRoot(
+    options.temporaryDirectoryRoot ?? tmpdir(),
+  );
+  const buildTargetPath = mkdtempSync(
+    join(temporaryDirectoryRoot, BUILD_TARGET_PREFIX),
+  );
+  const cleanup = createBuildTargetCleanup(
+    buildTargetPath,
+    temporaryDirectoryRoot,
+  );
   process.once('exit', cleanup);
   try {
     onTargetAllocated?.(buildTargetPath);
-    assertFreshIsolatedNativeBuildTarget(buildTargetPath);
+    assertFreshIsolatedNativeBuildTarget(
+      buildTargetPath,
+      temporaryDirectoryRoot,
+    );
     const cargoHomePath = prepareIsolatedCargoHome(
       buildTargetPath,
       options.cargoDependencyMode ?? 'shared-cache',
+      options.sharedCargoHomeRoot,
     );
     return { buildTargetPath, cargoHomePath, cleanup };
   } catch (error) {
@@ -1029,9 +1043,15 @@ export function createPinnedLocalNativeBuildWorkspace(
   }
 }
 
-export function assertFreshIsolatedNativeBuildTarget(targetPathInput: string): void {
+export function assertFreshIsolatedNativeBuildTarget(
+  targetPathInput: string,
+  temporaryDirectoryRootInput: string = tmpdir(),
+): void {
   const targetPath = realpathSync(requireAbsolutePath(targetPathInput, 'isolated build target'));
-  assertSafeBuildTargetPath(targetPath);
+  const temporaryDirectoryRoot = resolveBuildTargetRoot(
+    temporaryDirectoryRootInput,
+  );
+  assertSafeBuildTargetPath(targetPath, temporaryDirectoryRoot);
   const stat = lstatSync(targetPath);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error('isolated native build target must be a regular directory');
@@ -1502,6 +1522,25 @@ export interface BoundedProcessResult {
   stderr: string;
 }
 
+export class BoundedProcessExitError extends Error {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+
+  constructor(input: Readonly<{
+    label: string;
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  }>) {
+    super(`${input.label} failed`);
+    this.name = 'BoundedProcessExitError';
+    this.exitCode = input.exitCode;
+    this.stdout = input.stdout;
+    this.stderr = input.stderr;
+  }
+}
+
 interface BoundedProcessSpawnSpecification {
   executablePath: string;
   args: string[];
@@ -1696,7 +1735,12 @@ export async function runBoundedProcess(
         return;
       }
       if (code !== 0) {
-        finish(new Error(`${input.label} failed`));
+        finish(new BoundedProcessExitError({
+          label: input.label,
+          exitCode: code ?? -1,
+          stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+          stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        }));
         return;
       }
       finish();
@@ -2081,11 +2125,14 @@ function minimalToolEnvironment(): NodeJS.ProcessEnv {
   return environment;
 }
 
-function createBuildTargetCleanup(buildTargetPath: string): () => void {
+function createBuildTargetCleanup(
+  buildTargetPath: string,
+  temporaryDirectoryRoot: string,
+): () => void {
   let cleaned = false;
   function cleanup(): void {
     if (cleaned) return;
-    assertSafeBuildTargetPath(buildTargetPath);
+    assertSafeBuildTargetPath(buildTargetPath, temporaryDirectoryRoot);
     rmSync(buildTargetPath, { recursive: true, force: true, maxRetries: 3 });
     cleaned = true;
     process.removeListener('exit', cleanup);
@@ -2096,16 +2143,21 @@ function createBuildTargetCleanup(buildTargetPath: string): () => void {
 function prepareIsolatedCargoHome(
   buildTargetPath: string,
   dependencyMode: 'shared-cache' | 'private-copy-offline',
+  sharedCargoHomeRootInput: string | undefined = undefined,
 ): string {
   const cargoHomePath = resolve(buildTargetPath, 'cargo-home');
   mkdirSync(cargoHomePath);
   const homeRoot = process.env.USERPROFILE ?? process.env.HOME;
-  const sharedCargoHomeValue = process.env.CARGO_HOME
+  const sharedCargoHomeValue = sharedCargoHomeRootInput
+    ?? process.env.CARGO_HOME
     ?? (homeRoot ? join(homeRoot, '.cargo') : undefined);
   if (!sharedCargoHomeValue) {
     throw new Error('shared Cargo cache location is unavailable');
   }
-  const sharedCargoHome = resolve(sharedCargoHomeValue);
+  const sharedCargoHome = resolveRegularDirectory(
+    sharedCargoHomeValue,
+    'shared Cargo home',
+  );
   for (const directory of ['registry', 'git']) {
     const source = resolve(sharedCargoHome, directory);
     if (!existsSync(source)) continue;
@@ -2147,8 +2199,33 @@ function copyRegularDirectoryTree(source: string, target: string): void {
   }
 }
 
-function assertSafeBuildTargetPath(targetPath: string): void {
-  const normalizedTemp = realpathSync(tmpdir());
+function resolveBuildTargetRoot(rootPathInput: string): string {
+  return resolveRegularDirectory(
+    rootPathInput,
+    'isolated build temporary root',
+  );
+}
+
+function resolveRegularDirectory(
+  directoryPathInput: string,
+  label: string,
+): string {
+  const rootPath = realpathSync(requireAbsolutePath(
+    directoryPathInput,
+    label,
+  ));
+  const stat = lstatSync(rootPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular directory`);
+  }
+  return rootPath;
+}
+
+function assertSafeBuildTargetPath(
+  targetPath: string,
+  temporaryDirectoryRoot: string,
+): void {
+  const normalizedTemp = resolveBuildTargetRoot(temporaryDirectoryRoot);
   const normalizedTarget = resolve(targetPath);
   const expectedPrefix = `${normalizedTemp}${normalizedTemp.endsWith(sep) ? '' : sep}${BUILD_TARGET_PREFIX}`;
   if (
