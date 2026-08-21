@@ -3,6 +3,7 @@ import {
   createPublicKey,
   generateKeyPairSync,
   sign,
+  verify,
   type KeyObject,
 } from 'node:crypto';
 
@@ -17,6 +18,9 @@ import {
 import { decodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 import {
   buildSubstrateFederatedCheckpointProfileV1,
+  buildSubstrateFederatedCheckpointStatementV1,
+  deriveSubstrateFederatedCheckpointAttestationDigestHex,
+  type SubstrateFederatedCheckpointStatementV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
   FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FEDERATION_EPOCH_V1,
@@ -75,6 +79,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_SOURCE_PROOF_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-mint-source-proof.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_SOURCE_PROOF_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-mint-source-proof.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_ATTESTATION_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-checkpoint-attestation.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2 =
   '4' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2 =
@@ -88,10 +94,16 @@ const MINT_SOURCE_PROOF_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_SOURCE_PROOF_RECEIPT_V1';
 const MINT_SOURCE_PROOF_RECEIPT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_SOURCE_PROOF_RECEIPT_V2';
+const CHECKPOINT_ATTESTATION_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_ATTESTATION_RECEIPT_V1';
+const CHECKPOINT_ATTESTATION_SIGNATURE_SET_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_ATTESTATION_SIGNATURE_SET_V1';
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const SESSIONS = new WeakSet<object>();
 const V2_SESSIONS = new WeakSet<object>();
 const MINT_SOURCE_PROOF_RECEIPTS = new WeakSet<object>();
 const MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
+const CHECKPOINT_ATTESTATION_RECEIPTS = new WeakSet<object>();
 const UINT64_MAX = 0xffff_ffff_ffff_ffffn;
 
 type SourceSigner = Readonly<{
@@ -177,7 +189,69 @@ export interface SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 {
       ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input
     >,
   ) => Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2>;
+  readonly produceCheckpointAttestation: (
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1
+  >;
   readonly dispose: () => void;
+}
+
+export interface ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input {
+  readonly sourceNativeBlockHeight: string | number | bigint;
+  readonly sourceNativeBlockHashHex: string;
+  readonly executionBlockHashHex: string;
+  readonly bridgeEventRootHex: string;
+  readonly burnLeafCount: number;
+  readonly admissionValidFromErgoHeight: string | number | bigint;
+  readonly admissionExpiresAtErgoHeight: string | number | bigint;
+}
+
+export interface SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_ATTESTATION_V1_SCHEMA;
+  readonly version: 1;
+  readonly status: 'synthetic_federated_checkpoint_attested';
+  readonly sourceAttestationBindingDigestHex: string;
+  readonly targetDescriptorDigestHex: string;
+  readonly checkpointStatement:
+    Readonly<SubstrateFederatedCheckpointStatementV1>;
+  readonly attestationDigestHex: string;
+  readonly signatures:
+    readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
+  readonly signatureSetDigestHex: string;
+  readonly checks: Readonly<{
+    readonly exactLaunchTargetObjectBound: true;
+    readonly exactCheckpointProfileRebuilt: true;
+    readonly exactApplicationAndProfileIdentityBound: true;
+    readonly exactDynamicCheckpointFieldsBound: true;
+    readonly exactThresholdSignatureSetVerified: true;
+    readonly boundedAdmissionHorizonVerified: true;
+    readonly oneShotCapabilityConsumed: true;
+  }>;
+  readonly boundary: Readonly<{
+    readonly processOwnedSyntheticCustodyOnly: true;
+    readonly thresholdSourceAttestationVerified: true;
+    readonly independentAttestorCustodyEstablished: false;
+    readonly sourceConsensusIndependentlyVerified: false;
+    readonly deterministicSourceFinalityEstablished: false;
+    readonly mintBeforeCheckpointLifecycleEstablished: false;
+    readonly ergoAnchorEstablished: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly replayInsertionEstablished: false;
+    readonly payoutAuthorized: false;
+    readonly ergoTransactionSigningAuthorized: false;
+    readonly submissionAuthorized: false;
+    readonly broadcastAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly limitations: readonly string[];
+  readonly receiptDigestHex: string;
 }
 
 export interface ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV1Input {
@@ -717,6 +791,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   let signedTarget:
     Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1> | undefined;
   let mintProofProduced = false;
+  let checkpointAttestationProduced = false;
   const session = Object.freeze({
     binding,
     signLaunchStatement: (
@@ -976,6 +1051,200 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         throw error;
       }
     },
+    produceCheckpointAttestation: (
+      input: Readonly<
+        ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input
+      >,
+    ) => {
+      assertOpen(state);
+      if (signedTarget === undefined) {
+        throw new Error(
+          'isolated-devnet checkpoint attestation requires one completed launch attestation',
+        );
+      }
+      if (checkpointAttestationProduced) {
+        throw new Error(
+          'isolated-devnet checkpoint-attestation capability is already consumed',
+        );
+      }
+      const checkpointInput = exactRecord(
+        input,
+        [
+          'admissionExpiresAtErgoHeight',
+          'admissionValidFromErgoHeight',
+          'bridgeEventRootHex',
+          'burnLeafCount',
+          'executionBlockHashHex',
+          'sourceNativeBlockHashHex',
+          'sourceNativeBlockHeight',
+        ],
+        'isolated-devnet checkpoint-attestation input',
+      );
+      const target = signedTarget;
+      const checkpointProfile = buildSubstrateFederatedCheckpointProfileV1({
+        federationEpoch: target.federation.federationEpoch,
+        maxAdmissionValidityBlocks:
+          target.federation.maxAdmissionValidityBlocks,
+        sourceAttestationThreshold:
+          target.federation.sourceAttestationThreshold,
+        sourceAttestationPublicKeysHex:
+          target.federation.sourceAttestationPublicKeysHex,
+        ergoAdmissionThreshold: target.federation.ergoAdmissionThreshold,
+        ergoAdmissionPublicKeysHex:
+          target.federation.ergoAdmissionPublicKeysHex,
+      });
+      if (
+        checkpointProfile.profileIdHex
+          !== binding.checkpointFederationProfileIdHex
+        || checkpointProfile.sourceAttestationKeySetDigestHex
+          !== binding.checkpointSourceAttestationKeySetDigestHex
+        || checkpointProfile.profileIdHex
+          !== target.federation.federationProfileIdHex
+        || checkpointProfile.sourceAttestationKeySetDigestHex
+          !== target.federation.sourceAttestationKeySetDigestHex
+      ) {
+        throw new Error(
+          'isolated-devnet checkpoint profile differs from the launched target',
+        );
+      }
+      const sourceNativeBlockHeight = uint64(
+        checkpointInput.sourceNativeBlockHeight,
+        'isolated-devnet checkpoint source native height',
+      );
+      if (sourceNativeBlockHeight === 0n) {
+        throw new Error(
+          'isolated-devnet checkpoint source native height must be positive',
+        );
+      }
+      const admissionValidFromErgoHeight = uint64(
+        checkpointInput.admissionValidFromErgoHeight,
+        'isolated-devnet checkpoint admission valid-from height',
+      );
+      const admissionExpiresAtErgoHeight = uint64(
+        checkpointInput.admissionExpiresAtErgoHeight,
+        'isolated-devnet checkpoint admission expiry height',
+      );
+      const checkpointStatement =
+        buildSubstrateFederatedCheckpointStatementV1({
+          profile: checkpointProfile,
+          sourceNetworkIdHex: target.sourceRuntime.sourceNetworkIdHex,
+          sidechainIdHex: target.sourceRuntime.sidechainIdHex,
+          sourceNativeBlockHeight,
+          sourceNativeBlockHashHex: fixedHex(
+            checkpointInput.sourceNativeBlockHashHex,
+            32,
+            'isolated-devnet checkpoint source native block hash',
+          ),
+          executionBlockHashHex: fixedHex(
+            checkpointInput.executionBlockHashHex,
+            32,
+            'isolated-devnet checkpoint execution block hash',
+          ),
+          bridgeEventRootHex: fixedHex(
+            checkpointInput.bridgeEventRootHex,
+            32,
+            'isolated-devnet checkpoint bridge event root',
+          ),
+          burnLeafCount: positiveUint32(
+            checkpointInput.burnLeafCount,
+            'isolated-devnet checkpoint burn leaf count',
+          ),
+          bridgeAddressHex: target.sourceRuntime.bridgeAddressHex,
+          tokenAddressHex: target.sourceRuntime.tokenAddressHex,
+          bridgeRuntimeCodeSha256Hex:
+            target.sourceRuntime.bridgeRuntimeCodeSha256Hex,
+          bridgeRuntimeCodeBytes:
+            target.sourceRuntime.bridgeRuntimeCodeBytes,
+          tokenRuntimeCodeSha256Hex:
+            target.sourceRuntime.tokenRuntimeCodeSha256Hex,
+          tokenRuntimeCodeBytes: target.sourceRuntime.tokenRuntimeCodeBytes,
+          sourceRuntimeCodeSha256Hex:
+            target.sourceRuntime.sourceRuntimeCodeSha256Hex,
+          sourceRuntimeCodeBytes: target.sourceRuntime.sourceRuntimeCodeBytes,
+          runtimeProfileIdHex: target.sourceRuntime.runtimeProfileIdHex,
+          settlementProfileIdHex: target.profile.settlementProfileIdHex,
+          admissionValidFromErgoHeight,
+          admissionExpiresAtErgoHeight,
+        });
+      const attestationDigestHex =
+        deriveSubstrateFederatedCheckpointAttestationDigestHex(
+          checkpointStatement.encodedStatementHex,
+        );
+
+      checkpointAttestationProduced = true;
+      try {
+        const signatures = signThreshold(signers, attestationDigestHex);
+        assertCheckpointAttestationSignatures(
+          checkpointProfile.sourceAttestationPublicKeysHex,
+          checkpointProfile.sourceAttestationThreshold,
+          attestationDigestHex,
+          signatures,
+        );
+        const body = deepFreeze({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_ATTESTATION_V1_SCHEMA,
+          version: 1 as const,
+          status: 'synthetic_federated_checkpoint_attested' as const,
+          sourceAttestationBindingDigestHex: binding.bindingDigestHex,
+          targetDescriptorDigestHex: target.descriptorDigestHex,
+          checkpointStatement,
+          attestationDigestHex,
+          signatures,
+          signatureSetDigestHex: sha256CanonicalJson(
+            signatures,
+            CHECKPOINT_ATTESTATION_SIGNATURE_SET_DIGEST_DOMAIN,
+          ),
+          checks: {
+            exactLaunchTargetObjectBound: true as const,
+            exactCheckpointProfileRebuilt: true as const,
+            exactApplicationAndProfileIdentityBound: true as const,
+            exactDynamicCheckpointFieldsBound: true as const,
+            exactThresholdSignatureSetVerified: true as const,
+            boundedAdmissionHorizonVerified: true as const,
+            oneShotCapabilityConsumed: true as const,
+          },
+          boundary: {
+            processOwnedSyntheticCustodyOnly: true as const,
+            thresholdSourceAttestationVerified: true as const,
+            independentAttestorCustodyEstablished: false as const,
+            sourceConsensusIndependentlyVerified: false as const,
+            deterministicSourceFinalityEstablished: false as const,
+            mintBeforeCheckpointLifecycleEstablished: false as const,
+            ergoAnchorEstablished: false as const,
+            trackerAdmissionEstablished: false as const,
+            replayInsertionEstablished: false as const,
+            payoutAuthorized: false as const,
+            ergoTransactionSigningAuthorized: false as const,
+            submissionAuthorized: false as const,
+            broadcastAuthorized: false as const,
+            fundsAuthorityEstablished: false as const,
+            gate5Closed: false as const,
+            trustlessStatusEstablished: false as const,
+            productionReadinessEstablished: false as const,
+          },
+          limitations: [
+            'The source-attestation keys are synthetic and share one process; this receipt proves the disclosed threshold policy decision only.',
+            'The checkpoint statement is bound to the exact launched application/profile, but the dynamic burn fields require a separate process-proven producer join.',
+            'The source-attestation session does not establish mint-before-checkpoint lifecycle ordering; a process-proven packet composition must impose it.',
+            'No independent source consensus, deterministic finality, Ergo anchor, tracker admission, replay insertion, payout, funds authority, Gate 5 closure, trustless status, or production readiness is established.',
+          ] as const,
+        });
+        const receipt = deepFreeze({
+          ...body,
+          receiptDigestHex: sha256CanonicalJson(
+            body,
+            CHECKPOINT_ATTESTATION_RECEIPT_DIGEST_DOMAIN,
+          ),
+        });
+        CHECKPOINT_ATTESTATION_RECEIPTS.add(receipt);
+        return receipt;
+      } catch (error) {
+        signers = [];
+        signedTarget = undefined;
+        state = 'disposed';
+        throw error;
+      }
+    },
     dispose: () => {
       if (state === 'open') {
         signers = [];
@@ -1014,6 +1283,36 @@ export function assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   ) {
     throw new Error(
       'isolated-devnet source-attestation V2 session lacks provenance',
+    );
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1
+> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !CHECKPOINT_ATTESTATION_RECEIPTS.has(value)
+  ) {
+    throw new Error(
+      'isolated-devnet checkpoint-attestation receipt lacks process provenance',
+    );
+  }
+  const receipt = value as Readonly<
+    SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1
+  >;
+  const { receiptDigestHex, ...body } = receipt;
+  if (
+    sha256CanonicalJson(
+      body,
+      CHECKPOINT_ATTESTATION_RECEIPT_DIGEST_DOMAIN,
+    ) !== receiptDigestHex
+  ) {
+    throw new Error(
+      'isolated-devnet checkpoint-attestation receipt digest changed',
     );
   }
 }
@@ -1144,6 +1443,64 @@ export function assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Pr
     throw new Error(
       'isolated-devnet settlement-family mint source-proof profile binding changed',
     );
+  }
+}
+
+function assertCheckpointAttestationSignatures(
+  allowedPublicKeysHex: readonly string[],
+  threshold: number,
+  attestationDigestHex: string,
+  signatures: readonly Readonly<
+    SubstrateFederatedIsolatedDevnetLaunchSignatureV1
+  >[],
+): void {
+  if (signatures.length !== threshold) {
+    throw new Error(
+      'isolated-devnet checkpoint attestation has the wrong signature count',
+    );
+  }
+  const digest = Buffer.from(
+    fixedHex(
+      attestationDigestHex,
+      32,
+      'isolated-devnet checkpoint attestation digest',
+    ).slice(2),
+    'hex',
+  );
+  const seen = new Set<string>();
+  for (const signature of signatures) {
+    const publicKeyHex = fixedHex(
+      signature.signerPublicKeyHex,
+      32,
+      'isolated-devnet checkpoint attestation public key',
+    ).slice(2);
+    const signatureHex = fixedHex(
+      signature.signatureHex,
+      64,
+      'isolated-devnet checkpoint attestation signature',
+    ).slice(2);
+    if (
+      seen.has(publicKeyHex)
+      || !allowedPublicKeysHex.includes(publicKeyHex)
+      || !verify(
+        null,
+        digest,
+        createPublicKey({
+          key: Buffer.concat([
+            ED25519_SPKI_PREFIX,
+            Buffer.from(publicKeyHex, 'hex'),
+          ]),
+          format: 'der',
+          type: 'spki',
+        }),
+        Buffer.from(signatureHex, 'hex'),
+      )
+    ) {
+      throw new Error(
+        'isolated-devnet checkpoint attestation signature verification failed',
+      );
+    }
+    seen.add(publicKeyHex);
   }
 }
 

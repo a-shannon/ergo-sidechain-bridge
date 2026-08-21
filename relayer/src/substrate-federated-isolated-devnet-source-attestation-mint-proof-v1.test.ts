@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
+  consumeCommittedReserveEvidenceForDraft: vi.fn(),
   failNextSignature: false,
+  failNextVerification: false,
   launchStatements: new WeakSet<object>(),
 }));
 
@@ -17,8 +19,29 @@ vi.mock('node:crypto', async importOriginal => {
       }
       return (actual.sign as (...values: unknown[]) => Buffer)(...args);
     }),
+    verify: vi.fn((...args: unknown[]) => {
+      if (mocks.failNextVerification) {
+        mocks.failNextVerification = false;
+        return false;
+      }
+      return (actual.verify as (...values: unknown[]) => boolean)(...args);
+    }),
   };
 });
+
+vi.mock(
+  './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js')
+    >();
+    return {
+      ...actual,
+      consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1:
+        mocks.consumeCommittedReserveEvidenceForDraft,
+    };
+  },
+);
 
 vi.mock(
   './substrate-federated-isolated-devnet-launch-v1.js',
@@ -61,6 +84,15 @@ import {
   derivePooledReserveMintReservationRuntimeProfileV4IdHex,
 } from './pooled-reserve-mint-reservation-runtime-profile-v4-codec.js';
 import {
+  buildSubstrateFederatedCheckpointProfileV1,
+} from './profiles/substrate-federated-v1/checkpoint-statement.js';
+import {
+  buildSubstrateFederatedSettlementFamilyV1CompilerFixtureInput,
+} from './substrate-federated-settlement-family-v1-fixture.js';
+import {
+  buildSubstrateFederatedSettlementFamilyV1CompilerRequest,
+} from './substrate-federated-settlement-family-v1.js';
+import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
@@ -70,6 +102,7 @@ import {
   type FederatedPooledReserveSourceProofProfileV1Input,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance,
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1Provenance,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
@@ -116,13 +149,19 @@ const EVIDENCE = Object.freeze({
   finalityProofCanonicalHex: '0x0b0c',
   verifierExecutableSha256Hex: `0x${'0d'.repeat(32)}`,
 });
+const COMMITTED_RESERVE_EVIDENCE_RECEIPT = Object.freeze({
+  receiptDigestHex: h32('0e'),
+});
 const LINEAGE_BY_DRAFT = new WeakMap<object, string>();
 
 let activePacket: object | undefined;
+let activeCommittedReserveDraft: object | undefined;
 
 beforeEach(() => {
   activePacket = undefined;
+  activeCommittedReserveDraft = undefined;
   mocks.failNextSignature = false;
+  mocks.failNextVerification = false;
   mocks.launchStatements = new WeakSet<object>();
   vi.clearAllMocks();
   mocks.assertCommittedVaultForCandidate.mockImplementation(
@@ -137,6 +176,17 @@ beforeEach(() => {
         throw new Error('committed-vault candidate provenance missing');
       }
       return activePacket;
+    },
+  );
+  mocks.consumeCommittedReserveEvidenceForDraft.mockImplementation(
+    (receipt, draft) => {
+      if (
+        receipt !== COMMITTED_RESERVE_EVIDENCE_RECEIPT
+        || draft !== activeCommittedReserveDraft
+      ) {
+        throw new Error('committed-reserve evidence provenance missing');
+      }
+      return EVIDENCE;
     },
   );
 });
@@ -342,7 +392,182 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     expect(() => session.produceSettlementFamilyMintSourceProof({} as never)).toThrow(
       /requires one completed launch attestation/u,
     );
+    expect(() => session.produceCheckpointAttestation(checkpointInput())).toThrow(
+      /requires one completed launch attestation/u,
+    );
     session.dispose();
+  });
+
+  it('signs one exact profile-bound checkpoint without claiming source consensus', () => {
+    const session = sessionV2();
+    signLaunch(session);
+
+    const receipt = session.produceCheckpointAttestation(checkpointInput());
+
+    expect(receipt).toMatchObject({
+      status: 'synthetic_federated_checkpoint_attested',
+      sourceAttestationBindingDigestHex: session.binding.bindingDigestHex,
+      targetDescriptorDigestHex: h32('60'),
+      checkpointStatement: {
+        sourceNetworkIdHex: SOURCE_NETWORK_ID.slice(2),
+        sidechainIdHex: SIDECHAIN_ID.slice(2),
+        sourceNativeBlockHeight: '7',
+        sourceNativeBlockHashHex: '61'.repeat(32),
+        executionBlockHashHex: '62'.repeat(32),
+        bridgeEventRootHex: '63'.repeat(32),
+        burnLeafCount: 1,
+        bridgeAddressHex: BRIDGE_ADDRESS.slice(2),
+        tokenAddressHex: TOKEN_ADDRESS.slice(2),
+        settlementProfileIdHex: SETTLEMENT_PROFILE_ID.slice(2),
+      },
+      checks: {
+        exactLaunchTargetObjectBound: true,
+        exactCheckpointProfileRebuilt: true,
+        exactApplicationAndProfileIdentityBound: true,
+        exactDynamicCheckpointFieldsBound: true,
+        exactThresholdSignatureSetVerified: true,
+        boundedAdmissionHorizonVerified: true,
+        oneShotCapabilityConsumed: true,
+      },
+      boundary: {
+        processOwnedSyntheticCustodyOnly: true,
+        thresholdSourceAttestationVerified: true,
+        independentAttestorCustodyEstablished: false,
+        sourceConsensusIndependentlyVerified: false,
+        deterministicSourceFinalityEstablished: false,
+        mintBeforeCheckpointLifecycleEstablished: false,
+        trackerAdmissionEstablished: false,
+        payoutAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(receipt.signatures).toHaveLength(2);
+    expect(receipt.signatures.map(value => value.signerPublicKeyHex)).toEqual(
+      session.binding.sourceAttestationPublicKeysHex.slice(0, 2),
+    );
+    expect(receipt.checkpointStatement.encodedStatementHex).toHaveLength(1024);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+        receipt,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance(
+        structuredClone(receipt),
+      )
+    ).toThrow(/lacks process provenance/u);
+    expect(() => session.produceCheckpointAttestation(checkpointInput()))
+      .toThrow(/already consumed/u);
+
+    session.dispose();
+  });
+
+  it('retains the exact launched profile and keys from mint proof through checkpoint', () => {
+    const session = sessionV2();
+    const target = signLaunch(session);
+    const draft = draftV2(target);
+    activeCommittedReserveDraft = draft;
+
+    const mintReceipt = session.produceSettlementFamilyMintSourceProof({
+      draft,
+      evidenceReceipt: COMMITTED_RESERVE_EVIDENCE_RECEIPT as never,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+    const checkpointReceipt =
+      session.produceCheckpointAttestation(checkpointInput());
+
+    expect(mintReceipt.targetDescriptorDigestHex).toBe(
+      target.descriptorDigestHex,
+    );
+    expect(checkpointReceipt.targetDescriptorDigestHex).toBe(
+      target.descriptorDigestHex,
+    );
+    expect(checkpointReceipt.checkpointStatement.federationProfileIdHex).toBe(
+      session.binding.checkpointFederationProfileIdHex,
+    );
+    expect(checkpointReceipt.signatures.map(value => value.signerPublicKeyHex))
+      .toEqual(mintReceipt.signatureVerification.signatures.map(value =>
+        value.signerPublicKeyHex.slice(2)
+      ));
+
+    session.dispose();
+  });
+
+  it('keeps mint and checkpoint one-shot capabilities order-independent at session level', () => {
+    const session = sessionV2();
+    const target = signLaunch(session);
+    const checkpointReceipt =
+      session.produceCheckpointAttestation(checkpointInput());
+    const draft = draftV2(target);
+    activeCommittedReserveDraft = draft;
+
+    const mintReceipt = session.produceSettlementFamilyMintSourceProof({
+      draft,
+      evidenceReceipt: COMMITTED_RESERVE_EVIDENCE_RECEIPT as never,
+      issuedAtNativeHeight: '4',
+      expiresAtNativeHeight: '36',
+    });
+
+    expect(
+      checkpointReceipt.boundary.mintBeforeCheckpointLifecycleEstablished,
+    ).toBe(false);
+    expect(mintReceipt.boundary.mintExecuted).toBe(false);
+    expect(checkpointReceipt.boundary.fundsAuthorityEstablished).toBe(false);
+    expect(mintReceipt.boundary.fundsAuthorityEstablished).toBe(false);
+
+    session.dispose();
+  });
+
+  it('rejects malformed checkpoint fields before consuming the one-shot capability', () => {
+    const session = sessionV2();
+    signLaunch(session);
+
+    expect(() => session.produceCheckpointAttestation({
+      ...checkpointInput(),
+      burnLeafCount: 0,
+    })).toThrow(/positive uint32/u);
+    expect(() => session.produceCheckpointAttestation({
+      ...checkpointInput(),
+      admissionExpiresAtErgoHeight: '2065',
+    })).toThrow(/admission horizon/u);
+    expect(() => session.produceCheckpointAttestation(checkpointInput()))
+      .not.toThrow();
+
+    session.dispose();
+  });
+
+  it('disposes every remaining signing capability when checkpoint signing fails', () => {
+    const session = sessionV2();
+    signLaunch(session);
+    mocks.failNextSignature = true;
+
+    expect(() => session.produceCheckpointAttestation(checkpointInput())).toThrow(
+      /injected source-attestation signature failure/u,
+    );
+    expect(() => session.produceCheckpointAttestation(checkpointInput()))
+      .toThrow(/disposed/u);
+    expect(() =>
+      session.produceSettlementFamilyMintSourceProof({} as never)
+    ).toThrow(/disposed/u);
+  });
+
+  it('disposes every remaining capability when checkpoint signature verification fails', () => {
+    const session = sessionV2();
+    signLaunch(session);
+    mocks.failNextVerification = true;
+
+    expect(() => session.produceCheckpointAttestation(checkpointInput())).toThrow(
+      /signature verification failed/u,
+    );
+    expect(() => session.produceCheckpointAttestation(checkpointInput()))
+      .toThrow(/disposed/u);
+    expect(() =>
+      session.produceSettlementFamilyMintSourceProof({} as never)
+    ).toThrow(/disposed/u);
   });
 
   it('disposes the signing capability when launch signing fails', () => {
@@ -378,8 +603,18 @@ function signLaunch(
     | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
     | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   >,
-): void {
+): any {
   const statementDigestHex = 'f1'.repeat(32);
+  const checkpointProfile = buildSubstrateFederatedCheckpointProfileV1({
+    federationEpoch: session.binding.federatedMintProfile.federationEpoch,
+    maxAdmissionValidityBlocks:
+      session.binding.federatedMintProfile.maxValidityBlocks,
+    sourceAttestationThreshold: session.binding.sourceAttestationThreshold,
+    sourceAttestationPublicKeysHex:
+      session.binding.sourceAttestationPublicKeysHex,
+    ergoAdmissionThreshold: 1,
+    ergoAdmissionPublicKeysHex: [ERGO_ADMISSION_PUBLIC_KEY_HEX],
+  });
   const federation = Object.freeze({
     sourceAttestationKeySetDigestHex:
       session.binding.checkpointSourceAttestationKeySetDigestHex,
@@ -387,6 +622,72 @@ function signLaunch(
     federationProfileIdHex: session.binding.checkpointFederationProfileIdHex,
     sourceAttestationPublicKeysHex:
       session.binding.sourceAttestationPublicKeysHex,
+    federationEpoch: checkpointProfile.federationEpoch,
+    maxAdmissionValidityBlocks:
+      checkpointProfile.maxAdmissionValidityBlocks,
+    ergoAdmissionThreshold: checkpointProfile.ergoAdmissionThreshold,
+    ergoAdmissionPublicKeysHex:
+      checkpointProfile.ergoAdmissionPublicKeysHex,
+    ergoAdmissionKeySetDigestHex:
+      checkpointProfile.ergoAdmissionKeySetDigestHex,
+  });
+  const familyInput =
+    buildSubstrateFederatedSettlementFamilyV1CompilerFixtureInput();
+  const familyRequest =
+    buildSubstrateFederatedSettlementFamilyV1CompilerRequest({
+      ...familyInput,
+      tracker: {
+        ...familyInput.tracker,
+        sourceNetworkIdHex: SOURCE_NETWORK_ID,
+        sidechainIdHex: SIDECHAIN_ID,
+        bridgeAddressHex: BRIDGE_ADDRESS,
+        tokenAddressHex: TOKEN_ADDRESS,
+        runtimeProfileIdHex: h32('54'),
+        settlementProfileIdHex: SETTLEMENT_PROFILE_ID,
+        federationProfileIdHex: checkpointProfile.profileIdHex,
+        sourceAttestationKeySetDigestHex:
+          checkpointProfile.sourceAttestationKeySetDigestHex,
+        sourceAttestationThreshold:
+          checkpointProfile.sourceAttestationThreshold,
+        ergoAdmissionKeySetDigestHex:
+          checkpointProfile.ergoAdmissionKeySetDigestHex,
+        ergoAdmissionThreshold: checkpointProfile.ergoAdmissionThreshold,
+        federationEpoch: checkpointProfile.federationEpoch,
+      },
+    });
+  const target = Object.freeze({
+    descriptorDigestHex: h32('60'),
+    profile: Object.freeze({
+      familyIdHex: familyRequest.profile.familyIdHex,
+      encodedProfileHex: familyRequest.profile.encodedProfileHex,
+      settlementProfileIdHex: SETTLEMENT_PROFILE_ID,
+    }),
+    sourceRuntime: Object.freeze({
+      sourceNetworkIdHex: SOURCE_NETWORK_ID,
+      sidechainIdHex: SIDECHAIN_ID,
+      bridgeAddressHex: BRIDGE_ADDRESS,
+      tokenAddressHex: TOKEN_ADDRESS,
+      bridgeRuntimeCodeSha256Hex: h32('51'),
+      bridgeRuntimeCodeBytes: 100,
+      tokenRuntimeCodeSha256Hex: h32('52'),
+      tokenRuntimeCodeBytes: 200,
+      sourceRuntimeCodeSha256Hex: h32('53'),
+      sourceRuntimeCodeBytes: 300,
+      runtimeProfileIdHex: h32('54'),
+    }),
+    federation,
+    lineages: Object.freeze({
+      tracker: Object.freeze({
+        singletonTokenIdHex: familyRequest.tracker.trackerNftIdHex,
+      }),
+      duplicatePrevention: Object.freeze({
+        singletonTokenIdHex:
+          familyRequest.profile.duplicatePreventionNftIdHex,
+      }),
+      pooledReserve: Object.freeze({
+        singletonTokenIdHex: familyRequest.profile.pooledReserveNftIdHex,
+      }),
+    }),
   });
   const statement = Object.freeze({
     statementDigestHex,
@@ -397,10 +698,61 @@ function signLaunch(
           federation.sourceAttestationKeySetDigestHex,
         sourceAttestationThreshold: federation.sourceAttestationThreshold,
       }),
-    target: Object.freeze({ federation }),
+    target,
   });
   mocks.launchStatements.add(statement);
   session.signLaunchStatement(statement as never);
+  return target;
+}
+
+function checkpointInput() {
+  return Object.freeze({
+    sourceNativeBlockHeight: '7',
+    sourceNativeBlockHashHex: h32('61'),
+    executionBlockHashHex: h32('62'),
+    bridgeEventRootHex: h32('63'),
+    burnLeafCount: 1,
+    admissionValidFromErgoHeight: '2000',
+    admissionExpiresAtErgoHeight: '2064',
+  });
+}
+
+function draftV2(target: any) {
+  const sourceIntentHex = encodePegInSourceIntentV2Hex({
+    formatVersion: 2,
+    sourceNetworkIdHex: target.sourceRuntime.sourceNetworkIdHex,
+    sidechainIdHex: target.sourceRuntime.sidechainIdHex,
+    bridgeAddressHex: target.sourceRuntime.bridgeAddressHex,
+    tokenAddressHex: target.sourceRuntime.tokenAddressHex,
+    settlementProfileIdHex: target.profile.settlementProfileIdHex,
+    admissionProfileIdHex: target.profile.familyIdHex,
+    sourceAssetIdHex: h32('00'),
+    amountNanoErg: '10000000',
+    recipientAddressHex: RECIPIENT_ADDRESS,
+  });
+  activePacket = Object.freeze({
+    familyIdHex: target.profile.familyIdHex,
+    familyCompiler: Object.freeze({ bindingDigestHex: h32('33') }),
+    sourceIntentHex,
+    depositCommitmentHex: COMMITMENT,
+    reserve: Object.freeze({
+      outputDigestHex: SUCCESSOR_DIGEST,
+      outputLiabilityNanoErg: '10000000',
+    }),
+    transactions: Object.freeze({
+      reserveTransition: Object.freeze({ txId: TRANSITION_ID }),
+    }),
+    boxes: Object.freeze({
+      sourceLock: Object.freeze({ boxId: SOURCE_LOCK_ID }),
+      reserveSuccessor: Object.freeze({ boxId: SUCCESSOR_ID }),
+    }),
+  });
+  return buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+    batch: BATCH as never,
+    target: TARGET as never,
+    candidate: CANDIDATE as never,
+    committedVaultObservation: OBSERVATION as never,
+  });
 }
 
 function draftV1(
