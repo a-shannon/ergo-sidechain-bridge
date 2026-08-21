@@ -25,7 +25,7 @@ index cd917a7..9d31b73 100644
  const SOURCE_PROOF_ENVELOPE_ENV: &str = "BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX";
  const DYNAMIC_SOURCE_PROOF_MARKER: &str = "bridge-lab-dynamic-source-proof-sha256=";
  
-@@ -509,6 +516,361 @@ fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
+@@ -509,6 +516,369 @@ fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
  	);
  }
  
@@ -320,6 +320,14 @@ index cd917a7..9d31b73 100644
 +		hex::encode(sidechain_id)
 +	);
 +	println!(
++		"bridge-lab-peg-out-source-native-block-height={}",
++		burned.best_number,
++	);
++	println!(
++		"bridge-lab-peg-out-source-native-block-hash=0x{}",
++		hex::encode(burned.best_hash),
++	);
++	println!(
 +		"bridge-lab-peg-out-execution-block-number={}",
 +		ethereum_block.header.number.low_u64(),
 +	);
@@ -387,7 +395,7 @@ index cd917a7..9d31b73 100644
  #[test]
  fn federated_lab_reservation_rejects_missing_stale_and_mismatched_authority_inputs() {
  	let missing = unactivated_fixture();
-@@ -947,6 +1309,56 @@ fn abi_call(signature: &[u8], words: &[H256]) -> Vec<u8> {
+@@ -947,6 +1317,56 @@ fn abi_call(signature: &[u8], words: &[H256]) -> Vec<u8> {
  	input
  }
  

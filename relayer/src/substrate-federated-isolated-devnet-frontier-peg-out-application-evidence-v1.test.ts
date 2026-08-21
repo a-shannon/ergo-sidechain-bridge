@@ -26,6 +26,8 @@ const applicationEvidenceOverlayPatchBytes = readFileSync(path.resolve(
 
 const EXACT_PRODUCER_STDOUT = [
   'bridge-lab-peg-out-sidechain-id=0xd82f3dc47cfc500fd972fe3c87b0cd8bd42e29b50bf58d0a8dad03c677f49633',
+  'bridge-lab-peg-out-source-native-block-height=7',
+  'bridge-lab-peg-out-source-native-block-hash=0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   'bridge-lab-peg-out-execution-block-number=7',
   'bridge-lab-peg-out-execution-block-hash=0xd14e7f50ba77ac0b7353267dcd916f4012cd26dde96defc746fb3ad76f2a5410',
   'bridge-lab-peg-out-bridge-address=0x970951a12f975e6762482aca81e57d5a2a4e73f4',
@@ -54,6 +56,11 @@ describe('federated isolated-devnet Frontier peg-out application evidence V1', (
     const receipt = consume(EXACT_PRODUCER_STDOUT);
 
     expect(receipt.status).toBe('local_application_burn_transcript_validated');
+    expect(receipt.sourceNativeBlock).toEqual({
+      height: 7,
+      hashHex:
+        '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    });
     expect(receipt.execution).toEqual({
       sidechainIdHex:
         '0xd82f3dc47cfc500fd972fe3c87b0cd8bd42e29b50bf58d0a8dad03c677f49633',
@@ -112,6 +119,18 @@ describe('federated isolated-devnet Frontier peg-out application evidence V1', (
       'token-address',
       '0x1111111111111111111111111111111111111111',
       /different application/u,
+    ],
+    [
+      'source native height drift',
+      'source-native-block-height',
+      '8',
+      /execution topology changed/u,
+    ],
+    [
+      'source native hash drift to zero',
+      'source-native-block-hash',
+      `0x${'00'.repeat(32)}`,
+      /source native block hash must be nonzero/u,
     ],
     [
       'execution block drift',
@@ -229,6 +248,20 @@ describe('federated isolated-devnet Frontier peg-out application evidence V1', (
       .toThrow(/duplicate.*burn-id/u);
     expect(() => consume(`${EXACT_PRODUCER_STDOUT}\nbridge-lab-peg-out-authority=true`))
       .toThrow(/unknown.*authority/u);
+  });
+
+  it('treats a different nonzero native hash as parsed data without process provenance', () => {
+    const baseline = consume(EXACT_PRODUCER_STDOUT);
+    const changed = consume(replaceMarker(
+      EXACT_PRODUCER_STDOUT,
+      'source-native-block-hash',
+      `0x${'bb'.repeat(32)}`,
+    ));
+
+    expect(changed.sourceNativeBlock.hashHex).toBe(`0x${'bb'.repeat(32)}`);
+    expect(changed.checks.sourceNativeBlockIdentityParsed).toBe(true);
+    expect(changed.boundary.callerSuppliedStdoutHasProcessProvenance).toBe(false);
+    expect(changed.receiptDigestHex).not.toBe(baseline.receiptDigestHex);
   });
 
   it('rejects either changed source patch', () => {

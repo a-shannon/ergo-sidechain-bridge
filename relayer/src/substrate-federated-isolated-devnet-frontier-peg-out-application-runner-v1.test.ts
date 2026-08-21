@@ -204,6 +204,7 @@ describe('federated isolated-devnet Frontier peg-out application runner V1', () 
         exactNamedCargoTestPassedOnce: true,
         sameProcessCargoExecutionProvenanceEstablished: true,
         pureApplicationEvidenceConsumedInSameProcess: true,
+        sourceNativeBlockToExecutionLookupBoundByExactSource: true,
       });
       expect(receipt.boundary).toMatchObject({
         callerSuppliedStdoutAccepted: false,

@@ -19,7 +19,7 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_EV
   'e2s.substrate-federated-isolated-devnet-frontier-peg-out-application-evidence.v1' as const;
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_OVERLAY_SHA256 =
-  'f0c31b1cf5f4da548438eab7a2467b8e6ef6e5eb023053ad07cdd6735fca93dc' as const;
+  'b275a0e44306e465e61369d80763945e3e8a0cdf96fac2efcc7914f77eb53bb5' as const;
 
 const CANONICAL_FRONTIER_PATCH_SHA256 =
   '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
@@ -41,6 +41,8 @@ const CONSUMER_RECEIPTS = new WeakSet<object>();
 
 const MARKERS = [
   'sidechain-id',
+  'source-native-block-height',
+  'source-native-block-hash',
   'execution-block-number',
   'execution-block-hash',
   'bridge-address',
@@ -86,6 +88,10 @@ export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEviden
     readonly tokenAddressHex: string;
     readonly ownerAddressHex: string;
   }>;
+  readonly sourceNativeBlock: Readonly<{
+    readonly height: 7;
+    readonly hashHex: string;
+  }>;
   readonly execution: Readonly<{
     readonly sidechainIdHex: string;
     readonly blockNumber: number;
@@ -117,6 +123,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEviden
     readonly reviewedBridgeAndTokenApplicationBound: true;
     readonly reportedSuccessfulPegOutStatusBound: true;
     readonly proofRelevantPegOutFieldsBound: true;
+    readonly sourceNativeBlockIdentityParsed: true;
     readonly canonicalPegOutAbiDecoded: true;
     readonly burnIdentityReconstructed: true;
     readonly burnLeafAndRootReconstructed: true;
@@ -196,6 +203,12 @@ export function consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplication
     'sidechain ID',
     true,
   );
+  const sourceNativeBlockHashHex = canonicalFixedHex(
+    markers.get('source-native-block-hash'),
+    32,
+    'source native block hash',
+    true,
+  );
   const blockHashHex = canonicalFixedHex(
     markers.get('execution-block-hash'),
     32,
@@ -254,6 +267,11 @@ export function consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplication
     'execution block number',
     true,
   );
+  const sourceNativeBlockHeight = canonicalSafeInteger(
+    markers.get('source-native-block-height'),
+    'source native block height',
+    true,
+  );
   const transactionIndex = canonicalSafeInteger(
     markers.get('transaction-index'),
     'transaction index',
@@ -272,7 +290,8 @@ export function consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplication
     true,
   );
   if (
-    blockNumber !== EXPECTED_EXECUTION_BLOCK_NUMBER
+    sourceNativeBlockHeight !== EXPECTED_EXECUTION_BLOCK_NUMBER
+    || blockNumber !== EXPECTED_EXECUTION_BLOCK_NUMBER
     || transactionIndex !== EXPECTED_TRANSACTION_INDEX
     || receiptStatus !== 1
     || eventIndex !== EXPECTED_EVENT_INDEX
@@ -354,6 +373,10 @@ export function consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplication
       tokenAddressHex,
       ownerAddressHex: EXPECTED_OWNER_ADDRESS,
     },
+    sourceNativeBlock: {
+      height: 7 as const,
+      hashHex: sourceNativeBlockHashHex,
+    },
     execution: {
       sidechainIdHex,
       blockNumber,
@@ -385,6 +408,7 @@ export function consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplication
       reviewedBridgeAndTokenApplicationBound: true as const,
       reportedSuccessfulPegOutStatusBound: true as const,
       proofRelevantPegOutFieldsBound: true as const,
+      sourceNativeBlockIdentityParsed: true as const,
       canonicalPegOutAbiDecoded: true as const,
       burnIdentityReconstructed: true as const,
       burnLeafAndRootReconstructed: true as const,
@@ -412,7 +436,7 @@ export function consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplication
     },
     limitations: [
       'The Rust producer executes the reviewed Solidity peg-out and runtime commitment in an isolated TestClient; it does not establish source consensus or sidechain finality.',
-      'This pure consumer receives caller-supplied stdout and reconstructs only the proof-relevant receipt view; same-process Cargo execution provenance remains for a later runner.',
+      'This pure consumer receives caller-supplied stdout and parses the native block identity without proving its relation to the EVM block; that relation requires the exact same-process Rust runner.',
       'No Ergo anchor, tracker admission, payout acceptance, replay update, signing, submission, broadcast, funds authority, Gate 5, trustless status, or production readiness follows from this receipt.',
     ] as const,
   });

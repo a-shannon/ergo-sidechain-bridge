@@ -54,9 +54,9 @@ const CARGO_TEST_NAME =
 const CANONICAL_FRONTIER_PATCH_SHA256 =
   '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
 const APPLICATION_OVERLAY_PATCH_SHA256 =
-  'f0c31b1cf5f4da548438eab7a2467b8e6ef6e5eb023053ad07cdd6735fca93dc';
+  'b275a0e44306e465e61369d80763945e3e8a0cdf96fac2efcc7914f77eb53bb5';
 const OVERLAY_APPLIED_SOURCE_LF_SHA256 =
-  'b1b6a4a5524cd5230e84c595c1d4853e052f6bd13e135a16cb017c65af973e89';
+  '1372b856b91b6c017e27e6ebf96ae95d658d3de041768ca3a90a9a2567ac4a53';
 const PATCH_GIT_VERSION = 'git version 2.55.0.windows.3';
 const PATCH_GIT_SHA256 =
   '7b7971dd13f0c3a284e538601f2f9770b3a87dfaccb5fb52d68141c67ed22364';
@@ -113,6 +113,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunner
     readonly exactNamedCargoTestPassedOnce: true;
     readonly sameProcessCargoExecutionProvenanceEstablished: true;
     readonly pureApplicationEvidenceConsumedInSameProcess: true;
+    readonly sourceNativeBlockToExecutionLookupBoundByExactSource: true;
     readonly freshRunnerOwnedCargoTargetUsed: true;
     readonly configurationIsolatedCargoHomeUsed: true;
     readonly cargoProcessTreeContainedBeforeCleanup: true;
@@ -526,6 +527,7 @@ async function executeRunner(
       exactNamedCargoTestPassedOnce: true as const,
       sameProcessCargoExecutionProvenanceEstablished: true as const,
       pureApplicationEvidenceConsumedInSameProcess: true as const,
+      sourceNativeBlockToExecutionLookupBoundByExactSource: true as const,
       freshRunnerOwnedCargoTargetUsed: true as const,
       configurationIsolatedCargoHomeUsed: true as const,
       cargoProcessTreeContainedBeforeCleanup: true as const,
