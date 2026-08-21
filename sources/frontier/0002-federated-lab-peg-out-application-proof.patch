@@ -1,0 +1,446 @@
+diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
+index cd917a7..9d31b73 100644
+--- a/template/node/src/bridge_federated_lab_reservation_tests.rs
++++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
+@@ -30,7 +30,8 @@ use substrate_test_client::{BlockOrigin, GenesisInit, TestClientBuilder};
+ use crate::{chain_spec, selected_runtime as lab_runtime, service::HostFunctions};
+ use lab_runtime::{
+ 	bridge_commitment::{
+-		ConsumedPooledReserveMintReservationsV4, CurrentPooledReserveMintReservationProfileV4,
++		BridgeEventCommitment, ConsumedPooledReserveMintReservationsV4, CurrentCommitment,
++		CurrentLeafHashes, CurrentPooledReserveMintReservationProfileV4,
+ 		Error as BridgeCommitmentError, InvalidatedPooledReserveMintReservationsV4,
+ 		PendingPooledReserveMintReservationKeysV4, PendingPooledReserveMintReservationsV4,
+ 		PooledReserveMintReservationEnforcementActivatedV4,
+@@ -67,6 +68,12 @@ const EVM_SECRET: [u8; 32] = ALITH_SECRET;
+ const TEST_CHAIN_ID: u64 = 42;
+ const TEST_GAS_PRICE: u64 = 1_000_000_000;
+ const TEST_GAS_LIMIT: u64 = 5_000_000;
++const BRIDGE_FEE_NANO_ERG: u64 = 5_000_000;
++const MINIMUM_PEG_OUT_NANO_ERG: u64 = 10_000_000;
++const PEG_OUT_EVENT_SIGNATURE: &[u8] = b"PegOut(address,uint256,bytes)";
++const BURN_ID_DOMAIN: &[u8] = b"E2S_TRUSTLESS_BURN_ID_V1";
++const BURN_LEAF_DOMAIN: &[u8] = b"E2S_TRUSTLESS_BURN_LEAF_V1";
++const P2PK_ERGO_TREE_PREFIX: [u8; 3] = [0x00, 0x08, 0xcd];
+ const SOURCE_PROOF_ENVELOPE_ENV: &str = "BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX";
+ const DYNAMIC_SOURCE_PROOF_MARKER: &str = "bridge-lab-dynamic-source-proof-sha256=";
+ 
+@@ -509,6 +516,361 @@ fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
+ 	);
+ }
+ 
++#[test]
++fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply() {
++	let fixture = activated_fixture();
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(&fixture.statement)
++		.expect("LAB reservation statement is canonical");
++	let mint_identity = validated.statement.mint_identity;
++	let bridge_address = validated.statement.source_intent.bridge_address;
++	let token_address = validated.statement.source_intent.token_address;
++	let recipient = validated.statement.source_intent.recipient;
++	let amount = validated.statement.source_intent.amount;
++	let evm_secret = H256::from(EVM_SECRET);
++	let evm_owner = evm_address(evm_secret);
++	assert_eq!(
++		recipient, evm_owner,
++		"LAB burn requires the process-owned recipient"
++	);
++	assert!(
++		amount >= MINIMUM_PEG_OUT_NANO_ERG + BRIDGE_FEE_NANO_ERG,
++		"LAB burn amount must satisfy the reviewed bridge minimum",
++	);
++
++	import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(30_000),
++			signed_extrinsic(
++				&fixture.client,
++				&fixture.signer,
++				4,
++				reservation_call(fixture.statement.clone(), fixture.proof.clone()),
++			),
++		],
++	);
++	let reserved = fixture.client.usage_info().chain;
++	assert_eq!(reserved.best_number, 5);
++	let owner = fixture
++		.client
++		.runtime_api()
++		.account_basic(reserved.best_hash, evm_owner)
++		.expect("LAB EVM owner query succeeds");
++	let mint_transaction = signed_legacy_transaction(
++		evm_secret,
++		owner.nonce.low_u64(),
++		TransactionAction::Call(bridge_address),
++		abi_call(
++			b"mintSERG(address,uint256,bytes32)",
++			&[
++				H256::from(recipient),
++				H256::from_low_u64_be(amount),
++				mint_identity,
++			],
++		),
++	);
++	import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(36_000),
++			ethereum_extrinsic(mint_transaction),
++		],
++	);
++	let minted = fixture.client.usage_info().chain;
++	assert_eq!(minted.best_number, 6);
++	let supply_call = abi_call(b"totalSupply()", &[]);
++	let user_balance_call = abi_call(b"balanceOf(address)", &[H256::from(recipient)]);
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			minted.best_hash,
++			evm_owner,
++			token_address,
++			supply_call.clone(),
++		),
++		U256::from(amount),
++	);
++	assert_eq!(
++		evm_view(
++			&fixture.client,
++			minted.best_hash,
++			evm_owner,
++			token_address,
++			user_balance_call.clone(),
++		),
++		U256::from(amount),
++	);
++
++	let account_after_mint = fixture
++		.client
++		.runtime_api()
++		.account_basic(minted.best_hash, evm_owner)
++		.expect("LAB EVM owner query succeeds after mint");
++	let approve_transaction = signed_legacy_transaction(
++		evm_secret,
++		account_after_mint.nonce.low_u64(),
++		TransactionAction::Call(token_address),
++		abi_call(
++			b"approve(address,uint256)",
++			&[H256::from(bridge_address), H256::from_low_u64_be(amount)],
++		),
++	);
++	let recipient_public_key = [
++		0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87,
++		0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16,
++		0xf8, 0x17, 0x98,
++	];
++	let peg_out_transaction = signed_legacy_transaction(
++		evm_secret,
++		account_after_mint.nonce.low_u64() + 1,
++		TransactionAction::Call(bridge_address),
++		abi_call_with_dynamic_bytes(
++			b"pegOut(uint256,bytes)",
++			H256::from_low_u64_be(amount),
++			&recipient_public_key,
++		),
++	);
++	let peg_out_transaction_hash = peg_out_transaction.hash();
++	import_built_block(
++		&fixture.client,
++		vec![
++			timestamp_extrinsic(42_000),
++			ethereum_extrinsic(approve_transaction),
++			ethereum_extrinsic(peg_out_transaction),
++		],
++	);
++	let burned = fixture.client.usage_info().chain;
++	assert_eq!(burned.best_number, 7);
++	let ethereum_block = fixture
++		.client
++		.runtime_api()
++		.current_block(burned.best_hash)
++		.expect("LAB Ethereum block query succeeds")
++		.expect("LAB burn block contains one Ethereum block");
++	let receipts = fixture
++		.client
++		.runtime_api()
++		.current_receipts(burned.best_hash)
++		.expect("LAB Ethereum receipts query succeeds")
++		.expect("LAB burn block contains receipts");
++	let statuses = fixture
++		.client
++		.runtime_api()
++		.current_transaction_statuses(burned.best_hash)
++		.expect("LAB Ethereum status query succeeds")
++		.expect("LAB burn block contains transaction statuses");
++	assert_eq!(receipts.len(), 2);
++	assert_eq!(statuses.len(), 2);
++	assert_eq!(statuses[1].transaction_hash, peg_out_transaction_hash);
++	let (receipt_status, receipt_logs) = match &receipts[1] {
++		pallet_ethereum::Receipt::Legacy(data)
++		| pallet_ethereum::Receipt::EIP2930(data)
++		| pallet_ethereum::Receipt::EIP1559(data) => (data.status_code, &data.logs),
++	};
++	assert_eq!(receipt_status, 1);
++	assert_eq!(receipt_logs, &statuses[1].logs);
++
++	let peg_out_topic = H256::from(keccak_256(PEG_OUT_EVENT_SIGNATURE));
++	let mut global_event_index = 0u32;
++	let mut observed_peg_out = None;
++	for status in &statuses {
++		for log in &status.logs {
++			if status.transaction_hash == peg_out_transaction_hash
++				&& log.address == bridge_address
++				&& log.topics.first() == Some(&peg_out_topic)
++			{
++				assert!(
++					observed_peg_out.is_none(),
++					"LAB burn emitted more than one PegOut"
++				);
++				observed_peg_out = Some((global_event_index, log.clone()));
++			}
++			global_event_index = global_event_index
++				.checked_add(1)
++				.expect("LAB global event index fits u32");
++		}
++	}
++	let (event_index, peg_out_log) = observed_peg_out.expect("LAB burn emitted one PegOut");
++	let net_amount = amount - BRIDGE_FEE_NANO_ERG;
++	assert_eq!(
++		peg_out_log.topics.len(),
++		2,
++		"LAB PegOut must expose only the signature and indexed sender topics"
++	);
++	assert_eq!(
++		peg_out_log.topics[1],
++		H256::from(recipient),
++		"LAB PegOut indexed sender must match the process-owned account"
++	);
++	let peg_out_data = peg_out_log.data.as_slice();
++	assert_eq!(
++		peg_out_data.len(),
++		160,
++		"LAB PegOut ABI data must use the canonical 160-byte encoding"
++	);
++	let decoded_net_amount = U256::from_big_endian(&peg_out_data[0..32]);
++	let decoded_recipient_offset = U256::from_big_endian(&peg_out_data[32..64]);
++	let decoded_recipient_length = U256::from_big_endian(&peg_out_data[64..96]);
++	assert_eq!(decoded_net_amount, U256::from(net_amount));
++	assert_eq!(decoded_recipient_offset, U256::from(64u64));
++	assert_eq!(decoded_recipient_length, U256::from(33u64));
++	let decoded_recipient_public_key = &peg_out_data[96..129];
++	assert_eq!(decoded_recipient_public_key, recipient_public_key);
++	assert!(
++		peg_out_data[129..].iter().all(|byte| *byte == 0),
++		"LAB PegOut dynamic-byte padding must be zero"
++	);
++	let mut recipient_ergo_tree = P2PK_ERGO_TREE_PREFIX.to_vec();
++	recipient_ergo_tree.extend_from_slice(decoded_recipient_public_key);
++	let recipient_ergo_tree_hash = H256::from(blake2_256(&recipient_ergo_tree));
++	let sidechain_id = fixture
++		.client
++		.block_hash(0)
++		.expect("LAB genesis hash query succeeds")
++		.expect("LAB genesis exists");
++	let execution_block_hash = ethereum_block.header.hash();
++	let burn_id = derive_lab_burn_id(sidechain_id, peg_out_transaction_hash, event_index);
++	let burn_leaf_hash = hash_lab_burn_leaf(
++		sidechain_id,
++		execution_block_hash,
++		burn_id,
++		peg_out_transaction_hash,
++		event_index,
++		recipient_ergo_tree_hash,
++		net_amount,
++	);
++	let commitment_bytes = storage_at(
++		&fixture.client,
++		burned.best_hash,
++		&StorageKey(CurrentCommitment::<Runtime>::hashed_key().to_vec()),
++	)
++	.expect("LAB burn writes the current commitment");
++	let commitment = BridgeEventCommitment::decode(&mut &commitment_bytes[..])
++		.expect("LAB burn commitment decodes");
++	let leaf_hash_bytes = storage_at(
++		&fixture.client,
++		burned.best_hash,
++		&StorageKey(CurrentLeafHashes::<Runtime>::hashed_key().to_vec()),
++	)
++	.expect("LAB burn writes the current leaf set");
++	let leaf_hashes =
++		Vec::<H256>::decode(&mut &leaf_hash_bytes[..]).expect("LAB burn leaf set decodes");
++	assert_eq!(leaf_hashes, vec![burn_leaf_hash]);
++	assert_eq!(commitment.format_version, 1);
++	assert_eq!(commitment.sidechain_id, sidechain_id);
++	assert_eq!(
++		commitment.sidechain_height,
++		ethereum_block.header.number.low_u64()
++	);
++	assert_eq!(commitment.execution_block_hash, execution_block_hash);
++	assert_eq!(commitment.bridge_event_root, burn_leaf_hash);
++	assert_eq!(commitment.burn_leaf_count, 1);
++
++	let bridge_balance_call = abi_call(b"balanceOf(address)", &[H256::from(bridge_address)]);
++	let accumulated_fees_call = abi_call(b"accumulatedFees()", &[]);
++	let supply_after = evm_view(
++		&fixture.client,
++		burned.best_hash,
++		evm_owner,
++		token_address,
++		supply_call,
++	);
++	let user_balance_after = evm_view(
++		&fixture.client,
++		burned.best_hash,
++		evm_owner,
++		token_address,
++		user_balance_call,
++	);
++	let bridge_balance_after = evm_view(
++		&fixture.client,
++		burned.best_hash,
++		evm_owner,
++		token_address,
++		bridge_balance_call,
++	);
++	let accumulated_fees_after = evm_view(
++		&fixture.client,
++		burned.best_hash,
++		evm_owner,
++		bridge_address,
++		accumulated_fees_call,
++	);
++	assert_eq!(supply_after, U256::from(BRIDGE_FEE_NANO_ERG));
++	assert_eq!(user_balance_after, U256::zero());
++	assert_eq!(bridge_balance_after, U256::from(BRIDGE_FEE_NANO_ERG));
++	assert_eq!(accumulated_fees_after, U256::from(BRIDGE_FEE_NANO_ERG));
++	assert_eq!(U256::from(amount) - supply_after, U256::from(net_amount));
++
++	println!(
++		"bridge-lab-peg-out-sidechain-id=0x{}",
++		hex::encode(sidechain_id)
++	);
++	println!(
++		"bridge-lab-peg-out-execution-block-number={}",
++		ethereum_block.header.number.low_u64(),
++	);
++	println!(
++		"bridge-lab-peg-out-execution-block-hash=0x{}",
++		hex::encode(execution_block_hash),
++	);
++	println!(
++		"bridge-lab-peg-out-bridge-address=0x{}",
++		hex::encode(bridge_address)
++	);
++	println!(
++		"bridge-lab-peg-out-token-address=0x{}",
++		hex::encode(token_address)
++	);
++	println!("bridge-lab-peg-out-transaction-index=1");
++	println!(
++		"bridge-lab-peg-out-transaction-hash=0x{}",
++		hex::encode(peg_out_transaction_hash),
++	);
++	println!("bridge-lab-peg-out-receipt-status={receipt_status}");
++	println!("bridge-lab-peg-out-log-index={event_index}");
++	println!(
++		"bridge-lab-peg-out-topic0=0x{}",
++		hex::encode(peg_out_log.topics[0])
++	);
++	println!(
++		"bridge-lab-peg-out-topic1=0x{}",
++		hex::encode(peg_out_log.topics[1])
++	);
++	println!(
++		"bridge-lab-peg-out-data=0x{}",
++		hex::encode(&peg_out_log.data)
++	);
++	println!(
++		"bridge-lab-peg-out-bridge-event-root=0x{}",
++		hex::encode(commitment.bridge_event_root),
++	);
++	println!(
++		"bridge-lab-peg-out-burn-leaf-count={}",
++		commitment.burn_leaf_count
++	);
++	println!("bridge-lab-peg-out-burn-id=0x{}", hex::encode(burn_id));
++	println!(
++		"bridge-lab-peg-out-burn-leaf-hash=0x{}",
++		hex::encode(burn_leaf_hash)
++	);
++	println!("bridge-lab-peg-out-net-amount-nano-erg={net_amount}");
++	println!(
++		"bridge-lab-peg-out-recipient-ergo-tree=0x{}",
++		hex::encode(recipient_ergo_tree),
++	);
++	println!(
++		"bridge-lab-peg-out-recipient-ergo-tree-hash=0x{}",
++		hex::encode(recipient_ergo_tree_hash),
++	);
++	println!("bridge-lab-peg-out-supply-before={amount}");
++	println!("bridge-lab-peg-out-supply-after={}", supply_after.low_u64());
++	println!(
++		"bridge-lab-peg-out-escrow-after={}",
++		bridge_balance_after.low_u64(),
++	);
++}
++
+ #[test]
+ fn federated_lab_reservation_rejects_missing_stale_and_mismatched_authority_inputs() {
+ 	let missing = unactivated_fixture();
+@@ -947,6 +1309,56 @@ fn abi_call(signature: &[u8], words: &[H256]) -> Vec<u8> {
+ 	input
+ }
+ 
++fn abi_call_with_dynamic_bytes(signature: &[u8], first_word: H256, bytes: &[u8]) -> Vec<u8> {
++	let padded_bytes = bytes
++		.len()
++		.checked_add(31)
++		.expect("LAB ABI dynamic bytes length fits usize")
++		/ 32 * 32;
++	let mut input = Vec::with_capacity(4 + 96 + padded_bytes);
++	input.extend_from_slice(&keccak_256(signature)[..4]);
++	input.extend_from_slice(first_word.as_bytes());
++	input.extend_from_slice(H256::from_low_u64_be(64).as_bytes());
++	input.extend_from_slice(H256::from_low_u64_be(bytes.len() as u64).as_bytes());
++	input.extend_from_slice(bytes);
++	input.resize(4 + 96 + padded_bytes, 0);
++	input
++}
++
++fn derive_lab_burn_id(sidechain_id: H256, transaction_hash: H256, event_index: u32) -> H256 {
++	let mut bytes = Vec::with_capacity(BURN_ID_DOMAIN.len() + 32 + 32 + 4);
++	bytes.extend_from_slice(BURN_ID_DOMAIN);
++	bytes.extend_from_slice(sidechain_id.as_bytes());
++	bytes.extend_from_slice(transaction_hash.as_bytes());
++	bytes.extend_from_slice(&event_index.to_be_bytes());
++	H256::from(blake2_256(&bytes))
++}
++
++fn hash_lab_burn_leaf(
++	sidechain_id: H256,
++	execution_block_hash: H256,
++	burn_id: H256,
++	transaction_hash: H256,
++	event_index: u32,
++	recipient_ergo_tree_hash: H256,
++	amount: u64,
++) -> H256 {
++	let mut encoded = Vec::with_capacity(205);
++	encoded.push(1);
++	encoded.extend_from_slice(sidechain_id.as_bytes());
++	encoded.extend_from_slice(execution_block_hash.as_bytes());
++	encoded.extend_from_slice(burn_id.as_bytes());
++	encoded.extend_from_slice(transaction_hash.as_bytes());
++	encoded.extend_from_slice(&event_index.to_be_bytes());
++	encoded.extend_from_slice(recipient_ergo_tree_hash.as_bytes());
++	encoded.extend_from_slice(&amount.to_be_bytes());
++	encoded.extend_from_slice(&[0u8; 32]);
++	let mut preimage = Vec::with_capacity(BURN_LEAF_DOMAIN.len() + encoded.len());
++	preimage.extend_from_slice(BURN_LEAF_DOMAIN);
++	preimage.extend_from_slice(&encoded);
++	H256::from(blake2_256(&preimage))
++}
++
+ fn reservation_call(
+ 	statement_bytes: PooledReserveMintReservationStatementBytesV4,
+ 	source_proof: PooledReserveMintReservationSourceProofEnvelopeV4,
