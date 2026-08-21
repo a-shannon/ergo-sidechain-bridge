@@ -551,6 +551,7 @@ function validateAndProjectRoot(
     'stdoutSha256Hex',
     'stderrSha256Hex',
     'checks',
+    'boundary',
     'limitations',
     'receiptDigestHex',
   ], 'mint-proof Frontier consumer receipt');

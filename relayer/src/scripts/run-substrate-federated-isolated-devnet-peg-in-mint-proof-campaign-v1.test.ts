@@ -236,6 +236,24 @@ describe('isolated devnet peg-in mint-proof campaign command V1', () => {
     ).toThrow(/producer-to-consumer binding changed/iu);
   });
 
+  it('rejects a Frontier consumer receipt without its boundary', () => {
+    const root = structuredClone(rootReceipt());
+    delete root.mintProof.consumerReceipt.boundary;
+    root.mintProof.consumerReceipt.receiptDigestHex = embeddedDigest(
+      root.mintProof.consumerReceipt,
+      'receiptDigestHex',
+      CONSUMER_RECEIPT_DIGEST_DOMAIN,
+    );
+    root.receiptDigestHex = rootDigest(root);
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetPegInMintProofCampaignWorkerReceiptV1(
+        root,
+        REQUEST_DIGEST_HEX,
+        pegInPlan(),
+      )
+    ).toThrow(/Frontier consumer receipt fields changed/iu);
+  });
+
   it.each([
     [
       'draft',
@@ -632,6 +650,27 @@ function rootReceipt(): any {
         stdoutSha256Hex: '37'.repeat(32),
         stderrSha256Hex: '38'.repeat(32),
         checks: {},
+        boundary: {
+          isolatedTestClientOnly: true,
+          processOwnedSyntheticCustodyOnly: true,
+          localSourceAndToolIdentityOnly: true,
+          completeBuildToolClosureVerified: false,
+          dependencyCacheContentAttested: false,
+          atomicSourceAndToolSnapshotEstablished: false,
+          exclusiveNonAdversarialSameUserExecutionRequired: true,
+          callerSuppliedEvidenceBytesAccepted: false,
+          sourceEvidenceCollectionProvenanceEstablished: true,
+          sourceCanonicalityIndependentlyVerified: false,
+          ergoPowAuthenticated: false,
+          externalTargetNodeAcceptanceEstablished: false,
+          activationAuthorized: false,
+          submissionAuthorized: false,
+          broadcastAuthorized: false,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+          trustlessStatusEstablished: false,
+          productionReadinessEstablished: false,
+        },
         limitations: [],
         receiptDigestHex: '39'.repeat(32),
       },
