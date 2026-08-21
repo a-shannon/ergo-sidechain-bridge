@@ -2549,13 +2549,15 @@ async function consumeManagedPegInMintProof(
     });
   const issuedAtNativeHeight =
     SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2;
+  const expiresAtNativeHeight = (
+    BigInt(issuedAtNativeHeight)
+    + BigInt(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2)
+  ).toString();
   const packetProof = packetSession.produceMintSourceProof(packet, {
     draft,
     evidenceReceipt,
     issuedAtNativeHeight,
-    expiresAtNativeHeight:
-      issuedAtNativeHeight
-      + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+    expiresAtNativeHeight,
   });
   assertManagedActionDeadline(
     completionDeadline,

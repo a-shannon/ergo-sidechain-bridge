@@ -1202,8 +1202,14 @@ describe('isolated devnet genesis setup execution root V1', () => {
         issuedAtNativeHeight:
           SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
         expiresAtNativeHeight:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2
-          + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+          (
+            BigInt(
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+            )
+            + BigInt(
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+            )
+          ).toString(),
       },
     );
     expect(mocked.frontierConsumer).toHaveBeenCalledWith(
