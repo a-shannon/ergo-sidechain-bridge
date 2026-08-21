@@ -11,16 +11,64 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
+import { describe, expect, it, vi } from 'vitest';
+
+const mintSourceProofProvenance = vi.hoisted(() => ({
+  receipts: new WeakSet<object>(),
+}));
+
+vi.mock(
+  './substrate-federated-isolated-devnet-source-attestation-session-v1.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import(
+        './substrate-federated-isolated-devnet-source-attestation-session-v1.js'
+      )
+    >();
+    return {
+      ...actual,
+      assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance:
+        (value: unknown) => {
+          if (
+            value === null
+            || typeof value !== 'object'
+            || !mintSourceProofProvenance.receipts.has(value)
+          ) {
+            throw new Error(
+              'isolated-devnet settlement-family mint source-proof receipt lacks process provenance',
+            );
+          }
+        },
+    };
+  },
+);
 
 import { BoundedProcessExitError } from './pinned-local-native-verifier-build.js';
 import {
+  decodePegInSourceIntentV2Hex,
+  derivePegInSourceIntentIdV2Hex,
+  encodePegInSourceIntentV2Hex,
+  type PegInSourceIntentV2,
+} from './peg-in-causal-admission-v2.js';
+import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1,
+  buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
+  preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
   restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
 } from './substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+import type {
+  SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
+} from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import {
+  decodeValidityApplicationPooledReserveMintReservationStatementV4Hex,
+  deriveValidityApplicationPooledReserveMintReservationStatementIdV4Hex,
+  encodeValidityApplicationPooledReserveMintReservationStatementV4Hex,
+} from './validity-application-pooled-reserve-mint-reservation-v4.js';
 
 const sourceDirectory = path.dirname(fileURLToPath(import.meta.url));
 const bridgeRoot = path.resolve(sourceDirectory, '..', '..');
@@ -36,7 +84,7 @@ const integrationEnabled = requiredIntegrationEnvironment.every(
   name => process.env[name] !== undefined,
 );
 
-describe('federated isolated-devnet Frontier peg-out application runner V1', () => {
+describe('federated isolated-devnet Frontier peg-out application runner V1/V2', () => {
   it('requires offline execution and an exact input shape', () => {
     expect(() => preflight({
       ...syntheticInput(),
@@ -131,6 +179,253 @@ describe('federated isolated-devnet Frontier peg-out application runner V1', () 
     expect(environment.BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_ID_V4_HEX)
       .toBe('0x93473aa29d814e70310349dc74ac8ff67982381def2adaa1435a24c81ad78d01');
     expect(Object.isFrozen(environment)).toBe(true);
+  });
+
+  it('requires one exact process-proven mint receipt for the V2 runner input', () => {
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'e2s-runner-root-'));
+    const source = mkdtempSync(path.join(temporaryRoot, 'source-'));
+    const receipt = syntheticMintSourceProofReceipt();
+    try {
+      const input = {
+        ...syntheticInput(),
+        frontierSourceDirectory: source,
+        temporaryDirectoryRoot: temporaryRoot,
+        cargoDependencyCacheDirectory: temporaryRoot,
+        mintSourceProofReceipt: receipt,
+      };
+      const plan =
+        preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
+          input,
+        );
+      expect(plan.mintSourceProofReceipt).toBe(receipt);
+      expect(Object.isFrozen(plan)).toBe(true);
+      expect(() =>
+        preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2({
+          ...input,
+          mintSourceProofReceipt: { ...receipt },
+        })
+      ).toThrow(/lacks process provenance/u);
+      expect(() =>
+        preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2({
+          ...input,
+          authority: true,
+        } as never)
+      ).toThrow(/must contain exactly/u);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('builds a frozen dynamic environment from the exact mint proof', () => {
+    const receipt = syntheticMintSourceProofReceipt();
+    const environment =
+      buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2(
+        receipt,
+      );
+    expect(environment).toEqual({
+      BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX:
+        receipt.sourceProofProfileScaleHex,
+      BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX:
+        receipt.sourceProofProfileIdHex,
+      BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX:
+        receipt.request.statementHex,
+      BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_ID_V4_HEX:
+        receipt.mintReservationStatementIdHex,
+      BRIDGE_LAB_FEDERATED_MINT_IDENTITY_V4_HEX: receipt.mintIdentityHex,
+      BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX:
+        receipt.sourceProofEnvelopeScaleHex,
+    });
+    expect(Object.isFrozen(environment)).toBe(true);
+  });
+
+  it('requires one exact Rust marker for the dynamic source-proof bytes', () => {
+    const envelopeHex = '0x01020304';
+    const digestHex = createHash('sha256')
+      .update(Buffer.from(envelopeHex.slice(2), 'hex'))
+      .digest('hex');
+    const marker = `bridge-lab-dynamic-source-proof-sha256=0x${digestHex}`;
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2(
+        `${marker}\r\n`,
+        '',
+        envelopeHex,
+      )
+    ).not.toThrow();
+    for (const output of [
+      '',
+      'bridge-lab-dynamic-source-proof-sha256=0x'.concat('00'.repeat(32)),
+      `${marker}\n${marker}`,
+    ]) {
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2(
+          output,
+          '',
+          envelopeHex,
+        )
+      ).toThrow(/lacks the exact dynamic proof marker/u);
+    }
+  });
+
+  it('keeps V1 and V2 receipt provenance registration disjoint', () => {
+    const source = runnerSourceFile();
+    const callGraph = localFunctionCallGraph(source);
+    expect(receiptRegistrationSites(source)).toEqual([
+      {
+        functionName:
+          'buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1',
+        registryCall: 'RECEIPTS.add',
+      },
+      {
+        functionName: 'bindDynamicMintProofToApplicationRunnerReceiptV2',
+        registryCall: 'V2_RECEIPTS.set',
+      },
+    ]);
+    expect(registryReferenceSites(source)).toEqual([
+      {
+        functionName:
+          'buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1',
+        registryName: 'RECEIPTS',
+        registryCall: 'RECEIPTS.add',
+      },
+      {
+        functionName:
+          'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1Provenance',
+        registryName: 'RECEIPTS',
+        registryCall: 'RECEIPTS.has',
+      },
+      {
+        functionName:
+          'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance',
+        registryName: 'V2_RECEIPTS',
+        registryCall: 'V2_RECEIPTS.get',
+      },
+      {
+        functionName: 'bindDynamicMintProofToApplicationRunnerReceiptV2',
+        registryName: 'V2_RECEIPTS',
+        registryCall: 'V2_RECEIPTS.set',
+      },
+    ]);
+
+    const v1Calls = reachableCallNames(
+      callGraph,
+      'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
+    );
+    expect(v1Calls).toContain('executeRunner');
+    expect(v1Calls).toContain(
+      'buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1',
+    );
+    expect(v1Calls).toContain('RECEIPTS.add');
+
+    const v2Calls = reachableCallNames(
+      callGraph,
+      'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+    );
+    expect(v2Calls).toContain('executeRunner');
+    expect(v2Calls).toContain(
+      'bindDynamicMintProofToApplicationRunnerReceiptV2',
+    );
+    expect(v2Calls).not.toContain(
+      'buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1',
+    );
+    expect(v2Calls).not.toContain('RECEIPTS.add');
+    expect(v2Calls).toContain('V2_RECEIPTS.set');
+
+    const neutralExecutionCalls = reachableCallNames(callGraph, 'executeRunner');
+    expect(neutralExecutionCalls).not.toContain('RECEIPTS.add');
+    expect(neutralExecutionCalls).not.toContain('V2_RECEIPTS.set');
+    expect(functionReferenceSites(
+      source,
+      'buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1',
+    )).toEqual([
+      {
+        functionName:
+          'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
+        use: 'call',
+      },
+    ]);
+    expect(functionReferenceSites(
+      source,
+      'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
+    )).toEqual([]);
+  });
+
+  it('detects an indirect V2-to-V1 receipt registration mutant', () => {
+    const mutant = ts.createSourceFile(
+      'receipt-registration-mutant.ts',
+      [
+        'const RECEIPTS = new WeakSet<object>();',
+        'const V2_RECEIPTS = new WeakMap<object, object>();',
+        'function buildV1(value: object) { RECEIPTS.add(value); }',
+        'const indirectV1 = (value: object) => buildV1(value);',
+        'function bindV2(value: object) { V2_RECEIPTS.set(value, value); }',
+        'function executeRunner() { return {}; }',
+        'function runV2() {',
+        '  const result = executeRunner();',
+        '  indirectV1(result);',
+        '  bindV2(result);',
+        '}',
+      ].join('\n'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    expect(reachableCallNames(localFunctionCallGraph(mutant), 'runV2'))
+      .toEqual(expect.arrayContaining(['buildV1', 'RECEIPTS.add']));
+  });
+
+  it('rejects an exact-receipt proof-envelope digest mutation', () => {
+    const receipt = syntheticMintSourceProofReceipt({
+      sourceProofEnvelopeSha256Hex: '00'.repeat(32),
+    });
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2(
+        receipt,
+      )
+    ).toThrow(/envelope SHA-256 changed/u);
+  });
+
+  it('rejects exact-receipt statement and mint identity drift', () => {
+    const statementReceipt = syntheticMintSourceProofReceipt({
+      mintReservationStatementIdHex: `0x${'00'.repeat(32)}`,
+    });
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2(
+        statementReceipt,
+      )
+    ).toThrow(/identity binding changed/u);
+
+    const mintReceipt = syntheticMintSourceProofReceipt({
+      mintIdentityHex: `0x${'00'.repeat(32)}`,
+    });
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2(
+        mintReceipt,
+      )
+    ).toThrow(/identity binding changed/u);
+  });
+
+  it.each([
+    [
+      'recipient',
+      (intent: PegInSourceIntentV2) => ({
+        ...intent,
+        recipientAddressHex: `0x${'11'.repeat(20)}`,
+      }),
+    ],
+    [
+      'amount',
+      (intent: PegInSourceIntentV2) => ({
+        ...intent,
+        amountNanoErg: '14999999',
+      }),
+    ],
+  ])('rejects a canonical mint source-intent %s mutation', (_label, mutate) => {
+    const receipt = syntheticMintSourceProofReceiptWithIntentMutation(mutate);
+    expect(() =>
+      buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2(
+        receipt,
+      )
+    ).toThrow(/differs from the reviewed LAB application/u);
   });
 
   it('restores the exact source snapshot when Git reversal fails', async () => {
@@ -306,4 +601,298 @@ function integrationInput() {
     gitExecutablePath: value('BRIDGE_FRONTIER_APPLICATION_RUNNER_GIT'),
     offline: true as const,
   };
+}
+
+function syntheticMintSourceProofReceipt(
+  overrides: Readonly<Record<string, unknown>> = {},
+): Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2> {
+  const reference =
+    buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1();
+  const sourceProofEnvelopeScaleHex = '0x01020304';
+  const receipt = Object.freeze({
+    receiptDigestHex: '11'.repeat(32),
+    targetDescriptorDigestHex: '22'.repeat(32),
+    mintReservationDraftDigestHex: '33'.repeat(32),
+    mintReservationStatementIdHex:
+      reference.BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_ID_V4_HEX,
+    mintIdentityHex:
+      reference.BRIDGE_LAB_FEDERATED_MINT_IDENTITY_V4_HEX,
+    sourceProofProfileIdHex:
+      reference.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX,
+    sourceProofProfileScaleHex:
+      reference.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX,
+    sourceProofEnvelopeScaleHex,
+    sourceProofEnvelopeSha256Hex: createHash('sha256')
+      .update(Buffer.from(sourceProofEnvelopeScaleHex.slice(2), 'hex'))
+      .digest('hex'),
+    request: Object.freeze({
+      statementHex:
+        reference.BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX,
+    }),
+    ...overrides,
+  }) as unknown as Readonly<
+    SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2
+  >;
+  mintSourceProofProvenance.receipts.add(receipt);
+  return receipt;
+}
+
+function syntheticMintSourceProofReceiptWithIntentMutation(
+  mutate: (intent: PegInSourceIntentV2) => PegInSourceIntentV2,
+): Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2> {
+  const reference =
+    buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1();
+  const statement =
+    decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(
+      reference.BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX,
+    );
+  const sourceIntent = mutate(
+    decodePegInSourceIntentV2Hex(statement.sourceIntentHex),
+  );
+  const mutatedStatement = Object.freeze({
+    ...statement,
+    sourceIntentHex: encodePegInSourceIntentV2Hex(sourceIntent),
+    sourceIntentIdHex: derivePegInSourceIntentIdV2Hex(sourceIntent),
+  });
+  return syntheticMintSourceProofReceipt({
+    mintReservationStatementIdHex:
+      deriveValidityApplicationPooledReserveMintReservationStatementIdV4Hex(
+        mutatedStatement,
+      ),
+    request: Object.freeze({
+      statementHex:
+        encodeValidityApplicationPooledReserveMintReservationStatementV4Hex(
+          mutatedStatement,
+        ),
+    }),
+  });
+}
+
+function runnerSourceFile(): ts.SourceFile {
+  const sourcePath = path.join(
+    sourceDirectory,
+    'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts',
+  );
+  return ts.createSourceFile(
+    sourcePath,
+    readFileSync(sourcePath, 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+}
+
+function localFunctionCallGraph(source: ts.SourceFile): ReadonlyMap<string, string[]> {
+  const graph = new Map<string, string[]>();
+  const collect = (node: ts.Node): void => {
+    if (isRuntimeFunctionLike(node)) {
+      const name = functionLikeName(node);
+      if (name !== undefined) graph.set(name, directCallNames(node));
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(source);
+  return graph;
+}
+
+function directCallNames(declaration: ts.FunctionLikeDeclaration): string[] {
+  const calls: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (node !== declaration && isRuntimeFunctionLike(node)) return;
+    if (ts.isCallExpression(node)) {
+      const name = callExpressionName(node.expression);
+      if (name !== undefined) calls.push(name);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(declaration);
+  return calls;
+}
+
+function reachableCallNames(
+  graph: ReadonlyMap<string, string[]>,
+  start: string,
+): string[] {
+  if (!graph.has(start)) throw new Error(`missing function declaration ${start}`);
+  const visited = new Set<string>();
+  const calls = new Set<string>();
+  const pending = [start];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const called of graph.get(current) ?? []) {
+      calls.add(called);
+      if (graph.has(called) && !visited.has(called)) pending.push(called);
+    }
+  }
+  return [...calls].sort();
+}
+
+function receiptRegistrationSites(
+  source: ts.SourceFile,
+): Array<Readonly<{ functionName: string; registryCall: string }>> {
+  const registrations: Array<
+    Readonly<{ functionName: string; registryCall: string }>
+  > = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const registryCall = callExpressionName(node.expression);
+      if (registryCall === 'RECEIPTS.add' || registryCall === 'V2_RECEIPTS.set') {
+        registrations.push({
+          functionName: nearestFunctionName(node),
+          registryCall,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return registrations;
+}
+
+function registryReferenceSites(
+  source: ts.SourceFile,
+): Array<Readonly<{
+  functionName: string;
+  registryName: string;
+  registryCall: string;
+}>> {
+  const sites: Array<
+    Readonly<{
+      functionName: string;
+      registryName: string;
+      registryCall: string;
+    }>
+  > = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isIdentifier(node)
+      && (node.text === 'RECEIPTS' || node.text === 'V2_RECEIPTS')
+    ) {
+      const parent = node.parent;
+      const declarationName = ts.isVariableDeclaration(parent)
+        && parent.name === node;
+      if (!declarationName) {
+        sites.push({
+          functionName: nearestFunctionName(node),
+          registryName: node.text,
+          registryCall:
+            ts.isPropertyAccessExpression(parent) && parent.expression === node
+              ? `${node.text}.${parent.name.text}`
+              : `${node.text}.<${ts.SyntaxKind[parent.kind]}>`,
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return sites.sort((left, right) =>
+    left.registryName.localeCompare(right.registryName)
+    || left.registryCall.localeCompare(right.registryCall)
+    || left.functionName.localeCompare(right.functionName)
+  );
+}
+
+function functionReferenceSites(
+  source: ts.SourceFile,
+  targetName: string,
+): Array<Readonly<{ functionName: string; use: string }>> {
+  const sites: Array<Readonly<{ functionName: string; use: string }>> = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && node.text === targetName) {
+      const parent = node.parent;
+      const declarationName = ts.isFunctionDeclaration(parent) && parent.name === node;
+      if (!declarationName) {
+        sites.push({
+          functionName: nearestFunctionName(node),
+          use: ts.isCallExpression(parent) && parent.expression === node
+            ? 'call'
+            : ts.SyntaxKind[parent.kind],
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return sites;
+}
+
+function nearestFunctionName(node: ts.Node): string {
+  let current: ts.Node | undefined = node.parent;
+  while (current !== undefined) {
+    if (isRuntimeFunctionLike(current)) {
+      return functionLikeName(current) ?? '<anonymous-function>';
+    }
+    current = current.parent;
+  }
+  return '<module>';
+}
+
+function isRuntimeFunctionLike(
+  node: ts.Node,
+): node is ts.FunctionLikeDeclaration {
+  return ts.isFunctionDeclaration(node)
+    || ts.isFunctionExpression(node)
+    || ts.isArrowFunction(node)
+    || ts.isMethodDeclaration(node)
+    || ts.isGetAccessorDeclaration(node)
+    || ts.isSetAccessorDeclaration(node)
+    || ts.isConstructorDeclaration(node);
+}
+
+function functionLikeName(node: ts.FunctionLikeDeclaration): string | undefined {
+  if (
+    (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node))
+    && node.name !== undefined
+  ) {
+    return node.name.text;
+  }
+  if (
+    (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+    && ts.isVariableDeclaration(node.parent)
+    && ts.isIdentifier(node.parent.name)
+  ) {
+    return node.parent.name.text;
+  }
+  if (
+    (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+    && ts.isPropertyAssignment(node.parent)
+  ) {
+    return qualifiedPropertyName(node.parent.name, node.parent.parent);
+  }
+  if (ts.isMethodDeclaration(node)) {
+    return qualifiedPropertyName(node.name, node.parent);
+  }
+  return undefined;
+}
+
+function qualifiedPropertyName(
+  name: ts.PropertyName,
+  owner: ts.Node,
+): string | undefined {
+  const property = ts.isIdentifier(name) || ts.isStringLiteral(name)
+    ? name.text
+    : undefined;
+  if (property === undefined) return undefined;
+  if (ts.isClassDeclaration(owner) && owner.name !== undefined) {
+    return `${owner.name.text}.${property}`;
+  }
+  if (
+    ts.isObjectLiteralExpression(owner)
+    && ts.isVariableDeclaration(owner.parent)
+    && ts.isIdentifier(owner.parent.name)
+  ) {
+    return `${owner.parent.name.text}.${property}`;
+  }
+  return property;
+}
+
+function callExpressionName(expression: ts.Expression): string | undefined {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (ts.isPropertyAccessExpression(expression)) {
+    const owner = callExpressionName(expression.expression);
+    if (owner !== undefined) return `${owner}.${expression.name.text}`;
+  }
+  return undefined;
 }
