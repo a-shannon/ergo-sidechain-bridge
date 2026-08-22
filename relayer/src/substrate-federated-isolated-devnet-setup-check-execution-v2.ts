@@ -12,6 +12,11 @@ import {
 } from './fleet-signer.js';
 import { deriveUnsignedTransactionId } from './ergo-unsigned-transaction.js';
 import {
+  assertExactSubstrateFederatedTrackerV1InputBox,
+  assertSubstrateFederatedTrackerV1Context,
+  type SubstrateFederatedTrackerV1Context,
+} from './substrate-federated-tracker-v1.js';
+import {
   assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
   bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
   type SubstrateFederatedSettlementFamilyCompilerBindingV1,
@@ -37,10 +42,14 @@ import {
   buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2,
 } from './substrate-federated-isolated-devnet-local-provisioning-v2.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
   type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import type {
+  SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1,
+} from './substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.js';
 import {
   replaySubstrateFederatedIsolatedDevnetPortableV1,
   takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1,
@@ -62,7 +71,11 @@ import {
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import { sha256CanonicalJson } from './strict-json.js';
-import type { MaterializedUnsignedTransaction } from './unsigned-ergo-transaction.js';
+import {
+  normalizeEip12Box,
+  type Eip12UnsignedTransaction,
+  type MaterializedUnsignedTransaction,
+} from './unsigned-ergo-transaction.js';
 
 const PRIMARY_NODE_ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS_NODE_ORIGIN = 'http://127.0.0.1:9052';
@@ -76,6 +89,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1_SCH
   'e2s.substrate-federated-isolated-devnet-peg-in-source-lock-check.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_CHECK_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-check.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_CHECK_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-observed-anchor-tracker-check.v1' as const;
 const PEG_IN_SOURCE_LOCK_CHECK_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1';
 const PEG_IN_SOURCE_LOCK_TRANSACTION_DIGEST_DOMAIN =
@@ -88,6 +103,12 @@ const PEG_IN_COMMITTED_VAULT_TRANSACTION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_TRANSACTION_V1';
 const PEG_IN_COMMITTED_VAULT_CHECK_RESPONSE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_CHECK_RESPONSE_V1';
+const OBSERVED_ANCHOR_TRACKER_CHECK_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_CHECK_V1';
+const OBSERVED_ANCHOR_TRACKER_TRANSACTION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_TRANSACTION_V1';
+const OBSERVED_ANCHOR_TRACKER_CHECK_RESPONSE_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_CHECK_RESPONSE_V1';
 const EXECUTION_BATCHES = new WeakMap<
   object,
   Readonly<{
@@ -125,6 +146,7 @@ const PEG_IN_COMMITTED_VAULT_CHECK_MATERIAL = new WeakMap<
     checked: Readonly<LocalWasmOpaqueCheckResult>;
   }>
 >();
+const OBSERVED_ANCHOR_TRACKER_CHECK_RECEIPTS = new WeakSet<object>();
 
 export interface SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1 {
   readonly receipt:
@@ -219,6 +241,22 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
+  >>;
+  readonly checkPegInCommittedVaultRetainingSigner: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
+  >>;
+  readonly checkTrackerCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt
   >>;
 }
 
@@ -336,6 +374,82 @@ export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Recei
     readonly productionReadinessEstablished: false;
   }>;
   readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input {
+  readonly context: Readonly<SubstrateFederatedTrackerV1Context>;
+  readonly trackerInputBox: unknown;
+}
+
+export interface SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_CHECK_V1_SCHEMA;
+  readonly version: 1;
+  readonly status: 'PASS';
+  readonly trackerInputBoxIdHex: string;
+  readonly statementIdHex: string;
+  readonly anchorHeaderIdHex: string;
+  readonly anchorHeight: number;
+  readonly anchorContextIndex: number;
+  readonly unsignedTransactionIdHex: string;
+  readonly unsignedTransactionDigestHex: string;
+  readonly signedTransactionIdHex: string;
+  readonly signedTransactionCanonicalJsonSha256Hex: string;
+  readonly signedTransactionBytesSha256Hex: string;
+  readonly signedTransactionBytesLength: number;
+  readonly checkResponseSha256Hex: string;
+  readonly target: Readonly<{
+    readonly processBindingDigestHex: string;
+    readonly executionTargetIdentityDigestHex: string;
+  }>;
+  readonly signer: Readonly<{
+    readonly derivation: 'wasm-root';
+    readonly publicKeyHex: string;
+    readonly p2pkErgoTreeHex: string;
+    readonly stateContextTipHeight: number;
+    readonly stateContextTipIdHex: string;
+  }>;
+  readonly checker: Readonly<{
+    readonly nodeOrigin: string;
+    readonly path: '/transactions/check';
+    readonly method: 'POST';
+    readonly transportPolicy: 'no-redirect-no-proxy';
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localIsolatedDevnetOnly: true;
+    readonly observedAnchorContextBound: true;
+    readonly exactTrackerInputAndTransactionBound: true;
+    readonly localWasmRootSigningPerformed: true;
+    readonly localJvmNodeCheckPassed: true;
+    readonly signedTransactionBytesPersisted: false;
+    readonly submissionAuthorityEstablished: false;
+    readonly broadcastAuthorityEstablished: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly replayProtectionEstablished: false;
+    readonly payoutEstablished: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt
+> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !OBSERVED_ANCHOR_TRACKER_CHECK_RECEIPTS.has(value)
+    || !Object.isFrozen(value)
+  ) {
+    throw new Error(
+      'isolated observed-anchor tracker check lacks exact process provenance',
+    );
+  }
 }
 
 /** Promote the exact in-process source-lock check once inside the static LAB root. */
@@ -605,6 +719,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'running'
       | 'setup-complete'
       | 'source-lock-check-complete'
+      | 'committed-vault-check-complete'
       | 'closed' = 'open';
     const close = (): void => {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
@@ -620,9 +735,17 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       state = 'closed';
     };
     const consume = async <T>(
-      expectedState: 'open' | 'setup-complete' | 'source-lock-check-complete',
+      expectedState:
+        | 'open'
+        | 'setup-complete'
+        | 'source-lock-check-complete'
+        | 'committed-vault-check-complete',
       operation: (activeMnemonic: string) => Promise<T>,
-      successState: 'setup-complete' | 'source-lock-check-complete' | 'closed',
+      successState:
+        | 'setup-complete'
+        | 'source-lock-check-complete'
+        | 'committed-vault-check-complete'
+        | 'closed',
     ): Promise<T> => {
       if (state !== expectedState) {
         throw new Error(
@@ -696,6 +819,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           state === 'open'
           || state === 'setup-complete'
           || state === 'source-lock-check-complete'
+          || state === 'committed-vault-check-complete'
         ) {
           close();
         }
@@ -768,6 +892,36 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       ) => consume(
         'source-lock-check-complete',
         activeMnemonic => runPegInCommittedVaultCheck(
+          input,
+          target,
+          signer,
+          activeMnemonic,
+        ),
+        'closed',
+      ),
+      checkPegInCommittedVaultRetainingSigner: async (
+        input: Readonly<
+          SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+        >,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume(
+        'source-lock-check-complete',
+        activeMnemonic => runPegInCommittedVaultCheck(
+          input,
+          target,
+          signer,
+          activeMnemonic,
+        ),
+        'committed-vault-check-complete',
+      ),
+      checkTrackerCandidate: async (
+        input: Readonly<
+          SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+        >,
+        target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+      ) => consume(
+        'committed-vault-check-complete',
+        activeMnemonic => runObservedAnchorTrackerCheck(
           input,
           target,
           signer,
@@ -1298,6 +1452,238 @@ async function runPegInCommittedVaultCheck(
     signedCandidate: prepared.signedCandidate,
     checked,
   }));
+  return receipt;
+}
+
+async function runObservedAnchorTrackerCheck(
+  inputValue: Readonly<
+    SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+  >,
+  target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+  expectedSigner:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSignerV2>,
+  mnemonic: string,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt
+>> {
+  if (
+    inputValue === null
+    || typeof inputValue !== 'object'
+    || Array.isArray(inputValue)
+    || Object.keys(inputValue).sort().join('\0') !== 'context\0trackerInputBox'
+  ) {
+    throw new Error('isolated observed-anchor tracker check input is invalid');
+  }
+  assertSubstrateFederatedTrackerV1Context(inputValue.context);
+  if (
+    inputValue.context.trackerTransition.anchorContextProvenance
+      !== 'eip0045-validity-tracker-observed-header-context'
+  ) {
+    throw new Error('isolated tracker check requires observed anchor provenance');
+  }
+  const before =
+    assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1(target);
+  const nodeOrigin = exactOrigin(
+    target.primaryNodeOrigin,
+    PRIMARY_NODE_ORIGIN,
+    'observed-anchor tracker checker',
+  );
+  if (
+    target.witnessNodeOrigin !== WITNESS_NODE_ORIGIN
+    || target.miningStopped !== true
+  ) {
+    throw new Error('isolated tracker check target differs from the stopped pair');
+  }
+  const context = inputValue.context;
+  const anchor = context.trackerTransition.headers[
+    context.trackerTransition.anchorContextIndex
+  ];
+  if (anchor === undefined || context.trackerTransition.headers.length !== 10) {
+    throw new Error('isolated tracker check header context is incomplete');
+  }
+  if (
+    context.contract.ergoAdmissionThreshold !== 1
+    || context.contract.ergoAdmissionPublicKeysHex.length !== 1
+    || context.contract.ergoAdmissionPublicKeysHex[0]
+      !== expectedSigner.publicKeyHex
+  ) {
+    throw new Error('isolated tracker admission key differs from the signer');
+  }
+  const trackerInputBox = await assertExactSubstrateFederatedTrackerV1InputBox(
+    inputValue.context,
+    inputValue.trackerInputBox,
+  );
+  const transaction = structuredClone(
+    context.eip12UnsignedTransaction,
+  ) as unknown as Eip12UnsignedTransaction;
+  const minimalInput = transaction.inputs[0];
+  if (
+    transaction.inputs.length !== 1
+    || minimalInput === undefined
+    || minimalInput.boxId !== trackerInputBox.boxId
+    || transaction.dataInputs.length !== 0
+    || transaction.outputs.length !== 1
+  ) {
+    throw new Error('isolated tracker candidate input shape changed');
+  }
+  const enrichedTransaction: Eip12UnsignedTransaction = {
+    ...transaction,
+    inputs: [{
+      ...trackerInputBox,
+      extension: structuredClone(minimalInput.extension),
+    }],
+  };
+  const independentlyDerivedId = fixedHex(
+    await deriveUnsignedTransactionId(enrichedTransaction),
+    32,
+    'isolated tracker independently derived transaction ID',
+  );
+  if (independentlyDerivedId !== context.unsignedTransactionIdHex) {
+    throw new Error('isolated tracker candidate transaction ID changed');
+  }
+  const unsignedTransactionDigestHex = sha256CanonicalJson({
+    trackerInputBoxIdHex: trackerInputBox.boxId,
+    statementIdHex: context.statement.statementIdHex,
+    anchorHeaderIdHex: anchor.id,
+    anchorHeight: anchor.height,
+    anchorContextIndex: context.trackerTransition.anchorContextIndex,
+    eip12UnsignedTransaction: enrichedTransaction,
+  }, OBSERVED_ANCHOR_TRACKER_TRANSACTION_DIGEST_DOMAIN);
+  const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
+    mnemonic,
+    networkPrefix: expectedSigner.networkPrefix,
+    nodeOrigin,
+    candidates: [{
+      role: 'observed-anchor-tracker',
+      eip12Tx: enrichedTransaction,
+      expectedTxId: context.unsignedTransactionIdHex,
+    }],
+  });
+  const prepared = batch.candidates[0];
+  if (
+    batch.derivation !== 'wasm-root'
+    || batch.pubKeyHex !== expectedSigner.publicKeyHex
+    || batch.ergoTreeHex !== expectedSigner.p2pkErgoTreeHex
+    || batch.candidates.length !== 1
+    || prepared === undefined
+    || prepared.role !== 'observed-anchor-tracker'
+    || prepared.expectedTxId !== context.unsignedTransactionIdHex
+    || prepared.signedCandidate.txId !== context.unsignedTransactionIdHex
+    || batch.stateContextTipHeight !== context.trackerTransition.currentErgoHeight - 1
+    || batch.stateContextTipIdHex !== context.trackerTransition.headers[0]!.id
+  ) {
+    throw new Error('isolated tracker signer or observed context binding changed');
+  }
+  const checked = await checkSignedTransaction(
+    prepared.signedCandidate,
+    'isolated local observed-anchor tracker check',
+    nodeOrigin,
+  );
+  if (checked === null) {
+    throw new Error('isolated local observed-anchor tracker JVM node check failed');
+  }
+  const signedBytesDigestHex = fixedHex(
+    checked.signedTransactionBytesSha256Hex,
+    32,
+    'isolated tracker signed transaction bytes digest',
+  );
+  const signedBytesLength = positiveSafeInteger(
+    checked.signedTransactionBytesLength,
+    'isolated tracker signed transaction bytes length',
+  );
+  if (
+    checked.txId !== context.unsignedTransactionIdHex
+    || checked.signedTransactionDigestHex
+      !== prepared.signedCandidate.signedTransactionDigestHex
+    || signedBytesDigestHex
+      !== prepared.signedCandidate.signedTransactionBytesSha256Hex
+    || signedBytesLength
+      !== prepared.signedCandidate.signedTransactionBytesLength
+    || checked.signerContext.pubKeyHex !== expectedSigner.publicKeyHex
+    || checked.signerContext.ergoTreeHex !== expectedSigner.p2pkErgoTreeHex
+    || checked.signerContext.stateContextTipHeight !== batch.stateContextTipHeight
+    || checked.signerContext.stateContextTipIdHex !== batch.stateContextTipIdHex
+    || checked.checkerIdentity.nodeOrigin !== nodeOrigin
+    || checked.checkerIdentity.path !== '/transactions/check'
+    || checked.checkerIdentity.method !== 'POST'
+    || checked.checkerIdentity.transportPolicy !== 'no-redirect-no-proxy'
+  ) {
+    throw new Error('isolated tracker signer and JVM node receipt disagree');
+  }
+  const after =
+    assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1(target);
+  if (
+    after.processBindingDigestHex !== before.processBindingDigestHex
+    || after.executionTargetIdentityDigestHex
+      !== before.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('isolated tracker checkpoint target changed during check');
+  }
+  const body = Object.freeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_CHECK_V1_SCHEMA,
+    version: 1 as const,
+    status: 'PASS' as const,
+    trackerInputBoxIdHex: trackerInputBox.boxId,
+    statementIdHex: context.statement.statementIdHex,
+    anchorHeaderIdHex: anchor.id,
+    anchorHeight: anchor.height,
+    anchorContextIndex: context.trackerTransition.anchorContextIndex,
+    unsignedTransactionIdHex: context.unsignedTransactionIdHex,
+    unsignedTransactionDigestHex,
+    signedTransactionIdHex: checked.txId,
+    signedTransactionCanonicalJsonSha256Hex:
+      checked.signedTransactionDigestHex,
+    signedTransactionBytesSha256Hex: signedBytesDigestHex,
+    signedTransactionBytesLength: signedBytesLength,
+    checkResponseSha256Hex: sha256CanonicalJson({
+      role: 'observed-anchor-tracker',
+      response: checked.checkResult,
+    }, OBSERVED_ANCHOR_TRACKER_CHECK_RESPONSE_DIGEST_DOMAIN),
+    target: Object.freeze({
+      processBindingDigestHex: after.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        after.executionTargetIdentityDigestHex,
+    }),
+    signer: Object.freeze({
+      derivation: 'wasm-root' as const,
+      publicKeyHex: expectedSigner.publicKeyHex,
+      p2pkErgoTreeHex: expectedSigner.p2pkErgoTreeHex,
+      stateContextTipHeight: batch.stateContextTipHeight,
+      stateContextTipIdHex: batch.stateContextTipIdHex,
+    }),
+    checker: Object.freeze({
+      nodeOrigin,
+      path: '/transactions/check' as const,
+      method: 'POST' as const,
+      transportPolicy: 'no-redirect-no-proxy' as const,
+    }),
+    boundaries: Object.freeze({
+      localIsolatedDevnetOnly: true as const,
+      observedAnchorContextBound: true as const,
+      exactTrackerInputAndTransactionBound: true as const,
+      localWasmRootSigningPerformed: true as const,
+      localJvmNodeCheckPassed: true as const,
+      signedTransactionBytesPersisted: false as const,
+      submissionAuthorityEstablished: false as const,
+      broadcastAuthorityEstablished: false as const,
+      trackerAdmissionEstablished: false as const,
+      replayProtectionEstablished: false as const,
+      payoutEstablished: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    }),
+  });
+  const receipt = Object.freeze({
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(
+      body,
+      OBSERVED_ANCHOR_TRACKER_CHECK_DIGEST_DOMAIN,
+    ),
+  });
+  OBSERVED_ANCHOR_TRACKER_CHECK_RECEIPTS.add(receipt);
   return receipt;
 }
 

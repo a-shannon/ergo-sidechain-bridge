@@ -27,10 +27,19 @@ import {
   buildSubstrateFederatedTrackerV1AcceptanceFixture,
 } from './substrate-federated-tracker-v1-fixture.js';
 import {
+  assertExactSubstrateFederatedTrackerV1InputBox,
+  assertSubstrateFederatedTrackerV1Context,
   buildCompilerBoundSubstrateFederatedTrackerV1Context,
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context,
   buildSubstrateFederatedTrackerV1Context,
   type SubstrateFederatedTrackerContractV1Identity,
 } from './substrate-federated-tracker-v1.js';
+import {
+  BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE,
+  BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
+  buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1,
+} from './bridge-validity-tracker-header-context-v1.js';
 import {
   materializeUnsignedTransaction,
   type Eip12Box,
@@ -72,6 +81,9 @@ describe('substrate federated tracker V1 transaction plan', () => {
     expect(Object.keys(first.contextExtension.eip12Values)).toEqual(['0', '1', '2']);
     expect(first.trackerTransition.trackerValueHex).toHaveLength(370 * 2);
     expect(first.trackerTransition.trackerKeyHex).toHaveLength(64);
+    expect(first.trackerTransition.anchorContextProvenance).toBe(
+      BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE,
+    );
     expect(first.trackerTransition.successorRegisters.R4)
       .toBe(first.trackerTransition.inputRegisters.R4);
     expect(first.trackerTransition.successorRegisters.R6)
@@ -97,6 +109,10 @@ describe('substrate federated tracker V1 transaction plan', () => {
       gate5Closed: false,
       trustlessStatusEstablished: false,
     });
+    expect(() => assertSubstrateFederatedTrackerV1Context(first)).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedTrackerV1Context(structuredClone(first)),
+    ).toThrow(/provenance is missing/i);
   });
 
   it('derives the exact key/value from the canonical anchor header', async () => {
@@ -233,6 +249,69 @@ describe('substrate federated tracker V1 transaction plan', () => {
     expect((context.eip12UnsignedTransaction.inputs as any[])[0].boxId)
       .toBe(trackerInputBox.boxId);
     expect(context.unsignedTransactionIdHex).toHaveLength(64);
+    const wasmModule = await import('ergo-lib-wasm-nodejs');
+    const wasm = wasmModule.default ?? wasmModule;
+    const syntheticHeaders =
+      buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+        currentHeight: context.trackerTransition.currentErgoHeight,
+        anchorContextIndex: context.trackerTransition.anchorContextIndex,
+        anchorExtensionRootHex: context.trackerTransition.headers[
+          context.trackerTransition.anchorContextIndex
+        ]!.extensionRootHex,
+      });
+    const observedHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(
+      wasm,
+      {
+        rawHeaders: syntheticHeaders.headers.map(header => header.raw),
+        anchorContextIndex: syntheticHeaders.anchorContextIndex,
+        expectedAnchorHeaderIdHex: syntheticHeaders.anchorHeader.id,
+        expectedAnchorExtensionRootHex:
+          syntheticHeaders.anchorHeader.extensionRootHex,
+      },
+    );
+    const observedContext =
+      await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context({
+        compilerRequest,
+        compilerReceipt,
+        trackerInputBox,
+        encodedStatementHex: statement.encodedStatementHex,
+        observedHeaderContext: observedHeaders,
+        extensionMembershipProofHex:
+          context.trackerTransition.extensionProofHex,
+      });
+    expect(observedContext.unsignedTransactionIdHex)
+      .toBe(context.unsignedTransactionIdHex);
+    expect(observedContext.prooflessTransactionHex)
+      .toBe(context.prooflessTransactionHex);
+    expect(observedContext.trackerTransition.anchorContextProvenance).toBe(
+      BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
+    );
+    await expect(
+      assertExactSubstrateFederatedTrackerV1InputBox(
+        observedContext,
+        trackerInputBox,
+      ),
+    ).resolves.toEqual(trackerInputBox);
+    await expect(
+      assertExactSubstrateFederatedTrackerV1InputBox(
+        observedContext,
+        {
+          ...trackerInputBox,
+          value: (BigInt(trackerInputBox.value) + 1n).toString(),
+        },
+      ),
+    ).rejects.toThrow(/valid EIP-12 box|Sigma bytes differ/);
+    await expect(
+      buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context({
+        compilerRequest,
+        compilerReceipt,
+        trackerInputBox,
+        encodedStatementHex: statement.encodedStatementHex,
+        observedHeaderContext: observedHeaders,
+        extensionMembershipProofHex:
+          `ff${context.trackerTransition.extensionProofHex.slice(2)}`,
+      }),
+    ).rejects.toThrow(/membership proof|invalid side/i);
     await expect(buildCompilerBoundSubstrateFederatedTrackerV1Context({
       compilerRequest,
       compilerReceipt: structuredClone(compilerReceipt),

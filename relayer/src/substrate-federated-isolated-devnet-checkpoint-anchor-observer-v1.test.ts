@@ -72,7 +72,7 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
     expect(observed.anchorHeight).toBe(primary.fullHeight);
     expect(observed.priorHeaderIdHex).toBe(headerAt(primary, 18).id);
     expect(observed.priorHeight).toBe(18);
-    expect(observed.headers).toHaveLength(3);
+    expect(observed.headers).toHaveLength(10);
     expect(observed.headers[0]!.canonicalHeaderBytesHex)
       .toMatch(/^[0-9a-f]+$/u);
     expect(observed.boundaries).toEqual({
@@ -306,7 +306,12 @@ function headerChain(
       votes: Buffer.from(identity.votes).toString('hex'),
       powSolutions: {
         pk: Buffer.from(identity.powSolution.publicKey).toString('hex'),
+        w: Buffer.concat([
+          Buffer.from([2]),
+          Buffer.alloc(32, height + 6),
+        ]).toString('hex'),
         n: Buffer.from(identity.powSolution.nonce).toString('hex'),
+        d: 0,
       },
     });
     parentId = id;

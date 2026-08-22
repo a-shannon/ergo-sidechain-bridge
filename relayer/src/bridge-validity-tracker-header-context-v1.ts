@@ -4,6 +4,8 @@ import blakejs from 'blakejs';
 
 export const BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE =
   'eip0045-validity-tracker-canonical-synthetic-header-context';
+export const BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE =
+  'eip0045-validity-tracker-observed-header-context';
 
 const HEADER_COUNT = 10;
 const HEADER_VERSION = 2;
@@ -38,7 +40,17 @@ export interface BridgeValidityTrackerCanonicalHeaderContextV1 {
     typeof BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE;
 }
 
+export interface BridgeValidityTrackerObservedHeaderContextV1 {
+  readonly currentHeight: number;
+  readonly anchorHeader: BridgeValidityTrackerCanonicalHeaderV1;
+  readonly anchorContextIndex: number;
+  readonly headers: readonly BridgeValidityTrackerCanonicalHeaderV1[];
+  readonly provenance:
+    typeof BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE;
+}
+
 const CONTEXTS = new WeakSet<object>();
+const OBSERVED_CONTEXTS = new WeakSet<object>();
 
 export function buildBridgeValidityTrackerCanonicalHeaderContextV1(
   wasm: any,
@@ -185,6 +197,144 @@ export function assertBridgeValidityTrackerCanonicalHeaderContextV1(
   });
 }
 
+export function buildBridgeValidityTrackerObservedHeaderContextV1(
+  wasm: any,
+  input: {
+    readonly rawHeaders: readonly Readonly<Record<string, unknown>>[];
+    readonly anchorContextIndex: number;
+    readonly expectedAnchorHeaderIdHex: string;
+    readonly expectedAnchorExtensionRootHex: string;
+  },
+): BridgeValidityTrackerObservedHeaderContextV1 {
+  if (input.rawHeaders.length !== HEADER_COUNT) {
+    throw new Error(
+      `observed header context must contain exactly ${HEADER_COUNT} headers`,
+    );
+  }
+  const anchorContextIndex = safeInteger(
+    input.anchorContextIndex,
+    'observed anchor context index',
+  );
+  if (anchorContextIndex >= HEADER_COUNT) {
+    throw new Error(
+      `observed anchor context index must be between 0 and ${HEADER_COUNT - 1}`,
+    );
+  }
+  const expectedAnchorHeaderIdHex = fixedHex(
+    input.expectedAnchorHeaderIdHex,
+    32,
+    'observed anchor header ID',
+  );
+  const expectedAnchorExtensionRootHex = fixedHex(
+    input.expectedAnchorExtensionRootHex,
+    32,
+    'observed anchor extension root',
+  );
+  const headers = Object.freeze(input.rawHeaders.map((rawInput, index) => {
+    const raw = deepFreeze(structuredClone(rawInput));
+    const serialized = serializeCanonicalErgoHeaderV2(raw);
+    const id = blake2b256Hex(serialized);
+    const claimedId = fixedHex(
+      raw.id ?? raw.headerId,
+      32,
+      `observed header ${index} claimed ID`,
+    );
+    if (claimedId !== id) {
+      throw new Error(`observed header ${index} ID is not canonical`);
+    }
+    const record: BridgeValidityTrackerCanonicalHeaderV1 = deepFreeze({
+      raw,
+      id,
+      parentId: fixedHex(
+        raw.parentId,
+        32,
+        `observed header ${index} parent ID`,
+      ),
+      height: safeInteger(raw.height, `observed header ${index} height`),
+      extensionRootHex: fixedHex(
+        raw.extensionRoot ?? raw.extensionHash,
+        32,
+        `observed header ${index} extension root`,
+      ),
+      jvmHeaderJson: canonicalJvmHeaderJson(raw),
+      serializedHex: serialized.toString('hex'),
+    });
+    assertSigmaRustHeaderIdentity(wasm, record, index, 'observed');
+    return record;
+  }));
+  const currentHeight = headers[0]!.height + 1;
+  headers.forEach((header, index) => {
+    if (header.height !== currentHeight - index - 1) {
+      throw new Error(`observed header ${index} height is not contiguous`);
+    }
+    if (
+      index + 1 < headers.length
+      && header.parentId !== headers[index + 1]!.id
+    ) {
+      throw new Error(`observed header ${index} parent lineage is broken`);
+    }
+  });
+  const anchorHeader = headers[anchorContextIndex]!;
+  if (
+    anchorHeader.id !== expectedAnchorHeaderIdHex
+    || anchorHeader.extensionRootHex !== expectedAnchorExtensionRootHex
+  ) {
+    throw new Error('observed anchor header binding mismatch');
+  }
+  const context: BridgeValidityTrackerObservedHeaderContextV1 = deepFreeze({
+    currentHeight,
+    anchorHeader,
+    anchorContextIndex,
+    headers,
+    provenance: BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
+  });
+  OBSERVED_CONTEXTS.add(context);
+  return context;
+}
+
+export function assertBridgeValidityTrackerObservedHeaderContextV1(
+  value: unknown,
+): asserts value is BridgeValidityTrackerObservedHeaderContextV1 {
+  if (
+    typeof value !== 'object'
+    || value === null
+    || !OBSERVED_CONTEXTS.has(value)
+    || !isDeepFrozen(value)
+  ) {
+    throw new Error(
+      'validity tracker observed header context provenance is missing',
+    );
+  }
+  const context = value as BridgeValidityTrackerObservedHeaderContextV1;
+  if (
+    context.provenance
+      !== BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE
+    || context.headers.length !== HEADER_COUNT
+    || context.currentHeight !== context.headers[0]!.height + 1
+    || context.anchorContextIndex < 0
+    || context.anchorContextIndex >= context.headers.length
+    || context.anchorHeader !== context.headers[context.anchorContextIndex]
+  ) {
+    throw new Error('validity tracker observed header context shape mismatch');
+  }
+  context.headers.forEach((header, index) => {
+    const serialized = serializeCanonicalErgoHeaderV2(header.raw);
+    if (
+      header.height !== context.currentHeight - index - 1
+      || serialized.toString('hex') !== header.serializedHex
+      || blake2b256Hex(serialized) !== header.id
+      || (
+        index + 1 < context.headers.length
+        && header.parentId !== context.headers[index + 1]!.id
+      )
+    ) {
+      throw new Error(
+        `validity tracker observed header ${index} identity mismatch`,
+      );
+    }
+  });
+}
+
 export function serializeCanonicalErgoHeaderV2(
   rawInput: Readonly<Record<string, unknown>>,
 ): Buffer {
@@ -302,7 +452,7 @@ function canonicalJvmHeaderJson(
     nBits: unsignedSafeInteger(raw.nBits, 'JVM header nBits'),
     height: unsignedSafeInteger(raw.height, 'JVM header height'),
     extensionRoot: fixedHex(
-      raw.extensionHash,
+      raw.extensionRoot ?? raw.extensionHash,
       32,
       'JVM header extension root',
     ),
@@ -322,6 +472,7 @@ function assertSigmaRustHeaderIdentity(
   wasm: any,
   record: BridgeValidityTrackerCanonicalHeaderV1,
   index: number,
+  source: 'synthetic' | 'observed' = 'synthetic',
 ): void {
   let header: any;
   let id: any;
@@ -332,7 +483,7 @@ function assertSigmaRustHeaderIdentity(
     expectedId = wasm.BlockId.from_str(record.id);
     if (!id.equals(expectedId)) {
       throw new Error(
-        `sigma-rust changed canonical synthetic header ${index} identity`,
+        `sigma-rust changed canonical ${source} header ${index} identity`,
       );
     }
   } finally {

@@ -22,6 +22,7 @@ const mocked = vi.hoisted(() => ({
   checkpointClaim: vi.fn(),
   checkpointObserve: vi.fn(),
   checkpointAssert: vi.fn(),
+  observedHeaderBuild: vi.fn(),
   checkpointExtensionEncode: vi.fn(),
   packet: vi.fn(),
   packetContinuation: vi.fn(),
@@ -35,6 +36,8 @@ const mocked = vi.hoisted(() => ({
   applicationCheckpointAssert: vi.fn(),
   applicationRunnerPreflight: vi.fn(),
   trackerBuild: vi.fn(),
+  observedTrackerBuild: vi.fn(),
+  trackerAssert: vi.fn(),
   materializeUnsigned: vi.fn(),
   sourceHistory: vi.fn(),
   rewardDiscovery: vi.fn(),
@@ -54,6 +57,9 @@ const mocked = vi.hoisted(() => ({
   pegInSourceLockOutputObserve: vi.fn(),
   pegInSourceLockOutputAssert: vi.fn(),
   pegInCommittedVaultCheck: vi.fn(),
+  pegInCommittedVaultRetainingCheck: vi.fn(),
+  observedTrackerCheck: vi.fn(),
+  observedTrackerCheckAssert: vi.fn(),
   pegInCommittedVaultPromote: vi.fn(),
   pegInCommittedVaultAuthorizationSession: vi.fn(),
   pegInCommittedVaultTransport: vi.fn(),
@@ -89,6 +95,14 @@ vi.mock('../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1
     mocked.checkpointAssert,
   observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1:
     mocked.checkpointObserve,
+}));
+vi.mock('../../bridge-validity-tracker-header-context-v1.js', () => ({
+  BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE:
+    'eip0045-validity-tracker-canonical-synthetic-header-context',
+  BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE:
+    'eip0045-validity-tracker-observed-header-context',
+  buildBridgeValidityTrackerObservedHeaderContextV1:
+    mocked.observedHeaderBuild,
 }));
 vi.mock('../../profiles/substrate-federated-v1/checkpoint-statement.js', async importOriginal => ({
   ...(await importOriginal()),
@@ -127,7 +141,10 @@ vi.mock('./substrate-federated-isolated-devnet-frontier-application-checkpoint-r
     mocked.applicationRunnerPreflight,
 }));
 vi.mock('../../substrate-federated-tracker-v1.js', () => ({
+  assertSubstrateFederatedTrackerV1Context: mocked.trackerAssert,
   buildCompilerBoundSubstrateFederatedTrackerV1Context: mocked.trackerBuild,
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context:
+    mocked.observedTrackerBuild,
   SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA:
     'e2s.substrate-federated-v1-tracker-context',
 }));
@@ -151,6 +168,8 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () =
     mocked.pegInCandidateBuild,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1:
+    mocked.observedTrackerCheckAssert,
   promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1:
     mocked.pegInCommittedVaultPromote,
   discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
@@ -246,6 +265,7 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5,
   runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4,
@@ -255,6 +275,7 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V6,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4,
@@ -309,6 +330,9 @@ describe('isolated devnet genesis setup execution root V1', () => {
   let trackerSetupMaterial:
     ReturnType<typeof validMaterializedTrackerSetup>;
   let trackerContext: ReturnType<typeof validTrackerContext>;
+  let observedHeaderContext: ReturnType<typeof validObservedHeaderContext>;
+  let observedTrackerContext: ReturnType<typeof validObservedTrackerContext>;
+  let observedTrackerCheck: ReturnType<typeof validObservedTrackerCheck>;
   let checkpointAnchorObservation:
     ReturnType<typeof validCheckpointAnchorObservation>;
 
@@ -361,6 +385,23 @@ describe('isolated devnet genesis setup execution root V1', () => {
       applicationCheckpointReceipt,
     );
     checkpointAnchorObservation = validCheckpointAnchorObservation();
+    observedHeaderContext = validObservedHeaderContext(
+      checkpointAnchorObservation,
+    );
+    observedTrackerContext = validObservedTrackerContext(
+      trackerContext,
+      observedHeaderContext,
+    );
+    observedTrackerCheck = validObservedTrackerCheck(
+      observedTrackerContext,
+      trackerSetupMaterial.outputs[0]!,
+      {
+        processBindingDigestHex:
+          checkpointAnchorObservation.processBindingDigestHex,
+        executionTargetIdentityDigestHex:
+          checkpointAnchorObservation.executionTargetIdentityDigestHex,
+      },
+    );
 
     mocked.build.mockImplementation(async () => {
       order.push('build');
@@ -383,6 +424,9 @@ describe('isolated devnet genesis setup execution root V1', () => {
         checkPegInSourceLockRetainingSigner:
           mocked.pegInSourceLockRetainingCheck,
         checkPegInCommittedVault: mocked.pegInCommittedVaultCheck,
+        checkPegInCommittedVaultRetainingSigner:
+          mocked.pegInCommittedVaultRetainingCheck,
+        checkTrackerCandidate: mocked.observedTrackerCheck,
       };
     });
     mocked.claim.mockReturnValue(MINING_CREDENTIAL);
@@ -417,6 +461,21 @@ describe('isolated devnet genesis setup execution root V1', () => {
       if (value !== checkpointAnchorObservation) {
         throw new Error('checkpoint anchor observation provenance changed');
       }
+    });
+    mocked.observedHeaderBuild.mockImplementation((_wasm, input) => {
+      order.push('tracker:observed-headers:build');
+      if (
+        input.rawHeaders.length !== 10
+        || input.anchorContextIndex
+          !== checkpointAnchorObservation.anchorContextIndex
+        || input.expectedAnchorHeaderIdHex
+          !== checkpointAnchorObservation.anchorHeaderIdHex
+        || input.expectedAnchorExtensionRootHex
+          !== checkpointAnchorObservation.anchorExtensionRootHex
+      ) {
+        throw new Error('observed tracker header input binding changed');
+      }
+      return observedHeaderContext;
     });
     mocked.packet.mockImplementation(() => ({
       signer: packetSigner(),
@@ -583,6 +642,46 @@ describe('isolated devnet genesis setup execution root V1', () => {
         throw new Error('tracker candidate producer binding changed');
       }
       return trackerContext;
+    });
+    mocked.observedTrackerBuild.mockImplementation(async input => {
+      order.push('tracker:observed-candidate:build');
+      if (
+        input.compilerRequest !== currentBatch.trackerCompilerBinding.request
+        || input.compilerReceipt !== currentBatch.trackerCompilerBinding.receipt
+        || input.trackerInputBox !== trackerSetupMaterial.outputs[0]
+        || input.encodedStatementHex
+          !== applicationCheckpointReceipt.checkpoint.checkpointAttestation
+            .checkpointStatement.encodedStatementHex
+        || input.observedHeaderContext !== observedHeaderContext
+        || input.extensionMembershipProofHex
+          !== checkpointAnchorObservation.extensionMembershipProofHex
+      ) {
+        throw new Error('observed tracker candidate input binding changed');
+      }
+      return observedTrackerContext;
+    });
+    mocked.trackerAssert.mockImplementation(value => {
+      if (value !== observedTrackerContext) {
+        throw new Error('observed tracker context provenance changed');
+      }
+    });
+    mocked.observedTrackerCheck.mockImplementation(async (input, target) => {
+      order.push('tracker:observed-candidate:check');
+      if (
+        input.context !== observedTrackerContext
+        || input.trackerInputBox !== trackerSetupMaterial.outputs[0]
+        || target.primaryNodeOrigin !== readOnlyTarget().primaryNodeOrigin
+        || target.witnessNodeOrigin !== readOnlyTarget().witnessNodeOrigin
+        || target.miningStopped !== true
+      ) {
+        throw new Error('observed tracker check input binding changed');
+      }
+      return observedTrackerCheck;
+    });
+    mocked.observedTrackerCheckAssert.mockImplementation(value => {
+      if (value !== observedTrackerCheck) {
+        throw new Error('observed tracker check provenance changed');
+      }
     });
     mocked.process.mockReturnValue(processSession);
     mocked.sourceHistory.mockImplementation(async () => {
@@ -762,6 +861,10 @@ describe('isolated devnet genesis setup execution root V1', () => {
     });
     mocked.pegInCommittedVaultCheck.mockImplementation(async input => {
       order.push('peg-in:committed-vault:check');
+      return validPegInCommittedVaultCheck(input, currentBatch.targetBinding);
+    });
+    mocked.pegInCommittedVaultRetainingCheck.mockImplementation(async input => {
+      order.push('peg-in:committed-vault:check:retain-signer');
       return validPegInCommittedVaultCheck(input, currentBatch.targetBinding);
     });
     mocked.pegInCommittedVaultPromote.mockImplementation(receipt => {
@@ -1755,6 +1858,117 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
     );
+  });
+
+  it('binds the mined 0x0401 anchor into a locally signed tracker candidate accepted by the same JVM target', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(mocked.pegInCommittedVaultCheck).not.toHaveBeenCalled();
+    expect(mocked.pegInCommittedVaultRetainingCheck).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('checkpoint-anchor:observe')).toBeLessThan(
+      order.indexOf('tracker:observed-headers:build'),
+    );
+    expect(order.indexOf('tracker:observed-headers:build')).toBeLessThan(
+      order.indexOf('tracker:observed-candidate:build'),
+    );
+    expect(order.indexOf('tracker:observed-candidate:build')).toBeLessThan(
+      order.indexOf('tracker:observed-candidate:check'),
+    );
+    expect(result.receipt).toMatchObject({
+      status: 'observed_anchor_tracker_candidate_accepted_by_local_node_check',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V6,
+      checkpointAnchor: {
+        observation: checkpointAnchorObservation,
+      },
+      tracker: {
+        trackerSetup: {
+          expectedTxId: digest('4'),
+          outputBoxIdHex: digest('a'),
+        },
+        candidate: {
+          anchorContextProvenance:
+            'eip0045-validity-tracker-observed-header-context',
+          anchorHeaderIdHex: checkpointAnchorObservation.anchorHeaderIdHex,
+          anchorHeaderHeight: checkpointAnchorObservation.anchorHeight,
+          anchorExtensionRootHex:
+            checkpointAnchorObservation.anchorExtensionRootHex,
+          inputBoxIdHex: digest('a'),
+          statementIdHex: digest('6'),
+          unsignedTransactionIdHex: digest('c'),
+        },
+        check: observedTrackerCheck,
+      },
+      checks: {
+        setupVaultMintBurnCheckpointAnchorAndTrackerCheckCompletedInOneChainLifetime:
+          true,
+        exactObserved0401AnchorConsumedByTrackerCandidate: true,
+        exactConfirmedTrackerSetupOutputConsumed: true,
+        exactSameProcessTrackerCompilerReceiptConsumed: true,
+        localWasmSignatureAcceptedBySameTargetJvmCheck: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        localErgoCheckpointAnchorObserved: true,
+        trackerCandidateConstructed: true,
+        trackerJvmReductionAccepted: true,
+        trackerNodeCheckPerformed: true,
+        trackerSigningPerformed: true,
+        signedTrackerBytesPersisted: false,
+        trackerAdmissionEstablished: false,
+        globalReplayInsertionEstablished: false,
+        payoutAuthorized: false,
+        trackerSubmissionPerformed: false,
+        trackerBroadcastPerformed: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it('rejects a tracker context that loses observed-anchor provenance', async () => {
+    observedTrackerContext = Object.freeze({
+      ...observedTrackerContext,
+      trackerTransition: Object.freeze({
+        ...observedTrackerContext.trackerTransition,
+        anchorContextProvenance:
+          'eip0045-validity-tracker-canonical-synthetic-header-context',
+      }),
+    }) as unknown as ReturnType<typeof validObservedTrackerContext>;
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(/observed anchor, tracker candidate, and JVM check binding changed/);
+
+    expect(mocked.observedTrackerCheck).toHaveBeenCalledTimes(1);
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects a tracker check whose signed transaction identity diverges', async () => {
+    observedTrackerCheck = Object.freeze({
+      ...observedTrackerCheck,
+      signedTransactionIdHex: digest('f'),
+    }) as ReturnType<typeof validObservedTrackerCheck>;
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(/observed anchor, tracker candidate, and JVM check binding changed/);
+
+    expect(mocked.observedTrackerCheckAssert).toHaveBeenCalled();
+    expect(order).toContain('process:stop');
   });
 
   it.each([
@@ -3118,6 +3332,7 @@ function checkpointMiningReceipt(extensionValueHex: string) {
 
 function validCheckpointAnchorObservation() {
   const extensionValueHex = `${digest('3')}${digest('6')}`;
+  const headerIds = ['d', 'c', 'b', 'a', '9', '8', '7', '6', '5', '4'];
   return Object.freeze({
     schema:
       'e2s.substrate-federated-isolated-devnet-checkpoint-anchor-observation.v1',
@@ -3135,7 +3350,14 @@ function validCheckpointAnchorObservation() {
       Object.freeze({ keyHex: '0401', valueHex: extensionValueHex }),
     ]),
     extensionMembershipProofHex: '00',
-    headers: Object.freeze([]),
+    headers: Object.freeze(headerIds.map((character, index) => Object.freeze({
+      idHex: digest(character),
+      height: 142 - index,
+      raw: Object.freeze({
+        id: digest(character),
+        height: 142 - index,
+      }),
+    }))),
     processBindingDigestHex: digest('7'),
     executionTargetIdentityDigestHex: digest('8'),
     observationDigestHex: digest('a'),
@@ -3284,6 +3506,8 @@ function validTrackerContext(
       successorDigestHex: '01'.repeat(33),
       currentErgoHeight: 221,
       anchorContextIndex: 0,
+      anchorContextProvenance:
+        'eip0045-validity-tracker-canonical-synthetic-header-context',
       headers: Object.freeze([Object.freeze({
         id: digest('a'),
         height: 220,
@@ -3322,6 +3546,115 @@ function validTrackerContext(
       gate5Closed: false,
       trustlessStatusEstablished: false,
     }),
+  } as const);
+}
+
+function validObservedHeaderContext(
+  observation: ReturnType<typeof validCheckpointAnchorObservation>,
+) {
+  return Object.freeze({
+    schema: 'e2s.bridge-validity-tracker-observed-header-context.v1',
+    version: 1,
+    provenance: 'eip0045-validity-tracker-observed-header-context',
+    anchorContextIndex: observation.anchorContextIndex,
+    anchorHeaderIdHex: observation.anchorHeaderIdHex,
+    anchorExtensionRootHex: observation.anchorExtensionRootHex,
+    headers: observation.headers,
+  } as const);
+}
+
+function validObservedTrackerContext(
+  synthetic: ReturnType<typeof validTrackerContext>,
+  observedHeaders: ReturnType<typeof validObservedHeaderContext>,
+) {
+  const headerIds = ['d', 'c', 'b', 'a', '9', '8', '7', '6', '5', '4'];
+  const headers = Object.freeze(headerIds.map((character, index) => Object.freeze({
+    id: digest(character),
+    height: 142 - index,
+    extensionRootHex: index === 0 ? digest('9') : digest(character),
+    jvmHeaderJson: '{}',
+    serializedHex: '00',
+  })));
+  return Object.freeze({
+    ...synthetic,
+    contract: Object.freeze({
+      ...synthetic.contract,
+      ergoAdmissionThreshold: 1,
+      ergoAdmissionPublicKeysHex: Object.freeze([setupSigner().publicKeyHex]),
+    }),
+    trackerTransition: Object.freeze({
+      ...synthetic.trackerTransition,
+      currentErgoHeight: headers[0]!.height + 1,
+      anchorContextIndex: observedHeaders.anchorContextIndex,
+      anchorContextProvenance:
+        'eip0045-validity-tracker-observed-header-context',
+      headers,
+    }),
+  } as const);
+}
+
+function validObservedTrackerCheck(
+  context: ReturnType<typeof validObservedTrackerContext>,
+  trackerInputBox:
+    ReturnType<typeof validMaterializedTrackerSetup>['outputs'][number],
+  targetBinding: Readonly<{
+    processBindingDigestHex: string;
+    executionTargetIdentityDigestHex: string;
+  }>,
+) {
+  const anchor = context.trackerTransition.headers[
+    context.trackerTransition.anchorContextIndex
+  ]!;
+  const tip = context.trackerTransition.headers[0]!;
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-observed-anchor-tracker-check.v1',
+    version: 1,
+    status: 'PASS',
+    trackerInputBoxIdHex: trackerInputBox.boxId,
+    statementIdHex: context.statement.statementIdHex,
+    anchorHeaderIdHex: anchor.id,
+    anchorHeight: anchor.height,
+    anchorContextIndex: context.trackerTransition.anchorContextIndex,
+    unsignedTransactionIdHex: context.unsignedTransactionIdHex,
+    unsignedTransactionDigestHex: digest('1'),
+    signedTransactionIdHex: context.unsignedTransactionIdHex,
+    signedTransactionCanonicalJsonSha256Hex: digest('2'),
+    signedTransactionBytesSha256Hex: digest('3'),
+    signedTransactionBytesLength: 2_048,
+    checkResponseSha256Hex: digest('4'),
+    target: Object.freeze({ ...targetBinding }),
+    signer: Object.freeze({
+      derivation: 'wasm-root',
+      publicKeyHex: setupSigner().publicKeyHex,
+      p2pkErgoTreeHex: setupSigner().p2pkErgoTreeHex,
+      stateContextTipHeight: tip.height,
+      stateContextTipIdHex: tip.id,
+    }),
+    checker: Object.freeze({
+      nodeOrigin: 'http://127.0.0.1:9051',
+      path: '/transactions/check',
+      method: 'POST',
+      transportPolicy: 'no-redirect-no-proxy',
+    }),
+    boundaries: Object.freeze({
+      localIsolatedDevnetOnly: true,
+      observedAnchorContextBound: true,
+      exactTrackerInputAndTransactionBound: true,
+      localWasmRootSigningPerformed: true,
+      localJvmNodeCheckPassed: true,
+      signedTransactionBytesPersisted: false,
+      submissionAuthorityEstablished: false,
+      broadcastAuthorityEstablished: false,
+      trackerAdmissionEstablished: false,
+      replayProtectionEstablished: false,
+      payoutEstablished: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    }),
+    receiptDigestHex: digest('5'),
   } as const);
 }
 

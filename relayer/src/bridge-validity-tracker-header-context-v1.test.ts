@@ -3,7 +3,9 @@ import blakejs from 'blakejs';
 
 import {
   assertBridgeValidityTrackerCanonicalHeaderContextV1,
+  assertBridgeValidityTrackerObservedHeaderContextV1,
   buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1,
   serializeCanonicalErgoHeaderV2,
 } from './bridge-validity-tracker-header-context-v1.js';
 import {
@@ -81,5 +83,63 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
         d: 1,
       },
     })).toThrow(/distance must be zero/i);
+  });
+
+  it('binds exactly ten observed node headers to their canonical identities', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const observed = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders: synthetic.headers.map(header => header.raw),
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: synthetic.anchorHeader.id,
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    });
+
+    expect(observed.currentHeight).toBe(2_000);
+    expect(observed.headers.map(header => header.id)).toEqual(
+      synthetic.headers.map(header => header.id),
+    );
+    expect(observed.anchorHeader).toBe(observed.headers[0]);
+    expect(() =>
+      assertBridgeValidityTrackerObservedHeaderContextV1(observed),
+    ).not.toThrow();
+    expect(() =>
+      assertBridgeValidityTrackerObservedHeaderContextV1(
+        structuredClone(observed),
+      ),
+    ).toThrow(/provenance is missing/i);
+  });
+
+  it('rejects incomplete or falsely identified observed header windows', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = synthetic.headers.map(header => header.raw);
+
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders: rawHeaders.slice(0, 9),
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: synthetic.anchorHeader.id,
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    })).toThrow(/exactly 10 headers/i);
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders,
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: 'cd'.repeat(32),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    })).toThrow(/anchor header binding mismatch/i);
   });
 });

@@ -281,7 +281,7 @@ async function observeNode(
     throw new Error(`${role} checkpoint anchor requires devnet identity`);
   }
   const fullHeight = positiveInteger(info.fullHeight, `${role} checkpoint height`);
-  const headerCount = fullHeight - expectedPriorHeight + 1;
+  const headerCount = Math.max(10, fullHeight - expectedPriorHeight + 1);
   if (!Number.isSafeInteger(headerCount) || headerCount < 2) {
     throw new Error(`${role} checkpoint anchor must follow the prior snapshot`);
   }

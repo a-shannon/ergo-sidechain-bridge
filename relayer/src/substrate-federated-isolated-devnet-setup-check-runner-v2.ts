@@ -8,10 +8,15 @@ import {
   createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2,
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input,
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt,
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input,
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input,
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import type {
+  SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1,
+} from './substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -84,6 +89,22 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   ) => Promise<Readonly<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
   >>;
+  readonly checkPegInCommittedVaultRetainingSigner: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
+  >>;
+  readonly checkTrackerCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt
+  >>;
 }
 
 /**
@@ -114,6 +135,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'running'
     | 'setup-complete'
     | 'source-lock-check-complete'
+    | 'committed-vault-check-complete'
     | 'check-complete'
     | 'closed' = 'open';
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
@@ -135,11 +157,16 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     }
   };
   const consume = async <T>(
-    expectedState: 'open' | 'setup-complete' | 'source-lock-check-complete',
+    expectedState:
+      | 'open'
+      | 'setup-complete'
+      | 'source-lock-check-complete'
+      | 'committed-vault-check-complete',
     operation: () => Promise<T>,
     successState:
       | 'setup-complete'
       | 'source-lock-check-complete'
+      | 'committed-vault-check-complete'
       | 'check-complete'
       | 'closed',
   ): Promise<T> => {
@@ -175,6 +202,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           state === 'open'
           || state === 'setup-complete'
           || state === 'source-lock-check-complete'
+          || state === 'committed-vault-check-complete'
           || state === 'check-complete'
       ) {
         close();
@@ -223,6 +251,26 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     ) => consume(
       'source-lock-check-complete',
       () => execution.checkPegInCommittedVault(input, target),
+      'check-complete',
+    ),
+    checkPegInCommittedVaultRetainingSigner: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+      >,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'source-lock-check-complete',
+      () => execution.checkPegInCommittedVaultRetainingSigner(input, target),
+      'committed-vault-check-complete',
+    ),
+    checkTrackerCandidate: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+      >,
+      target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+    ) => consume(
+      'committed-vault-check-complete',
+      () => execution.checkTrackerCandidate(input, target),
       'check-complete',
     ),
   });
