@@ -153,6 +153,7 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1View {
   readonly consensusSourceLockSha256Hex: string;
   readonly ergoNodeBaseCommit: string;
   readonly ergoPatchSha256Hex: string;
+  readonly gitVersion: NodeBuildLockV1['gitVersion'];
   readonly gitExecutableSha256Hex: string;
   readonly javaHomeSha256Hex: string;
   readonly sbtLauncherJarSha256Hex: string;
@@ -176,6 +177,7 @@ export function inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(
     consensusSourceLockSha256Hex: lock.consensusSourceLockSha256,
     ergoNodeBaseCommit: lock.ergoNodeBaseCommit,
     ergoPatchSha256Hex: lock.ergoPatchSha256,
+    gitVersion: lock.gitVersion,
     gitExecutableSha256Hex: lock.gitExecutableSha256,
     javaHomeSha256Hex: lock.javaHomeSha256,
     sbtLauncherJarSha256Hex: lock.sbtLauncherJarSha256,

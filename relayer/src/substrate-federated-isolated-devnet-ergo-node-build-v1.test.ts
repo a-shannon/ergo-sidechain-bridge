@@ -44,6 +44,7 @@ describe('isolated devnet Ergo node build V1', () => {
       ergoNodeBaseCommit: '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1',
       ergoPatchSha256Hex:
         '31b27cf9acd7ad6d7c05282d964f51be15b5aa78767b354f8f29ee28d39ebf23',
+      gitVersion: '2.54.0.windows.1',
       gitExecutableSha256Hex:
         '81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5',
       javaHomeSha256Hex:

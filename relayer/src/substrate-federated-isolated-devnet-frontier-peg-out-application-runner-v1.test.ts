@@ -58,8 +58,10 @@ import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1Provenance,
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2,
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitIdentityV1,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2,
+  inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
   restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1,
@@ -100,6 +102,31 @@ const EXPECTED_INTEGRATION_SIDECHAIN_ID_HEX =
   '0x233ab9f052d90ec0e32577793461b912118105ebacb3723e1aa0bff9df106bda';
 
 describe('federated isolated-devnet Frontier peg-out application runner V1/V2', () => {
+  it('consumes the exact node-build Git lock and rejects independent drift', () => {
+    const lock =
+      inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1(
+        bridgeRoot,
+      );
+    expect(lock).toEqual({
+      version: 'git version 2.54.0.windows.1',
+      sha256:
+        '81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5',
+    });
+    expect(Object.isFrozen(lock)).toBe(true);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitIdentityV1(
+        bridgeRoot,
+        { ...lock, version: 'git version 2.55.0.windows.3' },
+      )
+    ).toThrow(/version changed/u);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitIdentityV1(
+        bridgeRoot,
+        { ...lock, sha256: '00'.repeat(32) },
+      )
+    ).toThrow(/SHA-256 changed/u);
+  });
+
   it('requires offline execution and an exact input shape', () => {
     expect(() => preflight({
       ...syntheticInput(),

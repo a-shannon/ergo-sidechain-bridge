@@ -27,6 +27,9 @@ import {
   runBoundedProcess,
 } from './pinned-local-native-verifier-build.js';
 import {
+  inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1,
+} from './substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV1ConsumerConstruction,
   consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV1,
   type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceReceiptV1,
@@ -58,6 +61,33 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RU
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-frontier-peg-out-application-runner.v2' as const;
 
+export function inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1(
+  bridgeRoot: string,
+): Readonly<{ version: string; sha256: string }> {
+  const nodeBuildLock =
+    inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(bridgeRoot);
+  return deepFreeze({
+    version: `git version ${nodeBuildLock.gitVersion}`,
+    sha256: nodeBuildLock.gitExecutableSha256Hex,
+  });
+}
+
+export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitIdentityV1(
+  bridgeRoot: string,
+  identity: Readonly<{ version: string; sha256: string }>,
+): void {
+  const expected =
+    inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1(
+      bridgeRoot,
+    );
+  if (identity.version !== expected.version) {
+    throw new Error('patch Git version changed');
+  }
+  if (identity.sha256 !== expected.sha256) {
+    throw new Error('patch Git SHA-256 changed');
+  }
+}
+
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V1';
 const RECEIPT_V2_DIGEST_DOMAIN =
@@ -88,9 +118,6 @@ const APPLICATION_OVERLAY_PATCH_SHA256 =
   'b275a0e44306e465e61369d80763945e3e8a0cdf96fac2efcc7914f77eb53bb5';
 const OVERLAY_APPLIED_SOURCE_LF_SHA256 =
   '1372b856b91b6c017e27e6ebf96ae95d658d3de041768ca3a90a9a2567ac4a53';
-const PATCH_GIT_VERSION = 'git version 2.55.0.windows.3';
-const PATCH_GIT_SHA256 =
-  '7b7971dd13f0c3a284e538601f2f9770b3a87dfaccb5fb52d68141c67ed22364';
 const EXPECTED_OWNER_ADDRESS =
   '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const EXPECTED_MINT_AMOUNT_NANO_ERG = '15000000';
@@ -1141,6 +1168,10 @@ function inspectTools(input: Readonly<{
   cargoLockSha256: string;
   rustToolchainSha256: string;
 }> {
+  const patchGitLock =
+    inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1(
+      input.bridgeRoot,
+    );
   const lockPath = requireRegularFile(
     path.join(input.bridgeRoot, 'sources', 'native-verifier-toolchain-lock.json'),
     'native verifier toolchain lock',
@@ -1183,9 +1214,13 @@ function inspectTools(input: Readonly<{
   const git = inspectExactTool(
     input.gitExecutablePath,
     input.frontierSourceDirectory,
-    PATCH_GIT_VERSION,
-    PATCH_GIT_SHA256,
+    patchGitLock.version,
+    patchGitLock.sha256,
     'patch Git',
+  );
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitIdentityV1(
+    input.bridgeRoot,
+    git,
   );
   return deepFreeze({
     nativeToolchainLockSha256,
