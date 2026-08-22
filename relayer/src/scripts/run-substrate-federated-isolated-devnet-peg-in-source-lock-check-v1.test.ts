@@ -376,25 +376,37 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
     const originalPath = process.env.Path;
     const originalLib = process.env.LIB;
     const worktreeRoot = resolve(process.cwd(), '..', '..');
-    const npmBin = resolve(process.cwd(), 'node_modules', '.bin');
+    const worktreeDirectory = resolve(process.cwd(), 'src');
     const externalBin = dirname(process.execPath);
-    process.env.Path = [npmBin, externalBin].join(delimiter);
+    const cargoHome = mkdtempSync(join(tmpdir(), 'isolated-worker-cargo-home-'));
+    process.env.Path = [worktreeDirectory, externalBin].join(delimiter);
     try {
-      const environment = childEnvironment(worktreeRoot);
+      const environment = childEnvironment(worktreeRoot, {
+        cargoHomeDirectory: cargoHome,
+      });
       const childPath = environment.Path?.split(delimiter) ?? [];
       expect(childPath).toContain(externalBin);
-      expect(childPath).not.toContain(npmBin);
+      expect(childPath).not.toContain(worktreeDirectory);
+      expect(environment.CARGO_HOME).toBe(cargoHome);
       expect(environment.SystemDrive).toBe(
         parse(environment.SystemRoot ?? '').root.replace(/[\\/]+$/u, ''),
       );
+      expect(() => childEnvironment(worktreeRoot, {
+        cargoHomeDirectory: cargoHome,
+        unexpected: cargoHome,
+      } as any)).toThrow('isolated worker environment options are invalid');
+      expect(() => childEnvironment(worktreeRoot, {
+        cargoHomeDirectory: resolve(process.cwd(), 'src'),
+      })).toThrow('CARGO_HOME override must remain outside the worktree');
 
-      process.env.LIB = npmBin;
+      process.env.LIB = worktreeDirectory;
       expect(() => childEnvironment(worktreeRoot)).toThrow(
         'LIB must remain outside the worktree',
       );
     } finally {
       restoreEnvironment('Path', originalPath);
       restoreEnvironment('LIB', originalLib);
+      rmSync(cargoHome, { recursive: true, force: true });
     }
   });
 

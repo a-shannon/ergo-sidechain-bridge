@@ -334,8 +334,30 @@ export function assertCreateOnlyOutput(
   return outputPath;
 }
 
-export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
+export function childEnvironment(
+  worktreeRoot: string,
+  options?: Readonly<{ readonly cargoHomeDirectory?: string }>,
+): NodeJS.ProcessEnv {
+  if (
+    options !== undefined
+    && (
+      options === null
+      || typeof options !== 'object'
+      || Array.isArray(options)
+      || Object.keys(options).some(key => key !== 'cargoHomeDirectory')
+    )
+  ) {
+    throw new Error('isolated worker environment options are invalid');
+  }
   const canonicalWorktreeRoot = realpathSync(worktreeRoot);
+  const cargoHomeOverride = options?.cargoHomeDirectory === undefined
+    ? undefined
+    : safeEnvironmentPath(
+      options.cargoHomeDirectory,
+      'CARGO_HOME override',
+      'directory',
+      canonicalWorktreeRoot,
+    );
   const systemRoot = safeEnvironmentPath(
     process.env.SystemRoot ?? process.env.SYSTEMROOT
       ?? process.env.WINDIR,
@@ -390,6 +412,7 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
     environment.PATHEXT = pathExt;
   }
   for (const key of CHILD_DIRECTORY_ENVIRONMENT_KEYS) {
+    if (key === 'CARGO_HOME' && cargoHomeOverride !== undefined) continue;
     const value = process.env[key];
     if (value !== undefined && value.length > 0) {
       environment[key] = safeEnvironmentPath(
@@ -400,6 +423,9 @@ export function childEnvironment(worktreeRoot: string): NodeJS.ProcessEnv {
         allowedDriveRoots,
       );
     }
+  }
+  if (cargoHomeOverride !== undefined) {
+    environment.CARGO_HOME = cargoHomeOverride;
   }
   for (const key of CHILD_PATH_LIST_ENVIRONMENT_KEYS) {
     const value = process.env[key];

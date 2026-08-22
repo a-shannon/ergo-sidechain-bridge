@@ -1,10 +1,14 @@
+import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
-import { canonicalPathIdentity } from '../create-only-out-of-repository-artifact.js';
+import {
+  canonicalPathIdentity,
+  isPathInside,
+} from '../create-only-out-of-repository-artifact.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import {
   loadCanonicalBootstrapRequestBoundToSha256,
@@ -69,17 +73,39 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
     'Frontier application-checkpoint Cargo dependency cache',
     'directory',
   );
-  if (
-    canonicalPathIdentity(temporaryDirectoryRoot)
-      === canonicalPathIdentity(cargoDependencyCacheDirectory)
-  ) {
+  if (pathsOverlap(temporaryDirectoryRoot, cargoDependencyCacheDirectory)) {
     throw new Error(
-      'Frontier temporary root and Cargo dependency cache must differ',
+      'Frontier temporary root and Cargo dependency caches must differ and not overlap',
     );
   }
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-  const bridgeRoot = resolve(scriptDirectory, '..', '..', '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveCanonicalApplicationCheckpointCampaignWorkerRootsV3(scriptDirectory);
+  const relayerCargoCacheDirectory = explicitExistingLocalNonSensitivePath(
+    process.env.CARGO_HOME,
+    'relayer artifact Cargo dependency cache',
+    'directory',
+  );
+  if (
+    canonicalPathIdentity(relayerCargoCacheDirectory)
+      === canonicalPathIdentity(worktreeRoot)
+    || isPathInside(worktreeRoot, relayerCargoCacheDirectory)
+  ) {
+    throw new Error(
+      'relayer artifact Cargo dependency cache must remain outside the worktree',
+    );
+  }
+  if (
+    pathsOverlap(temporaryDirectoryRoot, relayerCargoCacheDirectory)
+    || pathsOverlap(
+      cargoDependencyCacheDirectory,
+      relayerCargoCacheDirectory,
+    )
+  ) {
+    throw new Error(
+      'Frontier temporary root and Cargo dependency caches must differ and not overlap',
+    );
+  }
   const input = loadCanonicalBootstrapRequestBoundToSha256(
     argv[1],
     bridgeRoot,
@@ -110,6 +136,22 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
     argv[3],
     pegIn,
   );
+}
+
+export function resolveCanonicalApplicationCheckpointCampaignWorkerRootsV3(
+  scriptDirectory: string,
+): Readonly<{ readonly bridgeRoot: string; readonly worktreeRoot: string }> {
+  const bridgeRoot = realpathSync(resolve(scriptDirectory, '..', '..', '..'));
+  return Object.freeze({
+    bridgeRoot,
+    worktreeRoot: realpathSync(resolve(bridgeRoot, '..')),
+  });
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return canonicalPathIdentity(left) === canonicalPathIdentity(right)
+    || isPathInside(left, right)
+    || isPathInside(right, left);
 }
 
 async function main(): Promise<void> {

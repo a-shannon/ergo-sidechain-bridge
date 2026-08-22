@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   canonicalPathIdentity,
+  isPathInside,
   readBoundedRegularFile,
 } from '../create-only-out-of-repository-artifact.js';
 import {
@@ -77,12 +78,21 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
     'Frontier application-checkpoint Cargo dependency cache',
     'directory',
   );
+  const relayerCargoCacheDirectory = explicitExistingLocalNonSensitivePath(
+    args.relayerCargoCache,
+    'relayer artifact Cargo dependency cache',
+    'directory',
+  );
   if (
-    canonicalPathIdentity(temporaryDirectoryRoot)
-      === canonicalPathIdentity(cargoDependencyCacheDirectory)
+    pathsOverlap(temporaryDirectoryRoot, cargoDependencyCacheDirectory)
+    || pathsOverlap(temporaryDirectoryRoot, relayerCargoCacheDirectory)
+    || pathsOverlap(
+      cargoDependencyCacheDirectory,
+      relayerCargoCacheDirectory,
+    )
   ) {
     throw new Error(
-      'Frontier temporary root and Cargo dependency cache must differ',
+      'Frontier temporary root and Cargo dependency caches must differ and not overlap',
     );
   }
   const outputPath = assertCreateOnlyOutput(
@@ -121,7 +131,9 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
       cargoDependencyCacheDirectory,
     ],
     cwd: relayerRoot,
-    env: childEnvironment(worktreeRoot),
+    env: childEnvironment(worktreeRoot, {
+      cargoHomeDirectory: relayerCargoCacheDirectory,
+    }),
     timeoutMs: WORKER_TIMEOUT_MS,
     terminationGraceMs: 30_000,
     maxOutputBytes: MAX_WORKER_OUTPUT_BYTES + 64 * 1024,
@@ -239,10 +251,11 @@ function parseArguments(argv: readonly string[]): Readonly<{
   outputPath: string;
   frontierTemporaryRoot: string;
   frontierCargoCache: string;
+  relayerCargoCache: string;
   pegIn: Readonly<SubstrateFederatedIsolatedDevnetPegInPlanV1>;
 }> {
   if (
-    argv.length !== 12
+    argv.length !== 14
     || argv[0] !== '--request'
     || argv[1] === undefined
     || argv[1].length === 0
@@ -259,10 +272,14 @@ function parseArguments(argv: readonly string[]): Readonly<{
     || argv[9] === undefined
     || argv[9].length === 0
     || argv[9].startsWith('--')
-    || argv[10] !== '--output'
+    || argv[10] !== '--relayer-cargo-cache'
     || argv[11] === undefined
     || argv[11].length === 0
     || argv[11].startsWith('--')
+    || argv[12] !== '--output'
+    || argv[13] === undefined
+    || argv[13].length === 0
+    || argv[13].startsWith('--')
   ) {
     throw new Error(
       'isolated peg-in application-checkpoint campaign arguments are invalid',
@@ -270,11 +287,18 @@ function parseArguments(argv: readonly string[]): Readonly<{
   }
   return Object.freeze({
     requestPath: argv[1],
-    outputPath: argv[11],
+    outputPath: argv[13],
     frontierTemporaryRoot: argv[7],
     frontierCargoCache: argv[9],
+    relayerCargoCache: argv[11],
     pegIn: normalizePegInPlan(argv[3], argv[5]),
   });
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+  return canonicalPathIdentity(left) === canonicalPathIdentity(right)
+    || isPathInside(left, right)
+    || isPathInside(right, left);
 }
 
 function normalizePegInPlan(
