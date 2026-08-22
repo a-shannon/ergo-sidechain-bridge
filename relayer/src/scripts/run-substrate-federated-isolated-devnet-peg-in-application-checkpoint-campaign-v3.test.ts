@@ -87,6 +87,7 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignCommandFromArgumentsV3,
 } from './run-substrate-federated-isolated-devnet-peg-in-application-checkpoint-campaign-v3.js';
 import {
+  formatSafeApplicationCheckpointCampaignWorkerFailureV3,
   resolveCanonicalApplicationCheckpointCampaignWorkerRootsV3,
   runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3,
 } from './run-substrate-federated-isolated-devnet-peg-in-application-checkpoint-campaign-worker-v3.js';
@@ -99,6 +100,30 @@ const RECIPIENT_ADDRESS_HEX = '11'.repeat(20);
 const REQUEST_DIGEST_HEX = 'f'.repeat(64);
 
 describe('isolated devnet peg-in application-checkpoint campaign command V3', () => {
+  it('emits only bounded path-free worker failure detail', () => {
+    expect(
+      formatSafeApplicationCheckpointCampaignWorkerFailureV3(
+        new Error('Frontier semantic SHA-256 changed'),
+      ),
+    ).toBe(
+      'isolated application-checkpoint campaign worker failed: '
+      + 'Frontier semantic SHA-256 changed\n',
+    );
+    expect(
+      formatSafeApplicationCheckpointCampaignWorkerFailureV3(
+        new Error('failed under C:\\private\\source'),
+      ),
+    ).toBe('isolated application-checkpoint campaign worker failed\n');
+    expect(
+      formatSafeApplicationCheckpointCampaignWorkerFailureV3(
+        new Error('first line\nsecond line'),
+      ),
+    ).toBe('isolated application-checkpoint campaign worker failed\n');
+    expect(
+      formatSafeApplicationCheckpointCampaignWorkerFailureV3('failure'),
+    ).toBe('isolated application-checkpoint campaign worker failed\n');
+  });
+
   beforeEach(() => {
     vi.resetAllMocks();
     mocked.environment.mockReturnValue(Object.freeze({ PATH: 'controlled' }));

@@ -22,6 +22,9 @@ import {
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 
 const ERGO_POSITIVE_LONG_MAX = 0x7fff_ffff_ffff_ffffn;
+const WORKER_FAILURE_PREFIX =
+  'isolated application-checkpoint campaign worker failed';
+const MAX_SAFE_FAILURE_MESSAGE_LENGTH = 4096;
 
 export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
   argv: readonly string[],
@@ -154,6 +157,21 @@ function pathsOverlap(left: string, right: string): boolean {
     || isPathInside(right, left);
 }
 
+export function formatSafeApplicationCheckpointCampaignWorkerFailureV3(
+  error: unknown,
+): string {
+  if (!(error instanceof Error)) return `${WORKER_FAILURE_PREFIX}\n`;
+  const message = error.message;
+  if (
+    message.length === 0
+    || message.length > MAX_SAFE_FAILURE_MESSAGE_LENGTH
+    || /[\r\n\0/\\]/u.test(message)
+  ) {
+    return `${WORKER_FAILURE_PREFIX}\n`;
+  }
+  return `${WORKER_FAILURE_PREFIX}: ${message}\n`;
+}
+
 async function main(): Promise<void> {
   const receipt =
     await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
@@ -166,9 +184,9 @@ const invokedPath = process.argv[1]
   ? pathToFileURL(resolve(process.argv[1])).href
   : undefined;
 if (invokedPath === import.meta.url) {
-  main().catch(() => {
+  main().catch(error => {
     process.stderr.write(
-      'isolated application-checkpoint campaign worker failed\n',
+      formatSafeApplicationCheckpointCampaignWorkerFailureV3(error),
     );
     process.exitCode = 1;
   });
