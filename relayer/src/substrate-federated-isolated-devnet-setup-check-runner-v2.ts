@@ -15,8 +15,9 @@ import {
 import type {
   SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
-import type {
-  SubstrateFederatedIsolatedDevnetMiningCredentialV1,
+import {
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  type SubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
@@ -29,6 +30,10 @@ export type {
 } from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 
 const MINING_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
+>();
+const CHECKPOINT_MINING_CREDENTIALS = new WeakMap<
   object,
   Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
 >();
@@ -102,6 +107,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     execution.dispose();
     throw error;
   }
+  const checkpointMiningCredential =
+    execution.claimCheckpointMiningCredential();
   let state:
     | 'open'
     | 'running'
@@ -112,6 +119,14 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   const close = (): void => {
     MINING_CREDENTIALS.delete(session);
+    const unclaimedCheckpointCredential =
+      CHECKPOINT_MINING_CREDENTIALS.get(session);
+    if (unclaimedCheckpointCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        unclaimedCheckpointCredential,
+      );
+    }
+    CHECKPOINT_MINING_CREDENTIALS.delete(session);
     revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
     try {
       execution.dispose();
@@ -212,6 +227,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     ),
   });
   MINING_CREDENTIALS.set(session, execution.miningCredential);
+  CHECKPOINT_MINING_CREDENTIALS.set(session, checkpointMiningCredential);
   return session;
 }
 
@@ -227,4 +243,26 @@ export function claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(
   }
   MINING_CREDENTIALS.delete(session);
   return credential;
+}
+
+/** Atomic composition-root handoff for the two ordered mining phases. */
+export function claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+): Readonly<{
+  readonly miningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly checkpointMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+}> {
+  const miningCredential = MINING_CREDENTIALS.get(session);
+  const checkpointMiningCredential =
+    CHECKPOINT_MINING_CREDENTIALS.get(session);
+  if (miningCredential === undefined || checkpointMiningCredential === undefined) {
+    throw new Error(
+      'isolated mining credential pair is absent, partially claimed, or disposed',
+    );
+  }
+  MINING_CREDENTIALS.delete(session);
+  CHECKPOINT_MINING_CREDENTIALS.delete(session);
+  return Object.freeze({ miningCredential, checkpointMiningCredential });
 }

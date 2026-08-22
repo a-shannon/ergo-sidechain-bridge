@@ -182,6 +182,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSignerV2>;
   readonly miningCredential:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly claimCheckpointMiningCredential: () =>
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
   readonly dispose: () => void;
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
@@ -592,6 +594,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         mnemonic,
         identity.publicKeyHex,
       );
+    let checkpointMiningCredential:
+      Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined =
+        issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          mnemonic,
+          identity.publicKeyHex,
+        );
     let state:
       | 'open'
       | 'running'
@@ -602,6 +610,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         miningCredential,
       );
+      if (checkpointMiningCredential !== undefined) {
+        revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          checkpointMiningCredential,
+        );
+        checkpointMiningCredential = undefined;
+      }
       mnemonic = '';
       state = 'closed';
     };
@@ -664,6 +678,16 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     return Object.freeze({
       signer,
       miningCredential,
+      claimCheckpointMiningCredential: () => {
+        if (checkpointMiningCredential === undefined) {
+          throw new Error(
+            'isolated checkpoint mining credential is absent, claimed, or disposed',
+          );
+        }
+        const credential = checkpointMiningCredential;
+        checkpointMiningCredential = undefined;
+        return credential;
+      },
       dispose: () => {
         if (state === 'running') {
           throw new Error('isolated fixed setup-check session is running');

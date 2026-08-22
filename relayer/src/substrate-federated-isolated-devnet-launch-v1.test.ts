@@ -344,8 +344,10 @@ import {
 } from './substrate-federated-isolated-devnet-portable-replay-files-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
@@ -2209,16 +2211,30 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     );
   });
 
-  it('hands one non-serializable mining credential to the static root', async () => {
+  it('atomically hands two independent one-shot mining credentials to the static root', async () => {
     const session =
       await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
-    const credential =
-      claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(session);
+    const pair = claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(
+      session,
+    );
+    const credential = pair.miningCredential;
+    const checkpointCredential = pair.checkpointMiningCredential;
+    expect(Object.isFrozen(pair)).toBe(true);
     expect(Object.keys(credential).sort()).toEqual(['schema', 'version']);
+    expect(Object.keys(checkpointCredential).sort()).toEqual([
+      'schema',
+      'version',
+    ]);
+    expect(checkpointCredential).not.toBe(credential);
     expect(JSON.stringify(credential)).not.toMatch(/mnemonic|secret|test /iu);
+    expect(JSON.stringify(checkpointCredential))
+      .not.toMatch(/mnemonic|secret|test /iu);
     expect(() =>
       claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(session)
     ).toThrow(/absent, claimed, or disposed/);
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(session)
+    ).toThrow(/pair is absent, partially claimed, or disposed/);
     expect(() =>
       assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         structuredClone(credential),
@@ -2232,6 +2248,32 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         session.signer.publicKeyHex,
       )
     ).toThrow(/absent, consumed, or revoked/);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        checkpointCredential,
+        session.signer.publicKeyHex,
+      )
+    ).not.toThrow();
+    revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+      checkpointCredential,
+    );
+  });
+
+  it('fails closed when one credential was claimed before the atomic handoff', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    const credential =
+      claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(session);
+
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(session)
+    ).toThrow(/pair is absent, partially claimed, or disposed/);
+
+    revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
+    session.dispose();
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(session)
+    ).toThrow(/pair is absent, partially claimed, or disposed/);
   });
 
   it('does not transfer signer-first binding provenance through serialization', async () => {

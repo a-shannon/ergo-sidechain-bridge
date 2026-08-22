@@ -19,6 +19,10 @@ const mocked = vi.hoisted(() => ({
   process: vi.fn(),
   setup: vi.fn(),
   claim: vi.fn(),
+  checkpointClaim: vi.fn(),
+  checkpointObserve: vi.fn(),
+  checkpointAssert: vi.fn(),
+  checkpointExtensionEncode: vi.fn(),
   packet: vi.fn(),
   packetContinuation: vi.fn(),
   packetV2Assert: vi.fn(),
@@ -75,8 +79,21 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', () 
     31 * 60_000,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', () => ({
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2:
+    mocked.checkpointClaim,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2: mocked.claim,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2: mocked.setup,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1:
+    mocked.checkpointAssert,
+  observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1:
+    mocked.checkpointObserve,
+}));
+vi.mock('../../profiles/substrate-federated-v1/checkpoint-statement.js', async importOriginal => ({
+  ...(await importOriginal()),
+  encodeSubstrateFederatedCheckpointExtensionValueV1:
+    mocked.checkpointExtensionEncode,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-packet-producer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance:
@@ -226,6 +243,7 @@ import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5,
   runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
@@ -233,6 +251,7 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CHECKPOINT_ANCHOR_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V5,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
@@ -259,6 +278,9 @@ import {
 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
+const CHECKPOINT_MINING_CREDENTIAL = Object.freeze({
+  schema: 'synthetic-checkpoint-mining-credential',
+});
 
 describe('isolated devnet genesis setup execution root V1', () => {
   let order: string[];
@@ -287,6 +309,8 @@ describe('isolated devnet genesis setup execution root V1', () => {
   let trackerSetupMaterial:
     ReturnType<typeof validMaterializedTrackerSetup>;
   let trackerContext: ReturnType<typeof validTrackerContext>;
+  let checkpointAnchorObservation:
+    ReturnType<typeof validCheckpointAnchorObservation>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -336,6 +360,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       trackerSetupMaterial.outputs[0]!,
       applicationCheckpointReceipt,
     );
+    checkpointAnchorObservation = validCheckpointAnchorObservation();
 
     mocked.build.mockImplementation(async () => {
       order.push('build');
@@ -361,6 +386,38 @@ describe('isolated devnet genesis setup execution root V1', () => {
       };
     });
     mocked.claim.mockReturnValue(MINING_CREDENTIAL);
+    mocked.checkpointClaim.mockReturnValue(Object.freeze({
+      miningCredential: MINING_CREDENTIAL,
+      checkpointMiningCredential: CHECKPOINT_MINING_CREDENTIAL,
+    }));
+    mocked.checkpointExtensionEncode.mockReturnValue(
+      checkpointAnchorObservation.extensionValueHex,
+    );
+    mocked.checkpointObserve.mockImplementation(async input => {
+      order.push('checkpoint-anchor:observe');
+      if (
+        input.target.primaryNodeOrigin !== executionTarget().primaryNodeOrigin
+        || input.target.witnessNodeOrigin
+          !== executionTarget().witnessNodeOrigin
+        || input.targetGenesisHeaderIdHex
+          !== fundingObservation.target.genesisHeaderIdHex
+        || input.expectedPriorHeaderIdHex
+          !== processReceipt().finalSnapshot.headerIdHex
+        || input.expectedPriorHeight
+          !== processReceipt().finalSnapshot.fullHeight
+        || input.expectedExtensionValueHex
+          !== checkpointAnchorObservation.extensionValueHex
+      ) {
+        throw new Error('checkpoint anchor observation input changed');
+      }
+      return checkpointAnchorObservation;
+    });
+    mocked.checkpointAssert.mockImplementation(value => {
+      order.push('checkpoint-anchor:assert');
+      if (value !== checkpointAnchorObservation) {
+        throw new Error('checkpoint anchor observation provenance changed');
+      }
+    });
     mocked.packet.mockImplementation(() => ({
       signer: packetSigner(),
       dispose: vi.fn(() => order.push('dispose:packet')),
@@ -1629,6 +1686,148 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
   });
 
+  it('mines and observes the exact checkpoint commitment on the same isolated chain', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    const encodedStatementHex =
+      applicationCheckpointReceipt.checkpoint.checkpointAttestation
+        .checkpointStatement.encodedStatementHex;
+    expect(mocked.checkpointExtensionEncode)
+      .toHaveBeenCalledWith(encodedStatementHex);
+    expect(mocked.checkpointClaim).toHaveBeenCalledTimes(1);
+    expect(mocked.process.mock.calls[0]?.[2]).toBe(MINING_CREDENTIAL);
+    expect(mocked.process.mock.calls[0]?.[3])
+      .toBe(CHECKPOINT_MINING_CREDENTIAL);
+    expect(order.indexOf('execution:leave')).toBeLessThan(
+      order.indexOf('checkpoint-mining:enter'),
+    );
+    expect(order.indexOf('checkpoint-mining:enter')).toBeLessThan(
+      order.indexOf('checkpoint-anchor:observe'),
+    );
+    expect(order.indexOf('checkpoint-anchor:observe')).toBeLessThan(
+      order.indexOf('checkpoint-mining:leave'),
+    );
+    expect(order.indexOf('checkpoint-mining:leave')).toBeLessThan(
+      order.indexOf('dispose:application-checkpoint-v3'),
+    );
+    expect(result.receipt).toMatchObject({
+      status: 'application_checkpoint_anchored_in_local_ergo_devnet',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CHECKPOINT_ANCHOR_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V5,
+      checkpointAnchor: {
+        mining: {
+          extensionKeyHex: '0401',
+          extensionValueHex: checkpointAnchorObservation.extensionValueHex,
+          priorSnapshot: processReceipt().finalSnapshot,
+        },
+        observation: checkpointAnchorObservation,
+      },
+      checks: {
+        setupVaultMintBurnCheckpointAndAnchorCompletedInOneChainLifetime: true,
+        exactApplicationCheckpointEncodedInto0401: true,
+        sameChainCheckpointExtensionMinedAfterApplication: true,
+        exactPrimaryWitnessAnchorAgreementEstablished: true,
+        exactExtensionMembershipRecomputed: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        localIsolatedDevnetOnly: true,
+        localErgoCheckpointAnchorObserved: true,
+        deterministicSourceFinalityEstablished: false,
+        ergoPowAuthenticated: false,
+        trackerCandidateConstructed: false,
+        trackerJvmReductionAccepted: false,
+        trackerNodeCheckPerformed: false,
+        trackerAdmissionEstablished: false,
+        trackerSigningPerformed: false,
+        trackerSubmissionPerformed: false,
+        trackerBroadcastPerformed: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it.each([
+    'extension value',
+    'process binding',
+    'target genesis',
+    'prior snapshot',
+    'mined snapshot',
+    'anchor height',
+    'anchor header',
+  ] as const)(
+    'rejects checkpoint-to-anchor %s drift',
+    async field => {
+      if (field === 'extension value') {
+        checkpointAnchorObservation = Object.freeze({
+          ...checkpointAnchorObservation,
+          extensionValueHex: 'ff'.repeat(64),
+        }) as typeof checkpointAnchorObservation;
+        mocked.checkpointObserve.mockResolvedValueOnce(checkpointAnchorObservation);
+      } else if (field === 'process binding') {
+        checkpointAnchorObservation = Object.freeze({
+          ...checkpointAnchorObservation,
+          processBindingDigestHex: digest('f'),
+        }) as typeof checkpointAnchorObservation;
+      } else if (field === 'target genesis') {
+        checkpointAnchorObservation = Object.freeze({
+          ...checkpointAnchorObservation,
+          targetGenesisHeaderIdHex: digest('f'),
+        }) as typeof checkpointAnchorObservation;
+      } else if (field === 'anchor height') {
+        checkpointAnchorObservation = Object.freeze({
+          ...checkpointAnchorObservation,
+          anchorHeight: 140,
+        }) as unknown as typeof checkpointAnchorObservation;
+      } else if (field === 'anchor header') {
+        checkpointAnchorObservation = Object.freeze({
+          ...checkpointAnchorObservation,
+          anchorHeaderIdHex: digest('f'),
+        }) as typeof checkpointAnchorObservation;
+      } else if (field === 'mined snapshot') {
+        processSession.withCheckpointExtensionMiningTarget
+          .mockImplementationOnce(async (extensionValueHex, action) => ({
+            value: await action(executionTarget()),
+            receipt: {
+              ...checkpointMiningReceipt(extensionValueHex),
+              minedSnapshot: {
+                ...checkpointMiningReceipt(extensionValueHex).minedSnapshot,
+                fullHeight: 140,
+              },
+            } as unknown as ReturnType<typeof checkpointMiningReceipt>,
+          }));
+      } else {
+        processSession.withCheckpointExtensionMiningTarget
+          .mockImplementationOnce(async (extensionValueHex, action) => ({
+            value: await action(executionTarget()),
+            receipt: {
+              ...checkpointMiningReceipt(extensionValueHex),
+              priorSnapshot: {
+                ...processReceipt().finalSnapshot,
+                headerIdHex: digest('f'),
+              },
+            },
+          }));
+      }
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(/checkpoint-to-anchor binding changed/);
+    },
+  );
+
   it.each([
     ['encoded statement', 'encodedHex', 'ff'],
     ['statement identity', 'statementIdHex', digest('f')],
@@ -2826,6 +3025,18 @@ function validProcessSession(order: string[]) {
       order.push('execution:leave');
       return { value, receipt: processReceipt() };
     }),
+    withCheckpointExtensionMiningTarget: vi.fn(async (
+      extensionValueHex,
+      action,
+    ) => {
+      order.push('checkpoint-mining:enter');
+      const value = await action(readOnlyTarget());
+      order.push('checkpoint-mining:leave');
+      return {
+        value,
+        receipt: checkpointMiningReceipt(extensionValueHex),
+      };
+    }),
     stop: vi.fn(async () => {
       order.push('process:stop');
     }),
@@ -2873,6 +3084,76 @@ function processReceipt(finalHeight = 140) {
       headerIdHex: digest('b'),
     },
   } as const;
+}
+
+function checkpointMiningReceipt(extensionValueHex: string) {
+  return {
+    schema: 'e2s.substrate-federated-isolated-devnet-ergo-node-process.v1',
+    version: 1,
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    miningStoppedBeforeObservation: true,
+    buildIdentityDigestHex: digest('3'),
+    executableIdentityDigestHex: digest('4'),
+    processBindingDigestHex: digest('7'),
+    executionTargetIdentityDigestHex: digest('8'),
+    minedSnapshot: {
+      network: 'devnet',
+      fullHeight: 141,
+      indexedHeight: 141,
+      headerIdHex: digest('c'),
+    },
+    finalSnapshot: {
+      network: 'devnet',
+      fullHeight: 142,
+      indexedHeight: 142,
+      headerIdHex: digest('d'),
+    },
+    extensionKeyHex: '0401',
+    extensionValueHex,
+    extensionFieldsSha256Hex: digest('e'),
+    priorSnapshot: processReceipt().finalSnapshot,
+  } as const;
+}
+
+function validCheckpointAnchorObservation() {
+  const extensionValueHex = `${digest('3')}${digest('6')}`;
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-checkpoint-anchor-observation.v1',
+    version: 1,
+    targetGenesisHeaderIdHex: digest('a'),
+    priorHeaderIdHex: digest('b'),
+    priorHeight: 140,
+    extensionKeyHex: '0401',
+    extensionValueHex,
+    anchorHeaderIdHex: digest('d'),
+    anchorHeight: 142,
+    anchorContextIndex: 0,
+    anchorExtensionRootHex: digest('9'),
+    extensionFields: Object.freeze([
+      Object.freeze({ keyHex: '0401', valueHex: extensionValueHex }),
+    ]),
+    extensionMembershipProofHex: '00',
+    headers: Object.freeze([]),
+    processBindingDigestHex: digest('7'),
+    executionTargetIdentityDigestHex: digest('8'),
+    observationDigestHex: digest('a'),
+    boundaries: Object.freeze({
+      primaryAndWitnessAgreed: true,
+      miningStoppedDuringObservation: true,
+      priorSnapshotAncestryEstablished: true,
+      exactExtensionMembershipRecomputed: true,
+      ergoPowAuthenticated: false,
+      trackerAdmissionEstablished: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    }),
+  } as const);
 }
 
 function setupBatch() {
@@ -3090,6 +3371,14 @@ function executionTarget() {
     witnessNodeOrigin: 'http://127.0.0.1:9052',
     primaryMining: true,
     witnessReadOnly: true,
+  } as const;
+}
+
+function readOnlyTarget() {
+  return {
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    miningStopped: true,
   } as const;
 }
 

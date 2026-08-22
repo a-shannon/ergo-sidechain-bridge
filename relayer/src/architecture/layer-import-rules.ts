@@ -62,6 +62,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts',
       'substrate-federated-isolated-devnet-ergo-node-build-v1.ts',
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      'substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.ts',
       'substrate-federated-isolated-devnet-packet-producer-v1.ts',
       'substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts',
       'substrate-federated-isolated-devnet-frontier-lab-application-v1.ts',
@@ -152,9 +153,18 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
+          'SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt',
           'SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt',
           'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1',
           'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1',
+          'observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1',
+          'SubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1',
         ]),
       ],
       [
@@ -232,6 +242,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
         new Set([
+          'claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2',
           'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
           'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
           'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
@@ -459,6 +470,13 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         ]),
       ],
       [
+        '../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1',
+          'observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1',
+        ]),
+      ],
+      [
         '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js',
         new Set(['collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2']),
       ],
@@ -508,6 +526,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       [
         '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
         new Set([
+          'claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2',
           'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
           'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
         ]),
@@ -658,6 +677,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
     new Set([
       'RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input',
+      'RunSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5Input',
       'RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input',
       'RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Input',
@@ -665,6 +685,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5',
+      'SubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5Receipt',
       'SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3',
       'SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
@@ -681,6 +703,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CHECKPOINT_ANCHOR_CAMPAIGN_ROOT_V5_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CHECKPOINT_ANCHOR_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V5',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1_SCHEMA',
@@ -696,6 +720,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
+      'runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5',
       'runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
@@ -822,6 +847,36 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         new Set([
           'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
           'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+          'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+        ]),
+      ],
+    ]),
+  ],
+  [
+    'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+    new Map([
+      [
+        'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
+        new Set([
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+        ]),
+      ],
+      [
+        'claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2',
+        new Set([
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+        ]),
+      ],
+    ]),
+  ],
+  [
+    'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+    new Map([
+      [
+        'assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1',
+        new Set([
+          'substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.ts',
         ]),
       ],
     ]),

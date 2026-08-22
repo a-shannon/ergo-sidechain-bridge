@@ -14,6 +14,10 @@ import {
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1,
+  observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1,
+} from './substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
@@ -27,9 +31,11 @@ import type {
   SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1,
 } from './substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
@@ -102,6 +108,10 @@ describe.skipIf(process.platform !== 'win32')(
         .rejects.toThrow(/requires the active mining phase/);
       await expect(session.withMiningActiveExecutionTarget(async () => 'never'))
         .rejects.toThrow(/requires the active mining phase/);
+      await expect(session.withCheckpointExtensionMiningTarget(
+        '11'.repeat(64),
+        async () => 'never',
+      )).rejects.toThrow(/requires the frozen first execution/);
       await expect(session.stop()).resolves.toBeUndefined();
       expect(() => assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1({
         primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
@@ -128,6 +138,22 @@ describe.skipIf(process.platform !== 'win32')(
       );
       await expect(session.stop()).resolves.toBeUndefined();
       expect(() => setup.dispose()).not.toThrow();
+    });
+
+    it('requires an independently one-shot checkpoint mining credential', async () => {
+      const credential = testMiningCredential();
+      expect(() => createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        credential,
+        credential,
+      )).toThrow(/must be independently one-shot/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          credential,
+          PUBLIC_KEY_HEX,
+        )
+      ).toThrow(/absent, consumed, or revoked/);
     });
 
     it('joins managed action completion before any overrun cleanup', () => {
@@ -357,6 +383,8 @@ describe.skipIf(process.platform !== 'win32')(
       async () => {
         const setup =
           await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+        const credentials =
+          claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(setup);
         const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
           {
             javaExecutablePath: liveJavaPath!,
@@ -367,7 +395,8 @@ describe.skipIf(process.platform !== 'win32')(
               sha256(Buffer.from('live-execution-process-only', 'ascii')),
           },
           launchBindingForSigner(setup.signer),
-          claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(setup),
+          credentials.miningCredential,
+          credentials.checkpointMiningCredential,
         );
         let ownedTarget:
           Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0]
@@ -389,7 +418,12 @@ describe.skipIf(process.platform !== 'win32')(
                   ...target,
                 })
               ).toThrow(/not owned by the active mining action/);
-              return binding;
+              const discovery =
+                await discoverSubstrateFederatedRewardInputsV1(setup.signer);
+              return Object.freeze({
+                ...binding,
+                genesisHeaderIdHex: discovery.target.genesisHeaderIdHex,
+              });
             },
           );
           expect(managed.receipt.processBindingDigestHex)
@@ -403,6 +437,46 @@ describe.skipIf(process.platform !== 'win32')(
               ownedTarget!,
             )
           ).toThrow(/not owned by the active mining action/);
+          const anchored = await session.withCheckpointExtensionMiningTarget(
+            'ab'.repeat(64),
+            async target =>
+              await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({
+                target,
+                targetGenesisHeaderIdHex: managed.value.genesisHeaderIdHex,
+                expectedPriorHeaderIdHex:
+                  managed.receipt.finalSnapshot.headerIdHex,
+                expectedPriorHeight: managed.receipt.finalSnapshot.fullHeight,
+                expectedExtensionValueHex: 'ab'.repeat(64),
+              }),
+          );
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1(
+              anchored.value,
+            )
+          ).not.toThrow();
+          expect(anchored.receipt.extensionKeyHex).toBe('0401');
+          expect(anchored.receipt.extensionValueHex).toBe('ab'.repeat(64));
+          expect(anchored.receipt.priorSnapshot)
+            .toEqual(managed.receipt.finalSnapshot);
+          expect(anchored.receipt.minedSnapshot.fullHeight)
+            .toBeGreaterThan(managed.receipt.finalSnapshot.fullHeight);
+          expect(anchored.receipt.miningStoppedBeforeObservation).toBe(true);
+          expect(anchored.receipt.finalSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(anchored.receipt.minedSnapshot.fullHeight);
+          expect(anchored.value.anchorHeaderIdHex)
+            .toBe(anchored.receipt.finalSnapshot.headerIdHex);
+          expect(anchored.value.anchorHeight)
+            .toBe(anchored.receipt.finalSnapshot.fullHeight);
+          expect(anchored.value.priorHeaderIdHex)
+            .toBe(managed.receipt.finalSnapshot.headerIdHex);
+          expect(anchored.value.processBindingDigestHex)
+            .toBe(anchored.receipt.processBindingDigestHex);
+          expect(anchored.receipt.processBindingDigestHex)
+            .not.toBe(managed.receipt.processBindingDigestHex);
+          await expect(session.withCheckpointExtensionMiningTarget(
+            'ab'.repeat(64),
+            async () => 'never',
+          )).rejects.toThrow(/absent, consumed, or revoked/);
         } finally {
           await session.stop();
           setup.dispose();
