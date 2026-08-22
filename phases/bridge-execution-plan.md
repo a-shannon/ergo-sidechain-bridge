@@ -1306,6 +1306,19 @@ anchor, tracker admission,
 replay insertion, payout, signing, submission, broadcast, funds authority,
 Gate 5, trustless status or readiness follows from this checkpoint.
 
+Fresh campaign `y` then crossed the corrected application-identity join and
+completed the long local lifecycle, but failed closed before receipt publication:
+the application-checkpoint root tried to canonicalize the complete packet
+object, whose process-only portable replay artifacts intentionally contain raw
+`Buffer` values. The root receipt now projects only the packet's exact canonical
+receipt while its private provenance map retains and revalidates the complete
+packet object. A regression fixture supplies real non-canonical packet bytes and
+proves that neither portable replay bytes nor replay state enter the serialized
+root. This is a receipt-boundary correction, not a weakening of packet identity
+or custody. One new create-only campaign against the corrected bridge commit
+must succeed before tracker, replay or payout work starts; campaign `y` produced
+no receipt and closes no authority or readiness boundary.
+
 The retained V2 source-attestation session now also exposes a one-shot
 checkpoint capability for one canonical 512-byte statement under the exact
 same synthetic profile and key set used for mint. A separate V2 application

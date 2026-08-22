@@ -3029,7 +3029,7 @@ async function consumeManagedPegInApplicationCheckpoint(
     applicationCheckpoint,
   );
   if (
-    applicationCheckpoint.packet !== packet
+    applicationCheckpoint.packet.receipt !== packet.receipt
     || applicationCheckpoint.mintSourceProof.packetReceiptDigestHex
       !== packet.receipt.receiptDigestHex
     || applicationCheckpoint.mintSourceProof.sourceProof

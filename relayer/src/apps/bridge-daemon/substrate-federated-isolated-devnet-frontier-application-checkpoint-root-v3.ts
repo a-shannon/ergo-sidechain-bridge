@@ -80,8 +80,10 @@ export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRo
   readonly version: 3;
   readonly status:
     'packet_mint_application_burn_checkpoint_composed';
-  readonly packet:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
+  readonly packet: Readonly<{
+    readonly receipt:
+      Readonly<SubstrateFederatedIsolatedDevnetPacketV2['receipt']>;
+  }>;
   readonly mintSourceProof:
     Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
   readonly applicationRunner:
@@ -501,7 +503,9 @@ function attestApplicationCheckpointContinuation(
     version: 3 as const,
     status:
       'packet_mint_application_burn_checkpoint_composed' as const,
-    packet,
+    packet: {
+      receipt: packet.receipt,
+    },
     mintSourceProof,
     applicationRunner,
     checkpoint,
@@ -589,7 +593,7 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
   >;
   if (
-    receipt.packet !== material.packet
+    receipt.packet.receipt !== material.packet.receipt
     || receipt.mintSourceProof !== material.mintSourceProof
     || receipt.applicationRunner !== material.applicationRunner
     || receipt.checkpoint !== material.checkpoint

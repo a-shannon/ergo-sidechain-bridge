@@ -314,6 +314,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
     applicationCheckpointStage = validApplicationCheckpointStage(
       applicationCheckpointReceipt,
+      packetV2,
     );
 
     mocked.build.mockImplementation(async () => {
@@ -1475,6 +1476,18 @@ describe('isolated devnet genesis setup execution root V1', () => {
         productionReadinessEstablished: false,
       },
     });
+    expect(
+      result.receipt.application.applicationCheckpoint.packet.receipt,
+    ).toBe(packetV2.receipt);
+    expect(
+      result.receipt.application.applicationCheckpoint.packet,
+    ).not.toBe(packetV2);
+    expect(
+      result.receipt.application.applicationCheckpoint.packet,
+    ).not.toHaveProperty('portableReplayInput');
+    expect(
+      result.receipt.application.applicationCheckpoint.packet,
+    ).not.toHaveProperty('replay');
     expect(containsFunction(result)).toBe(false);
     expect(JSON.stringify(result)).not.toMatch(
       /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
@@ -2854,7 +2867,9 @@ function validApplicationCheckpointReceipt(
       'e2s.substrate-federated-isolated-devnet-frontier-application-checkpoint-root.v3',
     version: 3,
     status: 'packet_mint_application_burn_checkpoint_composed',
-    packet,
+    packet: Object.freeze({
+      receipt: packet.receipt,
+    }),
     mintSourceProof: proof,
     applicationRunner,
     checkpoint,
@@ -2885,9 +2900,10 @@ function validApplicationCheckpointReceipt(
 
 function validApplicationCheckpointStage(
   receipt: ReturnType<typeof validApplicationCheckpointReceipt>,
+  packet: ReturnType<typeof validPacketV2>,
 ) {
   return Object.freeze({
-    packet: receipt.packet,
+    packet,
     mintSourceProof: receipt.mintSourceProof,
     applicationRunner: receipt.applicationRunner,
   });

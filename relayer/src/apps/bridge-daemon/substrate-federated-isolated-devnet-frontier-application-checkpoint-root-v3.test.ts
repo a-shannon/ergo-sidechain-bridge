@@ -75,6 +75,12 @@ vi.mock(
                 targetDescriptorDigestHex:
                   mocks.targetDescriptorDigestHex,
               }),
+              portableReplayInput: Object.freeze({
+                artifacts: Object.freeze({
+                  sourceArchive: Buffer.from('non-canonical packet bytes'),
+                }),
+              }),
+              replay: Object.freeze({ reportDigestHex: 'aa'.repeat(32) }),
             });
             mocks.packetReceipts.add(packet);
             mocks.packet = packet;
@@ -277,7 +283,11 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
       admissionValidFromErgoHeight: '2000',
       admissionExpiresAtErgoHeight: '2064',
     });
-    expect(receipt.packet).toBe(mocks.packet);
+    expect(receipt.packet.receipt).toBe(
+      (mocks.packet as { receipt: object }).receipt,
+    );
+    expect(receipt.packet).not.toHaveProperty('portableReplayInput');
+    expect(receipt.packet).not.toHaveProperty('replay');
     expect(receipt.mintSourceProof).toBe(mocks.mintSourceProof);
     expect(receipt.applicationRunner).toBe(mocks.runner);
     expect(receipt.checkpoint).toBe(mocks.checkpoint);
@@ -394,7 +404,8 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
         packet,
         completionInput() as never,
       );
-      expect(receipt.packet).toBe(packet);
+      expect(receipt.packet.receipt).toBe(packet.receipt);
+      expect(receipt.packet).not.toBe(packet);
       expect(mocks.sequence).toEqual([
         'session',
         'packet',
