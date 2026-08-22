@@ -111,6 +111,13 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
       const cargoCache = join(fixture, 'frontier-cache');
       mkdirSync(temporaryRoot);
       mkdirSync(cargoCache);
+      const previousEnvironment = currentBuildEnvironment();
+      mocked.root.mockImplementationOnce(async () => {
+        expect(process.env.CARGO_HOME).toBe(cargoCache);
+        expect(process.env.TEMP).toBe(temporaryRoot);
+        expect(process.env.TMP).toBe(temporaryRoot);
+        return { receipt: rootReceipt() };
+      });
       const receipt =
         await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3([
           '--request',
@@ -154,6 +161,7 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
       expect(receipt.application.amountNanoErg).toBe(BURN_AMOUNT_NANO_ERG);
       expect(receipt.application.burnIdHex).toBe(wireHex('19'));
       expect(receipt.checkpoint.statementIdHex).toBe('21'.repeat(32));
+      expect(currentBuildEnvironment()).toEqual(previousEnvironment);
       expect(canonicalJson(receipt)).not.toMatch(
         /C:\\reviewed|privateKey|mnemonic|signedTransactionBytesHex/iu,
       );
@@ -214,6 +222,12 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
         cargoCache,
       ]));
       expect(processInput.timeoutMs).toBe(120 * 60_000);
+      expect(processInput.env).toEqual({
+        PATH: 'controlled',
+        CARGO_HOME: cargoCache,
+        TEMP: temporaryRoot,
+        TMP: temporaryRoot,
+      });
       const published = readFileSync(outputPath, 'utf8');
       expect(published).toBe(`${canonicalJson(JSON.parse(published))}\n`);
       expect(published).not.toContain(temporaryRoot);
@@ -457,6 +471,89 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
     }
   });
 
+  it('restores the direct worker build environment after root failure', async () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-application-worker-failure-'));
+    const previousEnvironment = currentBuildEnvironment();
+    try {
+      const temporaryRoot = join(fixture, 'frontier-root');
+      const cargoCache = join(fixture, 'frontier-cache');
+      mkdirSync(temporaryRoot);
+      mkdirSync(cargoCache);
+      mocked.root.mockRejectedValueOnce(new Error('campaign root failed'));
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3([
+          '--request',
+          join(fixture, 'request.json'),
+          '--expected-request-sha256',
+          REQUEST_DIGEST_HEX,
+          '--amount-nano-erg',
+          MINT_AMOUNT_NANO_ERG,
+          '--recipient-address-hex',
+          RECIPIENT_ADDRESS_HEX,
+          '--frontier-temporary-root',
+          temporaryRoot,
+          '--frontier-cargo-cache',
+          cargoCache,
+        ]),
+      ).rejects.toThrow(/campaign root failed/iu);
+      expect(currentBuildEnvironment()).toEqual(previousEnvironment);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects overlapping direct workers before their build environments can cross-wire', async () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-application-worker-overlap-'));
+    const previousEnvironment = currentBuildEnvironment();
+    try {
+      const temporaryRoot = join(fixture, 'frontier-root');
+      const cargoCache = join(fixture, 'frontier-cache');
+      mkdirSync(temporaryRoot);
+      mkdirSync(cargoCache);
+      let resolveRoot!: (value: { receipt: ReturnType<typeof rootReceipt> }) => void;
+      const pendingRoot = new Promise<{ receipt: ReturnType<typeof rootReceipt> }>(
+        (resolve) => {
+          resolveRoot = resolve;
+        },
+      );
+      mocked.root.mockImplementationOnce(async () => pendingRoot);
+      const argumentsV3 = [
+        '--request',
+        join(fixture, 'request.json'),
+        '--expected-request-sha256',
+        REQUEST_DIGEST_HEX,
+        '--amount-nano-erg',
+        MINT_AMOUNT_NANO_ERG,
+        '--recipient-address-hex',
+        RECIPIENT_ADDRESS_HEX,
+        '--frontier-temporary-root',
+        temporaryRoot,
+        '--frontier-cargo-cache',
+        cargoCache,
+      ] as const;
+      const firstWorker =
+        runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
+          argumentsV3,
+        );
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
+          argumentsV3,
+        ),
+      ).rejects.toThrow(/build environment is already active/iu);
+      expect(currentBuildEnvironment()).toEqual({
+        CARGO_HOME: cargoCache,
+        TEMP: temporaryRoot,
+        TMP: temporaryRoot,
+      });
+      expect(mocked.root).toHaveBeenCalledTimes(1);
+      resolveRoot({ receipt: rootReceipt() });
+      await expect(firstWorker).resolves.toBeDefined();
+      expect(currentBuildEnvironment()).toEqual(previousEnvironment);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('registers the distinct opt-in V3 command', () => {
     const packageJson = JSON.parse(
       readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
@@ -684,4 +781,12 @@ function workerDigest(worker: any): string {
 
 function wireHex(byte: string, bytes = 32): string {
   return `0x${byte.repeat(bytes)}`;
+}
+
+function currentBuildEnvironment() {
+  return Object.freeze({
+    CARGO_HOME: process.env.CARGO_HOME,
+    TEMP: process.env.TEMP,
+    TMP: process.env.TMP,
+  });
 }

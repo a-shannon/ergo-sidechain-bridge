@@ -121,7 +121,12 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
       cargoDependencyCacheDirectory,
     ],
     cwd: relayerRoot,
-    env: childEnvironment(worktreeRoot),
+    env: {
+      ...childEnvironment(worktreeRoot),
+      CARGO_HOME: cargoDependencyCacheDirectory,
+      TEMP: temporaryDirectoryRoot,
+      TMP: temporaryDirectoryRoot,
+    },
     timeoutMs: WORKER_TIMEOUT_MS,
     terminationGraceMs: 30_000,
     maxOutputBytes: MAX_WORKER_OUTPUT_BYTES + 64 * 1024,
