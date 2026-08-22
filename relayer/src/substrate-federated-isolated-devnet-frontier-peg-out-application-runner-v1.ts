@@ -21,6 +21,7 @@ import {
   encodePegInSourceIntentV2Hex,
 } from './peg-in-causal-admission-v2.js';
 import {
+  buildPinnedLocalNativeReproducibleRustFlags,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
   runBoundedProcess,
@@ -264,6 +265,10 @@ export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicati
     record.temporaryDirectoryRoot,
     'runner temporary directory root',
   );
+  assertWhitespaceFreeRustRemapPath(
+    temporaryDirectoryRoot,
+    'runner temporary directory root',
+  );
   if (isSameOrDescendant(temporaryDirectoryRoot, repositoryRoot)) {
     throw new Error(
       'Frontier peg-out application runner requires an external temporary root',
@@ -271,6 +276,10 @@ export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicati
   }
   const frontierSourceDirectory = requireDirectory(
     record.frontierSourceDirectory,
+    'task-owned Frontier scratch source',
+  );
+  assertWhitespaceFreeRustRemapPath(
+    frontierSourceDirectory,
     'task-owned Frontier scratch source',
   );
   if (isSameOrDescendant(frontierSourceDirectory, repositoryRoot)) {
@@ -605,6 +614,7 @@ async function executeRunner(
           cargoHomeDirectory: workspace.cargoHomePath,
           cargoTargetDirectory: workspace.buildTargetPath,
           frontierSourceDirectory: input.frontierSourceDirectory,
+          rustTarget: toolsBefore.rustTarget,
           rustcExecutablePath: input.rustcExecutablePath,
           temporaryDirectoryRoot: input.temporaryDirectoryRoot,
         }),
@@ -975,15 +985,33 @@ function bindDynamicMintProofToApplicationRunnerReceiptV2(
     );
   const sourceIntent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
   const evidence = executionResult.applicationEvidence;
-  if (
-    evidence.execution.sidechainIdHex !== sourceIntent.sidechainIdHex
-    || evidence.application.bridgeAddressHex !== sourceIntent.bridgeAddressHex
-    || evidence.application.tokenAddressHex !== sourceIntent.tokenAddressHex
-    || evidence.application.ownerAddressHex !== sourceIntent.recipientAddressHex
-  ) {
-    throw new Error(
-      'Frontier application burn differs from the mint source-intent application',
-    );
+  for (const [label, actual, expected] of [
+    [
+      'sidechain ID',
+      evidence.execution.sidechainIdHex,
+      sourceIntent.sidechainIdHex,
+    ],
+    [
+      'bridge address',
+      evidence.application.bridgeAddressHex,
+      sourceIntent.bridgeAddressHex,
+    ],
+    [
+      'token address',
+      evidence.application.tokenAddressHex,
+      sourceIntent.tokenAddressHex,
+    ],
+    [
+      'owner address',
+      evidence.application.ownerAddressHex,
+      sourceIntent.recipientAddressHex,
+    ],
+  ] as const) {
+    if (actual !== expected) {
+      throw new Error(
+        `Frontier application burn ${label} ${actual} differs from mint source-intent ${expected}`,
+      );
+    }
   }
   if (
     evidence.conservation.supplyBeforeNanoErg
@@ -1109,6 +1137,7 @@ function inspectTools(input: Readonly<{
   cargo: Readonly<{ version: string; sha256: string }>;
   rustc: Readonly<{ version: string; sha256: string }>;
   git: Readonly<{ version: string; sha256: string }>;
+  rustTarget: string;
   cargoLockSha256: string;
   rustToolchainSha256: string;
 }> {
@@ -1130,6 +1159,13 @@ function inspectTools(input: Readonly<{
   );
   const cargoProfile = exactObject(profile.cargo, 'Cargo toolchain profile');
   const rustcProfile = exactObject(profile.rustc, 'Rust toolchain profile');
+  const rustTarget = profile.rustTarget;
+  if (
+    typeof rustTarget !== 'string'
+    || !/^[a-z0-9_]+(?:-[a-z0-9_]+)+$/u.test(rustTarget)
+  ) {
+    throw new Error('Rust toolchain target pin is invalid');
+  }
   const cargo = inspectExactTool(
     input.cargoExecutablePath,
     input.frontierSourceDirectory,
@@ -1156,6 +1192,7 @@ function inspectTools(input: Readonly<{
     cargo,
     rustc,
     git,
+    rustTarget,
     cargoLockSha256: sha256Bytes(readFileSync(requireRegularFile(
       path.join(input.frontierSourceDirectory, 'Cargo.lock'),
       'Frontier Cargo lock',
@@ -1289,6 +1326,7 @@ function buildCargoEnvironment(input: Readonly<{
   cargoHomeDirectory: string;
   cargoTargetDirectory: string;
   frontierSourceDirectory: string;
+  rustTarget: string;
   rustcExecutablePath: string;
   temporaryDirectoryRoot: string;
 }>): NodeJS.ProcessEnv {
@@ -1321,10 +1359,31 @@ function buildCargoEnvironment(input: Readonly<{
   environment.RUSTC = input.rustcExecutablePath;
   environment.RUSTC_WRAPPER = '';
   environment.RUSTC_WORKSPACE_WRAPPER = '';
+  const reproducibleRustFlags =
+    buildPinnedLocalNativeReproducibleRustFlags({
+      frontierSourcePath: input.frontierSourceDirectory,
+      buildTargetPath: input.cargoTargetDirectory,
+      rustTarget: input.rustTarget,
+    });
+  environment.CARGO_ENCODED_RUSTFLAGS = reproducibleRustFlags.join('\x1f');
+  environment.WASM_BUILD_RUSTFLAGS = reproducibleRustFlags
+    .filter(flag => !flag.startsWith('-Clink-arg='))
+    .join(' ');
   for (const [key, value] of Object.entries(input.authorityEnvironment)) {
     environment[key] = value;
   }
   return environment;
+}
+
+function assertWhitespaceFreeRustRemapPath(
+  value: string,
+  label: string,
+): void {
+  if (/\s/u.test(value)) {
+    throw new Error(
+      `${label} must be whitespace-free for deterministic WASM Rust flags`,
+    );
+  }
 }
 
 function minimalToolEnvironment(

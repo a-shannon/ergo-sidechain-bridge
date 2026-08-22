@@ -51,8 +51,12 @@ import {
   encodePegInSourceIntentV2Hex,
   type PegInSourceIntentV2,
 } from './peg-in-causal-admission-v2.js';
+import type {
+  PooledReserveMintReservationRuntimeProfileV4,
+} from './pooled-reserve-mint-reservation-runtime-profile-v4-codec.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2,
@@ -60,10 +64,19 @@ import {
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
   restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
+  runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
 } from './substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import {
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX,
+  FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX,
+  type FederatedPooledReserveSourceProofRequestV1,
+} from './substrate-federated-pooled-reserve-source-proof-v1.js';
+import {
+  createFederatedPooledReserveSourceProofV1Fixture,
+} from './substrate-federated-pooled-reserve-source-proof-v1.test-helper.js';
 import {
   decodeValidityApplicationPooledReserveMintReservationStatementV4Hex,
   deriveValidityApplicationPooledReserveMintReservationStatementIdV4Hex,
@@ -83,6 +96,8 @@ const requiredIntegrationEnvironment = [
 const integrationEnabled = requiredIntegrationEnvironment.every(
   name => process.env[name] !== undefined,
 );
+const EXPECTED_INTEGRATION_SIDECHAIN_ID_HEX =
+  '0x233ab9f052d90ec0e32577793461b912118105ebacb3723e1aa0bff9df106bda';
 
 describe('federated isolated-devnet Frontier peg-out application runner V1/V2', () => {
   it('requires offline execution and an exact input shape', () => {
@@ -137,6 +152,33 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
     } finally {
       rmSync(sourceRoot, { recursive: true, force: true });
       rmSync(separateRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects whitespace-bearing source and build roots before WASM execution', () => {
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'e2s-runner-root-'));
+    const sourceWithWhitespace = path.join(temporaryRoot, 'source with space');
+    mkdirSync(sourceWithWhitespace);
+    const parent = mkdtempSync(path.join(tmpdir(), 'e2s-runner-parent-'));
+    const rootWithWhitespace = path.join(parent, 'root with space');
+    const source = path.join(rootWithWhitespace, 'source');
+    mkdirSync(source, { recursive: true });
+    try {
+      expect(() => preflight({
+        ...syntheticInput(),
+        frontierSourceDirectory: sourceWithWhitespace,
+        temporaryDirectoryRoot: temporaryRoot,
+        cargoDependencyCacheDirectory: temporaryRoot,
+      })).toThrow(/must be whitespace-free for deterministic WASM Rust flags/u);
+      expect(() => preflight({
+        ...syntheticInput(),
+        frontierSourceDirectory: source,
+        temporaryDirectoryRoot: rootWithWhitespace,
+        cargoDependencyCacheDirectory: parent,
+      })).toThrow(/must be whitespace-free for deterministic WASM Rust flags/u);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+      rmSync(parent, { recursive: true, force: true });
     }
   });
 
@@ -349,6 +391,22 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
     )).toEqual([]);
   });
 
+  it('pins reproducible path remaps for host and WASM builds', () => {
+    const source = runnerSourceFile().getFullText();
+    expect(source).toContain(
+      'buildPinnedLocalNativeReproducibleRustFlags({',
+    );
+    expect(source).toContain(
+      "environment.CARGO_ENCODED_RUSTFLAGS = reproducibleRustFlags.join('\\x1f');",
+    );
+    expect(source).toContain(
+      "environment.WASM_BUILD_RUSTFLAGS = reproducibleRustFlags",
+    );
+    expect(source).toContain(
+      ".filter(flag => !flag.startsWith('-Clink-arg='))",
+    );
+  });
+
   it('detects an indirect V2-to-V1 receipt registration mutant', () => {
     const mutant = ts.createSourceFile(
       'receipt-registration-mutant.ts',
@@ -525,6 +583,66 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
   );
 
   it.runIf(integrationEnabled)(
+    'executes the exact dynamic mint proof before producing V2 burn evidence',
+    async () => {
+      const mintSourceProofReceipt = integrationMintSourceProofReceipt();
+      let receipt;
+      try {
+        receipt =
+          await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2({
+            ...integrationInput(),
+            mintSourceProofReceipt,
+          });
+      } catch (error) {
+        if (error instanceof BoundedProcessExitError) {
+          process.stderr.write(error.stderr);
+        }
+        throw error;
+      }
+      expect(receipt.status)
+        .toBe('same_process_mint_proof_bound_application_burn_executed');
+      expect(receipt.mintSourceProof).toMatchObject({
+        receiptDigestHex: mintSourceProofReceipt.receiptDigestHex,
+        targetDescriptorDigestHex:
+          mintSourceProofReceipt.targetDescriptorDigestHex,
+        sourceProofEnvelopeSha256Hex:
+          mintSourceProofReceipt.sourceProofEnvelopeSha256Hex,
+      });
+      expect(receipt.checks).toMatchObject({
+        exactMintSourceProofReceiptObjectBound: true,
+        exactDynamicProfileStatementAndProofEnvironmentBound: true,
+        runnerExecutionInputCommitsDynamicEnvironment: true,
+        exactDynamicSourceProofExecutionMarkerBound: true,
+        applicationMatchesMintSourceIntent: true,
+        mintAmountAndRecipientMatchApplicationExecution: true,
+        mintSourceProofReceiptRevalidatedAfterExecution: true,
+        exactExecutionResultObjectBound: true,
+      });
+      expect(receipt.boundary).toMatchObject({
+        processProvenMintSourceProofBound: true,
+        packetMintContinuationBound: false,
+        checkpointAttestationEstablished: false,
+        sourceConsensusEstablished: false,
+        sidechainFinalityEstablished: false,
+        payoutAuthorized: false,
+        broadcastAuthorized: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      });
+      assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
+        receipt,
+      );
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance({
+          ...receipt,
+        })
+      ).toThrow(/lacks process provenance/u);
+    },
+    45 * 60_000,
+  );
+
+  it.runIf(integrationEnabled)(
     'restores the source when post-application Cargo isolation rejects',
     async () => {
       const input = integrationInput();
@@ -635,6 +753,117 @@ function syntheticMintSourceProofReceipt(
   >;
   mintSourceProofProvenance.receipts.add(receipt);
   return receipt;
+}
+
+function integrationMintSourceProofReceipt(): Readonly<
+  SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2
+> {
+  const reference =
+    buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1();
+  const referenceStatement =
+    decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(
+      reference.BRIDGE_LAB_FEDERATED_MINT_RESERVATION_STATEMENT_V4_HEX,
+    );
+  const sourceIntent = Object.freeze({
+    ...decodePegInSourceIntentV2Hex(referenceStatement.sourceIntentHex),
+    sidechainIdHex: EXPECTED_INTEGRATION_SIDECHAIN_ID_HEX,
+  });
+  const statement = Object.freeze({
+    ...referenceStatement,
+    sourceIntentHex: encodePegInSourceIntentV2Hex(sourceIntent),
+    sourceIntentIdHex: derivePegInSourceIntentIdV2Hex(sourceIntent),
+  });
+  const statementHex =
+    encodeValidityApplicationPooledReserveMintReservationStatementV4Hex(
+      statement,
+    );
+  const frontierSource = integrationInput().frontierSourceDirectory;
+  const bridgeRuntimeCode = readIntegrationRuntimeCode(
+    frontierSource,
+    'ErgoBridge.runtime.bin',
+  );
+  const tokenRuntimeCode = readIntegrationRuntimeCode(
+    frontierSource,
+    'SERG.runtime.bin',
+  );
+  const runtimeProfile = Object.freeze({
+    formatVersion: 4 as const,
+    lineageProfileIdHex: statement.lineageProfileIdHex,
+    sourceNetworkIdHex: sourceIntent.sourceNetworkIdHex,
+    sidechainIdHex: sourceIntent.sidechainIdHex,
+    bridgeAddressHex: sourceIntent.bridgeAddressHex,
+    tokenAddressHex: sourceIntent.tokenAddressHex,
+    bridgeRuntimeCodeSha256Hex: sha256PrefixedHex(bridgeRuntimeCode),
+    bridgeRuntimeCodeBytes: bridgeRuntimeCode.length,
+    tokenRuntimeCodeSha256Hex: sha256PrefixedHex(tokenRuntimeCode),
+    tokenRuntimeCodeBytes: tokenRuntimeCode.length,
+    settlementProfileIdHex: sourceIntent.settlementProfileIdHex,
+    ergoDepositFinalityPolicyIdHex:
+      statement.ergoDepositFinalityPolicyIdHex,
+    sourceProofSystemIdHex:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_SYSTEM_ID_V1_HEX,
+    sourceProofProfileIdHex:
+      FEDERATED_POOLED_RESERVE_SOURCE_PROOF_PROFILE_ID_V1_HEX,
+    activationHeight: '4',
+    maxPendingBlocks: 64,
+  }) satisfies PooledReserveMintReservationRuntimeProfileV4;
+  const request = Object.freeze({
+    runtimeProfile,
+    statementHex,
+    evidence: Object.freeze({
+      sourceLockBoxCanonicalHex: statement.sourceLockBoxIdHex,
+      reserveTransitionTransactionCanonicalHex:
+        statement.reserveTransitionTransactionIdHex,
+      successorReserveBoxCanonicalHex: statement.successorReserveBoxIdHex,
+      inclusionProofCanonicalHex: statement.inclusionHeaderIdHex,
+      checkpointAncestryCanonicalHex: statement.targetHeaderIdHex,
+      finalityProofCanonicalHex:
+        `0x${statement.inclusionHeaderIdHex.slice(2)}${statement.targetHeaderIdHex.slice(2)}`,
+      verifierExecutableSha256Hex: sha256PrefixedHex(Buffer.from(
+        'federated-pooled-reserve-source-proof-lab-node-fixture-v1',
+        'ascii',
+      )),
+    }),
+    issuedAtNativeHeight: '4',
+    expiresAtNativeHeight: '68',
+  }) satisfies FederatedPooledReserveSourceProofRequestV1;
+  const fixture = createFederatedPooledReserveSourceProofV1Fixture({ request });
+  return syntheticMintSourceProofReceipt({
+    mintReservationStatementIdHex:
+      deriveValidityApplicationPooledReserveMintReservationStatementIdV4Hex(
+        statement,
+      ),
+    mintIdentityHex: statement.mintIdentityHex,
+    request,
+    sourceProofEnvelopeScaleHex: fixture.sourceProofEnvelopeScaleHex,
+    sourceProofEnvelopeSha256Hex: createHash('sha256')
+      .update(Buffer.from(fixture.sourceProofEnvelopeScaleHex.slice(2), 'hex'))
+      .digest('hex'),
+  });
+}
+
+function readIntegrationRuntimeCode(
+  frontierSource: string,
+  fileName: string,
+): Buffer {
+  const encoded = readFileSync(path.join(
+    frontierSource,
+    'template',
+    'node',
+    'src',
+    'tests',
+    'res',
+    'bridge-atomicity',
+    fileName,
+  ), 'utf8').trim();
+  if (encoded.length === 0 || !/^[0-9a-f]+$/u.test(encoded)) {
+    throw new Error(`${fileName} is not canonical lowercase hex`);
+  }
+  return Buffer.from(encoded, 'hex');
+}
+
+function sha256PrefixedHex(value: Uint8Array): string {
+  return `0x${createHash('sha256').update(value).digest('hex')}`;
 }
 
 function syntheticMintSourceProofReceiptWithIntentMutation(
