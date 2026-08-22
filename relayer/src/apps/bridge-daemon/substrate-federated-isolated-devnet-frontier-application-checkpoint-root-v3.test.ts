@@ -213,6 +213,7 @@ vi.mock(
 
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance,
+  createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
   runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3,
 } from './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js';
 
@@ -347,6 +348,44 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     expect(mocks.disposeCalls).toBe(1);
   });
 
+  it('retains one exact packet for a higher-level static composition root', async () => {
+    const continuation =
+      createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        Object.freeze({}) as never,
+      );
+    try {
+      const packet = await continuation.produce(Object.freeze({}) as never);
+      expect(mocks.sequence).toEqual(['session', 'packet']);
+      await expect(
+        continuation.complete(
+          Object.freeze({ ...packet }) as never,
+          completionInput() as never,
+        ),
+      ).rejects.toThrow(/exact retained packet/u);
+
+      const receipt = await continuation.complete(
+        packet,
+        completionInput() as never,
+      );
+      expect(receipt.packet).toBe(packet);
+      expect(mocks.sequence).toEqual([
+        'session',
+        'packet',
+        'mint',
+        'application-burn',
+        'checkpoint',
+        'dispose',
+      ]);
+      expect(mocks.disposeCalls).toBe(1);
+      await expect(
+        continuation.complete(packet, completionInput() as never),
+      ).rejects.toThrow(/exact retained packet/u);
+    } finally {
+      continuation.dispose();
+    }
+    expect(mocks.disposeCalls).toBe(1);
+  });
+
   it('rejects runner target drift before checkpoint production', async () => {
     mocks.runnerTargetDrift = true;
     await expect(
@@ -399,6 +438,15 @@ function rootInput() {
       validFromErgoHeight: '2000',
       expiresAtErgoHeight: '2064',
     },
+  };
+}
+
+function completionInput() {
+  const input = rootInput();
+  return {
+    mintSourceProofInput: input.mintSourceProofInput,
+    applicationRunnerInput: input.applicationRunnerInput,
+    checkpointAdmission: input.checkpointAdmission,
   };
 }
 

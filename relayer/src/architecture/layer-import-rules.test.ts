@@ -168,6 +168,19 @@ describe('layer import rules', () => {
       ...targets,
       [reviewedRoot]: `
         import {
+          createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
+        } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
+        const injectedContinuation =
+          createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3;
+      `,
+    }).map(violation => violation.message)).toContain(
+      'restricted capability binding must not escape its reviewed call: ../../substrate-federated-isolated-devnet-packet-producer-v1.js#createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3',
+    );
+
+    expect(inspect({
+      ...targets,
+      [reviewedRoot]: `
+        import {
           runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
         } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
         runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1({});

@@ -10,6 +10,7 @@ import {
   type ProduceSubstrateFederatedIsolatedDevnetPacketV1Input,
   type SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3,
   type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
+  type SubstrateFederatedIsolatedDevnetPacketSignerBindingV1,
   type SubstrateFederatedIsolatedDevnetPacketV2,
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
@@ -33,6 +34,17 @@ export type SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3 =
     RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input,
     'mintSourceProofReceipt'
   >>;
+
+export interface CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input {
+  readonly mintSourceProofInput:
+    Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input>;
+  readonly applicationRunnerInput:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>;
+  readonly checkpointAdmission: Readonly<{
+    readonly validFromErgoHeight: string | number | bigint;
+    readonly expiresAtErgoHeight: string | number | bigint;
+  }>;
+}
 
 export interface RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input {
   readonly ergoAdmissionSigner: Readonly<
@@ -124,6 +136,142 @@ interface RootMaterialV3 {
 
 const RECEIPTS = new WeakMap<object, Readonly<RootMaterialV3>>();
 
+interface CheckpointAttestationInputV3 {
+  readonly sourceNativeBlockHeight: string | number | bigint;
+  readonly sourceNativeBlockHashHex: string;
+  readonly executionBlockHashHex: string;
+  readonly bridgeEventRootHex: string;
+  readonly burnLeafCount: number;
+  readonly admissionValidFromErgoHeight: string | number | bigint;
+  readonly admissionExpiresAtErgoHeight: string | number | bigint;
+}
+
+interface PacketCheckpointContinuationV3 {
+  readonly signer:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly produce: (
+    input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>;
+  readonly produceMintSourceProof: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    input: Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+    >,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+  >;
+  readonly produceCheckpointAttestation: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    mintSourceProof: Readonly<
+      SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+    >,
+    input: Readonly<CheckpointAttestationInputV3>,
+  ) => Readonly<
+    SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+  >;
+  readonly dispose: () => void;
+}
+
+export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3 {
+  readonly signer:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly produce: PacketCheckpointContinuationV3['produce'];
+  readonly complete: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    input: Readonly<
+      CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
+    >,
+    completionDeadline?: number,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+  >>;
+  readonly dispose: () => void;
+}
+
+export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+  ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3
+> {
+  const continuation =
+    createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+      ergoAdmissionSigner,
+    );
+  let state:
+    | 'fresh'
+    | 'packet_running'
+    | 'packet_ready'
+    | 'completion_running'
+    | 'closed' = 'fresh';
+  let completedPacket:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketV2> | undefined;
+  return Object.freeze({
+    signer: continuation.signer,
+    dispose: () => {
+      if (state === 'packet_running' || state === 'completion_running') {
+        throw new Error(
+          'Frontier application-checkpoint continuation is running',
+        );
+      }
+      if (state !== 'closed') {
+        continuation.dispose();
+        completedPacket = undefined;
+        state = 'closed';
+      }
+    },
+    produce: async (
+      input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+    ) => {
+      if (state !== 'fresh') {
+        throw new Error(
+          'Frontier application-checkpoint continuation is already consumed or disposed',
+        );
+      }
+      state = 'packet_running';
+      try {
+        const packet = await continuation.produce(input);
+        assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+        completedPacket = packet;
+        state = 'packet_ready';
+        return packet;
+      } catch (error) {
+        completedPacket = undefined;
+        state = 'closed';
+        continuation.dispose();
+        throw error;
+      }
+    },
+    complete: async (
+      packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+      input: Readonly<
+        CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
+      >,
+      completionDeadline: number | undefined = undefined,
+    ) => {
+      if (state !== 'packet_ready' || packet !== completedPacket) {
+        throw new Error(
+          'Frontier application-checkpoint continuation requires its exact retained packet',
+        );
+      }
+      state = 'completion_running';
+      try {
+        return await completeApplicationCheckpointContinuation(
+          continuation,
+          packet,
+          preflightCompletionInput(input),
+          completionDeadline,
+        );
+      } finally {
+        completedPacket = undefined;
+        state = 'closed';
+        continuation.dispose();
+      }
+    },
+  });
+}
+
 export async function runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3(
   input: Readonly<
     RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input
@@ -134,135 +282,150 @@ export async function runSubstrateFederatedIsolatedDevnetFrontierApplicationChec
 >> {
   const plan = preflight(input);
   const continuation =
-    createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+    createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
       plan.ergoAdmissionSigner,
     );
   try {
     const packet = await continuation.produce(plan.packetInput);
-    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
-
-    const mintSourceProof = continuation.produceMintSourceProof(
-      packet,
-      plan.mintSourceProofInput,
-    );
-    assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
-      mintSourceProof,
-    );
-
-    const applicationRunner =
-      await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
-        {
-          ...plan.applicationRunnerInput,
-          mintSourceProofReceipt: mintSourceProof.sourceProof,
-        },
-        completionDeadline,
-      );
-    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
-      applicationRunner,
-    );
-    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
-    assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
-      mintSourceProof,
-    );
-    assertMintAndRunnerBinding(packet, mintSourceProof, applicationRunner);
-
-    const applicationEvidence =
-      applicationRunner.executionResult.applicationEvidence;
-    const checkpoint = continuation.produceCheckpointAttestation(
-      packet,
-      mintSourceProof,
-      {
-        sourceNativeBlockHeight: applicationEvidence.sourceNativeBlock.height,
-        sourceNativeBlockHashHex: applicationEvidence.sourceNativeBlock.hashHex,
-        executionBlockHashHex: applicationEvidence.execution.blockHashHex,
-        bridgeEventRootHex: applicationEvidence.burn.bridgeEventRootHex,
-        burnLeafCount: applicationEvidence.burn.burnLeafCount,
-        admissionValidFromErgoHeight:
-          plan.checkpointAdmission.validFromErgoHeight,
-        admissionExpiresAtErgoHeight:
-          plan.checkpointAdmission.expiresAtErgoHeight,
-      },
-    );
-    assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
-      checkpoint,
-    );
-    assertApplicationBurnCheckpointBinding(applicationRunner, checkpoint);
-
-    const body = deepFreeze({
-      schema:
-        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA,
-      version: 3 as const,
-      status:
-        'packet_mint_application_burn_checkpoint_composed' as const,
-      packet,
-      mintSourceProof,
-      applicationRunner,
-      checkpoint,
-      binding: {
-        targetDescriptorDigestHex:
-          packet.receipt.targetDescriptorDigestHex,
-        packetReceiptDigestHex: packet.receipt.receiptDigestHex,
-        mintSourceProofReceiptDigestHex: mintSourceProof.receiptDigestHex,
-        applicationRunnerReceiptDigestHex:
-          applicationRunner.receiptDigestHex,
-        checkpointReceiptDigestHex: checkpoint.receiptDigestHex,
-        burnIdHex: applicationEvidence.burn.burnIdHex,
-        bridgeEventRootHex: applicationEvidence.burn.bridgeEventRootHex,
-      },
-      checks: {
-        exactPacketObjectBound: true as const,
-        exactPacketMintSourceProofObjectBound: true as const,
-        exactProcessProvenApplicationRunnerReceiptBound: true as const,
-        exactPacketInnerMintProofPassedToRunner: true as const,
-        packetMintAndRunnerTargetDescriptorBound: true as const,
-        checkpointFieldsDerivedFromApplicationBurnReceipt: true as const,
-        exactCheckpointReceiptObjectBound: true as const,
-        packetThenMintThenApplicationBurnThenCheckpointOrderingEstablished:
-          true as const,
-        allProvenanceRevalidatedAfterApplicationExecution: true as const,
-        noCallerSuppliedExecutionOrAuthorityCallbackAccepted: true as const,
-      },
-      boundary: {
-        isolatedTestClientOnly: true as const,
-        processOwnedSyntheticCustodyOnly: true as const,
-        thresholdSourceAttestationVerified: true as const,
-        independentAttestorCustodyEstablished: false as const,
-        applicationBurnReceiptBound: true as const,
-        checkpointAttestationEstablished: true as const,
-        sourceConsensusIndependentlyVerified: false as const,
-        deterministicSourceFinalityEstablished: false as const,
-        ergoAnchorEstablished: false as const,
-        trackerAdmissionEstablished: false as const,
-        globalReplayInsertionEstablished: false as const,
-        payoutAuthorized: false as const,
-        ergoTransactionSigningAuthorized: false as const,
-        submissionAuthorized: false as const,
-        broadcastAuthorized: false as const,
-        fundsAuthorityEstablished: false as const,
-        gate5Closed: false as const,
-        trustlessStatusEstablished: false as const,
-        productionReadinessEstablished: false as const,
-      },
-      limitations: [
-        'The burn executes only in the pinned in-memory Frontier TestClient and the checkpoint is a disclosed federated attestation.',
-        'Source consensus, deterministic finality, Ergo anchoring, tracker admission, global replay insertion and payout remain separate joins.',
-        'No signing, submission, broadcast, funds authority, Gate 5 closure, trustless status or production readiness follows.',
-      ] as const,
-    });
-    const receipt = deepFreeze({
-      ...body,
-      receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
-    });
-    RECEIPTS.set(receipt, Object.freeze({
-      packet,
-      mintSourceProof,
-      applicationRunner,
-      checkpoint,
-    }));
-    return receipt;
+    return await continuation.complete(packet, {
+      mintSourceProofInput: plan.mintSourceProofInput,
+      applicationRunnerInput: plan.applicationRunnerInput,
+      checkpointAdmission: plan.checkpointAdmission,
+    }, completionDeadline);
   } finally {
     continuation.dispose();
   }
+}
+
+async function completeApplicationCheckpointContinuation(
+  continuation: Readonly<PacketCheckpointContinuationV3>,
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+  plan: Readonly<
+    CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
+  >,
+  completionDeadline: number | undefined,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+>> {
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  const mintSourceProof = continuation.produceMintSourceProof(
+    packet,
+    plan.mintSourceProofInput,
+  );
+  assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+    mintSourceProof,
+  );
+  const applicationRunner =
+    await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
+      {
+        ...plan.applicationRunnerInput,
+        mintSourceProofReceipt: mintSourceProof.sourceProof,
+      },
+      completionDeadline,
+    );
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
+    applicationRunner,
+  );
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+    mintSourceProof,
+  );
+  assertMintAndRunnerBinding(packet, mintSourceProof, applicationRunner);
+
+  const applicationEvidence =
+    applicationRunner.executionResult.applicationEvidence;
+  const checkpoint = continuation.produceCheckpointAttestation(
+    packet,
+    mintSourceProof,
+    {
+      sourceNativeBlockHeight: applicationEvidence.sourceNativeBlock.height,
+      sourceNativeBlockHashHex: applicationEvidence.sourceNativeBlock.hashHex,
+      executionBlockHashHex: applicationEvidence.execution.blockHashHex,
+      bridgeEventRootHex: applicationEvidence.burn.bridgeEventRootHex,
+      burnLeafCount: applicationEvidence.burn.burnLeafCount,
+      admissionValidFromErgoHeight:
+        plan.checkpointAdmission.validFromErgoHeight,
+      admissionExpiresAtErgoHeight:
+        plan.checkpointAdmission.expiresAtErgoHeight,
+    },
+  );
+  assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+    checkpoint,
+  );
+  assertApplicationBurnCheckpointBinding(applicationRunner, checkpoint);
+
+  const body = deepFreeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA,
+    version: 3 as const,
+    status:
+      'packet_mint_application_burn_checkpoint_composed' as const,
+    packet,
+    mintSourceProof,
+    applicationRunner,
+    checkpoint,
+    binding: {
+      targetDescriptorDigestHex:
+        packet.receipt.targetDescriptorDigestHex,
+      packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+      mintSourceProofReceiptDigestHex: mintSourceProof.receiptDigestHex,
+      applicationRunnerReceiptDigestHex:
+        applicationRunner.receiptDigestHex,
+      checkpointReceiptDigestHex: checkpoint.receiptDigestHex,
+      burnIdHex: applicationEvidence.burn.burnIdHex,
+      bridgeEventRootHex: applicationEvidence.burn.bridgeEventRootHex,
+    },
+    checks: {
+      exactPacketObjectBound: true as const,
+      exactPacketMintSourceProofObjectBound: true as const,
+      exactProcessProvenApplicationRunnerReceiptBound: true as const,
+      exactPacketInnerMintProofPassedToRunner: true as const,
+      packetMintAndRunnerTargetDescriptorBound: true as const,
+      checkpointFieldsDerivedFromApplicationBurnReceipt: true as const,
+      exactCheckpointReceiptObjectBound: true as const,
+      packetThenMintThenApplicationBurnThenCheckpointOrderingEstablished:
+        true as const,
+      allProvenanceRevalidatedAfterApplicationExecution: true as const,
+      noCallerSuppliedExecutionOrAuthorityCallbackAccepted: true as const,
+    },
+    boundary: {
+      isolatedTestClientOnly: true as const,
+      processOwnedSyntheticCustodyOnly: true as const,
+      thresholdSourceAttestationVerified: true as const,
+      independentAttestorCustodyEstablished: false as const,
+      applicationBurnReceiptBound: true as const,
+      checkpointAttestationEstablished: true as const,
+      sourceConsensusIndependentlyVerified: false as const,
+      deterministicSourceFinalityEstablished: false as const,
+      ergoAnchorEstablished: false as const,
+      trackerAdmissionEstablished: false as const,
+      globalReplayInsertionEstablished: false as const,
+      payoutAuthorized: false as const,
+      ergoTransactionSigningAuthorized: false as const,
+      submissionAuthorized: false as const,
+      broadcastAuthorized: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+    limitations: [
+      'The burn executes only in the pinned in-memory Frontier TestClient and the checkpoint is a disclosed federated attestation.',
+      'Source consensus, deterministic finality, Ergo anchoring, tracker admission, global replay insertion and payout remain separate joins.',
+      'No signing, submission, broadcast, funds authority, Gate 5 closure, trustless status or production readiness follows.',
+    ] as const,
+  });
+  const receipt = deepFreeze({
+    ...body,
+    receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
+  });
+  RECEIPTS.set(receipt, Object.freeze({
+    packet,
+    mintSourceProof,
+    applicationRunner,
+    checkpoint,
+  }));
+  return receipt;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(
@@ -429,6 +592,54 @@ function preflight(
     packetInput: record.packetInput as Readonly<
       ProduceSubstrateFederatedIsolatedDevnetPacketV1Input
     >,
+    mintSourceProofInput: record.mintSourceProofInput as Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+    >,
+    applicationRunnerInput: Object.freeze({
+      frontierSourceDirectory: runner.frontierSourceDirectory as string,
+      temporaryDirectoryRoot: runner.temporaryDirectoryRoot as string,
+      cargoDependencyCacheDirectory:
+        runner.cargoDependencyCacheDirectory as string,
+      cargoExecutablePath: runner.cargoExecutablePath as string,
+      rustcExecutablePath: runner.rustcExecutablePath as string,
+      gitExecutablePath: runner.gitExecutablePath as string,
+      offline: runner.offline as true,
+    }),
+    checkpointAdmission: Object.freeze({
+      validFromErgoHeight:
+        checkpointAdmission.validFromErgoHeight as string | number | bigint,
+      expiresAtErgoHeight:
+        checkpointAdmission.expiresAtErgoHeight as string | number | bigint,
+    }),
+  });
+}
+
+function preflightCompletionInput(
+  input: Readonly<
+    CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
+  >,
+): Readonly<
+  CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
+> {
+  const record = exactOwnDataRecord(input, [
+    'applicationRunnerInput',
+    'checkpointAdmission',
+    'mintSourceProofInput',
+  ], 'Frontier application-checkpoint continuation input');
+  const runner = exactOwnDataRecord(record.applicationRunnerInput, [
+    'cargoDependencyCacheDirectory',
+    'cargoExecutablePath',
+    'frontierSourceDirectory',
+    'gitExecutablePath',
+    'offline',
+    'rustcExecutablePath',
+    'temporaryDirectoryRoot',
+  ], 'Frontier application-checkpoint runner input');
+  const checkpointAdmission = exactOwnDataRecord(record.checkpointAdmission, [
+    'expiresAtErgoHeight',
+    'validFromErgoHeight',
+  ], 'Frontier application-checkpoint admission input');
+  return Object.freeze({
     mintSourceProofInput: record.mintSourceProofInput as Readonly<
       ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
     >,
