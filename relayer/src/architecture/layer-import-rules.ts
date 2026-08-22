@@ -85,6 +85,8 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.ts',
       'substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts',
       'substrate-federated-settlement-family-v1.ts',
+      'substrate-federated-tracker-v1.ts',
+      'unsigned-ergo-transaction.ts',
     ]),
   ],
   [
@@ -338,6 +340,21 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-settlement-family-v1.ts',
         new Set(['decodeSubstrateFederatedSettlementFamilyV1Profile']),
       ],
+      [
+        'substrate-federated-tracker-v1.ts',
+        new Set([
+          'buildCompilerBoundSubstrateFederatedTrackerV1Context',
+          'SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA',
+          'SubstrateFederatedTrackerV1Context',
+        ]),
+      ],
+      [
+        'unsigned-ergo-transaction.ts',
+        new Set([
+          'Eip12UnsignedTransaction',
+          'materializeUnsignedTransaction',
+        ]),
+      ],
     ]),
   ],
   [
@@ -571,6 +588,14 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
           'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
         ]),
       ],
+      [
+        '../../substrate-federated-tracker-v1.js',
+        new Set(['buildCompilerBoundSubstrateFederatedTrackerV1Context']),
+      ],
+      [
+        '../../unsigned-ergo-transaction.js',
+        new Set(['materializeUnsignedTransaction']),
+      ],
     ]),
   ],
   [
@@ -616,6 +641,10 @@ const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1',
         ]),
       ],
+      [
+        '../../substrate-federated-tracker-v1.js',
+        new Set(['SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA']),
+      ],
     ]),
   ],
 ]);
@@ -631,6 +660,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input',
       'RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input',
+      'RunSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Input',
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
@@ -645,6 +675,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
       'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4',
+      'SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Receipt',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_EXECUTION_ROOT_V1_SCHEMA',
@@ -659,6 +691,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_EXECUTION_ROOT_V1_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_V4_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
@@ -666,6 +700,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
+      'runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4',
     ]),
   ],
   [

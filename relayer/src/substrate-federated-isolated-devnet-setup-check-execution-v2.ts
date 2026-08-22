@@ -45,6 +45,7 @@ import {
   replaySubstrateFederatedIsolatedDevnetPortableV1,
   takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1,
   type ReplaySubstrateFederatedIsolatedDevnetPortableV1Input,
+  type SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1,
 } from './substrate-federated-isolated-devnet-portable-replay-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetSettlementTargetV2,
@@ -100,6 +101,8 @@ const FAMILY_EXECUTION_BATCHES = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     familyCompilerBinding:
       Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+    trackerCompilerBinding:
+      Readonly<SubstrateFederatedTrackerCompilerBindingV1>;
   }>
 >();
 const PEG_IN_SOURCE_LOCK_CHECK_MATERIAL = new WeakMap<
@@ -518,6 +521,15 @@ export interface SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
   extends SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 {
   readonly familyCompilerBinding:
     Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  readonly trackerCompilerBinding:
+    Readonly<SubstrateFederatedTrackerCompilerBindingV1>;
+}
+
+export interface SubstrateFederatedTrackerCompilerBindingV1 {
+  readonly request:
+    Readonly<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1['sourceAndCompilerInput']['trackerRequest']>;
+  readonly receipt:
+    Readonly<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1['sourceAndCompilerInput']['trackerReceipt']>;
 }
 
 interface FixedSetupCheckRunV2 {
@@ -529,6 +541,8 @@ interface FixedSetupCheckRunV2 {
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>;
   readonly familyCompilerBinding:
     Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  readonly trackerCompilerBinding:
+    Readonly<SubstrateFederatedTrackerCompilerBindingV1>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetSetupExecutionPromotionV2Input {
@@ -636,6 +650,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
           batch,
           result.familyCompilerBinding,
+          result.trackerCompilerBinding,
           target,
         );
       if (retainPegInSigner) {
@@ -850,6 +865,7 @@ export function assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV
     material === undefined
     || material.target !== target
     || material.familyCompilerBinding !== batch.familyCompilerBinding
+    || material.trackerCompilerBinding !== batch.trackerCompilerBinding
   ) {
     throw new Error(
       'isolated setup family execution batch lacks exact process provenance',
@@ -1296,6 +1312,10 @@ async function runFixedSetupCheck(
           continuation.genesisBoxIds.pooledReserve,
       },
     });
+  const trackerCompilerBinding = Object.freeze({
+    request: sourceAndCompilerInput.trackerRequest,
+    receipt: sourceAndCompilerInput.trackerReceipt,
+  });
   const profile = buildTargetProfile(
     replay.reportDigestHex,
     continuation.expectedSettlementGenesisHeaderIdHex,
@@ -1336,6 +1356,7 @@ async function runFixedSetupCheck(
     executionReceipt,
     request,
     familyCompilerBinding,
+    trackerCompilerBinding,
   });
 }
 
@@ -1343,6 +1364,8 @@ function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
   batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
   familyCompilerBinding:
     Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>,
+  trackerCompilerBinding:
+    Readonly<SubstrateFederatedTrackerCompilerBindingV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2> {
   const targetBinding =
@@ -1353,6 +1376,7 @@ function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
   const result = Object.freeze({
     ...batch,
     familyCompilerBinding,
+    trackerCompilerBinding,
   });
   EXECUTION_BATCHES.set(result, Object.freeze({
     target,
@@ -1361,6 +1385,7 @@ function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
   FAMILY_EXECUTION_BATCHES.set(result, Object.freeze({
     target,
     familyCompilerBinding,
+    trackerCompilerBinding,
   }));
   return result;
 }

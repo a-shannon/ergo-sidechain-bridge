@@ -30,6 +30,8 @@ const mocked = vi.hoisted(() => ({
   applicationCheckpointContinuation: vi.fn(),
   applicationCheckpointAssert: vi.fn(),
   applicationRunnerPreflight: vi.fn(),
+  trackerBuild: vi.fn(),
+  materializeUnsigned: vi.fn(),
   sourceHistory: vi.fn(),
   rewardDiscovery: vi.fn(),
   rewardDiscoveryAssert: vi.fn(),
@@ -106,6 +108,14 @@ vi.mock('./substrate-federated-isolated-devnet-frontier-application-checkpoint-r
     mocked.applicationCheckpointContinuation,
   preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3:
     mocked.applicationRunnerPreflight,
+}));
+vi.mock('../../substrate-federated-tracker-v1.js', () => ({
+  buildCompilerBoundSubstrateFederatedTrackerV1Context: mocked.trackerBuild,
+  SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA:
+    'e2s.substrate-federated-v1-tracker-context',
+}));
+vi.mock('../../unsigned-ergo-transaction.js', () => ({
+  materializeUnsignedTransaction: mocked.materializeUnsigned,
 }));
 vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => ({
   collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocked.sourceHistory,
@@ -220,6 +230,7 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
@@ -227,6 +238,7 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
@@ -272,6 +284,9 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ReturnType<typeof validApplicationCheckpointReceipt>;
   let applicationCheckpointStage:
     ReturnType<typeof validApplicationCheckpointStage>;
+  let trackerSetupMaterial:
+    ReturnType<typeof validMaterializedTrackerSetup>;
+  let trackerContext: ReturnType<typeof validTrackerContext>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -315,6 +330,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
     applicationCheckpointStage = validApplicationCheckpointStage(
       applicationCheckpointReceipt,
       packetV2,
+    );
+    trackerSetupMaterial = validMaterializedTrackerSetup(currentBatch);
+    trackerContext = validTrackerContext(
+      trackerSetupMaterial.outputs[0]!,
+      applicationCheckpointReceipt,
     );
 
     mocked.build.mockImplementation(async () => {
@@ -476,6 +496,36 @@ describe('isolated devnet genesis setup execution root V1', () => {
       if (value !== applicationCheckpointReceipt) {
         throw new Error('application-checkpoint provenance changed');
       }
+    });
+    mocked.materializeUnsigned.mockImplementation(async (transaction, label) => {
+      order.push('tracker:setup:materialize');
+      if (
+        transaction
+          !== currentBatch.orderedTransactions[0]!.issuance
+            .unsignedTransactionBody
+        || label !== 'isolated devnet tracker setup transaction'
+      ) {
+        throw new Error('tracker setup materialization input binding changed');
+      }
+      return trackerSetupMaterial;
+    });
+    mocked.trackerBuild.mockImplementation(async input => {
+      order.push('tracker:candidate:build');
+      if (
+        input.compilerRequest
+          !== currentBatch.trackerCompilerBinding.request
+        || input.compilerReceipt
+          !== currentBatch.trackerCompilerBinding.receipt
+        || input.trackerInputBox !== trackerSetupMaterial.outputs[0]
+        || input.encodedStatementHex
+          !== applicationCheckpointReceipt.checkpoint.checkpointAttestation
+            .checkpointStatement.encodedStatementHex
+        || input.currentErgoHeight !== 221
+        || input.anchorContextIndex !== 0
+      ) {
+        throw new Error('tracker candidate producer binding changed');
+      }
+      return trackerContext;
     });
     mocked.process.mockReturnValue(processSession);
     mocked.sourceHistory.mockImplementation(async () => {
@@ -1494,6 +1544,279 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
   });
 
+  it('binds the exact application checkpoint and confirmed tracker setup output into a non-authorizing candidate', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(order.indexOf('peg-in:checkpoint:attest')).toBeLessThan(
+      order.indexOf('observe:tracker:post-checkpoint'),
+    );
+    expect(order.indexOf('observe:tracker:post-checkpoint')).toBeLessThan(
+      order.indexOf('tracker:setup:materialize'),
+    );
+    expect(order.indexOf('tracker:setup:materialize')).toBeLessThan(
+      order.indexOf('tracker:candidate:build'),
+    );
+    expect(order.indexOf('tracker:candidate:build')).toBeLessThan(
+      order.indexOf('dispose:application-checkpoint-v3'),
+    );
+    expect(mocked.materializeUnsigned).toHaveBeenCalledTimes(1);
+    expect(mocked.trackerBuild).toHaveBeenCalledWith({
+      compilerRequest: currentBatch.trackerCompilerBinding.request,
+      compilerReceipt: currentBatch.trackerCompilerBinding.receipt,
+      trackerInputBox: trackerSetupMaterial.outputs[0],
+      encodedStatementHex:
+        applicationCheckpointReceipt.checkpoint.checkpointAttestation
+          .checkpointStatement.encodedStatementHex,
+      currentErgoHeight: 221,
+      anchorContextIndex: 0,
+    });
+    expect(result.receipt).toMatchObject({
+      status: 'checkpoint_bound_proofless_tracker_candidate_constructed',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4,
+      trackerCandidate: {
+        trackerSetup: {
+          expectedTxId: digest('4'),
+          outputBoxIdHex: digest('a'),
+          confirmationHeight: 120,
+          confirmationHeaderIdHex: digest('2'),
+          observedAtHeight: 221,
+        },
+        candidate: {
+          schema: 'e2s.substrate-federated-v1-tracker-context',
+          trustModel: 'federated_non_trustless',
+          contractIdHex: digest('7'),
+          trackerNftIdHex: digest('8'),
+          statementIdHex: digest('6'),
+          inputBoxIdHex: digest('a'),
+          currentErgoHeight: 221,
+          anchorContextIndex: 0,
+          syntheticAnchorHeaderIdHex: digest('a'),
+          syntheticAnchorHeaderHeight: 220,
+          unsignedTransactionIdHex: digest('c'),
+        },
+      },
+      checks: {
+        exactApplicationCheckpointConsumedByTrackerCandidate: true,
+        exactSameProcessTrackerCompilerReceiptConsumed: true,
+        exactConfirmedTrackerSetupOutputConsumed: true,
+        deterministicProoflessTrackerCandidateConstructed: true,
+        syntheticAnchorExplicitlyNonAuthorizing: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        syntheticAnchorContextConstructed: true,
+        trackerCandidateConstructed: true,
+        ergoAnchorEstablished: false,
+        trackerJvmReductionAccepted: false,
+        trackerNodeCheckPerformed: false,
+        trackerAdmissionEstablished: false,
+        trackerSigningPerformed: false,
+        trackerSubmissionPerformed: false,
+        trackerBroadcastPerformed: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it.each([
+    ['encoded statement', 'encodedHex', 'ff'],
+    ['statement identity', 'statementIdHex', digest('f')],
+  ] as const)(
+    'rejects isolated %s drift returned by the tracker builder',
+    async (_label, field, value) => {
+      trackerContext = Object.freeze({
+        ...trackerContext,
+        statement: Object.freeze({
+          ...trackerContext.statement,
+          [field]: value,
+        }),
+      }) as ReturnType<typeof validTrackerContext>;
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        'isolated devnet checkpoint-to-tracker candidate binding changed',
+      );
+
+      expect(mocked.trackerBuild).toHaveBeenCalledTimes(1);
+      expect(order).toContain('dispose:application-checkpoint-v3');
+      expect(order).toContain('dispose:setup');
+      expect(order).toContain('process:stop');
+    },
+  );
+
+  it.each([
+    ['contract identity binding', 'contractIdentityBound', false],
+    ['statement/profile validation', 'statementAndProfileValidated', false],
+    ['anchor membership construction', 'anchorMembershipConstructed', false],
+    ['context-extension round trip', 'exactContextExtensionRoundTrip', false],
+    ['AVL transition construction', 'avlTransitionConstructed', false],
+    ['source signature authority', 'sourceSignaturesVerifiedOnChain', true],
+    ['JVM acceptance authority', 'jvmReductionAccepted', true],
+    ['node-check authority', 'nodeCheckPerformed', true],
+    ['profile activation', 'profileActivated', true],
+    ['signing authority', 'signingPerformed', true],
+    ['submission authority', 'submissionPerformed', true],
+    ['broadcast authority', 'broadcastPerformed', true],
+    ['funds authority', 'fundsAuthorityEstablished', true],
+    ['Gate 5 closure', 'gate5Closed', true],
+    ['trustless status', 'trustlessStatusEstablished', true],
+  ] as const)(
+    'rejects one isolated tracker boundary mutation: %s',
+    async (_label, field, value) => {
+      trackerContext = Object.freeze({
+        ...trackerContext,
+        boundaries: Object.freeze({
+          ...trackerContext.boundaries,
+          [field]: value,
+        }),
+      }) as ReturnType<typeof validTrackerContext>;
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        'isolated devnet tracker candidate context changed or gained authority',
+      );
+
+      expect(mocked.trackerBuild).toHaveBeenCalledTimes(1);
+      expect(order).toContain('dispose:application-checkpoint-v3');
+      expect(order).toContain('dispose:setup');
+      expect(order).toContain('process:stop');
+    },
+  );
+
+  it.each([
+    ['contract', 'sourceSignaturesVerifiedOnChain'],
+    ['contract', 'jvmReductionAccepted'],
+    ['contract', 'profileActivated'],
+    ['contract', 'signingPerformed'],
+    ['contract', 'submissionPerformed'],
+    ['contract', 'broadcastPerformed'],
+    ['contract', 'fundsAuthorityEstablished'],
+    ['contract', 'gate5Closed'],
+    ['contract', 'trustlessStatusEstablished'],
+    ['statement', 'sourceSignaturesVerifiedOnChain'],
+  ] as const)(
+    'rejects one isolated nested tracker authority mutation: %s.%s',
+    async (section, field) => {
+      trackerContext = Object.freeze({
+        ...trackerContext,
+        [section]: Object.freeze({
+          ...trackerContext[section],
+          [field]: true,
+        }),
+      }) as ReturnType<typeof validTrackerContext>;
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        'isolated devnet tracker candidate context changed or gained authority',
+      );
+
+      expect(mocked.trackerBuild).toHaveBeenCalledTimes(1);
+      expect(order).toContain('dispose:application-checkpoint-v3');
+      expect(order).toContain('dispose:setup');
+      expect(order).toContain('process:stop');
+    },
+  );
+
+  it('rejects tracker setup output drift before the candidate builder runs', async () => {
+    trackerSetupMaterial = Object.freeze({
+      ...trackerSetupMaterial,
+      outputs: Object.freeze([Object.freeze({
+        ...trackerSetupMaterial.outputs[0]!,
+        boxId: digest('f'),
+      })]),
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      'isolated devnet tracker setup output changed during exact rematerialization',
+    );
+
+    expect(mocked.trackerBuild).not.toHaveBeenCalled();
+    expect(order).toContain('tracker:setup:materialize');
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
+  });
+
+  it.each([
+    ['confirmation height', { confirmationHeight: 121 }],
+    ['confirmation header', { confirmationHeaderIdHex: digest('f') }],
+  ] as const)('rejects tracker %s drift after candidate construction', async (
+    _label,
+    mutation,
+  ) => {
+    const baselineObserve = observerPort.observe.getMockImplementation()!;
+    observerPort.observe.mockImplementation(async expectedTxId => {
+      const confirmation = await baselineObserve(expectedTxId);
+      if (
+        expectedTxId === digest('4')
+        && order.includes('tracker:candidate:build')
+      ) {
+        return Object.freeze({
+          ...confirmation,
+          ...mutation,
+        });
+      }
+      return confirmation;
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      'isolated devnet checkpoint-to-tracker candidate binding changed',
+    );
+
+    expect(mocked.trackerBuild).toHaveBeenCalledTimes(1);
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
+  });
+
+  it('tears down every owned capability when tracker construction rejects', async () => {
+    mocked.trackerBuild.mockImplementationOnce(async () => {
+      order.push('tracker:candidate:build');
+      throw new Error('synthetic tracker candidate rejection');
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow('synthetic tracker candidate rejection');
+
+    expect(order).toContain('tracker:setup:materialize');
+    expect(order).toContain('tracker:candidate:build');
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
+    expect(mocked.stateClose).toHaveBeenCalledTimes(1);
+  });
+
   it('snapshots source-acceptance build roots before the first async build boundary', async () => {
     const input = pegInApplicationCheckpointRootInput() as unknown as {
       frontierApplicationRunner: {
@@ -2407,6 +2730,16 @@ function validObserver(order: string[]) {
           observedAtHeight: postApplication ? 220 : 140,
         } as const;
       }
+      if (
+        expectedTxId === digest('4')
+        && order.includes('peg-in:checkpoint:attest')
+      ) {
+        order.push('observe:tracker:post-checkpoint');
+        return {
+          ...confirmation(expectedTxId, 0, 1),
+          observedAtHeight: 221,
+        } as const;
+      }
       const index = setupTransactions().findIndex(value =>
         value.issuance.unsignedTransactionIdHex === expectedTxId
       );
@@ -2561,6 +2894,10 @@ function setupBatch() {
     familyCompilerBinding: {
       profile: { familyIdHex: digest('f') },
     },
+    trackerCompilerBinding: {
+      request: Object.freeze({ requestDigestHex: digest('1') }),
+      receipt: Object.freeze({ receiptDigestHex: digest('2') }),
+    },
     orderedTransactions: setupTransactions(),
   };
 }
@@ -2610,6 +2947,101 @@ function setupTransaction(
       },
     },
   };
+}
+
+function validMaterializedTrackerSetup(batch: ReturnType<typeof setupBatch>) {
+  const issuance = batch.orderedTransactions[0]!.issuance;
+  return Object.freeze({
+    txId: issuance.unsignedTransactionIdHex,
+    eip12Tx: issuance.unsignedTransactionBody,
+    outputs: Object.freeze([Object.freeze({
+      boxId: issuance.predictedStateOutput.boxIdHex,
+      value: '10000000',
+      ergoTree: '00',
+      assets: Object.freeze([]),
+      additionalRegisters: Object.freeze({}),
+      creationHeight: issuance.predictedStateOutput.creationHeight,
+      transactionId: issuance.predictedStateOutput.transactionIdHex,
+      index: issuance.predictedStateOutput.index,
+    })]),
+  });
+}
+
+function validTrackerContext(
+  trackerInputBox:
+    ReturnType<typeof validMaterializedTrackerSetup>['outputs'][number],
+  checkpoint: ReturnType<typeof validApplicationCheckpointReceipt>,
+) {
+  const statement = checkpoint.checkpoint.checkpointAttestation
+    .checkpointStatement;
+  return Object.freeze({
+    schema: 'e2s.substrate-federated-v1-tracker-context',
+    version: 1,
+    trustModel: 'federated_non_trustless',
+    contract: Object.freeze({
+      contractIdHex: digest('7'),
+      sourceSignaturesVerifiedOnChain: false,
+      jvmReductionAccepted: false,
+      profileActivated: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    }),
+    statement: Object.freeze({
+      encodedHex: statement.encodedStatementHex,
+      statementIdHex: statement.statementIdHex,
+      sourceSignaturesVerifiedOnChain: false,
+    }),
+    trackerTransition: Object.freeze({
+      trackerNftIdHex: digest('8'),
+      trackerKeyHex: digest('9'),
+      trackerValueHex: 'ab'.repeat(288),
+      inputDigestHex: '00'.repeat(33),
+      successorDigestHex: '01'.repeat(33),
+      currentErgoHeight: 221,
+      anchorContextIndex: 0,
+      headers: Object.freeze([Object.freeze({
+        id: digest('a'),
+        height: 220,
+        extensionRootHex: digest('b'),
+        jvmHeaderJson: '{}',
+        serializedHex: '00',
+      })]),
+    }),
+    contextExtension: Object.freeze({
+      serializedHex: '000102',
+    }),
+    eip12UnsignedTransaction: Object.freeze({
+      inputs: Object.freeze([Object.freeze({
+        boxId: trackerInputBox.boxId,
+        extension: Object.freeze({}),
+      })]),
+      dataInputs: Object.freeze([]),
+      outputs: Object.freeze([]),
+    }),
+    prooflessTransactionBytes: 1_024,
+    unsignedTransactionIdHex: digest('c'),
+    boundaries: Object.freeze({
+      contractIdentityBound: true,
+      statementAndProfileValidated: true,
+      anchorMembershipConstructed: true,
+      exactContextExtensionRoundTrip: true,
+      avlTransitionConstructed: true,
+      sourceSignaturesVerifiedOnChain: false,
+      jvmReductionAccepted: false,
+      nodeCheckPerformed: false,
+      profileActivated: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    }),
+  } as const);
 }
 
 function confirmation(expectedTxId: string, index: number, round: number) {
@@ -2859,6 +3291,8 @@ function validApplicationCheckpointReceipt(
       checkpointStatement: {
         admissionValidFromErgoHeight: '220',
         admissionExpiresAtErgoHeight: '284',
+        encodedStatementHex: '01'.repeat(64),
+        statementIdHex: digest('6'),
       },
     },
   } as const;

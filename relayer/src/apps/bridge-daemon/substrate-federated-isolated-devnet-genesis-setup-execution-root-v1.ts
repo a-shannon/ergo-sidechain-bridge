@@ -185,6 +185,15 @@ import {
 import {
   createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1,
 } from '../../substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js';
+import {
+  buildCompilerBoundSubstrateFederatedTrackerV1Context,
+  SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA,
+  type SubstrateFederatedTrackerV1Context,
+} from '../../substrate-federated-tracker-v1.js';
+import {
+  materializeUnsignedTransaction,
+  type Eip12UnsignedTransaction,
+} from '../../unsigned-ergo-transaction.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-genesis-setup-execution-root.v1' as const;
@@ -200,6 +209,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT
   'e2s.substrate-federated-isolated-devnet-peg-in-mint-proof-campaign-root.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-application-checkpoint-campaign-root.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_V4_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-candidate-campaign-root.v4' as const;
 
 const ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1';
@@ -215,6 +226,8 @@ const PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1';
 const PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3';
+const PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_V4';
 const STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_V1';
 const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
@@ -229,6 +242,8 @@ const PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_V1';
 const PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_V3';
+const PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_V4';
 const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1';
 const FEDERATION_EPOCH = '1';
@@ -446,6 +461,33 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_C
     PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
   );
 
+const PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST =
+  Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-candidate-campaign-static-execution.v4',
+    version: 4 as const,
+    applicationCheckpointManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
+    additionalOperations: Object.freeze([
+      'confirmationObserver.observeTrackerSetupAfterCheckpoint',
+      'materializeUnsignedTransaction',
+      'buildCompilerBoundSubstrateFederatedTrackerV1Context',
+    ]),
+    trackerCandidate: Object.freeze({
+      compilerReceipt: 'exact same-process JVM setup compiler receipt',
+      trackerInput: 'exact canonically confirmed tracker setup output',
+      statement: 'exact application checkpoint statement',
+      anchor: 'synthetic 0x0401 header context; non-authorizing',
+    }),
+    exposedCapabilities: Object.freeze([]),
+  });
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4 =
+  sha256CanonicalJson(
+    PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST,
+    PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
+  );
+
 export interface RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
   readonly build:
     Readonly<BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input>;
@@ -468,10 +510,13 @@ extends RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input {
 }
 
 export interface RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input
-extends RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input {
+  extends RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input {
   readonly frontierApplicationRunner:
     SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3;
 }
+
+export type RunSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Input =
+  RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input;
 
 export interface SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt {
   readonly schema:
@@ -1005,6 +1050,119 @@ export interface SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampa
 export interface SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3 {
   readonly receipt: Readonly<
     SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt
+  >;
+}
+
+interface ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4 {
+  readonly application: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
+  >;
+  readonly trackerSetup: Readonly<{
+    readonly expectedTxId: string;
+    readonly outputBoxIdHex: string;
+    readonly outputIndex: 0;
+    readonly outputCreationHeight: number;
+    readonly confirmationDigestHex: string;
+    readonly confirmationHeight: number;
+    readonly confirmationHeaderIdHex: string;
+    readonly observedAtHeight: number;
+  }>;
+  readonly context: Readonly<SubstrateFederatedTrackerV1Context>;
+}
+
+interface SubstrateFederatedIsolatedDevnetTrackerCandidateMaterialV4 {
+  readonly trackerSetup:
+    ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4['trackerSetup'];
+  readonly candidate: Readonly<{
+    readonly schema: typeof SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA;
+    readonly version: 1;
+    readonly trustModel: 'federated_non_trustless';
+    readonly contractIdHex: string;
+    readonly trackerNftIdHex: string;
+    readonly statementIdHex: string;
+    readonly inputBoxIdHex: string;
+    readonly trackerKeyHex: string;
+    readonly trackerValueHex: string;
+    readonly inputDigestHex: string;
+    readonly successorDigestHex: string;
+    readonly currentErgoHeight: number;
+    readonly anchorContextIndex: number;
+    readonly syntheticAnchorHeaderIdHex: string;
+    readonly syntheticAnchorHeaderHeight: number;
+    readonly syntheticAnchorExtensionRootHex: string;
+    readonly contextExtensionSerializedHex: string;
+    readonly prooflessTransactionBytes: number;
+    readonly unsignedTransactionIdHex: string;
+  }>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_V4_SCHEMA;
+  readonly version: 4;
+  readonly status: 'checkpoint_bound_proofless_tracker_candidate_constructed';
+  readonly staticExecutionManifestDigestHex: string;
+  readonly build:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
+  readonly process:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  readonly setup:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['setup'];
+  readonly pegIn:
+    SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt['pegIn'];
+  readonly application:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3>;
+  readonly trackerCandidate:
+    Readonly<SubstrateFederatedIsolatedDevnetTrackerCandidateMaterialV4>;
+  readonly checks: Readonly<{
+    readonly setupVaultMintBurnCheckpointAndTrackerCandidateCompletedInOneTargetLifetime: true;
+    readonly exactApplicationCheckpointConsumedByTrackerCandidate: true;
+    readonly exactSameProcessTrackerCompilerReceiptConsumed: true;
+    readonly exactConfirmedTrackerSetupOutputConsumed: true;
+    readonly deterministicProoflessTrackerCandidateConstructed: true;
+    readonly syntheticAnchorExplicitlyNonAuthorizing: true;
+    readonly everyEphemeralCapabilityDisposedBeforeReturn: true;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localSyntheticCompatibilityOnly: true;
+    readonly localSetupAndPegInBroadcastExecuted: true;
+    readonly sourceLockConsumptionEstablished: true;
+    readonly reserveLineageEstablished: true;
+    readonly frontierTestClientReservationAndMintExecuted: true;
+    readonly frontierApplicationBurnExecuted: true;
+    readonly federatedCheckpointAttestationEstablished: true;
+    readonly syntheticAnchorContextConstructed: true;
+    readonly trackerCandidateConstructed: true;
+    readonly externalTargetNodeAcceptanceEstablished: false;
+    readonly deterministicSourceFinalityEstablished: false;
+    readonly ergoPowAuthenticated: false;
+    readonly ergoAnchorEstablished: false;
+    readonly trackerJvmReductionAccepted: false;
+    readonly trackerNodeCheckPerformed: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly globalReplayInsertionEstablished: false;
+    readonly payoutAuthorized: false;
+    readonly trackerSigningPerformed: false;
+    readonly trackerSubmissionPerformed: false;
+    readonly trackerBroadcastPerformed: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+    readonly processLossRecoveryEstablished: false;
+    readonly profileActivated: false;
+    readonly mintAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4 {
+  readonly receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Receipt
   >;
 }
 
@@ -1690,13 +1848,163 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
   return Object.freeze({ receipt });
 }
 
+/**
+ * Extends the application checkpoint campaign through deterministic tracker
+ * candidate construction. The header context remains synthetic, so this root
+ * creates no tracker admission, signing, submission, or funds authority.
+ */
+export async function runSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4(
+  input: Readonly<
+    RunSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Input
+  >,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4
+>> {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: input.lifecycle.sourceHistory.acceptance.bridgeAddress,
+    tokenAddressHex: input.lifecycle.sourceHistory.acceptance.tokenAddress,
+  });
+  const pegInPlan = normalizePegInCandidatePlan(input.pegIn);
+  const applicationRunner = normalizeFrontierApplicationRunnerPlan(
+    input.frontierApplicationRunner,
+  );
+  const sourceAcceptanceBuildWorkspace = Object.freeze({
+    temporaryDirectoryRoot: applicationRunner.temporaryDirectoryRoot,
+    sharedCargoHomeRoot: applicationRunner.cargoDependencyCacheDirectory,
+  });
+  const { buildReceipt, managed } = await runManagedCampaign(
+    input,
+    pegInPlan,
+    'construct-tracker-candidate',
+    undefined,
+    applicationRunner,
+    sourceAcceptanceBuildWorkspace,
+  );
+  const pegIn = managed.value.pegIn;
+  const application = managed.value.applicationCheckpoint;
+  const trackerStage = managed.value.trackerCandidate;
+  if (
+    pegIn === undefined
+    || pegIn.sourceLockCheck === undefined
+    || pegIn.sourceLockExecution === undefined
+    || pegIn.committedVaultCheck === undefined
+    || pegIn.committedVaultExecution === undefined
+    || application === undefined
+    || trackerStage === undefined
+    || trackerStage.application !== application
+  ) {
+    throw new Error(
+      'isolated devnet peg-in tracker-candidate campaign was incomplete',
+    );
+  }
+  const root = application.applicationCheckpoint;
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(
+    root,
+  );
+  const finalTrackerConfirmations = managed.value.transactions.filter(
+    transaction => transaction.ordinal === 0 && transaction.role === 'tracker',
+  );
+  const checkpointStatement =
+    root.checkpoint.checkpointAttestation.checkpointStatement;
+  if (
+    finalTrackerConfirmations.length !== 1
+    || finalTrackerConfirmations[0]!.expectedTxId
+      !== trackerStage.trackerSetup.expectedTxId
+    || finalTrackerConfirmations[0]!.confirmationHeight
+      !== trackerStage.trackerSetup.confirmationHeight
+    || finalTrackerConfirmations[0]!.confirmationHeaderIdHex
+      !== trackerStage.trackerSetup.confirmationHeaderIdHex
+    || trackerStage.context.statement.encodedHex
+      !== checkpointStatement.encodedStatementHex
+    || trackerStage.context.statement.statementIdHex
+      !== checkpointStatement.statementIdHex
+  ) {
+    throw new Error(
+      'isolated devnet checkpoint-to-tracker candidate binding changed',
+    );
+  }
+  const trackerCandidate = projectManagedTrackerCandidateV4(trackerStage);
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_V4_SCHEMA,
+    version: 4 as const,
+    status: 'checkpoint_bound_proofless_tracker_candidate_constructed' as const,
+    staticExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4,
+    build: buildReceipt,
+    process: managed.receipt,
+    setup: {
+      lifecycle: managed.value.lifecycle,
+      transactions: managed.value.transactions,
+    },
+    pegIn: pegIn as SubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Receipt['pegIn'],
+    application,
+    trackerCandidate,
+    checks: {
+      setupVaultMintBurnCheckpointAndTrackerCandidateCompletedInOneTargetLifetime:
+        true as const,
+      exactApplicationCheckpointConsumedByTrackerCandidate: true as const,
+      exactSameProcessTrackerCompilerReceiptConsumed: true as const,
+      exactConfirmedTrackerSetupOutputConsumed: true as const,
+      deterministicProoflessTrackerCandidateConstructed: true as const,
+      syntheticAnchorExplicitlyNonAuthorizing: true as const,
+      everyEphemeralCapabilityDisposedBeforeReturn: true as const,
+      returnedValueContainsCapabilities: false as const,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true as const,
+      localSetupAndPegInBroadcastExecuted: true as const,
+      sourceLockConsumptionEstablished: true as const,
+      reserveLineageEstablished: true as const,
+      frontierTestClientReservationAndMintExecuted: true as const,
+      frontierApplicationBurnExecuted: true as const,
+      federatedCheckpointAttestationEstablished: true as const,
+      syntheticAnchorContextConstructed: true as const,
+      trackerCandidateConstructed: true as const,
+      externalTargetNodeAcceptanceEstablished: false as const,
+      deterministicSourceFinalityEstablished: false as const,
+      ergoPowAuthenticated: false as const,
+      ergoAnchorEstablished: false as const,
+      trackerJvmReductionAccepted: false as const,
+      trackerNodeCheckPerformed: false as const,
+      trackerAdmissionEstablished: false as const,
+      globalReplayInsertionEstablished: false as const,
+      payoutAuthorized: false as const,
+      trackerSigningPerformed: false as const,
+      trackerSubmissionPerformed: false as const,
+      trackerBroadcastPerformed: false as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+      processLossRecoveryEstablished: false as const,
+      profileActivated: false as const,
+      mintAuthorized: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+  };
+  const receipt = finalizeReceipt(
+    body,
+    PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN,
+  );
+  return Object.freeze({ receipt });
+}
+
 type PegInActionV1 =
   | 'candidate'
   | 'check-source-lock'
   | 'execute-source-lock'
   | 'execute-committed-vault'
   | 'consume-mint-proof'
-  | 'consume-application-checkpoint';
+  | 'consume-application-checkpoint'
+  | 'construct-tracker-candidate';
+
+function isApplicationCheckpointAction(action: PegInActionV1): boolean {
+  return action === 'consume-application-checkpoint'
+    || action === 'construct-tracker-candidate';
+}
 
 type SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3 =
   | Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1>
@@ -1732,11 +2040,12 @@ async function runManagedCampaign(
       readonly sharedCargoHomeRoot: string;
     }> | undefined = undefined,
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
+  const applicationCheckpointAction =
+    isApplicationCheckpointAction(pegInAction);
   if (
     (pegInAction === 'consume-mint-proof')
       !== (frontierMintProofConsumer !== undefined)
-    || (pegInAction === 'consume-application-checkpoint')
-      !== (frontierApplicationRunner !== undefined)
+    || applicationCheckpointAction !== (frontierApplicationRunner !== undefined)
   ) {
     throw new Error(
       'isolated devnet Frontier consumer must match the campaign action',
@@ -1767,7 +2076,7 @@ async function runManagedCampaign(
       claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(
         setupSession,
       );
-    packetSession = pegInAction === 'consume-application-checkpoint'
+    packetSession = applicationCheckpointAction
       ? createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
         setupSession.signer,
       )
@@ -1875,6 +2184,9 @@ interface ExecutionActionResult {
   readonly applicationCheckpoint?: Readonly<
     SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
   >;
+  readonly trackerCandidate?: Readonly<
+    ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4
+  >;
 }
 
 const MANAGED_PEG_IN_SOURCE_LOCK_MATERIAL = new WeakMap<
@@ -1911,11 +2223,12 @@ async function executeManagedSetupAction(
       readonly sharedCargoHomeRoot: string;
     }> | undefined,
 ): Promise<Readonly<ExecutionActionResult>> {
+  const applicationCheckpointAction =
+    isApplicationCheckpointAction(pegInAction);
   if (
     (pegInAction === 'consume-mint-proof')
       !== (frontierMintProofConsumer !== undefined)
-    || (pegInAction === 'consume-application-checkpoint')
-      !== (frontierApplicationRunner !== undefined)
+    || applicationCheckpointAction !== (frontierApplicationRunner !== undefined)
   ) {
     throw new Error(
       'isolated devnet Frontier consumer must match the managed action',
@@ -2058,6 +2371,9 @@ async function executeManagedSetupAction(
     let applicationCheckpoint: Readonly<
       SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
     > | undefined;
+    let trackerCandidate: Readonly<
+      ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4
+    > | undefined;
     if (pegInPlan !== undefined) {
       pegIn = await buildManagedPegInCandidate(
         pegInPlan,
@@ -2076,6 +2392,7 @@ async function executeManagedSetupAction(
         || pegInAction === 'execute-committed-vault'
         || pegInAction === 'consume-mint-proof'
         || pegInAction === 'consume-application-checkpoint'
+        || pegInAction === 'construct-tracker-candidate'
       ) {
         pegIn = await executeManagedPegInSourceLock(
           pegIn,
@@ -2090,6 +2407,7 @@ async function executeManagedSetupAction(
           pegInAction === 'execute-committed-vault'
           || pegInAction === 'consume-mint-proof'
           || pegInAction === 'consume-application-checkpoint'
+          || pegInAction === 'construct-tracker-candidate'
         ) {
           pegIn = await executeManagedPegInCommittedVault(
             pegIn,
@@ -2120,7 +2438,7 @@ async function executeManagedSetupAction(
             frontierMintProofConsumer,
             completionDeadline,
           );
-        } else if (pegInAction === 'consume-application-checkpoint') {
+        } else if (applicationCheckpointAction) {
           if (
             frontierApplicationRunner === undefined
             || !('executeApplication' in packetSession)
@@ -2142,6 +2460,15 @@ async function executeManagedSetupAction(
               observer,
               completionDeadline,
             );
+          if (pegInAction === 'construct-tracker-candidate') {
+            trackerCandidate = await constructManagedTrackerCandidateV4(
+              applicationCheckpoint,
+              batch,
+              finalTransactions,
+              observer,
+              completionDeadline,
+            );
+          }
         }
       }
       assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
@@ -2179,6 +2506,7 @@ async function executeManagedSetupAction(
       ...(applicationCheckpoint === undefined
         ? {}
         : { applicationCheckpoint }),
+      ...(trackerCandidate === undefined ? {} : { trackerCandidate }),
     });
   } catch (error) {
     actionFailure = error;
@@ -2344,6 +2672,7 @@ async function buildManagedPegInCandidate(
       pegInAction === 'execute-committed-vault'
       || pegInAction === 'consume-mint-proof'
       || pegInAction === 'consume-application-checkpoint'
+      || pegInAction === 'construct-tracker-candidate'
     )
       ? await setupSession.checkPegInSourceLockRetainingSigner(
         sourceLockCheckInput,
@@ -3058,6 +3387,199 @@ async function consumeManagedPegInApplicationCheckpoint(
   return deepFreeze(material);
 }
 
+async function constructManagedTrackerCandidateV4(
+  application: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
+  >,
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  transactions:
+    SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'],
+  observer:
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  completionDeadline: number,
+): Promise<Readonly<
+  ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4
+>> {
+  const checkpoint = application.applicationCheckpoint;
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(
+    checkpoint,
+  );
+  const statement = checkpoint.checkpoint.checkpointAttestation.checkpointStatement;
+  const validFromErgoHeight = Number(statement.admissionValidFromErgoHeight);
+  if (
+    !Number.isSafeInteger(validFromErgoHeight)
+    || validFromErgoHeight < 0
+    || validFromErgoHeight.toString()
+      !== statement.admissionValidFromErgoHeight
+  ) {
+    throw new Error(
+      'isolated devnet tracker candidate validity height is not a safe canonical integer',
+    );
+  }
+  const trackerIssuances = batch.orderedTransactions.filter(transaction =>
+    transaction.issuance.ordinal === 0
+    && transaction.issuance.role === 'tracker'
+  );
+  const trackerConfirmations = transactions.filter(transaction =>
+    transaction.ordinal === 0
+    && transaction.role === 'tracker'
+  );
+  if (trackerIssuances.length !== 1 || trackerConfirmations.length !== 1) {
+    throw new Error(
+      'isolated devnet tracker candidate requires one exact tracker setup lineage',
+    );
+  }
+  const trackerTransaction = trackerIssuances[0]!;
+  const retainedConfirmation = trackerConfirmations[0]!;
+  const issuance = trackerTransaction.issuance;
+  if (
+    retainedConfirmation.expectedTxId !== issuance.unsignedTransactionIdHex
+    || issuance.predictedStateOutput.transactionIdHex
+      !== issuance.unsignedTransactionIdHex
+    || issuance.predictedStateOutput.index !== 0
+  ) {
+    throw new Error(
+      'isolated devnet tracker setup transaction lineage changed before candidate construction',
+    );
+  }
+  const freshConfirmation = await waitForStableCanonicalConfirmationAfterHeight(
+    observer,
+    retainedConfirmation,
+    validFromErgoHeight,
+    completionDeadline,
+    'tracker-candidate-input',
+  );
+  const materialized = await materializeUnsignedTransaction(
+    issuance.unsignedTransactionBody as unknown as Eip12UnsignedTransaction,
+    'isolated devnet tracker setup transaction',
+  );
+  const trackerInputBox = materialized.outputs[issuance.predictedStateOutput.index];
+  if (
+    materialized.txId !== issuance.unsignedTransactionIdHex
+    || trackerInputBox === undefined
+    || trackerInputBox.boxId !== issuance.predictedStateOutput.boxIdHex
+    || trackerInputBox.transactionId
+      !== issuance.predictedStateOutput.transactionIdHex
+    || trackerInputBox.index !== issuance.predictedStateOutput.index
+    || trackerInputBox.creationHeight
+      !== issuance.predictedStateOutput.creationHeight
+  ) {
+    throw new Error(
+      'isolated devnet tracker setup output changed during exact rematerialization',
+    );
+  }
+  const context = await buildCompilerBoundSubstrateFederatedTrackerV1Context({
+    compilerRequest: batch.trackerCompilerBinding.request,
+    compilerReceipt: batch.trackerCompilerBinding.receipt,
+    trackerInputBox,
+    encodedStatementHex: statement.encodedStatementHex,
+    currentErgoHeight: freshConfirmation.observedAtHeight,
+    anchorContextIndex: 0,
+  });
+  const stage = {
+    application,
+    trackerSetup: {
+      expectedTxId: retainedConfirmation.expectedTxId,
+      outputBoxIdHex: issuance.predictedStateOutput.boxIdHex,
+      outputIndex: 0 as const,
+      outputCreationHeight: issuance.predictedStateOutput.creationHeight,
+      confirmationDigestHex: freshConfirmation.observationDigestHex,
+      confirmationHeight: freshConfirmation.confirmationHeight!,
+      confirmationHeaderIdHex: freshConfirmation.confirmationHeaderIdHex!,
+      observedAtHeight: freshConfirmation.observedAtHeight,
+    },
+    context,
+  };
+  assertCapabilityFreePlainData(
+    stage,
+    'isolated devnet checkpoint-bound tracker candidate stage',
+  );
+  return deepFreeze(stage);
+}
+
+function projectManagedTrackerCandidateV4(
+  stage: Readonly<ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4>,
+): Readonly<SubstrateFederatedIsolatedDevnetTrackerCandidateMaterialV4> {
+  const context = stage.context;
+  const transaction = context.eip12UnsignedTransaction;
+  const inputs = transaction.inputs;
+  const anchor = context.trackerTransition.headers[
+    context.trackerTransition.anchorContextIndex
+  ];
+  if (
+    context.schema !== SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA
+    || context.version !== 1
+    || context.trustModel !== 'federated_non_trustless'
+    || !Array.isArray(inputs)
+    || inputs.length !== 1
+    || inputs[0] === null
+    || typeof inputs[0] !== 'object'
+    || Array.isArray(inputs[0])
+    || (inputs[0] as Readonly<Record<string, unknown>>).boxId
+      !== stage.trackerSetup.outputBoxIdHex
+    || anchor === undefined
+    || context.boundaries.contractIdentityBound !== true
+    || context.boundaries.statementAndProfileValidated !== true
+    || context.boundaries.anchorMembershipConstructed !== true
+    || context.boundaries.exactContextExtensionRoundTrip !== true
+    || context.boundaries.avlTransitionConstructed !== true
+    || context.boundaries.sourceSignaturesVerifiedOnChain !== false
+    || context.boundaries.jvmReductionAccepted !== false
+    || context.boundaries.nodeCheckPerformed !== false
+    || context.boundaries.profileActivated !== false
+    || context.boundaries.signingPerformed !== false
+    || context.boundaries.submissionPerformed !== false
+    || context.boundaries.broadcastPerformed !== false
+    || context.boundaries.fundsAuthorityEstablished !== false
+    || context.boundaries.gate5Closed !== false
+    || context.boundaries.trustlessStatusEstablished !== false
+    || context.contract.sourceSignaturesVerifiedOnChain !== false
+    || context.contract.jvmReductionAccepted !== false
+    || context.contract.profileActivated !== false
+    || context.contract.signingPerformed !== false
+    || context.contract.submissionPerformed !== false
+    || context.contract.broadcastPerformed !== false
+    || context.contract.fundsAuthorityEstablished !== false
+    || context.contract.gate5Closed !== false
+    || context.contract.trustlessStatusEstablished !== false
+    || context.statement.sourceSignaturesVerifiedOnChain !== false
+  ) {
+    throw new Error(
+      'isolated devnet tracker candidate context changed or gained authority',
+    );
+  }
+  const material = {
+    trackerSetup: stage.trackerSetup,
+    candidate: {
+      schema: context.schema,
+      version: context.version,
+      trustModel: context.trustModel,
+      contractIdHex: context.contract.contractIdHex,
+      trackerNftIdHex: context.trackerTransition.trackerNftIdHex,
+      statementIdHex: context.statement.statementIdHex,
+      inputBoxIdHex: stage.trackerSetup.outputBoxIdHex,
+      trackerKeyHex: context.trackerTransition.trackerKeyHex,
+      trackerValueHex: context.trackerTransition.trackerValueHex,
+      inputDigestHex: context.trackerTransition.inputDigestHex,
+      successorDigestHex: context.trackerTransition.successorDigestHex,
+      currentErgoHeight: context.trackerTransition.currentErgoHeight,
+      anchorContextIndex: context.trackerTransition.anchorContextIndex,
+      syntheticAnchorHeaderIdHex: anchor.id,
+      syntheticAnchorHeaderHeight: anchor.height,
+      syntheticAnchorExtensionRootHex: anchor.extensionRootHex,
+      contextExtensionSerializedHex: context.contextExtension.serializedHex,
+      prooflessTransactionBytes: context.prooflessTransactionBytes,
+      unsignedTransactionIdHex: context.unsignedTransactionIdHex,
+    },
+  };
+  assertCapabilityFreePlainData(
+    material,
+    'isolated devnet projected tracker candidate material',
+  );
+  return deepFreeze(material);
+}
+
 function buildManagedPegInMintSourceProofInput(
   pegIn:
     SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'],
@@ -3474,6 +3996,39 @@ async function waitForCanonicalConfirmation(
       return observation;
     }
     await delay(Math.min(CONFIRMATION_POLL_MS, deadline - observedAt));
+  }
+}
+
+async function waitForStableCanonicalConfirmationAfterHeight(
+  observer:
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  retained:
+    SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'][number],
+  minimumExclusiveHeight: number,
+  completionDeadline: number,
+  stage: string,
+): Promise<Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>> {
+  for (;;) {
+    const confirmation = await waitForCanonicalConfirmation(
+      observer,
+      retained.expectedTxId,
+      completionDeadline,
+      stage,
+    );
+    if (
+      confirmation.confirmationHeight !== retained.confirmationHeight
+      || confirmation.confirmationHeaderIdHex
+        !== retained.confirmationHeaderIdHex
+    ) {
+      throw new Error(
+        `isolated ${stage} canonical confirmation changed`,
+      );
+    }
+    if (confirmation.observedAtHeight > minimumExclusiveHeight) {
+      return confirmation;
+    }
+    assertManagedActionDeadline(completionDeadline, stage);
+    await delay(CONFIRMATION_POLL_MS);
   }
 }
 

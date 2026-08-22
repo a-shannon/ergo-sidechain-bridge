@@ -110,6 +110,7 @@ import {
 } from './peg-in-causal-admission-v2.js';
 import {
   buildSubstrateFederatedCheckpointProfileV1,
+  buildSubstrateFederatedCheckpointStatementV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
   canonicalJson,
@@ -378,10 +379,14 @@ import {
 import {
   materializeUnsignedTransaction,
   type Eip12Box,
+  type Eip12UnsignedTransaction,
 } from './unsigned-ergo-transaction.js';
 import {
   buildSubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
+import {
+  buildCompilerBoundSubstrateFederatedTrackerV1Context,
+} from './substrate-federated-tracker-v1.js';
 
 const HISTORY_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_HISTORY_V1';
@@ -1732,7 +1737,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     }, session.signer.publicKeyHex);
   }, 30_000);
 
-  it('carries the exact live JVM family binding into the unsigned peg-in producer', async () => {
+  it('carries exact live JVM family and tracker bindings into unsigned producers', async () => {
     const session =
       await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
     await withPortableReplayFixture(async fixture => {
@@ -1756,6 +1761,59 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       });
       expect(batch.familyCompilerBinding.profile.familyIdHex)
         .toBe(fixture.compilerMocks.familyReceipt.profile.familyIdHex);
+      const trackerIssuance = batch.orderedTransactions[0]!.issuance;
+      const trackerSetup = await materializeUnsignedTransaction(
+        trackerIssuance.unsignedTransactionBody as unknown as Eip12UnsignedTransaction,
+        'isolated setup-batch tracker issuance',
+      );
+      const trackerCurrentHeight =
+        trackerIssuance.predictedStateOutput.creationHeight + 1;
+      const trackerRequest = batch.trackerCompilerBinding.request;
+      const trackerStatement = buildSubstrateFederatedCheckpointStatementV1({
+        profile: trackerRequest.profile,
+        ...trackerRequest.application,
+        sourceNativeBlockHeight: '17',
+        sourceNativeBlockHashHex: '51'.repeat(32),
+        executionBlockHashHex: '52'.repeat(32),
+        bridgeEventRootHex: '53'.repeat(32),
+        burnLeafCount: 1,
+        admissionValidFromErgoHeight: trackerCurrentHeight - 1,
+        admissionExpiresAtErgoHeight: trackerCurrentHeight + 1,
+      });
+      const actualTrackerCompiler = await vi.importActual<
+        typeof import('./substrate-federated-tracker-jvm-compiler-v1.js')
+      >('./substrate-federated-tracker-jvm-compiler-v1.js');
+      expect(
+        actualTrackerCompiler.assertSubstrateFederatedTrackerJvmCompilerReceiptV1(
+          batch.trackerCompilerBinding.receipt,
+          trackerRequest,
+        ),
+      ).toBe(batch.trackerCompilerBinding.receipt);
+      const trackerContext =
+        await buildCompilerBoundSubstrateFederatedTrackerV1Context({
+          compilerRequest: trackerRequest,
+          compilerReceipt: batch.trackerCompilerBinding.receipt,
+          trackerInputBox: trackerSetup.outputs[0],
+          encodedStatementHex: trackerStatement.encodedStatementHex,
+          currentErgoHeight: trackerCurrentHeight,
+          anchorContextIndex: 0,
+        });
+      expect(trackerContext.contract.contractIdHex)
+        .toBe(batch.trackerCompilerBinding.receipt.contract.contractIdHex);
+      expect((trackerContext.eip12UnsignedTransaction.inputs as any[])[0].boxId)
+        .toBe(trackerIssuance.predictedStateOutput.boxIdHex);
+      expect(trackerContext.boundaries).toMatchObject({
+        contractIdentityBound: true,
+        statementAndProfileValidated: true,
+        sourceSignaturesVerifiedOnChain: false,
+        jvmReductionAccepted: false,
+        signingPerformed: false,
+        submissionPerformed: false,
+        broadcastPerformed: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+      });
       const actualFamilyModule = await vi.importActual<
         typeof import('./substrate-federated-settlement-family-v1.js')
       >('./substrate-federated-settlement-family-v1.js');

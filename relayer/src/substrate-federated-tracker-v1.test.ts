@@ -10,12 +10,31 @@ import {
   buildSubstrateFederatedTrackerAdmissionV1,
 } from './profiles/substrate-federated-v1/tracker-admission.js';
 import {
+  encodeIntRegister,
+  MINER_FEE,
+  MINER_FEE_TREE,
+} from './ergo-encoding.js';
+import {
+  buildSubstrateFederatedTrackerCompilerRequestV1,
+} from './substrate-federated-tracker-compiler-v1.js';
+import {
+  compileSubstrateFederatedTrackerWithPinnedJvmV1,
+} from './substrate-federated-tracker-jvm-compiler-v1.js';
+import {
+  materializeSubstrateFederatedSingletonIssuanceV1,
+} from './substrate-federated-genesis-issuance-materialization-v1.js';
+import {
   buildSubstrateFederatedTrackerV1AcceptanceFixture,
 } from './substrate-federated-tracker-v1-fixture.js';
 import {
+  buildCompilerBoundSubstrateFederatedTrackerV1Context,
   buildSubstrateFederatedTrackerV1Context,
   type SubstrateFederatedTrackerContractV1Identity,
 } from './substrate-federated-tracker-v1.js';
+import {
+  materializeUnsignedTransaction,
+  type Eip12Box,
+} from './unsigned-ergo-transaction.js';
 
 const vector = JSON.parse(readFileSync(new URL(
   '../test-vectors/substrate-federated-v1-tracker-admission.json',
@@ -25,6 +44,10 @@ const contract = JSON.parse(readFileSync(new URL(
   '../test-vectors/substrate-federated-v1-tracker-contract.json',
   import.meta.url,
 ), 'utf8')) as SubstrateFederatedTrackerContractV1Identity;
+const trackerTemplate = readFileSync(new URL(
+  '../../contracts/SPVTrackerSubstrateFederatedV1.es',
+  import.meta.url,
+), 'utf8');
 
 function inputs() {
   const profile = buildSubstrateFederatedCheckpointProfileV1(vector.input.profile);
@@ -128,4 +151,217 @@ describe('substrate federated tracker V1 transaction plan', () => {
       anchorContextIndex: 10,
     })).rejects.toThrow(/anchor context index/);
   });
+
+  it('binds a real setup transaction output and same-process JVM receipt', async () => {
+    const { profile, statement } = inputs();
+    const genesisInput = await boxFromCandidate({
+      value: (10_000_000n + BigInt(MINER_FEE)).toString(),
+      ergoTree: MINER_FEE_TREE,
+      assets: [],
+      additionalRegisters: {},
+      creationHeight: 999,
+    });
+    const compilerRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
+      template: {
+        relativePath: 'contracts/SPVTrackerSubstrateFederatedV1.es',
+        source: trackerTemplate,
+      },
+      trackerGenesisInputBoxIdHex: genesisInput.boxId,
+      profile,
+      application: {
+        sourceNetworkIdHex: statement.sourceNetworkIdHex,
+        sidechainIdHex: statement.sidechainIdHex,
+        bridgeAddressHex: statement.bridgeAddressHex,
+        tokenAddressHex: statement.tokenAddressHex,
+        bridgeRuntimeCodeSha256Hex:
+          statement.bridgeRuntimeCodeSha256Hex,
+        bridgeRuntimeCodeBytes: statement.bridgeRuntimeCodeBytes,
+        tokenRuntimeCodeSha256Hex: statement.tokenRuntimeCodeSha256Hex,
+        tokenRuntimeCodeBytes: statement.tokenRuntimeCodeBytes,
+        sourceRuntimeCodeSha256Hex:
+          statement.sourceRuntimeCodeSha256Hex,
+        sourceRuntimeCodeBytes: statement.sourceRuntimeCodeBytes,
+        runtimeProfileIdHex: statement.runtimeProfileIdHex,
+        settlementProfileIdHex: statement.settlementProfileIdHex,
+      },
+    });
+    const nodeOptions = process.env.NODE_OPTIONS;
+    delete process.env.NODE_OPTIONS;
+    let compilerReceipt;
+    try {
+      compilerReceipt =
+        await compileSubstrateFederatedTrackerWithPinnedJvmV1(compilerRequest);
+    } finally {
+      if (nodeOptions !== undefined) process.env.NODE_OPTIONS = nodeOptions;
+    }
+    const fixture = await buildSubstrateFederatedTrackerV1AcceptanceFixture();
+    const registers = {
+      ...fixture.trackerTransition.inputRegisters,
+      R8: encodeIntRegister(0),
+    };
+    const setupTransaction =
+      await materializeSubstrateFederatedSingletonIssuanceV1({
+        label: 'isolated federated tracker issuance',
+        genesisInput,
+        expectedNftIdHex: compilerRequest.trackerNftIdHex,
+        propositionHex: compilerReceipt.contract.propositionHex,
+        registers,
+        singletonValue: 10_000_000n,
+        fee: BigInt(MINER_FEE),
+        creationHeight: 1_000,
+      });
+    const rematerializedSetup = await materializeUnsignedTransaction(
+      setupTransaction.eip12Tx,
+      'rematerialized isolated federated tracker issuance',
+    );
+    expect(rematerializedSetup).toEqual(setupTransaction);
+    const trackerInputBox = rematerializedSetup.outputs[0]!;
+
+    const context = await buildCompilerBoundSubstrateFederatedTrackerV1Context({
+      compilerRequest,
+      compilerReceipt,
+      trackerInputBox,
+      encodedStatementHex: statement.encodedStatementHex,
+      currentErgoHeight: 1_030,
+      anchorContextIndex: 1,
+    });
+
+    expect(context.contract.contractIdHex)
+      .toBe(compilerReceipt.contract.contractIdHex);
+    expect(context.trackerTransition.inputRegisters.R8)
+      .toBe(encodeIntRegister(0));
+    expect((context.eip12UnsignedTransaction.inputs as any[])[0].boxId)
+      .toBe(trackerInputBox.boxId);
+    expect(context.unsignedTransactionIdHex).toHaveLength(64);
+    await expect(buildCompilerBoundSubstrateFederatedTrackerV1Context({
+      compilerRequest,
+      compilerReceipt: structuredClone(compilerReceipt),
+      trackerInputBox,
+      encodedStatementHex: statement.encodedStatementHex,
+      currentErgoHeight: 1_030,
+      anchorContextIndex: 1,
+    })).rejects.toThrow(/lacks process provenance/);
+
+    const mutations: ReadonlyArray<readonly [string, TrackerBoxMutation]> = [
+      ['value', candidate => {
+        candidate.value = (BigInt(candidate.value) + 1n).toString();
+      }],
+      ['ErgoTree', candidate => {
+        candidate.ergoTree = MINER_FEE_TREE;
+      }],
+      ['asset cardinality', candidate => {
+        candidate.assets = [];
+      }],
+      ['token ID', candidate => {
+        candidate.assets[0]!.tokenId = 'ff'.repeat(32);
+      }],
+      ['token amount', candidate => {
+        candidate.assets[0]!.amount = '2';
+      }],
+      ...(['R4', 'R5', 'R6', 'R7', 'R8', 'R9'] as const).map(register => [
+        `register ${register}`,
+        (candidate: MutableBoxCandidate) => {
+          candidate.additionalRegisters[register] = encodeIntRegister(1);
+        },
+      ] as const),
+      ['register cardinality', candidate => {
+        delete candidate.additionalRegisters.R9;
+      }],
+      ['creation height', candidate => {
+        candidate.creationHeight = 1_030;
+      }],
+    ];
+    for (const [label, mutate] of mutations) {
+      const candidate = candidateFromBox(trackerInputBox);
+      mutate(candidate);
+      const mutatedBox = await boxFromCandidate(candidate);
+      await expect(buildCompilerBoundSubstrateFederatedTrackerV1Context({
+        compilerRequest,
+        compilerReceipt,
+        trackerInputBox: mutatedBox,
+        encodedStatementHex: statement.encodedStatementHex,
+        currentErgoHeight: 1_030,
+        anchorContextIndex: 1,
+      }), label).rejects.toThrow(/differs from genesis state/);
+    }
+
+    const rawMutations: ReadonlyArray<readonly [
+      string,
+      (candidate: Eip12Box) => void,
+      RegExp,
+    ]> = [
+      ['extra register key', candidate => {
+        candidate.additionalRegisters.R3 = encodeIntRegister(1);
+      }, /not a non-mandatory register/],
+      ['negative creation height', candidate => {
+        candidate.creationHeight = -1;
+      }, /positive safe integer/],
+      ['unsafe creation height', candidate => {
+        candidate.creationHeight = Number.MAX_SAFE_INTEGER + 1;
+      }, /positive safe integer/],
+    ];
+    for (const [label, mutate, expected] of rawMutations) {
+      const mutatedBox = structuredClone(trackerInputBox);
+      mutate(mutatedBox);
+      await expect(buildCompilerBoundSubstrateFederatedTrackerV1Context({
+        compilerRequest,
+        compilerReceipt,
+        trackerInputBox: mutatedBox,
+        encodedStatementHex: statement.encodedStatementHex,
+        currentErgoHeight: 1_030,
+        anchorContextIndex: 1,
+      }), label).rejects.toThrow(expected);
+    }
+  }, 20_000);
 });
+
+interface MutableBoxCandidate {
+  value: string;
+  ergoTree: string;
+  assets: Array<{ tokenId: string; amount: string }>;
+  additionalRegisters: Record<string, string>;
+  creationHeight: number;
+}
+
+type TrackerBoxMutation = (candidate: MutableBoxCandidate) => void;
+
+function candidateFromBox(box: Readonly<Eip12Box>): MutableBoxCandidate {
+  return {
+    value: box.value,
+    ergoTree: box.ergoTree,
+    assets: box.assets.map(asset => ({ ...asset })),
+    additionalRegisters: { ...box.additionalRegisters },
+    creationHeight: box.creationHeight,
+  };
+}
+
+async function boxFromCandidate(
+  input: Readonly<MutableBoxCandidate>,
+): Promise<Eip12Box> {
+  const wasmModule = await import('ergo-lib-wasm-nodejs');
+  const wasm = wasmModule.default ?? wasmModule;
+  const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
+    inputs: [{ boxId: '67'.repeat(32), extension: {} }],
+    dataInputs: [],
+    outputs: [{
+      value: input.value,
+      ergoTree: input.ergoTree,
+      assets: input.assets,
+      additionalRegisters: input.additionalRegisters,
+      creationHeight: input.creationHeight,
+    }],
+  }));
+  const id = unsigned.id();
+  const candidates = unsigned.output_candidates();
+  const candidate = candidates.get(0);
+  const box = wasm.ErgoBox.from_box_candidate(candidate, id, 0);
+  try {
+    return box.to_js_eip12() as Eip12Box;
+  } finally {
+    box.free?.();
+    candidate.free?.();
+    candidates.free?.();
+    id.free?.();
+    unsigned.free?.();
+  }
+}
