@@ -116,6 +116,67 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('pins the federated application/checkpoint root to direct reviewed calls', () => {
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
+    const packetTarget =
+      'substrate-federated-isolated-devnet-packet-producer-v1.ts';
+    const runnerTarget =
+      'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts';
+    const signerTarget =
+      'substrate-federated-isolated-devnet-setup-check-runner-v2.ts';
+    const targets = {
+      [packetTarget]: 'export function createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3() {}',
+      [runnerTarget]: 'export function runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2() {}',
+      [signerTarget]: 'export interface SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2 {}',
+    };
+    expect(inspect({
+      ...targets,
+      [reviewedRoot]: `
+        import {
+          createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
+        } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
+        import {
+          runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
+        } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+        import type {
+          SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+        } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+        export async function runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3(
+          signer: SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+        ) {
+          createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(signer);
+          return runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2({});
+        }
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      ...targets,
+      [reviewedRoot]: `
+        import {
+          runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
+        } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+        const injectedRunner =
+          runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2;
+      `,
+    }).map(violation => violation.message)).toContain(
+      'restricted capability binding must not escape its reviewed call: ../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js#runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+    );
+
+    expect(inspect({
+      ...targets,
+      [reviewedRoot]: `
+        import {
+          runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
+        } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+        runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1({});
+      `,
+    }).map(violation => violation.message)).toContain(
+      'restricted capability import binding is not allowlisted: ../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js#runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
+    );
+  });
+
   it('reserves isolated signer and mining authority imports to exact owners', () => {
     const signerBinding =
       'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts';

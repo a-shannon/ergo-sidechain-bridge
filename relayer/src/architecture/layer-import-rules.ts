@@ -88,6 +88,14 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
     ]),
   ],
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    new Set([
+      'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts',
+      'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+      'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+    ]),
+  ],
+  [
     'apps/bridge-daemon/substrate-federated-dual-node-recovery-composition-v1.ts',
     new Set([
       'substrate-federated-authority-safe-devnet-process-v1.ts',
@@ -332,6 +340,40 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
     ]),
   ],
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    new Map([
+      [
+        'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance',
+          'assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance',
+          'assertSubstrateFederatedIsolatedDevnetPacketV2Provenance',
+          'createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3',
+          'ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input',
+          'ProduceSubstrateFederatedIsolatedDevnetPacketV1Input',
+          'SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3',
+          'SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2',
+          'SubstrateFederatedIsolatedDevnetPacketV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance',
+          'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+          'RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input',
+          'SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+        new Set([
+          'SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
+        ]),
+      ],
+    ]),
+  ],
+  [
     'apps/bridge-daemon/substrate-federated-dual-node-recovery-composition-v1.ts',
     new Map([
       [
@@ -520,6 +562,27 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
     ]),
   ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    new Map([
+      [
+        '../../substrate-federated-isolated-devnet-packet-producer-v1.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance',
+          'assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance',
+          'assertSubstrateFederatedIsolatedDevnetPacketV2Provenance',
+          'createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3',
+        ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance',
+          'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+        ]),
+      ],
+    ]),
+  ],
 ]);
 
 const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
@@ -585,6 +648,17 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1',
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    new Set([
+      'assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance',
+      'runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3',
+      'RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input',
+      'SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3',
+      'SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA',
     ]),
   ],
 ]);

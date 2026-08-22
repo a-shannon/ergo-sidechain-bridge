@@ -1,0 +1,494 @@
+import {
+  sha256CanonicalJson,
+} from '../../ergo-settlement-core/strict-json.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance,
+  assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
+  type ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input,
+  type ProduceSubstrateFederatedIsolatedDevnetPacketV1Input,
+  type SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3,
+  type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
+  type SubstrateFederatedIsolatedDevnetPacketV2,
+} from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance,
+  runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
+  type RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input,
+  type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2,
+} from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+import type {
+  SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+} from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-frontier-application-checkpoint-root.v3' as const;
+
+const RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3';
+
+export type SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3 =
+  Readonly<Omit<
+    RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input,
+    'mintSourceProofReceipt'
+  >>;
+
+export interface RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input {
+  readonly ergoAdmissionSigner: Readonly<
+    SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+  >;
+  readonly packetInput:
+    Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>;
+  readonly mintSourceProofInput:
+    Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input>;
+  readonly applicationRunnerInput:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>;
+  readonly checkpointAdmission: Readonly<{
+    readonly validFromErgoHeight: string | number | bigint;
+    readonly expiresAtErgoHeight: string | number | bigint;
+  }>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA;
+  readonly version: 3;
+  readonly status:
+    'packet_mint_application_burn_checkpoint_composed';
+  readonly packet:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
+  readonly mintSourceProof:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
+  readonly applicationRunner:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2>;
+  readonly checkpoint:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3>;
+  readonly binding: Readonly<{
+    readonly targetDescriptorDigestHex: string;
+    readonly packetReceiptDigestHex: string;
+    readonly mintSourceProofReceiptDigestHex: string;
+    readonly applicationRunnerReceiptDigestHex: string;
+    readonly checkpointReceiptDigestHex: string;
+    readonly burnIdHex: string;
+    readonly bridgeEventRootHex: string;
+  }>;
+  readonly checks: Readonly<{
+    readonly exactPacketObjectBound: true;
+    readonly exactPacketMintSourceProofObjectBound: true;
+    readonly exactProcessProvenApplicationRunnerReceiptBound: true;
+    readonly exactPacketInnerMintProofPassedToRunner: true;
+    readonly packetMintAndRunnerTargetDescriptorBound: true;
+    readonly checkpointFieldsDerivedFromApplicationBurnReceipt: true;
+    readonly exactCheckpointReceiptObjectBound: true;
+    readonly packetThenMintThenApplicationBurnThenCheckpointOrderingEstablished:
+      true;
+    readonly allProvenanceRevalidatedAfterApplicationExecution: true;
+    readonly noCallerSuppliedExecutionOrAuthorityCallbackAccepted: true;
+  }>;
+  readonly boundary: Readonly<{
+    readonly isolatedTestClientOnly: true;
+    readonly processOwnedSyntheticCustodyOnly: true;
+    readonly thresholdSourceAttestationVerified: true;
+    readonly independentAttestorCustodyEstablished: false;
+    readonly applicationBurnReceiptBound: true;
+    readonly checkpointAttestationEstablished: true;
+    readonly sourceConsensusIndependentlyVerified: false;
+    readonly deterministicSourceFinalityEstablished: false;
+    readonly ergoAnchorEstablished: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly globalReplayInsertionEstablished: false;
+    readonly payoutAuthorized: false;
+    readonly ergoTransactionSigningAuthorized: false;
+    readonly submissionAuthorized: false;
+    readonly broadcastAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly limitations: readonly string[];
+  readonly receiptDigestHex: string;
+}
+
+interface RootMaterialV3 {
+  readonly packet:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
+  readonly mintSourceProof:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
+  readonly applicationRunner:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2>;
+  readonly checkpoint:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3>;
+}
+
+const RECEIPTS = new WeakMap<object, Readonly<RootMaterialV3>>();
+
+export async function runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3(
+  input: Readonly<
+    RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input
+  >,
+  completionDeadline: number | undefined = undefined,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+>> {
+  const plan = preflight(input);
+  const continuation =
+    createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+      plan.ergoAdmissionSigner,
+    );
+  try {
+    const packet = await continuation.produce(plan.packetInput);
+    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+
+    const mintSourceProof = continuation.produceMintSourceProof(
+      packet,
+      plan.mintSourceProofInput,
+    );
+    assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+      mintSourceProof,
+    );
+
+    const applicationRunner =
+      await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
+        {
+          ...plan.applicationRunnerInput,
+          mintSourceProofReceipt: mintSourceProof.sourceProof,
+        },
+        completionDeadline,
+      );
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
+      applicationRunner,
+    );
+    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+    assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+      mintSourceProof,
+    );
+    assertMintAndRunnerBinding(packet, mintSourceProof, applicationRunner);
+
+    const applicationEvidence =
+      applicationRunner.executionResult.applicationEvidence;
+    const checkpoint = continuation.produceCheckpointAttestation(
+      packet,
+      mintSourceProof,
+      {
+        sourceNativeBlockHeight: applicationEvidence.sourceNativeBlock.height,
+        sourceNativeBlockHashHex: applicationEvidence.sourceNativeBlock.hashHex,
+        executionBlockHashHex: applicationEvidence.execution.blockHashHex,
+        bridgeEventRootHex: applicationEvidence.burn.bridgeEventRootHex,
+        burnLeafCount: applicationEvidence.burn.burnLeafCount,
+        admissionValidFromErgoHeight:
+          plan.checkpointAdmission.validFromErgoHeight,
+        admissionExpiresAtErgoHeight:
+          plan.checkpointAdmission.expiresAtErgoHeight,
+      },
+    );
+    assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+      checkpoint,
+    );
+    assertApplicationBurnCheckpointBinding(applicationRunner, checkpoint);
+
+    const body = deepFreeze({
+      schema:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA,
+      version: 3 as const,
+      status:
+        'packet_mint_application_burn_checkpoint_composed' as const,
+      packet,
+      mintSourceProof,
+      applicationRunner,
+      checkpoint,
+      binding: {
+        targetDescriptorDigestHex:
+          packet.receipt.targetDescriptorDigestHex,
+        packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+        mintSourceProofReceiptDigestHex: mintSourceProof.receiptDigestHex,
+        applicationRunnerReceiptDigestHex:
+          applicationRunner.receiptDigestHex,
+        checkpointReceiptDigestHex: checkpoint.receiptDigestHex,
+        burnIdHex: applicationEvidence.burn.burnIdHex,
+        bridgeEventRootHex: applicationEvidence.burn.bridgeEventRootHex,
+      },
+      checks: {
+        exactPacketObjectBound: true as const,
+        exactPacketMintSourceProofObjectBound: true as const,
+        exactProcessProvenApplicationRunnerReceiptBound: true as const,
+        exactPacketInnerMintProofPassedToRunner: true as const,
+        packetMintAndRunnerTargetDescriptorBound: true as const,
+        checkpointFieldsDerivedFromApplicationBurnReceipt: true as const,
+        exactCheckpointReceiptObjectBound: true as const,
+        packetThenMintThenApplicationBurnThenCheckpointOrderingEstablished:
+          true as const,
+        allProvenanceRevalidatedAfterApplicationExecution: true as const,
+        noCallerSuppliedExecutionOrAuthorityCallbackAccepted: true as const,
+      },
+      boundary: {
+        isolatedTestClientOnly: true as const,
+        processOwnedSyntheticCustodyOnly: true as const,
+        thresholdSourceAttestationVerified: true as const,
+        independentAttestorCustodyEstablished: false as const,
+        applicationBurnReceiptBound: true as const,
+        checkpointAttestationEstablished: true as const,
+        sourceConsensusIndependentlyVerified: false as const,
+        deterministicSourceFinalityEstablished: false as const,
+        ergoAnchorEstablished: false as const,
+        trackerAdmissionEstablished: false as const,
+        globalReplayInsertionEstablished: false as const,
+        payoutAuthorized: false as const,
+        ergoTransactionSigningAuthorized: false as const,
+        submissionAuthorized: false as const,
+        broadcastAuthorized: false as const,
+        fundsAuthorityEstablished: false as const,
+        gate5Closed: false as const,
+        trustlessStatusEstablished: false as const,
+        productionReadinessEstablished: false as const,
+      },
+      limitations: [
+        'The burn executes only in the pinned in-memory Frontier TestClient and the checkpoint is a disclosed federated attestation.',
+        'Source consensus, deterministic finality, Ergo anchoring, tracker admission, global replay insertion and payout remain separate joins.',
+        'No signing, submission, broadcast, funds authority, Gate 5 closure, trustless status or production readiness follows.',
+      ] as const,
+    });
+    const receipt = deepFreeze({
+      ...body,
+      receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
+    });
+    RECEIPTS.set(receipt, Object.freeze({
+      packet,
+      mintSourceProof,
+      applicationRunner,
+      checkpoint,
+    }));
+    return receipt;
+  } finally {
+    continuation.dispose();
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+> {
+  if (value === null || typeof value !== 'object') {
+    throw new Error(
+      'Frontier application-checkpoint root receipt lacks process provenance',
+    );
+  }
+  const material = RECEIPTS.get(value);
+  if (material === undefined) {
+    throw new Error(
+      'Frontier application-checkpoint root receipt lacks process provenance',
+    );
+  }
+  const receipt = value as Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+  >;
+  if (
+    receipt.packet !== material.packet
+    || receipt.mintSourceProof !== material.mintSourceProof
+    || receipt.applicationRunner !== material.applicationRunner
+    || receipt.checkpoint !== material.checkpoint
+  ) {
+    throw new Error('Frontier application-checkpoint root binding changed');
+  }
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(material.packet);
+  assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
+    material.mintSourceProof,
+  );
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
+    material.applicationRunner,
+  );
+  assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
+    material.checkpoint,
+  );
+  assertMintAndRunnerBinding(
+    material.packet,
+    material.mintSourceProof,
+    material.applicationRunner,
+  );
+  assertApplicationBurnCheckpointBinding(
+    material.applicationRunner,
+    material.checkpoint,
+  );
+  const evidence = material.applicationRunner.executionResult.applicationEvidence;
+  if (
+    receipt.binding.targetDescriptorDigestHex
+      !== material.packet.receipt.targetDescriptorDigestHex
+    || receipt.binding.packetReceiptDigestHex
+      !== material.packet.receipt.receiptDigestHex
+    || receipt.binding.mintSourceProofReceiptDigestHex
+      !== material.mintSourceProof.receiptDigestHex
+    || receipt.binding.applicationRunnerReceiptDigestHex
+      !== material.applicationRunner.receiptDigestHex
+    || receipt.binding.checkpointReceiptDigestHex
+      !== material.checkpoint.receiptDigestHex
+    || receipt.binding.burnIdHex !== evidence.burn.burnIdHex
+    || receipt.binding.bridgeEventRootHex
+      !== evidence.burn.bridgeEventRootHex
+  ) {
+    throw new Error('Frontier application-checkpoint root digest binding changed');
+  }
+  const { receiptDigestHex, ...body } = receipt;
+  if (sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN) !== receiptDigestHex) {
+    throw new Error('Frontier application-checkpoint root receipt changed');
+  }
+}
+
+function assertMintAndRunnerBinding(
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+  mintSourceProof: Readonly<
+    SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
+  >,
+  applicationRunner: Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2
+  >,
+): void {
+  if (
+    mintSourceProof.packetReceiptDigestHex
+      !== packet.receipt.receiptDigestHex
+    || mintSourceProof.targetDescriptorDigestHex
+      !== packet.receipt.targetDescriptorDigestHex
+    || mintSourceProof.sourceProofReceiptDigestHex
+      !== mintSourceProof.sourceProof.receiptDigestHex
+    || applicationRunner.mintSourceProof.receiptDigestHex
+      !== mintSourceProof.sourceProofReceiptDigestHex
+    || applicationRunner.mintSourceProof.targetDescriptorDigestHex
+      !== mintSourceProof.targetDescriptorDigestHex
+  ) {
+    throw new Error(
+      'Frontier application runner targets a different packet or mint proof',
+    );
+  }
+}
+
+function assertApplicationBurnCheckpointBinding(
+  applicationRunner: Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2
+  >,
+  checkpoint: Readonly<
+    SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
+  >,
+): void {
+  const evidence = applicationRunner.executionResult.applicationEvidence;
+  const statement = checkpoint.checkpointAttestation.checkpointStatement;
+  if (
+    statement.sourceNativeBlockHeight
+      !== evidence.sourceNativeBlock.height.toString()
+    || statement.sourceNativeBlockHashHex
+      !== unprefixedHex(evidence.sourceNativeBlock.hashHex)
+    || statement.executionBlockHashHex
+      !== unprefixedHex(evidence.execution.blockHashHex)
+    || statement.bridgeEventRootHex
+      !== unprefixedHex(evidence.burn.bridgeEventRootHex)
+    || statement.burnLeafCount !== evidence.burn.burnLeafCount
+    || statement.sidechainIdHex
+      !== unprefixedHex(evidence.execution.sidechainIdHex)
+    || statement.bridgeAddressHex
+      !== unprefixedHex(evidence.application.bridgeAddressHex)
+    || statement.tokenAddressHex
+      !== unprefixedHex(evidence.application.tokenAddressHex)
+  ) {
+    throw new Error(
+      'federated checkpoint differs from the process-proven application burn',
+    );
+  }
+}
+
+function preflight(
+  input: Readonly<
+    RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input
+  >,
+): Readonly<
+  RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input
+> {
+  const record = exactOwnDataRecord(input, [
+    'applicationRunnerInput',
+    'checkpointAdmission',
+    'ergoAdmissionSigner',
+    'mintSourceProofInput',
+    'packetInput',
+  ], 'Frontier application-checkpoint root input');
+  const runner = exactOwnDataRecord(record.applicationRunnerInput, [
+    'cargoDependencyCacheDirectory',
+    'cargoExecutablePath',
+    'frontierSourceDirectory',
+    'gitExecutablePath',
+    'offline',
+    'rustcExecutablePath',
+    'temporaryDirectoryRoot',
+  ], 'Frontier application-checkpoint runner input');
+  const checkpointAdmission = exactOwnDataRecord(record.checkpointAdmission, [
+    'expiresAtErgoHeight',
+    'validFromErgoHeight',
+  ], 'Frontier application-checkpoint admission input');
+  return Object.freeze({
+    ergoAdmissionSigner: record.ergoAdmissionSigner as Readonly<
+      SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
+    >,
+    packetInput: record.packetInput as Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketV1Input
+    >,
+    mintSourceProofInput: record.mintSourceProofInput as Readonly<
+      ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
+    >,
+    applicationRunnerInput: Object.freeze({
+      frontierSourceDirectory: runner.frontierSourceDirectory as string,
+      temporaryDirectoryRoot: runner.temporaryDirectoryRoot as string,
+      cargoDependencyCacheDirectory:
+        runner.cargoDependencyCacheDirectory as string,
+      cargoExecutablePath: runner.cargoExecutablePath as string,
+      rustcExecutablePath: runner.rustcExecutablePath as string,
+      gitExecutablePath: runner.gitExecutablePath as string,
+      offline: runner.offline as true,
+    }),
+    checkpointAdmission: Object.freeze({
+      validFromErgoHeight:
+        checkpointAdmission.validFromErgoHeight as string | number | bigint,
+      expiresAtErgoHeight:
+        checkpointAdmission.expiresAtErgoHeight as string | number | bigint,
+    }),
+  });
+}
+
+function exactOwnDataRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  if (Object.getOwnPropertySymbols(value).length !== 0) {
+    throw new Error(`${label} must not contain symbol keys`);
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (!('value' in descriptor)) {
+      throw new Error(`${label}.${key} must be an own data property`);
+    }
+  }
+  const actualKeys = Object.keys(descriptors).sort();
+  const expected = [...expectedKeys].sort();
+  if (
+    actualKeys.length !== expected.length
+    || actualKeys.some((key, index) => key !== expected[index])
+  ) {
+    throw new Error(`${label} must contain exactly ${expected.join(', ')}`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function unprefixedHex(value: string): string {
+  return value.toLowerCase().replace(/^0x/u, '');
+}
+
+function deepFreeze<T>(value: T): Readonly<T> {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
