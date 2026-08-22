@@ -1275,14 +1275,18 @@ async function exactVersion(input: Readonly<{
 }
 
 function canonicalChainSpecBytes(value: Uint8Array, label: string): Buffer {
+  return Buffer.from(
+    stringifyJsonPreservingNumbers(canonicalChainSpecValue(value, label)),
+    'utf8',
+  );
+}
+
+function canonicalChainSpecValue(value: Uint8Array, label: string): unknown {
   const parsed = parseStrictJsonPreservingNumbers(
     strictUtf8(value, label),
     label,
   );
-  return Buffer.from(
-    stringifyJsonPreservingNumbers(sortJsonObjectKeys(parsed)),
-    'utf8',
-  );
+  return sortJsonObjectKeys(parsed);
 }
 
 function buildAuthoritySafeRecoveryDrillChainSpec(
@@ -1376,18 +1380,90 @@ async function assertExactBinaryAcceptsChainSpec(input: Readonly<{
       maxRetries: 3,
     });
   }
-  const sourceSemanticBytes = canonicalChainSpecBytes(
+  const sourceSemanticValue = canonicalChainSpecValue(
     input.chainSpecBytes,
     input.sourceLabel,
   );
-  const acceptedSemanticBytes = canonicalChainSpecBytes(
+  const acceptedSemanticValue = canonicalChainSpecValue(
     nodeAcceptedBytes,
     input.acceptedLabel,
   );
+  const sourceSemanticBytes = Buffer.from(
+    stringifyJsonPreservingNumbers(sourceSemanticValue),
+    'utf8',
+  );
+  const acceptedSemanticBytes = Buffer.from(
+    stringifyJsonPreservingNumbers(acceptedSemanticValue),
+    'utf8',
+  );
   if (!sourceSemanticBytes.equals(acceptedSemanticBytes)) {
-    throw new Error(input.driftMessage);
+    const firstDifference = firstJsonDifferencePath(
+      sourceSemanticValue,
+      acceptedSemanticValue,
+    ) ?? '$';
+    throw new Error(
+      `${input.driftMessage}: binary SHA-256 ${sha256(readFileSync(input.binaryPath))}; `
+      + `generated semantic SHA-256 ${sha256(sourceSemanticBytes)}; `
+      + `node-accepted semantic SHA-256 ${sha256(acceptedSemanticBytes)}; `
+      + `first difference ${firstDifference}`,
+    );
   }
   return Object.freeze({ nodeAcceptedBytes, sourceSemanticBytes });
+}
+
+function firstJsonDifferencePath(
+  left: unknown,
+  right: unknown,
+  path = '$',
+): string | undefined {
+  if (left === right) return undefined;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return path;
+    if (left.length !== right.length) return `${path}.length`;
+    for (let index = 0; index < left.length; index += 1) {
+      const difference = firstJsonDifferencePath(
+        left[index],
+        right[index],
+        `${path}[${index}]`,
+      );
+      if (difference !== undefined) return difference;
+    }
+    return undefined;
+  }
+  if (isJsonRecord(left) || isJsonRecord(right)) {
+    if (!isJsonRecord(left) || !isJsonRecord(right)) return path;
+    if (
+      Object.getOwnPropertySymbols(left).length > 0
+      || Object.getOwnPropertySymbols(right).length > 0
+    ) {
+      return stringifyJsonPreservingNumbers(left)
+        === stringifyJsonPreservingNumbers(right)
+        ? undefined
+        : path;
+    }
+    const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])]
+      .sort((first, second) => first.localeCompare(second));
+    for (const key of keys) {
+      const childPath = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)
+        ? `${path}.${key}`
+        : `${path}[${JSON.stringify(key)}]`;
+      if (!Object.hasOwn(left, key) || !Object.hasOwn(right, key)) {
+        return childPath;
+      }
+      const difference = firstJsonDifferencePath(
+        left[key],
+        right[key],
+        childPath,
+      );
+      if (difference !== undefined) return difference;
+    }
+    return undefined;
+  }
+  return path;
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object';
 }
 
 function requiredJsonRecord(

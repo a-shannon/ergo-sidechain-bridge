@@ -567,7 +567,9 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
 
     await expect(
       acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/changed the generated authority-safe chain-spec semantics/);
+    ).rejects.toThrow(
+      /changed the generated authority-safe chain-spec semantics: binary SHA-256 [0-9a-f]{64}; generated semantic SHA-256 [0-9a-f]{64}; node-accepted semantic SHA-256 [0-9a-f]{64}; first difference \$\.protocolId/,
+    );
     expect(mocks.observe).not.toHaveBeenCalled();
   });
 
