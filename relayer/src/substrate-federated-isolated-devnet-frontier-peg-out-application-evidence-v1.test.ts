@@ -52,6 +52,26 @@ const EXACT_PRODUCER_STDOUT = [
 ].join('\n');
 
 describe('federated isolated-devnet Frontier peg-out application evidence V1', () => {
+  it('binds application burn and runtime commitment identity to the validated profile', () => {
+    const overlay = applicationEvidenceOverlayPatchBytes.toString('utf8');
+    expect(overlay).toContain(
+      '+\tlet sidechain_id = validated.statement.source_intent.sidechain_id;',
+    );
+    expect(overlay).toContain(
+      'LAB application identity must differ from the TestClient genesis',
+    );
+    expect(overlay).toContain(
+      '+\t\tlet (bridge_address, commitment_sidechain_id) =',
+    );
+    expect(overlay).toContain(
+      '+\t\t\t\t(Some(profile.bridge_address), profile.sidechain_id)',
+    );
+    expect(overlay).toContain(
+      '+\t\t\t\t(BridgeAddress::<T>::get(), sidechain_id)',
+    );
+    expect(overlay).toContain('+\t\t\t\tcommitment_sidechain_id,');
+  });
+
   it('binds the real application burn, runtime commitment, and supply conservation', () => {
     const receipt = consume(EXACT_PRODUCER_STDOUT);
 

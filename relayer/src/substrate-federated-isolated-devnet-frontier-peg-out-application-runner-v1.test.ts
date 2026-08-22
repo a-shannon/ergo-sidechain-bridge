@@ -65,6 +65,7 @@ import {
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
   restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1,
+  restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourcesV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
 } from './substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
@@ -538,6 +539,48 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
     }
   });
 
+  it('restores both exact source snapshots after a line-ending-normalized reversal', async () => {
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'e2s-overlay-restore-pair-'));
+    const nodeSourcePath = path.join(temporaryRoot, 'node-source.rs');
+    const runtimeSourcePath = path.join(temporaryRoot, 'runtime-source.rs');
+    const originalNode = Buffer.from('node original\r\n', 'utf8');
+    const originalRuntime = Buffer.from('runtime original\r\n', 'utf8');
+    const appliedNode = Buffer.from('node overlay\n', 'utf8');
+    const appliedRuntime = Buffer.from('runtime overlay\n', 'utf8');
+    writeFileSync(nodeSourcePath, appliedNode);
+    writeFileSync(runtimeSourcePath, appliedRuntime);
+    try {
+      const result =
+        await restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourcesV1({
+          sources: [
+            {
+              sourcePath: nodeSourcePath,
+              originalSourceBytes: originalNode,
+              expectedAppliedSourceLfSha256: createHash('sha256')
+                .update(appliedNode)
+                .digest('hex'),
+            },
+            {
+              sourcePath: runtimeSourcePath,
+              originalSourceBytes: originalRuntime,
+              expectedAppliedSourceLfSha256: createHash('sha256')
+                .update(appliedRuntime)
+                .digest('hex'),
+            },
+          ],
+          reverseOverlay: async () => {
+            writeFileSync(nodeSourcePath, 'node original\n', 'utf8');
+            writeFileSync(runtimeSourcePath, 'runtime original\n', 'utf8');
+          },
+        });
+      expect(result).toBe('snapshot_fallback');
+      expect(readFileSync(nodeSourcePath)).toEqual(originalNode);
+      expect(readFileSync(runtimeSourcePath)).toEqual(originalRuntime);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('does not overwrite unrecognized source drift during restoration', async () => {
     const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'e2s-overlay-drift-'));
     const sourcePath = path.join(temporaryRoot, 'source.rs');
@@ -559,6 +602,63 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  it.each(['node', 'runtime'] as const)(
+    'does not overwrite unrecognized %s drift during paired restoration',
+    async driftedSource => {
+      const temporaryRoot = mkdtempSync(
+        path.join(tmpdir(), 'e2s-overlay-drift-pair-'),
+      );
+      const nodeSourcePath = path.join(temporaryRoot, 'node-source.rs');
+      const runtimeSourcePath = path.join(temporaryRoot, 'runtime-source.rs');
+      const appliedNode = Buffer.from('node overlay\n', 'utf8');
+      const appliedRuntime = Buffer.from('runtime overlay\n', 'utf8');
+      const drifted = Buffer.from(`${driftedSource} concurrent drift\n`, 'utf8');
+      writeFileSync(nodeSourcePath, appliedNode);
+      writeFileSync(runtimeSourcePath, appliedRuntime);
+      writeFileSync(
+        driftedSource === 'node' ? nodeSourcePath : runtimeSourcePath,
+        drifted,
+      );
+      let reversalCalled = false;
+      try {
+        await expect(
+          restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourcesV1({
+            sources: [
+              {
+                sourcePath: nodeSourcePath,
+                originalSourceBytes: Buffer.from('node original\n', 'utf8'),
+                expectedAppliedSourceLfSha256: createHash('sha256')
+                  .update(appliedNode)
+                  .digest('hex'),
+              },
+              {
+                sourcePath: runtimeSourcePath,
+                originalSourceBytes: Buffer.from('runtime original\n', 'utf8'),
+                expectedAppliedSourceLfSha256: createHash('sha256')
+                  .update(appliedRuntime)
+                  .digest('hex'),
+              },
+            ],
+            reverseOverlay: async () => {
+              reversalCalled = true;
+            },
+          }),
+        ).rejects.toThrow(/unexpected bytes before restoration/u);
+        expect(reversalCalled).toBe(false);
+        expect(readFileSync(
+          driftedSource === 'node' ? nodeSourcePath : runtimeSourcePath,
+        )).toEqual(drifted);
+        expect(readFileSync(
+          driftedSource === 'node' ? runtimeSourcePath : nodeSourcePath,
+        )).toEqual(
+          driftedSource === 'node' ? appliedRuntime : appliedNode,
+        );
+      } finally {
+        rmSync(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.runIf(integrationEnabled)(
     'applies, executes, consumes, and reverses the exact application overlay',

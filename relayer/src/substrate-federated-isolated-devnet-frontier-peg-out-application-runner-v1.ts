@@ -115,9 +115,11 @@ const CARGO_ARGUMENTS = Object.freeze([
 const CANONICAL_FRONTIER_PATCH_SHA256 =
   '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
 const APPLICATION_OVERLAY_PATCH_SHA256 =
-  'b275a0e44306e465e61369d80763945e3e8a0cdf96fac2efcc7914f77eb53bb5';
-const OVERLAY_APPLIED_SOURCE_LF_SHA256 =
-  '1372b856b91b6c017e27e6ebf96ae95d658d3de041768ca3a90a9a2567ac4a53';
+  '2a7504ece8f175ba0ab25a2ab5ad9076afcf3b195618efbca6103544fadec495';
+const OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256 =
+  'ff7857d14f50fc39f9f6679087fe574380a0c88026d58082b6fa5e781e86a962';
+const OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256 =
+  'd4cd785d764ed70c25e324a3250dc0bb34db5322a9385b9c11ad1cdaf34f64d0';
 const EXPECTED_OWNER_ADDRESS =
   '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const EXPECTED_MINT_AMOUNT_NANO_ERG = '15000000';
@@ -162,7 +164,8 @@ export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunner
     readonly baselineReportDigestHex: string;
     readonly canonicalFrontierPatchSha256: string;
     readonly applicationOverlayPatchSha256: string;
-    readonly overlayAppliedSourceLfSha256: string;
+    readonly overlayAppliedNodeSourceLfSha256: string;
+    readonly overlayAppliedRuntimeSourceLfSha256: string;
   }>;
   readonly tools: Readonly<{
     readonly toolchainDigestHex: string;
@@ -182,7 +185,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunner
     readonly exactToolchainRevalidatedBeforeAndAfter: true;
     readonly exactCanonicalAndOverlayPatchBytesBound: true;
     readonly overlayAppliedOnlyForBoundedExecution: true;
-    readonly overlaySourceBytesVerifiedBeforeCargo: true;
+    readonly overlayNodeAndRuntimeSourceBytesVerifiedBeforeCargo: true;
     readonly exactNamedCargoTestPassedOnce: true;
     readonly sameProcessCargoExecutionProvenanceEstablished: true;
     readonly pureApplicationEvidenceConsumedInSameProcess: true;
@@ -564,6 +567,19 @@ async function executeRunner(
     'Frontier source before application overlay',
   );
   const originalOverlaySourceBytes = readFileSync(overlaySourcePath);
+  const overlayRuntimeSourcePath = requireRegularFile(
+    path.join(
+      input.frontierSourceDirectory,
+      'template',
+      'runtime',
+      'src',
+      'bridge_commitment.rs',
+    ),
+    'Frontier runtime source before application overlay',
+  );
+  const originalOverlayRuntimeSourceBytes = readFileSync(
+    overlayRuntimeSourcePath,
+  );
 
   const toolsBefore = inspectTools({
     bridgeRoot,
@@ -618,8 +634,12 @@ async function executeRunner(
       label: 'Frontier peg-out overlay application',
     });
     if (sha256LfNormalized(readFileSync(overlaySourcePath))
-      !== OVERLAY_APPLIED_SOURCE_LF_SHA256) {
+      !== OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256) {
       throw new Error('overlay-applied Frontier source bytes changed');
+    }
+    if (sha256LfNormalized(readFileSync(overlayRuntimeSourcePath))
+      !== OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256) {
+      throw new Error('overlay-applied Frontier runtime source bytes changed');
     }
 
     const workspace = createPinnedLocalNativeBuildWorkspace(undefined, {
@@ -668,10 +688,21 @@ async function executeRunner(
     }
   } finally {
     if (overlayApplicationAttempted) {
-      await restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1({
-        sourcePath: overlaySourcePath,
-        originalSourceBytes: originalOverlaySourceBytes,
-        expectedAppliedSourceLfSha256: OVERLAY_APPLIED_SOURCE_LF_SHA256,
+      await restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourcesV1({
+        sources: [
+          {
+            sourcePath: overlaySourcePath,
+            originalSourceBytes: originalOverlaySourceBytes,
+            expectedAppliedSourceLfSha256:
+              OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256,
+          },
+          {
+            sourcePath: overlayRuntimeSourcePath,
+            originalSourceBytes: originalOverlayRuntimeSourceBytes,
+            expectedAppliedSourceLfSha256:
+              OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256,
+          },
+        ],
         reverseOverlay: async () => {
           await runExactGitApply({
             args: [
@@ -745,7 +776,10 @@ async function executeRunner(
       baselineReportDigestHex,
       canonicalFrontierPatchSha256: CANONICAL_FRONTIER_PATCH_SHA256,
       applicationOverlayPatchSha256: APPLICATION_OVERLAY_PATCH_SHA256,
-      overlayAppliedSourceLfSha256: OVERLAY_APPLIED_SOURCE_LF_SHA256,
+      overlayAppliedNodeSourceLfSha256:
+        OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256,
+      overlayAppliedRuntimeSourceLfSha256:
+        OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256,
     },
     tools: {
       toolchainDigestHex,
@@ -765,7 +799,7 @@ async function executeRunner(
       exactToolchainRevalidatedBeforeAndAfter: true as const,
       exactCanonicalAndOverlayPatchBytesBound: true as const,
       overlayAppliedOnlyForBoundedExecution: true as const,
-      overlaySourceBytesVerifiedBeforeCargo: true as const,
+      overlayNodeAndRuntimeSourceBytesVerifiedBeforeCargo: true as const,
       exactNamedCargoTestPassedOnce: true as const,
       sameProcessCargoExecutionProvenanceEstablished: true as const,
       pureApplicationEvidenceConsumedInSameProcess: true as const,
@@ -1279,6 +1313,116 @@ function inspectExactTool(
   return Object.freeze({ version, sha256 });
 }
 
+export async function restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourcesV1(
+  input: Readonly<{
+    sources: readonly Readonly<{
+      sourcePath: string;
+      originalSourceBytes: Uint8Array;
+      expectedAppliedSourceLfSha256: string;
+    }>[];
+    reverseOverlay: () => Promise<void>;
+  }>,
+): Promise<'already_clean' | 'reversed' | 'snapshot_fallback'> {
+  if (
+    !Array.isArray(input.sources)
+    || input.sources.length === 0
+    || typeof input.reverseOverlay !== 'function'
+  ) {
+    throw new Error('overlay restoration input is invalid');
+  }
+  const seenPaths = new Set<string>();
+  const snapshots = input.sources.map((source, index) => {
+    const sourcePath = requireRegularFile(
+      source.sourcePath,
+      `overlay source ${index + 1}`,
+    );
+    const sourceIdentity = pathIdentity(sourcePath);
+    if (
+      seenPaths.has(sourceIdentity)
+      || !(source.originalSourceBytes instanceof Uint8Array)
+      || source.originalSourceBytes.byteLength === 0
+      || !/^[0-9a-f]{64}$/u.test(source.expectedAppliedSourceLfSha256)
+    ) {
+      throw new Error('overlay restoration input is invalid');
+    }
+    seenPaths.add(sourceIdentity);
+    const originalSourceBytes = Buffer.from(source.originalSourceBytes);
+    return Object.freeze({
+      sourcePath,
+      originalSourceBytes,
+      originalSourceSha256: sha256Bytes(originalSourceBytes),
+      originalSourceLfSha256: sha256LfNormalized(originalSourceBytes),
+      expectedAppliedSourceLfSha256:
+        source.expectedAppliedSourceLfSha256,
+    });
+  });
+  const inspect = (snapshot: typeof snapshots[number]) => {
+    const bytes = readFileSync(snapshot.sourcePath);
+    const sha256 = sha256Bytes(bytes);
+    const lfSha256 = sha256LfNormalized(bytes);
+    return Object.freeze({
+      bytes,
+      exactOriginal: sha256 === snapshot.originalSourceSha256,
+      normalizedOriginal: lfSha256 === snapshot.originalSourceLfSha256,
+      normalizedApplied:
+        lfSha256 === snapshot.expectedAppliedSourceLfSha256,
+    });
+  };
+  const before = snapshots.map(inspect);
+  if (before.every(state => state.exactOriginal)) return 'already_clean';
+  if (before.some(
+    state => !state.exactOriginal
+      && !state.normalizedOriginal
+      && !state.normalizedApplied,
+  )) {
+    throw new Error('overlay source has unexpected bytes before restoration');
+  }
+
+  const allApplied = before.every(
+    state => !state.exactOriginal && state.normalizedApplied,
+  );
+  let reverseAttempted = false;
+  let reverseError: unknown;
+  if (allApplied) {
+    reverseAttempted = true;
+    try {
+      await input.reverseOverlay();
+    } catch (error) {
+      reverseError = error;
+    }
+  }
+  const afterReverse = snapshots.map(inspect);
+  if (afterReverse.some(
+    state => !state.exactOriginal
+      && !state.normalizedOriginal
+      && !state.normalizedApplied,
+  )) {
+    throw new Error(
+      'overlay source has unexpected bytes after reversal',
+      reverseError === undefined ? undefined : { cause: reverseError },
+    );
+  }
+  if (afterReverse.every(state => state.exactOriginal)) {
+    return reverseAttempted && reverseError === undefined
+      ? 'reversed'
+      : 'already_clean';
+  }
+
+  for (const snapshot of snapshots) {
+    writeFileSync(snapshot.sourcePath, snapshot.originalSourceBytes);
+  }
+  if (snapshots.some(snapshot =>
+    sha256Bytes(readFileSync(snapshot.sourcePath))
+      !== snapshot.originalSourceSha256
+  )) {
+    throw new Error(
+      'overlay source snapshot restoration failed',
+      reverseError === undefined ? undefined : { cause: reverseError },
+    );
+  }
+  return 'snapshot_fallback';
+}
+
 export async function restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1(
   input: Readonly<{
     sourcePath: string;
@@ -1287,49 +1431,15 @@ export async function restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOut
     reverseOverlay: () => Promise<void>;
   }>,
 ): Promise<'already_clean' | 'reversed' | 'snapshot_fallback'> {
-  const sourcePath = requireRegularFile(input.sourcePath, 'overlay source');
-  if (
-    !(input.originalSourceBytes instanceof Uint8Array)
-    || input.originalSourceBytes.byteLength === 0
-    || !/^[0-9a-f]{64}$/u.test(input.expectedAppliedSourceLfSha256)
-    || typeof input.reverseOverlay !== 'function'
-  ) {
-    throw new Error('overlay restoration input is invalid');
-  }
-  const originalSourceBytes = Buffer.from(input.originalSourceBytes);
-  const originalSourceSha256 = sha256Bytes(originalSourceBytes);
-  const before = readFileSync(sourcePath);
-  if (sha256Bytes(before) === originalSourceSha256) return 'already_clean';
-  if (sha256LfNormalized(before) !== input.expectedAppliedSourceLfSha256) {
-    throw new Error('overlay source has unexpected bytes before restoration');
-  }
-
-  let reverseError: unknown;
-  try {
-    await input.reverseOverlay();
-  } catch (error) {
-    reverseError = error;
-  }
-  const afterReverse = readFileSync(sourcePath);
-  if (sha256Bytes(afterReverse) === originalSourceSha256) return 'reversed';
-  if (
-    sha256LfNormalized(afterReverse)
-    !== input.expectedAppliedSourceLfSha256
-  ) {
-    throw new Error(
-      'overlay source has unexpected bytes after reversal',
-      reverseError === undefined ? undefined : { cause: reverseError },
-    );
-  }
-
-  writeFileSync(sourcePath, originalSourceBytes);
-  if (sha256Bytes(readFileSync(sourcePath)) !== originalSourceSha256) {
-    throw new Error(
-      'overlay source snapshot restoration failed',
-      reverseError === undefined ? undefined : { cause: reverseError },
-    );
-  }
-  return 'snapshot_fallback';
+  return restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourcesV1({
+    sources: [{
+      sourcePath: input.sourcePath,
+      originalSourceBytes: input.originalSourceBytes,
+      expectedAppliedSourceLfSha256:
+        input.expectedAppliedSourceLfSha256,
+    }],
+    reverseOverlay: input.reverseOverlay,
+  });
 }
 
 async function runExactGitApply(input: Readonly<{

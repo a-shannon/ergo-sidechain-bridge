@@ -19,7 +19,7 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_EV
   'e2s.substrate-federated-isolated-devnet-frontier-peg-out-application-evidence.v1' as const;
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_OVERLAY_SHA256 =
-  'b275a0e44306e465e61369d80763945e3e8a0cdf96fac2efcc7914f77eb53bb5' as const;
+  '2a7504ece8f175ba0ab25a2ab5ad9076afcf3b195618efbca6103544fadec495' as const;
 
 const CANONICAL_FRONTIER_PATCH_SHA256 =
   '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';

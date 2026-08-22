@@ -1271,16 +1271,37 @@ secp256k1 recipient, and derives the runtime burn ID, leaf and
 `bridge_event_root` from those emitted bytes. It also proves that the minted
 15,000,000 nanoERG supply falls by the 10,000,000 nanoERG net burn while the
 5,000,000 nanoERG bridge fee remains in escrow. Overlay SHA-256
-`b275a0e44306e465e61369d80763945e3e8a0cdf96fac2efcc7914f77eb53bb5`
-reproduces the exact passing Rust source and exports the distinct Substrate
-native block identity alongside the EVM execution block identity. A pure
+`2a7504ece8f175ba0ab25a2ab5ad9076afcf3b195618efbca6103544fadec495`
+reproduces the exact Rust node and runtime sources. For the active pooled-reserve
+profile, the bounded LAB overlay makes the runtime producer consume the exact
+profile bridge address and application sidechain identity; its legacy fallback
+retains the prior configured bridge address and genesis-derived identity. The
+named test exports the distinct Substrate native block identity alongside the
+EVM execution block identity. A pure
 TypeScript consumer binds the exact canonical and overlay patch bytes, parses
 the exported proof-relevant fields, independently rebuilds the burn
 identity/leaf/root, validates the compressed public key, and rejects isolated
 ABI, topology, identity, root and conservation drift. The source-locked
 same-process runner now owns the build/test/stdout provenance and removes the
-overlay before returning. The next slice is the exact burn-to-checkpoint
-source-attestation join, not tracker or payout work. No source finality, Ergo
+overlay before returning. Fresh campaign `v` exposed and rejected one semantic
+join defect before receipt creation: the burn test used the in-memory TestClient
+genesis while the validated mint statement and active runtime profile use the
+versioned application sidechain identity. The overlay now consumes
+`validated.statement.source_intent.sidechain_id` directly, proves that it is
+distinct from the in-memory TestClient genesis, and makes the runtime commitment
+producer select that same versioned profile identity. The normalized applied
+node-source SHA-256 is
+`ff7857d14f50fc39f9f6679087fe574380a0c88026d58082b6fa5e781e86a962`;
+the normalized applied runtime-source SHA-256 is
+`d4cd785d764ed70c25e324a3250dc0bb34db5322a9385b9c11ad1cdaf34f64d0`.
+The exact named Cargo test passed once against Frontier commit
+`75329a2df49e2cc7981485392c31160929d1bd48`, the canonical source patch,
+Rust/Cargo 1.82.0 and Git 2.54.0; the runner restored both overlaid sources
+before returning.
+This is a LAB-only producer correction; promotion into the canonical Frontier
+patch remains a separate reviewed change after the fresh campaign succeeds.
+The next slice is one fresh exact packet-to-mint-to-application-burn-to-
+checkpoint campaign, not tracker or payout work. No source finality, Ergo
 anchor, tracker admission,
 replay insertion, payout, signing, submission, broadcast, funds authority,
 Gate 5, trustless status or readiness follows from this checkpoint.

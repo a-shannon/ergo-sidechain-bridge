@@ -1,5 +1,5 @@
 diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
-index cd917a7..9d31b73 100644
+index cd917a757a449f4e56704ca579eb0537ca526f04..e12d8b6538b6fca0bbf35d93dfff4dbf44a54227 100644
 --- a/template/node/src/bridge_federated_lab_reservation_tests.rs
 +++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
 @@ -30,7 +30,8 @@ use substrate_test_client::{BlockOrigin, GenesisInit, TestClientBuilder};
@@ -25,7 +25,7 @@ index cd917a7..9d31b73 100644
  const SOURCE_PROOF_ENVELOPE_ENV: &str = "BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX";
  const DYNAMIC_SOURCE_PROOF_MARKER: &str = "bridge-lab-dynamic-source-proof-sha256=";
  
-@@ -509,6 +516,369 @@ fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
+@@ -509,6 +516,374 @@ fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
  	);
  }
  
@@ -236,11 +236,16 @@ index cd917a7..9d31b73 100644
 +	let mut recipient_ergo_tree = P2PK_ERGO_TREE_PREFIX.to_vec();
 +	recipient_ergo_tree.extend_from_slice(decoded_recipient_public_key);
 +	let recipient_ergo_tree_hash = H256::from(blake2_256(&recipient_ergo_tree));
-+	let sidechain_id = fixture
++	let sidechain_id = validated.statement.source_intent.sidechain_id;
++	let genesis_sidechain_id = fixture
 +		.client
 +		.block_hash(0)
 +		.expect("LAB genesis hash query succeeds")
 +		.expect("LAB genesis exists");
++	assert_ne!(
++		sidechain_id, genesis_sidechain_id,
++		"LAB application identity must differ from the TestClient genesis",
++	);
 +	let execution_block_hash = ethereum_block.header.hash();
 +	let burn_id = derive_lab_burn_id(sidechain_id, peg_out_transaction_hash, event_index);
 +	let burn_leaf_hash = hash_lab_burn_leaf(
@@ -395,7 +400,7 @@ index cd917a7..9d31b73 100644
  #[test]
  fn federated_lab_reservation_rejects_missing_stale_and_mismatched_authority_inputs() {
  	let missing = unactivated_fixture();
-@@ -947,6 +1317,56 @@ fn abi_call(signature: &[u8], words: &[H256]) -> Vec<u8> {
+@@ -947,6 +1322,56 @@ fn abi_call(signature: &[u8], words: &[H256]) -> Vec<u8> {
  	input
  }
  
@@ -452,3 +457,26 @@ index cd917a7..9d31b73 100644
  fn reservation_call(
  	statement_bytes: PooledReserveMintReservationStatementBytesV4,
  	source_proof: PooledReserveMintReservationSourceProofEnvelopeV4,
+diff --git a/template/runtime/src/bridge_commitment.rs b/template/runtime/src/bridge_commitment.rs
+index ae7e4662c780a4be3d99e88a974c5a56ebb131bb..8718aba0929b26d6e54bf7b854fcfbedb6e60a99 100644
+--- a/template/runtime/src/bridge_commitment.rs
++++ b/template/runtime/src/bridge_commitment.rs
+@@ -2569,11 +2569,16 @@ impl<T: Config> OnBlockStored for Pallet<T> {
+ 			Some(remaining)
+ 		};
+ 
+-		let bridge_address = BridgeAddress::<T>::get();
++		let (bridge_address, commitment_sidechain_id) =
++			if let Some(profile) = pooled_reserve_profile.as_ref() {
++				(Some(profile.bridge_address), profile.sidechain_id)
++			} else {
++				(BridgeAddress::<T>::get(), sidechain_id)
++			};
+ 		let produced = if let Some(bridge_address) = bridge_address {
+ 			produce_commitment(
+ 				bridge_address,
+-				sidechain_id,
++				commitment_sidechain_id,
+ 				block.header.number,
+ 				execution_block_hash,
+ 				receipts,
