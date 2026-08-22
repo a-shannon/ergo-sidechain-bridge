@@ -13,7 +13,7 @@ It is not a production-ready or mainnet-readiness claim.
 | Field | Current value |
 |---|---|
 | Active work package | **WP-06-FED - EIP-independent federated reference profile.** Deliver a complete, funds-safe bridge path under an explicit, versioned federation trust model. Reuse the reviewed commitment, application-binding, conservation, replay, cutover, and lifecycle invariants, but create new federated statement/profile domains wherever authority semantics differ. Do not restore unrestricted owner minting, the historical fee-from-backing payout, overlapping source-lock branches, timeout payout after burn disappearance, single-attestor legacy R9 admission, or route-local replay cutover. This track may become a usable institutional reference profile, but it is never labelled trustless. |
-| Active internal slice | **FED-6-LAB - federated peg-out campaign.** The peg-in campaign is closed through commit `da2f99d9`. The peg-out path has a real V2 runner integration for the exact dynamic Frontier application burn and a separate static V3 composition that orders packet, mint proof, application burn and checkpoint while deriving the dynamic checkpoint fields from the burn receipt and independently cross-checking the packet-owned target identities. Reproducible host and WASM path remaps bind the LAB statement to the in-process TestClient identity; whitespace-bearing remap paths fail closed. The immediate next boundary is one opt-in execution through the unmocked packet producer, runner and checkpoint continuation. Tracker admission, global replay insertion and external-fee payout follow only after that join passes. Confirmation and recovery remain later joins. The disclosed source finality remains a dual-RPC depth policy and does not authenticate Ergo proof of work. This lane is self-operated research evidence only: it does not establish independent custody, external review, Gate 5, trustless status, deployment readiness or support for public funds. |
+| Active internal slice | **FED-6-LAB - federated peg-out campaign.** The peg-in campaign is closed through commit `da2f99d9`. Fresh campaign `z` against commit `9503bc0c` now executes the unmocked packet producer, exact mint proof, dynamic Frontier application burn and federated checkpoint continuation in one owned loopback lifecycle and publishes one compact create-only receipt. The immediate next boundary is tracker admission consuming that exact checkpoint identity. Global replay insertion and external-fee payout follow as separate joins; confirmation and recovery remain later joins. The disclosed source finality remains a dual-RPC depth policy and does not authenticate Ergo proof of work. This lane is self-operated research evidence only: it does not establish independent custody, external review, Gate 5, trustless status, deployment readiness or support for public funds. |
 | Public coordination | Public `main` is protected by both required CI jobs, one approving review from someone other than the last pusher, stale-review dismissal, conversation resolution, linear history and disabled force-push/deletion. [Issue #1](https://github.com/a-shannon/ergo-sidechain-bridge/issues/1) owns independent review of exact commit `ee0686b84483e6f0af85c764e93b8a43383cc54a`; [issue #2](https://github.com/a-shannon/ergo-sidechain-bridge/issues/2) owns external target and custody evidence for a later independently operated FED-6 campaign. Private vulnerability reporting is enabled. The public issues remain parallel assurance lanes and do not authorize or describe FED-6-LAB. |
 | Frozen upgrade track | **WP-06-STARK - Ergo-verifiable finality / EIP-0045 STARK upgrade.** The V4/V5/V6 proof and cutover artifacts through commit `d7420756` remain frozen. Resume only when an activated compatible target can execute the exact verifier profile and no-submit acceptance route. The absence of an activated EIP-0045 verifier or equivalent reviewed Ergo-verifiable consumer blocks the trustless upgrade, not WP-06-FED or the bridge reference implementation as a whole. |
 | WP-08F state | The original WP-08F exact-envelope lifecycle contained the relayer owner-mint capability but still left an executable owner-mint signing operation and transport. P1-LR1 supersedes that containment by removing the owner-mint envelope/signing methods, submitter, adapter, application root, executor, daemon composition, and journal APIs that could create a new owner-mint attempt. The supported `deploy:sidechain` command and script are removed, `SidechainClient` is observation-only, the Frontier extraction spike is synthetic-only, and active readiness preflights reject historical owner-mint deployments even when their code is present. Peg-in stops after exact committed-vault verification and waits for an authenticated V4 pending reservation and atomic runtime consumption; only historical transaction confirmation/reconciliation remains. The historical Solidity owner entrypoint, historical deployments, and protocol funds authority are not removed by this change and remain outside its claim boundary |
@@ -1299,10 +1299,10 @@ The exact named Cargo test passed once against Frontier commit
 Rust/Cargo 1.82.0 and Git 2.54.0; the runner restored both overlaid sources
 before returning.
 This is a LAB-only producer correction; promotion into the canonical Frontier
-patch remains a separate reviewed change after the fresh campaign succeeds.
-The next slice is one fresh exact packet-to-mint-to-application-burn-to-
-checkpoint campaign, not tracker or payout work. No source finality, Ergo
-anchor, tracker admission,
+patch remains a separate reviewed change. Fresh campaign `z` now exercises the
+exact packet-to-mint-to-application-burn-to-checkpoint join. The next slice is
+tracker admission consuming that exact checkpoint, not replay or payout work.
+No source finality, Ergo anchor, tracker admission,
 replay insertion, payout, signing, submission, broadcast, funds authority,
 Gate 5, trustless status or readiness follows from this checkpoint.
 
@@ -1315,9 +1315,26 @@ receipt while its private provenance map retains and revalidates the complete
 packet object. A regression fixture supplies real non-canonical packet bytes and
 proves that neither portable replay bytes nor replay state enter the serialized
 root. This is a receipt-boundary correction, not a weakening of packet identity
-or custody. One new create-only campaign against the corrected bridge commit
-must succeed before tracker, replay or payout work starts; campaign `y` produced
-no receipt and closes no authority or readiness boundary.
+or custody. At that point, one new create-only campaign against the corrected
+bridge commit was still required before tracker, replay or payout work could
+start; campaign `y` produced no receipt and closed no authority or readiness
+boundary.
+
+Fresh campaign `z` against commit
+`9503bc0c55f1daf05ac0616108c584fa9f8ff391` then completed the exact
+owned-loopback setup, committed-reserve, packet-bound mint, application burn
+and federated checkpoint lifecycle. The create-only command receipt digest is
+`75d7a92aceb57efdf24e119b83e7eb85bc9a4a07446d4deb5406fe7e7cabd60f`;
+its worker and root receipt digests are respectively
+`5a3f5e5a5f80f9668042fad8dfa290e7a3cf05330bae980fbb4fae5d8b27c091`
+and `590d47879c9c163bfd810fca5e176a23295e443bc1ae65eaa3a33612e1d30bab`.
+The receipt revalidates the packet/mint/burn/checkpoint bindings, excludes local
+paths and capabilities, records local synthetic broadcast only, and keeps
+tracker admission, global replay insertion, payout, external target acceptance,
+funds authority, Gate 5, trustless status and production readiness false. All
+six owned listeners were absent after completion and the exact Frontier/Ergo
+source baseline revalidated. This closes only the FED-6-LAB application-
+checkpoint join; tracker admission is the next executable boundary.
 
 The retained V2 source-attestation session now also exposes a one-shot
 checkpoint capability for one canonical 512-byte statement under the exact
@@ -1328,10 +1345,10 @@ TestClient, commits that environment into the runner input digest, requires the
 exact proof-envelope SHA-256 marker from Rust, and compares the resulting
 sidechain, application, recipient and minted amount before
 issuing its own process-bound receipt. Focused negatives and TypeScript close
-the local implementation boundary; the exact dynamic Rust execution is not yet
-claimed and belongs to the next V3 composition. That wrapper must retain the
-same launch/packet continuation and enforce `launch -> packet -> mint -> burn ->
-checkpoint` before tracker or payout work begins. No source consensus,
+the local implementation boundary. Fresh campaign `z` now supplies the exact
+dynamic Rust execution through the V3 composition while retaining the same
+launch/packet continuation and enforcing `launch -> packet -> mint -> burn ->
+checkpoint`. Tracker admission remains the next join. No source consensus,
 sidechain finality, Ergo anchor, tracker admission, global replay insertion,
 payout, funds authority, Gate 5, trustless status or readiness follows.
 
