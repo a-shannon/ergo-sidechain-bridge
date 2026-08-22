@@ -127,7 +127,10 @@ describe('layer import rules', () => {
       'substrate-federated-isolated-devnet-setup-check-runner-v2.ts';
     const targets = {
       [packetTarget]: 'export function createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3() {}',
-      [runnerTarget]: 'export function runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2() {}',
+      [runnerTarget]: `
+        export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1() {}
+        export function runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2() {}
+      `,
       [signerTarget]: 'export interface SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2 {}',
     };
     expect(inspect({
@@ -137,6 +140,7 @@ describe('layer import rules', () => {
           createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
         } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
         import {
+          preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
           runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
         } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
         import type {
@@ -146,6 +150,7 @@ describe('layer import rules', () => {
           signer: SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
         ) {
           createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(signer);
+          preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1({});
           return runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2({});
         }
       `,
@@ -162,6 +167,19 @@ describe('layer import rules', () => {
       `,
     }).map(violation => violation.message)).toContain(
       'restricted capability binding must not escape its reviewed call: ../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js#runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+    );
+
+    expect(inspect({
+      ...targets,
+      [reviewedRoot]: `
+        import {
+          preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
+        } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+        const injectedPreflight =
+          preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1;
+      `,
+    }).map(violation => violation.message)).toContain(
+      'restricted capability binding must not escape its reviewed call: ../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js#preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
     );
 
     expect(inspect({
@@ -260,6 +278,8 @@ describe('layer import rules', () => {
       'substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts';
     const transportTarget =
       'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
+    const applicationCheckpointTarget =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
     expect(inspect({
       [reviewedRoot]: `
         import {
@@ -284,6 +304,12 @@ describe('layer import rules', () => {
         import {
           discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
         } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+        import {
+          assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance,
+          createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
+          preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3,
+        } from './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js';
+        preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3({});
       `,
       [authorizerTarget]: 'export const authorizer = true;',
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts':
@@ -293,6 +319,11 @@ describe('layer import rules', () => {
       [sourceLockAuthorizerTarget]: 'export const authorizer = true;',
       [ownedRewardDiscoveryTarget]: 'export const discovery = true;',
       [transportTarget]: 'export const transport = true;',
+      [applicationCheckpointTarget]: `
+        export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance() {}
+        export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3() {}
+        export function preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3() {}
+      `,
     })).toEqual([]);
 
     expect(inspect({
@@ -304,6 +335,22 @@ describe('layer import rules', () => {
       [authorizerTarget]: 'export const authorizer = true;',
     }).map(violation => violation.message)).toEqual([
       'restricted capability import binding is not allowlisted: ../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js#authorizeUnreviewedBroadcast',
+    ]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
+        } from './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js';
+        export const escapedApplicationCheckpointContinuation =
+          createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3;
+      `,
+      [applicationCheckpointTarget]: `
+        export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3() {}
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'reviewed app root export is not allowlisted: escapedApplicationCheckpointContinuation',
+      'restricted capability binding must not escape its reviewed call: ./substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js#createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3',
     ]);
 
     expect(inspect({

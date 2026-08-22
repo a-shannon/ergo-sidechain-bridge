@@ -68,6 +68,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
   createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
+  type ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input,
   type ProduceSubstrateFederatedIsolatedDevnetPacketV1Input,
   type SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
   type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
@@ -85,6 +86,14 @@ import {
   type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2,
   type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2,
 } from '../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance,
+  createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
+  preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3,
+  type SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
+  type SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3,
+  type SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3,
+} from './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
 } from '../../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
@@ -189,6 +198,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTIO
   'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-execution-root.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-mint-proof-campaign-root.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-application-checkpoint-campaign-root.v3' as const;
 
 const ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_EXECUTION_ROOT_V1';
@@ -202,6 +213,8 @@ const PEG_IN_COMMITTED_VAULT_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1';
 const PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_ROOT_V1';
+const PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3';
 const STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_V1';
 const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
@@ -214,6 +227,8 @@ const PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_V1';
 const PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_V1';
+const PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_V3';
 const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1';
 const FEDERATION_EPOCH = '1';
@@ -394,6 +409,43 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STAT
     PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
   );
 
+const PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST =
+  Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-application-checkpoint-campaign-static-execution.v3',
+    version: 3 as const,
+    committedVaultCompatibilityManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+    packetSessionReplacement: Object.freeze({
+      compatibilityOperation:
+        'createSubstrateFederatedIsolatedDevnetPacketSessionV1',
+      campaignOperation:
+        'createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3',
+      packetCompatibilityPreserved: true as const,
+      sourceAttestationRetainedThroughCheckpointAttestation: true as const,
+    }),
+    additionalOperations: Object.freeze([
+      'buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1',
+      'collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1',
+      'applicationCheckpointContinuation.executeApplication',
+      'confirmationObserver.observeCommittedVaultAfterApplication',
+      'applicationCheckpointContinuation.attestCheckpoint',
+      'assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance',
+    ]),
+    checkpointAdmission: Object.freeze({
+      validFrom:
+        'fresh post-application dual-node observation height of the committed-vault transaction',
+      validityBlocks: MAX_ADMISSION_VALIDITY_BLOCKS,
+    }),
+    exposedCapabilities: Object.freeze([]),
+  });
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3 =
+  sha256CanonicalJson(
+    PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST,
+    PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
+  );
+
 export interface RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
   readonly build:
     Readonly<BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input>;
@@ -413,6 +465,12 @@ export interface RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1
 extends RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input {
   readonly frontierMintProofConsumer:
     SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2;
+}
+
+export interface RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input
+extends RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input {
+  readonly frontierApplicationRunner:
+    SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3;
 }
 
 export interface SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt {
@@ -865,6 +923,88 @@ export interface SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Rec
 export interface SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1 {
   readonly receipt: Readonly<
     SubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Receipt
+  >;
+}
+
+interface SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3 {
+  readonly draft:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
+  readonly evidenceReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
+  readonly applicationCheckpoint: Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+  >;
+  readonly checkpointAdmissionObservation: Readonly<{
+    readonly expectedTxId: string;
+    readonly observedAtHeight: number;
+    readonly observationDigestHex: string;
+    readonly confirmationHeight: number;
+    readonly confirmationHeaderIdHex: string;
+  }>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3_SCHEMA;
+  readonly version: 3;
+  readonly status:
+    'committed_reserve_minted_burned_and_checkpoint_attested_in_frontier_lab';
+  readonly staticExecutionManifestDigestHex: string;
+  readonly build:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt>;
+  readonly process:
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt>;
+  readonly setup:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['setup'];
+  readonly pegIn:
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1Receipt['pegIn'];
+  readonly application:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3>;
+  readonly checks: Readonly<{
+    readonly setupVaultMintBurnAndCheckpointCompletedInOneTargetLifetime: true;
+    readonly compatibilityPacketReplacedByBoundContinuationV3: true;
+    readonly exactCommittedReserveBoundToMintStatement: true;
+    readonly exactCollectedEvidenceBoundToPacketProof: true;
+    readonly exactRetainedPacketConsumedByApplicationCheckpointRoot: true;
+    readonly checkpointAdmissionDerivedFromFreshVaultReobservation: true;
+    readonly everyEphemeralCapabilityDisposedBeforeReturn: true;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localSyntheticCompatibilityOnly: true;
+    readonly localSetupAndValuePathBroadcastExecuted: true;
+    readonly sourceLockConsumptionEstablished: true;
+    readonly reserveLineageEstablished: true;
+    readonly depositCommitmentStateEstablished: true;
+    readonly sourceEvidenceCollectionProvenanceEstablished: true;
+    readonly frontierTestClientReservationAndMintExecuted: true;
+    readonly frontierApplicationBurnExecuted: true;
+    readonly federatedCheckpointAttestationEstablished: true;
+    readonly externalTargetNodeAcceptanceEstablished: false;
+    readonly sourceCanonicalityIndependentlyVerified: false;
+    readonly deterministicSourceFinalityEstablished: false;
+    readonly ergoPowAuthenticated: false;
+    readonly ergoAnchorEstablished: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly globalReplayInsertionEstablished: false;
+    readonly payoutAuthorized: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+    readonly processLossRecoveryEstablished: false;
+    readonly profileActivated: false;
+    readonly mintAuthorized: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3 {
+  readonly receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt
   >;
 }
 
@@ -1398,16 +1538,167 @@ export async function runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignR
   return Object.freeze({ receipt });
 }
 
+/**
+ * Executes the real LAB packet -> mint -> application burn -> checkpoint join
+ * while retaining the source-attestation session created before setup.
+ */
+export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+  input: Readonly<
+    RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input
+  >,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3
+>> {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: input.lifecycle.sourceHistory.acceptance.bridgeAddress,
+    tokenAddressHex: input.lifecycle.sourceHistory.acceptance.tokenAddress,
+  });
+  const pegInPlan = normalizePegInCandidatePlan(input.pegIn);
+  const applicationRunner = normalizeFrontierApplicationRunnerPlan(
+    input.frontierApplicationRunner,
+  );
+  const { buildReceipt, managed } = await runManagedCampaign(
+    input,
+    pegInPlan,
+    'consume-application-checkpoint',
+    undefined,
+    applicationRunner,
+  );
+  const pegIn = managed.value.pegIn;
+  const application = managed.value.applicationCheckpoint;
+  if (
+    pegIn === undefined
+    || pegIn.sourceLockCheck === undefined
+    || pegIn.sourceLockExecution === undefined
+    || pegIn.committedVaultCheck === undefined
+    || pegIn.committedVaultExecution === undefined
+    || application === undefined
+  ) {
+    throw new Error(
+      'isolated devnet peg-in application-checkpoint campaign was incomplete',
+    );
+  }
+  const root = application.applicationCheckpoint;
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(
+    root,
+  );
+  const mintProof = root.mintSourceProof;
+  const checkpointStatement =
+    root.checkpoint.checkpointAttestation.checkpointStatement;
+  const admissionObservation = application.checkpointAdmissionObservation;
+  const validFrom = admissionObservation.observedAtHeight.toString();
+  const expiresAt = (
+    BigInt(validFrom) + BigInt(MAX_ADMISSION_VALIDITY_BLOCKS)
+  ).toString();
+  if (
+    root.packet.receipt.receiptDigestHex
+      !== managed.value.lifecycle.packetReceiptDigestHex
+    || mintProof.packetReceiptDigestHex
+      !== root.packet.receipt.receiptDigestHex
+    || mintProof.sourceProof.sourceEvidenceReceiptDigestHex
+      !== application.evidenceReceipt.receiptDigestHex
+    || mintProof.sourceProof.mintReservationDraftDigestHex
+      !== application.draft.draftDigestHex
+    || mintProof.sourceProof.mintReservationStatementIdHex
+      !== application.draft.statementIdHex
+    || mintProof.sourceProof.mintIdentityHex
+      !== application.draft.reservationKeyHex
+    || admissionObservation.expectedTxId
+      !== pegIn.committedVaultExecution.expectedTxId
+    || admissionObservation.confirmationHeight
+      !== pegIn.committedVaultExecution.confirmationHeight
+    || admissionObservation.confirmationHeaderIdHex
+      !== pegIn.committedVaultExecution.confirmationHeaderIdHex
+    || admissionObservation.observedAtHeight
+      < admissionObservation.confirmationHeight
+    || checkpointStatement.admissionValidFromErgoHeight !== validFrom
+    || checkpointStatement.admissionExpiresAtErgoHeight !== expiresAt
+    || root.binding.packetReceiptDigestHex
+      !== root.packet.receipt.receiptDigestHex
+    || root.binding.mintSourceProofReceiptDigestHex
+      !== mintProof.receiptDigestHex
+  ) {
+    throw new Error(
+      'isolated devnet peg-in application-checkpoint campaign binding changed',
+    );
+  }
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3_SCHEMA,
+    version: 3 as const,
+    status:
+      'committed_reserve_minted_burned_and_checkpoint_attested_in_frontier_lab' as const,
+    staticExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
+    build: buildReceipt,
+    process: managed.receipt,
+    setup: {
+      lifecycle: managed.value.lifecycle,
+      transactions: managed.value.transactions,
+    },
+    pegIn: pegIn as SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt['pegIn'],
+    application,
+    checks: {
+      setupVaultMintBurnAndCheckpointCompletedInOneTargetLifetime: true as const,
+      compatibilityPacketReplacedByBoundContinuationV3: true as const,
+      exactCommittedReserveBoundToMintStatement: true as const,
+      exactCollectedEvidenceBoundToPacketProof: true as const,
+      exactRetainedPacketConsumedByApplicationCheckpointRoot: true as const,
+      checkpointAdmissionDerivedFromFreshVaultReobservation: true as const,
+      everyEphemeralCapabilityDisposedBeforeReturn: true as const,
+      returnedValueContainsCapabilities: false as const,
+    },
+    boundaries: {
+      localSyntheticCompatibilityOnly: true as const,
+      localSetupAndValuePathBroadcastExecuted: true as const,
+      sourceLockConsumptionEstablished: true as const,
+      reserveLineageEstablished: true as const,
+      depositCommitmentStateEstablished: true as const,
+      sourceEvidenceCollectionProvenanceEstablished: true as const,
+      frontierTestClientReservationAndMintExecuted: true as const,
+      frontierApplicationBurnExecuted: true as const,
+      federatedCheckpointAttestationEstablished: true as const,
+      externalTargetNodeAcceptanceEstablished: false as const,
+      sourceCanonicalityIndependentlyVerified: false as const,
+      deterministicSourceFinalityEstablished: false as const,
+      ergoPowAuthenticated: false as const,
+      ergoAnchorEstablished: false as const,
+      trackerAdmissionEstablished: false as const,
+      globalReplayInsertionEstablished: false as const,
+      payoutAuthorized: false as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+      processLossRecoveryEstablished: false as const,
+      profileActivated: false as const,
+      mintAuthorized: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+  };
+  const receipt = finalizeReceipt(
+    body,
+    PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN,
+  );
+  return Object.freeze({ receipt });
+}
+
 type PegInActionV1 =
   | 'candidate'
   | 'check-source-lock'
   | 'execute-source-lock'
   | 'execute-committed-vault'
-  | 'consume-mint-proof';
+  | 'consume-mint-proof'
+  | 'consume-application-checkpoint';
 
-type SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2 =
+type SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3 =
   | Readonly<SubstrateFederatedIsolatedDevnetPacketSessionV1>
-  | Readonly<SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2>;
+  | Readonly<SubstrateFederatedIsolatedDevnetPacketContinuationSessionV2>
+  | Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3
+  >;
 
 interface ManagedCampaignExecutionV1 {
   readonly buildReceipt:
@@ -1427,13 +1718,18 @@ async function runManagedCampaign(
   frontierMintProofConsumer:
     Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>
     | undefined = undefined,
+  frontierApplicationRunner:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>
+    | undefined = undefined,
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   if (
     (pegInAction === 'consume-mint-proof')
       !== (frontierMintProofConsumer !== undefined)
+    || (pegInAction === 'consume-application-checkpoint')
+      !== (frontierApplicationRunner !== undefined)
   ) {
     throw new Error(
-      'isolated devnet Frontier mint-proof consumer must match the campaign action',
+      'isolated devnet Frontier consumer must match the campaign action',
     );
   }
   const buildInput = input.build;
@@ -1446,7 +1742,7 @@ async function runManagedCampaign(
   let setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
   let packetSession:
-    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2 | undefined;
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3 | undefined;
   let nodeSession:
     Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1>
     | undefined;
@@ -1461,13 +1757,17 @@ async function runManagedCampaign(
       claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(
         setupSession,
       );
-    packetSession = pegInAction === 'consume-mint-proof'
-      ? createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2(
+    packetSession = pegInAction === 'consume-application-checkpoint'
+      ? createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
         setupSession.signer,
       )
-      : createSubstrateFederatedIsolatedDevnetPacketSessionV1(
-        setupSession.signer,
-      );
+      : pegInAction === 'consume-mint-proof'
+        ? createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2(
+          setupSession.signer,
+        )
+        : createSubstrateFederatedIsolatedDevnetPacketSessionV1(
+          setupSession.signer,
+        );
     assertPacketErgoSignerMatchesSetup(packetSession, setupSession.signer);
     const profilePins = deriveExpectedProfilePins(packetSession);
     nodeSession = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
@@ -1495,6 +1795,7 @@ async function runManagedCampaign(
         pegInPlan,
         pegInAction,
         frontierMintProofConsumer,
+        frontierApplicationRunner,
       ),
     );
     assertCapabilityFreePlainData(managed, 'isolated devnet managed result');
@@ -1560,6 +1861,9 @@ interface ExecutionActionResult {
     SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'];
   readonly mintProof?:
     Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>;
+  readonly applicationCheckpoint?: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
+  >;
 }
 
 const MANAGED_PEG_IN_SOURCE_LOCK_MATERIAL = new WeakMap<
@@ -1577,7 +1881,7 @@ async function executeManagedSetupAction(
   setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
   packetSession:
-    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2,
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3,
   profilePins:
     Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input['expectedProfilePins']>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1587,13 +1891,18 @@ async function executeManagedSetupAction(
   frontierMintProofConsumer:
     Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>
     | undefined,
+  frontierApplicationRunner:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>
+    | undefined,
 ): Promise<Readonly<ExecutionActionResult>> {
   if (
     (pegInAction === 'consume-mint-proof')
       !== (frontierMintProofConsumer !== undefined)
+    || (pegInAction === 'consume-application-checkpoint')
+      !== (frontierApplicationRunner !== undefined)
   ) {
     throw new Error(
-      'isolated devnet Frontier mint-proof consumer must match the managed action',
+      'isolated devnet Frontier consumer must match the managed action',
     );
   }
   const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
@@ -1729,6 +2038,9 @@ async function executeManagedSetupAction(
     let mintProof:
       Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>
       | undefined;
+    let applicationCheckpoint: Readonly<
+      SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
+    > | undefined;
     if (pegInPlan !== undefined) {
       pegIn = await buildManagedPegInCandidate(
         pegInPlan,
@@ -1746,6 +2058,7 @@ async function executeManagedSetupAction(
         pegInAction === 'execute-source-lock'
         || pegInAction === 'execute-committed-vault'
         || pegInAction === 'consume-mint-proof'
+        || pegInAction === 'consume-application-checkpoint'
       ) {
         pegIn = await executeManagedPegInSourceLock(
           pegIn,
@@ -1759,6 +2072,7 @@ async function executeManagedSetupAction(
         if (
           pegInAction === 'execute-committed-vault'
           || pegInAction === 'consume-mint-proof'
+          || pegInAction === 'consume-application-checkpoint'
         ) {
           pegIn = await executeManagedPegInCommittedVault(
             pegIn,
@@ -1789,6 +2103,28 @@ async function executeManagedSetupAction(
             frontierMintProofConsumer,
             completionDeadline,
           );
+        } else if (pegInAction === 'consume-application-checkpoint') {
+          if (
+            frontierApplicationRunner === undefined
+            || !('executeApplication' in packetSession)
+            || !('attestCheckpoint' in packetSession)
+          ) {
+            throw new Error(
+              'isolated devnet application-checkpoint campaign requires its V3 continuation and runner',
+            );
+          }
+          assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+          applicationCheckpoint =
+            await consumeManagedPegInApplicationCheckpoint(
+              packetSession,
+              packet,
+              pegIn,
+              batch,
+              target,
+              frontierApplicationRunner,
+              observer,
+              completionDeadline,
+            );
         }
       }
       assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
@@ -1823,6 +2159,9 @@ async function executeManagedSetupAction(
       transactions: finalTransactions,
       ...(pegIn === undefined ? {} : { pegIn }),
       ...(mintProof === undefined ? {} : { mintProof }),
+      ...(applicationCheckpoint === undefined
+        ? {}
+        : { applicationCheckpoint }),
     });
   } catch (error) {
     actionFailure = error;
@@ -1987,6 +2326,7 @@ async function buildManagedPegInCandidate(
     sourceLockCheck = (
       pegInAction === 'execute-committed-vault'
       || pegInAction === 'consume-mint-proof'
+      || pegInAction === 'consume-application-checkpoint'
     )
       ? await setupSession.checkPegInSourceLockRetainingSigner(
         sourceLockCheckInput,
@@ -2531,41 +2871,12 @@ async function consumeManagedPegInMintProof(
     Readonly<SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerPlanV2>,
   completionDeadline: number,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInMintProofCampaignMaterialV1>> {
-  const committedVaultObservation =
-    pegIn.committedVaultExecution?.outputObservation;
-  if (committedVaultObservation === undefined) {
-    throw new Error(
-      'isolated devnet mint-proof campaign requires a confirmed committed reserve',
-    );
-  }
-  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
-  const draft =
-    buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
-      batch,
-      target,
-      candidate: pegIn.candidate,
-      committedVaultObservation,
-    });
-  const evidenceReceipt =
-    collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1({
-      batch,
-      target,
-      candidate: pegIn.candidate,
-      committedVaultObservation,
-      draft,
-    });
-  const issuedAtNativeHeight =
-    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2;
-  const expiresAtNativeHeight = (
-    BigInt(issuedAtNativeHeight)
-    + BigInt(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2)
-  ).toString();
-  const packetProof = packetSession.produceMintSourceProof(packet, {
-    draft,
-    evidenceReceipt,
-    issuedAtNativeHeight,
-    expiresAtNativeHeight,
-  });
+  const { draft, evidenceReceipt, mintSourceProofInput } =
+    buildManagedPegInMintSourceProofInput(pegIn, batch, target);
+  const packetProof = packetSession.produceMintSourceProof(
+    packet,
+    mintSourceProofInput,
+  );
   assertManagedActionDeadline(
     completionDeadline,
     'Frontier mint-proof consumer',
@@ -2621,6 +2932,167 @@ async function consumeManagedPegInMintProof(
     'isolated devnet peg-in mint-proof campaign material',
   );
   return deepFreeze(material);
+}
+
+async function consumeManagedPegInApplicationCheckpoint(
+  continuation: Readonly<
+    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3
+  >,
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+  pegIn:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'],
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  applicationRunner:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>,
+  observer:
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  completionDeadline: number,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
+>> {
+  const { draft, evidenceReceipt, mintSourceProofInput } =
+    buildManagedPegInMintSourceProofInput(pegIn, batch, target);
+  const committedVaultExecution = pegIn.committedVaultExecution;
+  if (committedVaultExecution === undefined) {
+    throw new Error(
+      'isolated devnet application-checkpoint campaign requires a confirmed committed reserve',
+    );
+  }
+  assertManagedActionDeadline(
+    completionDeadline,
+    'Frontier application-checkpoint campaign',
+  );
+  const application = await continuation.executeApplication(packet, {
+    mintSourceProofInput,
+    applicationRunnerInput: applicationRunner,
+  }, completionDeadline);
+  const freshConfirmation = await waitForCanonicalConfirmation(
+    observer,
+    committedVaultExecution.expectedTxId,
+    completionDeadline,
+    'application-checkpoint-admission',
+  );
+  if (
+    freshConfirmation.confirmationHeight
+      !== committedVaultExecution.confirmationHeight
+    || freshConfirmation.confirmationHeaderIdHex
+      !== committedVaultExecution.confirmationHeaderIdHex
+    || freshConfirmation.observedAtHeight
+      < freshConfirmation.confirmationHeight
+  ) {
+    throw new Error(
+      'isolated devnet committed reserve changed before checkpoint attestation',
+    );
+  }
+  const checkpointAdmissionObservation = Object.freeze({
+    expectedTxId: committedVaultExecution.expectedTxId,
+    observedAtHeight: freshConfirmation.observedAtHeight,
+    observationDigestHex: freshConfirmation.observationDigestHex,
+    confirmationHeight: freshConfirmation.confirmationHeight,
+    confirmationHeaderIdHex: freshConfirmation.confirmationHeaderIdHex,
+  });
+  assertCapabilityFreePlainData(
+    checkpointAdmissionObservation,
+    'isolated devnet checkpoint admission observation',
+  );
+  const validFromErgoHeight = freshConfirmation.observedAtHeight.toString();
+  const expiresAtErgoHeight = (
+    BigInt(validFromErgoHeight) + BigInt(MAX_ADMISSION_VALIDITY_BLOCKS)
+  ).toString();
+  const applicationCheckpoint = continuation.attestCheckpoint(
+    application,
+    {
+      validFromErgoHeight,
+      expiresAtErgoHeight,
+    },
+  );
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(
+    applicationCheckpoint,
+  );
+  if (
+    applicationCheckpoint.packet !== packet
+    || applicationCheckpoint.mintSourceProof.packetReceiptDigestHex
+      !== packet.receipt.receiptDigestHex
+    || applicationCheckpoint.mintSourceProof.sourceProof
+      .sourceEvidenceReceiptDigestHex !== evidenceReceipt.receiptDigestHex
+    || applicationCheckpoint.mintSourceProof.sourceProof
+      .mintReservationDraftDigestHex !== draft.draftDigestHex
+    || applicationCheckpoint.mintSourceProof.sourceProof
+      .mintReservationStatementIdHex !== draft.statementIdHex
+    || applicationCheckpoint.mintSourceProof.sourceProof.mintIdentityHex
+      !== draft.reservationKeyHex
+  ) {
+    throw new Error(
+      'isolated devnet application-checkpoint producer-to-consumer binding changed',
+    );
+  }
+  const material = {
+    draft,
+    evidenceReceipt,
+    applicationCheckpoint,
+    checkpointAdmissionObservation,
+  };
+  assertCapabilityFreePlainData(
+    material,
+    'isolated devnet peg-in application-checkpoint campaign material',
+  );
+  return deepFreeze(material);
+}
+
+function buildManagedPegInMintSourceProofInput(
+  pegIn:
+    SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn'],
+  batch:
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<{
+  readonly draft:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
+  readonly evidenceReceipt:
+    Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
+  readonly mintSourceProofInput:
+    Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input>;
+}> {
+  const committedVaultObservation =
+    pegIn.committedVaultExecution?.outputObservation;
+  if (committedVaultObservation === undefined) {
+    throw new Error(
+      'isolated devnet mint proof requires a confirmed committed reserve',
+    );
+  }
+  const draft =
+    buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+      batch,
+      target,
+      candidate: pegIn.candidate,
+      committedVaultObservation,
+    });
+  const evidenceReceipt =
+    collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1({
+      batch,
+      target,
+      candidate: pegIn.candidate,
+      committedVaultObservation,
+      draft,
+    });
+  const issuedAtNativeHeight =
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2;
+  const expiresAtNativeHeight = (
+    BigInt(issuedAtNativeHeight)
+    + BigInt(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2)
+  ).toString();
+  return Object.freeze({
+    draft,
+    evidenceReceipt,
+    mintSourceProofInput: Object.freeze({
+      draft,
+      evidenceReceipt,
+      issuedAtNativeHeight,
+      expiresAtNativeHeight,
+    }),
+  });
 }
 
 function assertSourceLockOperationalAdmission(
@@ -3078,7 +3550,7 @@ function assertCanonicalBatch(
 
 function deriveExpectedProfilePins(
   packetSession:
-    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2,
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3,
 ): Readonly<
   ProduceSubstrateFederatedIsolatedDevnetPacketV1Input['expectedProfilePins']
 > {
@@ -3102,7 +3574,7 @@ function deriveExpectedProfilePins(
 
 function assertPacketErgoSignerMatchesSetup(
   packetSession:
-    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2,
+    SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3,
   setupSigner:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
 ): void {
@@ -3219,6 +3691,56 @@ function normalizeFrontierMintProofConsumerPlan(
   );
   return preflightSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2(
     input,
+  );
+}
+
+function normalizeFrontierApplicationRunnerPlan(
+  input:
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>,
+): Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3> {
+  assertCapabilityFreePlainData(
+    input,
+    'isolated devnet Frontier application runner plan',
+  );
+  assertExactObjectKeys(
+    input,
+    [
+      'cargoDependencyCacheDirectory',
+      'cargoExecutablePath',
+      'frontierSourceDirectory',
+      'gitExecutablePath',
+      'offline',
+      'rustcExecutablePath',
+      'temporaryDirectoryRoot',
+    ],
+    'isolated devnet Frontier application runner plan',
+  );
+  if (
+    input.offline !== true
+    || [
+      input.cargoDependencyCacheDirectory,
+      input.cargoExecutablePath,
+      input.frontierSourceDirectory,
+      input.gitExecutablePath,
+      input.rustcExecutablePath,
+      input.temporaryDirectoryRoot,
+    ].some(value => typeof value !== 'string' || value.trim() === '')
+  ) {
+    throw new Error(
+      'isolated devnet Frontier application runner plan is invalid',
+    );
+  }
+  const normalized = Object.freeze({
+    frontierSourceDirectory: input.frontierSourceDirectory,
+    temporaryDirectoryRoot: input.temporaryDirectoryRoot,
+    cargoDependencyCacheDirectory: input.cargoDependencyCacheDirectory,
+    cargoExecutablePath: input.cargoExecutablePath,
+    rustcExecutablePath: input.rustcExecutablePath,
+    gitExecutablePath: input.gitExecutablePath,
+    offline: true as const,
+  });
+  return preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3(
+    normalized,
   );
 }
 

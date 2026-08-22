@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   disposeCalls: 0,
   createSessionCalls: 0,
   runnerFailure: null as Error | null,
+  runnerPreflightFailure: null as Error | null,
+  runnerPreflightCalls: 0,
   runnerTargetDrift: false,
   checkpointRootDrift: false,
   checkpointApplicationDrift: false,
@@ -164,6 +166,14 @@ vi.mock(
         value,
         'application runner',
       ),
+    preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1:
+      (input: Readonly<Record<string, unknown>>) => {
+        mocks.runnerPreflightCalls += 1;
+        if (mocks.runnerPreflightFailure !== null) {
+          throw mocks.runnerPreflightFailure;
+        }
+        return Object.freeze({ ...input });
+      },
     runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2:
       async (input: Record<string, unknown>) => {
         mocks.sequence.push('application-burn');
@@ -227,6 +237,8 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     mocks.disposeCalls = 0;
     mocks.createSessionCalls = 0;
     mocks.runnerFailure = null;
+    mocks.runnerPreflightFailure = null;
+    mocks.runnerPreflightCalls = 0;
     mocks.runnerTargetDrift = false;
     mocks.checkpointRootDrift = false;
     mocks.checkpointApplicationDrift = false;
@@ -255,6 +267,7 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     ]);
     expect(mocks.runnerInput?.mintSourceProofReceipt)
       .toBe(mocks.innerMintSourceProof);
+    expect(mocks.runnerPreflightCalls).toBe(2);
     expect(mocks.checkpointInput).toEqual({
       sourceNativeBlockHeight: 7,
       sourceNativeBlockHashHex: mocks.sourceNativeBlockHashHex,
@@ -330,6 +343,20 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     expect(mocks.createSessionCalls).toBe(0);
   });
 
+  it('rejects an invalid runner plan before creating packet custody', async () => {
+    mocks.runnerPreflightFailure = new Error('injected runner preflight failure');
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3(
+        rootInput() as never,
+      ),
+    ).rejects.toThrow(/injected runner preflight failure/u);
+
+    expect(mocks.runnerPreflightCalls).toBe(1);
+    expect(mocks.createSessionCalls).toBe(0);
+    expect(mocks.sequence).toEqual([]);
+  });
+
   it('closes retained custody when the process runner fails', async () => {
     mocks.runnerFailure = new Error('injected runner failure');
     await expect(
@@ -380,6 +407,51 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
       await expect(
         continuation.complete(packet, completionInput() as never),
       ).rejects.toThrow(/exact retained packet/u);
+    } finally {
+      continuation.dispose();
+    }
+    expect(mocks.disposeCalls).toBe(1);
+  });
+
+  it('retains the exact application stage until a later checkpoint attestation', async () => {
+    const continuation =
+      createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        Object.freeze({}) as never,
+      );
+    try {
+      const packet = await continuation.produce(Object.freeze({}) as never);
+      const application = await continuation.executeApplication(
+        packet,
+        applicationInput() as never,
+      );
+      expect(mocks.sequence).toEqual([
+        'session',
+        'packet',
+        'mint',
+        'application-burn',
+      ]);
+      expect(mocks.checkpoint).toBeUndefined();
+
+      expect(() =>
+        continuation.attestCheckpoint(
+          Object.freeze({ ...application }) as never,
+          rootInput().checkpointAdmission,
+        )
+      ).toThrow(/exact application stage/u);
+
+      const receipt = continuation.attestCheckpoint(
+        application,
+        rootInput().checkpointAdmission,
+      );
+      expect(receipt.applicationRunner).toBe(application.applicationRunner);
+      expect(mocks.sequence).toEqual([
+        'session',
+        'packet',
+        'mint',
+        'application-burn',
+        'checkpoint',
+        'dispose',
+      ]);
     } finally {
       continuation.dispose();
     }
@@ -447,6 +519,14 @@ function completionInput() {
     mintSourceProofInput: input.mintSourceProofInput,
     applicationRunnerInput: input.applicationRunnerInput,
     checkpointAdmission: input.checkpointAdmission,
+  };
+}
+
+function applicationInput() {
+  const input = rootInput();
+  return {
+    mintSourceProofInput: input.mintSourceProofInput,
+    applicationRunnerInput: input.applicationRunnerInput,
   };
 }
 

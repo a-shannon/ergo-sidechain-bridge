@@ -27,6 +27,9 @@ const mocked = vi.hoisted(() => ({
   frontierConsumerPreflight: vi.fn(),
   frontierConsumer: vi.fn(),
   frontierConsumerAssert: vi.fn(),
+  applicationCheckpointContinuation: vi.fn(),
+  applicationCheckpointAssert: vi.fn(),
+  applicationRunnerPreflight: vi.fn(),
   sourceHistory: vi.fn(),
   rewardDiscovery: vi.fn(),
   rewardDiscoveryAssert: vi.fn(),
@@ -95,6 +98,14 @@ vi.mock('../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-
     mocked.frontierConsumerPreflight,
   runSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerV2:
     mocked.frontierConsumer,
+}));
+vi.mock('./substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance:
+    mocked.applicationCheckpointAssert,
+  createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3:
+    mocked.applicationCheckpointContinuation,
+  preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3:
+    mocked.applicationRunnerPreflight,
 }));
 vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => ({
   collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocked.sourceHistory,
@@ -203,6 +214,7 @@ vi.mock('../../state-tracker.js', () => ({
 
 import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
@@ -210,6 +222,7 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
@@ -255,6 +268,10 @@ describe('isolated devnet genesis setup execution root V1', () => {
   let evidenceReceipt: ReturnType<typeof validEvidenceReceipt>;
   let packetProof: ReturnType<typeof validPacketProof>;
   let consumerReceipt: ReturnType<typeof validConsumerReceipt>;
+  let applicationCheckpointReceipt:
+    ReturnType<typeof validApplicationCheckpointReceipt>;
+  let applicationCheckpointStage:
+    ReturnType<typeof validApplicationCheckpointStage>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -290,6 +307,13 @@ describe('isolated devnet genesis setup execution root V1', () => {
       mintDraft,
       evidenceReceipt,
       packetProof,
+    );
+    applicationCheckpointReceipt = validApplicationCheckpointReceipt(
+      packetV2,
+      packetProof,
+    );
+    applicationCheckpointStage = validApplicationCheckpointStage(
+      applicationCheckpointReceipt,
     );
 
     mocked.build.mockImplementation(async () => {
@@ -346,6 +370,57 @@ describe('isolated devnet genesis setup execution root V1', () => {
         return packetProof;
       }),
     }));
+    mocked.applicationRunnerPreflight.mockImplementation(input => {
+      order.push('peg-in:application-runner:preflight');
+      return Object.freeze({ ...input });
+    });
+    mocked.applicationCheckpointContinuation.mockImplementation(() => ({
+      signer: packetSigner(),
+      dispose: vi.fn(() => order.push('dispose:application-checkpoint-v3')),
+      produce: vi.fn(async () => {
+        order.push('packet-v3:produce');
+        return packetV2;
+      }),
+      executeApplication: vi.fn(async (
+        packet,
+        input,
+        completionDeadline,
+      ) => {
+        order.push('peg-in:application:execute');
+        if (
+          packet !== packetV2
+          || input.mintSourceProofInput.draft !== mintDraft
+          || input.mintSourceProofInput.evidenceReceipt !== evidenceReceipt
+          || input.applicationRunnerInput.frontierSourceDirectory
+            !== 'reviewed/frontier'
+          || input.applicationRunnerInput.temporaryDirectoryRoot
+            !== 'reviewed/frontier-temporary'
+          || input.applicationRunnerInput.cargoDependencyCacheDirectory
+            !== 'reviewed/frontier-cargo-cache'
+          || !Number.isFinite(completionDeadline)
+          || completionDeadline <= performance.now()
+        ) {
+          throw new Error(
+            'application execution input binding changed',
+          );
+        }
+        return applicationCheckpointStage;
+      }),
+      attestCheckpoint: vi.fn((application, checkpointAdmission) => {
+        order.push('peg-in:checkpoint:attest');
+        if (
+          application !== applicationCheckpointStage
+          || checkpointAdmission.validFromErgoHeight !== '220'
+          || checkpointAdmission.expiresAtErgoHeight !== '284'
+        ) {
+          throw new Error('checkpoint attestation input binding changed');
+        }
+        return applicationCheckpointReceipt;
+      }),
+      complete: vi.fn(() => {
+        throw new Error('legacy one-step completion must not be used');
+      }),
+    }));
     mocked.packetV2Assert.mockImplementation(value => {
       order.push('packet-v2:assert');
       if (value !== packetV2) {
@@ -393,6 +468,12 @@ describe('isolated devnet genesis setup execution root V1', () => {
       order.push('peg-in:mint-proof:consumer:assert');
       if (value !== consumerReceipt) {
         throw new Error('Frontier mint-proof consumer provenance changed');
+      }
+    });
+    mocked.applicationCheckpointAssert.mockImplementation(value => {
+      order.push('peg-in:application-checkpoint:assert');
+      if (value !== applicationCheckpointReceipt) {
+        throw new Error('application-checkpoint provenance changed');
       }
     });
     mocked.process.mockReturnValue(processSession);
@@ -1269,6 +1350,292 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
   });
 
+  it('retains one exact packet through the real application burn and checkpoint composition', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(mocked.packetContinuation).not.toHaveBeenCalled();
+    expect(mocked.applicationCheckpointContinuation).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('peg-in:application-runner:preflight')).toBeLessThan(
+      order.indexOf('build'),
+    );
+    expect(order.indexOf('peg-in:committed-vault:outputs')).toBeLessThan(
+      order.indexOf('peg-in:mint-proof:draft'),
+    );
+    expect(order.indexOf('peg-in:mint-proof:draft')).toBeLessThan(
+      order.indexOf('peg-in:mint-proof:evidence'),
+    );
+    expect(order.indexOf('peg-in:mint-proof:evidence')).toBeLessThan(
+      order.indexOf('peg-in:application:execute'),
+    );
+    expect(order.indexOf('peg-in:application:execute')).toBeLessThan(
+      order.indexOf('observe:committedVault:post-application'),
+    );
+    expect(order.indexOf('observe:committedVault:post-application')).toBeLessThan(
+      order.indexOf('peg-in:checkpoint:attest'),
+    );
+    expect(order.indexOf('peg-in:checkpoint:attest')).toBeLessThan(
+      order.indexOf('peg-in:application-checkpoint:assert'),
+    );
+    expect(order.indexOf('peg-in:application-checkpoint:assert')).toBeLessThan(
+      order.indexOf('dispose:application-checkpoint-v3'),
+    );
+    expect(order.indexOf('dispose:application-checkpoint-v3')).toBeLessThan(
+      order.lastIndexOf('peg-in:application-checkpoint:assert'),
+    );
+    const continuation =
+      mocked.applicationCheckpointContinuation.mock.results[0]!.value;
+    expect(continuation.executeApplication).toHaveBeenCalledWith(
+      packetV2,
+      {
+        mintSourceProofInput: {
+          draft: mintDraft,
+          evidenceReceipt,
+          issuedAtNativeHeight:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+          expiresAtNativeHeight:
+            (
+              BigInt(
+                SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+              )
+              + BigInt(
+                SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+              )
+            ).toString(),
+        },
+        applicationRunnerInput: {
+          frontierSourceDirectory: 'reviewed/frontier',
+          temporaryDirectoryRoot: 'reviewed/frontier-temporary',
+          cargoDependencyCacheDirectory: 'reviewed/frontier-cargo-cache',
+          cargoExecutablePath: 'reviewed/cargo.exe',
+          rustcExecutablePath: 'reviewed/rustc.exe',
+          gitExecutablePath: 'reviewed/git.exe',
+          offline: true,
+        },
+      },
+      expect.any(Number),
+    );
+    expect(continuation.attestCheckpoint).toHaveBeenCalledWith(
+      applicationCheckpointStage,
+      {
+        validFromErgoHeight: '220',
+        expiresAtErgoHeight: '284',
+      },
+    );
+    expect(continuation.complete).not.toHaveBeenCalled();
+    expect(result.receipt).toMatchObject({
+      status:
+        'committed_reserve_minted_burned_and_checkpoint_attested_in_frontier_lab',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
+      application: {
+        draft: mintDraft,
+        evidenceReceipt,
+        applicationCheckpoint: applicationCheckpointReceipt,
+        checkpointAdmissionObservation: {
+          expectedTxId: digest('9'),
+          observedAtHeight: 220,
+          confirmationHeight: 140,
+        },
+      },
+      checks: {
+        setupVaultMintBurnAndCheckpointCompletedInOneTargetLifetime: true,
+        compatibilityPacketReplacedByBoundContinuationV3: true,
+        exactCommittedReserveBoundToMintStatement: true,
+        exactCollectedEvidenceBoundToPacketProof: true,
+        exactRetainedPacketConsumedByApplicationCheckpointRoot: true,
+        checkpointAdmissionDerivedFromFreshVaultReobservation: true,
+        everyEphemeralCapabilityDisposedBeforeReturn: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        sourceLockConsumptionEstablished: true,
+        reserveLineageEstablished: true,
+        frontierTestClientReservationAndMintExecuted: true,
+        frontierApplicationBurnExecuted: true,
+        federatedCheckpointAttestationEstablished: true,
+        deterministicSourceFinalityEstablished: false,
+        ergoAnchorEstablished: false,
+        trackerAdmissionEstablished: false,
+        globalReplayInsertionEstablished: false,
+        payoutAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it('rejects a cloned application packet and tears down the campaign', async () => {
+    applicationCheckpointReceipt = Object.freeze({
+      ...applicationCheckpointReceipt,
+      packet: structuredClone(packetV2),
+    }) as never;
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      'isolated devnet application-checkpoint producer-to-consumer binding changed',
+    );
+
+    expect(order).toContain('peg-in:application:execute');
+    expect(order).toContain('peg-in:checkpoint:attest');
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
+  });
+
+  it('tears down every owned capability when the application runner rejects', async () => {
+    mocked.applicationCheckpointContinuation.mockImplementationOnce(() => ({
+      signer: packetSigner(),
+      dispose: vi.fn(() => order.push('dispose:application-checkpoint-v3')),
+      produce: vi.fn(async () => {
+        order.push('packet-v3:produce');
+        return packetV2;
+      }),
+      executeApplication: vi.fn(async () => {
+        order.push('peg-in:application:execute');
+        throw new Error('synthetic Frontier application runner rejection');
+      }),
+      attestCheckpoint: vi.fn(),
+      complete: vi.fn(),
+    }));
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow('synthetic Frontier application runner rejection');
+
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
+    expect(mocked.stateClose).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('peg-in:application:execute')).toBeLessThan(
+      order.indexOf('dispose:application-checkpoint-v3'),
+    );
+  });
+
+  it('rejects an invalid application runner before building or starting the target', async () => {
+    mocked.applicationRunnerPreflight.mockImplementationOnce(() => {
+      order.push('peg-in:application-runner:preflight:reject');
+      throw new Error('synthetic invalid application runner path');
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow('synthetic invalid application runner path');
+
+    expect(order).toEqual(['peg-in:application-runner:preflight:reject']);
+    expect(mocked.build).not.toHaveBeenCalled();
+    expect(mocked.process).not.toHaveBeenCalled();
+    expect(mocked.applicationCheckpointContinuation).not.toHaveBeenCalled();
+  });
+
+  it('rejects committed-vault drift after the application burn before checkpoint attestation', async () => {
+    const baselineObserve = observerPort.observe.getMockImplementation()!;
+    observerPort.observe.mockImplementation(async expectedTxId => {
+      const confirmation = await baselineObserve(expectedTxId);
+      if (
+        expectedTxId === digest('9')
+        && order.includes('peg-in:application:execute')
+      ) {
+        return Object.freeze({
+          ...confirmation,
+          confirmationHeaderIdHex: digest('f'),
+        });
+      }
+      return confirmation;
+    });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      'isolated devnet committed reserve changed before checkpoint attestation',
+    );
+
+    const continuation =
+      mocked.applicationCheckpointContinuation.mock.results[0]!.value;
+    expect(continuation.executeApplication).toHaveBeenCalledTimes(1);
+    expect(continuation.attestCheckpoint).not.toHaveBeenCalled();
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects a post-application confirmation after its deadline and tears down before attestation', async () => {
+    const baselineObserve = observerPort.observe.getMockImplementation();
+    if (baselineObserve === undefined) {
+      throw new Error('observer mock is unavailable');
+    }
+    const before = localJournalDirectories();
+    let now = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    observerPort.observe.mockImplementation(async (...args) => {
+      const observation = await baselineObserve(...args);
+      if (
+        args[0] === digest('9')
+        && order.includes('peg-in:application:execute')
+      ) {
+        now += 2 * 60_000 + 1;
+      }
+      return observation;
+    });
+
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        /application-checkpoint-admission transaction confirmation exceeded its deadline/u,
+      );
+
+      const continuation =
+        mocked.applicationCheckpointContinuation.mock.results[0]!.value;
+      expect(continuation.executeApplication).toHaveBeenCalledTimes(1);
+      expect(continuation.attestCheckpoint).not.toHaveBeenCalled();
+      expect(order).toContain('dispose:application-checkpoint-v3');
+      expect(order).toContain('dispose:setup');
+      expect(order).toContain('process:stop');
+      expect(mocked.stateClose).toHaveBeenCalledTimes(1);
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+      expect(
+        order.filter(value => value === 'dispose:application-checkpoint-v3'),
+      ).toHaveLength(1);
+      expect(order.filter(value => value === 'dispose:setup')).toHaveLength(1);
+      expect(order.filter(value => value === 'process:stop')).toHaveLength(1);
+      expect(order.indexOf('peg-in:application:execute')).toBeLessThan(
+        order.indexOf('observe:committedVault:post-application'),
+      );
+      expect(
+        order.indexOf('observe:committedVault:post-application'),
+      ).toBeLessThan(order.indexOf('dispose:application-checkpoint-v3'));
+      expect(order.indexOf('dispose:application-checkpoint-v3')).toBeLessThan(
+        order.indexOf('dispose:setup'),
+      );
+      expect(order.indexOf('dispose:setup')).toBeLessThan(
+        order.indexOf('process:stop'),
+      );
+      expect(localJournalDirectories()).toEqual(before);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('rejects an invalid Frontier consumer plan before building or starting the target', async () => {
     mocked.frontierConsumerPreflight.mockImplementationOnce(() => {
       order.push('peg-in:mint-proof:consumer:preflight:reject');
@@ -1978,11 +2345,17 @@ function validObserver(order: string[]) {
       if (expectedTxId === digest('9')) {
         const round = observationCount.get(expectedTxId) ?? 0;
         observationCount.set(expectedTxId, round + 1);
-        order.push('observe:committedVault');
+        const postApplication = order.includes('peg-in:application:execute');
+        order.push(
+          postApplication
+            ? 'observe:committedVault:post-application'
+            : 'observe:committedVault',
+        );
         return {
           ...confirmation(expectedTxId, 4, round),
-          confirmationHeight: 138,
-          observedAtHeight: 140,
+          confirmationHeight: 140,
+          confirmationHeaderIdHex: digest('7'),
+          observedAtHeight: postApplication ? 220 : 140,
         } as const;
       }
       const index = setupTransactions().findIndex(value =>
@@ -2286,6 +2659,21 @@ function pegInMintProofRootInput() {
   } as never;
 }
 
+function pegInApplicationCheckpointRootInput() {
+  return {
+    ...(pegInRootInput() as unknown as Record<string, unknown>),
+    frontierApplicationRunner: {
+      frontierSourceDirectory: 'reviewed/frontier',
+      temporaryDirectoryRoot: 'reviewed/frontier-temporary',
+      cargoDependencyCacheDirectory: 'reviewed/frontier-cargo-cache',
+      cargoExecutablePath: 'reviewed/cargo.exe',
+      rustcExecutablePath: 'reviewed/rustc.exe',
+      gitExecutablePath: 'reviewed/git.exe',
+      offline: true,
+    },
+  } as never;
+}
+
 function validPacketV2() {
   return {
     receipt: {
@@ -2398,6 +2786,75 @@ function validConsumerReceipt(
     mintIdentityHex: draft.reservationKeyHex,
     receiptDigestHex: digest('e'),
   } as const;
+}
+
+function validApplicationCheckpointReceipt(
+  packet: ReturnType<typeof validPacketV2>,
+  proof: ReturnType<typeof validPacketProof>,
+) {
+  const applicationRunner = {
+    receiptDigestHex: digest('1'),
+    mintSourceProof: proof.sourceProof,
+    executionResult: {
+      applicationEvidence: {
+        burn: {
+          burnIdHex: `0x${digest('2')}`,
+          bridgeEventRootHex: `0x${digest('3')}`,
+        },
+      },
+    },
+  } as const;
+  const checkpoint = {
+    receiptDigestHex: digest('4'),
+    checkpointAttestation: {
+      checkpointStatement: {
+        admissionValidFromErgoHeight: '220',
+        admissionExpiresAtErgoHeight: '284',
+      },
+    },
+  } as const;
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-frontier-application-checkpoint-root.v3',
+    version: 3,
+    status: 'packet_mint_application_burn_checkpoint_composed',
+    packet,
+    mintSourceProof: proof,
+    applicationRunner,
+    checkpoint,
+    binding: {
+      targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+      packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+      mintSourceProofReceiptDigestHex: proof.receiptDigestHex,
+      applicationRunnerReceiptDigestHex: applicationRunner.receiptDigestHex,
+      checkpointReceiptDigestHex: checkpoint.receiptDigestHex,
+      burnIdHex: applicationRunner.executionResult.applicationEvidence.burn
+        .burnIdHex,
+      bridgeEventRootHex:
+        applicationRunner.executionResult.applicationEvidence.burn
+          .bridgeEventRootHex,
+    },
+    checks: {
+      exactPacketObjectBound: true,
+    },
+    boundary: {
+      isolatedTestClientOnly: true,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+    },
+    limitations: ['synthetic application-checkpoint test receipt'],
+    receiptDigestHex: digest('5'),
+  } as const);
+}
+
+function validApplicationCheckpointStage(
+  receipt: ReturnType<typeof validApplicationCheckpointReceipt>,
+) {
+  return Object.freeze({
+    packet: receipt.packet,
+    mintSourceProof: receipt.mintSourceProof,
+    applicationRunner: receipt.applicationRunner,
+  });
 }
 
 function validPegInFundingObservation() {
