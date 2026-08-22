@@ -186,6 +186,21 @@ describe('Substrate federated authority-safe devnet history V1', () => {
     ).toThrow(/provenance/);
   });
 
+  it('forwards explicit source-acceptance build roots without promoting them into evidence', async () => {
+    const buildWorkspace = Object.freeze({
+      temporaryDirectoryRoot: 'D:/reviewed/frontier-builds',
+      sharedCargoHomeRoot: 'D:/reviewed/frontier-cargo-cache',
+    });
+
+    const history = await collectHistory(buildWorkspace);
+
+    expect(mocks.accept).toHaveBeenCalledWith(
+      {},
+      buildWorkspace,
+    );
+    expect(JSON.stringify(history.receipt)).not.toContain('D:/reviewed');
+  });
+
   it.each([
     ['witness disagreement', { witnessInteriorDisagreement: true }, /origins disagree at height 1/],
     ['broken parent', { parentBreak: true }, /parent linkage failed at 1/],
@@ -234,10 +249,18 @@ describe('Substrate federated authority-safe devnet history V1', () => {
   });
 });
 
-async function collectHistory() {
-  return await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1({
-    acceptance: {} as AcceptSubstrateFederatedAuthoritySafeDevnetV1Input,
-  });
+async function collectHistory(
+  sourceAcceptanceBuildWorkspace?: Readonly<{
+    temporaryDirectoryRoot: string;
+    sharedCargoHomeRoot: string;
+  }>,
+) {
+  return await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
+    {
+      acceptance: {} as AcceptSubstrateFederatedAuthoritySafeDevnetV1Input,
+    },
+    sourceAcceptanceBuildWorkspace,
+  );
 }
 
 function acceptance(): Readonly<SubstrateFederatedAuthoritySafeDevnetAcceptanceV1> {

@@ -18,7 +18,6 @@ import {
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 
 const ERGO_POSITIVE_LONG_MAX = 0x7fff_ffff_ffff_ffffn;
-let directWorkerBuildEnvironmentActive = false;
 
 export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
   argv: readonly string[],
@@ -92,57 +91,25 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
     recipientAddressHex: argv[7],
   });
   const acceptance = input.lifecycle.sourceHistory.acceptance;
-  if (directWorkerBuildEnvironmentActive) {
-    throw new Error(
-      'isolated application-checkpoint campaign worker build environment is already active',
-    );
-  }
-  directWorkerBuildEnvironmentActive = true;
-  const previousEnvironment = Object.freeze({
-    CARGO_HOME: process.env.CARGO_HOME,
-    TEMP: process.env.TEMP,
-    TMP: process.env.TMP,
-  });
-  try {
-    process.env.CARGO_HOME = cargoDependencyCacheDirectory;
-    process.env.TEMP = temporaryDirectoryRoot;
-    process.env.TMP = temporaryDirectoryRoot;
-    const result =
-      await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3({
-        ...input,
-        pegIn,
-        frontierApplicationRunner: Object.freeze({
-          frontierSourceDirectory: acceptance.frontierSourcePath,
-          temporaryDirectoryRoot,
-          cargoDependencyCacheDirectory,
-          cargoExecutablePath: acceptance.cargoExecutablePath,
-          rustcExecutablePath: acceptance.rustcExecutablePath,
-          gitExecutablePath: acceptance.gitExecutablePath,
-          offline: true as const,
-        }),
-      });
-    return buildSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerReceiptV3(
-      result.receipt,
-      argv[3],
+  const result =
+    await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3({
+      ...input,
       pegIn,
-    );
-  } finally {
-    try {
-      restoreEnvironmentValue('CARGO_HOME', previousEnvironment.CARGO_HOME);
-      restoreEnvironmentValue('TEMP', previousEnvironment.TEMP);
-      restoreEnvironmentValue('TMP', previousEnvironment.TMP);
-    } finally {
-      directWorkerBuildEnvironmentActive = false;
-    }
-  }
-}
-
-function restoreEnvironmentValue(
-  key: 'CARGO_HOME' | 'TEMP' | 'TMP',
-  value: string | undefined,
-): void {
-  if (value === undefined) delete process.env[key];
-  else process.env[key] = value;
+      frontierApplicationRunner: Object.freeze({
+        frontierSourceDirectory: acceptance.frontierSourcePath,
+        temporaryDirectoryRoot,
+        cargoDependencyCacheDirectory,
+        cargoExecutablePath: acceptance.cargoExecutablePath,
+        rustcExecutablePath: acceptance.rustcExecutablePath,
+        gitExecutablePath: acceptance.gitExecutablePath,
+        offline: true as const,
+      }),
+    });
+  return buildSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerReceiptV3(
+    result.receipt,
+    argv[3],
+    pegIn,
+  );
 }
 
 async function main(): Promise<void> {

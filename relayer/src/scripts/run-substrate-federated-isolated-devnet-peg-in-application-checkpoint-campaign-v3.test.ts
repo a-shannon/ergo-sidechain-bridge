@@ -113,9 +113,7 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
       mkdirSync(cargoCache);
       const previousEnvironment = currentBuildEnvironment();
       mocked.root.mockImplementationOnce(async () => {
-        expect(process.env.CARGO_HOME).toBe(cargoCache);
-        expect(process.env.TEMP).toBe(temporaryRoot);
-        expect(process.env.TMP).toBe(temporaryRoot);
+        expect(currentBuildEnvironment()).toEqual(previousEnvironment);
         return { receipt: rootReceipt() };
       });
       const receipt =
@@ -222,12 +220,7 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
         cargoCache,
       ]));
       expect(processInput.timeoutMs).toBe(120 * 60_000);
-      expect(processInput.env).toEqual({
-        PATH: 'controlled',
-        CARGO_HOME: cargoCache,
-        TEMP: temporaryRoot,
-        TMP: temporaryRoot,
-      });
+      expect(processInput.env).toEqual({ PATH: 'controlled' });
       const published = readFileSync(outputPath, 'utf8');
       expect(published).toBe(`${canonicalJson(JSON.parse(published))}\n`);
       expect(published).not.toContain(temporaryRoot);
@@ -471,7 +464,7 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
     }
   });
 
-  it('restores the direct worker build environment after root failure', async () => {
+  it('does not mutate the direct worker build environment after root failure', async () => {
     const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-application-worker-failure-'));
     const previousEnvironment = currentBuildEnvironment();
     try {
@@ -502,52 +495,54 @@ describe('isolated devnet peg-in application-checkpoint campaign command V3', ()
     }
   });
 
-  it('rejects overlapping direct workers before their build environments can cross-wire', async () => {
+  it('keeps overlapping direct worker roots explicit without cross-wiring process environment', async () => {
     const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-application-worker-overlap-'));
     const previousEnvironment = currentBuildEnvironment();
     try {
-      const temporaryRoot = join(fixture, 'frontier-root');
-      const cargoCache = join(fixture, 'frontier-cache');
-      mkdirSync(temporaryRoot);
-      mkdirSync(cargoCache);
-      let resolveRoot!: (value: { receipt: ReturnType<typeof rootReceipt> }) => void;
-      const pendingRoot = new Promise<{ receipt: ReturnType<typeof rootReceipt> }>(
-        (resolve) => {
-          resolveRoot = resolve;
-        },
-      );
-      mocked.root.mockImplementationOnce(async () => pendingRoot);
-      const argumentsV3 = [
-        '--request',
-        join(fixture, 'request.json'),
-        '--expected-request-sha256',
-        REQUEST_DIGEST_HEX,
-        '--amount-nano-erg',
-        MINT_AMOUNT_NANO_ERG,
-        '--recipient-address-hex',
-        RECIPIENT_ADDRESS_HEX,
-        '--frontier-temporary-root',
-        temporaryRoot,
-        '--frontier-cargo-cache',
-        cargoCache,
-      ] as const;
-      const firstWorker =
+      const firstTemporaryRoot = join(fixture, 'frontier-root-a');
+      const firstCargoCache = join(fixture, 'frontier-cache-a');
+      const secondTemporaryRoot = join(fixture, 'frontier-root-b');
+      const secondCargoCache = join(fixture, 'frontier-cache-b');
+      for (const path of [
+        firstTemporaryRoot,
+        firstCargoCache,
+        secondTemporaryRoot,
+        secondCargoCache,
+      ]) mkdirSync(path);
+      const worker = (suffix: 'a' | 'b', temporaryRoot: string, cargoCache: string) =>
         runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
-          argumentsV3,
+          [
+            '--request',
+            join(fixture, `request-${suffix}.json`),
+            '--expected-request-sha256',
+            REQUEST_DIGEST_HEX,
+            '--amount-nano-erg',
+            MINT_AMOUNT_NANO_ERG,
+            '--recipient-address-hex',
+            RECIPIENT_ADDRESS_HEX,
+            '--frontier-temporary-root',
+            temporaryRoot,
+            '--frontier-cargo-cache',
+            cargoCache,
+          ],
         );
-      await expect(
-        runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignWorkerFromArgumentsV3(
-          argumentsV3,
-        ),
-      ).rejects.toThrow(/build environment is already active/iu);
-      expect(currentBuildEnvironment()).toEqual({
-        CARGO_HOME: cargoCache,
-        TEMP: temporaryRoot,
-        TMP: temporaryRoot,
-      });
-      expect(mocked.root).toHaveBeenCalledTimes(1);
-      resolveRoot({ receipt: rootReceipt() });
-      await expect(firstWorker).resolves.toBeDefined();
+      await expect(Promise.all([
+        worker('a', firstTemporaryRoot, firstCargoCache),
+        worker('b', secondTemporaryRoot, secondCargoCache),
+      ])).resolves.toHaveLength(2);
+      expect(mocked.root).toHaveBeenCalledTimes(2);
+      expect(mocked.root.mock.calls.map(call => (
+        call[0].frontierApplicationRunner
+      ))).toEqual([
+        expect.objectContaining({
+            temporaryDirectoryRoot: firstTemporaryRoot,
+            cargoDependencyCacheDirectory: firstCargoCache,
+        }),
+        expect.objectContaining({
+            temporaryDirectoryRoot: secondTemporaryRoot,
+            cargoDependencyCacheDirectory: secondCargoCache,
+        }),
+      ]);
       expect(currentBuildEnvironment()).toEqual(previousEnvironment);
     } finally {
       rmSync(fixture, { recursive: true, force: true });

@@ -3,6 +3,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -238,6 +239,40 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     expect(() =>
       assertSubstrateFederatedAuthoritySafeDevnetAcceptanceV1Provenance({ ...result })
     ).toThrow(/provenance/);
+  });
+
+  it('scopes explicit build roots to source acceptance without mutating process Cargo state', async () => {
+    const workspaceRoot = mkdtempSync(join(tmpdir(), 'fed6g1c-explicit-build-root-'));
+    temporaryDirectories.push(workspaceRoot);
+    const temporaryRoot = join(workspaceRoot, 'builds');
+    const sharedCargoHomeRoot = join(workspaceRoot, 'cargo-cache');
+    const sharedRegistry = join(sharedCargoHomeRoot, 'registry');
+    mkdirSync(temporaryRoot);
+    mkdirSync(sharedRegistry, { recursive: true });
+    const previousCargoHome = process.env.CARGO_HOME;
+    let explicitBuildObserved = false;
+    mocks.runProcess.mockImplementation(async value => {
+      if (value.args[0] === 'build') {
+        const target = value.env?.CARGO_TARGET_DIR;
+        const isolatedCargoHome = value.env?.CARGO_HOME;
+        expect(target).toBeTruthy();
+        expect(isolatedCargoHome).toBeTruthy();
+        expect(dirname(realpathSync(target!))).toBe(realpathSync(temporaryRoot));
+        expect(
+          realpathSync(join(isolatedCargoHome!, 'registry')).toLowerCase(),
+        ).toBe(realpathSync(sharedRegistry).toLowerCase());
+        explicitBuildObserved = true;
+      }
+      return await runProcess(value);
+    });
+
+    await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+      { temporaryDirectoryRoot: temporaryRoot, sharedCargoHomeRoot },
+    );
+
+    expect(explicitBuildObserved).toBe(true);
+    expect(process.env.CARGO_HOME).toBe(previousCargoHome);
   });
 
   it('captures a sealed recovery timeline with the exact source-built binary and generated spec', async () => {

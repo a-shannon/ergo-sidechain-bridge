@@ -1359,6 +1359,13 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(mocked.packet).not.toHaveBeenCalled();
     expect(mocked.packetContinuation).not.toHaveBeenCalled();
     expect(mocked.applicationCheckpointContinuation).toHaveBeenCalledTimes(1);
+    expect(mocked.sourceHistory).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        temporaryDirectoryRoot: 'reviewed/frontier-temporary',
+        sharedCargoHomeRoot: 'reviewed/frontier-cargo-cache',
+      },
+    );
     expect(order.indexOf('peg-in:application-runner:preflight')).toBeLessThan(
       order.indexOf('build'),
     );
@@ -1471,6 +1478,35 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(containsFunction(result)).toBe(false);
     expect(JSON.stringify(result)).not.toMatch(
       /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+  });
+
+  it('snapshots source-acceptance build roots before the first async build boundary', async () => {
+    const input = pegInApplicationCheckpointRootInput() as unknown as {
+      frontierApplicationRunner: {
+        temporaryDirectoryRoot: string;
+        cargoDependencyCacheDirectory: string;
+      };
+    };
+    mocked.build.mockImplementationOnce(async () => {
+      order.push('build');
+      input.frontierApplicationRunner.temporaryDirectoryRoot =
+        'mutated/frontier-temporary';
+      input.frontierApplicationRunner.cargoDependencyCacheDirectory =
+        'mutated/frontier-cargo-cache';
+      return validBuild();
+    });
+
+    await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+      input as never,
+    );
+
+    expect(mocked.sourceHistory).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        temporaryDirectoryRoot: 'reviewed/frontier-temporary',
+        sharedCargoHomeRoot: 'reviewed/frontier-cargo-cache',
+      },
     );
   });
 

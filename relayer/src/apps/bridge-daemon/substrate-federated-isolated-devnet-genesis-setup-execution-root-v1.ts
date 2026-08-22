@@ -1557,12 +1557,17 @@ export async function runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpo
   const applicationRunner = normalizeFrontierApplicationRunnerPlan(
     input.frontierApplicationRunner,
   );
+  const sourceAcceptanceBuildWorkspace = Object.freeze({
+    temporaryDirectoryRoot: applicationRunner.temporaryDirectoryRoot,
+    sharedCargoHomeRoot: applicationRunner.cargoDependencyCacheDirectory,
+  });
   const { buildReceipt, managed } = await runManagedCampaign(
     input,
     pegInPlan,
     'consume-application-checkpoint',
     undefined,
     applicationRunner,
+    sourceAcceptanceBuildWorkspace,
   );
   const pegIn = managed.value.pegIn;
   const application = managed.value.applicationCheckpoint;
@@ -1721,6 +1726,11 @@ async function runManagedCampaign(
   frontierApplicationRunner:
     Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>
     | undefined = undefined,
+  sourceAcceptanceBuildWorkspace:
+    Readonly<{
+      readonly temporaryDirectoryRoot: string;
+      readonly sharedCargoHomeRoot: string;
+    }> | undefined = undefined,
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   if (
     (pegInAction === 'consume-mint-proof')
@@ -1796,6 +1806,7 @@ async function runManagedCampaign(
         pegInAction,
         frontierMintProofConsumer,
         frontierApplicationRunner,
+        sourceAcceptanceBuildWorkspace,
       ),
     );
     assertCapabilityFreePlainData(managed, 'isolated devnet managed result');
@@ -1894,6 +1905,11 @@ async function executeManagedSetupAction(
   frontierApplicationRunner:
     Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>
     | undefined,
+  sourceAcceptanceBuildWorkspace:
+    Readonly<{
+      readonly temporaryDirectoryRoot: string;
+      readonly sharedCargoHomeRoot: string;
+    }> | undefined,
 ): Promise<Readonly<ExecutionActionResult>> {
   if (
     (pegInAction === 'consume-mint-proof')
@@ -1909,6 +1925,7 @@ async function executeManagedSetupAction(
   const sourceHistory =
     await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
       input.sourceHistory,
+      sourceAcceptanceBuildWorkspace,
     );
   const rewardInputs = await discoverSubstrateFederatedRewardInputsV2(
     setupSession.signer,

@@ -7,6 +7,7 @@ import {
   type AcceptSubstrateFederatedAuthoritySafeDevnetV1Input,
   type SubstrateFederatedAuthoritySafeDevnetAcceptanceV1,
   type SubstrateFederatedAuthoritySafeDevnetAcceptedHistoryV1,
+  type SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1,
 } from './substrate-federated-authority-safe-devnet-acceptance-v1.js';
 import {
   SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_APPLICATION_HISTORY_V1_SCHEMA,
@@ -140,10 +141,14 @@ export interface SubstrateFederatedAuthoritySafeDevnetHistoryV1 {
 
 export async function collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
   input: Readonly<CollectSubstrateFederatedAuthoritySafeDevnetHistoryV1Input>,
+  sourceAcceptanceBuildWorkspace?: Readonly<
+    SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1
+  >,
 ): Promise<Readonly<SubstrateFederatedAuthoritySafeDevnetHistoryV1>> {
   const accepted =
     await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
       input.acceptance,
+      sourceAcceptanceBuildWorkspace,
     );
   assertSubstrateFederatedAuthoritySafeDevnetAcceptedHistoryV1Provenance(
     accepted,

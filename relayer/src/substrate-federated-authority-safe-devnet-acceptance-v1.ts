@@ -129,6 +129,11 @@ export interface AcceptSubstrateFederatedAuthoritySafeDevnetV1Input
   readonly witnessPrometheusPort: number;
 }
 
+export interface SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1 {
+  readonly temporaryDirectoryRoot: string;
+  readonly sharedCargoHomeRoot: string;
+}
+
 export interface SubstrateFederatedAuthoritySafeDevnetAcceptanceV1 {
   readonly schema:
     typeof SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_ACCEPTANCE_V1_SCHEMA;
@@ -303,10 +308,15 @@ export async function acceptSubstrateFederatedAuthoritySafeDevnetV1(
 
 export async function acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
   input: Readonly<AcceptSubstrateFederatedAuthoritySafeDevnetV1Input>,
+  buildWorkspace?: Readonly<
+    SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1
+  >,
 ): Promise<Readonly<SubstrateFederatedAuthoritySafeDevnetAcceptedHistoryV1>> {
   return await acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1(
     input,
     collectSubstrateFederatedAuthoritySafeDevnetHistoryActionV1,
+    undefined,
+    buildWorkspace,
   );
 }
 
@@ -420,6 +430,9 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
   afterAcceptedTarget?: (
     recoveryProcess: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
   ) => Promise<void>,
+  buildWorkspaceInput?: Readonly<
+    SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1
+  >,
 ): Promise<Readonly<
   SubstrateFederatedAuthoritySafeDevnetAcceptedActionV1<T>
 >> {
@@ -471,7 +484,12 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     cwd: frontierSourcePath,
   });
 
-  const buildWorkspace = createPinnedLocalNativeBuildWorkspace();
+  const buildWorkspace = buildWorkspaceInput === undefined
+    ? createPinnedLocalNativeBuildWorkspace()
+    : createPinnedLocalNativeBuildWorkspace(undefined, {
+      temporaryDirectoryRoot: buildWorkspaceInput.temporaryDirectoryRoot,
+      sharedCargoHomeRoot: buildWorkspaceInput.sharedCargoHomeRoot,
+    });
   const cargoTargetDirectory = buildWorkspace.buildTargetPath;
   try {
     const cargoEnvironment = minimalCargoEnvironment({
