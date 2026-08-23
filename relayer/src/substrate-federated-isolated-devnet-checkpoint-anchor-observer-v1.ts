@@ -310,23 +310,29 @@ async function observeNode(
   ) {
     throw new Error(`${role} checkpoint anchor header window is incomplete`);
   }
-  const headers = headersResponse.data.map((value, index) =>
+  const apiHeaders = headersResponse.data.map((value, index) =>
     normalizeHeader(value, index, role)
   );
-  if (headers[0]!.height !== fullHeight) {
-    throw new Error(`${role} checkpoint anchor tip differs from node height`);
-  }
-  headers.forEach((header, index) => {
-    if (header.height !== fullHeight - index) {
-      throw new Error(`${role} checkpoint anchor header heights are not contiguous`);
+  const oldestHeight = fullHeight - headerCount + 1;
+  apiHeaders.forEach((header, index) => {
+    if (header.height !== oldestHeight + index) {
+      throw new Error(
+        `${role} checkpoint anchor API headers are not contiguous oldest-to-newest`,
+      );
     }
     if (
-      index + 1 < headers.length
-      && header.parentIdHex !== headers[index + 1]!.idHex
+      index > 0
+      && header.parentIdHex !== apiHeaders[index - 1]!.idHex
     ) {
       throw new Error(`${role} checkpoint anchor header lineage is broken`);
     }
   });
+  // Ergo Node's lastHeaders endpoint is oldest-first. State-context consumers
+  // require the mined tip first, so convert only after checking the API order.
+  const headers = [...apiHeaders].reverse();
+  if (headers[0]!.height !== fullHeight) {
+    throw new Error(`${role} checkpoint anchor tip differs from node height`);
+  }
   const anchorBlockResponse = await client.get(`/blocks/${headers[0]!.idHex}`);
   const anchorBlock = requiredRecord(
     anchorBlockResponse.data,

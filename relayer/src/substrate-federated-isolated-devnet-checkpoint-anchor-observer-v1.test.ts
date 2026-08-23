@@ -130,6 +130,12 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
     await expect(observe()).rejects.toThrow(/lineage is broken/);
   });
 
+  it('rejects a newest-first response that violates the Ergo Node API order', async () => {
+    primary.lastHeadersNewestFirst = true;
+    witness = structuredClone(primary);
+    await expect(observe()).rejects.toThrow(/oldest-to-newest/);
+  });
+
   it('rejects a header window that does not extend the exact prior snapshot', async () => {
     await expect(observe(EXTENSION_VALUE_HEX, 'ff'.repeat(32)))
       .rejects.toThrow(/does not extend the exact prior process snapshot/);
@@ -192,6 +198,7 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
 interface NodeFixture {
   fullHeight: number;
   headers: RawHeader[];
+  lastHeadersNewestFirst: boolean;
   extensionFields: string[][];
   block: { header: RawHeader; extension: { fields: string[][] } };
 }
@@ -217,6 +224,7 @@ function nodeFixture(startHeight = 11, endHeight = 20): NodeFixture {
   return {
     fullHeight: endHeight,
     headers,
+    lastHeadersNewestFirst: false,
     extensionFields,
     block: {
       header: headers[0]!,
@@ -232,7 +240,10 @@ function responseFor(fixture: NodeFixture, path: string): unknown {
   if (path === '/blocks/at/1') return [GENESIS_ID_HEX];
   const headerCountMatch = /^\/blocks\/lastHeaders\/(\d+)$/u.exec(path);
   if (headerCountMatch !== null) {
-    return fixture.headers.slice(0, Number(headerCountMatch[1]));
+    const newestFirst = fixture.headers.slice(0, Number(headerCountMatch[1]));
+    return fixture.lastHeadersNewestFirst
+      ? newestFirst
+      : [...newestFirst].reverse();
   }
   if (path === `/blocks/${fixture.headers[0]!.id}`) return fixture.block;
   throw new Error(`unexpected checkpoint observer path: ${path}`);
