@@ -42,6 +42,10 @@ const CHECKPOINT_MINING_CREDENTIALS = new WeakMap<
   object,
   Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
 >();
+const TRACKER_ADMISSION_MINING_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
+>();
 
 export interface RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input {
   readonly portableReplayInput:
@@ -128,8 +132,25 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     execution.dispose();
     throw error;
   }
-  const checkpointMiningCredential =
-    execution.claimCheckpointMiningCredential();
+  let checkpointMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+  let trackerAdmissionMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+  try {
+    checkpointMiningCredential =
+      execution.claimCheckpointMiningCredential();
+    trackerAdmissionMiningCredential =
+      execution.claimTrackerAdmissionMiningCredential();
+  } catch (error) {
+    if (checkpointMiningCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        checkpointMiningCredential,
+      );
+    }
+    revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+    execution.dispose();
+    throw error;
+  }
   let state:
     | 'open'
     | 'running'
@@ -149,6 +170,14 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       );
     }
     CHECKPOINT_MINING_CREDENTIALS.delete(session);
+    const unclaimedTrackerAdmissionCredential =
+      TRACKER_ADMISSION_MINING_CREDENTIALS.get(session);
+    if (unclaimedTrackerAdmissionCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        unclaimedTrackerAdmissionCredential,
+      );
+    }
+    TRACKER_ADMISSION_MINING_CREDENTIALS.delete(session);
     revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
     try {
       execution.dispose();
@@ -276,6 +305,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
   });
   MINING_CREDENTIALS.set(session, execution.miningCredential);
   CHECKPOINT_MINING_CREDENTIALS.set(session, checkpointMiningCredential);
+  TRACKER_ADMISSION_MINING_CREDENTIALS.set(
+    session,
+    trackerAdmissionMiningCredential,
+  );
   return session;
 }
 
@@ -313,4 +346,39 @@ export function claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(
   MINING_CREDENTIALS.delete(session);
   CHECKPOINT_MINING_CREDENTIALS.delete(session);
   return Object.freeze({ miningCredential, checkpointMiningCredential });
+}
+
+/** Atomic composition-root handoff for setup, checkpoint, and tracker admission. */
+export function claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+): Readonly<{
+  readonly miningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly checkpointMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly trackerAdmissionMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+}> {
+  const miningCredential = MINING_CREDENTIALS.get(session);
+  const checkpointMiningCredential =
+    CHECKPOINT_MINING_CREDENTIALS.get(session);
+  const trackerAdmissionMiningCredential =
+    TRACKER_ADMISSION_MINING_CREDENTIALS.get(session);
+  if (
+    miningCredential === undefined
+    || checkpointMiningCredential === undefined
+    || trackerAdmissionMiningCredential === undefined
+  ) {
+    throw new Error(
+      'isolated mining credential sequence is absent, partially claimed, or disposed',
+    );
+  }
+  MINING_CREDENTIALS.delete(session);
+  CHECKPOINT_MINING_CREDENTIALS.delete(session);
+  TRACKER_ADMISSION_MINING_CREDENTIALS.delete(session);
+  return Object.freeze({
+    miningCredential,
+    checkpointMiningCredential,
+    trackerAdmissionMiningCredential,
+  });
 }

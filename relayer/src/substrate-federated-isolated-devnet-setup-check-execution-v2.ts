@@ -206,6 +206,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
   readonly claimCheckpointMiningCredential: () =>
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly claimTrackerAdmissionMiningCredential: () =>
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
   readonly dispose: () => void;
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
@@ -714,6 +716,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           mnemonic,
           identity.publicKeyHex,
         );
+    let trackerAdmissionMiningCredential:
+      Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined =
+        issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          mnemonic,
+          identity.publicKeyHex,
+        );
     let state:
       | 'open'
       | 'running'
@@ -730,6 +738,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           checkpointMiningCredential,
         );
         checkpointMiningCredential = undefined;
+      }
+      if (trackerAdmissionMiningCredential !== undefined) {
+        revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          trackerAdmissionMiningCredential,
+        );
+        trackerAdmissionMiningCredential = undefined;
       }
       mnemonic = '';
       state = 'closed';
@@ -809,6 +823,16 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         }
         const credential = checkpointMiningCredential;
         checkpointMiningCredential = undefined;
+        return credential;
+      },
+      claimTrackerAdmissionMiningCredential: () => {
+        if (trackerAdmissionMiningCredential === undefined) {
+          throw new Error(
+            'isolated tracker-admission mining credential is absent, claimed, or disposed',
+          );
+        }
+        const credential = trackerAdmissionMiningCredential;
+        trackerAdmissionMiningCredential = undefined;
         return credential;
       },
       dispose: () => {

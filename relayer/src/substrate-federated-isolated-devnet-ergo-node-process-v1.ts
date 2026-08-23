@@ -24,6 +24,16 @@ import {
 import { performance } from 'node:perf_hooks';
 
 import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
+import {
+  buildErgoExtensionMembershipProof,
+} from './ergo-settlement-core/ergo-extension-membership.js';
+import {
+  computeErgoHeaderId,
+  parseErgoHeaderIdentity,
+} from './ergo-settlement-core/ergo-header-id.js';
+import {
+  normalizeErgoNodeHeaderBytes,
+} from './adapters/ergo-utxo-state-runtime-witness-capture-port-v1.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import type {
@@ -80,6 +90,9 @@ const OWNED_EXECUTION_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>(
 const ACTIVE_OWNED_EXECUTION_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_CHECKPOINT_TARGETS = new WeakSet<object>();
+const OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS =
+  new WeakMap<object, OwnedTargetBinding>();
+const ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS = new WeakSet<object>();
 
 export function deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
   priorHeight: number,
@@ -154,6 +167,15 @@ interface OwnedTargetBinding {
   readonly assertActiveProcesses: () => void;
 }
 
+interface CheckpointExecutionContinuation {
+  readonly extensionFields: string;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly checkpointExtensionObservationDigestHex: string;
+}
+
 export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input {
   readonly javaExecutablePath: string;
   readonly expectedJavaExecutableSha256Hex: string;
@@ -219,6 +241,17 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1 {
     readonly receipt:
       Readonly<SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt>;
   }>>;
+  readonly withCheckpointBoundMiningActiveExecutionTarget: <T>(
+    action: (
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+      >,
+    ) => Promise<T>,
+  ) => Promise<Readonly<{
+    readonly value: T;
+    readonly receipt:
+      Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV1Receipt>;
+  }>>;
   readonly stop: () => Promise<void>;
 }
 
@@ -233,6 +266,16 @@ export interface SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 {
     typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
   readonly primaryMining: true;
   readonly witnessReadOnly: true;
+}
+
+export interface SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1 {
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMining: true;
+  readonly witnessReadOnly: true;
+  readonly checkpointBound: true;
 }
 
 export interface SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1 {
@@ -281,6 +324,18 @@ export interface SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt
   readonly priorSnapshot: Readonly<TargetSnapshot>;
   readonly minedSnapshot: Readonly<TargetSnapshot>;
   readonly finalSnapshot: Readonly<TargetSnapshot>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV1Receipt
+  extends SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt {
+  readonly checkpointExtensionBoundDuringAction: true;
+  readonly trackerAdmissionMiningCredentialConsumedOnce: true;
+  readonly checkpointSnapshotRevalidatedOnBothNodes: true;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly extensionKeyHex: typeof CHECKPOINT_EXTENSION_KEY_HEX;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(
@@ -339,6 +394,28 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
   });
 }
 
+export function assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1(
+  value: Readonly<
+    SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+  >,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const binding = OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS.get(value);
+  if (
+    binding === undefined
+    || !ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS.has(value)
+  ) {
+    throw new Error(
+      'isolated Ergo checkpoint-bound target is not owned by the active tracker-admission action',
+    );
+  }
+  binding.assertActiveProcesses();
+  return Object.freeze({
+    processBindingDigestHex: binding.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      binding.executionTargetIdentityDigestHex,
+  });
+}
+
 interface NormalizedProcessInput {
   readonly javaExecutablePath: string;
   readonly javaExecutableSha256Hex: string;
@@ -364,24 +441,36 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
   checkpointMiningCredentialValue?:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
+  trackerAdmissionMiningCredentialValue?:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1> {
   const { input, binding } = normalizeProcessConstruction(
     inputValue,
     bindingValue,
     miningCredentialValue,
     checkpointMiningCredentialValue,
+    trackerAdmissionMiningCredentialValue,
   );
   let miningCredential:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined =
       miningCredentialValue;
   let checkpointMiningCredential = checkpointMiningCredentialValue;
+  let trackerAdmissionMiningCredential = trackerAdmissionMiningCredentialValue;
+  let checkpointExecutionContinuation:
+    Readonly<CheckpointExecutionContinuation> | undefined;
   let state: 'inert' | 'mining' | 'action' | 'read-only' | 'stopped' = 'inert';
   let ownedRuntimeRoot: string | undefined;
   let runtime: RuntimeLayout | undefined;
   let primary: OwnedNode | undefined;
   let witness: OwnedNode | undefined;
   let activeOperation:
-    'start' | 'execution' | 'transition' | 'anchor' | 'stop' | undefined;
+    | 'start'
+    | 'execution'
+    | 'transition'
+    | 'anchor'
+    | 'checkpoint-execution'
+    | 'stop'
+    | undefined;
 
   const cleanup = async (): Promise<void> => {
     if (state === 'stopped') return;
@@ -396,6 +485,12 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         checkpointMiningCredential,
       );
       checkpointMiningCredential = undefined;
+    }
+    if (trackerAdmissionMiningCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerAdmissionMiningCredential,
+      );
+      trackerAdmissionMiningCredential = undefined;
     }
     if (
       state === 'inert' && ownedRuntimeRoot === undefined && runtime === undefined
@@ -892,11 +987,12 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
             binding,
             extensionFields,
           );
+        const extensionFieldsSha256Hex =
+          sha256(Buffer.from(extensionFields, 'ascii'));
         const processBindingDigestHex = sha256CanonicalJson({
           schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
           executionTargetIdentityDigestHex,
-          extensionFieldsSha256Hex:
-            sha256(Buffer.from(extensionFields, 'ascii')),
+          extensionFieldsSha256Hex,
           primaryProcessId: processId(primary),
           witnessProcessId: processId(witness),
           priorSnapshot,
@@ -941,6 +1037,21 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         assertOwnedNodeIdentity(input, runtime, witness);
         assertOwnedListenerBindings(primary, witness);
         recheckRuntimeFiles(input, runtime);
+        const checkpointExtensionObservationDigestHex =
+          await observeExactCheckpointExtensionOnBothNodes(
+            primary,
+            witness,
+            finalSnapshot,
+            checkpointExtensionValueHex,
+          );
+        checkpointExecutionContinuation = Object.freeze({
+          extensionFields,
+          extensionValueHex: checkpointExtensionValueHex,
+          extensionFieldsSha256Hex,
+          checkpointSnapshot: finalSnapshot,
+          executionTargetIdentityDigestHex,
+          checkpointExtensionObservationDigestHex,
+        });
 
         const receipt: SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt =
           Object.freeze({
@@ -956,10 +1067,230 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
             executionTargetIdentityDigestHex,
             extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
             extensionValueHex: checkpointExtensionValueHex,
-            extensionFieldsSha256Hex:
-              sha256(Buffer.from(extensionFields, 'ascii')),
+            extensionFieldsSha256Hex,
             priorSnapshot,
             minedSnapshot,
+            finalSnapshot,
+          });
+        return Object.freeze({ value, receipt });
+      } catch (error) {
+        return await failWithCleanup(error);
+      } finally {
+        activeOperation = undefined;
+      }
+    },
+    withCheckpointBoundMiningActiveExecutionTarget: async <T>(
+      action: (
+        target: Readonly<
+          SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+        >,
+      ) => Promise<T>,
+    ) => {
+      if (
+        state !== 'read-only' || activeOperation !== undefined
+        || runtime === undefined || primary === undefined || witness === undefined
+        || primary.mode !== 'non-mining' || witness.mode !== 'non-mining'
+        || checkpointExecutionContinuation === undefined
+      ) {
+        throw new Error(
+          'isolated Ergo checkpoint-bound execution requires one completed checkpoint observation',
+        );
+      }
+      if (trackerAdmissionMiningCredential === undefined) {
+        throw new Error(
+          'isolated tracker-admission mining credential is absent, consumed, or revoked',
+        );
+      }
+      if (typeof action !== 'function') {
+        throw new Error('isolated Ergo checkpoint-bound execution action is required');
+      }
+      activeOperation = 'checkpoint-execution';
+      try {
+        const continuation = checkpointExecutionContinuation;
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        await stopOwnedNode(primary, true);
+        primary = undefined;
+        await stopOwnedNode(witness, true);
+        witness = undefined;
+        assertPortsUnowned(OWNED_PORTS);
+        recheckRuntimeFiles(input, runtime);
+
+        const credential = trackerAdmissionMiningCredential;
+        trackerAdmissionMiningCredential = undefined;
+        let launchedPrimary: OwnedNode | undefined;
+        consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          credential,
+          binding.miningTargetPublicKeyHex,
+          ephemeralMiningMnemonic => {
+            launchedPrimary = spawnOwnedNode(
+              input,
+              runtime!,
+              'primary',
+              'mining',
+              ephemeralMiningMnemonic,
+              continuation.extensionFields,
+            );
+          },
+        );
+        if (launchedPrimary === undefined) {
+          throw new Error(
+            'isolated Ergo checkpoint-bound primary mining process did not start',
+          );
+        }
+        primary = launchedPrimary;
+        await waitForBasicNodeReadiness(primary);
+        assertOwnedNodeIdentity(input, runtime, primary);
+        witness = spawnOwnedNode(
+          input,
+          runtime,
+          'witness',
+          'mining',
+          undefined,
+          continuation.extensionFields,
+        );
+        await waitForBasicNodeReadiness(witness);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        const initialSnapshot = await waitForCommonIndexedSnapshot(
+          primary,
+          witness,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        const executionTargetIdentityDigestHex =
+          deriveExecutionTargetIdentityDigestHex(
+            input,
+            runtime,
+            binding,
+            continuation.extensionFields,
+          );
+        if (
+          executionTargetIdentityDigestHex
+            !== continuation.executionTargetIdentityDigestHex
+        ) {
+          throw new Error(
+            'isolated Ergo checkpoint-bound execution target identity changed',
+          );
+        }
+        const processBindingDigestHex = sha256CanonicalJson({
+          schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+          executionTargetIdentityDigestHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          primaryProcessId: processId(primary),
+          witnessProcessId: processId(witness),
+          initialSnapshot,
+        }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_EXECUTION_PROCESS_V1');
+        const target = Object.freeze({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: true as const,
+          witnessReadOnly: true as const,
+          checkpointBound: true as const,
+        });
+        const assertActiveProcesses = (): void => {
+          if (
+            state !== 'action' || primary === undefined || witness === undefined
+            || runtime === undefined || primary.mode !== 'mining'
+          ) {
+            throw new Error(
+              'isolated Ergo checkpoint-bound execution processes are not active',
+            );
+          }
+          assertOwnedNodeIdentity(input, runtime, primary);
+          assertOwnedNodeIdentity(input, runtime, witness);
+          assertOwnedListenerBindings(primary, witness);
+          recheckRuntimeFiles(input, runtime);
+        };
+        OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS.set(
+          target,
+          Object.freeze({
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            assertActiveProcesses,
+          }),
+        );
+        state = 'action';
+        ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS.delete(target);
+        }
+        state = 'mining';
+
+        await stopOwnedNode(primary, true);
+        primary = undefined;
+        await stopOwnedNode(witness, true);
+        witness = undefined;
+        assertPortsUnowned(OWNED_PORTS);
+        recheckRuntimeFiles(input, runtime);
+        primary = spawnOwnedNode(
+          input,
+          runtime,
+          'primary',
+          'non-mining',
+          undefined,
+          continuation.extensionFields,
+        );
+        const finalSnapshot = await waitForMinimumIndexedSnapshot(primary);
+        witness = spawnOwnedNode(
+          input,
+          runtime,
+          'witness',
+          'non-mining',
+          undefined,
+          continuation.extensionFields,
+        );
+        await waitForExactSnapshot(witness, finalSnapshot, STARTUP_TIMEOUT_MS);
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        await assertStableExactSnapshot(primary, witness, finalSnapshot);
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+        state = 'read-only';
+        checkpointExecutionContinuation = undefined;
+
+        const receipt:
+          SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV1Receipt =
+          Object.freeze({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+            version: 1 as const,
+            primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+            witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+            primaryMiningDuringAction: true as const,
+            witnessReadOnlyDuringAction: true as const,
+            checkpointExtensionBoundDuringAction: true as const,
+            trackerAdmissionMiningCredentialConsumedOnce: true as const,
+            checkpointSnapshotRevalidatedOnBothNodes: true as const,
+            checkpointExtensionObservationDigestHex:
+              continuation.checkpointExtensionObservationDigestHex,
+            buildIdentityDigestHex: input.buildIdentityDigestHex,
+            executableIdentityDigestHex: input.executableIdentityDigestHex,
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
+            extensionValueHex: continuation.extensionValueHex,
+            extensionFieldsSha256Hex:
+              continuation.extensionFieldsSha256Hex,
+            checkpointSnapshot: continuation.checkpointSnapshot,
+            initialSnapshot,
             finalSnapshot,
           });
         return Object.freeze({ value, receipt });
@@ -979,6 +1310,8 @@ function normalizeProcessConstruction(
   miningCredentialValue:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
   checkpointMiningCredentialValue?:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
+  trackerAdmissionMiningCredentialValue?:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
 ): Readonly<{
   readonly input: Readonly<NormalizedProcessInput>;
@@ -1008,6 +1341,21 @@ function normalizeProcessConstruction(
         );
       }
     }
+    if (trackerAdmissionMiningCredentialValue !== undefined) {
+      assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerAdmissionMiningCredentialValue,
+        binding.miningTargetPublicKeyHex,
+      );
+      if (
+        trackerAdmissionMiningCredentialValue === miningCredentialValue
+        || trackerAdmissionMiningCredentialValue
+          === checkpointMiningCredentialValue
+      ) {
+        throw new Error(
+          'isolated tracker-admission mining credential must be independently one-shot',
+        );
+      }
+    }
     return Object.freeze({ input, binding });
   } catch (error) {
     revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
@@ -1019,6 +1367,16 @@ function normalizeProcessConstruction(
     ) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         checkpointMiningCredentialValue,
+      );
+    }
+    if (
+      trackerAdmissionMiningCredentialValue !== undefined
+      && trackerAdmissionMiningCredentialValue !== miningCredentialValue
+      && trackerAdmissionMiningCredentialValue
+        !== checkpointMiningCredentialValue
+    ) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerAdmissionMiningCredentialValue,
       );
     }
     throw error;
@@ -1436,6 +1794,261 @@ async function waitForCommonIndexedSnapshotAfterHeight(
     }
     return snapshot;
   });
+}
+
+async function assertCheckpointRemainsCanonical(
+  primary: Readonly<OwnedNode>,
+  witness: Readonly<OwnedNode>,
+  checkpoint: Readonly<TargetSnapshot>,
+): Promise<void> {
+  const path = `/blocks/at/${checkpoint.fullHeight}`;
+  const [primaryIdsValue, witnessIdsValue] = await Promise.all([
+    getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path),
+    getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, path),
+  ]);
+  for (const [role, value] of [
+    ['primary', primaryIdsValue],
+    ['witness', witnessIdsValue],
+  ] as const) {
+    if (!Array.isArray(value) || value.length !== 1) {
+      throw new Error(
+        `isolated Ergo ${role} checkpoint height is not singular after restart`,
+      );
+    }
+    const observedIdHex = fixedHex(
+      value[0],
+      32,
+      `isolated Ergo ${role} checkpoint header ID`,
+    );
+    if (observedIdHex !== checkpoint.headerIdHex) {
+      throw new Error(
+        `isolated Ergo ${role} checkpoint is not canonical after restart`,
+      );
+    }
+  }
+  assertLive(primary);
+  assertLive(witness);
+}
+
+async function observeExactCheckpointExtensionOnBothNodes(
+  primary: Readonly<OwnedNode>,
+  witness: Readonly<OwnedNode>,
+  checkpoint: Readonly<TargetSnapshot>,
+  expectedExtensionValueHex: string,
+): Promise<string> {
+  const [primaryDigestHex, witnessDigestHex] = await Promise.all([
+    observeExactCheckpointExtension(
+      primary,
+      checkpoint,
+      expectedExtensionValueHex,
+    ),
+    observeExactCheckpointExtension(
+      witness,
+      checkpoint,
+      expectedExtensionValueHex,
+    ),
+  ]);
+  return deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1(
+    checkpoint,
+    expectedExtensionValueHex,
+    primaryDigestHex,
+    witnessDigestHex,
+  );
+}
+
+export function deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1(
+  checkpoint: Readonly<{
+    readonly network: 'devnet';
+    readonly fullHeight: number;
+    readonly indexedHeight: number;
+    readonly headerIdHex: string;
+  }>,
+  expectedExtensionValueHex: string,
+  primaryObservationDigestHex: string,
+  witnessObservationDigestHex: string,
+): string {
+  const normalizedCheckpoint = Object.freeze({
+    network: checkpoint.network,
+    fullHeight: nonnegativeInteger(
+      checkpoint.fullHeight,
+      'isolated Ergo checkpoint full height',
+    ),
+    indexedHeight: nonnegativeInteger(
+      checkpoint.indexedHeight,
+      'isolated Ergo checkpoint indexed height',
+    ),
+    headerIdHex: fixedHex(
+      checkpoint.headerIdHex,
+      32,
+      'isolated Ergo checkpoint header ID',
+    ),
+  });
+  if (
+    normalizedCheckpoint.network !== 'devnet'
+    || normalizedCheckpoint.indexedHeight !== normalizedCheckpoint.fullHeight
+  ) {
+    throw new Error('isolated Ergo checkpoint snapshot is not fully indexed devnet state');
+  }
+  const normalizedExtensionValueHex = fixedHex(
+    expectedExtensionValueHex,
+    64,
+    'isolated Ergo checkpoint extension value',
+  );
+  const normalizedPrimaryDigestHex = digest(
+    primaryObservationDigestHex,
+    'isolated Ergo primary checkpoint extension observation digest',
+  );
+  const normalizedWitnessDigestHex = digest(
+    witnessObservationDigestHex,
+    'isolated Ergo witness checkpoint extension observation digest',
+  );
+  if (normalizedPrimaryDigestHex !== normalizedWitnessDigestHex) {
+    throw new Error(
+      'isolated Ergo checkpoint extension observations disagree',
+    );
+  }
+  return sha256CanonicalJson({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+    checkpoint: normalizedCheckpoint,
+    extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
+    extensionValueHex: normalizedExtensionValueHex,
+    primaryObservationDigestHex: normalizedPrimaryDigestHex,
+    witnessObservationDigestHex: normalizedWitnessDigestHex,
+  }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_EXTENSION_OBSERVATION_V1');
+}
+
+async function observeExactCheckpointExtension(
+  node: Readonly<OwnedNode>,
+  checkpoint: Readonly<TargetSnapshot>,
+  expectedExtensionValueHex: string,
+): Promise<string> {
+  const origin = node.role === 'primary'
+    ? SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
+    : SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  const block = plainRecord(
+    await getJson(origin, `/blocks/${checkpoint.headerIdHex}`),
+    `isolated Ergo ${node.role} checkpoint block`,
+  );
+  const observationDigestHex =
+    deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1(
+      node.role,
+      checkpoint,
+      expectedExtensionValueHex,
+      block,
+    );
+  assertLive(node);
+  return observationDigestHex;
+}
+
+export function deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1(
+  role: NodeRole,
+  checkpoint: Readonly<{
+    readonly fullHeight: number;
+    readonly headerIdHex: string;
+  }>,
+  expectedExtensionValueHex: string,
+  blockValue: unknown,
+): string {
+  const checkpointHeaderIdHex = fixedHex(
+    checkpoint.headerIdHex,
+    32,
+    `isolated Ergo ${role} checkpoint header ID`,
+  );
+  const checkpointHeight = nonnegativeInteger(
+    checkpoint.fullHeight,
+    `isolated Ergo ${role} checkpoint height`,
+  );
+  const normalizedExtensionValueHex = fixedHex(
+    expectedExtensionValueHex,
+    64,
+    `isolated Ergo ${role} checkpoint extension value`,
+  );
+  const block = plainRecord(
+    blockValue,
+    `isolated Ergo ${role} checkpoint block`,
+  );
+  const rawHeader = plainRecord(
+    block.header,
+    `isolated Ergo ${role} checkpoint block header`,
+  );
+  const canonicalHeaderBytes = normalizeErgoNodeHeaderBytes(rawHeader);
+  const identity = parseErgoHeaderIdentity(canonicalHeaderBytes);
+  const headerIdHex = computeErgoHeaderId(identity).toString('hex');
+  if (
+    headerIdHex !== checkpointHeaderIdHex
+    || identity.height !== checkpointHeight
+  ) {
+    throw new Error(
+      `isolated Ergo ${role} checkpoint block identity changed`,
+    );
+  }
+  const extension = plainRecord(
+    block.extension,
+    `isolated Ergo ${role} checkpoint extension`,
+  );
+  if (!Array.isArray(extension.fields) || extension.fields.length === 0) {
+    throw new Error(
+      `isolated Ergo ${role} checkpoint extension fields are absent`,
+    );
+  }
+  const fields = extension.fields.map((field, index) => {
+    if (!Array.isArray(field) || field.length !== 2) {
+      throw new Error(
+        `isolated Ergo ${role} checkpoint extension field ${index} is malformed`,
+      );
+    }
+    const keyHex = variableHex(
+      field[0],
+      `isolated Ergo ${role} checkpoint extension key ${index}`,
+    );
+    const valueHex = variableHex(
+      field[1],
+      `isolated Ergo ${role} checkpoint extension value ${index}`,
+    );
+    if (Buffer.from(keyHex, 'hex').length !== 2) {
+      throw new Error(
+        `isolated Ergo ${role} checkpoint extension key ${index} must be two bytes`,
+      );
+    }
+    if (Buffer.from(valueHex, 'hex').length > 64) {
+      throw new Error(
+        `isolated Ergo ${role} checkpoint extension value ${index} exceeds 64 bytes`,
+      );
+    }
+    return Object.freeze({ keyHex, valueHex });
+  });
+  const matching = fields.filter(field =>
+    field.keyHex === CHECKPOINT_EXTENSION_KEY_HEX
+  );
+  if (
+    matching.length !== 1
+    || matching[0]!.valueHex !== normalizedExtensionValueHex
+  ) {
+    throw new Error(
+      `isolated Ergo ${role} checkpoint does not contain the exact 0x0401 value`,
+    );
+  }
+  const membership = buildErgoExtensionMembershipProof(
+    fields.map(field => ({
+      key: Buffer.from(field.keyHex, 'hex'),
+      value: Buffer.from(field.valueHex, 'hex'),
+    })),
+    Buffer.from(CHECKPOINT_EXTENSION_KEY_HEX, 'hex'),
+  );
+  const extensionRootHex = Buffer.from(identity.extensionHash).toString('hex');
+  if (membership.root.toString('hex') !== extensionRootHex) {
+    throw new Error(
+      `isolated Ergo ${role} checkpoint extension root changed`,
+    );
+  }
+  return sha256CanonicalJson({
+    headerIdHex,
+    height: identity.height,
+    canonicalHeaderBytesHex: canonicalHeaderBytes.toString('hex'),
+    extensionRootHex,
+    fields,
+    extensionMembershipProofHex: membership.proof.toString('hex'),
+  }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_EXTENSION_NODE_OBSERVATION_V1');
 }
 
 async function waitForExactSnapshot(
@@ -1944,6 +2557,16 @@ function fixedHex(value: unknown, bytes: number, label: string): string {
     || !/^[0-9a-f]+$/u.test(value)
   ) {
     throw new Error(`${label} must be ${bytes}-byte lowercase hexadecimal`);
+  }
+  return value;
+}
+
+function variableHex(value: unknown, label: string): string {
+  if (
+    typeof value !== 'string' || value.length === 0
+    || value.length % 2 !== 0 || !/^[0-9a-f]+$/u.test(value)
+  ) {
+    throw new Error(`${label} must be nonempty lowercase hexadecimal`);
   }
   return value;
 }

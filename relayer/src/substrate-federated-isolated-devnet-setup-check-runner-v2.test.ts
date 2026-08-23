@@ -34,6 +34,7 @@ vi.mock(
 );
 
 import {
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 
@@ -46,6 +47,7 @@ const SIGNER = Object.freeze({
 const SIGNER_BINDING = Object.freeze({ ...SIGNER });
 const MINING_CREDENTIAL = Object.freeze({ role: 'setup' });
 const CHECKPOINT_CREDENTIAL = Object.freeze({ role: 'checkpoint' });
+const TRACKER_ADMISSION_CREDENTIAL = Object.freeze({ role: 'tracker-admission' });
 const SETUP_INPUT = Object.freeze({ primaryNodeOrigin: 'primary' });
 const TARGET = Object.freeze({ target: 'owned' });
 const SOURCE_LOCK_INPUT = Object.freeze({ source: 'lock' });
@@ -101,6 +103,8 @@ describe('isolated setup-check runner V2 lifecycle', () => {
     expect(mocks.revokeSignerBinding).toHaveBeenCalledOnce();
     expect(mocks.revokeMiningCredential)
       .toHaveBeenCalledWith(CHECKPOINT_CREDENTIAL);
+    expect(mocks.revokeMiningCredential)
+      .toHaveBeenCalledWith(TRACKER_ADMISSION_CREDENTIAL);
     expect(execution.dispose).toHaveBeenCalledOnce();
   });
 
@@ -132,12 +136,54 @@ describe('isolated setup-check runner V2 lifecycle', () => {
     expect(mocks.revokeSignerBinding).toHaveBeenCalledOnce();
     expect(mocks.revokeMiningCredential)
       .toHaveBeenCalledWith(CHECKPOINT_CREDENTIAL);
+    expect(mocks.revokeMiningCredential)
+      .toHaveBeenCalledWith(TRACKER_ADMISSION_CREDENTIAL);
     expect(execution.dispose).toHaveBeenCalledOnce();
     await expect(session.checkTrackerCandidate(
       TRACKER_INPUT as never,
       TARGET as never,
     )).rejects.toThrow(/continuation is absent, consumed, or disposed/);
     session.dispose();
+    expect(execution.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('hands off the three ordered mining credentials atomically', async () => {
+    const execution = executionSession();
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+
+    expect(
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(session),
+    ).toEqual({
+      miningCredential: MINING_CREDENTIAL,
+      checkpointMiningCredential: CHECKPOINT_CREDENTIAL,
+      trackerAdmissionMiningCredential: TRACKER_ADMISSION_CREDENTIAL,
+    });
+    expect(execution.claimCheckpointMiningCredential).toHaveBeenCalledOnce();
+    expect(execution.claimTrackerAdmissionMiningCredential).toHaveBeenCalledOnce();
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(session)
+    ).toThrow(/absent, partially claimed, or disposed/);
+
+    session.dispose();
+    expect(mocks.revokeMiningCredential).not.toHaveBeenCalled();
+  });
+
+  it('revokes a partially claimed credential sequence', async () => {
+    const execution = executionSession();
+    execution.claimTrackerAdmissionMiningCredential.mockImplementationOnce(
+      () => {
+        throw new Error('injected tracker credential failure');
+      },
+    );
+    mocks.createExecutionSession.mockResolvedValue(execution);
+
+    await expect(createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2())
+      .rejects.toThrow(/injected tracker credential failure/);
+    expect(mocks.revokeMiningCredential)
+      .toHaveBeenCalledExactlyOnceWith(CHECKPOINT_CREDENTIAL);
+    expect(mocks.revokeSignerBinding)
+      .toHaveBeenCalledExactlyOnceWith(SIGNER_BINDING);
     expect(execution.dispose).toHaveBeenCalledOnce();
   });
 });
@@ -147,6 +193,8 @@ function executionSession() {
     signer: SIGNER,
     miningCredential: MINING_CREDENTIAL,
     claimCheckpointMiningCredential: vi.fn(() => CHECKPOINT_CREDENTIAL),
+    claimTrackerAdmissionMiningCredential:
+      vi.fn(() => TRACKER_ADMISSION_CREDENTIAL),
     dispose: vi.fn(),
     run: vi.fn(),
     runForExecution: vi.fn(),
