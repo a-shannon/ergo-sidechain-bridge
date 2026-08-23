@@ -11,6 +11,9 @@ import {
 import {
   loadWp06CanonicalJvmHeaderVector,
 } from './wp06-canonical-jvm-header-chain.js';
+import {
+  serializeErgoHeaderIdentity,
+} from './ergo-settlement-core/ergo-header-id.js';
 
 async function wasmModule(): Promise<any> {
   const imported = await import('ergo-lib-wasm-nodejs');
@@ -117,6 +120,103 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
     ).toThrow(/provenance is missing/i);
   });
 
+  it('accepts current Autolykos V2 block-version 4 node headers', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 4);
+    const observed = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders,
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    });
+
+    expect(observed.headers.map(header => header.raw.version))
+      .toEqual(Array(10).fill(4));
+    expect(observed.headers.every(header => header.serializedHex.length === 438))
+      .toBe(true);
+    expect(() => assertBridgeValidityTrackerObservedHeaderContextV1(observed))
+      .not.toThrow();
+  });
+
+  it('rejects legacy Autolykos V1 node headers from the observed context', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 1);
+
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders,
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    })).toThrow(/version 2 to 4/i);
+  });
+
+  it('rejects non-committed observed aliases and Autolykos V2 fields', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 4);
+    const expected = {
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    };
+
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? { ...header, extensionRoot: 'cd'.repeat(32) }
+        : header),
+    })).toThrow(/extension root aliases disagree/i);
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? {
+          ...header,
+          powSolutions: {
+            ...(header.powSolutions as Readonly<Record<string, unknown>>),
+            w: String(
+              (synthetic.headers[0]!.raw.powSolutions as Record<string, unknown>).pk,
+            ),
+          },
+        }
+        : header),
+    })).toThrow(/one-time key is not canonical/i);
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? {
+          ...header,
+          powSolutions: {
+            ...(header.powSolutions as Readonly<Record<string, unknown>>),
+            d: 1,
+          },
+        }
+        : header),
+    })).toThrow(/distance is not canonical/i);
+  });
+
   it('rejects incomplete or falsely identified observed header windows', async () => {
     const wasm = await wasmModule();
     const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
@@ -143,3 +243,53 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
     })).toThrow(/anchor header binding mismatch/i);
   });
 });
+
+function observedHeadersAtVersion(
+  source: readonly Readonly<{
+    readonly raw: Readonly<Record<string, unknown>>;
+    readonly parentId: string;
+  }>[],
+  version: 1 | 4,
+): Readonly<Record<string, unknown>>[] {
+  const oldestToNewest = [...source].reverse();
+  let parentId = oldestToNewest[0]!.parentId;
+  const rebuilt = oldestToNewest.map(header => {
+    const raw = header.raw;
+    const pow = raw.powSolutions as Readonly<Record<string, unknown>>;
+    const serialized = serializeErgoHeaderIdentity({
+      version,
+      parentId: Buffer.from(parentId, 'hex'),
+      adProofsRoot: Buffer.from(String(raw.adProofsRoot), 'hex'),
+      stateRoot: Buffer.from(String(raw.stateRoot), 'hex'),
+      transactionsRoot: Buffer.from(String(raw.transactionsRoot), 'hex'),
+      timestamp: BigInt(Number(raw.timestamp)),
+      nBits: Number(raw.nBits),
+      height: Number(raw.height),
+      extensionHash: Buffer.from(String(raw.extensionHash), 'hex'),
+      votes: Buffer.from(String(raw.votes), 'hex'),
+      powSolution: {
+        publicKey: Buffer.from(String(pow.pk), 'hex'),
+        nonce: Buffer.from(String(pow.n), 'hex'),
+        ...(version === 1
+          ? {
+            oneTimePublicKey: Buffer.from(String(pow.w), 'hex'),
+            distance: BigInt(String(pow.d)),
+          }
+          : {}),
+      },
+    });
+    const id = Buffer.from(
+      blakejs.blake2b(serialized, undefined, 32),
+    ).toString('hex');
+    const rebuiltRaw = {
+      ...raw,
+      id,
+      parentId,
+      ...(version === 4 ? { unparsedBytes: '' } : {}),
+      version,
+    };
+    parentId = id;
+    return rebuiltRaw;
+  });
+  return rebuilt.reverse();
+}

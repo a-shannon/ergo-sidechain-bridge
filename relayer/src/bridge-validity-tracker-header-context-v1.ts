@@ -2,6 +2,14 @@ import { createHash } from 'crypto';
 
 import blakejs from 'blakejs';
 
+import {
+  normalizeErgoNodeHeaderBytes,
+} from './adapters/ergo-utxo-state-runtime-witness-capture-port-v1.js';
+import {
+  parseErgoAutolykosV2HeaderIdentity,
+  type ErgoHeaderIdentityFields,
+} from './ergo-settlement-core/ergo-header-id.js';
+
 export const BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE =
   'eip0045-validity-tracker-canonical-synthetic-header-context';
 export const BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE =
@@ -100,12 +108,13 @@ export function buildBridgeValidityTrackerCanonicalHeaderContextV1(
       extensionRootHex,
     });
     const serialized = serializeCanonicalErgoHeaderV2(rawWithoutId);
+    const identity = parseErgoAutolykosV2HeaderIdentity(serialized);
     const id = blake2b256Hex(serialized);
     const raw = deepFreeze({
       ...rawWithoutId,
       id,
     });
-    const jvmHeaderJson = canonicalJvmHeaderJson(raw);
+    const jvmHeaderJson = canonicalJvmHeaderJson(identity);
     const record = deepFreeze({
       raw,
       id,
@@ -232,7 +241,7 @@ export function buildBridgeValidityTrackerObservedHeaderContextV1(
   );
   const headers = Object.freeze(input.rawHeaders.map((rawInput, index) => {
     const raw = deepFreeze(structuredClone(rawInput));
-    const serialized = serializeCanonicalErgoHeaderV2(raw);
+    const { identity, serialized } = canonicalObservedErgoHeader(raw);
     const id = blake2b256Hex(serialized);
     const claimedId = fixedHex(
       raw.id ?? raw.headerId,
@@ -245,18 +254,10 @@ export function buildBridgeValidityTrackerObservedHeaderContextV1(
     const record: BridgeValidityTrackerCanonicalHeaderV1 = deepFreeze({
       raw,
       id,
-      parentId: fixedHex(
-        raw.parentId,
-        32,
-        `observed header ${index} parent ID`,
-      ),
-      height: safeInteger(raw.height, `observed header ${index} height`),
-      extensionRootHex: fixedHex(
-        raw.extensionRoot ?? raw.extensionHash,
-        32,
-        `observed header ${index} extension root`,
-      ),
-      jvmHeaderJson: canonicalJvmHeaderJson(raw),
+      parentId: Buffer.from(identity.parentId).toString('hex'),
+      height: identity.height,
+      extensionRootHex: Buffer.from(identity.extensionHash).toString('hex'),
+      jvmHeaderJson: canonicalJvmHeaderJson(identity),
       serializedHex: serialized.toString('hex'),
     });
     assertSigmaRustHeaderIdentity(wasm, record, index, 'observed');
@@ -318,11 +319,15 @@ export function assertBridgeValidityTrackerObservedHeaderContextV1(
     throw new Error('validity tracker observed header context shape mismatch');
   }
   context.headers.forEach((header, index) => {
-    const serialized = serializeCanonicalErgoHeaderV2(header.raw);
+    const { identity, serialized } = canonicalObservedErgoHeader(header.raw);
     if (
       header.height !== context.currentHeight - index - 1
       || serialized.toString('hex') !== header.serializedHex
       || blake2b256Hex(serialized) !== header.id
+      || Buffer.from(identity.parentId).toString('hex') !== header.parentId
+      || Buffer.from(identity.extensionHash).toString('hex')
+        !== header.extensionRootHex
+      || canonicalJvmHeaderJson(identity) !== header.jvmHeaderJson
       || (
         index + 1 < context.headers.length
         && header.parentId !== context.headers[index + 1]!.id
@@ -333,6 +338,39 @@ export function assertBridgeValidityTrackerObservedHeaderContextV1(
       );
     }
   });
+}
+
+function canonicalObservedErgoHeader(
+  rawInput: Readonly<Record<string, unknown>>,
+): Readonly<{
+  readonly identity: ErgoHeaderIdentityFields;
+  readonly serialized: Buffer;
+}> {
+  const serialized = normalizeErgoNodeHeaderBytes(rawInput);
+  const identity = parseErgoAutolykosV2HeaderIdentity(serialized);
+  const raw = requiredRecord(rawInput, 'observed Ergo header');
+  const extensionRootHex = Buffer.from(identity.extensionHash).toString('hex');
+  if (
+    raw.extensionRoot !== undefined
+    && fixedHex(raw.extensionRoot, 32, 'observed header extensionRoot alias')
+      !== extensionRootHex
+  ) {
+    throw new Error('observed header extension root aliases disagree');
+  }
+  const pow = requiredRecord(raw.powSolutions, 'observed header PoW solution');
+  if (
+    pow.w !== undefined
+    && fixedHex(pow.w, 33, 'observed Autolykos V2 one-time key') !== HEADER_W
+  ) {
+    throw new Error('observed Autolykos V2 one-time key is not canonical');
+  }
+  if (
+    pow.d !== undefined
+    && decimalInteger(pow.d, 'observed Autolykos V2 distance') !== '0'
+  ) {
+    throw new Error('observed Autolykos V2 distance is not canonical');
+  }
+  return Object.freeze({ identity, serialized });
 }
 
 export function serializeCanonicalErgoHeaderV2(
@@ -424,47 +462,30 @@ function buildRawHeader(input: {
   };
 }
 
-function canonicalJvmHeaderJson(
-  rawInput: Readonly<Record<string, unknown>>,
-): string {
-  const raw = requiredRecord(rawInput, 'canonical JVM header');
-  const pow = requiredRecord(raw.powSolutions, 'canonical JVM PoW solution');
+function canonicalJvmHeaderJson(identity: ErgoHeaderIdentityFields): string {
   return JSON.stringify({
-    version: safeInteger(raw.version, 'JVM header version'),
-    parentId: fixedHex(raw.parentId, 32, 'JVM header parent ID'),
-    adProofsRoot: fixedHex(
-      raw.adProofsRoot,
-      32,
-      'JVM header AD proofs root',
-    ),
+    version: identity.version,
+    parentId: Buffer.from(identity.parentId).toString('hex'),
+    adProofsRoot: Buffer.from(identity.adProofsRoot).toString('hex'),
     stateRoot: {
-      digest: fixedHex(raw.stateRoot, 33, 'JVM header state root'),
+      digest: Buffer.from(identity.stateRoot).toString('hex'),
       treeFlags: 7,
       keyLength: 32,
       valueLength: null,
     },
-    transactionsRoot: fixedHex(
-      raw.transactionsRoot,
-      32,
-      'JVM header transactions root',
+    transactionsRoot: Buffer.from(identity.transactionsRoot).toString('hex'),
+    timestamp: unsignedSafeInteger(
+      Number(identity.timestamp),
+      'JVM header timestamp',
     ),
-    timestamp: unsignedSafeInteger(raw.timestamp, 'JVM header timestamp'),
-    nBits: unsignedSafeInteger(raw.nBits, 'JVM header nBits'),
-    height: unsignedSafeInteger(raw.height, 'JVM header height'),
-    extensionRoot: fixedHex(
-      raw.extensionRoot ?? raw.extensionHash,
-      32,
-      'JVM header extension root',
-    ),
-    minerPk: fixedHex(pow.pk, 33, 'JVM header miner public key'),
-    powOnetimePk: fixedHex(
-      pow.w,
-      33,
-      'JVM header PoW one-time public key',
-    ),
-    powNonce: fixedHex(pow.n, 8, 'JVM header PoW nonce'),
+    nBits: identity.nBits,
+    height: identity.height,
+    extensionRoot: Buffer.from(identity.extensionHash).toString('hex'),
+    minerPk: Buffer.from(identity.powSolution.publicKey).toString('hex'),
+    powOnetimePk: HEADER_W,
+    powNonce: Buffer.from(identity.powSolution.nonce).toString('hex'),
     powDistance: 0,
-    votes: fixedHex(raw.votes, 3, 'JVM header votes'),
+    votes: Buffer.from(identity.votes).toString('hex'),
   });
 }
 

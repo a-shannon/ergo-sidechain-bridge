@@ -55,6 +55,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Set([
+      'bridge-validity-tracker-header-context-v1.ts',
       'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
       'substrate-federated-authority-safe-devnet-history-v1.ts',
@@ -121,6 +122,14 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Map([
+      [
+        'bridge-validity-tracker-header-context-v1.ts',
+        new Set([
+          'BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE',
+          'BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE',
+          'buildBridgeValidityTrackerObservedHeaderContextV1',
+        ]),
+      ],
       [
         'peg-in-causal-admission-v2.ts',
         new Set(['PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION']),
@@ -254,11 +263,13 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt',
           'SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1',
+          'SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt',
           'SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt',
           'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1',
           'SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
+          'assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1',
           'discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
@@ -354,7 +365,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-tracker-v1.ts',
         new Set([
+          'assertSubstrateFederatedTrackerV1Context',
           'buildCompilerBoundSubstrateFederatedTrackerV1Context',
+          'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context',
           'SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA',
           'SubstrateFederatedTrackerV1Context',
         ]),
@@ -362,6 +375,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'unsigned-ergo-transaction.ts',
         new Set([
+          'Eip12Box',
           'Eip12UnsignedTransaction',
           'materializeUnsignedTransaction',
         ]),
@@ -534,6 +548,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       [
         '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js',
         new Set([
+          'assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1',
           'discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1',
           'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
@@ -609,7 +624,11 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-tracker-v1.js',
-        new Set(['buildCompilerBoundSubstrateFederatedTrackerV1Context']),
+        new Set([
+          'assertSubstrateFederatedTrackerV1Context',
+          'buildCompilerBoundSubstrateFederatedTrackerV1Context',
+          'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context',
+        ]),
       ],
       [
         '../../unsigned-ergo-transaction.js',
@@ -678,6 +697,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5Input',
+      'RunSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6Input',
       'RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input',
       'RunSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInTrackerCandidateCampaignRootV4Input',
@@ -687,6 +707,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5',
       'SubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5Receipt',
+      'SubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6',
+      'SubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6Receipt',
       'SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3',
       'SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Receipt',
       'SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
@@ -705,6 +727,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_V1',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CHECKPOINT_ANCHOR_CAMPAIGN_ROOT_V5_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CHECKPOINT_ANCHOR_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V5',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_ROOT_V6_SCHEMA',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V6',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_ROOT_V3_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_EXECUTION_ROOT_V1_SCHEMA',
@@ -721,6 +745,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5',
+      'runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6',
       'runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1',
@@ -877,6 +902,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1',
         new Set([
           'substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.ts',
+          'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         ]),
       ],
     ]),
