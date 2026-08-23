@@ -282,6 +282,7 @@ const CONFIRMATION_POLL_MS = 250;
 const TRANSACTION_CONFIRMATION_BUDGET_MS = 2 * 60_000;
 const MAX_CONFIRMATION_WINDOWS = 11;
 const NON_CONFIRMATION_ACTION_BUDGET_MS = 8 * 60_000;
+const OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT = 11;
 const ACTION_COMPLETION_BUDGET_MS =
   (MAX_CONFIRMATION_WINDOWS * TRANSACTION_CONFIRMATION_BUDGET_MS)
   + NON_CONFIRMATION_ACTION_BUDGET_MS;
@@ -571,6 +572,12 @@ const PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST =
       broadcast: false as const,
       trackerAdmission: false as const,
       payout: false as const,
+    }),
+    observedHeaderContext: Object.freeze({
+      headerVersion: 2 as const,
+      headerCount: 10 as const,
+      minimumCheckpointTipHeight:
+        OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT,
     }),
     exposedCapabilities: Object.freeze([]),
   });
@@ -2842,8 +2849,14 @@ async function runManagedCampaign(
             .checkpointStatement.encodedStatementHex,
         );
       const priorProcessSnapshot = managed.receipt.finalSnapshot;
+      const checkpointMiningPolicy = pegInAction === 'check-observed-anchor-tracker'
+        ? Object.freeze({
+          minimumTipHeight: OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT,
+        })
+        : Object.freeze({});
       const anchored = await nodeSession.withCheckpointExtensionMiningTarget(
         extensionValueHex,
+        checkpointMiningPolicy,
         async target => {
           const observation =
             await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({

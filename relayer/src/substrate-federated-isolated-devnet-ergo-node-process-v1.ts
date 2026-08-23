@@ -81,6 +81,29 @@ const ACTIVE_OWNED_EXECUTION_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_CHECKPOINT_TARGETS = new WeakSet<object>();
 
+export function deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
+  priorHeight: number,
+  minimumTipHeight?: number,
+): number {
+  if (
+    !Number.isSafeInteger(priorHeight)
+    || priorHeight < 0
+    || priorHeight >= Number.MAX_SAFE_INTEGER
+  ) {
+    throw new Error('isolated checkpoint prior height is invalid');
+  }
+  if (
+    minimumTipHeight !== undefined
+    && (
+      !Number.isSafeInteger(minimumTipHeight)
+      || minimumTipHeight < 0
+    )
+  ) {
+    throw new Error('isolated checkpoint minimum tip height is invalid');
+  }
+  return Math.max(priorHeight + 1, minimumTipHeight ?? 0);
+}
+
 type NodeRole = 'primary' | 'witness';
 type NodeMode = 'mining' | 'non-mining';
 
@@ -187,6 +210,7 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1 {
   }>>;
   readonly withCheckpointExtensionMiningTarget: <T>(
     checkpointExtensionValueHex: string,
+    policy: Readonly<SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1>,
     action: (
       target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
     ) => Promise<T>,
@@ -196,6 +220,10 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1 {
       Readonly<SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt>;
   }>>;
   readonly stop: () => Promise<void>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1 {
+  readonly minimumTipHeight?: number;
 }
 
 export interface SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 {
@@ -734,6 +762,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
     },
     withCheckpointExtensionMiningTarget: async <T>(
       checkpointExtensionValueHexValue: string,
+      policy: Readonly<SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1>,
       action: (
         target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
       ) => Promise<T>,
@@ -749,6 +778,14 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
       }
       if (typeof action !== 'function') {
         throw new Error('isolated Ergo checkpoint mining action is required');
+      }
+      if (
+        typeof policy !== 'object'
+        || policy === null
+        || Array.isArray(policy)
+        || Object.keys(policy).some(key => key !== 'minimumTipHeight')
+      ) {
+        throw new Error('isolated Ergo checkpoint mining policy is invalid');
       }
       const checkpointExtensionValueHex = fixedHex(
         checkpointExtensionValueHexValue,
@@ -766,6 +803,11 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
       activeOperation = 'anchor';
       try {
         const priorSnapshot = await waitForCommonIndexedSnapshot(primary, witness);
+        const requiredCheckpointTipHeight =
+          deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
+            priorSnapshot.fullHeight,
+            policy.minimumTipHeight,
+          );
         await assertStableExactSnapshot(primary, witness, priorSnapshot);
         await stopOwnedNode(primary, true);
         primary = undefined;
@@ -810,7 +852,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         const minedSnapshot = await waitForCommonIndexedSnapshotAfterHeight(
           primary,
           witness,
-          priorSnapshot.fullHeight,
+          requiredCheckpointTipHeight - 1,
         );
 
         await stopOwnedNode(primary, true);

@@ -1804,6 +1804,8 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(mocked.process.mock.calls[0]?.[2]).toBe(MINING_CREDENTIAL);
     expect(mocked.process.mock.calls[0]?.[3])
       .toBe(CHECKPOINT_MINING_CREDENTIAL);
+    expect(processSession.withCheckpointExtensionMiningTarget.mock.calls[0]?.[1])
+      .toEqual({});
     expect(order.indexOf('execution:leave')).toBeLessThan(
       order.indexOf('checkpoint-mining:enter'),
     );
@@ -1868,6 +1870,8 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
     expect(mocked.pegInCommittedVaultCheck).not.toHaveBeenCalled();
     expect(mocked.pegInCommittedVaultRetainingCheck).toHaveBeenCalledTimes(1);
+    expect(processSession.withCheckpointExtensionMiningTarget.mock.calls[0]?.[1])
+      .toEqual({ minimumTipHeight: 11 });
     expect(order.indexOf('checkpoint-anchor:observe')).toBeLessThan(
       order.indexOf('tracker:observed-headers:build'),
     );
@@ -2010,7 +2014,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         }) as typeof checkpointAnchorObservation;
       } else if (field === 'mined snapshot') {
         processSession.withCheckpointExtensionMiningTarget
-          .mockImplementationOnce(async (extensionValueHex, action) => ({
+          .mockImplementationOnce(async (extensionValueHex, _policy, action) => ({
             value: await action(executionTarget()),
             receipt: {
               ...checkpointMiningReceipt(extensionValueHex),
@@ -2022,7 +2026,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
           }));
       } else {
         processSession.withCheckpointExtensionMiningTarget
-          .mockImplementationOnce(async (extensionValueHex, action) => ({
+          .mockImplementationOnce(async (extensionValueHex, _policy, action) => ({
             value: await action(executionTarget()),
             receipt: {
               ...checkpointMiningReceipt(extensionValueHex),
@@ -3241,6 +3245,7 @@ function validProcessSession(order: string[]) {
     }),
     withCheckpointExtensionMiningTarget: vi.fn(async (
       extensionValueHex,
+      _policy,
       action,
     ) => {
       order.push('checkpoint-mining:enter');

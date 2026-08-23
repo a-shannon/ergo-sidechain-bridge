@@ -23,6 +23,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   decideSubstrateFederatedIsolatedDevnetCleanupAuthorityV1,
   type SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input,
@@ -110,6 +111,7 @@ describe.skipIf(process.platform !== 'win32')(
         .rejects.toThrow(/requires the active mining phase/);
       await expect(session.withCheckpointExtensionMiningTarget(
         '11'.repeat(64),
+        {},
         async () => 'never',
       )).rejects.toThrow(/requires the frozen first execution/);
       await expect(session.stop()).resolves.toBeUndefined();
@@ -192,6 +194,60 @@ describe.skipIf(process.platform !== 'win32')(
       expect(source).toContain('managedActionOverrunRejectedAfterJoin');
       expect(source).toContain('performance.now()');
       expect(source).not.toContain('Promise.race([');
+    });
+
+    it('applies an explicit checkpoint tip floor without changing the generic path', () => {
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(0))
+        .toBe(1);
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(8))
+        .toBe(9);
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(8, 11))
+        .toBe(11);
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(11, 11))
+        .toBe(12);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(-1)
+      ).toThrow(/prior height is invalid/);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
+          Number.MAX_SAFE_INTEGER,
+        )
+      ).toThrow(/prior height is invalid/);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(8, -1)
+      ).toThrow(/minimum tip height is invalid/);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
+          8,
+          Number.MAX_SAFE_INTEGER + 1,
+        )
+      ).toThrow(/minimum tip height is invalid/);
+      const source = readFileSync(
+        join(
+          import.meta.dirname,
+          'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        ),
+        'utf8',
+      );
+      const checkpointActionIndex = source.indexOf(
+        'withCheckpointExtensionMiningTarget: async',
+      );
+      const policyDerivationIndex = source.indexOf(
+        'const requiredCheckpointTipHeight =',
+        checkpointActionIndex,
+      );
+      const credentialConsumptionIndex = source.indexOf(
+        'checkpointMiningCredential = undefined;',
+        checkpointActionIndex,
+      );
+      const firstNodeStopIndex = source.indexOf(
+        'await stopOwnedNode(primary, true);',
+        checkpointActionIndex,
+      );
+      expect(checkpointActionIndex).toBeGreaterThan(-1);
+      expect(policyDerivationIndex).toBeGreaterThan(-1);
+      expect(firstNodeStopIndex).toBeGreaterThan(policyDerivationIndex);
+      expect(credentialConsumptionIndex).toBeGreaterThan(policyDerivationIndex);
     });
 
     it('fails stop before runtime cleanup when process termination is unverified', () => {
@@ -439,6 +495,7 @@ describe.skipIf(process.platform !== 'win32')(
           ).toThrow(/not owned by the active mining action/);
           const anchored = await session.withCheckpointExtensionMiningTarget(
             'ab'.repeat(64),
+            { minimumTipHeight: 11 },
             async target =>
               await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({
                 target,
@@ -460,6 +517,8 @@ describe.skipIf(process.platform !== 'win32')(
             .toEqual(managed.receipt.finalSnapshot);
           expect(anchored.receipt.minedSnapshot.fullHeight)
             .toBeGreaterThan(managed.receipt.finalSnapshot.fullHeight);
+          expect(anchored.receipt.minedSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(11);
           expect(anchored.receipt.miningStoppedBeforeObservation).toBe(true);
           expect(anchored.receipt.finalSnapshot.fullHeight)
             .toBeGreaterThanOrEqual(anchored.receipt.minedSnapshot.fullHeight);
@@ -475,6 +534,7 @@ describe.skipIf(process.platform !== 'win32')(
             .not.toBe(managed.receipt.processBindingDigestHex);
           await expect(session.withCheckpointExtensionMiningTarget(
             'ab'.repeat(64),
+            { minimumTipHeight: 11 },
             async () => 'never',
           )).rejects.toThrow(/absent, consumed, or revoked/);
         } finally {
