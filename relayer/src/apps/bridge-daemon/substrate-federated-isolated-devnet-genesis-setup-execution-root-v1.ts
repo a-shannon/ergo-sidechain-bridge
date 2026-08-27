@@ -4744,6 +4744,9 @@ async function runManagedCampaign(
         frontierMintProofConsumer,
         frontierApplicationRunner,
         sourceAcceptanceBuildWorkspace,
+        phase => {
+          managedPhase = phase;
+        },
       ),
     );
     assertCapabilityFreePlainData(managed, 'isolated devnet managed result');
@@ -5744,6 +5747,9 @@ async function executeManagedSetupAction(
       readonly temporaryDirectoryRoot: string;
       readonly sharedCargoHomeRoot: string;
     }> | undefined,
+  setManagedPhase: (
+    phase: TrackerTransportManagedCampaignPhaseV9,
+  ) => void,
 ): Promise<Readonly<ExecutionActionResult>> {
   const applicationCheckpointAction =
     isApplicationCheckpointAction(pegInAction);
@@ -5757,11 +5763,13 @@ async function executeManagedSetupAction(
     );
   }
   const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
+  setManagedPhase('source history collection');
   const sourceHistory =
     await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
       input.sourceHistory,
       sourceAcceptanceBuildWorkspace,
     );
+  setManagedPhase('ergo funding and history');
   const rewardInputs = await discoverSubstrateFederatedRewardInputsV2(
     setupSession.signer,
   );
@@ -5769,6 +5777,7 @@ async function executeManagedSetupAction(
     await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(
       rewardInputs,
     );
+  setManagedPhase('packet production');
   const packet = await packetSession.produce({
     sourceHistory,
     ergoHistory,
@@ -5780,6 +5789,7 @@ async function executeManagedSetupAction(
     primaryNodeOrigin: target.primaryNodeOrigin,
     witnessNodeOrigin: target.witnessNodeOrigin,
   };
+  setManagedPhase('setup batch construction');
   const batch = pegInAction !== 'candidate'
     ? await setupSession.runForExecutionRetainingPegInSigner(
       setupExecutionInput,
@@ -5789,6 +5799,7 @@ async function executeManagedSetupAction(
   assertCanonicalBatch(batch);
 
   const targetBinding = batch.targetBinding;
+  setManagedPhase('genesis setup transport');
   const observer =
     createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
       target,
@@ -5897,6 +5908,7 @@ async function executeManagedSetupAction(
       ManagedSubstrateFederatedIsolatedDevnetTrackerCandidateStageV4
     > | undefined;
     if (pegInPlan !== undefined) {
+      setManagedPhase('peg-in candidate construction');
       pegIn = await buildManagedPegInCandidate(
         pegInPlan,
         setupSession,
@@ -5919,6 +5931,7 @@ async function executeManagedSetupAction(
         || pegInAction === 'check-observed-anchor-tracker'
         || isFrozenTrackerCheckAction(pegInAction)
       ) {
+        setManagedPhase('peg-in source-lock execution');
         pegIn = await executeManagedPegInSourceLock(
           pegIn,
           batch,
@@ -5937,6 +5950,7 @@ async function executeManagedSetupAction(
           || pegInAction === 'check-observed-anchor-tracker'
           || isFrozenTrackerCheckAction(pegInAction)
         ) {
+          setManagedPhase('peg-in committed-vault execution');
           pegIn = await executeManagedPegInCommittedVault(
             pegIn,
             batch,
@@ -5979,6 +5993,7 @@ async function executeManagedSetupAction(
             );
           }
           assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+          setManagedPhase('application checkpoint execution');
           applicationCheckpoint =
             await consumeManagedPegInApplicationCheckpoint(
               packetSession,
@@ -5995,6 +6010,7 @@ async function executeManagedSetupAction(
             || pegInAction === 'check-observed-anchor-tracker'
             || isFrozenTrackerCheckAction(pegInAction)
           ) {
+            setManagedPhase('tracker candidate construction');
             trackerCandidate = await constructManagedTrackerCandidateV4(
               applicationCheckpoint,
               batch,
@@ -6005,6 +6021,7 @@ async function executeManagedSetupAction(
           }
         }
       }
+      setManagedPhase('managed setup finalization');
       assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
         authorizer,
         target,

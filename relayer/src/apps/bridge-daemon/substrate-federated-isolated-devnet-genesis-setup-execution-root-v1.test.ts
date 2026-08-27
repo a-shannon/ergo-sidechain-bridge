@@ -2990,6 +2990,111 @@ describe('isolated devnet genesis setup execution root V1', () => {
     }
   });
 
+  it.each([
+    ['source history', 'source history collection'],
+    ['Ergo funding', 'ergo funding and history'],
+  ] as const)(
+    'projects the exact V9 %s managed subphase without its private cause',
+    async (boundary, expectedPhase) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), `e2s-tracker-${boundary.replace(' ', '-')}-phase-`),
+      );
+      const privateDiagnostic =
+        `synthetic private ${boundary} failure under ${journalRoot}`;
+      if (boundary === 'source history') {
+        mocked.sourceHistory.mockRejectedValueOnce(new Error(privateDiagnostic));
+      } else {
+        mocked.rewardDiscovery.mockRejectedValueOnce(new Error(privateDiagnostic));
+      }
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            failure,
+          ),
+        ).toBe(expectedPhase);
+        expect(processSession.startMining).toHaveBeenCalledOnce();
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('assigns the V9 genesis transport phase before support construction', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-genesis-transport-phase-'),
+    );
+    const privateDiagnostic =
+      `synthetic private observer construction failure under ${journalRoot}`;
+    mocked.observer.mockImplementationOnce(() => {
+      throw new Error(privateDiagnostic);
+    });
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe('genesis setup transport');
+      expect(processSession.startMining).toHaveBeenCalledOnce();
+      expect(processSession.stop).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('retains the V9 managed subphase across teardown aggregation', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-source-history-aggregate-phase-'),
+    );
+    mocked.sourceHistory.mockRejectedValueOnce(
+      new Error(`synthetic private source failure under ${journalRoot}`),
+    );
+    processSession.stop.mockRejectedValueOnce(
+      new Error(`synthetic private teardown failure under ${journalRoot}`),
+    );
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe('source history collection');
+      expect(processSession.stop).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
   it('projects the V9 node-start phase across teardown aggregation', async () => {
     const journalRoot = mkdtempSync(
       join(tmpdir(), 'e2s-tracker-node-start-phase-'),

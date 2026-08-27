@@ -594,6 +594,9 @@ describe('isolated tracker transport campaign worker V9', () => {
   it.each([
     'ergo node build',
     'node startup and mining',
+    'source history collection',
+    'application checkpoint execution',
+    'managed setup finalization',
   ] as const)('projects process-issued managed phase %s without leaking its cause', async workerPhase => {
     const privateDiagnostic = `private ${workerPhase} diagnostic under ${root}`;
     const rootFailure = new Error(privateDiagnostic);

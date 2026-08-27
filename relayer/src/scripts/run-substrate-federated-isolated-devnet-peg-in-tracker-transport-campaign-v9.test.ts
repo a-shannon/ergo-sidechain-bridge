@@ -237,6 +237,17 @@ describe('isolated tracker transport campaign command V9', () => {
     'campaign root',
     'ergo node build',
     'node startup and mining',
+    'source history collection',
+    'ergo funding and history',
+    'packet production',
+    'setup batch construction',
+    'genesis setup transport',
+    'peg-in candidate construction',
+    'peg-in source-lock execution',
+    'peg-in committed-vault execution',
+    'application checkpoint execution',
+    'tracker candidate construction',
+    'managed setup finalization',
   ] as const)(
     'relays only allowlisted worker phase %s without publishing a receipt',
     async workerPhase => {
