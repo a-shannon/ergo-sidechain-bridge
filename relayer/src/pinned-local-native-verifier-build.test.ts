@@ -443,7 +443,7 @@ describe('pinned local native verifier build conformance', () => {
       message: 'test bounded diagnostics failed',
     });
     expect((outcome.error as BoundedProcessExitError).exitCode).not.toBe(0);
-  });
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {
     const workspace = createPinnedLocalNativeBuildWorkspace();

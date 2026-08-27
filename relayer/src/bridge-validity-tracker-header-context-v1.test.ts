@@ -166,7 +166,61 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
     })).toThrow(/version 2 to 4/i);
   });
 
-  it('rejects non-committed observed aliases and Autolykos V2 fields', async () => {
+  it('canonicalizes uncommitted Autolykos V2 aliases from freshly mined headers', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 4);
+    const expected = {
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    };
+
+    const freshHeaders = rawHeaders.map(header => ({
+      ...header,
+      powSolutions: {
+        ...(header.powSolutions as Readonly<Record<string, unknown>>),
+        w: String(
+          (header.powSolutions as Readonly<Record<string, unknown>>).pk,
+        ),
+        d: '12345678901234567890',
+      },
+    }));
+    const observed = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: freshHeaders,
+    });
+    const canonical = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders,
+    });
+
+    expect(observed.headers.map(header => header.id)).toEqual(
+      rawHeaders.map(header => String(header.id)),
+    );
+    expect(observed.headers.map(header => header.serializedHex)).toEqual(
+      canonical.headers.map(header => header.serializedHex),
+    );
+    expect(observed.headers.map(header => header.jvmHeaderJson)).toEqual(
+      canonical.headers.map(header => header.jvmHeaderJson),
+    );
+    expect(observed.headers.every(header =>
+      header.jvmHeaderJson.includes(`\"powOnetimePk\":\"${
+        String(
+          (synthetic.headers[0]!.raw.powSolutions as Record<string, unknown>).w,
+        )
+      }\"`)
+      && header.jvmHeaderJson.includes('\"powDistance\":0'))).toBe(true);
+  });
+
+  it('rejects malformed observed aliases and Autolykos V2 fields', async () => {
     const wasm = await wasmModule();
     const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
       wasm,
@@ -196,13 +250,11 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
           ...header,
           powSolutions: {
             ...(header.powSolutions as Readonly<Record<string, unknown>>),
-            w: String(
-              (synthetic.headers[0]!.raw.powSolutions as Record<string, unknown>).pk,
-            ),
+            w: '02'.repeat(32),
           },
         }
         : header),
-    })).toThrow(/one-time key is not canonical/i);
+    })).toThrow(/one-time key must be exactly 33 bytes/i);
     expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
       ...expected,
       rawHeaders: rawHeaders.map((header, index) => index === 0
@@ -210,11 +262,23 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
           ...header,
           powSolutions: {
             ...(header.powSolutions as Readonly<Record<string, unknown>>),
-            d: 1,
+            w: `04${'00'.repeat(32)}`,
           },
         }
         : header),
-    })).toThrow(/distance is not canonical/i);
+    })).toThrow();
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? {
+          ...header,
+          powSolutions: {
+            ...(header.powSolutions as Readonly<Record<string, unknown>>),
+            d: '-1',
+          },
+        }
+        : header),
+    })).toThrow(/distance must be a nonnegative decimal integer/i);
   });
 
   it('rejects incomplete or falsely identified observed header windows', async () => {

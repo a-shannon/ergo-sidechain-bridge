@@ -186,6 +186,19 @@ export const LOCAL_CONTINUITY_WITNESS_SCHEMA =
   'e2s.local-continuity-witness.v2';
 export const FUNDS_EXECUTION_AUTHORITY_SCHEMA =
   'e2s.funds-execution-authority.v1';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-admission-reservation.v1';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_DURABLE_RESERVATION_V1_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_DURABLE_RESERVATION_V1';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORE_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-admission-persistence-store.v1';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-transport-attempt.v1';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_DURABLE_ATTEMPT_V1_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_DURABLE_ATTEMPT_V1';
+
+const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORE_V1_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORE_V1';
 
 const LOCAL_CONTINUITY_LOCATION_DIGEST_DOMAIN =
   'ergo-sidechain-bridge:local-continuity-location:v1';
@@ -908,6 +921,143 @@ export interface ReserveErgoOperationalTransactionAttemptInput {
   revalidationDigestHex: string;
   authorizationDigestHex: string;
 }
+
+export interface SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA;
+  readonly reservationIdentityHex: string;
+  readonly operationProfileDigestHex: string;
+  readonly rootReceiptDigestHex: string;
+  readonly authorizationDigestHex: string;
+  readonly sourceProfileDigestHex: string;
+  readonly trackerSetupDigestHex: string;
+  readonly checkpointAnchorDigestHex: string;
+  readonly frozenTargetDigestHex: string;
+  readonly trackerCandidateDigestHex: string;
+  readonly jvmCheckDigestHex: string;
+  readonly statementIdHex: string;
+  readonly trackerInputBoxIdHex: string;
+  readonly unsignedTransactionIdHex: string;
+  readonly anchorHeaderIdHex: string;
+  readonly targetIdentityDigestHex: string;
+  readonly durableReservationDigestHex: string;
+  readonly createdAt: string;
+}
+
+export interface ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Input {
+  readonly reservationIdentityHex: string;
+  readonly operationProfileDigestHex: string;
+  readonly rootReceiptDigestHex: string;
+  readonly authorizationDigestHex: string;
+  readonly sourceProfileDigestHex: string;
+  readonly trackerSetupDigestHex: string;
+  readonly checkpointAnchorDigestHex: string;
+  readonly frozenTargetDigestHex: string;
+  readonly trackerCandidateDigestHex: string;
+  readonly jvmCheckDigestHex: string;
+  readonly statementIdHex: string;
+  readonly trackerInputBoxIdHex: string;
+  readonly unsignedTransactionIdHex: string;
+  readonly anchorHeaderIdHex: string;
+  readonly targetIdentityDigestHex: string;
+}
+
+export interface ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result {
+  readonly created: boolean;
+  readonly reservation: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1
+  >;
+}
+
+export interface ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result {
+  readonly reservation: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1
+  >;
+}
+
+export type SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Status =
+  | 'pending'
+  | 'accepted'
+  | 'ambiguous';
+
+export interface SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA;
+  readonly reservationIdentityHex: string;
+  readonly durableReservationDigestHex: string;
+  readonly expectedTransactionIdHex: string;
+  readonly inputBoxIdsHex: readonly string[];
+  readonly attemptedAtHeight: number;
+  readonly reservationFreshnessReceiptDigestHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly signedTransactionDigestHex: string;
+  readonly signedTransactionBytesSha256Hex: string;
+  readonly signedTransactionBytesLength: number;
+  readonly checkResponseDigestHex: string;
+  readonly authorizationDigestHex: string;
+  readonly durableAttemptDigestHex: string;
+  readonly status:
+    SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Status;
+  readonly submittedTransactionIdHex: string | null;
+  readonly responseDigestHex: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ReserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Input {
+  readonly reservationIdentityHex: string;
+  readonly durableReservationDigestHex: string;
+  readonly expectedTransactionIdHex: string;
+  readonly inputBoxIdsHex: readonly string[];
+  readonly attemptedAtHeight: number;
+  readonly reservationFreshnessReceiptDigestHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly signedTransactionDigestHex: string;
+  readonly signedTransactionBytesSha256Hex: string;
+  readonly signedTransactionBytesLength: number;
+  readonly checkResponseDigestHex: string;
+  readonly authorizationDigestHex: string;
+}
+
+export interface ReserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Result {
+  readonly created: boolean;
+  readonly attempt: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1
+  >;
+}
+
+export interface FinalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Input {
+  readonly expectedTransactionIdHex: string;
+  readonly durableAttemptDigestHex: string;
+  readonly disposition: 'accepted' | 'ambiguous';
+  readonly submittedTransactionIdHex: string | null;
+  readonly responseDigestHex: string;
+}
+
+const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_RESULTS_V1 =
+  new WeakMap<object, Readonly<{
+    readonly persistenceOwner: object;
+    readonly persistenceDatabase: Database.Database;
+    readonly persistenceStoreIdentityHex: string;
+    readonly created: boolean;
+    readonly reservationIdentityHex: string;
+    readonly durableReservationDigestHex: string;
+  }>>();
+const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RELOAD_RESULTS_V1 =
+  new WeakMap<object, Readonly<{
+    readonly persistenceOwner: object;
+    readonly persistenceDatabase: Database.Database;
+    readonly persistenceStoreIdentityHex: string;
+    readonly reservationIdentityHex: string;
+    readonly durableReservationDigestHex: string;
+  }>>();
+const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORES_V1 =
+  new WeakMap<object, Readonly<{
+    readonly database: Database.Database;
+    readonly persistenceStoreIdentityHex: string;
+  }>>();
 
 export interface StateTrackerOptions {
   readOnly?: boolean;
@@ -2614,6 +2764,563 @@ function mapPegInMintTransportAttemptRow(
   });
 }
 
+interface SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1Row {
+  schema: string;
+  reservation_identity: string;
+  operation_profile_digest: string;
+  root_receipt_digest: string;
+  authorization_digest: string;
+  source_profile_digest: string;
+  tracker_setup_digest: string;
+  checkpoint_anchor_digest: string;
+  frozen_target_digest: string;
+  tracker_candidate_digest: string;
+  jvm_check_digest: string;
+  statement_id: string;
+  tracker_input_box_id: string;
+  unsigned_transaction_id: string;
+  anchor_header_id: string;
+  target_identity_digest: string;
+  durable_reservation_digest: string;
+  created_at: string;
+}
+
+function mapSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+  row: SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1Row,
+): Readonly<SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1> {
+  if (
+    row.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA
+  ) {
+    throw new Error(
+      'persisted isolated-devnet tracker admission reservation schema is unsupported',
+    );
+  }
+  const reservation = Object.freeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA,
+    reservationIdentityHex: normalizeFixedHex(
+      row.reservation_identity,
+      32,
+      'persisted tracker reservation identity',
+    ),
+    operationProfileDigestHex: normalizeFixedHex(
+      row.operation_profile_digest,
+      32,
+      'persisted tracker reservation operation profile digest',
+    ),
+    rootReceiptDigestHex: normalizeFixedHex(
+      row.root_receipt_digest,
+      32,
+      'persisted tracker reservation root receipt digest',
+    ),
+    authorizationDigestHex: normalizeFixedHex(
+      row.authorization_digest,
+      32,
+      'persisted tracker reservation authorization digest',
+    ),
+    sourceProfileDigestHex: normalizeFixedHex(
+      row.source_profile_digest,
+      32,
+      'persisted tracker reservation source profile digest',
+    ),
+    trackerSetupDigestHex: normalizeFixedHex(
+      row.tracker_setup_digest,
+      32,
+      'persisted tracker reservation setup digest',
+    ),
+    checkpointAnchorDigestHex: normalizeFixedHex(
+      row.checkpoint_anchor_digest,
+      32,
+      'persisted tracker reservation checkpoint anchor digest',
+    ),
+    frozenTargetDigestHex: normalizeFixedHex(
+      row.frozen_target_digest,
+      32,
+      'persisted tracker reservation frozen target digest',
+    ),
+    trackerCandidateDigestHex: normalizeFixedHex(
+      row.tracker_candidate_digest,
+      32,
+      'persisted tracker reservation candidate digest',
+    ),
+    jvmCheckDigestHex: normalizeFixedHex(
+      row.jvm_check_digest,
+      32,
+      'persisted tracker reservation JVM check digest',
+    ),
+    statementIdHex: normalizeFixedHex(
+      row.statement_id,
+      32,
+      'persisted tracker reservation statement ID',
+    ),
+    trackerInputBoxIdHex: normalizeFixedHex(
+      row.tracker_input_box_id,
+      32,
+      'persisted tracker reservation input box ID',
+    ),
+    unsignedTransactionIdHex: normalizeFixedHex(
+      row.unsigned_transaction_id,
+      32,
+      'persisted tracker reservation unsigned transaction ID',
+    ),
+    anchorHeaderIdHex: normalizeFixedHex(
+      row.anchor_header_id,
+      32,
+      'persisted tracker reservation anchor header ID',
+    ),
+    targetIdentityDigestHex: normalizeFixedHex(
+      row.target_identity_digest,
+      32,
+      'persisted tracker reservation target identity digest',
+    ),
+    durableReservationDigestHex: normalizeFixedHex(
+      row.durable_reservation_digest,
+      32,
+      'persisted tracker durable reservation digest',
+    ),
+    createdAt: row.created_at,
+  });
+  if (
+    substrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationDigestHexV1(
+      reservation,
+    ) !== reservation.durableReservationDigestHex
+  ) {
+    throw new Error(
+      'persisted isolated-devnet tracker admission reservation durable digest changed',
+    );
+  }
+  return reservation;
+}
+
+function readSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+  database: Database.Database,
+  reservationIdentityHex: string,
+): Readonly<SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1> | null {
+  const row = database.prepare(`
+    SELECT *
+    FROM substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+    WHERE reservation_identity = ?
+  `).get(reservationIdentityHex) as
+    | SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1Row
+    | undefined;
+  return row === undefined
+    ? null
+    : mapSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(row);
+}
+
+interface SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Row {
+  schema: string;
+  reservation_identity: string;
+  durable_reservation_digest: string;
+  expected_transaction_id: string;
+  input_box_ids_json: string;
+  attempted_at_height: number;
+  reservation_freshness_receipt_digest: string;
+  process_binding_digest: string;
+  execution_target_identity_digest: string;
+  signed_transaction_digest: string;
+  signed_transaction_bytes_sha256: string;
+  signed_transaction_bytes_length: number;
+  check_response_digest: string;
+  authorization_digest: string;
+  durable_attempt_digest: string;
+  status: string;
+  submitted_transaction_id: string | null;
+  response_digest: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function normalizeTrackerTransportInputBoxIdsHex(
+  value: readonly string[],
+  label: string,
+): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`${label} must contain at least one input box ID`);
+  }
+  const normalized = value.map((boxId, index) =>
+    normalizeFixedHex(boxId, 32, `${label} ${index}`)
+  );
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error(`${label} must not contain duplicate box IDs`);
+  }
+  return Object.freeze(normalized);
+}
+
+function parseTrackerTransportInputBoxIdsHex(
+  value: string,
+): readonly string[] {
+  const parsed = parseStrictJson(value);
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      'persisted isolated-devnet tracker transport input box IDs are invalid',
+    );
+  }
+  return normalizeTrackerTransportInputBoxIdsHex(
+    parsed as string[],
+    'persisted isolated-devnet tracker transport input box IDs',
+  );
+}
+
+export function substrateFederatedIsolatedDevnetTrackerTransportDurableAttemptDigestHexV1(
+  input: ReserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Input,
+): string {
+  return sha256CanonicalJson({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA,
+    reservationIdentityHex: input.reservationIdentityHex,
+    durableReservationDigestHex: input.durableReservationDigestHex,
+    expectedTransactionIdHex: input.expectedTransactionIdHex,
+    inputBoxIdsHex: input.inputBoxIdsHex,
+    attemptedAtHeight: input.attemptedAtHeight,
+    reservationFreshnessReceiptDigestHex:
+      input.reservationFreshnessReceiptDigestHex,
+    processBindingDigestHex: input.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      input.executionTargetIdentityDigestHex,
+    signedTransactionDigestHex: input.signedTransactionDigestHex,
+    signedTransactionBytesSha256Hex:
+      input.signedTransactionBytesSha256Hex,
+    signedTransactionBytesLength: input.signedTransactionBytesLength,
+    checkResponseDigestHex: input.checkResponseDigestHex,
+    authorizationDigestHex: input.authorizationDigestHex,
+  }, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_DURABLE_ATTEMPT_V1_DIGEST_DOMAIN);
+}
+
+function mapSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+  row: SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Row,
+): Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1> {
+  if (
+    row.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA
+  ) {
+    throw new Error(
+      'persisted isolated-devnet tracker transport attempt schema is unsupported',
+    );
+  }
+  const status = row.status;
+  if (status !== 'pending' && status !== 'accepted' && status !== 'ambiguous') {
+    throw new Error(
+      'persisted isolated-devnet tracker transport attempt status is unsupported',
+    );
+  }
+  const attempt = Object.freeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA,
+    reservationIdentityHex: normalizeFixedHex(
+      row.reservation_identity,
+      32,
+      'persisted tracker transport reservation identity',
+    ),
+    durableReservationDigestHex: normalizeFixedHex(
+      row.durable_reservation_digest,
+      32,
+      'persisted tracker transport durable reservation digest',
+    ),
+    expectedTransactionIdHex: normalizeFixedHex(
+      row.expected_transaction_id,
+      32,
+      'persisted tracker transport expected transaction ID',
+    ),
+    inputBoxIdsHex: parseTrackerTransportInputBoxIdsHex(
+      row.input_box_ids_json,
+    ),
+    attemptedAtHeight: normalizeNonnegativeSignedInt(
+      row.attempted_at_height,
+      'persisted tracker transport attempt height',
+    ),
+    reservationFreshnessReceiptDigestHex: normalizeFixedHex(
+      row.reservation_freshness_receipt_digest,
+      32,
+      'persisted tracker transport freshness receipt digest',
+    ),
+    processBindingDigestHex: normalizeFixedHex(
+      row.process_binding_digest,
+      32,
+      'persisted tracker transport process binding digest',
+    ),
+    executionTargetIdentityDigestHex: normalizeFixedHex(
+      row.execution_target_identity_digest,
+      32,
+      'persisted tracker transport target identity digest',
+    ),
+    signedTransactionDigestHex: normalizeFixedHex(
+      row.signed_transaction_digest,
+      32,
+      'persisted tracker transport signed transaction digest',
+    ),
+    signedTransactionBytesSha256Hex: normalizeFixedHex(
+      row.signed_transaction_bytes_sha256,
+      32,
+      'persisted tracker transport signed transaction bytes digest',
+    ),
+    signedTransactionBytesLength: normalizePositiveSignedInt(
+      row.signed_transaction_bytes_length,
+      'persisted tracker transport signed transaction bytes length',
+    ),
+    checkResponseDigestHex: normalizeFixedHex(
+      row.check_response_digest,
+      32,
+      'persisted tracker transport check response digest',
+    ),
+    authorizationDigestHex: normalizeFixedHex(
+      row.authorization_digest,
+      32,
+      'persisted tracker transport authorization digest',
+    ),
+    durableAttemptDigestHex: normalizeFixedHex(
+      row.durable_attempt_digest,
+      32,
+      'persisted tracker transport durable attempt digest',
+    ),
+    status,
+    submittedTransactionIdHex: row.submitted_transaction_id === null
+      ? null
+      : normalizeFixedHex(
+        row.submitted_transaction_id,
+        32,
+        'persisted tracker transport submitted transaction ID',
+      ),
+    responseDigestHex: row.response_digest === null
+      ? null
+      : normalizeFixedHex(
+        row.response_digest,
+        32,
+        'persisted tracker transport response digest',
+      ),
+    createdAt: normalizeCanonicalIsoTimestamp(
+      row.created_at,
+      'persisted tracker transport creation time',
+    ),
+    updatedAt: normalizeCanonicalIsoTimestamp(
+      row.updated_at,
+      'persisted tracker transport update time',
+    ),
+  });
+  if (
+    substrateFederatedIsolatedDevnetTrackerTransportDurableAttemptDigestHexV1(
+      attempt,
+    ) !== attempt.durableAttemptDigestHex
+  ) {
+    throw new Error(
+      'persisted isolated-devnet tracker transport durable attempt digest changed',
+    );
+  }
+  if (
+    (attempt.status === 'pending'
+      && (attempt.submittedTransactionIdHex !== null
+        || attempt.responseDigestHex !== null))
+    || (attempt.status === 'accepted'
+      && (attempt.submittedTransactionIdHex
+        !== attempt.expectedTransactionIdHex
+        || attempt.responseDigestHex === null))
+    || (attempt.status === 'ambiguous'
+      && (attempt.submittedTransactionIdHex !== null
+        || attempt.responseDigestHex === null))
+  ) {
+    throw new Error(
+      'persisted isolated-devnet tracker transport outcome binding is invalid',
+    );
+  }
+  return attempt;
+}
+
+function readSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+  database: Database.Database,
+  reservationIdentityHex: string,
+): Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1> | null {
+  const row = database.prepare(`
+    SELECT *
+    FROM substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+    WHERE reservation_identity = ?
+  `).get(reservationIdentityHex) as
+    | SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Row
+    | undefined;
+  return row === undefined
+    ? null
+    : mapSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(row);
+}
+
+export function substrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationDigestHexV1(
+  input: ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Input,
+): string {
+  return sha256CanonicalJson({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA,
+    reservationIdentityHex: input.reservationIdentityHex,
+    operationProfileDigestHex: input.operationProfileDigestHex,
+    rootReceiptDigestHex: input.rootReceiptDigestHex,
+    authorizationDigestHex: input.authorizationDigestHex,
+    sourceProfileDigestHex: input.sourceProfileDigestHex,
+    trackerSetupDigestHex: input.trackerSetupDigestHex,
+    checkpointAnchorDigestHex: input.checkpointAnchorDigestHex,
+    frozenTargetDigestHex: input.frozenTargetDigestHex,
+    trackerCandidateDigestHex: input.trackerCandidateDigestHex,
+    jvmCheckDigestHex: input.jvmCheckDigestHex,
+    statementIdHex: input.statementIdHex,
+    trackerInputBoxIdHex: input.trackerInputBoxIdHex,
+    unsignedTransactionIdHex: input.unsignedTransactionIdHex,
+    anchorHeaderIdHex: input.anchorHeaderIdHex,
+    targetIdentityDigestHex: input.targetIdentityDigestHex,
+  }, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_DURABLE_RESERVATION_V1_DIGEST_DOMAIN);
+}
+
+function requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+  value: unknown,
+): Readonly<{
+  readonly database: Database.Database;
+  readonly persistenceStoreIdentityHex: string;
+}> {
+  if (value === null || typeof value !== 'object') {
+    throw new Error(
+      'isolated-devnet tracker admission reservation requires a constructor-proven file-backed StateTracker store',
+    );
+  }
+  const material =
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORES_V1
+      .get(value);
+  if (material === undefined) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation requires a constructor-proven file-backed StateTracker store',
+    );
+  }
+  return material;
+}
+
+export function substrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreIdentityHexV1(
+  value: unknown,
+): string {
+  return requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+    value,
+  ).persistenceStoreIdentityHex;
+}
+
+export function assertReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+  value: unknown,
+  persistenceOwner: object,
+): asserts value is Readonly<
+  ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result
+> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !Object.isFrozen(value)
+    || persistenceOwner === null
+    || typeof persistenceOwner !== 'object'
+  ) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation result lacks exact StateTracker persistence provenance',
+    );
+  }
+  const material =
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_RESULTS_V1
+      .get(value);
+  const store =
+    requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+      persistenceOwner,
+    );
+  if (
+    material === undefined
+    || material.persistenceOwner !== persistenceOwner
+    || material.persistenceDatabase !== store.database
+    || material.persistenceStoreIdentityHex
+      !== store.persistenceStoreIdentityHex
+  ) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation result lacks exact StateTracker persistence provenance',
+    );
+  }
+  const result = value as Readonly<
+    ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result
+  >;
+  const reservation = result.reservation;
+  if (
+    typeof result.created !== 'boolean'
+    || result.created !== material.created
+    || reservation === null
+    || typeof reservation !== 'object'
+    || !Object.isFrozen(reservation)
+    || reservation.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA
+    || reservation.reservationIdentityHex !== material.reservationIdentityHex
+    || reservation.durableReservationDigestHex
+      !== material.durableReservationDigestHex
+    || substrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationDigestHexV1(
+      reservation,
+    ) !== reservation.durableReservationDigestHex
+    || typeof reservation.createdAt !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(
+      reservation.createdAt,
+    )
+  ) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation result binding changed',
+    );
+  }
+}
+
+export function assertReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance(
+  value: unknown,
+  persistenceOwner: object,
+): asserts value is Readonly<
+  ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result
+> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !Object.isFrozen(value)
+    || persistenceOwner === null
+    || typeof persistenceOwner !== 'object'
+  ) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation reload lacks exact StateTracker persistence provenance',
+    );
+  }
+  const material =
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RELOAD_RESULTS_V1
+      .get(value);
+  const store =
+    requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+      persistenceOwner,
+    );
+  if (
+    material === undefined
+    || material.persistenceOwner !== persistenceOwner
+    || material.persistenceDatabase !== store.database
+    || material.persistenceStoreIdentityHex !== store.persistenceStoreIdentityHex
+  ) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation reload lacks exact StateTracker persistence provenance',
+    );
+  }
+  const result = value as Readonly<
+    ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result
+  >;
+  const reservation = result.reservation;
+  if (
+    reservation === null
+    || typeof reservation !== 'object'
+    || !Object.isFrozen(reservation)
+    || reservation.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA
+    || reservation.reservationIdentityHex !== material.reservationIdentityHex
+    || reservation.durableReservationDigestHex
+      !== material.durableReservationDigestHex
+    || substrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationDigestHexV1(
+      reservation,
+    ) !== reservation.durableReservationDigestHex
+    || typeof reservation.createdAt !== 'string'
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(
+      reservation.createdAt,
+    )
+  ) {
+    throw new Error(
+      'isolated-devnet tracker admission reservation reload binding changed',
+    );
+  }
+}
+
 const PEG_IN_STATUSES = new Set<PegInStatus>([
   'detected',
   'confirmed',
@@ -3336,6 +4043,23 @@ export class StateTracker {
       this.db.pragma('journal_mode = WAL');
       this.initializeLocalContinuityState();
       this.migrate();
+      if (
+        canonicalDbPath !== null
+        && this.db.memory === false
+        && this.fundsReleaseContinuityLocationDigestHex !== null
+      ) {
+        const persistenceStoreIdentityHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORE_V1_SCHEMA,
+          localContinuityIdentityHex: this.readLocalContinuityIdentityHex(),
+          locationDigestHex: this.fundsReleaseContinuityLocationDigestHex,
+        }, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORE_V1_DIGEST_DOMAIN);
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_PERSISTENCE_STORES_V1
+          .set(this, Object.freeze({
+            database: this.db,
+            persistenceStoreIdentityHex,
+          }));
+      }
     }
   }
 
@@ -4656,6 +5380,162 @@ export class StateTracker {
           '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}'
         )
           AND status IN ('pending', 'accepted', 'ambiguous');
+
+      CREATE TABLE IF NOT EXISTS substrate_federated_isolated_devnet_tracker_admission_reservations_v1 (
+        schema TEXT NOT NULL,
+        reservation_identity TEXT PRIMARY KEY,
+        operation_profile_digest TEXT NOT NULL,
+        root_receipt_digest TEXT NOT NULL UNIQUE,
+        authorization_digest TEXT NOT NULL UNIQUE,
+        source_profile_digest TEXT NOT NULL,
+        tracker_setup_digest TEXT NOT NULL,
+        checkpoint_anchor_digest TEXT NOT NULL,
+        frozen_target_digest TEXT NOT NULL,
+        tracker_candidate_digest TEXT NOT NULL,
+        jvm_check_digest TEXT NOT NULL,
+        statement_id TEXT NOT NULL UNIQUE,
+        tracker_input_box_id TEXT NOT NULL UNIQUE,
+        unsigned_transaction_id TEXT NOT NULL UNIQUE,
+        anchor_header_id TEXT NOT NULL,
+        target_identity_digest TEXT NOT NULL,
+        durable_reservation_digest TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        CHECK (
+          schema = '${SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA}'
+        ),
+        CHECK (length(reservation_identity) = 64),
+        CHECK (length(operation_profile_digest) = 64),
+        CHECK (length(root_receipt_digest) = 64),
+        CHECK (length(authorization_digest) = 64),
+        CHECK (length(source_profile_digest) = 64),
+        CHECK (length(tracker_setup_digest) = 64),
+        CHECK (length(checkpoint_anchor_digest) = 64),
+        CHECK (length(frozen_target_digest) = 64),
+        CHECK (length(tracker_candidate_digest) = 64),
+        CHECK (length(jvm_check_digest) = 64),
+        CHECK (length(statement_id) = 64),
+        CHECK (length(tracker_input_box_id) = 64),
+        CHECK (length(unsigned_transaction_id) = 64),
+        CHECK (length(anchor_header_id) = 64),
+        CHECK (length(target_identity_digest) = 64),
+        CHECK (length(durable_reservation_digest) = 64)
+      );
+
+      CREATE TRIGGER IF NOT EXISTS substrate_federated_isolated_devnet_tracker_admission_reservation_no_update_v1
+      BEFORE UPDATE ON substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+      BEGIN
+        SELECT RAISE(
+          ABORT,
+          'isolated-devnet tracker admission reservations are append-only'
+        );
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS substrate_federated_isolated_devnet_tracker_admission_reservation_no_delete_v1
+      BEFORE DELETE ON substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+      BEGIN
+        SELECT RAISE(
+          ABORT,
+          'isolated-devnet tracker admission reservations are append-only'
+        );
+      END;
+
+      CREATE TABLE IF NOT EXISTS substrate_federated_isolated_devnet_tracker_transport_attempts_v1 (
+        schema TEXT NOT NULL,
+        reservation_identity TEXT PRIMARY KEY,
+        durable_reservation_digest TEXT NOT NULL,
+        expected_transaction_id TEXT NOT NULL UNIQUE,
+        input_box_ids_json TEXT NOT NULL,
+        attempted_at_height INTEGER NOT NULL,
+        reservation_freshness_receipt_digest TEXT NOT NULL UNIQUE,
+        process_binding_digest TEXT NOT NULL,
+        execution_target_identity_digest TEXT NOT NULL,
+        signed_transaction_digest TEXT NOT NULL,
+        signed_transaction_bytes_sha256 TEXT NOT NULL,
+        signed_transaction_bytes_length INTEGER NOT NULL,
+        check_response_digest TEXT NOT NULL,
+        authorization_digest TEXT NOT NULL UNIQUE,
+        durable_attempt_digest TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'pending',
+        submitted_transaction_id TEXT,
+        response_digest TEXT,
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+        FOREIGN KEY (reservation_identity)
+          REFERENCES substrate_federated_isolated_devnet_tracker_admission_reservations_v1(reservation_identity),
+        CHECK (
+          schema = '${SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA}'
+        ),
+        CHECK (length(reservation_identity) = 64),
+        CHECK (length(durable_reservation_digest) = 64),
+        CHECK (length(expected_transaction_id) = 64),
+        CHECK (attempted_at_height >= 0),
+        CHECK (length(reservation_freshness_receipt_digest) = 64),
+        CHECK (length(process_binding_digest) = 64),
+        CHECK (length(execution_target_identity_digest) = 64),
+        CHECK (length(signed_transaction_digest) = 64),
+        CHECK (length(signed_transaction_bytes_sha256) = 64),
+        CHECK (signed_transaction_bytes_length > 0),
+        CHECK (length(check_response_digest) = 64),
+        CHECK (length(authorization_digest) = 64),
+        CHECK (length(durable_attempt_digest) = 64),
+        CHECK (status IN ('pending', 'accepted', 'ambiguous')),
+        CHECK (
+          (status = 'pending'
+            AND submitted_transaction_id IS NULL
+            AND response_digest IS NULL)
+          OR (status = 'accepted'
+            AND submitted_transaction_id = expected_transaction_id
+            AND length(response_digest) = 64)
+          OR (status = 'ambiguous'
+            AND submitted_transaction_id IS NULL
+            AND length(response_digest) = 64)
+        )
+      );
+
+      CREATE TRIGGER IF NOT EXISTS substrate_federated_isolated_devnet_tracker_transport_attempt_transition_v1
+      BEFORE UPDATE ON substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+      WHEN NOT (
+        OLD.status = 'pending'
+        AND NEW.status IN ('accepted', 'ambiguous')
+        AND NEW.schema = OLD.schema
+        AND NEW.reservation_identity = OLD.reservation_identity
+        AND NEW.durable_reservation_digest = OLD.durable_reservation_digest
+        AND NEW.expected_transaction_id = OLD.expected_transaction_id
+        AND NEW.input_box_ids_json = OLD.input_box_ids_json
+        AND NEW.attempted_at_height = OLD.attempted_at_height
+        AND NEW.reservation_freshness_receipt_digest = OLD.reservation_freshness_receipt_digest
+        AND NEW.process_binding_digest = OLD.process_binding_digest
+        AND NEW.execution_target_identity_digest = OLD.execution_target_identity_digest
+        AND NEW.signed_transaction_digest = OLD.signed_transaction_digest
+        AND NEW.signed_transaction_bytes_sha256 = OLD.signed_transaction_bytes_sha256
+        AND NEW.signed_transaction_bytes_length = OLD.signed_transaction_bytes_length
+        AND NEW.check_response_digest = OLD.check_response_digest
+        AND NEW.authorization_digest = OLD.authorization_digest
+        AND NEW.durable_attempt_digest = OLD.durable_attempt_digest
+        AND NEW.created_at = OLD.created_at
+        AND NEW.response_digest IS NOT NULL
+        AND (
+          (NEW.status = 'accepted'
+            AND NEW.submitted_transaction_id = OLD.expected_transaction_id)
+          OR (NEW.status = 'ambiguous'
+            AND NEW.submitted_transaction_id IS NULL)
+        )
+      )
+      BEGIN
+        SELECT RAISE(
+          ABORT,
+          'isolated-devnet tracker transport attempt transition is invalid'
+        );
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS substrate_federated_isolated_devnet_tracker_transport_attempt_no_delete_v1
+      BEFORE DELETE ON substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+      BEGIN
+        SELECT RAISE(
+          ABORT,
+          'isolated-devnet tracker transport attempts are append-only'
+        );
+      END;
 
       CREATE TABLE IF NOT EXISTS aggregate_settlement_attempts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13876,6 +14756,584 @@ export class StateTracker {
           updated_at = datetime('now')
       WHERE id = ?
     `).run(pegOut.id);
+  }
+
+  reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1(
+    input: ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Input,
+  ): ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result {
+    if (this.isReadOnly === true) {
+      this.assertWritable('reserve isolated-devnet tracker admission');
+    }
+    const persistenceStore =
+      requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+        this,
+      );
+    this.assertWritable('reserve isolated-devnet tracker admission');
+    const database = persistenceStore.database;
+    if (database !== this.db) {
+      throw new Error(
+        'isolated-devnet tracker admission reservation persistence database changed after construction',
+      );
+    }
+    const normalized = Object.freeze({
+      reservationIdentityHex: normalizeFixedHex(
+        input.reservationIdentityHex,
+        32,
+        'tracker reservation identity',
+      ),
+      operationProfileDigestHex: normalizeFixedHex(
+        input.operationProfileDigestHex,
+        32,
+        'tracker reservation operation profile digest',
+      ),
+      rootReceiptDigestHex: normalizeFixedHex(
+        input.rootReceiptDigestHex,
+        32,
+        'tracker reservation root receipt digest',
+      ),
+      authorizationDigestHex: normalizeFixedHex(
+        input.authorizationDigestHex,
+        32,
+        'tracker reservation authorization digest',
+      ),
+      sourceProfileDigestHex: normalizeFixedHex(
+        input.sourceProfileDigestHex,
+        32,
+        'tracker reservation source profile digest',
+      ),
+      trackerSetupDigestHex: normalizeFixedHex(
+        input.trackerSetupDigestHex,
+        32,
+        'tracker reservation setup digest',
+      ),
+      checkpointAnchorDigestHex: normalizeFixedHex(
+        input.checkpointAnchorDigestHex,
+        32,
+        'tracker reservation checkpoint anchor digest',
+      ),
+      frozenTargetDigestHex: normalizeFixedHex(
+        input.frozenTargetDigestHex,
+        32,
+        'tracker reservation frozen target digest',
+      ),
+      trackerCandidateDigestHex: normalizeFixedHex(
+        input.trackerCandidateDigestHex,
+        32,
+        'tracker reservation candidate digest',
+      ),
+      jvmCheckDigestHex: normalizeFixedHex(
+        input.jvmCheckDigestHex,
+        32,
+        'tracker reservation JVM check digest',
+      ),
+      statementIdHex: normalizeFixedHex(
+        input.statementIdHex,
+        32,
+        'tracker reservation statement ID',
+      ),
+      trackerInputBoxIdHex: normalizeFixedHex(
+        input.trackerInputBoxIdHex,
+        32,
+        'tracker reservation input box ID',
+      ),
+      unsignedTransactionIdHex: normalizeFixedHex(
+        input.unsignedTransactionIdHex,
+        32,
+        'tracker reservation unsigned transaction ID',
+      ),
+      anchorHeaderIdHex: normalizeFixedHex(
+        input.anchorHeaderIdHex,
+        32,
+        'tracker reservation anchor header ID',
+      ),
+      targetIdentityDigestHex: normalizeFixedHex(
+        input.targetIdentityDigestHex,
+        32,
+        'tracker reservation target identity digest',
+      ),
+    });
+    const durableReservationDigestHex =
+      substrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationDigestHexV1(
+        normalized,
+      );
+
+    const reserve = database.transaction(
+      (): ReserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result => {
+        const existing =
+          readSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            database,
+            normalized.reservationIdentityHex,
+          );
+        if (existing !== null) {
+          if (
+            existing.durableReservationDigestHex
+              !== durableReservationDigestHex
+          ) {
+            throw new Error(
+              'isolated-devnet tracker admission reservation identity conflicts with persisted bindings',
+            );
+          }
+          return Object.freeze({
+            created: false,
+            reservation: existing,
+          });
+        }
+
+        const conflict = database.prepare(`
+          SELECT reservation_identity
+          FROM substrate_federated_isolated_devnet_tracker_admission_reservations_v1
+          WHERE root_receipt_digest = ?
+             OR authorization_digest = ?
+             OR statement_id = ?
+             OR tracker_input_box_id = ?
+             OR unsigned_transaction_id = ?
+          LIMIT 1
+        `).get(
+          normalized.rootReceiptDigestHex,
+          normalized.authorizationDigestHex,
+          normalized.statementIdHex,
+          normalized.trackerInputBoxIdHex,
+          normalized.unsignedTransactionIdHex,
+        ) as { reservation_identity: string } | undefined;
+        if (conflict !== undefined) {
+          throw new Error(
+            'conflicting isolated-devnet tracker admission reservation must be reconciled before replacement',
+          );
+        }
+
+        database.prepare(`
+          INSERT INTO substrate_federated_isolated_devnet_tracker_admission_reservations_v1 (
+            schema,
+            reservation_identity,
+            operation_profile_digest,
+            root_receipt_digest,
+            authorization_digest,
+            source_profile_digest,
+            tracker_setup_digest,
+            checkpoint_anchor_digest,
+            frozen_target_digest,
+            tracker_candidate_digest,
+            jvm_check_digest,
+            statement_id,
+            tracker_input_box_id,
+            unsigned_transaction_id,
+            anchor_header_id,
+            target_identity_digest,
+            durable_reservation_digest
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_V1_SCHEMA,
+          normalized.reservationIdentityHex,
+          normalized.operationProfileDigestHex,
+          normalized.rootReceiptDigestHex,
+          normalized.authorizationDigestHex,
+          normalized.sourceProfileDigestHex,
+          normalized.trackerSetupDigestHex,
+          normalized.checkpointAnchorDigestHex,
+          normalized.frozenTargetDigestHex,
+          normalized.trackerCandidateDigestHex,
+          normalized.jvmCheckDigestHex,
+          normalized.statementIdHex,
+          normalized.trackerInputBoxIdHex,
+          normalized.unsignedTransactionIdHex,
+          normalized.anchorHeaderIdHex,
+          normalized.targetIdentityDigestHex,
+          durableReservationDigestHex,
+        );
+        const reservation =
+          readSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            database,
+            normalized.reservationIdentityHex,
+          );
+        if (reservation === null) {
+          throw new Error(
+            'isolated-devnet tracker admission reservation was not persisted',
+          );
+        }
+        return Object.freeze({ created: true, reservation });
+      },
+    );
+    const result = reserve.immediate();
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_RESULTS_V1
+      .set(result, Object.freeze({
+        persistenceOwner: this,
+        persistenceDatabase: persistenceStore.database,
+        persistenceStoreIdentityHex:
+          persistenceStore.persistenceStoreIdentityHex,
+        created: result.created,
+        reservationIdentityHex: result.reservation.reservationIdentityHex,
+        durableReservationDigestHex:
+          result.reservation.durableReservationDigestHex,
+      }));
+    return result;
+  }
+
+  getSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+    reservationIdentityHex: string,
+  ): Readonly<SubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1> | null {
+    const normalizedIdentity = normalizeFixedHex(
+      reservationIdentityHex,
+      32,
+      'tracker reservation identity',
+    );
+    return readSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+      this.db,
+      normalizedIdentity,
+    );
+  }
+
+  reloadSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+    reservationIdentityHex: string,
+  ): Readonly<ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result> {
+    const persistenceStore =
+      requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+        this,
+      );
+    const database = persistenceStore.database;
+    if (database !== this.db) {
+      throw new Error(
+        'isolated-devnet tracker admission reservation persistence database changed after construction',
+      );
+    }
+    const normalizedIdentity = normalizeFixedHex(
+      reservationIdentityHex,
+      32,
+      'tracker reservation identity',
+    );
+    const reservation =
+      readSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+        database,
+        normalizedIdentity,
+      );
+    if (reservation === null) {
+      throw new Error(
+        'isolated-devnet tracker admission reservation is absent from the proven persistence store',
+      );
+    }
+    const result = Object.freeze({ reservation });
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RELOAD_RESULTS_V1.set(
+      result,
+      Object.freeze({
+        persistenceOwner: this,
+        persistenceDatabase: database,
+        persistenceStoreIdentityHex:
+          persistenceStore.persistenceStoreIdentityHex,
+        reservationIdentityHex: reservation.reservationIdentityHex,
+        durableReservationDigestHex:
+          reservation.durableReservationDigestHex,
+      }),
+    );
+    return result;
+  }
+
+  reserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+    input:
+      ReserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Input,
+  ): ReserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Result {
+    const persistenceStore =
+      requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+        this,
+      );
+    this.assertWritable('reserve isolated-devnet tracker transport attempt');
+    if (persistenceStore.database !== this.db) {
+      throw new Error(
+        'isolated-devnet tracker transport persistence database changed after construction',
+      );
+    }
+    const normalized = Object.freeze({
+      reservationIdentityHex: normalizeFixedHex(
+        input.reservationIdentityHex,
+        32,
+        'tracker transport reservation identity',
+      ),
+      durableReservationDigestHex: normalizeFixedHex(
+        input.durableReservationDigestHex,
+        32,
+        'tracker transport durable reservation digest',
+      ),
+      expectedTransactionIdHex: normalizeFixedHex(
+        input.expectedTransactionIdHex,
+        32,
+        'tracker transport expected transaction ID',
+      ),
+      inputBoxIdsHex: normalizeTrackerTransportInputBoxIdsHex(
+        input.inputBoxIdsHex,
+        'tracker transport input box IDs',
+      ),
+      attemptedAtHeight: normalizeNonnegativeSignedInt(
+        input.attemptedAtHeight,
+        'tracker transport attempt height',
+      ),
+      reservationFreshnessReceiptDigestHex: normalizeFixedHex(
+        input.reservationFreshnessReceiptDigestHex,
+        32,
+        'tracker transport freshness receipt digest',
+      ),
+      processBindingDigestHex: normalizeFixedHex(
+        input.processBindingDigestHex,
+        32,
+        'tracker transport process binding digest',
+      ),
+      executionTargetIdentityDigestHex: normalizeFixedHex(
+        input.executionTargetIdentityDigestHex,
+        32,
+        'tracker transport target identity digest',
+      ),
+      signedTransactionDigestHex: normalizeFixedHex(
+        input.signedTransactionDigestHex,
+        32,
+        'tracker transport signed transaction digest',
+      ),
+      signedTransactionBytesSha256Hex: normalizeFixedHex(
+        input.signedTransactionBytesSha256Hex,
+        32,
+        'tracker transport signed transaction bytes digest',
+      ),
+      signedTransactionBytesLength: normalizePositiveSignedInt(
+        input.signedTransactionBytesLength,
+        'tracker transport signed transaction bytes length',
+      ),
+      checkResponseDigestHex: normalizeFixedHex(
+        input.checkResponseDigestHex,
+        32,
+        'tracker transport check response digest',
+      ),
+      authorizationDigestHex: normalizeFixedHex(
+        input.authorizationDigestHex,
+        32,
+        'tracker transport authorization digest',
+      ),
+    });
+    const durableAttemptDigestHex =
+      substrateFederatedIsolatedDevnetTrackerTransportDurableAttemptDigestHexV1(
+        normalized,
+      );
+    const reserve = this.db.transaction(
+      (): ReserveSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Result => {
+        const reservation =
+          readSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            this.db,
+            normalized.reservationIdentityHex,
+          );
+        if (
+          reservation === null
+          || reservation.durableReservationDigestHex
+            !== normalized.durableReservationDigestHex
+        ) {
+          throw new Error(
+            'isolated-devnet tracker transport lacks its exact durable reservation',
+          );
+        }
+        const existing =
+          readSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+            this.db,
+            normalized.reservationIdentityHex,
+          );
+        if (existing !== null) {
+          if (existing.durableAttemptDigestHex !== durableAttemptDigestHex) {
+            throw new Error(
+              'isolated-devnet tracker transport reservation conflicts with a durable attempt',
+            );
+          }
+          return Object.freeze({ created: false, attempt: existing });
+        }
+        const conflict = this.db.prepare(`
+          SELECT reservation_identity
+          FROM substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+          WHERE expected_transaction_id = ?
+             OR reservation_freshness_receipt_digest = ?
+             OR authorization_digest = ?
+          LIMIT 1
+        `).get(
+          normalized.expectedTransactionIdHex,
+          normalized.reservationFreshnessReceiptDigestHex,
+          normalized.authorizationDigestHex,
+        ) as { reservation_identity: string } | undefined;
+        if (conflict !== undefined) {
+          throw new Error(
+            'conflicting isolated-devnet tracker transport attempt requires reconciliation',
+          );
+        }
+        this.db.prepare(`
+          INSERT INTO substrate_federated_isolated_devnet_tracker_transport_attempts_v1 (
+            schema,
+            reservation_identity,
+            durable_reservation_digest,
+            expected_transaction_id,
+            input_box_ids_json,
+            attempted_at_height,
+            reservation_freshness_receipt_digest,
+            process_binding_digest,
+            execution_target_identity_digest,
+            signed_transaction_digest,
+            signed_transaction_bytes_sha256,
+            signed_transaction_bytes_length,
+            check_response_digest,
+            authorization_digest,
+            durable_attempt_digest
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_ATTEMPT_V1_SCHEMA,
+          normalized.reservationIdentityHex,
+          normalized.durableReservationDigestHex,
+          normalized.expectedTransactionIdHex,
+          canonicalJson(normalized.inputBoxIdsHex),
+          normalized.attemptedAtHeight,
+          normalized.reservationFreshnessReceiptDigestHex,
+          normalized.processBindingDigestHex,
+          normalized.executionTargetIdentityDigestHex,
+          normalized.signedTransactionDigestHex,
+          normalized.signedTransactionBytesSha256Hex,
+          normalized.signedTransactionBytesLength,
+          normalized.checkResponseDigestHex,
+          normalized.authorizationDigestHex,
+          durableAttemptDigestHex,
+        );
+        const attempt =
+          readSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+            this.db,
+            normalized.reservationIdentityHex,
+          );
+        if (attempt === null) {
+          throw new Error(
+            'isolated-devnet tracker transport attempt was not persisted',
+          );
+        }
+        return Object.freeze({ created: true, attempt });
+      },
+    );
+    return reserve.immediate();
+  }
+
+  getSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+    reservationIdentityHex: string,
+  ): Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1> | null {
+    return readSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+      this.db,
+      normalizeFixedHex(
+        reservationIdentityHex,
+        32,
+        'tracker transport reservation identity',
+      ),
+    );
+  }
+
+  finalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+    input:
+      FinalizeSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1Input,
+  ): Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1> {
+    requireSubstrateFederatedIsolatedDevnetTrackerAdmissionPersistenceStoreV1(
+      this,
+    );
+    this.assertWritable('finalize isolated-devnet tracker transport attempt');
+    const expectedTransactionIdHex = normalizeFixedHex(
+      input.expectedTransactionIdHex,
+      32,
+      'tracker transport expected transaction ID',
+    );
+    const durableAttemptDigestHex = normalizeFixedHex(
+      input.durableAttemptDigestHex,
+      32,
+      'tracker transport durable attempt digest',
+    );
+    const responseDigestHex = normalizeFixedHex(
+      input.responseDigestHex,
+      32,
+      'tracker transport response digest',
+    );
+    if (input.disposition !== 'accepted' && input.disposition !== 'ambiguous') {
+      throw new Error('tracker transport disposition is invalid');
+    }
+    const submittedTransactionIdHex =
+      input.submittedTransactionIdHex === null
+        ? null
+        : normalizeFixedHex(
+          input.submittedTransactionIdHex,
+          32,
+          'tracker transport submitted transaction ID',
+        );
+    if (
+      (input.disposition === 'accepted'
+        && submittedTransactionIdHex !== expectedTransactionIdHex)
+      || (input.disposition === 'ambiguous'
+        && submittedTransactionIdHex !== null)
+    ) {
+      throw new Error('tracker transport outcome does not match its disposition');
+    }
+    const finalize = this.db.transaction(
+      (): Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1> => {
+        const row = this.db.prepare(`
+          SELECT reservation_identity
+          FROM substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+          WHERE expected_transaction_id = ?
+        `).get(expectedTransactionIdHex) as
+          | { reservation_identity: string }
+          | undefined;
+        if (row === undefined) {
+          throw new Error(
+            'isolated-devnet tracker transport attempt is absent before finalization',
+          );
+        }
+        const existing =
+          readSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+            this.db,
+            row.reservation_identity,
+          );
+        if (
+          existing === null
+          || existing.durableAttemptDigestHex !== durableAttemptDigestHex
+        ) {
+          throw new Error(
+            'isolated-devnet tracker transport durable attempt binding changed',
+          );
+        }
+        if (existing.status !== 'pending') {
+          if (
+            existing.status === input.disposition
+            && existing.submittedTransactionIdHex === submittedTransactionIdHex
+            && existing.responseDigestHex === responseDigestHex
+          ) {
+            return existing;
+          }
+          throw new Error(
+            'isolated-devnet tracker transport attempt is already finalized',
+          );
+        }
+        const update = this.db.prepare(`
+          UPDATE substrate_federated_isolated_devnet_tracker_transport_attempts_v1
+          SET status = ?,
+              submitted_transaction_id = ?,
+              response_digest = ?,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE reservation_identity = ?
+            AND status = 'pending'
+            AND durable_attempt_digest = ?
+        `).run(
+          input.disposition,
+          submittedTransactionIdHex,
+          responseDigestHex,
+          existing.reservationIdentityHex,
+          durableAttemptDigestHex,
+        );
+        if (update.changes !== 1) {
+          throw new Error(
+            'isolated-devnet tracker transport attempt finalization lost atomicity',
+          );
+        }
+        const finalized =
+          readSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+            this.db,
+            existing.reservationIdentityHex,
+          );
+        if (finalized === null || finalized.status !== input.disposition) {
+          throw new Error(
+            'isolated-devnet tracker transport outcome was not persisted',
+          );
+        }
+        return finalized;
+      },
+    );
+    return finalize.immediate();
   }
 
   reserveErgoOperationalTransactionAttempt(

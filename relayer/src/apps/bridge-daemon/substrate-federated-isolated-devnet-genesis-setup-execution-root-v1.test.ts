@@ -1,10 +1,16 @@
 import {
+  mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   beforeEach,
@@ -14,19 +20,32 @@ import {
   vi,
 } from 'vitest';
 
+import {
+  deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
+
 const mocked = vi.hoisted(() => ({
   build: vi.fn(),
   process: vi.fn(),
   setup: vi.fn(),
   claim: vi.fn(),
   checkpointClaim: vi.fn(),
+  checkpointSequenceClaim: vi.fn(),
   checkpointObserve: vi.fn(),
   checkpointAssert: vi.fn(),
+  checkpointBoundObserve: vi.fn(),
+  checkpointBoundAssert: vi.fn(),
+  checkpointBoundFrozenObserve: vi.fn(),
+  checkpointBoundFrozenAssert: vi.fn(),
+  trackerReservationFreshnessObserve: vi.fn(),
+  trackerReservationFreshnessObserveAssert: vi.fn(),
   observedHeaderBuild: vi.fn(),
   checkpointExtensionEncode: vi.fn(),
   packet: vi.fn(),
   packetContinuation: vi.fn(),
   packetV2Assert: vi.fn(),
+  packetRelayerLineageClaim: vi.fn(),
+  requestBindingClaim: vi.fn(),
   mintDraftBuild: vi.fn(),
   evidenceCollect: vi.fn(),
   frontierConsumerPreflight: vi.fn(),
@@ -60,6 +79,17 @@ const mocked = vi.hoisted(() => ({
   pegInCommittedVaultRetainingCheck: vi.fn(),
   observedTrackerCheck: vi.fn(),
   observedTrackerCheckAssert: vi.fn(),
+  observedFrozenTrackerCheck: vi.fn(),
+  observedFrozenTrackerCheckAssert: vi.fn(),
+  trackerReservationFreshnessCheck: vi.fn(),
+  trackerReservationFreshnessCheckAssert: vi.fn(),
+  trackerReservationFreshnessCompletionClaim: vi.fn(),
+  trackerReservationFreshnessCheckDiscard: vi.fn(),
+  trackerReservationFreshnessPromote: vi.fn(),
+  trackerTransportAuthorize: vi.fn(),
+  trackerTransportJournalCreate: vi.fn(),
+  trackerTransportPreflight: vi.fn(),
+  trackerTransportSubmit: vi.fn(),
   pegInCommittedVaultPromote: vi.fn(),
   pegInCommittedVaultAuthorizationSession: vi.fn(),
   pegInCommittedVaultTransport: vi.fn(),
@@ -81,20 +111,40 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () =>
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1: mocked.process,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA:
+    'e2s.substrate-federated-isolated-devnet-checkpoint-bound-frozen-execution.v2',
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1:
     31 * 60_000,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA:
+    'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-execution.v1',
 }));
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', () => ({
   claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2:
     mocked.checkpointClaim,
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2:
+    mocked.checkpointSequenceClaim,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2: mocked.claim,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2: mocked.setup,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1:
     mocked.checkpointAssert,
+  assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV1:
+    mocked.checkpointBoundAssert,
+  assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2:
+    mocked.checkpointBoundFrozenAssert,
+  assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessObservationV1:
+    mocked.trackerReservationFreshnessObserveAssert,
   observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1:
     mocked.checkpointObserve,
+  observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV1:
+    mocked.checkpointBoundObserve,
+  observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2:
+    mocked.checkpointBoundFrozenObserve,
+  observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1:
+    mocked.trackerReservationFreshnessObserve,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_TRACKER_OBSERVATION_V2_SCHEMA:
+    'e2s.substrate-federated-isolated-devnet-checkpoint-bound-tracker-observation.v2',
 }));
 vi.mock('../../bridge-validity-tracker-header-context-v1.js', () => ({
   BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE:
@@ -112,10 +162,19 @@ vi.mock('../../profiles/substrate-federated-v1/checkpoint-statement.js', async i
 vi.mock('../../substrate-federated-isolated-devnet-packet-producer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance:
     mocked.packetV2Assert,
+  claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1:
+    mocked.packetRelayerLineageClaim,
   createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2:
     mocked.packetContinuation,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1: mocked.packet,
 }));
+vi.mock(
+  '../../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js',
+  () => ({
+    claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1:
+      mocked.requestBindingClaim,
+  }),
+);
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', () => ({
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1:
     mocked.mintDraftBuild,
@@ -170,12 +229,26 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () =
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1:
     mocked.observedTrackerCheckAssert,
+  assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2:
+    mocked.observedFrozenTrackerCheckAssert,
+  assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1:
+    mocked.trackerReservationFreshnessCheckAssert,
+  claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1:
+    mocked.trackerReservationFreshnessCompletionClaim,
+  discardSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1:
+    mocked.trackerReservationFreshnessCheckDiscard,
+  promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1:
+    mocked.trackerReservationFreshnessPromote,
   promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1:
     mocked.pegInCommittedVaultPromote,
   discardSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
     mocked.pegInSourceLockDiscard,
   promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1:
     mocked.pegInSourceLockPromote,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_OBSERVED_ANCHOR_TRACKER_CHECK_V2_SCHEMA:
+    'e2s.substrate-federated-isolated-devnet-observed-anchor-tracker-check.v2',
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_CHECK_V1_SCHEMA:
+    'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-check.v1',
 }));
 vi.mock('../../substrate-federated-settlement-family-v1.js', () => ({
   decodeSubstrateFederatedSettlementFamilyV1Profile: mocked.familyDecode,
@@ -215,6 +288,18 @@ vi.mock('../../substrate-federated-isolated-devnet-checked-submission-transport-
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1:
     mocked.pegInCommittedVaultTransport,
 }));
+vi.mock('./substrate-federated-isolated-devnet-tracker-checked-transport-v1.js', () => ({
+  submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1:
+    mocked.trackerTransportSubmit,
+}));
+vi.mock('./substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js', () => ({
+  authorizeSubstrateFederatedIsolatedDevnetTrackerTransportV1:
+    mocked.trackerTransportAuthorize,
+  createSubstrateFederatedIsolatedDevnetTrackerTransportJournalV1:
+    mocked.trackerTransportJournalCreate,
+  createSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1:
+    mocked.trackerTransportPreflight,
+}));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1:
     mocked.pegInCommittedVaultAuthorizationSession,
@@ -250,21 +335,38 @@ vi.mock('../../substrate-federated-local-devnet-peg-in-committed-vault-journal-v
   createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1:
     mocked.pegInCommittedVaultJournal,
 }));
-vi.mock('../../state-tracker.js', () => ({
-  StateTracker: class {
-    close(): void {
-      mocked.stateClose();
-    }
-  },
-}));
+vi.mock('../../state-tracker.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../state-tracker.js')
+  >();
+  return {
+    ...actual,
+    StateTracker: class extends actual.StateTracker {
+      override close(): void {
+        try {
+          super.close();
+        } finally {
+          mocked.stateClose();
+        }
+      }
+    },
+  };
+});
 
 import {
+  assertSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7Provenance,
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Provenance,
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance,
+  projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9,
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5,
   runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
+  runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7,
+  runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8,
+  runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9,
   runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
@@ -275,11 +377,22 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_APPLICATION_CHECKPOINT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V3,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FROZEN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V7,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V8,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V6,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1PersistenceStore,
+  assertSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationAuthorizationV1Provenance,
+  authorizeSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1,
+  persistSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_OPERATION_PROFILE_DIGEST_V1,
+} from './substrate-federated-isolated-devnet-tracker-admission-reservation-authorization-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
@@ -301,6 +414,29 @@ import {
 const MINING_CREDENTIAL = Object.freeze({ schema: 'synthetic-mining-credential' });
 const CHECKPOINT_MINING_CREDENTIAL = Object.freeze({
   schema: 'synthetic-checkpoint-mining-credential',
+});
+const TRACKER_ADMISSION_MINING_CREDENTIAL = Object.freeze({
+  schema: 'synthetic-tracker-admission-mining-credential',
+});
+const TRACKER_CONFIRMATION_MINING_CREDENTIAL = Object.freeze({
+  schema: 'synthetic-tracker-confirmation-mining-credential',
+});
+const TRACKER_RESERVATION_FRESHNESS_COMPLETION = Object.freeze({
+  schema:
+    'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1',
+  version: 1 as const,
+});
+const TRACKER_TRANSPORT_REQUEST_BINDING = Object.freeze({
+  schema:
+    'e2s.substrate-federated-isolated-devnet-bootstrap-request-binding.v1',
+  version: 1 as const,
+  requestSha256Hex: 'f'.repeat(64),
+});
+const TRACKER_TRANSPORT_REQUEST_CAMPAIGN_BINDING = Object.freeze({
+  schema:
+    'e2s.substrate-federated-isolated-devnet-bootstrap-request-campaign-binding.v1',
+  version: 1 as const,
+  requestSha256Hex: 'f'.repeat(64),
 });
 
 describe('isolated devnet genesis setup execution root V1', () => {
@@ -335,6 +471,26 @@ describe('isolated devnet genesis setup execution root V1', () => {
   let observedTrackerCheck: ReturnType<typeof validObservedTrackerCheck>;
   let checkpointAnchorObservation:
     ReturnType<typeof validCheckpointAnchorObservation>;
+  let checkpointBoundObservation:
+    ReturnType<typeof validCheckpointBoundObservation>;
+  let frozenCheckpointBoundObservation:
+    ReturnType<typeof validFrozenCheckpointBoundObservation>;
+  let frozenObservedTrackerCheck:
+    ReturnType<typeof validFrozenObservedTrackerCheck>;
+  let trackerReservationFreshnessObservation:
+    ReturnType<typeof validTrackerReservationFreshnessObservation>;
+  let trackerReservationFreshnessCheck:
+    ReturnType<typeof validTrackerReservationFreshnessCheck>;
+  let trackerTransportExecutionCheck: Readonly<Record<string, unknown>>;
+  let trackerTransportAuthorization: Readonly<Record<string, unknown>>;
+  let trackerTransportAttempt: Readonly<Record<string, unknown>>;
+  let trackerTransportPreflight: Readonly<Record<string, unknown>>;
+  let packetRelayerLineage: Readonly<Record<string, unknown>>;
+  let trackerTransportOutcome: Readonly<Record<string, unknown>>;
+  let trackerTransportJournal: Readonly<{
+    reserve: ReturnType<typeof vi.fn>;
+    finalize: ReturnType<typeof vi.fn>;
+  }>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -362,6 +518,33 @@ describe('isolated devnet genesis setup execution root V1', () => {
     preTransportFundingObservation.target.tipHeight = 133;
     preTransportFundingObservation.target.tipHeaderIdHex = digest('1');
     packetV2 = validPacketV2();
+    packetRelayerLineage = Object.freeze({
+      schema:
+        'e2s.substrate-federated-isolated-devnet-packet-relayer-lineage.v1',
+      version: 1,
+      headCommitSha1Hex: '1'.repeat(40),
+      relayerArtifactSetDigestHex: digest('1'),
+      packetReceiptDigestHex: digest('2'),
+    });
+    mocked.packetRelayerLineageClaim.mockImplementation(value => {
+      order.push('tracker-transport:packet-lineage:claim');
+      if (value !== packetV2) {
+        throw new Error('packet relayer lineage input changed');
+      }
+      return packetRelayerLineage;
+    });
+    mocked.requestBindingClaim.mockImplementation((value, input) => {
+      if (
+        value !== TRACKER_TRANSPORT_REQUEST_BINDING
+        || input === null
+        || typeof input !== 'object'
+        || input.build === undefined
+        || input.lifecycle === undefined
+      ) {
+        throw new Error('tracker transport request binding changed');
+      }
+      return TRACKER_TRANSPORT_REQUEST_CAMPAIGN_BINDING;
+    });
     mintDraft = validMintDraft();
     evidenceReceipt = validEvidenceReceipt(mintDraft);
     packetProof = validPacketProof(packetV2, mintDraft, evidenceReceipt);
@@ -385,8 +568,14 @@ describe('isolated devnet genesis setup execution root V1', () => {
       applicationCheckpointReceipt,
     );
     checkpointAnchorObservation = validCheckpointAnchorObservation();
-    observedHeaderContext = validObservedHeaderContext(
+    checkpointBoundObservation = validCheckpointBoundObservation(
       checkpointAnchorObservation,
+    );
+    frozenCheckpointBoundObservation = validFrozenCheckpointBoundObservation(
+      checkpointAnchorObservation,
+    );
+    observedHeaderContext = validObservedHeaderContext(
+      checkpointBoundObservation,
     );
     observedTrackerContext = validObservedTrackerContext(
       trackerContext,
@@ -397,11 +586,87 @@ describe('isolated devnet genesis setup execution root V1', () => {
       trackerSetupMaterial.outputs[0]!,
       {
         processBindingDigestHex:
-          checkpointAnchorObservation.processBindingDigestHex,
+          checkpointBoundObservation.processBindingDigestHex,
         executionTargetIdentityDigestHex:
-          checkpointAnchorObservation.executionTargetIdentityDigestHex,
+          checkpointBoundObservation.executionTargetIdentityDigestHex,
       },
     );
+    frozenObservedTrackerCheck = validFrozenObservedTrackerCheck(
+      observedTrackerContext,
+      trackerSetupMaterial.outputs[0]!,
+      {
+        processBindingDigestHex:
+          frozenCheckpointBoundObservation.processBindingDigestHex,
+        executionTargetIdentityDigestHex:
+          frozenCheckpointBoundObservation.executionTargetIdentityDigestHex,
+      },
+    );
+    trackerReservationFreshnessObservation =
+      validTrackerReservationFreshnessObservation(
+        checkpointAnchorObservation,
+      );
+    trackerReservationFreshnessCheck = validTrackerReservationFreshnessCheck(
+      frozenObservedTrackerCheck,
+    );
+    trackerTransportExecutionCheck = Object.freeze({
+      receipt: trackerReservationFreshnessCheck,
+      signedCandidate: Object.freeze({ role: 'synthetic-signed-candidate' }),
+      checkedAcceptance: Object.freeze({ role: 'synthetic-check-acceptance' }),
+    });
+    trackerTransportAuthorization = Object.freeze({
+      expectedTransactionIdHex:
+        trackerReservationFreshnessCheck.signedTransactionIdHex,
+      executionTargetIdentityDigestHex: digest('6'),
+      authorizationDigestHex: digest('2'),
+    });
+    trackerTransportAttempt = Object.freeze({
+      expectedTransactionIdHex:
+        trackerReservationFreshnessCheck.signedTransactionIdHex,
+      durableAttemptDigestHex: digest('3'),
+      authorization: trackerTransportAuthorization,
+    });
+    trackerTransportPreflight = Object.freeze({
+      schema:
+        'e2s.substrate-federated-isolated-devnet-tracker-transport-preflight.v1',
+      version: 1,
+      status: 'fresh_campaign_bound_before_one_local_post',
+      preflightDigestHex: digest('7'),
+    });
+    trackerTransportOutcome = Object.freeze({
+      schema:
+        'e2s.substrate-federated-isolated-devnet-tracker-transport-outcome.v1',
+      version: 1,
+      status: 'accepted',
+      expectedTransactionIdHex:
+        trackerReservationFreshnessCheck.signedTransactionIdHex,
+      submittedTransactionIdHex:
+        trackerReservationFreshnessCheck.signedTransactionIdHex,
+      durableAttemptDigestHex: digest('3'),
+      responseDigestHex: digest('4'),
+      trackerAdmissionEstablished: false,
+      outcomeDigestHex: digest('5'),
+    });
+    trackerTransportJournal = Object.freeze({
+      reserve: vi.fn(authorization => {
+        order.push('tracker-transport:journal:reserve');
+        if (authorization !== trackerTransportAuthorization) {
+          throw new Error('tracker transport authorization changed');
+        }
+        return trackerTransportAttempt;
+      }),
+      finalize: vi.fn((attempt, submission) => {
+        order.push('tracker-transport:journal:finalize');
+        if (
+          attempt !== trackerTransportAttempt
+          || submission.status !== 'accepted'
+          || submission.submittedTransactionIdHex
+            !== trackerReservationFreshnessCheck.signedTransactionIdHex
+        ) {
+          throw new Error('tracker transport outcome changed');
+        }
+        return trackerTransportOutcome;
+      }),
+    });
 
     mocked.build.mockImplementation(async () => {
       order.push('build');
@@ -427,12 +692,22 @@ describe('isolated devnet genesis setup execution root V1', () => {
         checkPegInCommittedVaultRetainingSigner:
           mocked.pegInCommittedVaultRetainingCheck,
         checkTrackerCandidate: mocked.observedTrackerCheck,
+        checkFrozenTrackerCandidate: mocked.observedFrozenTrackerCheck,
+        recheckTrackerReservationFreshnessCandidate:
+          mocked.trackerReservationFreshnessCheck,
       };
     });
     mocked.claim.mockReturnValue(MINING_CREDENTIAL);
     mocked.checkpointClaim.mockReturnValue(Object.freeze({
       miningCredential: MINING_CREDENTIAL,
       checkpointMiningCredential: CHECKPOINT_MINING_CREDENTIAL,
+    }));
+    mocked.checkpointSequenceClaim.mockReturnValue(Object.freeze({
+      miningCredential: MINING_CREDENTIAL,
+      checkpointMiningCredential: CHECKPOINT_MINING_CREDENTIAL,
+      trackerAdmissionMiningCredential: TRACKER_ADMISSION_MINING_CREDENTIAL,
+      trackerConfirmationMiningCredential:
+        TRACKER_CONFIRMATION_MINING_CREDENTIAL,
     }));
     mocked.checkpointExtensionEncode.mockReturnValue(
       checkpointAnchorObservation.extensionValueHex,
@@ -462,16 +737,122 @@ describe('isolated devnet genesis setup execution root V1', () => {
         throw new Error('checkpoint anchor observation provenance changed');
       }
     });
+    mocked.checkpointBoundObserve.mockImplementation(async input => {
+      order.push('checkpoint-bound-tracker:observe');
+      if (
+        input.target.primaryNodeOrigin !== activeExecutionTarget().primaryNodeOrigin
+        || input.target.witnessNodeOrigin
+          !== activeExecutionTarget().witnessNodeOrigin
+        || input.target.checkpointBound !== true
+        || input.targetGenesisHeaderIdHex
+          !== fundingObservation.target.genesisHeaderIdHex
+        || input.expectedAnchorHeaderIdHex
+          !== checkpointAnchorObservation.anchorHeaderIdHex
+        || input.expectedAnchorHeight
+          !== checkpointAnchorObservation.anchorHeight
+        || input.expectedAnchorExtensionRootHex
+          !== checkpointAnchorObservation.anchorExtensionRootHex
+        || input.expectedExtensionValueHex
+          !== checkpointAnchorObservation.extensionValueHex
+      ) {
+        throw new Error('checkpoint-bound tracker observation input changed');
+      }
+      return checkpointBoundObservation;
+    });
+    mocked.checkpointBoundAssert.mockImplementation(value => {
+      order.push('checkpoint-bound-tracker:assert');
+      if (value !== checkpointBoundObservation) {
+        throw new Error('checkpoint-bound tracker observation provenance changed');
+      }
+    });
+    mocked.checkpointBoundFrozenObserve.mockImplementation(async input => {
+      order.push('checkpoint-bound-frozen-tracker:observe');
+      if (
+        input.target.primaryNodeOrigin !== frozenExecutionTarget().primaryNodeOrigin
+        || input.target.witnessNodeOrigin
+          !== frozenExecutionTarget().witnessNodeOrigin
+        || input.target.primaryMining !== false
+        || input.target.primaryReadOnly !== true
+        || input.target.witnessReadOnly !== true
+        || input.target.miningStopped !== true
+        || input.target.checkpointBound !== true
+        || input.targetGenesisHeaderIdHex
+          !== fundingObservation.target.genesisHeaderIdHex
+        || input.expectedAnchorHeaderIdHex
+          !== checkpointAnchorObservation.anchorHeaderIdHex
+        || input.expectedAnchorHeight
+          !== checkpointAnchorObservation.anchorHeight
+        || input.expectedAnchorExtensionRootHex
+          !== checkpointAnchorObservation.anchorExtensionRootHex
+        || input.expectedExtensionValueHex
+          !== checkpointAnchorObservation.extensionValueHex
+      ) {
+        throw new Error(
+          'checkpoint-bound frozen tracker observation input changed',
+        );
+      }
+      return frozenCheckpointBoundObservation;
+    });
+    mocked.checkpointBoundFrozenAssert.mockImplementation(value => {
+      order.push('checkpoint-bound-frozen-tracker:assert');
+      if (value !== frozenCheckpointBoundObservation) {
+        throw new Error(
+          'checkpoint-bound frozen tracker observation provenance changed',
+        );
+      }
+    });
+    mocked.trackerReservationFreshnessObserve.mockImplementation(
+      async input => {
+        order.push('tracker-reservation-freshness:observe');
+        if (
+          input.target.primaryNodeOrigin
+            !== trackerReservationFreshnessTarget().primaryNodeOrigin
+          || input.target.witnessNodeOrigin
+            !== trackerReservationFreshnessTarget().witnessNodeOrigin
+          || input.target.primaryMining !== false
+          || input.target.primaryReadOnly !== true
+          || input.target.witnessReadOnly !== true
+          || input.target.miningStopped !== true
+          || input.target.checkpointBound !== true
+          || input.target.reservationFreshnessRevalidation !== true
+          || input.targetGenesisHeaderIdHex
+            !== fundingObservation.target.genesisHeaderIdHex
+          || input.expectedAnchorHeaderIdHex
+            !== checkpointAnchorObservation.anchorHeaderIdHex
+          || input.expectedAnchorHeight
+            !== checkpointAnchorObservation.anchorHeight
+          || input.expectedAnchorExtensionRootHex
+            !== checkpointAnchorObservation.anchorExtensionRootHex
+          || input.expectedExtensionValueHex
+            !== checkpointAnchorObservation.extensionValueHex
+        ) {
+          throw new Error(
+            'tracker reservation freshness observation input changed',
+          );
+        }
+        return trackerReservationFreshnessObservation;
+      },
+    );
+    mocked.trackerReservationFreshnessObserveAssert.mockImplementation(
+      value => {
+        order.push('tracker-reservation-freshness:observe:assert');
+        if (value !== trackerReservationFreshnessObservation) {
+          throw new Error(
+            'tracker reservation freshness observation provenance changed',
+          );
+        }
+      },
+    );
     mocked.observedHeaderBuild.mockImplementation((_wasm, input) => {
       order.push('tracker:observed-headers:build');
       if (
         input.rawHeaders.length !== 10
         || input.anchorContextIndex
-          !== checkpointAnchorObservation.anchorContextIndex
+          !== checkpointBoundObservation.anchorContextIndex
         || input.expectedAnchorHeaderIdHex
-          !== checkpointAnchorObservation.anchorHeaderIdHex
+          !== checkpointBoundObservation.anchorHeaderIdHex
         || input.expectedAnchorExtensionRootHex
-          !== checkpointAnchorObservation.anchorExtensionRootHex
+          !== checkpointBoundObservation.anchorExtensionRootHex
       ) {
         throw new Error('observed tracker header input binding changed');
       }
@@ -654,7 +1035,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
             .checkpointStatement.encodedStatementHex
         || input.observedHeaderContext !== observedHeaderContext
         || input.extensionMembershipProofHex
-          !== checkpointAnchorObservation.extensionMembershipProofHex
+          !== checkpointBoundObservation.extensionMembershipProofHex
       ) {
         throw new Error('observed tracker candidate input binding changed');
       }
@@ -669,10 +1050,13 @@ describe('isolated devnet genesis setup execution root V1', () => {
       order.push('tracker:observed-candidate:check');
       if (
         input.context !== observedTrackerContext
+        || input.observedHeaderContext !== observedHeaderContext
         || input.trackerInputBox !== trackerSetupMaterial.outputs[0]
-        || target.primaryNodeOrigin !== readOnlyTarget().primaryNodeOrigin
-        || target.witnessNodeOrigin !== readOnlyTarget().witnessNodeOrigin
-        || target.miningStopped !== true
+        || target.primaryNodeOrigin !== activeExecutionTarget().primaryNodeOrigin
+        || target.witnessNodeOrigin !== activeExecutionTarget().witnessNodeOrigin
+        || target.primaryMining !== true
+        || target.witnessReadOnly !== true
+        || target.checkpointBound !== true
       ) {
         throw new Error('observed tracker check input binding changed');
       }
@@ -682,6 +1066,147 @@ describe('isolated devnet genesis setup execution root V1', () => {
       if (value !== observedTrackerCheck) {
         throw new Error('observed tracker check provenance changed');
       }
+    });
+    mocked.observedFrozenTrackerCheck.mockImplementation(async (
+      input,
+      target,
+    ) => {
+      order.push('tracker:frozen-observed-candidate:check');
+      if (
+        input.context !== observedTrackerContext
+        || input.observedHeaderContext !== observedHeaderContext
+        || input.trackerInputBox !== trackerSetupMaterial.outputs[0]
+        || target.primaryNodeOrigin !== frozenExecutionTarget().primaryNodeOrigin
+        || target.witnessNodeOrigin !== frozenExecutionTarget().witnessNodeOrigin
+        || target.primaryMining !== false
+        || target.primaryReadOnly !== true
+        || target.witnessReadOnly !== true
+        || target.miningStopped !== true
+        || target.checkpointBound !== true
+      ) {
+        throw new Error('frozen observed tracker check input binding changed');
+      }
+      return frozenObservedTrackerCheck;
+    });
+    mocked.observedFrozenTrackerCheckAssert.mockImplementation(value => {
+      if (value !== frozenObservedTrackerCheck) {
+        throw new Error('frozen observed tracker check provenance changed');
+      }
+    });
+    mocked.trackerReservationFreshnessCheck.mockImplementation(async (
+      input,
+      target,
+    ) => {
+      order.push('tracker-reservation-freshness:check');
+      if (
+        input.context !== observedTrackerContext
+        || input.observedHeaderContext !== observedHeaderContext
+        || input.trackerInputBox !== trackerSetupMaterial.outputs[0]
+        || target.primaryNodeOrigin
+          !== trackerReservationFreshnessTarget().primaryNodeOrigin
+        || target.witnessNodeOrigin
+          !== trackerReservationFreshnessTarget().witnessNodeOrigin
+        || target.primaryMining !== false
+        || target.primaryReadOnly !== true
+        || target.witnessReadOnly !== true
+        || target.miningStopped !== true
+        || target.checkpointBound !== true
+        || target.reservationFreshnessRevalidation !== true
+      ) {
+        throw new Error(
+          'tracker reservation freshness check input binding changed',
+        );
+      }
+      return trackerReservationFreshnessCheck;
+    });
+    mocked.trackerReservationFreshnessCheckAssert.mockImplementation(
+      value => {
+        if (value !== trackerReservationFreshnessCheck) {
+          throw new Error(
+            'tracker reservation freshness check provenance changed',
+          );
+        }
+      },
+    );
+    mocked.trackerReservationFreshnessCompletionClaim.mockImplementation(
+      value => {
+        order.push('tracker-transport:freshness:claim');
+        if (value !== trackerReservationFreshnessCheck) {
+          throw new Error('tracker freshness completion input changed');
+        }
+        return TRACKER_RESERVATION_FRESHNESS_COMPLETION;
+      },
+    );
+    mocked.trackerReservationFreshnessPromote.mockImplementation(
+      (value, target) => {
+        order.push('tracker-transport:freshness:promote');
+        if (
+          value !== trackerReservationFreshnessCheck
+          || target.trackerTransport !== true
+          || target.reservationFreshnessCheckBound !== true
+        ) {
+          throw new Error('tracker freshness promotion input changed');
+        }
+        return trackerTransportExecutionCheck;
+      },
+    );
+    mocked.trackerTransportAuthorize.mockImplementation(input => {
+      order.push('tracker-transport:authorize');
+      if (
+        input.executionCheck !== trackerTransportExecutionCheck
+        || input.target.trackerTransport !== true
+        || input.target.reservationFreshnessCheckBound !== true
+        || input.durableReservation?.bindings?.unsignedTransactionIdHex
+          !== trackerReservationFreshnessCheck.unsignedTransactionIdHex
+      ) {
+        throw new Error('tracker transport authorization input changed');
+      }
+      return trackerTransportAuthorization;
+    });
+    mocked.trackerTransportJournalCreate.mockImplementation(input => {
+      order.push('tracker-transport:journal:create');
+      if (
+        input.durableReservation?.bindings?.unsignedTransactionIdHex
+          !== trackerReservationFreshnessCheck.unsignedTransactionIdHex
+      ) {
+        throw new Error('tracker transport journal input changed');
+      }
+      return trackerTransportJournal;
+    });
+    mocked.trackerTransportPreflight.mockImplementation(input => {
+      order.push('tracker-transport:preflight');
+      if (
+        input.requestBinding !== TRACKER_TRANSPORT_REQUEST_CAMPAIGN_BINDING
+        || input.relayerLineage !== packetRelayerLineage
+        || input.target.trackerTransport !== true
+        || input.executionCheck !== trackerTransportExecutionCheck
+        || input.authorization !== trackerTransportAuthorization
+        || input.journal !== trackerTransportJournal
+        || input.attempt !== trackerTransportAttempt
+      ) {
+        throw new Error('tracker transport preflight input changed');
+      }
+      return trackerTransportPreflight;
+    });
+    mocked.trackerTransportSubmit.mockImplementation(async input => {
+      order.push('tracker-transport:post');
+      if (
+        input.target.trackerTransport !== true
+        || input.target.reservationFreshnessCheckBound !== true
+        || input.executionCheck !== trackerTransportExecutionCheck
+        || input.authorization !== trackerTransportAuthorization
+        || input.journal !== trackerTransportJournal
+        || input.attempt !== trackerTransportAttempt
+        || input.preflight !== trackerTransportPreflight
+      ) {
+        throw new Error('tracker transport submission input changed');
+      }
+      return Object.freeze({
+        status: 'accepted' as const,
+        submittedTransactionIdHex:
+          trackerReservationFreshnessCheck.signedTransactionIdHex,
+        responseDigestHex: digest('4'),
+      });
     });
     mocked.process.mockReturnValue(processSession);
     mocked.sourceHistory.mockImplementation(async () => {
@@ -1559,6 +2084,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
     );
+
   });
 
   it('retains one exact packet through the real application burn and checkpoint composition', async () => {
@@ -1870,9 +2396,19 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
     expect(mocked.pegInCommittedVaultCheck).not.toHaveBeenCalled();
     expect(mocked.pegInCommittedVaultRetainingCheck).toHaveBeenCalledTimes(1);
+    expect(mocked.checkpointClaim).not.toHaveBeenCalled();
+    expect(mocked.checkpointSequenceClaim).toHaveBeenCalledTimes(1);
+    expect(mocked.process.mock.calls[0]?.[4])
+      .toBe(TRACKER_ADMISSION_MINING_CREDENTIAL);
     expect(processSession.withCheckpointExtensionMiningTarget.mock.calls[0]?.[1])
       .toEqual({ minimumTipHeight: 11 });
     expect(order.indexOf('checkpoint-anchor:observe')).toBeLessThan(
+      order.indexOf('checkpoint-bound-execution:enter'),
+    );
+    expect(order.indexOf('checkpoint-bound-execution:enter')).toBeLessThan(
+      order.indexOf('checkpoint-bound-tracker:observe'),
+    );
+    expect(order.indexOf('checkpoint-bound-tracker:observe')).toBeLessThan(
       order.indexOf('tracker:observed-headers:build'),
     );
     expect(order.indexOf('tracker:observed-headers:build')).toBeLessThan(
@@ -1889,6 +2425,8 @@ describe('isolated devnet genesis setup execution root V1', () => {
         observation: checkpointAnchorObservation,
       },
       tracker: {
+        execution: checkpointBoundExecutionReceipt(),
+        observation: checkpointBoundObservation,
         trackerSetup: {
           expectedTxId: digest('4'),
           outputBoxIdHex: digest('a'),
@@ -1910,6 +2448,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         setupVaultMintBurnCheckpointAnchorAndTrackerCheckCompletedInOneChainLifetime:
           true,
         exactObserved0401AnchorConsumedByTrackerCandidate: true,
+        exactCheckpointBoundActiveTargetConsumedByTrackerCheck: true,
         exactConfirmedTrackerSetupOutputConsumed: true,
         exactSameProcessTrackerCompilerReceiptConsumed: true,
         localWasmSignatureAcceptedBySameTargetJvmCheck: true,
@@ -1917,6 +2456,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       },
       boundaries: {
         localErgoCheckpointAnchorObserved: true,
+        checkpointBoundTrackerExecutionObserved: true,
         trackerCandidateConstructed: true,
         trackerJvmReductionAccepted: true,
         trackerNodeCheckPerformed: true,
@@ -1937,6 +2477,1427 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(JSON.stringify(result)).not.toMatch(
       /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
     );
+  });
+
+  it('checks the observed anchor against an immutable same-node snapshot', async () => {
+    expect(
+      frozenCheckpointBoundExecutionReceipt()
+        .checkpointExtensionObservationDigestHex,
+    ).not.toBe(checkpointAnchorObservation.observationDigestHex);
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(mocked.checkpointSequenceClaim).toHaveBeenCalledTimes(1);
+    expect(processSession.withCheckpointBoundMiningActiveExecutionTarget)
+      .not.toHaveBeenCalled();
+    expect(processSession.withCheckpointBoundMiningStoppedExecutionTarget)
+      .toHaveBeenCalledTimes(1);
+    expect(order.indexOf('checkpoint-anchor:observe')).toBeLessThan(
+      order.indexOf('checkpoint-bound-frozen-execution:enter'),
+    );
+    expect(order.indexOf('checkpoint-bound-frozen-execution:enter')).toBeLessThan(
+      order.indexOf('checkpoint-bound-frozen-tracker:observe'),
+    );
+    expect(order.indexOf('checkpoint-bound-frozen-tracker:observe')).toBeLessThan(
+      order.indexOf('tracker:frozen-observed-candidate:check'),
+    );
+    expect(result.receipt).toMatchObject({
+      status:
+        'observed_anchor_tracker_candidate_accepted_by_frozen_local_node_check',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FROZEN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V7,
+      checkpointAnchor: {
+        observation: checkpointAnchorObservation,
+      },
+      tracker: {
+        execution: frozenCheckpointBoundExecutionReceipt(),
+        observation: frozenCheckpointBoundObservation,
+        trackerSetup: {
+          expectedTxId: digest('4'),
+          outputBoxIdHex: digest('a'),
+        },
+        candidate: {
+          anchorContextProvenance:
+            'eip0045-validity-tracker-observed-header-context',
+          anchorHeaderIdHex: checkpointAnchorObservation.anchorHeaderIdHex,
+          inputBoxIdHex: digest('a'),
+          statementIdHex: digest('6'),
+          unsignedTransactionIdHex: digest('c'),
+        },
+        check: frozenObservedTrackerCheck,
+      },
+      checks: {
+        setupVaultMintBurnCheckpointAnchorAndTrackerCheckCompletedInOneChainLifetime:
+          true,
+        exactObserved0401AnchorConsumedByTrackerCandidate: true,
+        exactCheckpointBoundFrozenTargetConsumedByTrackerCheck: true,
+        exactFrozenSnapshotStableAcrossTrackerCheck: true,
+        exactConfirmedTrackerSetupOutputConsumed: true,
+        exactSameProcessTrackerCompilerReceiptConsumed: true,
+        localWasmSignatureAcceptedBySameTargetJvmCheck: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        localErgoCheckpointAnchorObserved: true,
+        checkpointBoundFrozenTrackerExecutionObserved: true,
+        trackerCandidateConstructed: true,
+        trackerJvmReductionAccepted: true,
+        trackerNodeCheckPerformed: true,
+        trackerSigningPerformed: true,
+        signedTrackerBytesPersisted: false,
+        trackerAdmissionEstablished: false,
+        trackerSubmissionPerformed: false,
+        trackerBroadcastPerformed: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+      },
+    });
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+
+    assertSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7Provenance(
+      result.receipt,
+    );
+    const authorization =
+      authorizeSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+        result.receipt,
+      );
+    assertSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationAuthorizationV1Provenance(
+      authorization,
+    );
+    expect(authorization).toMatchObject({
+      status:
+        'exact_frozen_tracker_check_authorized_for_durable_reservation',
+      operationProfileDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESERVATION_OPERATION_PROFILE_DIGEST_V1,
+      rootReceiptDigestHex: result.receipt.receiptDigestHex,
+      sourceProfile: {
+        statementIdHex: digest('6'),
+        bridgeEventRootHex: digest('3'),
+        burnIdHex: digest('2'),
+      },
+      trackerSetup: {
+        transactionIdHex: digest('4'),
+        outputBoxIdHex: digest('a'),
+      },
+      checkpointAnchor: {
+        extensionKeyHex: '0401',
+        extensionValueHex: `${digest('3')}${digest('6')}`,
+        anchorHeaderIdHex: checkpointAnchorObservation.anchorHeaderIdHex,
+      },
+      frozenTarget: {
+        processBindingDigestHex: digest('0'),
+        executionTargetIdentityDigestHex: digest('8'),
+        snapshotHeight: 143,
+        snapshotHeaderIdHex: digest('e'),
+      },
+      trackerCandidate: {
+        trustModel: 'federated_non_trustless',
+        inputBoxIdHex: digest('a'),
+        statementIdHex: digest('6'),
+        unsignedTransactionIdHex: digest('c'),
+      },
+      jvmCheck: {
+        unsignedTransactionIdHex: digest('c'),
+        stateContextTipHeight: 143,
+        stateContextTipIdHex: digest('e'),
+      },
+      boundaries: {
+        localIsolatedDevnetOnly: true,
+        exactProcessProvenRootConsumed: true,
+        structuralRevalidationCompleted: true,
+        reservationAuthorityEstablished: true,
+        durableReservationEstablished: false,
+        signedTransactionBytesPersisted: false,
+        signingCapabilityExposed: false,
+        deterministicSourceFinalityEstablished: false,
+        ergoPowAuthenticated: false,
+        profileActivated: false,
+        mintAuthorized: false,
+        submissionAuthorityEstablished: false,
+        broadcastAuthorityEstablished: false,
+        trackerAdmissionEstablished: false,
+        globalReplayInsertionEstablished: false,
+        payoutAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+        publicNetworkUsed: false,
+        realFundsUsed: false,
+        existingWalletMaterialUsed: false,
+      },
+    });
+    expect(containsFunction(authorization)).toBe(false);
+    expect(JSON.stringify(authorization)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+    const actualStateTracker = await vi.importActual<
+      typeof import('../../state-tracker.js')
+    >('../../state-tracker.js');
+    const reservationDirectory = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-admission-reservation-'),
+    );
+    const primaryStorePath = join(reservationDirectory, 'primary.sqlite');
+    const primaryTracker = new actualStateTracker.StateTracker(primaryStorePath);
+    const competingTracker = new actualStateTracker.StateTracker(
+      join(reservationDirectory, 'competing.sqlite'),
+    );
+    let durableReservation!: ReturnType<
+      typeof persistSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1
+    >;
+    let primaryTrackerClosed = false;
+    let reopenedTracker: InstanceType<
+      typeof actualStateTracker.StateTracker
+    > | undefined;
+    try {
+      durableReservation =
+        persistSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+          primaryTracker,
+          authorization,
+        );
+      assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1Provenance(
+        durableReservation,
+      );
+      assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1PersistenceStore(
+        durableReservation,
+        primaryTracker,
+      );
+      const persisted = primaryTracker
+        .getSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+          authorization.reservationIdentityHex,
+        );
+      expect(persisted).toMatchObject({
+        reservationIdentityHex: authorization.reservationIdentityHex,
+        operationProfileDigestHex: authorization.operationProfileDigestHex,
+        rootReceiptDigestHex: authorization.rootReceiptDigestHex,
+        authorizationDigestHex: authorization.authorizationDigestHex,
+        sourceProfileDigestHex: authorization.bindings.sourceProfileDigestHex,
+        trackerSetupDigestHex: authorization.bindings.trackerSetupDigestHex,
+        checkpointAnchorDigestHex:
+          authorization.bindings.checkpointAnchorDigestHex,
+        frozenTargetDigestHex: authorization.bindings.frozenTargetDigestHex,
+        trackerCandidateDigestHex:
+          authorization.bindings.trackerCandidateDigestHex,
+        jvmCheckDigestHex: authorization.bindings.jvmCheckDigestHex,
+        statementIdHex: authorization.sourceProfile.statementIdHex,
+        trackerInputBoxIdHex: authorization.trackerCandidate.inputBoxIdHex,
+        unsignedTransactionIdHex:
+          authorization.trackerCandidate.unsignedTransactionIdHex,
+        anchorHeaderIdHex: authorization.checkpointAnchor.anchorHeaderIdHex,
+        targetIdentityDigestHex:
+          authorization.frozenTarget.executionTargetIdentityDigestHex,
+      });
+      expect(durableReservation).toMatchObject({
+        status: 'exact_tracker_admission_reservation_persisted',
+        reservationIdentityHex: authorization.reservationIdentityHex,
+        durableReservationDigestHex: persisted?.durableReservationDigestHex,
+        authorizationDigestHex: authorization.authorizationDigestHex,
+        boundaries: {
+          localIsolatedDevnetOnly: true,
+          exactAuthorizationConsumed: true,
+          durableReservationEstablished: true,
+          localDatabaseAuthoritative: false,
+          signedTransactionBytesPersisted: false,
+          signingCapabilityExposed: false,
+          deterministicSourceFinalityEstablished: false,
+          ergoPowAuthenticated: false,
+          profileActivated: false,
+          mintAuthorized: false,
+          submissionAuthorityEstablished: false,
+          broadcastAuthorityEstablished: false,
+          trackerAdmissionEstablished: false,
+          globalReplayInsertionEstablished: false,
+          payoutAuthorized: false,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+          trustlessStatusEstablished: false,
+          productionReadinessEstablished: false,
+          publicNetworkUsed: false,
+          realFundsUsed: false,
+          existingWalletMaterialUsed: false,
+        },
+      });
+      primaryTracker.close();
+      primaryTrackerClosed = true;
+      reopenedTracker = new actualStateTracker.StateTracker(primaryStorePath);
+      const retry =
+        persistSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+          reopenedTracker,
+          authorization,
+        );
+      expect(retry).toEqual(durableReservation);
+      assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1PersistenceStore(
+        durableReservation,
+        reopenedTracker,
+      );
+      expect(() =>
+        persistSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+          competingTracker,
+          authorization,
+        )
+      ).toThrow(/cannot fan out across persistence stores/);
+      expect(
+        competingTracker
+          .getSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+            authorization.reservationIdentityHex,
+          ),
+      ).toBeNull();
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1PersistenceStore(
+          durableReservation,
+          competingTracker,
+        )
+      ).toThrow(/persistence store changed/);
+    } finally {
+      if (!primaryTrackerClosed) primaryTracker.close();
+      reopenedTracker?.close();
+      competingTracker.close();
+      rmSync(reservationDirectory, { recursive: true, force: true });
+    }
+    expect(containsFunction(durableReservation)).toBe(false);
+    expect(JSON.stringify(durableReservation)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+    const copiedAuthorizationPort = {
+      reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1: vi.fn(),
+    };
+    expect(() =>
+      persistSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+        copiedAuthorizationPort,
+        structuredClone(authorization),
+      )
+    ).toThrow(/authorization lacks exact process provenance/);
+    expect(
+      copiedAuthorizationPort
+        .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1,
+    ).not.toHaveBeenCalled();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1Provenance(
+        structuredClone(durableReservation),
+      )
+    ).toThrow(/lacks exact process provenance/);
+    expect(() =>
+      authorizeSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+        result.receipt,
+      )
+    ).toThrow(/already consumed for reservation authorization/);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7Provenance(
+        structuredClone(result.receipt),
+      )
+    ).toThrow(/lacks exact runtime provenance/);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationAuthorizationV1Provenance(
+        structuredClone(authorization),
+      )
+    ).toThrow(/lacks exact process provenance/);
+  });
+
+  it('reloads the exact durable tracker reservation and rechecks freshness in one process lifetime', async () => {
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(
+      processSession
+        .withCheckpointBoundReservationFreshnessRevalidationTarget,
+    ).toHaveBeenCalledTimes(1);
+    expect(mocked.trackerReservationFreshnessObserve).toHaveBeenCalledTimes(1);
+    expect(mocked.trackerReservationFreshnessCheck).toHaveBeenCalledTimes(1);
+    expect(
+      mocked.trackerReservationFreshnessCheckDiscard,
+    ).toHaveBeenCalledTimes(1);
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(
+      order.indexOf('tracker:frozen-observed-candidate:check'),
+    ).toBeLessThan(
+      order.indexOf('tracker-reservation-freshness-execution:enter'),
+    );
+    expect(
+      order.indexOf('tracker-reservation-freshness:observe'),
+    ).toBeLessThan(
+      order.indexOf('tracker-reservation-freshness:check'),
+    );
+    expect(
+      order.indexOf('tracker-reservation-freshness:check'),
+    ).toBeLessThan(order.indexOf('process:stop'));
+
+    expect(result.receipt).toMatchObject({
+      schema:
+        'e2s.substrate-federated-isolated-devnet-peg-in-tracker-reservation-freshness-campaign-root.v8',
+      version: 8,
+      status:
+        'durable_tracker_reservation_reloaded_and_freshness_rechecked',
+      staticExecutionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V8,
+      frozenTrackerRoot: {
+        status:
+          'observed_anchor_tracker_candidate_accepted_by_frozen_local_node_check',
+      },
+      reservation: {
+        authorization: {
+          status:
+            'exact_frozen_tracker_check_authorized_for_durable_reservation',
+        },
+        durable: {
+          status: 'exact_tracker_admission_reservation_persisted',
+        },
+        reloaded: {
+          statementIdHex: digest('6'),
+          trackerInputBoxIdHex: digest('a'),
+          unsignedTransactionIdHex: digest('c'),
+          anchorHeaderIdHex: checkpointAnchorObservation.anchorHeaderIdHex,
+          targetIdentityDigestHex: digest('8'),
+        },
+      },
+      freshness: {
+        execution: trackerReservationFreshnessExecutionReceipt(),
+        observation: trackerReservationFreshnessObservation,
+        check: trackerReservationFreshnessCheck,
+      },
+      checks: {
+        setupThroughFreshnessCompletedInOneChainLifetime: true,
+        firstReservationStoreClosedBeforeReopen: true,
+        exactReservationReloadedBeforeAndAfterFreshness: true,
+        exactFrozenTrackerTargetReacquired: true,
+        exactObserved0401AnchorReacquired: true,
+        exactReservedTrackerCandidateReconstructed: true,
+        sameSyntheticSignerAndJvmCheckReused: true,
+        everyEphemeralCapabilityDisposedBeforeReturn: true,
+        returnedValueContainsCapabilities: false,
+      },
+      boundaries: {
+        localIsolatedDevnetOnly: true,
+        processProvenFrozenTrackerRootConsumed: true,
+        durableReservationEstablished: true,
+        localDatabaseAuthoritative: false,
+        trackerInputRevalidated: true,
+        checkpointAnchorRevalidated: true,
+        frozenTargetSnapshotRevalidated: true,
+        trackerJvmReductionRechecked: true,
+        trackerSigningPerformed: true,
+        signedTrackerBytesPersisted: false,
+        deterministicSourceFinalityEstablished: false,
+        ergoPowAuthenticated: false,
+        profileActivated: false,
+        mintAuthorized: false,
+        submissionAuthorityEstablished: false,
+        broadcastAuthorityEstablished: false,
+        trackerAdmissionEstablished: false,
+        globalReplayInsertionEstablished: false,
+        payoutAuthorized: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+        productionReadinessEstablished: false,
+        publicNetworkUsed: false,
+        realFundsUsed: false,
+        existingWalletMaterialUsed: false,
+      },
+    });
+    expect(
+      result.receipt.reservation.authorization.rootReceiptDigestHex,
+    ).toBe(result.receipt.frozenTrackerRoot.receiptDigestHex);
+    expect(
+      result.receipt.reservation.durable.reservationIdentityHex,
+    ).toBe(result.receipt.reservation.reloaded.reservationIdentityHex);
+    expect(
+      result.receipt.reservation.durable.durableReservationDigestHex,
+    ).toBe(result.receipt.reservation.reloaded.durableReservationDigestHex);
+    expect(
+      result.receipt.freshness.execution
+        .trackerCheckExecutionTargetIdentityDigestHex,
+    ).toBe(result.receipt.reservation.reloaded.targetIdentityDigestHex);
+    expect(result.receipt.freshness.check.unsignedTransactionIdHex).toBe(
+      result.receipt.reservation.reloaded.unsignedTransactionIdHex,
+    );
+    expect(result.receipt.freshness.check.signedTransactionIdHex).toBe(
+      result.receipt.frozenTrackerRoot.tracker.check.signedTransactionIdHex,
+    );
+    expect(containsFunction(result)).toBe(false);
+    expect(JSON.stringify(result)).not.toMatch(
+      /(?:reviewed[\\/]|signedTx|signedCandidate|submissionHandle|mnemonic|privateKey)/iu,
+    );
+
+    assertSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Provenance(
+      result.receipt,
+    );
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Provenance(
+        structuredClone(result.receipt),
+      )
+    ).toThrow(/lacks exact runtime provenance/);
+  });
+
+  it('records and canonically confirms one durable tracker transport attempt before teardown', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-transport-root-'),
+    );
+    try {
+      const rootInput = {
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      };
+      const result =
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9(
+          rootInput,
+        );
+
+      expect(
+        processSession.withCheckpointBoundTrackerTransportTarget,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        processSession.withTrackerTransportConfirmationMiningTarget,
+      ).toHaveBeenCalledTimes(1);
+      expect(mocked.trackerReservationFreshnessCheckDiscard).not
+        .toHaveBeenCalled();
+      expect(mocked.trackerTransportJournalCreate).toHaveBeenCalledTimes(1);
+      expect(mocked.requestBindingClaim).toHaveBeenCalledWith(
+        TRACKER_TRANSPORT_REQUEST_BINDING,
+        rootInput,
+      );
+      expect(trackerTransportJournal.reserve).toHaveBeenCalledTimes(1);
+      expect(mocked.packetRelayerLineageClaim).toHaveBeenCalledOnce();
+      expect(mocked.trackerTransportPreflight).toHaveBeenCalledTimes(1);
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+      expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      expect(
+        order.indexOf('tracker-transport:freshness:claim'),
+      ).toBeLessThan(order.indexOf('tracker-transport:journal:reserve'));
+      expect(
+        order.indexOf('tracker-transport:journal:reserve'),
+      ).toBeLessThan(order.indexOf('tracker-transport:preflight'));
+      expect(
+        order.indexOf('tracker-transport:packet-lineage:claim'),
+      ).toBeLessThan(order.indexOf('tracker-transport:preflight'));
+      expect(order.indexOf('tracker-transport:preflight')).toBeLessThan(
+        order.indexOf('tracker-transport:post'),
+      );
+      expect(order.indexOf('tracker-transport:post')).toBeLessThan(
+        order.indexOf('tracker-transport:journal:finalize'),
+      );
+      expect(
+        order.indexOf('tracker-transport:journal:finalize'),
+      ).toBeLessThan(order.indexOf('tracker-confirmation:enter'));
+      expect(order.indexOf('tracker-confirmation:enter')).toBeLessThan(
+        order.indexOf('observe:tracker-admission'),
+      );
+      expect(order.indexOf('observe:tracker-admission')).toBeLessThan(
+        order.indexOf('tracker-confirmation:leave'),
+      );
+      expect(order.indexOf('tracker-confirmation:leave')).toBeLessThan(
+        order.indexOf('process:stop'),
+      );
+
+      expect(result.receipt).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v9',
+        version: 9,
+        status: 'local_tracker_transport_canonically_confirmed',
+        staticExecutionManifestDigestHex:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+        freshness: {
+          status:
+            'durable_tracker_reservation_reloaded_and_freshness_rechecked',
+        },
+        transport: {
+          execution: trackerTransportExecutionReceipt(),
+          authorization: trackerTransportAuthorization,
+          attempt: {
+            expectedTransactionIdHex:
+              trackerReservationFreshnessCheck.signedTransactionIdHex,
+            durableAttemptDigestHex: digest('3'),
+          },
+          outcome: trackerTransportOutcome,
+          confirmationExecution: trackerConfirmationExecutionReceipt(),
+          confirmation: trackerTransportConfirmation(),
+        },
+        checks: {
+          exactFreshnessCheckPromotedOnce: true,
+          exactTransportTargetActiveOnlyDuringAttempt: true,
+          durableAttemptPersistedBeforePost: true,
+          exactCheckedBytesConsumedOnce: true,
+          transportOutcomePersistedBeforeReturn: true,
+          exactAttemptConfirmedBeforeTeardown: true,
+          persistentJournalPathExcludedFromReceipt: true,
+          returnedValueContainsCapabilities: false,
+        },
+        boundaries: {
+          localIsolatedDevnetOnly: true,
+          trackerTransportAttempted: true,
+          exactNodeAcceptanceObserved: true,
+          oneTransportAttemptRecorded: true,
+          canonicalConfirmationObserved: true,
+          trackerAdmissionEstablished: true,
+          localDatabaseAuthoritative: false,
+          signedTrackerBytesPersisted: false,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+          trustlessStatusEstablished: false,
+          productionReadinessEstablished: false,
+          publicNetworkUsed: false,
+          realFundsUsed: false,
+          existingWalletMaterialUsed: false,
+        },
+      });
+      expect(containsFunction(result)).toBe(false);
+      expect(JSON.stringify(result)).not.toContain(journalRoot);
+      assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+        result.receipt,
+      );
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+          structuredClone(result.receipt),
+        )
+      ).toThrow(/lacks exact runtime provenance/);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('projects a bounded terminal receipt when the durable transport is not confirmed', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-transport-unconfirmed-'),
+    );
+    processSession.withTrackerTransportConfirmationMiningTarget
+      .mockRejectedValueOnce(new Error(
+        `synthetic private diagnostic under ${journalRoot}`,
+      ));
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      const receipt =
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          failure,
+        );
+      expect(receipt).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v9',
+        version: 9,
+        status: 'local_tracker_transport_not_canonically_confirmed',
+        staticExecutionManifestDigestHex:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+        transport: {
+          authorization: {
+            expectedTransactionIdHex:
+              trackerTransportAuthorization.expectedTransactionIdHex,
+            executionTargetIdentityDigestHex:
+              trackerTransportAuthorization.executionTargetIdentityDigestHex,
+            authorizationDigestHex:
+              trackerTransportAuthorization.authorizationDigestHex,
+          },
+          attempt: {
+            expectedTransactionIdHex:
+              trackerTransportAttempt.expectedTransactionIdHex,
+            durableAttemptDigestHex:
+              trackerTransportAttempt.durableAttemptDigestHex,
+          },
+          outcome: {
+            status: trackerTransportOutcome.status,
+            expectedTransactionIdHex:
+              trackerTransportOutcome.expectedTransactionIdHex,
+            submittedTransactionIdHex:
+              trackerTransportOutcome.submittedTransactionIdHex,
+            durableAttemptDigestHex:
+              trackerTransportOutcome.durableAttemptDigestHex,
+            outcomeDigestHex: trackerTransportOutcome.outcomeDigestHex,
+            responseDigestHex: trackerTransportOutcome.responseDigestHex,
+          },
+        },
+        confirmation: {
+          schema:
+            'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation-failure-diagnostic.v1',
+          version: 1,
+          category: 'confirmation_phase_failure',
+          expectedTransactionIdHex:
+            trackerTransportAttempt.expectedTransactionIdHex,
+          executionTargetIdentityDigestHex:
+            trackerTransportAuthorization.executionTargetIdentityDigestHex,
+          confirmationBudgetMs: 120000,
+          observationCount: 0,
+          lastObservation: null,
+        },
+        boundaries: {
+          oneTransportAttemptRecorded: true,
+          transportOutcomePersisted: true,
+          exactNodeAcceptanceObserved: true,
+          canonicalConfirmationObserved: false,
+          trackerAdmissionEstablished: false,
+          signedTrackerBytesPersisted: false,
+          publicNetworkUsed: false,
+          gate5Closed: false,
+        },
+      });
+      expect(receipt?.receiptDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+      expect(JSON.stringify(receipt)).not.toContain(journalRoot);
+      expect(JSON.stringify(receipt)).not.toContain('synthetic private diagnostic');
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          new AggregateError([
+            failure,
+            new Error('synthetic cleanup failure'),
+          ]),
+        ),
+      ).toBe(receipt);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          new AggregateError([
+            new Error('synthetic cleanup failure'),
+            failure,
+          ]),
+        ),
+      ).toBeNull();
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          new Error('forged failure'),
+        ),
+      ).toBeNull();
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          new AggregateError([new Error('forged aggregate')]),
+        ),
+      ).toBeNull();
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+      expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['pending', 'pending_at_deadline'],
+    ['not_found', 'not_found_at_deadline'],
+    ['budget', 'confirmation_budget_elapsed'],
+    ['observer_failure', 'observer_failure'],
+  ] as const)(
+    'projects a typed %s tracker confirmation terminal category',
+    async (mode, expectedCategory) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-confirmation-diagnostic-'),
+      );
+      const baselineObserve = observerPort.observe.getMockImplementation();
+      if (baselineObserve === undefined) {
+        throw new Error('observer mock is unavailable');
+      }
+      let now = 0;
+      let confirmationClockReads = 0;
+      const clock = vi.spyOn(performance, 'now').mockImplementation(() => {
+        if (
+          mode === 'budget'
+          && order.includes('tracker-confirmation:enter')
+        ) {
+          confirmationClockReads += 1;
+          return confirmationClockReads === 1 ? 0 : 2 * 60_000 + 1;
+        }
+        return now;
+      });
+      observerPort.observe.mockImplementation(async (...args) => {
+        if (
+          args[0] === digest('c')
+          && order.includes('tracker-confirmation:enter')
+        ) {
+          now = 2 * 60_000 + 1;
+          if (mode === 'observer_failure') {
+            throw new AggregateError(
+              Array.from(
+                { length: 40 },
+                (_, index) => new Error(
+                  `private observer diagnostic ${index} under ${journalRoot}`,
+                ),
+              ),
+              'private aggregate observer failure',
+            );
+          }
+          if (mode === 'budget') {
+            throw new Error('budget mode reached the observer unexpectedly');
+          }
+          return Object.freeze({
+            ...confirmation(args[0], 0, 1),
+            status: mode,
+            confirmations: 0,
+            confirmationHeight: null,
+            confirmationHeaderIdHex: null,
+          });
+        }
+        return await baselineObserve(...args);
+      });
+      if (mode === 'observer_failure') {
+        const baselineConfirmationAction =
+          processSession.withTrackerTransportConfirmationMiningTarget
+            .getMockImplementation();
+        if (baselineConfirmationAction === undefined) {
+          throw new Error('confirmation action mock is unavailable');
+        }
+        processSession.withTrackerTransportConfirmationMiningTarget
+          .mockImplementationOnce(async (...args) => {
+            try {
+              return await baselineConfirmationAction(...args);
+            } catch (error) {
+              throw new AggregateError([
+                error,
+                ...Array.from(
+                  { length: 40 },
+                  (_, index) => new Error(`cleanup failure ${index}`),
+                ),
+              ], 'confirmation and cleanup failed');
+            }
+          });
+      }
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      try {
+        const receipt =
+          projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+            failure,
+          );
+        expect(receipt?.confirmation).toMatchObject({
+          schema:
+            'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation-failure-diagnostic.v1',
+          version: 1,
+          category: expectedCategory,
+          expectedTransactionIdHex: digest('c'),
+          executionTargetIdentityDigestHex: digest('6'),
+          confirmationBudgetMs: 120000,
+          observationCount: mode === 'budget' ? 0 : 1,
+          lastObservation: mode === 'observer_failure' || mode === 'budget'
+            ? null
+            : { status: mode },
+        });
+        expect(JSON.stringify(receipt)).not.toContain(journalRoot);
+        expect(JSON.stringify(receipt)).not.toContain('private observer diagnostic');
+        expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+      } finally {
+        clock.mockRestore();
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does not inspect opaque confirmation failure accessors', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-confirmation-opaque-error-'),
+    );
+    let accessorReads = 0;
+    const opaqueErrors = new Proxy([new Error('opaque nested failure')], {
+      get: () => {
+        accessorReads += 1;
+        throw new Error('errors proxy must not execute');
+      },
+      getOwnPropertyDescriptor: () => {
+        accessorReads += 1;
+        throw new Error('errors descriptor proxy must not execute');
+      },
+    });
+    const opaqueFailure = new AggregateError([], 'opaque confirmation failure');
+    Object.defineProperties(opaqueFailure, {
+      cause: {
+        configurable: true,
+        get: () => {
+          accessorReads += 1;
+          throw new Error('cause accessor must not execute');
+        },
+      },
+      errors: {
+        configurable: true,
+        value: opaqueErrors,
+      },
+    });
+    processSession.withTrackerTransportConfirmationMiningTarget
+      .mockRejectedValueOnce(opaqueFailure);
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      const receipt =
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          failure,
+        );
+      expect(receipt?.confirmation.category)
+        .toBe('confirmation_phase_failure');
+      expect(accessorReads).toBe(0);
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['authorization transaction', () => {
+      trackerTransportAuthorization = Object.freeze({
+        ...trackerTransportAuthorization,
+        expectedTransactionIdHex: digest('e'),
+      });
+    }],
+    ['outcome transaction', () => {
+      trackerTransportOutcome = Object.freeze({
+        ...trackerTransportOutcome,
+        expectedTransactionIdHex: digest('e'),
+      });
+    }],
+    ['durable attempt', () => {
+      trackerTransportOutcome = Object.freeze({
+        ...trackerTransportOutcome,
+        durableAttemptDigestHex: digest('e'),
+      });
+    }],
+    ['accepted submitted transaction', () => {
+      trackerTransportOutcome = Object.freeze({
+        ...trackerTransportOutcome,
+        submittedTransactionIdHex: null,
+      });
+    }],
+    ['ambiguous submitted transaction', () => {
+      trackerTransportOutcome = Object.freeze({
+        ...trackerTransportOutcome,
+        status: 'ambiguous',
+      });
+    }],
+    ['unknown outcome status', () => {
+      trackerTransportOutcome = Object.freeze({
+        ...trackerTransportOutcome,
+        status: 'unknown',
+        submittedTransactionIdHex: null,
+      });
+    }],
+  ] as const)(
+    'rejects an unconfirmed transport with a mismatched %s binding',
+    async (_label, mutate) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-transport-mismatch-'),
+      );
+      mutate();
+      processSession.withTrackerTransportConfirmationMiningTarget
+        .mockRejectedValueOnce(new Error('synthetic confirmation failure'));
+      try {
+        await expect(
+          runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+            ...(pegInApplicationCheckpointRootInput() as any),
+            trackerTransportJournalRoot: journalRoot,
+          }),
+        ).rejects.toThrow(
+          'isolated tracker transport terminal failure binding changed',
+        );
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does not restart mining when durable outcome finalization fails after POST', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-transport-finalize-failure-'),
+    );
+    trackerTransportJournal.finalize.mockImplementationOnce(() => {
+      order.push('tracker-transport:journal:finalize');
+      throw new Error('synthetic durable outcome failure');
+    });
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        }),
+      ).rejects.toThrow('synthetic durable outcome failure');
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+      expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      expect(
+        processSession.withTrackerTransportConfirmationMiningTarget,
+      ).not.toHaveBeenCalled();
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a canonical confirmation for any transaction other than the exact attempt', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-transport-confirmation-drift-'),
+    );
+    processSession.withTrackerTransportConfirmationMiningTarget
+      .mockResolvedValueOnce({
+        value: trackerTransportConfirmation(),
+        receipt: {
+          ...trackerConfirmationExecutionReceipt(),
+          confirmedTransactionIdHex: digest('f'),
+        },
+      });
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        }),
+      ).rejects.toThrow('isolated tracker transport outcome binding changed');
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects direct tracker journal paths inside or above the worktree', async () => {
+    const worktreeRoot = realpathSync(resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      '..',
+      '..',
+      '..',
+    ));
+    for (const journalRoot of [worktreeRoot, dirname(worktreeRoot)]) {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        }),
+      ).rejects.toThrow(/must remain outside the worktree/);
+    }
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('rejects linked and nonempty tracker journal directories', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'e2s-tracker-journal-boundary-'));
+    const target = join(root, 'target');
+    const link = join(root, 'link');
+    const nonempty = join(root, 'nonempty');
+    mkdirSync(target);
+    mkdirSync(nonempty);
+    writeFileSync(join(nonempty, 'existing.txt'), 'occupied');
+    symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: link,
+        }),
+      ).rejects.toThrow(/must be one link-free directory/);
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: nonempty,
+        }),
+      ).rejects.toThrow(/must be empty before the one-attempt campaign/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('atomically excludes a concurrent campaign from the same journal parent', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-journal-exclusive-'),
+    );
+    try {
+      const first =
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      expect(readdirSync(journalRoot)).toEqual(['tracker-transport-attempt']);
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        }),
+      ).rejects.toThrow(/must be empty before the one-attempt campaign/);
+      await expect(first).resolves.toBeDefined();
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects replacement of the atomically reserved journal directory before opening it', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-journal-replacement-'),
+    );
+    mocked.build.mockImplementationOnce(async () => {
+      const entries = readdirSync(journalRoot);
+      expect(entries).toHaveLength(1);
+      const reservedRoot = join(journalRoot, entries[0]!);
+      rmSync(reservedRoot, { recursive: true, force: true });
+      writeFileSync(reservedRoot, 'replaced');
+      return validBuild();
+    });
+    try {
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        }),
+      ).rejects.toThrow(
+        'isolated tracker transport campaign journal root changed before opening',
+      );
+      expect(mocked.trackerTransportJournalCreate).not.toHaveBeenCalled();
+      expect(mocked.trackerTransportSubmit).not.toHaveBeenCalled();
+      expect(processSession.stop).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects freshness execution that does not reacquire the frozen tracker target', async () => {
+    processSession
+      .withCheckpointBoundReservationFreshnessRevalidationTarget
+      .mockImplementationOnce(async action => {
+        order.push('tracker-reservation-freshness-execution:enter');
+        const value = await action(trackerReservationFreshnessTarget());
+        order.push('tracker-reservation-freshness-execution:leave');
+        return {
+          value,
+          receipt: {
+            ...trackerReservationFreshnessExecutionReceipt(),
+            trackerCheckExecutionTargetIdentityDigestHex: digest('f'),
+          },
+        };
+      });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /tracker reservation freshness binding changed or gained authority/,
+    );
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects a stable freshness snapshot that differs from the frozen tracker snapshot', async () => {
+    const differentStableSnapshot = Object.freeze({
+      ...trackerReservationFreshnessExecutionReceipt().actionStartSnapshot,
+      headerIdHex: digest('f'),
+    });
+    processSession
+      .withCheckpointBoundReservationFreshnessRevalidationTarget
+      .mockImplementationOnce(async action => {
+        order.push('tracker-reservation-freshness-execution:enter');
+        const value = await action(trackerReservationFreshnessTarget());
+        order.push('tracker-reservation-freshness-execution:leave');
+        return {
+          value,
+          receipt: {
+            ...trackerReservationFreshnessExecutionReceipt(),
+            actionStartSnapshot: differentStableSnapshot,
+            actionEndSnapshot: differentStableSnapshot,
+          },
+        };
+      });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /tracker reservation freshness binding changed or gained authority/,
+    );
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects freshness execution from a different node executable', async () => {
+    processSession
+      .withCheckpointBoundReservationFreshnessRevalidationTarget
+      .mockImplementationOnce(async action => {
+        order.push('tracker-reservation-freshness-execution:enter');
+        const value = await action(trackerReservationFreshnessTarget());
+        order.push('tracker-reservation-freshness-execution:leave');
+        return {
+          value,
+          receipt: {
+            ...trackerReservationFreshnessExecutionReceipt(),
+            executableIdentityDigestHex: digest('f'),
+          },
+        };
+      });
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /tracker reservation freshness binding changed or gained authority/,
+    );
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects a freshly observed anchor outside the reacquired process binding', async () => {
+    trackerReservationFreshnessObservation = Object.freeze({
+      ...trackerReservationFreshnessObservation,
+      processBindingDigestHex: digest('f'),
+    }) as ReturnType<typeof validTrackerReservationFreshnessObservation>;
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /tracker reservation freshness binding changed or gained authority/,
+    );
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects a freshness JVM result for a different signed tracker transaction', async () => {
+    trackerReservationFreshnessCheck = Object.freeze({
+      ...trackerReservationFreshnessCheck,
+      signedTransactionIdHex: digest('f'),
+    }) as ReturnType<typeof validTrackerReservationFreshnessCheck>;
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /tracker reservation freshness binding changed or gained authority/,
+    );
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it('tears down both reservation stores when the freshness JVM check fails', async () => {
+    mocked.trackerReservationFreshnessCheck.mockRejectedValueOnce(
+      new Error('synthetic freshness JVM rejection'),
+    );
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(/synthetic freshness JVM rejection/);
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it.each([
+    ['primary mining', { primaryMiningDuringAction: true }],
+    ['primary read-only', { primaryReadOnlyDuringAction: false }],
+    ['witness read-only', { witnessReadOnlyDuringAction: false }],
+    ['mining stop', { miningStoppedBeforeAction: false }],
+    ['snapshot stability', { exactFrozenSnapshotStableAcrossAction: false }],
+  ] as const)(
+    'rejects a frozen tracker receipt with invalid %s evidence',
+    async (_label, mutation) => {
+      processSession.withCheckpointBoundMiningStoppedExecutionTarget
+        .mockImplementationOnce(async action => ({
+          value: await action(frozenExecutionTarget()),
+          receipt: Object.freeze({
+            ...frozenCheckpointBoundExecutionReceipt(),
+            ...mutation,
+          }) as unknown as ReturnType<
+            typeof frozenCheckpointBoundExecutionReceipt
+          >,
+        }));
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        /frozen observed anchor, tracker candidate, and JVM check binding changed/,
+      );
+
+      expect(mocked.observedFrozenTrackerCheck).toHaveBeenCalledTimes(1);
+      expect(order).toContain('process:stop');
+    },
+  );
+
+  it('rejects frozen execution bound to a different anchor observation', async () => {
+    processSession.withCheckpointBoundMiningStoppedExecutionTarget
+      .mockImplementationOnce(async action => ({
+        value: await action(frozenExecutionTarget()),
+        receipt: Object.freeze({
+          ...frozenCheckpointBoundExecutionReceipt(),
+          checkpointExtensionObservationDigestHex: digest('f'),
+        }),
+      }));
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /frozen observed anchor, tracker candidate, and JVM check binding changed: execution checkpoint extension binding digest/,
+    );
+  });
+
+  it('rejects reservation authorization when the source statement diverges from the application burn root', async () => {
+    applicationCheckpointReceipt = Object.freeze({
+      ...applicationCheckpointReceipt,
+      checkpoint: Object.freeze({
+        ...applicationCheckpointReceipt.checkpoint,
+        checkpointAttestation: Object.freeze({
+          ...applicationCheckpointReceipt.checkpoint.checkpointAttestation,
+          checkpointStatement: Object.freeze({
+            ...applicationCheckpointReceipt.checkpoint.checkpointAttestation
+              .checkpointStatement,
+            bridgeEventRootHex: digest('f'),
+          }),
+        }),
+      }),
+    }) as typeof applicationCheckpointReceipt;
+    applicationCheckpointStage = validApplicationCheckpointStage(
+      applicationCheckpointReceipt,
+      packetV2,
+    );
+
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(() =>
+      authorizeSubstrateFederatedIsolatedDevnetTrackerAdmissionReservationV1(
+        result.receipt,
+      )
+    ).toThrow(/checkpoint binding changed/);
+  });
+
+  it('rejects frozen action snapshot drift after the JVM check', async () => {
+    processSession.withCheckpointBoundMiningStoppedExecutionTarget
+      .mockImplementationOnce(async action => ({
+        value: await action(frozenExecutionTarget()),
+        receipt: Object.freeze({
+          ...frozenCheckpointBoundExecutionReceipt(),
+          actionEndSnapshot: Object.freeze({
+            ...frozenCheckpointBoundExecutionReceipt().actionEndSnapshot,
+            headerIdHex: digest('f'),
+          }),
+        }),
+      }));
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /frozen observed anchor, tracker candidate, and JVM check binding changed/,
+    );
+
+    expect(order).toContain('process:stop');
+  });
+
+  it('rejects a stable snapshot that is not the signed observation tip', async () => {
+    const wrongSnapshot = Object.freeze({
+      ...frozenCheckpointBoundExecutionReceipt().actionStartSnapshot,
+      headerIdHex: digest('f'),
+    });
+    processSession.withCheckpointBoundMiningStoppedExecutionTarget
+      .mockImplementationOnce(async action => ({
+        value: await action(frozenExecutionTarget()),
+        receipt: Object.freeze({
+          ...frozenCheckpointBoundExecutionReceipt(),
+          actionStartSnapshot: wrongSnapshot,
+          actionEndSnapshot: wrongSnapshot,
+        }),
+      }));
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(
+      /frozen observed anchor, tracker candidate, and JVM check binding changed/,
+    );
+
+    expect(order).toContain('process:stop');
+  });
+
+  it.each([
+    'execution V1 substitution',
+    'observation V1 substitution',
+    'check V1 substitution',
+  ] as const)(
+    'rejects %s in the frozen V7 root',
+    async source => {
+      if (source === 'execution V1 substitution') {
+        processSession.withCheckpointBoundMiningStoppedExecutionTarget
+          .mockImplementationOnce(async action => ({
+            value: await action(frozenExecutionTarget()),
+            receipt: Object.freeze({
+              ...frozenCheckpointBoundExecutionReceipt(),
+              schema:
+                'e2s.substrate-federated-isolated-devnet-ergo-node-process.v1',
+              version: 1,
+            }) as unknown as ReturnType<
+              typeof frozenCheckpointBoundExecutionReceipt
+            >,
+          }));
+      } else if (source === 'observation V1 substitution') {
+        frozenCheckpointBoundObservation = Object.freeze({
+          ...frozenCheckpointBoundObservation,
+          schema:
+            'e2s.substrate-federated-isolated-devnet-checkpoint-bound-tracker-observation.v1',
+          version: 1,
+        }) as unknown as typeof frozenCheckpointBoundObservation;
+      } else {
+        frozenObservedTrackerCheck = Object.freeze({
+          ...frozenObservedTrackerCheck,
+          schema:
+            'e2s.substrate-federated-isolated-devnet-observed-anchor-tracker-check.v1',
+          version: 1,
+        }) as unknown as typeof frozenObservedTrackerCheck;
+      }
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        /frozen observed anchor, tracker candidate, and JVM check binding changed/,
+      );
+
+      expect(order).toContain('process:stop');
+    },
+  );
+
+  it('tears down the isolated nodes when the frozen JVM check fails', async () => {
+    mocked.observedFrozenTrackerCheck.mockRejectedValueOnce(
+      new Error('frozen local JVM check rejected'),
+    );
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput(),
+      ),
+    ).rejects.toThrow(/frozen local JVM check rejected/);
+
+    expect(order).toContain('dispose:application-checkpoint-v3');
+    expect(order).toContain('dispose:setup');
+    expect(order).toContain('process:stop');
   });
 
   it('rejects a tracker context that loses observed-anchor provenance', async () => {
@@ -1974,6 +3935,91 @@ describe('isolated devnet genesis setup execution root V1', () => {
     expect(mocked.observedTrackerCheckAssert).toHaveBeenCalled();
     expect(order).toContain('process:stop');
   });
+
+  it.each([
+    'active observation',
+    'active execution receipt',
+  ] as const)(
+    'rejects %s process-binding drift before promoting the tracker check',
+    async source => {
+      if (source === 'active observation') {
+        checkpointBoundObservation = Object.freeze({
+          ...checkpointBoundObservation,
+          processBindingDigestHex: digest('0'),
+        }) as typeof checkpointBoundObservation;
+      } else {
+        processSession.withCheckpointBoundMiningActiveExecutionTarget
+          .mockImplementationOnce(async action => ({
+            value: await action(activeExecutionTarget()),
+            receipt: Object.freeze({
+              ...checkpointBoundExecutionReceipt(),
+              processBindingDigestHex: digest('0'),
+            }),
+          }));
+      }
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        /observed anchor, tracker candidate, and JVM check binding changed/,
+      );
+
+      expect(mocked.observedTrackerCheck).toHaveBeenCalledTimes(1);
+      expect(order).toContain('process:stop');
+    },
+  );
+
+  it.each([
+    'active observation anchor index',
+    'active execution credential claim',
+    'tracker check target identity',
+    'tracker check anchor identity',
+  ] as const)(
+    'rejects isolated %s drift before exposing the tracker result',
+    async source => {
+      if (source === 'active observation anchor index') {
+        checkpointBoundObservation = Object.freeze({
+          ...checkpointBoundObservation,
+          anchorContextIndex: checkpointBoundObservation.anchorContextIndex + 1,
+        }) as typeof checkpointBoundObservation;
+      } else if (source === 'active execution credential claim') {
+        processSession.withCheckpointBoundMiningActiveExecutionTarget
+          .mockImplementationOnce(async action => ({
+            value: await action(activeExecutionTarget()),
+            receipt: Object.freeze({
+              ...checkpointBoundExecutionReceipt(),
+              trackerAdmissionMiningCredentialConsumedOnce: false,
+            }) as unknown as ReturnType<typeof checkpointBoundExecutionReceipt>,
+          }));
+      } else if (source === 'tracker check target identity') {
+        observedTrackerCheck = Object.freeze({
+          ...observedTrackerCheck,
+          target: Object.freeze({
+            ...observedTrackerCheck.target,
+            executionTargetIdentityDigestHex: digest('0'),
+          }),
+        }) as ReturnType<typeof validObservedTrackerCheck>;
+      } else {
+        observedTrackerCheck = Object.freeze({
+          ...observedTrackerCheck,
+          anchorHeaderIdHex: digest('0'),
+        }) as ReturnType<typeof validObservedTrackerCheck>;
+      }
+
+      await expect(
+        runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6(
+          pegInApplicationCheckpointRootInput(),
+        ),
+      ).rejects.toThrow(
+        /observed anchor, tracker candidate, and JVM check binding changed/,
+      );
+
+      expect(mocked.observedTrackerCheck).toHaveBeenCalledTimes(1);
+      expect(order).toContain('process:stop');
+    },
+  );
 
   it.each([
     'extension value',
@@ -3157,6 +5203,16 @@ function validObserver(order: string[]) {
           observedAtHeight: 221,
         } as const;
       }
+      if (
+        expectedTxId === digest('c')
+        && order.includes('peg-in:checkpoint:attest')
+      ) {
+        order.push('observe:tracker-admission');
+        return {
+          ...confirmation(expectedTxId, 0, 1),
+          observedAtHeight: 221,
+        } as const;
+      }
       const index = setupTransactions().findIndex(value =>
         value.issuance.unsignedTransactionIdHex === expectedTxId
       );
@@ -3256,6 +5312,65 @@ function validProcessSession(order: string[]) {
         receipt: checkpointMiningReceipt(extensionValueHex),
       };
     }),
+    withCheckpointBoundMiningActiveExecutionTarget: vi.fn(async action => {
+      order.push('checkpoint-bound-execution:enter');
+      const value = await action(activeExecutionTarget());
+      order.push('checkpoint-bound-execution:leave');
+      return {
+        value,
+        receipt: checkpointBoundExecutionReceipt(),
+      };
+    }),
+    withCheckpointBoundMiningStoppedExecutionTarget: vi.fn(async action => {
+      order.push('checkpoint-bound-frozen-execution:enter');
+      const value = await action(frozenExecutionTarget());
+      order.push('checkpoint-bound-frozen-execution:leave');
+      return {
+        value,
+        receipt: frozenCheckpointBoundExecutionReceipt(),
+      };
+    }),
+    withCheckpointBoundReservationFreshnessRevalidationTarget: vi.fn(
+      async action => {
+        order.push('tracker-reservation-freshness-execution:enter');
+        const value = await action(trackerReservationFreshnessTarget());
+        order.push('tracker-reservation-freshness-execution:leave');
+        return {
+          value,
+          receipt: trackerReservationFreshnessExecutionReceipt(),
+        };
+      },
+    ),
+    withCheckpointBoundTrackerTransportTarget: vi.fn(async (
+      completion,
+      action,
+    ) => {
+      order.push('tracker-transport-execution:enter');
+      if (completion !== TRACKER_RESERVATION_FRESHNESS_COMPLETION) {
+        throw new Error('tracker transport completion changed');
+      }
+      const value = await action(trackerTransportTarget());
+      order.push('tracker-transport-execution:leave');
+      return {
+        value,
+        receipt: trackerTransportExecutionReceipt(),
+      };
+    }),
+    withTrackerTransportConfirmationMiningTarget: vi.fn(async (
+      expectedTransactionIdHex,
+      action,
+    ) => {
+      order.push('tracker-confirmation:enter');
+      if (expectedTransactionIdHex !== digest('c')) {
+        throw new Error('tracker confirmation transaction changed');
+      }
+      const value = await action(executionTarget());
+      order.push('tracker-confirmation:leave');
+      return {
+        value,
+        receipt: trackerConfirmationExecutionReceipt(),
+      };
+    }),
     stop: vi.fn(async () => {
       order.push('process:stop');
     }),
@@ -3335,6 +5450,198 @@ function checkpointMiningReceipt(extensionValueHex: string) {
   } as const;
 }
 
+function checkpointBoundExecutionReceipt() {
+  const anchor = validCheckpointAnchorObservation();
+  return {
+    schema: 'e2s.substrate-federated-isolated-devnet-ergo-node-process.v1',
+    version: 1,
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    primaryMiningDuringAction: true,
+    witnessReadOnlyDuringAction: true,
+    checkpointExtensionBoundDuringAction: true,
+    trackerAdmissionMiningCredentialConsumedOnce: true,
+    checkpointSnapshotRevalidatedOnBothNodes: true,
+    checkpointExtensionObservationDigestHex:
+      deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1(
+        anchor,
+      ),
+    buildIdentityDigestHex: digest('3'),
+    executableIdentityDigestHex: digest('4'),
+    processBindingDigestHex: digest('f'),
+    executionTargetIdentityDigestHex: digest('8'),
+    extensionKeyHex: '0401',
+    extensionValueHex: anchor.extensionValueHex,
+    extensionFieldsSha256Hex: digest('e'),
+    checkpointSnapshot: checkpointMiningReceipt(
+      anchor.extensionValueHex,
+    ).finalSnapshot,
+    initialSnapshot: checkpointMiningReceipt(
+      anchor.extensionValueHex,
+    ).finalSnapshot,
+    finalSnapshot: {
+      ...checkpointMiningReceipt(anchor.extensionValueHex).finalSnapshot,
+      fullHeight: 143,
+      indexedHeight: 143,
+      headerIdHex: digest('e'),
+    },
+  } as const;
+}
+
+function frozenCheckpointBoundExecutionReceipt() {
+  const anchor = validCheckpointAnchorObservation();
+  const frozenSnapshot = {
+    network: 'devnet',
+    fullHeight: 143,
+    indexedHeight: 143,
+    headerIdHex: digest('e'),
+  } as const;
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-checkpoint-bound-frozen-execution.v2',
+    version: 2,
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    primaryMiningDuringAction: false,
+    primaryReadOnlyDuringAction: true,
+    witnessReadOnlyDuringAction: true,
+    miningStoppedBeforeAction: true,
+    exactFrozenSnapshotStableAcrossAction: true,
+    checkpointExtensionBoundDuringAction: true,
+    trackerAdmissionMiningCredentialConsumedOnce: true,
+    checkpointSnapshotRevalidatedOnBothNodes: true,
+    checkpointExtensionObservationDigestHex:
+      deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1(
+        anchor,
+      ),
+    buildIdentityDigestHex: digest('3'),
+    executableIdentityDigestHex: digest('4'),
+    processBindingDigestHex: digest('0'),
+    executionTargetIdentityDigestHex: digest('8'),
+    extensionKeyHex: '0401',
+    extensionValueHex: anchor.extensionValueHex,
+    extensionFieldsSha256Hex: digest('e'),
+    checkpointSnapshot: checkpointMiningReceipt(
+      anchor.extensionValueHex,
+    ).finalSnapshot,
+    preFreezeMiningSnapshot: frozenSnapshot,
+    actionStartSnapshot: frozenSnapshot,
+    actionEndSnapshot: frozenSnapshot,
+  } as const;
+}
+
+function trackerReservationFreshnessExecutionReceipt() {
+  const frozen = frozenCheckpointBoundExecutionReceipt();
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-execution.v1',
+    version: 1,
+    primaryNodeOrigin: frozen.primaryNodeOrigin,
+    witnessNodeOrigin: frozen.witnessNodeOrigin,
+    primaryReadOnlyDuringAction: true,
+    witnessReadOnlyDuringAction: true,
+    miningStoppedBeforeAction: true,
+    exactFrozenSnapshotStableAcrossAction: true,
+    sameProcessesAsTrackerCheck: true,
+    buildIdentityDigestHex: frozen.buildIdentityDigestHex,
+    executableIdentityDigestHex: frozen.executableIdentityDigestHex,
+    trackerCheckProcessBindingDigestHex: frozen.processBindingDigestHex,
+    trackerCheckExecutionTargetIdentityDigestHex:
+      frozen.executionTargetIdentityDigestHex,
+    processBindingDigestHex: digest('1'),
+    executionTargetIdentityDigestHex: digest('2'),
+    trackerCheckSnapshot: frozen.actionEndSnapshot,
+    actionStartSnapshot: frozen.actionEndSnapshot,
+    actionEndSnapshot: frozen.actionEndSnapshot,
+    checkpointExtensionBoundDuringAction: true,
+    checkpointSnapshotRevalidatedOnBothNodes: true,
+    checkpointExtensionObservationDigestHex:
+      frozen.checkpointExtensionObservationDigestHex,
+    extensionKeyHex: frozen.extensionKeyHex,
+    extensionValueHex: frozen.extensionValueHex,
+    extensionFieldsSha256Hex: frozen.extensionFieldsSha256Hex,
+    checkpointSnapshot: frozen.checkpointSnapshot,
+  } as const;
+}
+
+function trackerTransportExecutionReceipt() {
+  const freshness = trackerReservationFreshnessExecutionReceipt();
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-transport-execution.v1',
+    version: 1,
+    primaryNodeOrigin: freshness.primaryNodeOrigin,
+    witnessNodeOrigin: freshness.witnessNodeOrigin,
+    primaryMiningStoppedDuringAction: true,
+    trackerTransportTargetActiveOnlyDuringAction: true,
+    witnessReadOnlyDuringAction: true,
+    miningStoppedBeforeAction: true,
+    exactFrozenChainSnapshotStableAcrossAction: true,
+    sameProcessesAsReservationFreshness: true,
+    buildIdentityDigestHex: freshness.buildIdentityDigestHex,
+    executableIdentityDigestHex: freshness.executableIdentityDigestHex,
+    reservationFreshnessProcessBindingDigestHex:
+      freshness.processBindingDigestHex,
+    reservationFreshnessExecutionTargetIdentityDigestHex:
+      freshness.executionTargetIdentityDigestHex,
+    processBindingDigestHex: digest('7'),
+    executionTargetIdentityDigestHex: digest('8'),
+    reservationFreshnessSnapshot: freshness.actionEndSnapshot,
+    actionStartSnapshot: freshness.actionEndSnapshot,
+    actionEndSnapshot: freshness.actionEndSnapshot,
+    checkpointExtensionBoundDuringAction: true,
+    checkpointSnapshotRevalidatedOnBothNodes: true,
+    checkpointExtensionObservationDigestHex:
+      freshness.checkpointExtensionObservationDigestHex,
+    extensionKeyHex: freshness.extensionKeyHex,
+    extensionValueHex: freshness.extensionValueHex,
+    extensionFieldsSha256Hex: freshness.extensionFieldsSha256Hex,
+    checkpointSnapshot: freshness.checkpointSnapshot,
+  } as const;
+}
+
+function trackerConfirmationExecutionReceipt() {
+  const transport = trackerTransportExecutionReceipt();
+  const anchor = validCheckpointAnchorObservation();
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-confirmation-execution.v1',
+    version: 1,
+    primaryNodeOrigin: transport.primaryNodeOrigin,
+    witnessNodeOrigin: transport.witnessNodeOrigin,
+    primaryMiningDuringAction: true,
+    witnessReadOnlyDuringAction: true,
+    buildIdentityDigestHex: transport.buildIdentityDigestHex,
+    executableIdentityDigestHex: transport.executableIdentityDigestHex,
+    processBindingDigestHex: digest('9'),
+    executionTargetIdentityDigestHex: digest('a'),
+    initialSnapshot: transport.actionEndSnapshot,
+    finalSnapshot: {
+      ...transport.actionEndSnapshot,
+      fullHeight: transport.actionEndSnapshot.fullHeight + 1,
+      indexedHeight: transport.actionEndSnapshot.indexedHeight + 1,
+      headerIdHex: digest('f'),
+    },
+    trackerConfirmationMiningCredentialConsumedOnce: true,
+    exactTrackerTransportBound: true,
+    confirmedTransactionIdHex: digest('c'),
+    trackerTransportProcessBindingDigestHex: transport.processBindingDigestHex,
+    trackerTransportExecutionTargetIdentityDigestHex:
+      transport.executionTargetIdentityDigestHex,
+    checkpointExtensionBoundDuringAction: true,
+    checkpointSnapshotRevalidatedOnBothNodes: true,
+    checkpointExtensionObservationDigestHex:
+      deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1(
+        anchor,
+      ),
+    extensionKeyHex: anchor.extensionKeyHex,
+    extensionValueHex: anchor.extensionValueHex,
+    extensionFieldsSha256Hex: transport.extensionFieldsSha256Hex,
+    checkpointSnapshot: transport.checkpointSnapshot,
+    transportSnapshot: transport.actionEndSnapshot,
+  } as const;
+}
+
 function validCheckpointAnchorObservation() {
   const extensionValueHex = `${digest('3')}${digest('6')}`;
   const headerIds = ['d', 'c', 'b', 'a', '9', '8', '7', '6', '5', '4'];
@@ -3356,8 +5663,10 @@ function validCheckpointAnchorObservation() {
     ]),
     extensionMembershipProofHex: '00',
     headers: Object.freeze(headerIds.map((character, index) => Object.freeze({
+      canonicalHeaderBytesHex: digest(character),
       idHex: digest(character),
       height: 142 - index,
+      extensionRootHex: index === 0 ? digest('9') : digest(character),
       raw: Object.freeze({
         id: digest(character),
         height: 142 - index,
@@ -3381,6 +5690,133 @@ function validCheckpointAnchorObservation() {
       trustlessStatusEstablished: false,
     }),
   } as const);
+}
+
+function validCheckpointBoundObservation(
+  anchor: ReturnType<typeof validCheckpointAnchorObservation>,
+) {
+  const headers = validCheckpointBoundHeaders(anchor);
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-checkpoint-bound-tracker-observation.v1',
+    version: 1,
+    targetGenesisHeaderIdHex: anchor.targetGenesisHeaderIdHex,
+    extensionKeyHex: anchor.extensionKeyHex,
+    extensionValueHex: anchor.extensionValueHex,
+    anchorHeaderIdHex: anchor.anchorHeaderIdHex,
+    anchorHeight: anchor.anchorHeight,
+    anchorContextIndex: 1,
+    anchorExtensionRootHex: anchor.anchorExtensionRootHex,
+    extensionFields: anchor.extensionFields,
+    extensionMembershipProofHex: anchor.extensionMembershipProofHex,
+    headers,
+    processBindingDigestHex:
+      checkpointBoundExecutionReceipt().processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      checkpointBoundExecutionReceipt().executionTargetIdentityDigestHex,
+    observationDigestHex: digest('2'),
+    boundaries: Object.freeze({
+      primaryAndWitnessAgreed: true,
+      primaryMiningDuringObservation: true,
+      checkpointBoundActiveTarget: true,
+      exactCheckpointRetainedInCurrentContext: true,
+      exactExtensionMembershipRecomputed: true,
+      ergoPowAuthenticated: false,
+      trackerAdmissionEstablished: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    }),
+  } as const);
+}
+
+function validFrozenCheckpointBoundObservation(
+  anchor: ReturnType<typeof validCheckpointAnchorObservation>,
+) {
+  const headers = validCheckpointBoundHeaders(anchor);
+  return Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-checkpoint-bound-tracker-observation.v2',
+    version: 2,
+    targetGenesisHeaderIdHex: anchor.targetGenesisHeaderIdHex,
+    extensionKeyHex: anchor.extensionKeyHex,
+    extensionValueHex: anchor.extensionValueHex,
+    anchorHeaderIdHex: anchor.anchorHeaderIdHex,
+    anchorHeight: anchor.anchorHeight,
+    anchorContextIndex: 1,
+    anchorExtensionRootHex: anchor.anchorExtensionRootHex,
+    extensionFields: anchor.extensionFields,
+    extensionMembershipProofHex: anchor.extensionMembershipProofHex,
+    headers,
+    processBindingDigestHex:
+      frozenCheckpointBoundExecutionReceipt().processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      frozenCheckpointBoundExecutionReceipt().executionTargetIdentityDigestHex,
+    observationDigestHex: digest('7'),
+    boundaries: Object.freeze({
+      primaryAndWitnessAgreed: true,
+      miningStoppedDuringObservation: true,
+      checkpointBoundFrozenTarget: true,
+      exactCheckpointRetainedInCurrentContext: true,
+      exactExtensionMembershipRecomputed: true,
+      ergoPowAuthenticated: false,
+      trackerAdmissionEstablished: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    }),
+  } as const);
+}
+
+function validTrackerReservationFreshnessObservation(
+  anchor: ReturnType<typeof validCheckpointAnchorObservation>,
+) {
+  const frozen = validFrozenCheckpointBoundObservation(anchor);
+  const {
+    checkpointBoundFrozenTarget: _checkpointBoundFrozenTarget,
+    ...sharedBoundaries
+  } = frozen.boundaries;
+  return Object.freeze({
+    ...frozen,
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-observation.v1',
+    version: 1,
+    processBindingDigestHex:
+      trackerReservationFreshnessExecutionReceipt().processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      trackerReservationFreshnessExecutionReceipt()
+        .executionTargetIdentityDigestHex,
+    observationDigestHex: digest('8'),
+    boundaries: Object.freeze({
+      ...sharedBoundaries,
+      checkpointBoundReservationFreshnessTarget: true,
+      durableReservationBound: false,
+      trackerInputRevalidated: false,
+      jvmTransactionRechecked: false,
+    }),
+  } as const);
+}
+
+function validCheckpointBoundHeaders(
+  anchor: ReturnType<typeof validCheckpointAnchorObservation>,
+) {
+  return Object.freeze([
+    Object.freeze({
+      idHex: digest('e'),
+      height: anchor.anchorHeight + 1,
+      raw: Object.freeze({
+        id: digest('e'),
+        height: anchor.anchorHeight + 1,
+      }),
+    }),
+    ...anchor.headers.slice(0, 9),
+  ]);
 }
 
 function setupBatch() {
@@ -3555,7 +5991,12 @@ function validTrackerContext(
 }
 
 function validObservedHeaderContext(
-  observation: ReturnType<typeof validCheckpointAnchorObservation>,
+  observation: Readonly<{
+    anchorContextIndex: number;
+    anchorHeaderIdHex: string;
+    anchorExtensionRootHex: string;
+    headers: readonly unknown[];
+  }>,
 ) {
   return Object.freeze({
     schema: 'e2s.bridge-validity-tracker-observed-header-context.v1',
@@ -3572,11 +6013,11 @@ function validObservedTrackerContext(
   synthetic: ReturnType<typeof validTrackerContext>,
   observedHeaders: ReturnType<typeof validObservedHeaderContext>,
 ) {
-  const headerIds = ['d', 'c', 'b', 'a', '9', '8', '7', '6', '5', '4'];
+  const headerIds = ['e', 'd', 'c', 'b', 'a', '9', '8', '7', '6', '5'];
   const headers = Object.freeze(headerIds.map((character, index) => Object.freeze({
     id: digest(character),
-    height: 142 - index,
-    extensionRootHex: index === 0 ? digest('9') : digest(character),
+    height: 143 - index,
+    extensionRootHex: index === 1 ? digest('9') : digest(character),
     jvmHeaderJson: '{}',
     serializedHex: '00',
   })));
@@ -3644,6 +6085,7 @@ function validObservedTrackerCheck(
     }),
     boundaries: Object.freeze({
       localIsolatedDevnetOnly: true,
+      checkpointBoundActiveTarget: true,
       observedAnchorContextBound: true,
       exactTrackerInputAndTransactionBound: true,
       localWasmRootSigningPerformed: true,
@@ -3663,6 +6105,65 @@ function validObservedTrackerCheck(
   } as const);
 }
 
+function validFrozenObservedTrackerCheck(
+  context: ReturnType<typeof validObservedTrackerContext>,
+  trackerInputBox:
+    ReturnType<typeof validMaterializedTrackerSetup>['outputs'][number],
+  targetBinding: Readonly<{
+    processBindingDigestHex: string;
+    executionTargetIdentityDigestHex: string;
+  }>,
+) {
+  const active = validObservedTrackerCheck(
+    context,
+    trackerInputBox,
+    targetBinding,
+  );
+  const {
+    checkpointBoundActiveTarget: _checkpointBoundActiveTarget,
+    ...sharedBoundaries
+  } = active.boundaries;
+  return Object.freeze({
+    ...active,
+    schema:
+      'e2s.substrate-federated-isolated-devnet-observed-anchor-tracker-check.v2',
+    version: 2,
+    boundaries: Object.freeze({
+      ...sharedBoundaries,
+      checkpointBoundFrozenTarget: true,
+    }),
+    receiptDigestHex: digest('6'),
+  } as const);
+}
+
+function validTrackerReservationFreshnessCheck(
+  frozen: ReturnType<typeof validFrozenObservedTrackerCheck>,
+) {
+  const {
+    checkpointBoundFrozenTarget: _checkpointBoundFrozenTarget,
+    ...sharedBoundaries
+  } = frozen.boundaries;
+  return Object.freeze({
+    ...frozen,
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-check.v1',
+    version: 1,
+    target: Object.freeze({
+      processBindingDigestHex:
+        trackerReservationFreshnessExecutionReceipt().processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        trackerReservationFreshnessExecutionReceipt()
+          .executionTargetIdentityDigestHex,
+    }),
+    boundaries: Object.freeze({
+      ...sharedBoundaries,
+      reservationFreshnessRevalidationTarget: true,
+      durableReservationBound: false,
+    }),
+    receiptDigestHex: digest('9'),
+  } as const);
+}
+
 function confirmation(expectedTxId: string, index: number, round: number) {
   return {
     status: 'confirmed',
@@ -3674,6 +6175,22 @@ function confirmation(expectedTxId: string, index: number, round: number) {
     confirmationHeaderIdHex: digest(String(index + 1 + round)),
     observationDigestHex: digest(String(index + 4 + round)),
     observerArtifact: {},
+  } as const;
+}
+
+function trackerTransportConfirmation() {
+  const observed = confirmation(digest('c'), 0, 1);
+  return {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation.v1',
+    version: 1,
+    status: 'confirmed',
+    transactionIdHex: digest('c'),
+    confirmations: observed.confirmations,
+    observedAtHeight: 221,
+    confirmationHeight: observed.confirmationHeight,
+    confirmationHeaderIdHex: observed.confirmationHeaderIdHex,
+    observationDigestHex: observed.observationDigestHex,
   } as const;
 }
 
@@ -3720,6 +6237,48 @@ function readOnlyTarget() {
   } as const;
 }
 
+function activeExecutionTarget() {
+  return {
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    primaryMining: true,
+    witnessReadOnly: true,
+    checkpointBound: true,
+  } as const;
+}
+
+function frozenExecutionTarget() {
+  return {
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    primaryMining: false,
+    primaryReadOnly: true,
+    witnessReadOnly: true,
+    miningStopped: true,
+    checkpointBound: true,
+  } as const;
+}
+
+function trackerReservationFreshnessTarget() {
+  return {
+    ...frozenExecutionTarget(),
+    reservationFreshnessRevalidation: true,
+  } as const;
+}
+
+function trackerTransportTarget() {
+  return {
+    primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052',
+    primaryMining: false,
+    witnessReadOnly: true,
+    miningStopped: true,
+    checkpointBound: true,
+    reservationFreshnessCheckBound: true,
+    trackerTransport: true,
+  } as const;
+}
+
 function rootInput() {
   return {
     build: {
@@ -3739,7 +6298,9 @@ function rootInput() {
             SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
         },
       },
-      relayerArtifacts: {},
+      relayerArtifacts: {
+        expectedHeadCommitSha1Hex: '1'.repeat(40),
+      },
     },
   } as never;
 }
@@ -3779,6 +6340,7 @@ function pegInApplicationCheckpointRootInput() {
       gitExecutablePath: 'reviewed/git.exe',
       offline: true,
     },
+    requestBinding: TRACKER_TRANSPORT_REQUEST_BINDING,
   } as never;
 }
 
@@ -3789,6 +6351,11 @@ function validPacketV2() {
       version: 2,
       receiptDigestHex: digest('2'),
       targetDescriptorDigestHex: digest('3'),
+      relayerArtifactSetDigestHex: digest('1'),
+      checks: {
+        realRelayerArtifactProducerInvoked: true,
+        relayerArtifactFilesRehashedAfterPublication: true,
+      },
     },
     portableReplayInput: { packet: 'portable-v2' },
     replay: { reportDigestHex: digest('4') },
@@ -3916,6 +6483,35 @@ function validApplicationCheckpointReceipt(
     receiptDigestHex: digest('4'),
     checkpointAttestation: {
       checkpointStatement: {
+        version: 1,
+        hashAlgorithmId: 1,
+        finalityRuleId: 1,
+        flags: 0,
+        sourceNetworkIdHex: digest('7'),
+        sidechainIdHex: digest('8'),
+        sourceNativeBlockHeight: '100',
+        sourceNativeBlockHashHex: digest('9'),
+        executionBlockHashHex: digest('a'),
+        bridgeEventRootHex: digest('3'),
+        burnLeafCount: 1,
+        bridgeAddressHex:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+        tokenAddressHex:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+        bridgeRuntimeCodeSha256Hex: digest('b'),
+        bridgeRuntimeCodeBytes: 100,
+        tokenRuntimeCodeSha256Hex: digest('c'),
+        tokenRuntimeCodeBytes: 200,
+        sourceRuntimeCodeSha256Hex: digest('d'),
+        sourceRuntimeCodeBytes: 300,
+        runtimeProfileIdHex: digest('e'),
+        settlementProfileIdHex: digest('f'),
+        federationProfileIdHex: digest('0'),
+        sourceAttestationKeySetDigestHex: digest('1'),
+        sourceAttestationThreshold: 2,
+        ergoAdmissionKeySetDigestHex: digest('2'),
+        ergoAdmissionThreshold: 1,
+        federationEpoch: '1',
         admissionValidFromErgoHeight: '220',
         admissionExpiresAtErgoHeight: '284',
         encodedStatementHex: '01'.repeat(64),

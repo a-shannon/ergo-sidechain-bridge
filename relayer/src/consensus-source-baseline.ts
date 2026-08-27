@@ -1721,7 +1721,7 @@ function rawGitBlobIdentities(path: string, bytes: Buffer): string[] {
 function isControlledCrLfTextPath(path: string): boolean {
   const name = path.split(/[\\/]/).at(-1)?.toLowerCase() ?? '';
   return (
-    /\.(?:bat|bib|cfg|cmd|conf|css|csv|dat|dockerignore|editorconfig|gitattributes|gitignore|gnu|gradle|hbs|html|ini|java|js|jsx|json|kt|lock|md|mjs|nix|orig|properties|ps1|py|rej|rs|sample|sbt|scala|scss|sh|sol|stderr|svg|tex|toml|ts|tsx|tsv|txt|uxf|xml|ya?ml)$/i.test(name)
+    /\.(?:bat|bib|cfg|cmd|conf|css|csv|dat|dockerignore|editorconfig|gitattributes|gitignore|gnu|gradle|hbs|hex|html|ini|java|js|jsx|json|kt|lock|md|mjs|nix|orig|properties|ps1|py|rej|rs|sample|sbt|scala|scss|sh|sol|stderr|svg|tex|toml|ts|tsx|tsv|txt|uxf|xml|ya?ml)$/i.test(name)
     || ['codeowners', 'dockerfile', 'license', 'makefile', 'notice'].includes(name)
     || /^(?:header|license)-/.test(name)
   );

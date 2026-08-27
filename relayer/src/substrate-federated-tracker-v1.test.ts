@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 
+import { Mnemonic } from 'ethers';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -10,10 +11,17 @@ import {
   buildSubstrateFederatedTrackerAdmissionV1,
 } from './profiles/substrate-federated-v1/tracker-admission.js';
 import {
+  encodeCollByteRegister,
   encodeIntRegister,
   MINER_FEE,
   MINER_FEE_TREE,
 } from './ergo-encoding.js';
+import {
+  prepareLocalWasmRootCheckCandidates,
+} from './fleet-signer.js';
+import {
+  deriveLocalWasmRootSignerPublicIdentity,
+} from './local-wasm-root-signer-public-identity.js';
 import {
   buildSubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
@@ -392,6 +400,156 @@ describe('substrate federated tracker V1 transaction plan', () => {
       }), label).rejects.toThrow(expected);
     }
   }, 20_000);
+
+  it('root-signs the exact observed-anchor tracker candidate with real WASM', async () => {
+    const mnemonic = Mnemonic.fromEntropy(`0x${'42'.repeat(32)}`).phrase;
+    const signer = await deriveLocalWasmRootSignerPublicIdentity(mnemonic);
+    const profile = buildSubstrateFederatedCheckpointProfileV1({
+      ...vector.input.profile,
+      ergoAdmissionThreshold: 1,
+      ergoAdmissionPublicKeysHex: [signer.publicKeyHex],
+    });
+    const statement = buildSubstrateFederatedCheckpointStatementV1({
+      profile,
+      ...vector.input.statement,
+    });
+    const genesisInput = await boxFromCandidate({
+      value: (10_000_000n + BigInt(MINER_FEE)).toString(),
+      ergoTree: MINER_FEE_TREE,
+      assets: [],
+      additionalRegisters: {},
+      creationHeight: 999,
+    });
+    const compilerRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
+      template: {
+        relativePath: 'contracts/SPVTrackerSubstrateFederatedV1.es',
+        source: trackerTemplate,
+      },
+      trackerGenesisInputBoxIdHex: genesisInput.boxId,
+      profile,
+      application: {
+        sourceNetworkIdHex: statement.sourceNetworkIdHex,
+        sidechainIdHex: statement.sidechainIdHex,
+        bridgeAddressHex: statement.bridgeAddressHex,
+        tokenAddressHex: statement.tokenAddressHex,
+        bridgeRuntimeCodeSha256Hex:
+          statement.bridgeRuntimeCodeSha256Hex,
+        bridgeRuntimeCodeBytes: statement.bridgeRuntimeCodeBytes,
+        tokenRuntimeCodeSha256Hex: statement.tokenRuntimeCodeSha256Hex,
+        tokenRuntimeCodeBytes: statement.tokenRuntimeCodeBytes,
+        sourceRuntimeCodeSha256Hex:
+          statement.sourceRuntimeCodeSha256Hex,
+        sourceRuntimeCodeBytes: statement.sourceRuntimeCodeBytes,
+        runtimeProfileIdHex: statement.runtimeProfileIdHex,
+        settlementProfileIdHex: statement.settlementProfileIdHex,
+      },
+    });
+    const nodeOptions = process.env.NODE_OPTIONS;
+    delete process.env.NODE_OPTIONS;
+    let compilerReceipt;
+    try {
+      compilerReceipt =
+        await compileSubstrateFederatedTrackerWithPinnedJvmV1(compilerRequest);
+    } finally {
+      if (nodeOptions !== undefined) process.env.NODE_OPTIONS = nodeOptions;
+    }
+    const baseline = await buildSubstrateFederatedTrackerV1AcceptanceFixture();
+    const setupTransaction =
+      await materializeSubstrateFederatedSingletonIssuanceV1({
+        label: 'signable isolated federated tracker issuance',
+        genesisInput,
+        expectedNftIdHex: compilerRequest.trackerNftIdHex,
+        propositionHex: compilerReceipt.contract.propositionHex,
+        registers: {
+          ...baseline.trackerTransition.inputRegisters,
+          R4: encodeCollByteRegister(Buffer.from(profile.profileIdHex, 'hex')),
+          R8: encodeIntRegister(0),
+          R9: encodeCollByteRegister(Buffer.from(
+            profile.ergoAdmissionKeySetDigestHex,
+            'hex',
+          )),
+        },
+        singletonValue: 10_000_000n,
+        fee: BigInt(MINER_FEE),
+        creationHeight: 1_000,
+      });
+    const trackerInputBox = setupTransaction.outputs[0]!;
+    const canonicalContext =
+      await buildCompilerBoundSubstrateFederatedTrackerV1Context({
+        compilerRequest,
+        compilerReceipt,
+        trackerInputBox,
+        encodedStatementHex: statement.encodedStatementHex,
+        currentErgoHeight: 1_030,
+        anchorContextIndex: 1,
+      });
+    const wasmModule = await import('ergo-lib-wasm-nodejs');
+    const wasm = wasmModule.default ?? wasmModule;
+    const syntheticHeaders =
+      buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+        currentHeight: canonicalContext.trackerTransition.currentErgoHeight,
+        anchorContextIndex:
+          canonicalContext.trackerTransition.anchorContextIndex,
+        anchorExtensionRootHex: canonicalContext.trackerTransition.headers[
+          canonicalContext.trackerTransition.anchorContextIndex
+        ]!.extensionRootHex,
+      });
+    const observedHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(
+      wasm,
+      {
+        rawHeaders: syntheticHeaders.headers.map(header => header.raw),
+        anchorContextIndex: syntheticHeaders.anchorContextIndex,
+        expectedAnchorHeaderIdHex: syntheticHeaders.anchorHeader.id,
+        expectedAnchorExtensionRootHex:
+          syntheticHeaders.anchorHeader.extensionRootHex,
+      },
+    );
+    const observedContext =
+      await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context({
+        compilerRequest,
+        compilerReceipt,
+        trackerInputBox,
+        encodedStatementHex: statement.encodedStatementHex,
+        observedHeaderContext: observedHeaders,
+        extensionMembershipProofHex:
+          canonicalContext.trackerTransition.extensionProofHex,
+      });
+    const minimalInput = (
+      observedContext.eip12UnsignedTransaction.inputs as ReadonlyArray<
+        Readonly<{ extension: Readonly<Record<string, string>> }>
+      >
+    )[0]!;
+    const eip12Tx = {
+      ...observedContext.eip12UnsignedTransaction,
+      inputs: [{
+        ...trackerInputBox,
+        extension: structuredClone(minimalInput.extension),
+      }],
+    };
+
+    const batch = await prepareLocalWasmRootCheckCandidates({
+      mnemonic,
+      networkPrefix: 16,
+      headers: observedHeaders.headers.map(header => header.raw),
+      nodeOrigin: 'http://127.0.0.1:9051',
+      candidates: [{
+        role: 'observed-anchor-tracker',
+        eip12Tx,
+        expectedTxId: observedContext.unsignedTransactionIdHex,
+      }],
+    });
+
+    expect(batch).toMatchObject({
+      derivation: 'wasm-root',
+      pubKeyHex: signer.publicKeyHex,
+      ergoTreeHex: signer.p2pkErgoTreeHex,
+      stateContextTipHeight: 1_029,
+      candidates: [{
+        role: 'observed-anchor-tracker',
+        expectedTxId: observedContext.unsignedTransactionIdHex,
+      }],
+    });
+  }, 40_000);
 });
 
 interface MutableBoxCandidate {

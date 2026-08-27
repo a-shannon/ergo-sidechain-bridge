@@ -98,6 +98,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_MINT_SOURCE_PROOF_V2_SCH
   'e2s.substrate-federated-isolated-devnet-packet-mint-source-proof.v2' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-packet-checkpoint-attestation.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-packet-relayer-lineage.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT =
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_KEY_COUNT_V1;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_ATTESTATION_THRESHOLD =
@@ -144,6 +146,13 @@ const MINT_CONTINUATION_BINDINGS = new WeakMap<
   object,
   Readonly<PacketMintContinuationBindingV1>
 >();
+const PACKET_RELAYER_LINEAGES = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1>
+>();
+const RELAYER_LINEAGE_PACKETS = new WeakMap<object, object>();
+const CLAIMED_RELAYER_LINEAGE_PACKETS = new WeakSet<object>();
+const CONSUMED_PACKET_RELAYER_LINEAGES = new WeakSet<object>();
 
 interface PacketMintContinuationBindingV1 {
   readonly targetDescriptorDigestHex: string;
@@ -244,6 +253,15 @@ export interface SubstrateFederatedIsolatedDevnetPacketV1 {
     Readonly<ReplaySubstrateFederatedIsolatedDevnetPortableV1Input>;
   readonly replay:
     Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV1>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA;
+  readonly version: 1;
+  readonly headCommitSha1Hex: string;
+  readonly relayerArtifactSetDigestHex: string;
+  readonly packetReceiptDigestHex: string;
 }
 
 export interface SubstrateFederatedIsolatedDevnetPacketSessionV1 {
@@ -968,6 +986,72 @@ export function assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(
   }
 }
 
+export function claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1> {
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  if (CLAIMED_RELAYER_LINEAGE_PACKETS.has(packet)) {
+    throw new Error('isolated packet relayer lineage is already claimed');
+  }
+  const lineage = PACKET_RELAYER_LINEAGES.get(packet);
+  if (lineage === undefined) {
+    throw new Error('isolated packet relayer lineage is missing');
+  }
+  CLAIMED_RELAYER_LINEAGE_PACKETS.add(packet);
+  return lineage;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1
+> {
+  if (value === null || typeof value !== 'object' || !Object.isFrozen(value)) {
+    throw new Error('isolated packet relayer lineage lacks process provenance');
+  }
+  const packet = RELAYER_LINEAGE_PACKETS.get(value);
+  const lineage = value as Readonly<
+    SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1
+  >;
+  if (
+    packet === undefined
+    || !CLAIMED_RELAYER_LINEAGE_PACKETS.has(packet)
+    || PACKET_RELAYER_LINEAGES.get(packet) !== value
+    || lineage.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA
+    || lineage.version !== 1
+    || !/^[0-9a-f]{40}$/u.test(lineage.headCommitSha1Hex)
+    || !/^[0-9a-f]{64}$/u.test(lineage.relayerArtifactSetDigestHex)
+    || !/^[0-9a-f]{64}$/u.test(lineage.packetReceiptDigestHex)
+  ) {
+    throw new Error('isolated packet relayer lineage lacks process provenance');
+  }
+  const exactPacket = packet as Readonly<
+    SubstrateFederatedIsolatedDevnetPacketV2
+  >;
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(exactPacket);
+  if (
+    lineage.relayerArtifactSetDigestHex
+      !== exactPacket.receipt.relayerArtifactSetDigestHex
+    || lineage.packetReceiptDigestHex
+      !== exactPacket.receipt.receiptDigestHex
+  ) {
+    throw new Error('isolated packet relayer lineage changed');
+  }
+}
+
+export function consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+  lineage:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1> {
+  assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage);
+  if (CONSUMED_PACKET_RELAYER_LINEAGES.has(lineage)) {
+    throw new Error('isolated packet relayer lineage is already consumed');
+  }
+  CONSUMED_PACKET_RELAYER_LINEAGES.add(lineage);
+  return lineage;
+}
+
 export function assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
   value: unknown,
 ): asserts value is Readonly<
@@ -1399,6 +1483,16 @@ async function producePacket(
     result,
     buildPacketMintContinuationBinding(target),
   );
+  const relayerLineage = deepFreeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_RELAYER_LINEAGE_V1_SCHEMA,
+    version: 1 as const,
+    headCommitSha1Hex: relayerReceipt.headCommitSha1Hex,
+    relayerArtifactSetDigestHex,
+    packetReceiptDigestHex: receipt.receiptDigestHex,
+  });
+  PACKET_RELAYER_LINEAGES.set(result, relayerLineage);
+  RELAYER_LINEAGE_PACKETS.set(relayerLineage, result);
   return result;
 }
 

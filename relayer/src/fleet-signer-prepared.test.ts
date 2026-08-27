@@ -6,7 +6,10 @@ const signerMock = vi.hoisted(() => ({
   events: [] as string[],
   signedIds: [] as string[],
   failOnSignCall: 0,
+  failStage: '' as string,
   signCalls: 0,
+  reduceCalls: 0,
+  reducedFreeCalls: 0,
   fleetDerivations: 0,
   rootDerivations: 0,
 }));
@@ -161,13 +164,52 @@ vi.mock('ergo-lib-wasm-nodejs', () => {
           free(): void {},
         }),
       },
-      SecretKey: { dlog_from_bytes: () => ({}) },
+      SecretKey: {
+        dlog_from_bytes: () => {
+          if (signerMock.failStage === 'secret-key') {
+            throw new Error('private signer detail must remain hidden');
+          }
+          return {};
+        },
+      },
       SecretKeys,
       ErgoBoxes: {
-        from_boxes_json: () => ({}),
-        empty: () => ({ add(): void {} }),
+        from_boxes_json: () => {
+          if (signerMock.failStage === 'input-boxes') {
+            throw new Error('input box detail must remain hidden');
+          }
+          return {};
+        },
+        empty: () => {
+          if (signerMock.failStage === 'data-input-boxes') {
+            throw new Error('data input detail must remain hidden');
+          }
+          return { add(): void {} };
+        },
       },
-      UnsignedTransaction: { from_json: (source: string) => JSON.parse(source) },
+      UnsignedTransaction: {
+        from_json: (source: string) => {
+          if (signerMock.failStage === 'unsigned-transaction') {
+            throw new Error('unsigned transaction detail must remain hidden');
+          }
+          return JSON.parse(source);
+        },
+      },
+      ReducedTransaction: {
+        from_unsigned_tx: () => {
+          signerMock.reduceCalls += 1;
+          signerMock.events.push(`reduce:${signerMock.reduceCalls}`);
+          if (signerMock.failStage === 'reduce-transaction') {
+            throw new Error('transaction reduction detail must remain hidden');
+          }
+          return {
+            free(): void {
+              signerMock.reducedFreeCalls += 1;
+              signerMock.events.push(`free:${signerMock.reducedFreeCalls}`);
+            },
+          };
+        },
+      },
       Transaction: {
         from_json: (source: string) => ({
           sigma_serialize_bytes: () => Buffer.from(source, 'utf8'),
@@ -176,14 +218,31 @@ vi.mock('ergo-lib-wasm-nodejs', () => {
       },
       Wallet: {
         from_secrets: () => ({
-          sign_transaction: () => {
+          sign_transaction: (
+            _stateContext: unknown,
+            unsignedTransaction: Readonly<{ readonly inputs: unknown[] }>,
+          ) => {
             signerMock.signCalls += 1;
             signerMock.events.push(`sign:${signerMock.signCalls}`);
-            if (signerMock.signCalls === signerMock.failOnSignCall) {
-              throw new Error('synthetic signing failure');
+            if (
+              signerMock.signCalls === signerMock.failOnSignCall
+              || signerMock.failStage === 'sign-transaction'
+              || signerMock.failStage === 'reduce-transaction'
+            ) {
+              throw new Error('proof generation detail must remain hidden');
             }
             const id = signerMock.signedIds[signerMock.signCalls - 1];
-            return { to_json: () => JSON.stringify({ id }) };
+            return {
+              to_json: () => {
+                if (signerMock.failStage === 'signed-transaction-json') {
+                  throw new Error('signed transaction detail must remain hidden');
+                }
+                return JSON.stringify({
+                  id,
+                  inputs: unsignedTransaction.inputs,
+                });
+              },
+            };
           },
         }),
       },
@@ -218,6 +277,7 @@ import {
   prepareLocalWasmRootCheckCandidatesFromNode,
   prepareLocalWasmRootCheckSigner,
   promoteLocalWasmCheckedTransactionForSubmissionV1,
+  projectLocalWasmSignedCheckInputBoxIdsV1,
   signTransactionForCheck,
   type LocalWasmExactBytesSignedCheckCandidate,
 } from './fleet-signer.js';
@@ -294,7 +354,10 @@ beforeEach(() => {
   signerMock.events.length = 0;
   signerMock.signedIds = [firstTxId, secondTxId];
   signerMock.failOnSignCall = 0;
+  signerMock.failStage = '';
   signerMock.signCalls = 0;
+  signerMock.reduceCalls = 0;
+  signerMock.reducedFreeCalls = 0;
   signerMock.fleetDerivations = 0;
   signerMock.rootDerivations = 0;
   nodeMock.checkedIds.length = 0;
@@ -350,6 +413,8 @@ describe('prepared local WASM check signer', () => {
       `check:${firstTxId}`,
       `check:${secondTxId}`,
     ]);
+    expect(signerMock.reduceCalls).toBe(0);
+    expect(signerMock.reducedFreeCalls).toBe(0);
     expect(accepted.map(result => result.nodeTxId)).toEqual([firstTxId, secondTxId]);
     expect(JSON.stringify(accepted)).not.toMatch(/"(?:signedTx|signedTransaction|privateKey|mnemonic)"/i);
   });
@@ -367,7 +432,9 @@ describe('prepared local WASM check signer', () => {
       candidate('tracker-setup', firstTxId, 1),
       candidate('duplicate-prevention-vault-setup', secondTxId, 2),
     ], checkNode)).rejects.toThrow(/local WASM signing failed/i);
-    expect(signerMock.events).toEqual(['sign:1', 'sign:2']);
+    expect(signerMock.events).toEqual(['sign:1', 'sign:2', 'reduce:1', 'free:1']);
+    expect(signerMock.reduceCalls).toBe(1);
+    expect(signerMock.reducedFreeCalls).toBe(1);
     expect(checkNode).not.toHaveBeenCalled();
   });
 
@@ -443,6 +510,66 @@ describe('prepared local WASM check signer', () => {
     expect(signerMock.fleetDerivations).toBe(0);
   });
 
+  it.each([
+    'secret-key',
+    'input-boxes',
+    'data-input-boxes',
+    'unsigned-transaction',
+    'signed-transaction-json',
+  ])('reports the fixed %s stage without exposing WASM details', async stage => {
+    signerMock.failStage = stage;
+
+    const error = await prepareLocalWasmRootCheckCandidates({
+      mnemonic: 'synthetic root batch input',
+      networkPrefix: 16,
+      headers: headers(),
+      nodeOrigin: 'http://127.0.0.1:9052',
+      candidates: [candidate('tracker-setup', firstTxId, 1)],
+    }).then(() => undefined, reason => reason as Error);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toBe(
+      `tracker-setup: local WASM root signing failed at ${stage}`,
+    );
+    expect(error?.message).not.toMatch(/private|input box detail|proof generation|signed transaction detail/i);
+  });
+
+  it('replays and frees reduction after proof generation fails', async () => {
+    signerMock.failStage = 'sign-transaction';
+
+    await expect(prepareLocalWasmRootCheckCandidates({
+      mnemonic: 'synthetic root batch input',
+      networkPrefix: 16,
+      headers: headers(),
+      nodeOrigin: 'http://127.0.0.1:9052',
+      candidates: [candidate('tracker-setup', firstTxId, 1)],
+    })).rejects.toThrow('tracker-setup: local WASM root signing failed at sign-transaction');
+
+    expect(signerMock.events).toEqual(['sign:1', 'reduce:1', 'free:1']);
+    expect(signerMock.reduceCalls).toBe(1);
+    expect(signerMock.reducedFreeCalls).toBe(1);
+  });
+
+  it('reports reduction failure without exposing or freeing a missing reduction', async () => {
+    signerMock.failStage = 'reduce-transaction';
+
+    const error = await prepareLocalWasmRootCheckCandidates({
+      mnemonic: 'synthetic root batch input',
+      networkPrefix: 16,
+      headers: headers(),
+      nodeOrigin: 'http://127.0.0.1:9052',
+      candidates: [candidate('tracker-setup', firstTxId, 1)],
+    }).then(() => undefined, reason => reason as Error);
+
+    expect(error?.message).toBe(
+      'tracker-setup: local WASM root signing failed at reduce-transaction',
+    );
+    expect(error?.message).not.toMatch(/transaction reduction detail/i);
+    expect(signerMock.events).toEqual(['sign:1', 'reduce:1']);
+    expect(signerMock.reduceCalls).toBe(1);
+    expect(signerMock.reducedFreeCalls).toBe(0);
+  });
+
   it('keeps exact header collection inside the root check signer boundary', async () => {
     const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
       mnemonic: 'synthetic root batch input',
@@ -475,6 +602,13 @@ describe('separate authenticated check signer and checker capabilities', () => {
     );
 
     expect(signed).not.toBeNull();
+    expect(projectLocalWasmSignedCheckInputBoxIdsV1(signed!)).toEqual([
+      '1'.padStart(64, '0'),
+    ]);
+    expect(Object.isFrozen(projectLocalWasmSignedCheckInputBoxIdsV1(signed!)))
+      .toBe(true);
+    expect(() => projectLocalWasmSignedCheckInputBoxIdsV1({ ...signed! }))
+      .toThrow(/provenance is missing/);
     expect(nodeMock.ncheck).not.toHaveBeenCalled();
     expect(() => assertLocalWasmSignedCheckCandidateProvenance(signed))
       .not.toThrow();
@@ -767,7 +901,13 @@ describe('separate authenticated check signer and checker capabilities', () => {
     expect(submissionNodeMock.post.mock.calls[0]?.[0])
       .toBe('http://127.0.0.1:9051/transactions');
     expect(submissionNodeMock.post.mock.calls[0]?.[1])
-      .toEqual({ id: firstTxId });
+      .toEqual({
+        id: firstTxId,
+        inputs: [{
+          boxId: '1'.padStart(64, '0'),
+          extension: {},
+        }],
+      });
   });
 
   it('rejects cloned provenance and a checker origin different from the signing context', async () => {

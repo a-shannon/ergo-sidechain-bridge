@@ -63,9 +63,15 @@ import {
 } from './run-substrate-federated-isolated-devnet-bootstrap-v1.js';
 import {
   loadCanonicalBootstrapRequestBoundToSha256,
+  loadCanonicalBootstrapRequestBoundWithProvenanceV1,
   runSubstrateFederatedIsolatedDevnetBootstrapWorkerFromArgumentsV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_BOOTSTRAP_COMMAND_REQUEST_V1_SCHEMA,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
+import {
+  claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
+  consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
+  projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1,
+} from '../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js';
 
 describe('isolated devnet tracked no-submit bootstrap command V1', () => {
   beforeEach(() => {
@@ -141,6 +147,95 @@ describe('isolated devnet tracked no-submit bootstrap command V1', () => {
         resolve(process.cwd(), '..', '..'),
         '0'.repeat(64),
       )).toThrow('changed after parent validation');
+    });
+  });
+
+  it('issues one opaque binding from the exact canonical request bytes', async () => {
+    await withFixture(async fixture => {
+      const expectedRequestSha256Hex = createHash('sha256')
+        .update(readFileSync(fixture.requestPath))
+        .digest('hex');
+      const loaded = loadCanonicalBootstrapRequestBoundWithProvenanceV1(
+        fixture.requestPath,
+        resolve(process.cwd(), '..'),
+        resolve(process.cwd(), '..', '..'),
+        expectedRequestSha256Hex,
+      );
+      const independentlyLoaded =
+        loadCanonicalBootstrapRequestBoundWithProvenanceV1(
+          fixture.requestPath,
+          resolve(process.cwd(), '..'),
+          resolve(process.cwd(), '..', '..'),
+          expectedRequestSha256Hex,
+        );
+
+      expect(loaded.input.lifecycle.relayerArtifacts.expectedHeadCommitSha1Hex)
+        .toBe('a'.repeat(40));
+      expect(() =>
+        claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1(
+          loaded.requestBinding,
+          independentlyLoaded.input,
+        )
+      ).toThrow(/does not match the exact parsed root input/u);
+      expect(Object.isFrozen(loaded.input.build)).toBe(true);
+      expect(Object.isFrozen(loaded.input.lifecycle)).toBe(true);
+      expect(Object.isFrozen(
+        loaded.input.lifecycle.sourceHistory.acceptance,
+      )).toBe(true);
+      expect(Reflect.set(
+        loaded.input.lifecycle.sourceHistory.acceptance,
+        'expectedChainId',
+        999n,
+      )).toBe(false);
+      expect(() =>
+        claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1(
+          structuredClone(loaded.requestBinding),
+          loaded.input,
+        )
+      ).toThrow(/lacks fresh process provenance/u);
+      const baseSpecBytes =
+        loaded.input.lifecycle.sourceHistory.acceptance.baseSpecBytes;
+      const originalFirstByte = baseSpecBytes[0]!;
+      baseSpecBytes[0] = originalFirstByte ^ 0xff;
+      expect(() =>
+        claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1(
+          loaded.requestBinding,
+          loaded.input,
+        )
+      ).toThrow(/root input changed after validation/u);
+      baseSpecBytes[0] = originalFirstByte;
+      const campaignBinding =
+        claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1(
+          loaded.requestBinding,
+          loaded.input,
+        );
+      baseSpecBytes[0] = originalFirstByte ^ 0xff;
+      expect(() =>
+        projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1(
+          campaignBinding,
+        )
+      ).toThrow(/root input changed after validation/u);
+      baseSpecBytes[0] = originalFirstByte;
+      expect(
+        projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1(
+          campaignBinding,
+        ),
+      ).toBe(expectedRequestSha256Hex);
+      expect(() =>
+        projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1(
+          structuredClone(campaignBinding),
+        )
+      ).toThrow(/lacks fresh process provenance/u);
+      expect(
+        consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1(
+          campaignBinding,
+        ),
+      ).toBe(expectedRequestSha256Hex);
+      expect(() =>
+        consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1(
+          campaignBinding,
+        )
+      ).toThrow(/lacks fresh process provenance/u);
     });
   });
 

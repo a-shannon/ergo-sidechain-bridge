@@ -483,6 +483,17 @@ function safeEnvironmentPathList(
     ) {
       throw new Error(`${label} contains an unsafe path`);
     }
+    const lexicalPath = resolve(entry);
+    if (
+      label === 'Path'
+      && (
+        canonicalPathIdentity(lexicalPath)
+          === canonicalPathIdentity(canonicalWorktreeRoot)
+        || isPathInside(canonicalWorktreeRoot, lexicalPath)
+      )
+    ) {
+      continue;
+    }
     let path: string;
     try {
       path = explicitExistingLocalNonSensitivePath(

@@ -415,70 +415,127 @@ async function wasmSignWithStateContext(
   wasm: any,
   stateCtx: any,
 ): Promise<any> {
-
   // 1. Build WASM Wallet from private key
-  const secretKey = wasm.SecretKey.dlog_from_bytes(
-    Buffer.from(keys.privateKeyHex, 'hex')
-  );
-  const secretKeys = new wasm.SecretKeys();
-  secretKeys.add(secretKey);
-  const wallet = wasm.Wallet.from_secrets(secretKeys);
+  const wallet = runWasmSigningStage('secret-key', () => {
+    const secretKey = wasm.SecretKey.dlog_from_bytes(
+      Buffer.from(keys.privateKeyHex, 'hex')
+    );
+    const secretKeys = new wasm.SecretKeys();
+    secretKeys.add(secretKey);
+    return wasm.Wallet.from_secrets(secretKeys);
+  });
 
   // 2. Convert inputs to WASM ErgoBoxes
   // EIP-12 inputs have full box data; WASM needs ErgoBox objects
-  const inputBoxesJson = eip12Tx.inputs.map((input: any) => {
-    // WASM ErgoBox.from_json expects a specific format:
-    // { boxId, value (as string), ergoTree, assets, additionalRegisters,
-    //   transactionId, index, creationHeight }
-    return {
-      boxId: input.boxId,
-      value: typeof input.value === 'bigint' ? input.value.toString() : String(input.value),
-      ergoTree: input.ergoTree,
-      assets: (input.assets || []).map((a: any) => ({
-        tokenId: a.tokenId,
-        amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
-      })),
-      additionalRegisters: input.additionalRegisters || {},
-      transactionId: input.transactionId,
-      index: typeof input.index === 'number' ? input.index : 0,
-      creationHeight: input.creationHeight,
-    };
+  const inputBoxes = runWasmSigningStage('input-boxes', () => {
+    const inputBoxesJson = eip12Tx.inputs.map((input: any) => {
+      // WASM ErgoBox.from_json expects a specific format:
+      // { boxId, value (as string), ergoTree, assets, additionalRegisters,
+      //   transactionId, index, creationHeight }
+      return {
+        boxId: input.boxId,
+        value: typeof input.value === 'bigint' ? input.value.toString() : String(input.value),
+        ergoTree: input.ergoTree,
+        assets: (input.assets || []).map((a: any) => ({
+          tokenId: a.tokenId,
+          amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
+        })),
+        additionalRegisters: input.additionalRegisters || {},
+        transactionId: input.transactionId,
+        index: typeof input.index === 'number' ? input.index : 0,
+        creationHeight: input.creationHeight,
+      };
+    });
+    return wasm.ErgoBoxes.from_boxes_json(inputBoxesJson);
   });
-  // BigInt-safe converter for WASM JSON parsing
-  // WASM from_boxes_json takes a JS array (NOT a JSON string)
-  const numericValue = (v: any) => typeof v === 'bigint' ? v.toString() : String(v);
-  const inputBoxes = wasm.ErgoBoxes.from_boxes_json(inputBoxesJson);
 
   // 4. Convert data inputs
-  const dataInputBoxes = wasm.ErgoBoxes.empty();
-  if (eip12Tx.dataInputs?.length > 0) {
-    const dataJson = eip12Tx.dataInputs.map((di: any) => ({
-      boxId: di.boxId,
-      value: typeof di.value === 'bigint' ? di.value.toString() : String(di.value),
-      ergoTree: di.ergoTree,
-      assets: (di.assets || []).map((a: any) => ({
-        tokenId: a.tokenId,
-        amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
-      })),
-      additionalRegisters: di.additionalRegisters || {},
-      transactionId: di.transactionId,
-      index: typeof di.index === 'number' ? di.index : 0,
-      creationHeight: di.creationHeight,
-    }));
-    const dbis = wasm.ErgoBoxes.from_boxes_json(dataJson);
-    for (let i = 0; i < dbis.len(); i++) dataInputBoxes.add(dbis.get(i));
-  }
+  const dataInputBoxes = runWasmSigningStage('data-input-boxes', () => {
+    const boxes = wasm.ErgoBoxes.empty();
+    if (eip12Tx.dataInputs?.length > 0) {
+      const dataJson = eip12Tx.dataInputs.map((di: any) => ({
+        boxId: di.boxId,
+        value: typeof di.value === 'bigint' ? di.value.toString() : String(di.value),
+        ergoTree: di.ergoTree,
+        assets: (di.assets || []).map((a: any) => ({
+          tokenId: a.tokenId,
+          amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
+        })),
+        additionalRegisters: di.additionalRegisters || {},
+        transactionId: di.transactionId,
+        index: typeof di.index === 'number' ? di.index : 0,
+        creationHeight: di.creationHeight,
+      }));
+      const dbis = wasm.ErgoBoxes.from_boxes_json(dataJson);
+      for (let i = 0; i < dbis.len(); i++) boxes.add(dbis.get(i));
+    }
+    return boxes;
+  });
 
   // 5. Build unsigned TX in WASM format.
-  const unsignedTx = wasm.UnsignedTransaction.from_json(
-    JSON.stringify(toUnsignedTransactionJson(eip12Tx)),
+  const unsignedTx = runWasmSigningStage(
+    'unsigned-transaction',
+    () => wasm.UnsignedTransaction.from_json(
+      JSON.stringify(toUnsignedTransactionJson(eip12Tx)),
+    ),
   );
 
-  // 6. Sign with full sigma-rust interpreter
-  const signedTx = wallet.sign_transaction(stateCtx, unsignedTx, inputBoxes, dataInputBoxes);
+  // 6. Sign with the full sigma-rust interpreter. If that fails, replay only
+  // reduction to distinguish a context/script failure from proof generation.
+  let signedTx: ReturnType<typeof wallet.sign_transaction>;
+  try {
+    signedTx = runWasmSigningStage(
+      'sign-transaction',
+      () => wallet.sign_transaction(stateCtx, unsignedTx, inputBoxes, dataInputBoxes),
+    );
+  } catch (signingError) {
+    runWasmSigningStage('reduce-transaction', () => {
+      const reducedTx = wasm.ReducedTransaction.from_unsigned_tx(
+        unsignedTx,
+        inputBoxes,
+        dataInputBoxes,
+        stateCtx,
+      );
+      reducedTx.free();
+    });
+    throw signingError;
+  }
 
   // 7. Return as JSON for node submission
-  return JSON.parse(signedTx.to_json());
+  return runWasmSigningStage(
+    'signed-transaction-json',
+    () => JSON.parse(signedTx.to_json()),
+  );
+}
+
+type WasmSigningStage =
+  | 'secret-key'
+  | 'input-boxes'
+  | 'data-input-boxes'
+  | 'unsigned-transaction'
+  | 'reduce-transaction'
+  | 'sign-transaction'
+  | 'signed-transaction-json';
+
+class WasmSigningStageError extends Error {
+  readonly stage: WasmSigningStage;
+
+  constructor(stage: WasmSigningStage) {
+    super(`local WASM signing failed at ${stage}`);
+    this.name = 'WasmSigningStageError';
+    this.stage = stage;
+  }
+}
+
+function runWasmSigningStage<T>(
+  stage: WasmSigningStage,
+  operation: () => T,
+): T {
+  try {
+    return operation();
+  } catch {
+    throw new WasmSigningStageError(stage);
+  }
 }
 
 /**
@@ -640,8 +697,13 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
         wasm,
         context.stateContext,
       );
-    } catch {
-      throw new Error(`${candidate.role}: local WASM root signing failed`);
+    } catch (error) {
+      const stage = error instanceof WasmSigningStageError
+        ? ` at ${error.stage}`
+        : '';
+      throw new Error(
+        `${candidate.role}: local WASM root signing failed${stage}`,
+      );
     }
     assertSignedTransactionIdMatchesExpected(
       candidate.role,
@@ -1018,6 +1080,39 @@ function serializeSignedCheckTransactionHex(wasm: any, value: unknown): string {
   } finally {
     transaction?.free?.();
   }
+}
+
+/**
+ * Project only the complete ordered input identity from retained signed bytes.
+ * The signed transaction and its bytes remain inside the private material map.
+ */
+export function projectLocalWasmSignedCheckInputBoxIdsV1(
+  candidate: LocalWasmExactBytesSignedCheckCandidate,
+): readonly string[] {
+  assertLocalWasmSignedCheckCandidateProvenance(candidate);
+  const material = requireLocalWasmSignedCheckMaterial(candidate);
+  const inputs = material.signedTx.inputs;
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new Error('local WASM signed check transaction has no inputs');
+  }
+  const inputBoxIds = inputs.map((input, index) => {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error(
+        `local WASM signed check input ${index} is not an object`,
+      );
+    }
+    const boxId = (input as Readonly<Record<string, unknown>>).boxId;
+    if (typeof boxId !== 'string' || !/^[0-9a-f]{64}$/u.test(boxId)) {
+      throw new Error(
+        `local WASM signed check input ${index} box ID is invalid`,
+      );
+    }
+    return boxId;
+  });
+  if (new Set(inputBoxIds).size !== inputBoxIds.length) {
+    throw new Error('local WASM signed check input box IDs are not unique');
+  }
+  return Object.freeze(inputBoxIds);
 }
 
 /**

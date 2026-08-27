@@ -290,6 +290,7 @@ describe('broadcast surface isolation', () => {
       'ergo-helpers.ts',
       'scripts/devnet-consolidate-rewards.ts',
       'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-checked-transport-v1.ts',
     ];
 
     const offenders = walk(srcRoot)
@@ -311,32 +312,76 @@ describe('broadcast surface isolation', () => {
     const sources = productionSources();
     const executionRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const trackerCheckWorkerFile =
+      'scripts/run-substrate-federated-isolated-devnet-peg-in-observed-anchor-tracker-check-campaign-worker-v6.ts';
     const authorizerFile =
       'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts';
     const sourceLockAuthorizerFile =
       'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts';
     const transportFile =
       'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts';
+    const trackerTransportFile =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-checked-transport-v1.ts';
     const authorizer = readFileSync(join(srcRoot, authorizerFile), 'utf-8');
     const sourceLockAuthorizer = readFileSync(
       join(srcRoot, sourceLockAuthorizerFile),
       'utf-8',
     );
     const transport = readFileSync(join(srcRoot, transportFile), 'utf-8');
+    const trackerTransport = readFileSync(
+      join(srcRoot, trackerTransportFile),
+      'utf-8',
+    );
     const frozenNoSubmit = [
       'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
       'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
       'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
     ].map(file => readFileSync(join(srcRoot, file), 'utf-8')).join('\n');
+    const trackerCheckNoSubmit = [
+      'scripts/run-substrate-federated-isolated-devnet-peg-in-observed-anchor-tracker-check-campaign-v6.ts',
+      trackerCheckWorkerFile,
+      'scripts/run-substrate-federated-isolated-devnet-peg-in-observed-anchor-tracker-check-campaign-receipt-v6.ts',
+    ].map(file => readFileSync(join(srcRoot, file), 'utf-8')).join('\n');
+    const executionRootSource = readFileSync(
+      join(srcRoot, executionRoot),
+      'utf-8',
+    );
+    const trackerRootStart = executionRootSource.indexOf(
+      'export async function runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6',
+    );
+    const trackerTransportRootStart = executionRootSource.indexOf(
+      'export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9',
+      trackerRootStart,
+    );
+    const trackerRootEnd = trackerTransportRootStart;
+    const trackerTransportRootEnd = executionRootSource.indexOf(
+      '\ntype PegInActionV1',
+      trackerTransportRootStart,
+    );
+    expect(trackerRootStart).toBeGreaterThan(-1);
+    expect(trackerRootEnd).toBeGreaterThan(trackerRootStart);
+    expect(trackerTransportRootStart).toBeGreaterThan(trackerRootStart);
+    expect(trackerTransportRootEnd).toBeGreaterThan(
+      trackerTransportRootStart,
+    );
+    const trackerRootSlice = executionRootSource.slice(
+      trackerRootStart,
+      trackerRootEnd,
+    );
+    const trackerTransportRootSlice = executionRootSource.slice(
+      trackerTransportRootStart,
+      trackerTransportRootEnd,
+    );
 
     expect(filesImporting(
       sources,
       'consumeLocalWasmCheckedSubmissionHandleV1',
-    )).toEqual([transportFile]);
+    )).toEqual([trackerTransportFile, transportFile]);
     expect(filesContainingIdentifier(
       sources,
       'consumeLocalWasmCheckedSubmissionHandleV1',
     )).toEqual([
+      trackerTransportFile,
       'fleet-signer.ts',
       transportFile,
     ]);
@@ -346,6 +391,8 @@ describe('broadcast surface isolation', () => {
       ))
       .map(({ rel }) => rel)
       .sort()).toEqual([
+        trackerTransportFile,
+        'architecture/layer-import-rules.ts',
         'fleet-signer.ts',
         transportFile,
       ]);
@@ -432,6 +479,14 @@ describe('broadcast surface isolation', () => {
     ]);
     expect(filesImporting(
       sources,
+      'runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6',
+    )).toEqual([trackerCheckWorkerFile]);
+    expect(filesContainingIdentifier(
+      sources,
+      'runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6',
+    )).toEqual([executionRoot, trackerCheckWorkerFile]);
+    expect(filesImporting(
+      sources,
       'assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1',
     )).toEqual([transportFile]);
     expect(filesImporting(
@@ -458,6 +513,17 @@ describe('broadcast surface isolation', () => {
     expect(transport).toContain('proxy: false');
     expect(transport).not.toContain('npostDirect');
     expect(transport).not.toContain('API_KEY');
+    expect(trackerTransport).toContain(
+      'SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN',
+    );
+    expect(trackerTransport).toContain(
+      '`${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN}${SUBMISSION_PATH}`',
+    );
+    expect(trackerTransport).toContain("const SUBMISSION_PATH = '/transactions'");
+    expect(trackerTransport).toContain('maxRedirects: 0');
+    expect(trackerTransport).toContain('proxy: false');
+    expect(trackerTransport).not.toContain('npostDirect');
+    expect(trackerTransport).not.toContain('API_KEY');
     expect(authorizer).not.toContain("'/transactions'");
     expect(authorizer).not.toContain('axios');
     expect(authorizer).not.toContain('consumeLocalWasmCheckedSubmissionHandleV1');
@@ -483,6 +549,57 @@ describe('broadcast surface isolation', () => {
     );
     expect(frozenNoSubmit).not.toContain(
       'consumeLocalWasmCheckedSubmissionHandleV1',
+    );
+    expect(trackerCheckNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    );
+    expect(trackerCheckNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+    );
+    expect(trackerCheckNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    );
+    expect(trackerCheckNoSubmit).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+    );
+    expect(trackerCheckNoSubmit).not.toContain(
+      'consumeLocalWasmCheckedSubmissionHandleV1',
+    );
+    expect(trackerCheckNoSubmit).not.toContain('submitTransaction');
+    expect(trackerCheckNoSubmit).not.toContain('trackerSubmissionPerformed: true');
+    expect(trackerCheckNoSubmit).not.toContain('trackerBroadcastPerformed: true');
+    expect(trackerCheckNoSubmit).not.toContain('signedTrackerBytesPersisted: true');
+    expect(trackerRootSlice).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+    );
+    expect(trackerRootSlice).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+    );
+    expect(trackerRootSlice).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    );
+    expect(trackerRootSlice).not.toContain(
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+    );
+    expect(trackerRootSlice).not.toContain(
+      'consumeLocalWasmCheckedSubmissionHandleV1',
+    );
+    expect(trackerRootSlice).not.toContain('submitTransaction');
+    expect(trackerRootSlice).not.toContain('trackerSubmissionPerformed: true');
+    expect(trackerRootSlice).not.toContain('trackerBroadcastPerformed: true');
+    expect(trackerRootSlice).not.toContain('signedTrackerBytesPersisted: true');
+    expect(filesImporting(
+      sources,
+      'submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1',
+    )).toEqual([executionRoot]);
+    expect(trackerTransportRootSlice).toContain(
+      'trackerTransportAttempted: true',
+    );
+    expect(trackerTransportRootSlice).not.toContain(
+      'trackerBroadcastPerformed: true',
+    );
+    expect(trackerTransportRootSlice).not.toContain(
+      'signedTrackerBytesPersisted: true',
     );
   });
 

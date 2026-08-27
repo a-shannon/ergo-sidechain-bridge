@@ -82,6 +82,42 @@ const journalBoundary = vi.hoisted(() => ({
   assertDurableAttempt: vi.fn(),
 }));
 
+const trackerBoundary = vi.hoisted(() => ({
+  target: Object.freeze({
+    primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+    witnessNodeOrigin: 'http://127.0.0.1:9052' as const,
+    primaryMining: false as const,
+    witnessReadOnly: true as const,
+    miningStopped: true as const,
+    checkpointBound: true as const,
+    reservationFreshnessCheckBound: true as const,
+    trackerTransport: true as const,
+  }),
+  authorization: Object.freeze({
+    expectedTransactionIdHex: '03'.repeat(32),
+    processBindingDigestHex: '11'.repeat(32),
+    executionTargetIdentityDigestHex: '10'.repeat(32),
+    signedTransactionDigestHex: '05'.repeat(32),
+    signedTransactionBytesSha256Hex: '15'.repeat(32),
+    signedTransactionBytesLength: 321,
+    checkResponseDigestHex: '06'.repeat(32),
+    authorizationDigestHex: '18'.repeat(32),
+  }),
+  journal: Object.freeze({ role: 'tracker-transport-journal' }),
+  attempt: undefined as unknown,
+  preflight: undefined as unknown,
+  executionCheck: undefined as unknown,
+  persisted: undefined as unknown,
+  claimed: false,
+  events: [] as string[],
+  beforeCheckedCallback: vi.fn(),
+  assertAuthorization: vi.fn(),
+  assertExecutionCheck: vi.fn(),
+  consumePreflight: vi.fn(),
+  claimAttempt: vi.fn(),
+  issueResult: vi.fn(),
+}));
+
 vi.mock(
   './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
   () => ({
@@ -182,6 +218,28 @@ vi.mock(
   }),
 );
 
+vi.mock(
+  './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1:
+      trackerBoundary.assertExecutionCheck,
+  }),
+);
+
+vi.mock(
+  './apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1:
+      trackerBoundary.assertAuthorization,
+    consumeSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1:
+      trackerBoundary.consumePreflight,
+    claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1:
+      trackerBoundary.claimAttempt,
+    issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1:
+      trackerBoundary.issueResult,
+  }),
+);
+
 const processBoundary = vi.hoisted(() => ({
   reconciliationIdentityDigestHex: '10'.repeat(32),
   processBindingDigestHex: '11'.repeat(32),
@@ -253,6 +311,20 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
         processBoundary.reconciliationIdentityDigestHex,
     });
   },
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1: (
+    value: unknown,
+  ) => {
+    if (value !== trackerBoundary.target) {
+      throw new Error('synthetic tracker transport target is missing');
+    }
+    return Object.freeze({
+      processBindingDigestHex: processBoundary.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        processBoundary.reconciliationIdentityDigestHex,
+      reservationFreshnessProcessBindingDigestHex: '19'.repeat(32),
+      reservationFreshnessExecutionTargetIdentityDigestHex: '1a'.repeat(32),
+    });
+  },
 }));
 
 import {
@@ -260,6 +332,9 @@ import {
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1,
+} from './apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-checked-transport-v1.js';
 import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   executeErgoOperationalTransaction,
@@ -302,6 +377,8 @@ beforeEach(() => {
       throw new Error('synthetic checked handle is unavailable');
     }
     boundary.consumed = true;
+    trackerBoundary.events.push('consume');
+    await trackerBoundary.beforeCheckedCallback();
     return await consume(boundary.signedTransaction);
   });
   node.post.mockReset();
@@ -311,6 +388,109 @@ beforeEach(() => {
       if (attempt.durableArtifact !== journalBoundary.durableArtifact) {
         throw new Error('synthetic durable journal provenance is missing');
       }
+    },
+  );
+  trackerBoundary.claimed = false;
+  trackerBoundary.events.length = 0;
+  trackerBoundary.beforeCheckedCallback.mockReset();
+  trackerBoundary.executionCheck = Object.freeze({
+    signedCandidate: boundary.signedCandidate,
+    checkedAcceptance: Object.freeze({
+      submissionHandle: boundary.checkedHandle,
+    }),
+  });
+  trackerBoundary.attempt = Object.freeze({
+    expectedTransactionIdHex: boundary.expectedTxId,
+    durableAttemptDigestHex: ATTEMPT_DIGEST,
+    authorization: trackerBoundary.authorization,
+  });
+  trackerBoundary.preflight = Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-transport-preflight.v1',
+  });
+  trackerBoundary.persisted = Object.freeze({
+    status: 'pending' as const,
+    expectedTransactionIdHex: boundary.expectedTxId,
+    durableAttemptDigestHex: ATTEMPT_DIGEST,
+  });
+  trackerBoundary.assertExecutionCheck.mockReset();
+  trackerBoundary.assertExecutionCheck.mockImplementation(
+    (value: unknown, target: unknown) => {
+      if (
+        value !== trackerBoundary.executionCheck
+        || target !== trackerBoundary.target
+      ) {
+        throw new Error('synthetic tracker execution check is missing');
+      }
+      return Object.freeze({
+        processBindingDigestHex: processBoundary.processBindingDigestHex,
+        executionTargetIdentityDigestHex:
+          processBoundary.reconciliationIdentityDigestHex,
+      });
+    },
+  );
+  trackerBoundary.assertAuthorization.mockReset();
+  trackerBoundary.assertAuthorization.mockImplementation(
+    (value: unknown, target: unknown, executionCheck: unknown) => {
+      if (
+        value !== trackerBoundary.authorization
+        || target !== trackerBoundary.target
+        || executionCheck !== trackerBoundary.executionCheck
+      ) {
+        throw new Error('synthetic tracker transport authorization is missing');
+      }
+    },
+  );
+  trackerBoundary.consumePreflight.mockReset();
+  trackerBoundary.consumePreflight.mockImplementation(
+    (value: unknown, input: Readonly<Record<string, unknown>>) => {
+      if (
+        value !== trackerBoundary.preflight
+        || input.target !== trackerBoundary.target
+        || input.executionCheck !== trackerBoundary.executionCheck
+        || input.authorization !== trackerBoundary.authorization
+        || input.journal !== trackerBoundary.journal
+        || input.attempt !== trackerBoundary.attempt
+      ) {
+        throw new Error('synthetic tracker transport preflight is missing');
+      }
+      if ((trackerBoundary.persisted as { status: string }).status !== 'pending') {
+        throw new Error('tracker transport preflight durable state changed');
+      }
+      trackerBoundary.events.push('preflight');
+    },
+  );
+  trackerBoundary.claimAttempt.mockReset();
+  trackerBoundary.claimAttempt.mockImplementation(
+    (journal: unknown, attempt: unknown, authorization: unknown) => {
+      if (
+        journal !== trackerBoundary.journal
+        || attempt !== trackerBoundary.attempt
+        || authorization !== trackerBoundary.authorization
+        || trackerBoundary.claimed
+      ) {
+        throw new Error('synthetic durable tracker attempt is unavailable');
+      }
+      trackerBoundary.claimed = true;
+      trackerBoundary.events.push('claim');
+      return trackerBoundary.persisted;
+    },
+  );
+  trackerBoundary.issueResult.mockReset();
+  trackerBoundary.issueResult.mockImplementation(
+    (journal: unknown, attempt: unknown, submission: any) => {
+      if (
+        journal !== trackerBoundary.journal
+        || attempt !== trackerBoundary.attempt
+        || !trackerBoundary.claimed
+      ) {
+        throw new Error('synthetic tracker transport result is unavailable');
+      }
+      trackerBoundary.events.push('issue-result');
+      return Object.freeze({
+        ...submission,
+        resultArtifact: Object.freeze({ role: 'tracker-transport-result' }),
+      });
     },
   );
 });
@@ -411,6 +591,106 @@ async function execute(overrides: Readonly<{
 }
 
 describe('isolated devnet checked submission transport V1', () => {
+  it('claims the durable tracker attempt before one exact loopback POST', async () => {
+    node.post.mockImplementation(async () => {
+      trackerBoundary.events.push('post');
+      return { status: 200, data: boundary.expectedTxId };
+    });
+
+    await expect(
+      submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
+        target: trackerBoundary.target,
+        executionCheck: trackerBoundary.executionCheck as any,
+        authorization: trackerBoundary.authorization as any,
+        journal: trackerBoundary.journal as any,
+        attempt: trackerBoundary.attempt as any,
+        preflight: trackerBoundary.preflight as any,
+      }),
+    ).resolves.toMatchObject({
+      status: 'accepted',
+      submittedTransactionIdHex: boundary.expectedTxId,
+      responseDigestHex: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(trackerBoundary.events).toEqual([
+      'claim',
+      'consume',
+      'preflight',
+      'post',
+      'issue-result',
+    ]);
+    expect(node.post).toHaveBeenCalledTimes(1);
+    expect(node.post.mock.calls[0]?.[0]).toBe(
+      'http://127.0.0.1:9051/transactions',
+    );
+    expect(node.post.mock.calls[0]?.[1]).toBe(boundary.signedTransaction);
+  });
+
+  it('rejects durable-state drift after claim and before the checked callback POST', async () => {
+    trackerBoundary.beforeCheckedCallback.mockImplementationOnce(() => {
+      trackerBoundary.persisted = Object.freeze({
+        status: 'ambiguous' as const,
+        expectedTransactionIdHex: boundary.expectedTxId,
+        durableAttemptDigestHex: ATTEMPT_DIGEST,
+      });
+    });
+
+    await expect(
+      submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
+        target: trackerBoundary.target,
+        executionCheck: trackerBoundary.executionCheck as any,
+        authorization: trackerBoundary.authorization as any,
+        journal: trackerBoundary.journal as any,
+        attempt: trackerBoundary.attempt as any,
+        preflight: trackerBoundary.preflight as any,
+      }),
+    ).rejects.toThrow(/preflight durable state changed/u);
+    expect(trackerBoundary.events).toEqual(['claim', 'consume']);
+    expect(trackerBoundary.consumePreflight).toHaveBeenCalledOnce();
+    expect(node.post).not.toHaveBeenCalled();
+    expect(trackerBoundary.issueResult).not.toHaveBeenCalled();
+  });
+
+  it('keeps an uncertain tracker POST ambiguous and cannot claim it twice', async () => {
+    node.post.mockRejectedValue({ isAxiosError: true, code: 'ETIMEDOUT' });
+    const input = {
+      target: trackerBoundary.target,
+      executionCheck: trackerBoundary.executionCheck as any,
+      authorization: trackerBoundary.authorization as any,
+      journal: trackerBoundary.journal as any,
+      attempt: trackerBoundary.attempt as any,
+      preflight: trackerBoundary.preflight as any,
+    };
+
+    await expect(
+      submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1(input),
+    ).resolves.toMatchObject({
+      status: 'ambiguous',
+      submittedTransactionIdHex: null,
+    });
+    await expect(
+      submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1(input),
+    ).rejects.toThrow(/checked handle provenance is missing/);
+    expect(trackerBoundary.claimAttempt).toHaveBeenCalledTimes(1);
+    expect(node.post).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects copied tracker transport authority before claim or POST', async () => {
+    await expect(
+      submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
+        target: trackerBoundary.target,
+        executionCheck: trackerBoundary.executionCheck as any,
+        authorization: { ...trackerBoundary.authorization } as any,
+        journal: trackerBoundary.journal as any,
+        attempt: trackerBoundary.attempt as any,
+        preflight: trackerBoundary.preflight as any,
+      }),
+    ).rejects.toThrow(/transport authorization is missing/);
+    expect(trackerBoundary.claimAttempt).not.toHaveBeenCalled();
+    expect(trackerBoundary.consumePreflight).not.toHaveBeenCalled();
+    expect(boundary.consume).not.toHaveBeenCalled();
+    expect(node.post).not.toHaveBeenCalled();
+  });
+
   it('posts the exact checked object once to the credential-free loopback endpoint', async () => {
     node.post.mockResolvedValue({
       status: 200,

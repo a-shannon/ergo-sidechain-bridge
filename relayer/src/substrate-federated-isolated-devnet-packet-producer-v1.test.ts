@@ -506,10 +506,13 @@ vi.mock(
 );
 
 import {
+  assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1,
   assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV1Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1,
+  consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1,
   createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
   createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
@@ -806,6 +809,38 @@ describe('isolated-devnet portable packet producer', () => {
     expect(() => session.produceMintSourceProof(packet, {} as never)).toThrow(
       /requires one completed packet/u,
     );
+  });
+
+  it('issues one opaque relayer lineage from the exact process-owned packet', async () => {
+    const session = packetContinuationSession();
+    const packet = await session.produce(packetInput());
+    const lineage =
+      claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(packet);
+
+    expect(lineage).toMatchObject({
+      headCommitSha1Hex: 'c1'.repeat(20),
+      relayerArtifactSetDigestHex:
+        packet.receipt.relayerArtifactSetDigestHex,
+      packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+    });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage)
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(
+        structuredClone(lineage),
+      )
+    ).toThrow(/lacks process provenance/u);
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(packet)
+    ).toThrow(/already claimed/u);
+    expect(
+      consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage),
+    ).toBe(lineage);
+    expect(() =>
+      consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage)
+    ).toThrow(/already consumed/u);
+    session.dispose();
   });
 
   it('joins the exact completed packet to one settlement-family mint proof', async () => {

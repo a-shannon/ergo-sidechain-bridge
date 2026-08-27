@@ -217,6 +217,8 @@ describe('layer import rules', () => {
       'substrate-federated-isolated-devnet-setup-check-runner-v2.ts';
     const execution =
       'substrate-federated-isolated-devnet-setup-check-execution-v2.ts';
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     expect(inspect({
       [signerBinding]: 'export const registry = true;',
       [miningCredential]: 'export const credential = true;',
@@ -231,6 +233,12 @@ describe('layer import rules', () => {
           issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
           revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
         } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+      `,
+      [reviewedRoot]: `
+        import {
+          claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
+        } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+        claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2({});
       `,
       'authenticated-spv-tracker-jvm-avl-differential.ts': `
         declare const runtimePath: string;
@@ -264,6 +272,208 @@ describe('layer import rules', () => {
       'exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js#registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
       'exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-mining-credential-v1.js#issueSubstrateFederatedIsolatedDevnetMiningCredentialV1',
       'exclusive authority module must use named runtime imports: ./substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+    ]);
+
+    expect(inspect({
+      [runner]: 'export const runner = true;',
+      'unauthorized-credential-sequence.ts': `
+        import {
+          claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
+        } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+        claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2({});
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-setup-check-runner-v2.js#claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
+    ]);
+  });
+
+  it('reserves bootstrap request provenance issuance and claiming to V9 owners', () => {
+    const bindingModule =
+      'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.ts';
+    const loaderModule =
+      'scripts/run-substrate-federated-isolated-devnet-bootstrap-worker-v1.ts';
+    const issue =
+      'bindSubstrateFederatedIsolatedDevnetCanonicalBootstrapRequestBytesV1';
+    const claim =
+      'claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1';
+    const project =
+      'projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1';
+    const consume =
+      'consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1';
+    const load =
+      'loadCanonicalBootstrapRequestBoundWithProvenanceV1';
+
+    expect(inspect({
+      [bindingModule]: `
+        export const ${issue} = () => {};
+        export const ${claim} = () => {};
+        export const ${project} = () => {};
+        export const ${consume} = () => {};
+      `,
+      [loaderModule]: `
+        export const ${load} = () => {};
+      `,
+      'forged-request-authority.ts': `
+        import { ${issue}, ${claim}, ${project}, ${consume} } from './adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js';
+        import { ${load} } from './scripts/run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
+        ${issue}();
+        ${claim}();
+        ${project}();
+        ${consume}();
+        ${load}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js#${issue}`,
+      `exclusive authority import has the wrong owner: ./adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js#${claim}`,
+      `exclusive authority import has the wrong owner: ./adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js#${consume}`,
+      `exclusive authority import has the wrong owner: ./adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js#${project}`,
+      `exclusive authority import has the wrong owner: ./scripts/run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js#${load}`,
+    ]);
+  });
+
+  it('keeps the tracker attempt journal behind its two reviewed app owners', () => {
+    const attempt =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts';
+    const transport =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-checked-transport-v1.ts';
+    const claim =
+      'claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1';
+    const issueResult =
+      'issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1';
+    expect(inspect({
+      [attempt]: `
+        export const ${claim} = () => {};
+        export const ${issueResult} = () => {};
+      `,
+      [transport]: `
+        import { ${claim}, ${issueResult} } from './substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js';
+        export async function submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1() {
+          ${claim}();
+          ${issueResult}();
+        }
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [attempt]: `export const ${claim} = () => {};`,
+      'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts': `
+        import { ${claim} } from './apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js';
+        ${claim}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'exclusive runtime module import has the wrong owner: ./apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js',
+    ]);
+
+    expect(inspect({
+      [attempt]: `export const ${issueResult} = () => {};`,
+      'apps/bridge-daemon/forged-tracker-result.ts': `
+        import { ${issueResult} } from './substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js';
+        ${issueResult}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js#${issueResult}`,
+      'exclusive runtime module import has the wrong owner: ./substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js',
+    ]);
+  });
+
+  it('reserves tracker freshness completion issuance to setup execution', () => {
+    const processModule =
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
+    const setupExecution =
+      'substrate-federated-isolated-devnet-setup-check-execution-v2.ts';
+    const issue =
+      'issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1';
+    expect(inspect({
+      [processModule]: `export const ${issue} = () => {};`,
+      [setupExecution]: `
+        import { ${issue} } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        ${issue}();
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [processModule]: `export const ${issue} = () => {};`,
+      'forged-freshness-completion.ts': `
+        import { ${issue} } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        ${issue}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-ergo-node-process-v1.js#${issue}`,
+    ]);
+  });
+
+  it('keeps the tracker confirmation receipt type inside the reviewed composition root', () => {
+    const processModule =
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const receipt =
+      'SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt';
+    expect(inspect({
+      [processModule]: `export interface ${receipt} {}`,
+      [reviewedRoot]: `
+        import type { ${receipt} } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        type ReviewedConfirmation = ${receipt};
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [processModule]: `export interface ${receipt} {}`,
+      'apps/bridge-daemon/forged-confirmation-root.ts': `
+        import type { ${receipt} } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        type ForgedConfirmation = ${receipt};
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `apps must not import an unclassified legacy module: ${processModule}`,
+    ]);
+  });
+
+  it('reserves frozen V7 provenance registration to the execution root', () => {
+    const registry =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frozen-tracker-root-v7-provenance.ts';
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const registration =
+      'registerSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7Provenance';
+    expect(inspect({
+      [registry]: `export const ${registration} = () => {};`,
+      [reviewedRoot]: `
+        import { ${registration} } from './substrate-federated-isolated-devnet-frozen-tracker-root-v7-provenance.js';
+        ${registration}();
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [registry]: `export const ${registration} = () => {};`,
+      'apps/bridge-daemon/forged-v7-provenance.ts': `
+        import { ${registration} } from './substrate-federated-isolated-devnet-frozen-tracker-root-v7-provenance.js';
+        ${registration}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-frozen-tracker-root-v7-provenance.js#${registration}`,
+    ]);
+  });
+
+  it('reserves every isolated tracker signing kernel to the reviewed execution module', () => {
+    const kernel =
+      'substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.ts';
+    const v2 = 'executeObservedAnchorTrackerCheckKernelV2';
+    const freshness =
+      'executeObservedAnchorTrackerReservationFreshnessCheckKernelV1';
+
+    expect(inspect({
+      [kernel]: `
+        export const ${v2} = () => {};
+        export const ${freshness} = () => {};
+      `,
+      'unauthorized-tracker-check.ts': `
+        import { ${v2}, ${freshness} } from './substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js';
+        ${v2}();
+        ${freshness}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js#${v2}`,
+      `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js#${freshness}`,
     ]);
   });
 
@@ -511,6 +721,25 @@ describe('layer import rules', () => {
     }).map(violation => violation.message)).toEqual([
       `apps must not import an unclassified legacy module: ${reviewedTarget}`,
     ]);
+  });
+
+  it('keeps exact reviewed type imports out of runtime capability flow', () => {
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const stateTarget = 'state-tracker.ts';
+    expect(inspect({
+      [reviewedRoot]: `
+        import {
+          type ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result,
+        } from '../../state-tracker.js';
+        interface ReloadHolder {
+          readonly reload: ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result;
+        }
+      `,
+      [stateTarget]: `
+        export interface ReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1Result {}
+      `,
+    })).toEqual([]);
   });
 
   it('limits the concrete recovery campaign to its exact process and SQLite bindings', () => {

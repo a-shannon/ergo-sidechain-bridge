@@ -10,15 +10,17 @@ import {
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input,
   SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt,
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2Receipt,
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input,
   SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import type {
-  SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1,
-} from './substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.js';
-import type {
+  SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
+  SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2,
   SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+  SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
@@ -43,6 +45,10 @@ const CHECKPOINT_MINING_CREDENTIALS = new WeakMap<
   Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
 >();
 const TRACKER_ADMISSION_MINING_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
+>();
+const TRACKER_CONFIRMATION_MINING_CREDENTIALS = new WeakMap<
   object,
   Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
 >();
@@ -105,9 +111,31 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     input: Readonly<
       SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
     >,
-    target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+    >,
   ) => Promise<Readonly<
     SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt
+  >>;
+  readonly checkFrozenTrackerCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+    >,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2Receipt
+  >>;
+  readonly recheckTrackerReservationFreshnessCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+    >,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt
   >>;
 }
 
@@ -136,15 +164,24 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
   let trackerAdmissionMiningCredential:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+  let trackerConfirmationMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
   try {
     checkpointMiningCredential =
       execution.claimCheckpointMiningCredential();
     trackerAdmissionMiningCredential =
       execution.claimTrackerAdmissionMiningCredential();
+    trackerConfirmationMiningCredential =
+      execution.claimTrackerConfirmationMiningCredential();
   } catch (error) {
     if (checkpointMiningCredential !== undefined) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         checkpointMiningCredential,
+      );
+    }
+    if (trackerAdmissionMiningCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerAdmissionMiningCredential,
       );
     }
     revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
@@ -158,9 +195,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'source-lock-check-complete'
     | 'committed-vault-check-complete'
     | 'check-complete'
+    | 'frozen-tracker-check-complete'
     | 'closed' = 'open';
+  let terminalInvalidationRequested = false;
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   const close = (): void => {
+    if (state === 'closed') return;
+    terminalInvalidationRequested = true;
     MINING_CREDENTIALS.delete(session);
     const unclaimedCheckpointCredential =
       CHECKPOINT_MINING_CREDENTIALS.get(session);
@@ -178,6 +219,14 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       );
     }
     TRACKER_ADMISSION_MINING_CREDENTIALS.delete(session);
+    const unclaimedTrackerConfirmationCredential =
+      TRACKER_CONFIRMATION_MINING_CREDENTIALS.get(session);
+    if (unclaimedTrackerConfirmationCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        unclaimedTrackerConfirmationCredential,
+      );
+    }
+    TRACKER_CONFIRMATION_MINING_CREDENTIALS.delete(session);
     revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
     try {
       execution.dispose();
@@ -190,26 +239,40 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'open'
       | 'setup-complete'
       | 'source-lock-check-complete'
-      | 'committed-vault-check-complete',
+      | 'committed-vault-check-complete'
+      | 'frozen-tracker-check-complete',
     operation: () => Promise<T>,
     successState:
       | 'setup-complete'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
       | 'check-complete'
+      | 'frozen-tracker-check-complete'
       | 'closed',
   ): Promise<T> => {
     if (state !== expectedState) {
-      throw new Error(
+      const error = new Error(
         expectedState === 'open'
           ? 'isolated fixed setup-check session is already consumed or disposed'
           : 'isolated peg-in signer continuation is absent, consumed, or disposed',
       );
+      if (state === 'running') {
+        terminalInvalidationRequested = true;
+      } else if (state !== 'closed') {
+        close();
+      }
+      throw error;
     }
     if (expectedState === 'open') MINING_CREDENTIALS.delete(session);
     state = 'running';
     try {
       const result = await operation();
+      if (terminalInvalidationRequested) {
+        close();
+        throw new Error(
+          'isolated fixed setup-check session was invalidated by a concurrent transition',
+        );
+      }
       if (successState === 'closed') {
         close();
       } else {
@@ -233,6 +296,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'source-lock-check-complete'
           || state === 'committed-vault-check-complete'
           || state === 'check-complete'
+          || state === 'frozen-tracker-check-complete'
       ) {
         close();
       }
@@ -296,11 +360,40 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       input: Readonly<
         SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
       >,
-      target: Readonly<SubstrateFederatedIsolatedDevnetReadOnlyErgoTargetV1>,
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+      >,
     ) => consume(
       'committed-vault-check-complete',
       () => execution.checkTrackerCandidate(input, target),
       'check-complete',
+    ),
+    checkFrozenTrackerCandidate: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+      >,
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+      >,
+    ) => consume(
+      'committed-vault-check-complete',
+      () => execution.checkFrozenTrackerCandidate(input, target),
+      'frozen-tracker-check-complete',
+    ),
+    recheckTrackerReservationFreshnessCandidate: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+      >,
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+      >,
+    ) => consume(
+      'frozen-tracker-check-complete',
+      () => execution.recheckTrackerReservationFreshnessCandidate(
+        input,
+        target,
+      ),
+      'closed',
     ),
   });
   MINING_CREDENTIALS.set(session, execution.miningCredential);
@@ -308,6 +401,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
   TRACKER_ADMISSION_MINING_CREDENTIALS.set(
     session,
     trackerAdmissionMiningCredential,
+  );
+  TRACKER_CONFIRMATION_MINING_CREDENTIALS.set(
+    session,
+    trackerConfirmationMiningCredential,
   );
   return session;
 }
@@ -348,7 +445,7 @@ export function claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(
   return Object.freeze({ miningCredential, checkpointMiningCredential });
 }
 
-/** Atomic composition-root handoff for setup, checkpoint, and tracker admission. */
+/** Atomic handoff for setup, checkpoint, tracker freeze, and confirmation. */
 export function claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(
   session: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
 ): Readonly<{
@@ -358,16 +455,21 @@ export function claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
   readonly trackerAdmissionMiningCredential:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly trackerConfirmationMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
 }> {
   const miningCredential = MINING_CREDENTIALS.get(session);
   const checkpointMiningCredential =
     CHECKPOINT_MINING_CREDENTIALS.get(session);
   const trackerAdmissionMiningCredential =
     TRACKER_ADMISSION_MINING_CREDENTIALS.get(session);
+  const trackerConfirmationMiningCredential =
+    TRACKER_CONFIRMATION_MINING_CREDENTIALS.get(session);
   if (
     miningCredential === undefined
     || checkpointMiningCredential === undefined
     || trackerAdmissionMiningCredential === undefined
+    || trackerConfirmationMiningCredential === undefined
   ) {
     throw new Error(
       'isolated mining credential sequence is absent, partially claimed, or disposed',
@@ -376,9 +478,11 @@ export function claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(
   MINING_CREDENTIALS.delete(session);
   CHECKPOINT_MINING_CREDENTIALS.delete(session);
   TRACKER_ADMISSION_MINING_CREDENTIALS.delete(session);
+  TRACKER_CONFIRMATION_MINING_CREDENTIALS.delete(session);
   return Object.freeze({
     miningCredential,
     checkpointMiningCredential,
     trackerAdmissionMiningCredential,
+    trackerConfirmationMiningCredential,
   });
 }

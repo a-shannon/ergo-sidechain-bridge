@@ -123,6 +123,24 @@ const OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256 =
 const EXPECTED_OWNER_ADDRESS =
   '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const EXPECTED_MINT_AMOUNT_NANO_ERG = '15000000';
+const WINDOWS_CLASSIC_SOURCE_PATH_MAX_CHARS = 259;
+const WINDOWS_LOCKED_NATIVE_SOURCE_PATH_SUFFIX = path.join(
+  'e2s-pinned-local-native-XXXXXX',
+  'cargo-home',
+  'registry',
+  'src',
+  'index.crates.io-6f17d22bba15001f',
+  'librocksdb-sys-0.11.0+8.1.1',
+  'rocksdb',
+  'utilities',
+  'transactions',
+  'lock',
+  'range',
+  'range_tree',
+  'lib',
+  'portability',
+  'toku_external_pthread.h',
+);
 const MAX_RUNNER_RUNTIME_MS = 45 * 60_000;
 const POST_CARGO_REVALIDATION_BUDGET_MS = 90_000;
 const RECEIPTS = new WeakSet<object>();
@@ -331,6 +349,10 @@ export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicati
       'Frontier peg-out application runner requires an external Cargo dependency cache',
     );
   }
+  assertFrontierNativeBuildHostPreflight(
+    temporaryDirectoryRoot,
+    cargoDependencyCacheDirectory,
+  );
   return Object.freeze({
     frontierSourceDirectory,
     cargoDependencyCacheDirectory,
@@ -349,6 +371,47 @@ export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicati
     ),
     offline: true,
   });
+}
+
+function assertFrontierNativeBuildHostPreflight(
+  temporaryDirectoryRoot: string,
+  cargoDependencyCacheDirectory: string,
+): void {
+  for (const directory of ['registry', 'git']) {
+    const cachePath = path.join(cargoDependencyCacheDirectory, directory);
+    if (!existsSync(cachePath)) {
+      throw new Error(
+        `Frontier offline Cargo dependency cache is missing ${directory}`,
+      );
+    }
+    const cacheStat = lstatSync(cachePath);
+    if (!cacheStat.isDirectory() || cacheStat.isSymbolicLink()) {
+      throw new Error(
+        `Frontier offline Cargo dependency cache ${directory} must be a regular directory`,
+      );
+    }
+  }
+  if (process.platform !== 'win32') return;
+
+  const projectedNativeSourcePath = path.resolve(
+    temporaryDirectoryRoot,
+    WINDOWS_LOCKED_NATIVE_SOURCE_PATH_SUFFIX,
+  );
+  if (
+    projectedNativeSourcePath.length
+      > WINDOWS_CLASSIC_SOURCE_PATH_MAX_CHARS
+  ) {
+    throw new Error(
+      'Frontier native build temporary root exceeds the locked MSVC source-path budget',
+    );
+  }
+  for (const key of ['LIB', 'LIBPATH', 'INCLUDE']) {
+    if (!process.env[key]?.trim()) {
+      throw new Error(
+        `Frontier native build requires the Visual Studio ${key} environment`,
+      );
+    }
+  }
 }
 
 export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(

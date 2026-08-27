@@ -888,10 +888,46 @@ describe('consensus source baseline', () => {
       Buffer.from('line one\n'),
     )).toBe(true);
     expect(baseline.isRawOrControlledCrLfEquivalent(
+      'proof-vector.hex',
+      Buffer.from('0123abcd\r\n'),
+      Buffer.from('0123abcd\n'),
+    )).toBe(true);
+    expect(baseline.isRawOrControlledCrLfEquivalent(
       'build.sbt',
       Buffer.from('line one\r\n'),
       Buffer.from('line one\r\n'),
     )).toBe(true);
+  });
+
+  it('preserves the pinned Git blob identity for CRLF-materialized hex vectors', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-hex-checkout-'));
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      writeFileSync(resolve(root, 'proof-vector.hex'), '0123abcd\n');
+      git('add', 'proof-vector.hex');
+      git('commit', '--quiet', '-m', 'fixture');
+      const pinnedBlob = git('rev-parse', 'HEAD:proof-vector.hex').trim();
+
+      writeFileSync(resolve(root, 'proof-vector.hex'), '0123abcd\r\n');
+      const inspected = baseline.inspectRawCheckout(root, ['proof-vector.hex']);
+
+      expect(inspected.status).toBe('');
+      expect(inspected.blobs['proof-vector.hex']).toBe(pinnedBlob);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('detects raw checkout and index drift even when a Git clean filter rewrites the blob identity', async () => {

@@ -59,6 +59,9 @@ const EXPECTED_WASM_PACK_VERSION = '0.14.0';
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
 const MAX_TOOL_BYTES = 128 * 1024 * 1024;
 const MAX_GIT_OUTPUT_BYTES = 32 * 1024 * 1024;
+const MAX_GIT_SOURCE_BLOB_BYTES = 48 * 1024 * 1024;
+const MAX_GIT_BLOB_BATCH_ENTRY_FRAMING_BYTES = 56;
+const MAX_GIT_BLOB_BATCH_OUTPUT_BYTES = 64 * 1024 * 1024;
 const BUILD_ARCHIVE_VERSION = 1;
 const SCRATCH_DIRECTORY_PREFIX = '.e2s-rba-build-';
 
@@ -511,6 +514,9 @@ function checkoutSnapshot(
     safeGitEnvironment(),
     'Git source blob batch',
     input,
+    maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(
+      snapshot.trackedBlobs.length,
+    ),
   );
   const materialized = decodeSubstrateFederatedIsolatedDevnetGitBlobBatchV1(
     batch,
@@ -997,7 +1003,7 @@ export function decodeSubstrateFederatedIsolatedDevnetGitBlobBatchV1(
       throw new Error('Git source blob content differs from its immutable object identity');
     }
     totalBytes += content.byteLength;
-    if (totalBytes > MAX_GIT_OUTPUT_BYTES) {
+    if (totalBytes > MAX_GIT_SOURCE_BLOB_BYTES) {
       throw new Error('Git source blob closure exceeds the bounded total');
     }
     contents.push(content);
@@ -1007,6 +1013,23 @@ export function decodeSubstrateFederatedIsolatedDevnetGitBlobBatchV1(
     throw new Error('Git source blob batch has trailing bytes');
   }
   return Object.freeze(contents);
+}
+
+export function maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(
+  expectedBlobCount: number,
+): number {
+  if (!Number.isSafeInteger(expectedBlobCount) || expectedBlobCount <= 0) {
+    throw new Error('Git source blob count must be a positive safe integer');
+  }
+  const maximumBytes = MAX_GIT_SOURCE_BLOB_BYTES
+    + expectedBlobCount * MAX_GIT_BLOB_BATCH_ENTRY_FRAMING_BYTES;
+  if (
+    !Number.isSafeInteger(maximumBytes)
+    || maximumBytes > MAX_GIT_BLOB_BATCH_OUTPUT_BYTES
+  ) {
+    throw new Error('Git source blob batch framing exceeds the bounded limit');
+  }
+  return maximumBytes;
 }
 
 function assertEsbuildResult(
@@ -1189,14 +1212,18 @@ function runBinaryTool(
   env: NodeJS.ProcessEnv,
   label: string,
   input?: Buffer,
+  maxBufferBytes: number = MAX_GIT_OUTPUT_BYTES,
 ): Buffer {
+  if (!Number.isSafeInteger(maxBufferBytes) || maxBufferBytes <= 0) {
+    throw new Error(`${label} output limit must be a positive safe integer`);
+  }
   try {
     return Buffer.from(execFileSync(executable, [...args], {
       cwd,
       env,
       input,
       encoding: 'buffer',
-      maxBuffer: MAX_GIT_OUTPUT_BYTES,
+      maxBuffer: maxBufferBytes,
       windowsHide: true,
       stdio: [input ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     }));

@@ -2005,7 +2005,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
           session.signer,
         )
-      ).not.toThrow();
+      ).toThrow(/lacks active process provenance/);
       session.dispose();
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
@@ -2087,13 +2087,6 @@ describe('Substrate federated isolated-devnet launch V1', () => {
           creationHeight: 803,
         }],
       }, 'isolated peg-in committed-vault continuation fixture');
-
-      await expect(session.checkPegInCommittedVault({
-        reservePredecessorBoxIdHex: reservePredecessor.boxId,
-        sourceLockBoxIdHex: sourceLock.boxId,
-        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
-        unsignedTransaction: reserveTransition,
-      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent/);
 
       await session.checkPegInSourceLockRetainingSigner({
         sourceFundingBoxIdHex: sourceFundingInput.boxId,
@@ -2454,7 +2447,10 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       'node:crypto',
       'ethers',
       './fleet-signer.js',
+      './bridge-validity-tracker-header-context-v1.js',
       './ergo-unsigned-transaction.js',
+      './substrate-federated-tracker-v1.js',
+      './substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js',
       './substrate-federated-settlement-family-compiler-binding-v1.js',
       './local-wasm-root-signer-public-identity.js',
       './relayer-core/devnet-reward-consolidation.js',

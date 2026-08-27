@@ -14,6 +14,7 @@ import {
   decodeSubstrateFederatedIsolatedDevnetGitBlobBatchV1,
   decodeSubstrateFederatedIsolatedDevnetBuildArchiveV1,
   encodeSubstrateFederatedIsolatedDevnetBuildArchiveV1,
+  maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1,
   produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1,
 } from './substrate-federated-isolated-devnet-relayer-artifacts-v1.js';
 import { parseSubstrateFederatedIsolatedDevnetRelayerArtifactsArgsV1 } from './scripts/build-substrate-federated-isolated-devnet-relayer-artifacts-v1.js';
@@ -171,6 +172,26 @@ describe('Substrate federated isolated-devnet relayer artifacts V1', () => {
       Buffer.concat([batch, Buffer.from([0x00])]),
       expected,
     )).toThrow(/trailing bytes/);
+  });
+
+  it('bounds Git batch framing separately from source blob content', () => {
+    const genericGitOutputLimit = 32 * 1024 * 1024;
+    const contentLimit = 48 * 1024 * 1024;
+    const currentClosureBlobCount = 1_443;
+    const batchLimit =
+      maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(
+        currentClosureBlobCount,
+      );
+
+    expect(batchLimit).toBe(contentLimit + currentClosureBlobCount * 56);
+    expect(batchLimit).toBeGreaterThan(contentLimit);
+    expect(contentLimit).toBeGreaterThan(genericGitOutputLimit);
+    expect(batchLimit).toBeLessThanOrEqual(64 * 1024 * 1024);
+    expect(() => maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(0))
+      .toThrow(/positive safe integer/);
+    expect(() => maximumSubstrateFederatedIsolatedDevnetGitBlobBatchBytesV1(
+      Number.MAX_SAFE_INTEGER,
+    )).toThrow(/bounded limit/);
   });
 
   it('requires exactly one explicit value for each CLI input', () => {

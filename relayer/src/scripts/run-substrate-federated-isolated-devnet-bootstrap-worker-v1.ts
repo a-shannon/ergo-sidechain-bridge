@@ -18,6 +18,10 @@ import {
   type RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input,
   type SubstrateFederatedIsolatedDevnetBootstrapRootV1Receipt,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.js';
+import {
+  bindSubstrateFederatedIsolatedDevnetCanonicalBootstrapRequestBytesV1,
+  type SubstrateFederatedIsolatedDevnetBootstrapRequestBindingV1,
+} from '../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_BOOTSTRAP_COMMAND_REQUEST_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-bootstrap-command-request.v1' as const;
@@ -127,11 +131,51 @@ export function loadCanonicalBootstrapRequestBoundToSha256(
   );
 }
 
+export function loadCanonicalBootstrapRequestBoundWithProvenanceV1(
+  requestPath: string,
+  bridgeRoot: string,
+  worktreeRoot: string,
+  expectedRequestSha256Hex: string,
+): Readonly<{
+  readonly input: Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input>;
+  readonly requestBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestBindingV1>;
+}> {
+  if (!/^[0-9a-f]{64}$/u.test(expectedRequestSha256Hex)) {
+    throw new Error('bootstrap request digest is invalid');
+  }
+  let requestBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestBindingV1>
+    | undefined;
+  const input = loadCanonicalBootstrapRequestInternal(
+    requestPath,
+    bridgeRoot,
+    worktreeRoot,
+    expectedRequestSha256Hex,
+    (requestBytes, input) => {
+      requestBinding =
+        bindSubstrateFederatedIsolatedDevnetCanonicalBootstrapRequestBytesV1(
+          requestBytes,
+          expectedRequestSha256Hex,
+          input,
+        );
+    },
+  );
+  if (requestBinding === undefined) {
+    throw new Error('bootstrap request binding was not issued');
+  }
+  return Object.freeze({ input, requestBinding });
+}
+
 function loadCanonicalBootstrapRequestInternal(
   requestPath: string,
   bridgeRoot: string,
   worktreeRoot: string,
   expectedRequestSha256Hex?: string,
+  bindExactRequestBytes?: (
+    requestBytes: Uint8Array,
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input>,
+  ) => void,
 ): Readonly<RunSubstrateFederatedIsolatedDevnetBootstrapRootV1Input> {
   const requestFile = readBoundedRegularFile(
     explicitExistingLocalNonSensitivePath(
@@ -230,7 +274,9 @@ function loadCanonicalBootstrapRequestInternal(
       },
     },
   };
-  return Object.freeze(input);
+  const frozenInput = Object.freeze(input);
+  bindExactRequestBytes?.(requestFile.bytes, frozenInput);
+  return frozenInput;
 }
 
 function parseBootstrapRequest(value: unknown): Readonly<BootstrapCommandRequestV1> {

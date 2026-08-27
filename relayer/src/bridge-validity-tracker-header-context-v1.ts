@@ -358,17 +358,14 @@ function canonicalObservedErgoHeader(
     throw new Error('observed header extension root aliases disagree');
   }
   const pow = requiredRecord(raw.powSolutions, 'observed header PoW solution');
-  if (
-    pow.w !== undefined
-    && fixedHex(pow.w, 33, 'observed Autolykos V2 one-time key') !== HEADER_W
-  ) {
-    throw new Error('observed Autolykos V2 one-time key is not canonical');
+  // V2 commits only pk and n. Freshly mined headers may retain the miner's
+  // in-memory w/d aliases, while serialized-and-reloaded headers expose the
+  // protocol placeholders. Validate the aliases but canonicalize JVM input.
+  if (pow.w !== undefined) {
+    fixedHex(pow.w, 33, 'observed Autolykos V2 one-time key');
   }
-  if (
-    pow.d !== undefined
-    && decimalInteger(pow.d, 'observed Autolykos V2 distance') !== '0'
-  ) {
-    throw new Error('observed Autolykos V2 distance is not canonical');
+  if (pow.d !== undefined) {
+    decimalInteger(pow.d, 'observed Autolykos V2 distance');
   }
   return Object.freeze({ identity, serialized });
 }

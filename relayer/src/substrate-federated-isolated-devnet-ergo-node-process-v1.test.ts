@@ -18,14 +18,21 @@ import { computeErgoHeaderId } from './ergo-settlement-core/ergo-header-id.js';
 import {
   assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1,
+  issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
   decideSubstrateFederatedIsolatedDevnetCleanupAuthorityV1,
   type SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -116,6 +123,30 @@ describe.skipIf(process.platform !== 'win32')(
         {},
         async () => 'never',
       )).rejects.toThrow(/requires the frozen first execution/);
+      await expect(session.withCheckpointBoundMiningStoppedExecutionTarget(
+        async () => 'never',
+      )).rejects.toThrow(/requires one completed checkpoint observation/);
+      await expect(
+        session.withCheckpointBoundReservationFreshnessRevalidationTarget(
+          async () => 'never',
+        ),
+      ).rejects.toThrow(/requires one completed frozen tracker check/);
+      await expect(
+        session.withCheckpointBoundTrackerTransportTarget(
+          Object.freeze({
+            schema:
+              'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1',
+            version: 1,
+          }),
+          async () => 'never',
+        ),
+      ).rejects.toThrow(/requires one completed reservation freshness check/);
+      await expect(
+        session.withTrackerTransportConfirmationMiningTarget(
+          '11'.repeat(32),
+          async () => 'never',
+        ),
+      ).rejects.toThrow(/requires one completed transport attempt/);
       await expect(session.withCheckpointBoundMiningActiveExecutionTarget(
         async () => 'never',
       )).rejects.toThrow(/requires one completed checkpoint observation/);
@@ -140,6 +171,41 @@ describe.skipIf(process.platform !== 'win32')(
           checkpointBound: true,
         })
       ).toThrow(/not owned by the active tracker-admission action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false,
+          primaryReadOnly: true,
+          witnessReadOnly: true,
+          miningStopped: true,
+          checkpointBound: true,
+        })
+      ).toThrow(/not owned by the active tracker-check action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false,
+          primaryReadOnly: true,
+          witnessReadOnly: true,
+          miningStopped: true,
+          checkpointBound: true,
+          reservationFreshnessRevalidation: true,
+        })
+      ).toThrow(/not owned by the active reservation-freshness action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false,
+          witnessReadOnly: true,
+          miningStopped: true,
+          checkpointBound: true,
+          reservationFreshnessCheckBound: true,
+          trackerTransport: true,
+        })
+      ).toThrow(/not owned by the active tracker-transport action/);
       await expect(session.startMining()).rejects.toThrow(/exactly once/);
       await expect(session.stop()).resolves.toBeUndefined();
     });
@@ -182,6 +248,28 @@ describe.skipIf(process.platform !== 'win32')(
         checkpointCredential,
         checkpointCredential,
       )).toThrow(/tracker-admission mining credential must be independently one-shot/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          setupCredential,
+          PUBLIC_KEY_HEX,
+        )
+      ).toThrow(/absent, consumed, or revoked/);
+    });
+
+    it('requires an independently one-shot tracker-confirmation mining credential', () => {
+      const setupCredential = testMiningCredential();
+      const checkpointCredential = testMiningCredential();
+      const trackerAdmissionCredential = testMiningCredential();
+      expect(() => createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        setupCredential,
+        checkpointCredential,
+        trackerAdmissionCredential,
+        trackerAdmissionCredential,
+      )).toThrow(
+        /tracker-confirmation mining credential must be independently one-shot/,
+      );
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
           setupCredential,
@@ -576,10 +664,21 @@ describe.skipIf(process.platform !== 'win32')(
           credentials.miningCredential,
           credentials.checkpointMiningCredential,
           credentials.trackerAdmissionMiningCredential,
+          credentials.trackerConfirmationMiningCredential,
         );
         let ownedTarget:
           Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0]
             | undefined;
+        let freshnessTarget:
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1>[0]
+            | undefined;
+        let transportTarget:
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1>[0]
+            | undefined;
+        let freshnessCompletion:
+          ReturnType<
+            typeof issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
+          > | undefined;
         try {
           await session.startMining();
           const managed = await session.withMiningActiveExecutionTarget(
@@ -641,19 +740,47 @@ describe.skipIf(process.platform !== 'win32')(
             async () => 'never',
           )).rejects.toThrow(/absent, consumed, or revoked/);
           const resumed =
-            await session.withCheckpointBoundMiningActiveExecutionTarget(
+            await session.withCheckpointBoundMiningStoppedExecutionTarget(
               async target => {
+                expect(target).toMatchObject({
+                  primaryMining: false,
+                  primaryReadOnly: true,
+                  witnessReadOnly: true,
+                  miningStopped: true,
+                  checkpointBound: true,
+                });
                 expect(() =>
                   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
-                    target,
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1
+                    >[0],
                   )
                 ).toThrow(/not owned by the active mining action/);
-                return assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1(
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active tracker-admission action/);
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active reservation-freshness action/);
+                return assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(
                   target,
                 );
               },
             );
           expect(resumed.receipt.checkpointExtensionBoundDuringAction).toBe(true);
+          expect(resumed.receipt.primaryMiningDuringAction).toBe(false);
+          expect(resumed.receipt.primaryReadOnlyDuringAction).toBe(true);
+          expect(resumed.receipt.witnessReadOnlyDuringAction).toBe(true);
+          expect(resumed.receipt.miningStoppedBeforeAction).toBe(true);
+          expect(resumed.receipt.exactFrozenSnapshotStableAcrossAction).toBe(true);
           expect(resumed.receipt.trackerAdmissionMiningCredentialConsumedOnce)
             .toBe(true);
           expect(resumed.receipt.checkpointSnapshotRevalidatedOnBothNodes)
@@ -668,11 +795,192 @@ describe.skipIf(process.platform !== 'win32')(
             .toBe(anchored.receipt.executionTargetIdentityDigestHex);
           expect(resumed.receipt.processBindingDigestHex)
             .not.toBe(anchored.receipt.processBindingDigestHex);
+          expect(resumed.receipt.actionStartSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(resumed.receipt.actionStartSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(
+              resumed.receipt.preFreezeMiningSnapshot.fullHeight,
+            );
           expect(resumed.value.processBindingDigestHex)
             .toBe(resumed.receipt.processBindingDigestHex);
-          await expect(session.withCheckpointBoundMiningActiveExecutionTarget(
+          const freshness = await session
+            .withCheckpointBoundReservationFreshnessRevalidationTarget(
+              async target => {
+                freshnessTarget = target;
+                expect(target).toMatchObject({
+                  primaryMining: false,
+                  primaryReadOnly: true,
+                  witnessReadOnly: true,
+                  miningStopped: true,
+                  checkpointBound: true,
+                  reservationFreshnessRevalidation: true,
+                });
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active tracker-check action/);
+                const binding =
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+                    target,
+                  );
+                freshnessCompletion =
+                  issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
+                    target,
+                  );
+                expect(() =>
+                  issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
+                    target,
+                  )
+                ).toThrow(/completion is already issued/);
+                return binding;
+              },
+            );
+          expect(freshness.receipt.schema).toBe(
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+          );
+          expect(freshness.receipt.sameProcessesAsTrackerCheck).toBe(true);
+          expect(freshness.receipt.trackerCheckProcessBindingDigestHex)
+            .toBe(resumed.receipt.processBindingDigestHex);
+          expect(
+            freshness.receipt.trackerCheckExecutionTargetIdentityDigestHex,
+          ).toBe(resumed.receipt.executionTargetIdentityDigestHex);
+          expect(freshness.receipt.processBindingDigestHex)
+            .not.toBe(resumed.receipt.processBindingDigestHex);
+          expect(freshness.receipt.executionTargetIdentityDigestHex)
+            .not.toBe(resumed.receipt.executionTargetIdentityDigestHex);
+          expect(freshness.receipt.trackerCheckSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(freshness.receipt.actionStartSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(freshness.receipt.actionEndSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(freshness.receipt.checkpointSnapshot)
+            .toEqual(resumed.receipt.checkpointSnapshot);
+          expect(freshness.receipt.checkpointExtensionObservationDigestHex)
+            .toBe(resumed.receipt.checkpointExtensionObservationDigestHex);
+          expect(freshness.receipt.extensionValueHex)
+            .toBe(resumed.receipt.extensionValueHex);
+          expect(freshness.value.processBindingDigestHex)
+            .toBe(freshness.receipt.processBindingDigestHex);
+          expect(freshness.value.executionTargetIdentityDigestHex)
+            .toBe(freshness.receipt.executionTargetIdentityDigestHex);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+              freshnessTarget!,
+            )
+          ).toThrow(/not owned by the active reservation-freshness action/);
+          await expect(
+            session.withCheckpointBoundTrackerTransportTarget(
+              structuredClone(freshnessCompletion!),
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/lacks exact reservation freshness completion/);
+          const transport = await session
+            .withCheckpointBoundTrackerTransportTarget(
+              freshnessCompletion!,
+              async target => {
+                transportTarget = target;
+                expect(target).toMatchObject({
+                  primaryMining: false,
+                  witnessReadOnly: true,
+                  miningStopped: true,
+                  checkpointBound: true,
+                  reservationFreshnessCheckBound: true,
+                  trackerTransport: true,
+                });
+                const binding =
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(
+                    target,
+                  );
+                expect(binding.reservationFreshnessProcessBindingDigestHex)
+                  .toBe(freshness.receipt.processBindingDigestHex);
+                expect(
+                  binding.reservationFreshnessExecutionTargetIdentityDigestHex,
+                ).toBe(freshness.receipt.executionTargetIdentityDigestHex);
+                return binding;
+              },
+            );
+          expect(transport.receipt.schema).toBe(
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
+          );
+          expect(transport.receipt.sameProcessesAsReservationFreshness)
+            .toBe(true);
+          expect(transport.receipt.primaryMiningStoppedDuringAction)
+            .toBe(true);
+          expect(transport.receipt.trackerTransportTargetActiveOnlyDuringAction)
+            .toBe(true);
+          expect(transport.receipt.exactFrozenChainSnapshotStableAcrossAction)
+            .toBe(true);
+          expect(transport.receipt.reservationFreshnessProcessBindingDigestHex)
+            .toBe(freshness.receipt.processBindingDigestHex);
+          expect(
+            transport.receipt
+              .reservationFreshnessExecutionTargetIdentityDigestHex,
+          ).toBe(freshness.receipt.executionTargetIdentityDigestHex);
+          expect(transport.receipt.reservationFreshnessSnapshot)
+            .toEqual(freshness.receipt.actionEndSnapshot);
+          expect(transport.receipt.actionStartSnapshot)
+            .toEqual(freshness.receipt.actionEndSnapshot);
+          expect(transport.receipt.actionEndSnapshot)
+            .toEqual(freshness.receipt.actionEndSnapshot);
+          expect(transport.value.processBindingDigestHex)
+            .toBe(transport.receipt.processBindingDigestHex);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(
+              transportTarget!,
+            )
+          ).toThrow(/not owned by the active tracker-transport action/);
+          await expect(
+            session.withCheckpointBoundTrackerTransportTarget(
+              freshnessCompletion!,
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/requires one completed reservation freshness check/);
+          await expect(
+            session.withCheckpointBoundReservationFreshnessRevalidationTarget(
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/requires one completed frozen tracker check/);
+          await expect(session.withCheckpointBoundMiningStoppedExecutionTarget(
             async () => 'never',
           )).rejects.toThrow(/requires one completed checkpoint observation/);
+          const confirmationTransactionIdHex = 'ac'.repeat(32);
+          const confirmation = await session
+            .withTrackerTransportConfirmationMiningTarget(
+              confirmationTransactionIdHex,
+              async target =>
+                assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+                  target,
+                ),
+            );
+          expect(confirmation.receipt.schema).toBe(
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
+          );
+          expect(confirmation.receipt.confirmedTransactionIdHex)
+            .toBe(confirmationTransactionIdHex);
+          expect(confirmation.receipt.trackerConfirmationMiningCredentialConsumedOnce)
+            .toBe(true);
+          expect(confirmation.receipt.exactTrackerTransportBound).toBe(true);
+          expect(
+            confirmation.receipt.trackerTransportProcessBindingDigestHex,
+          ).toBe(transport.receipt.processBindingDigestHex);
+          expect(
+            confirmation.receipt
+              .trackerTransportExecutionTargetIdentityDigestHex,
+          ).toBe(transport.receipt.executionTargetIdentityDigestHex);
+          expect(confirmation.receipt.transportSnapshot)
+            .toEqual(transport.receipt.actionEndSnapshot);
+          expect(confirmation.value.processBindingDigestHex)
+            .toBe(confirmation.receipt.processBindingDigestHex);
+          await expect(
+            session.withTrackerTransportConfirmationMiningTarget(
+              confirmationTransactionIdHex,
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/requires one completed transport attempt/);
         } finally {
           await session.stop();
           setup.dispose();

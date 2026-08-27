@@ -211,8 +211,10 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
   });
 
   it('canonicalizes one external scratch plan without creating authority', () => {
-    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'e2s-runner-root-'));
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'f6-'));
     const source = mkdtempSync(path.join(temporaryRoot, 'source-'));
+    prepareCompleteCargoCache(temporaryRoot);
+    stubWindowsMsvcEnvironment();
     try {
       const plan = preflight({
         ...syntheticInput(),
@@ -231,9 +233,72 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
       });
       expect(Object.isFrozen(plan)).toBe(true);
     } finally {
+      vi.unstubAllEnvs();
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
+
+  it('rejects an incomplete offline Cargo cache before native execution', () => {
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'f6-'));
+    const source = mkdtempSync(path.join(temporaryRoot, 'source-'));
+    stubWindowsMsvcEnvironment();
+    try {
+      expect(() => preflight({
+        ...syntheticInput(),
+        frontierSourceDirectory: source,
+        temporaryDirectoryRoot: temporaryRoot,
+        cargoDependencyCacheDirectory: temporaryRoot,
+      })).toThrow(/offline Cargo dependency cache is missing registry/u);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform === 'win32')(
+    'rejects a temporary root outside the locked MSVC source-path budget',
+    () => {
+      const parent = mkdtempSync(path.join(tmpdir(), 'f6-'));
+      const temporaryRoot = path.join(parent, 'x'.repeat(70));
+      const source = path.join(temporaryRoot, 'source');
+      mkdirSync(source, { recursive: true });
+      prepareCompleteCargoCache(parent);
+      stubWindowsMsvcEnvironment();
+      try {
+        expect(() => preflight({
+          ...syntheticInput(),
+          frontierSourceDirectory: source,
+          temporaryDirectoryRoot: temporaryRoot,
+          cargoDependencyCacheDirectory: parent,
+        })).toThrow(/exceeds the locked MSVC source-path budget/u);
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.runIf(process.platform === 'win32')(
+    'rejects a native build without the Visual Studio include environment',
+    () => {
+      const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'f6-'));
+      const source = mkdtempSync(path.join(temporaryRoot, 'source-'));
+      prepareCompleteCargoCache(temporaryRoot);
+      stubWindowsMsvcEnvironment();
+      vi.stubEnv('INCLUDE', undefined);
+      try {
+        expect(() => preflight({
+          ...syntheticInput(),
+          frontierSourceDirectory: source,
+          temporaryDirectoryRoot: temporaryRoot,
+          cargoDependencyCacheDirectory: temporaryRoot,
+        })).toThrow(/requires the Visual Studio INCLUDE environment/u);
+      } finally {
+        vi.unstubAllEnvs();
+        rmSync(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('builds the exact application-specific mint reservation environment', () => {
     const environment =
@@ -252,8 +317,10 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
   });
 
   it('requires one exact process-proven mint receipt for the V2 runner input', () => {
-    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'e2s-runner-root-'));
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'f6-'));
     const source = mkdtempSync(path.join(temporaryRoot, 'source-'));
+    prepareCompleteCargoCache(temporaryRoot);
+    stubWindowsMsvcEnvironment();
     const receipt = syntheticMintSourceProofReceipt();
     try {
       const input = {
@@ -282,6 +349,7 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
         } as never)
       ).toThrow(/must contain exactly/u);
     } finally {
+      vi.unstubAllEnvs();
       rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
@@ -827,6 +895,18 @@ function syntheticInput() {
     gitExecutablePath: process.execPath,
     offline: true as const,
   };
+}
+
+function prepareCompleteCargoCache(root: string): void {
+  mkdirSync(path.join(root, 'registry'), { recursive: true });
+  mkdirSync(path.join(root, 'git'), { recursive: true });
+}
+
+function stubWindowsMsvcEnvironment(): void {
+  if (process.platform !== 'win32') return;
+  vi.stubEnv('LIB', process.env.LIB ?? 'C:\\toolchain\\lib');
+  vi.stubEnv('LIBPATH', process.env.LIBPATH ?? 'C:\\toolchain\\libpath');
+  vi.stubEnv('INCLUDE', process.env.INCLUDE ?? 'C:\\toolchain\\include');
 }
 
 function integrationInput() {

@@ -2,6 +2,9 @@ import axios from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
+  assertActiveTarget: vi.fn(),
+  assertFrozenTarget: vi.fn(),
+  assertFreshnessTarget: vi.fn(),
   assertReadOnlyTarget: vi.fn(),
 }));
 
@@ -12,25 +15,58 @@ vi.mock('axios', () => ({
 }));
 
 vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1:
+    mocked.assertActiveTarget,
+  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2:
+    mocked.assertFrozenTarget,
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1:
     mocked.assertReadOnlyTarget,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1:
+    mocked.assertFreshnessTarget,
 }));
 
 import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
 import { computeErgoHeaderId } from './ergo-settlement-core/ergo-header-id.js';
 import {
   assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1,
+  assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV1,
+  assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessObservationV1,
   observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1,
+  observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV1,
+  observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2,
+  observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1,
 } from './substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js';
 
 const PRIMARY = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
 const GENESIS_ID_HEX = '01'.repeat(32);
 const EXTENSION_VALUE_HEX = 'ab'.repeat(64);
+const POW_DISTANCE_DECIMAL = '9007199254740993123456789';
 const TARGET = Object.freeze({
   primaryNodeOrigin: PRIMARY,
   witnessNodeOrigin: WITNESS,
   miningStopped: true as const,
+});
+const ACTIVE_TARGET = Object.freeze({
+  primaryNodeOrigin: PRIMARY,
+  witnessNodeOrigin: WITNESS,
+  primaryMining: true as const,
+  witnessReadOnly: true as const,
+  checkpointBound: true as const,
+});
+const FROZEN_TARGET = Object.freeze({
+  primaryNodeOrigin: PRIMARY,
+  witnessNodeOrigin: WITNESS,
+  primaryMining: false as const,
+  primaryReadOnly: true as const,
+  witnessReadOnly: true as const,
+  miningStopped: true as const,
+  checkpointBound: true as const,
+});
+const FRESHNESS_TARGET = Object.freeze({
+  ...FROZEN_TARGET,
+  reservationFreshnessRevalidation: true as const,
 });
 const BINDING = Object.freeze({
   processBindingDigestHex: '11'.repeat(32),
@@ -40,18 +76,32 @@ const BINDING = Object.freeze({
 describe('isolated devnet checkpoint anchor observer V1', () => {
   let primary: NodeFixture;
   let witness: NodeFixture;
+  let mutateResponse: ((
+    path: string,
+    response: MutableNodeResponse,
+  ) => void) | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
     primary = nodeFixture();
     witness = structuredClone(primary);
+    mutateResponse = undefined;
+    mocked.assertActiveTarget.mockReturnValue(BINDING);
+    mocked.assertFrozenTarget.mockReturnValue(BINDING);
+    mocked.assertFreshnessTarget.mockReturnValue(BINDING);
     mocked.assertReadOnlyTarget.mockReturnValue(BINDING);
     vi.mocked(axios.create).mockImplementation(config => {
       const fixture = config?.baseURL === PRIMARY ? primary : witness;
       return {
-        get: vi.fn(async (path: string) => ({
-          data: responseFor(fixture, path),
-        })),
+        get: vi.fn(async (path: string) => {
+          const response: MutableNodeResponse = {
+            data: rawNodeJson(responseFor(fixture, path)),
+            headers: {},
+            status: 200,
+          };
+          mutateResponse?.(path, response);
+          return response;
+        }),
       } as any;
     });
   });
@@ -75,6 +125,9 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
     expect(observed.headers).toHaveLength(10);
     expect(observed.headers[0]!.canonicalHeaderBytesHex)
       .toMatch(/^[0-9a-f]+$/u);
+    expect(
+      (observed.headers[0]!.raw.powSolutions as Record<string, unknown>).d,
+    ).toBe(POW_DISTANCE_DECIMAL);
     expect(observed.boundaries).toEqual({
       primaryAndWitnessAgreed: true,
       miningStoppedDuringObservation: true,
@@ -100,6 +153,67 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
       )
     ).toThrow(/lacks exact process provenance/);
     expect(mocked.assertReadOnlyTarget).toHaveBeenCalledTimes(2);
+    expect(axios.create).toHaveBeenCalledTimes(2);
+    for (const [config] of vi.mocked(axios.create).mock.calls) {
+      expect(config).toEqual(expect.objectContaining({
+        responseType: 'arraybuffer',
+        decompress: false,
+        headers: expect.objectContaining({
+          Accept: 'application/json',
+          'Accept-Encoding': 'identity',
+        }),
+      }));
+      const transforms = config?.transformResponse;
+      expect(Array.isArray(transforms)).toBe(true);
+      const raw = Buffer.from('{"d":9007199254740993123456789}', 'utf8');
+      const [transform] = transforms as readonly unknown[];
+      expect(typeof transform).toBe('function');
+      expect((transform as (
+        value: unknown,
+        headers: unknown,
+        status: number,
+      ) => unknown)(raw, {}, 200)).toBe(raw);
+    }
+  });
+
+  it('rejects an already-decoded string response body', async () => {
+    mutateResponse = (path, response) => {
+      if (path === '/info') {
+        response.data = '{"network":"devnet","fullHeight":20}';
+      }
+    };
+    await expect(observe()).rejects.toThrow(/body must remain raw bytes/);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['non-success', 500],
+  ] as const)('rejects an %s HTTP status', async (_label, status) => {
+    mutateResponse = (path, response) => {
+      if (path === '/info') response.status = status;
+    };
+    await expect(observe()).rejects.toThrow(/failed with HTTP status/);
+  });
+
+  it('rejects a compressed response body', async () => {
+    mutateResponse = (path, response) => {
+      if (path === '/info') response.headers['content-encoding'] = 'gzip';
+    };
+    await expect(observe()).rejects.toThrow(/must use identity encoding/);
+  });
+
+  it('rejects a response body beyond the explicit byte bound', async () => {
+    mutateResponse = (path, response) => {
+      if (path === '/info') response.data = Buffer.alloc(512 * 1024 + 1);
+    };
+    await expect(observe()).rejects.toThrow(/exceeds the response byte bound/);
+  });
+
+  it('rejects a response body that is not canonical UTF-8', async () => {
+    mutateResponse = (path, response) => {
+      if (path === '/info') response.data = Buffer.from([0xc3, 0x28]);
+    };
+    await expect(observe()).rejects.toThrow(/must use canonical UTF-8/);
   });
 
   it('rejects dual-node disagreement before accepting membership', async () => {
@@ -181,6 +295,227 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
     await expect(observe()).rejects.toThrow(/process binding changed/);
   });
 
+  it('preserves the V1 active-target observation semantics', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    const anchor = primary.block.header;
+
+    const observed =
+      await observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV1({
+        target: ACTIVE_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: anchor.id,
+        expectedAnchorHeight: anchor.height,
+        expectedAnchorExtensionRootHex: anchor.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      });
+
+    expect(observed.headers).toHaveLength(10);
+    expect(observed.headers[0]!.height).toBe(22);
+    expect(observed.anchorContextIndex).toBe(2);
+    expect(observed.anchorHeaderIdHex).toBe(anchor.id);
+    expect(observed.boundaries).toEqual({
+      primaryAndWitnessAgreed: true,
+      primaryMiningDuringObservation: true,
+      checkpointBoundActiveTarget: true,
+      exactCheckpointRetainedInCurrentContext: true,
+      exactExtensionMembershipRecomputed: true,
+      ergoPowAuthenticated: false,
+      trackerAdmissionEstablished: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV1(
+        observed,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV1(
+        structuredClone(observed),
+      )
+    ).toThrow(/lacks exact process provenance/);
+    expect(mocked.assertActiveTarget).toHaveBeenCalledTimes(2);
+  });
+
+  it('rebinds the retained anchor into the V2 frozen context', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    const anchor = primary.block.header;
+
+    const observed =
+      await observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2({
+        target: FROZEN_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: anchor.id,
+        expectedAnchorHeight: anchor.height,
+        expectedAnchorExtensionRootHex: anchor.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      });
+
+    expect(observed.boundaries).toMatchObject({
+      primaryAndWitnessAgreed: true,
+      miningStoppedDuringObservation: true,
+      checkpointBoundFrozenTarget: true,
+    });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2(
+        observed,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2(
+        structuredClone(observed),
+      )
+    ).toThrow(/lacks exact process provenance/);
+    expect(mocked.assertFrozenTarget).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a frozen context that no longer retains the exact anchor', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2({
+        target: FROZEN_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: 'ff'.repeat(32),
+        expectedAnchorHeight: 20,
+        expectedAnchorExtensionRootHex: extensionRootHex(),
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      }),
+    ).rejects.toThrow(/does not retain the anchor/);
+  });
+
+  it('rejects frozen primary and witness tip disagreement', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    witness.fullHeight = 23;
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2({
+        target: FROZEN_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: primary.block.header.id,
+        expectedAnchorHeight: primary.block.header.height,
+        expectedAnchorExtensionRootHex: primary.block.header.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      }),
+    ).rejects.toThrow(/not contiguous oldest-to-newest|observations disagree/);
+  });
+
+  it('re-observes the exact anchor under the reservation-freshness target', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    const anchor = primary.block.header;
+
+    const observed =
+      await observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1({
+        target: FRESHNESS_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: anchor.id,
+        expectedAnchorHeight: anchor.height,
+        expectedAnchorExtensionRootHex: anchor.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      });
+
+    expect(observed.schema).toBe(
+      'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-observation.v1',
+    );
+    expect(observed.anchorHeaderIdHex).toBe(anchor.id);
+    expect(observed.extensionValueHex).toBe(EXTENSION_VALUE_HEX);
+    expect(observed.boundaries).toEqual({
+      primaryAndWitnessAgreed: true,
+      miningStoppedDuringObservation: true,
+      checkpointBoundReservationFreshnessTarget: true,
+      exactCheckpointRetainedInCurrentContext: true,
+      exactExtensionMembershipRecomputed: true,
+      durableReservationBound: false,
+      trackerInputRevalidated: false,
+      jvmTransactionRechecked: false,
+      ergoPowAuthenticated: false,
+      signingPerformed: false,
+      submissionPerformed: false,
+      broadcastPerformed: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+    });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessObservationV1(
+        observed,
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessObservationV1(
+        structuredClone(observed),
+      )
+    ).toThrow(/lacks exact process provenance/);
+    expect(mocked.assertFreshnessTarget).toHaveBeenCalledTimes(2);
+    expect(mocked.assertFrozenTarget).not.toHaveBeenCalled();
+  });
+
+  it('rejects the tracker-check target at the reservation-freshness boundary', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    const anchor = primary.block.header;
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1({
+        target: FROZEN_TARGET as typeof FRESHNESS_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: anchor.id,
+        expectedAnchorHeight: anchor.height,
+        expectedAnchorExtensionRootHex: anchor.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      }),
+    ).rejects.toThrow(/dedicated frozen read-only target/);
+    expect(mocked.assertFreshnessTarget).not.toHaveBeenCalled();
+  });
+
+  it('rejects reservation-freshness dual-node extension disagreement', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    witness.extensionFields[1]![1] = 'cd'.repeat(64);
+    const anchor = primary.block.header;
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1({
+        target: FRESHNESS_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: anchor.id,
+        expectedAnchorHeight: anchor.height,
+        expectedAnchorExtensionRootHex: anchor.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      }),
+    ).rejects.toThrow(/observations disagree/);
+  });
+
+  it('rejects reservation-freshness process-binding drift', async () => {
+    primary = nodeFixture(13, 22, 20);
+    witness = structuredClone(primary);
+    const anchor = primary.block.header;
+    mocked.assertFreshnessTarget
+      .mockReturnValueOnce(BINDING)
+      .mockReturnValueOnce({
+        ...BINDING,
+        processBindingDigestHex: '33'.repeat(32),
+      });
+
+    await expect(
+      observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1({
+        target: FRESHNESS_TARGET,
+        targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+        expectedAnchorHeaderIdHex: anchor.id,
+        expectedAnchorHeight: anchor.height,
+        expectedAnchorExtensionRootHex: anchor.extensionHash,
+        expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+      }),
+    ).rejects.toThrow(/process binding changed during observation/);
+  });
+
   async function observe(
     expectedExtensionValueHex = EXTENSION_VALUE_HEX,
     expectedPriorHeaderIdHex = headerAt(primary, 18).id,
@@ -203,6 +538,12 @@ interface NodeFixture {
   block: { header: RawHeader; extension: { fields: string[][] } };
 }
 
+interface MutableNodeResponse {
+  data: unknown;
+  headers: Record<string, string>;
+  status: number | undefined;
+}
+
 interface RawHeader extends Record<string, unknown> {
   id: string;
   parentId: string;
@@ -210,7 +551,11 @@ interface RawHeader extends Record<string, unknown> {
   extensionHash: string;
 }
 
-function nodeFixture(startHeight = 11, endHeight = 20): NodeFixture {
+function nodeFixture(
+  startHeight = 11,
+  endHeight = 20,
+  anchorHeight = endHeight,
+): NodeFixture {
   const extensionFields = [
     ['0100', Buffer.from('side-field', 'ascii').toString('hex')],
     ['0401', EXTENSION_VALUE_HEX],
@@ -220,14 +565,19 @@ function nodeFixture(startHeight = 11, endHeight = 20): NodeFixture {
     false,
     startHeight,
     endHeight,
+    anchorHeight,
   );
+  const anchorHeader = headers.find(header => header.height === anchorHeight);
+  if (anchorHeader === undefined) {
+    throw new Error(`missing fixture anchor header ${anchorHeight}`);
+  }
   return {
     fullHeight: endHeight,
     headers,
     lastHeadersNewestFirst: false,
     extensionFields,
     block: {
-      header: headers[0]!,
+      header: anchorHeader,
       extension: { fields: extensionFields },
     },
   };
@@ -245,8 +595,16 @@ function responseFor(fixture: NodeFixture, path: string): unknown {
       ? newestFirst
       : [...newestFirst].reverse();
   }
-  if (path === `/blocks/${fixture.headers[0]!.id}`) return fixture.block;
+  if (path === `/blocks/${fixture.block.header.id}`) return fixture.block;
   throw new Error(`unexpected checkpoint observer path: ${path}`);
+}
+
+function rawNodeJson(value: unknown): Buffer {
+  const encoded = JSON.stringify(value).replaceAll(
+    `\"d\":\"${POW_DISTANCE_DECIMAL}\"`,
+    `\"d\":${POW_DISTANCE_DECIMAL}`,
+  );
+  return Buffer.from(encoded, 'utf8');
 }
 
 function headerAt(fixture: NodeFixture, height: number): RawHeader {
@@ -273,11 +631,12 @@ function headerChain(
   breakLatestParent = false,
   startHeight = 11,
   endHeight = 20,
+  anchorHeight = endHeight,
 ): RawHeader[] {
   const ascending: RawHeader[] = [];
   let parentId = '40'.repeat(32);
   for (let height = startHeight; height <= endHeight; height += 1) {
-    const extensionHash = height === endHeight
+    const extensionHash = height === anchorHeight
       ? anchorExtensionRootHex
       : Buffer.alloc(32, height).toString('hex');
     const effectiveParentId = height === endHeight && breakLatestParent
@@ -322,7 +681,7 @@ function headerChain(
           Buffer.alloc(32, height + 6),
         ]).toString('hex'),
         n: Buffer.from(identity.powSolution.nonce).toString('hex'),
-        d: 0,
+        d: POW_DISTANCE_DECIMAL,
       },
     });
     parentId = id;

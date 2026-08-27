@@ -34,6 +34,11 @@ import {
 import {
   normalizeErgoNodeHeaderBytes,
 } from './adapters/ergo-utxo-state-runtime-witness-capture-port-v1.js';
+import {
+  deriveSubstrateFederatedIsolatedDevnetCanonicalCheckpointExtensionNodeObservationDigestV1,
+  deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromNodeDigestsV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+} from './relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import type {
@@ -52,8 +57,17 @@ import {
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
 } from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
 
-export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA =
-  'e2s.substrate-federated-isolated-devnet-ergo-node-process.v1' as const;
+export {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
+} from './relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-checkpoint-bound-frozen-execution.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-execution.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-transport-execution.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-confirmation-execution.v1' as const;
 
 const PRIMARY_REST_PORT = 9051;
 const WITNESS_REST_PORT = 9052;
@@ -93,6 +107,29 @@ const ACTIVE_OWNED_CHECKPOINT_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS =
   new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS = new WeakSet<object>();
+const OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS =
+  new WeakMap<object, OwnedTargetBinding>();
+const ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS =
+  new WeakSet<object>();
+const OWNED_TRACKER_RESERVATION_FRESHNESS_TARGET_BINDINGS =
+  new WeakMap<object, OwnedTargetBinding>();
+const ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS =
+  new WeakSet<object>();
+const OWNED_TRACKER_TRANSPORT_TARGET_BINDINGS =
+  new WeakMap<object, OwnedTrackerTransportTargetBinding>();
+const ACTIVE_OWNED_TRACKER_TRANSPORT_TARGETS = new WeakSet<object>();
+const OWNED_TRACKER_RESERVATION_FRESHNESS_COMPLETIONS = new WeakMap<
+  object,
+  Readonly<{
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+    >;
+    binding:
+      Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  }>
+>();
+const ISSUED_TRACKER_RESERVATION_FRESHNESS_COMPLETION_TARGETS =
+  new WeakSet<object>();
 
 export function deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
   priorHeight: number,
@@ -167,6 +204,11 @@ interface OwnedTargetBinding {
   readonly assertActiveProcesses: () => void;
 }
 
+interface OwnedTrackerTransportTargetBinding extends OwnedTargetBinding {
+  readonly reservationFreshnessProcessBindingDigestHex: string;
+  readonly reservationFreshnessExecutionTargetIdentityDigestHex: string;
+}
+
 interface CheckpointExecutionContinuation {
   readonly extensionFields: string;
   readonly extensionValueHex: string;
@@ -174,6 +216,39 @@ interface CheckpointExecutionContinuation {
   readonly checkpointSnapshot: Readonly<TargetSnapshot>;
   readonly executionTargetIdentityDigestHex: string;
   readonly checkpointExtensionObservationDigestHex: string;
+}
+
+interface TrackerReservationFreshnessContinuation {
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly frozenSnapshot: Readonly<TargetSnapshot>;
+}
+
+interface TrackerTransportContinuation {
+  readonly reservationFreshnessTarget: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+  >;
+  readonly reservationFreshnessProcessBindingDigestHex: string;
+  readonly reservationFreshnessExecutionTargetIdentityDigestHex: string;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly frozenSnapshot: Readonly<TargetSnapshot>;
+}
+
+interface TrackerConfirmationContinuation {
+  readonly trackerTransportProcessBindingDigestHex: string;
+  readonly trackerTransportExecutionTargetIdentityDigestHex: string;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly transportSnapshot: Readonly<TargetSnapshot>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input {
@@ -252,6 +327,55 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1 {
     readonly receipt:
       Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV1Receipt>;
   }>>;
+  readonly withCheckpointBoundMiningStoppedExecutionTarget: <T>(
+    action: (
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+      >,
+    ) => Promise<T>,
+  ) => Promise<Readonly<{
+    readonly value: T;
+    readonly receipt:
+      Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV2Receipt>;
+  }>>;
+  readonly withCheckpointBoundReservationFreshnessRevalidationTarget: <T>(
+    action: (
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+      >,
+    ) => Promise<T>,
+  ) => Promise<Readonly<{
+    readonly value: T;
+    readonly receipt: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessExecutionV1Receipt
+    >;
+  }>>;
+  readonly withCheckpointBoundTrackerTransportTarget: <T>(
+    completion: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
+    >,
+    action: (
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1
+      >,
+    ) => Promise<T>,
+  ) => Promise<Readonly<{
+    readonly value: T;
+    readonly receipt: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV1Receipt
+    >;
+  }>>;
+  readonly withTrackerTransportConfirmationMiningTarget: <T>(
+    expectedTransactionIdHex: string,
+    action: (
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => Promise<T>,
+  ) => Promise<Readonly<{
+    readonly value: T;
+    readonly receipt: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt
+    >;
+  }>>;
   readonly stop: () => Promise<void>;
 }
 
@@ -278,9 +402,59 @@ export interface SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV
   readonly checkpointBound: true;
 }
 
+export interface SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2 {
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMining: false;
+  readonly primaryReadOnly: true;
+  readonly witnessReadOnly: true;
+  readonly miningStopped: true;
+  readonly checkpointBound: true;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1 {
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMining: false;
+  readonly primaryReadOnly: true;
+  readonly witnessReadOnly: true;
+  readonly miningStopped: true;
+  readonly checkpointBound: true;
+  readonly reservationFreshnessRevalidation: true;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1 {
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMining: false;
+  readonly witnessReadOnly: true;
+  readonly miningStopped: true;
+  readonly checkpointBound: true;
+  readonly reservationFreshnessCheckBound: true;
+  readonly trackerTransport: true;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1 {
+  readonly schema:
+    'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1';
+  readonly version: 1;
+}
+
 export interface SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1 {
   readonly processBindingDigestHex: string;
   readonly executionTargetIdentityDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1
+  extends SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1 {
+  readonly reservationFreshnessProcessBindingDigestHex: string;
+  readonly reservationFreshnessExecutionTargetIdentityDigestHex: string;
 }
 
 export type SubstrateFederatedIsolatedDevnetOwnedCheckpointTargetBindingV1 =
@@ -336,6 +510,121 @@ export interface SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV1Recei
   readonly extensionValueHex: string;
   readonly extensionFieldsSha256Hex: string;
   readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV2Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA;
+  readonly version: 2;
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMiningDuringAction: false;
+  readonly primaryReadOnlyDuringAction: true;
+  readonly witnessReadOnlyDuringAction: true;
+  readonly miningStoppedBeforeAction: true;
+  readonly exactFrozenSnapshotStableAcrossAction: true;
+  readonly buildIdentityDigestHex: string;
+  readonly executableIdentityDigestHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly preFreezeMiningSnapshot: Readonly<TargetSnapshot>;
+  readonly actionStartSnapshot: Readonly<TargetSnapshot>;
+  readonly actionEndSnapshot: Readonly<TargetSnapshot>;
+  readonly checkpointExtensionBoundDuringAction: true;
+  readonly trackerAdmissionMiningCredentialConsumedOnce: true;
+  readonly checkpointSnapshotRevalidatedOnBothNodes: true;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly extensionKeyHex: typeof CHECKPOINT_EXTENSION_KEY_HEX;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessExecutionV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA;
+  readonly version: 1;
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryReadOnlyDuringAction: true;
+  readonly witnessReadOnlyDuringAction: true;
+  readonly miningStoppedBeforeAction: true;
+  readonly exactFrozenSnapshotStableAcrossAction: true;
+  readonly sameProcessesAsTrackerCheck: true;
+  readonly buildIdentityDigestHex: string;
+  readonly executableIdentityDigestHex: string;
+  readonly trackerCheckProcessBindingDigestHex: string;
+  readonly trackerCheckExecutionTargetIdentityDigestHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly trackerCheckSnapshot: Readonly<TargetSnapshot>;
+  readonly actionStartSnapshot: Readonly<TargetSnapshot>;
+  readonly actionEndSnapshot: Readonly<TargetSnapshot>;
+  readonly checkpointExtensionBoundDuringAction: true;
+  readonly checkpointSnapshotRevalidatedOnBothNodes: true;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly extensionKeyHex: typeof CHECKPOINT_EXTENSION_KEY_HEX;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV1Receipt {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA;
+  readonly version: 1;
+  readonly primaryNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN;
+  readonly witnessNodeOrigin:
+    typeof SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
+  readonly primaryMiningStoppedDuringAction: true;
+  readonly trackerTransportTargetActiveOnlyDuringAction: true;
+  readonly witnessReadOnlyDuringAction: true;
+  readonly miningStoppedBeforeAction: true;
+  readonly exactFrozenChainSnapshotStableAcrossAction: true;
+  readonly sameProcessesAsReservationFreshness: true;
+  readonly buildIdentityDigestHex: string;
+  readonly executableIdentityDigestHex: string;
+  readonly reservationFreshnessProcessBindingDigestHex: string;
+  readonly reservationFreshnessExecutionTargetIdentityDigestHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly reservationFreshnessSnapshot: Readonly<TargetSnapshot>;
+  readonly actionStartSnapshot: Readonly<TargetSnapshot>;
+  readonly actionEndSnapshot: Readonly<TargetSnapshot>;
+  readonly checkpointExtensionBoundDuringAction: true;
+  readonly checkpointSnapshotRevalidatedOnBothNodes: true;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly extensionKeyHex: typeof CHECKPOINT_EXTENSION_KEY_HEX;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt
+  extends Omit<
+    SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt,
+    'schema'
+  > {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA;
+  readonly trackerConfirmationMiningCredentialConsumedOnce: true;
+  readonly exactTrackerTransportBound: true;
+  readonly confirmedTransactionIdHex: string;
+  readonly trackerTransportProcessBindingDigestHex: string;
+  readonly trackerTransportExecutionTargetIdentityDigestHex: string;
+  readonly checkpointExtensionBoundDuringAction: true;
+  readonly checkpointSnapshotRevalidatedOnBothNodes: true;
+  readonly checkpointExtensionObservationDigestHex: string;
+  readonly extensionKeyHex: typeof CHECKPOINT_EXTENSION_KEY_HEX;
+  readonly extensionValueHex: string;
+  readonly extensionFieldsSha256Hex: string;
+  readonly checkpointSnapshot: Readonly<TargetSnapshot>;
+  readonly transportSnapshot: Readonly<TargetSnapshot>;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(
@@ -416,6 +705,112 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecut
   });
 }
 
+export function assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(
+  value: Readonly<
+    SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+  >,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const binding =
+    OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS.get(value);
+  if (
+    binding === undefined
+    || !ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS.has(value)
+  ) {
+    throw new Error(
+      'isolated Ergo frozen checkpoint-bound target is not owned by the active tracker-check action',
+    );
+  }
+  binding.assertActiveProcesses();
+  return Object.freeze({
+    processBindingDigestHex: binding.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      binding.executionTargetIdentityDigestHex,
+  });
+}
+
+export function assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+  value: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+  >,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const binding =
+    OWNED_TRACKER_RESERVATION_FRESHNESS_TARGET_BINDINGS.get(value);
+  if (
+    binding === undefined
+    || !ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS.has(value)
+  ) {
+    throw new Error(
+      'isolated Ergo target is not owned by the active reservation-freshness action',
+    );
+  }
+  binding.assertActiveProcesses();
+  return Object.freeze({
+    processBindingDigestHex: binding.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      binding.executionTargetIdentityDigestHex,
+  });
+}
+
+export function assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(
+  value: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1
+> {
+  const binding = OWNED_TRACKER_TRANSPORT_TARGET_BINDINGS.get(value);
+  if (
+    binding === undefined
+    || !ACTIVE_OWNED_TRACKER_TRANSPORT_TARGETS.has(value)
+  ) {
+    throw new Error(
+      'isolated Ergo target is not owned by the active tracker-transport action',
+    );
+  }
+  binding.assertActiveProcesses();
+  return Object.freeze({
+    processBindingDigestHex: binding.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      binding.executionTargetIdentityDigestHex,
+    reservationFreshnessProcessBindingDigestHex:
+      binding.reservationFreshnessProcessBindingDigestHex,
+    reservationFreshnessExecutionTargetIdentityDigestHex:
+      binding.reservationFreshnessExecutionTargetIdentityDigestHex,
+  });
+}
+
+/**
+ * Seal one successful checker-owned freshness action. Import rules restrict
+ * this issuer to the concrete setup checker; the composition root can only
+ * claim the resulting opaque completion through that checker.
+ */
+export function issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
+  target: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+  >,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
+> {
+  const binding =
+    assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+      target,
+    );
+  if (ISSUED_TRACKER_RESERVATION_FRESHNESS_COMPLETION_TARGETS.has(target)) {
+    throw new Error(
+      'isolated tracker reservation freshness completion is already issued',
+    );
+  }
+  const completion = Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1' as const,
+    version: 1 as const,
+  });
+  ISSUED_TRACKER_RESERVATION_FRESHNESS_COMPLETION_TARGETS.add(target);
+  OWNED_TRACKER_RESERVATION_FRESHNESS_COMPLETIONS.set(
+    completion,
+    Object.freeze({ target, binding }),
+  );
+  return completion;
+}
+
 interface NormalizedProcessInput {
   readonly javaExecutablePath: string;
   readonly javaExecutableSha256Hex: string;
@@ -443,6 +838,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
   trackerAdmissionMiningCredentialValue?:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
+  trackerConfirmationMiningCredentialValue?:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1> {
   const { input, binding } = normalizeProcessConstruction(
     inputValue,
@@ -450,14 +847,23 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
     miningCredentialValue,
     checkpointMiningCredentialValue,
     trackerAdmissionMiningCredentialValue,
+    trackerConfirmationMiningCredentialValue,
   );
   let miningCredential:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined =
       miningCredentialValue;
   let checkpointMiningCredential = checkpointMiningCredentialValue;
   let trackerAdmissionMiningCredential = trackerAdmissionMiningCredentialValue;
+  let trackerConfirmationMiningCredential =
+    trackerConfirmationMiningCredentialValue;
   let checkpointExecutionContinuation:
     Readonly<CheckpointExecutionContinuation> | undefined;
+  let trackerReservationFreshnessContinuation:
+    Readonly<TrackerReservationFreshnessContinuation> | undefined;
+  let trackerTransportContinuation:
+    Readonly<TrackerTransportContinuation> | undefined;
+  let trackerConfirmationContinuation:
+    Readonly<TrackerConfirmationContinuation> | undefined;
   let state: 'inert' | 'mining' | 'action' | 'read-only' | 'stopped' = 'inert';
   let ownedRuntimeRoot: string | undefined;
   let runtime: RuntimeLayout | undefined;
@@ -469,6 +875,9 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
     | 'transition'
     | 'anchor'
     | 'checkpoint-execution'
+    | 'checkpoint-freshness'
+    | 'tracker-transport'
+    | 'tracker-confirmation'
     | 'stop'
     | undefined;
 
@@ -491,6 +900,12 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         trackerAdmissionMiningCredential,
       );
       trackerAdmissionMiningCredential = undefined;
+    }
+    if (trackerConfirmationMiningCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerConfirmationMiningCredential,
+      );
+      trackerConfirmationMiningCredential = undefined;
     }
     if (
       state === 'inert' && ownedRuntimeRoot === undefined && runtime === undefined
@@ -1300,6 +1715,886 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
         activeOperation = undefined;
       }
     },
+    withCheckpointBoundMiningStoppedExecutionTarget: async <T>(
+      action: (
+        target: Readonly<
+          SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+        >,
+      ) => Promise<T>,
+    ) => {
+      if (
+        state !== 'read-only' || activeOperation !== undefined
+        || runtime === undefined || primary === undefined || witness === undefined
+        || primary.mode !== 'non-mining' || witness.mode !== 'non-mining'
+        || checkpointExecutionContinuation === undefined
+      ) {
+        throw new Error(
+          'isolated Ergo checkpoint-bound execution requires one completed checkpoint observation',
+        );
+      }
+      if (trackerAdmissionMiningCredential === undefined) {
+        throw new Error(
+          'isolated tracker-admission mining credential is absent, consumed, or revoked',
+        );
+      }
+      if (typeof action !== 'function') {
+        throw new Error('isolated Ergo checkpoint-bound execution action is required');
+      }
+      activeOperation = 'checkpoint-execution';
+      try {
+        const continuation = checkpointExecutionContinuation;
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        await stopOwnedNode(primary, true);
+        primary = undefined;
+        await stopOwnedNode(witness, true);
+        witness = undefined;
+        assertPortsUnowned(OWNED_PORTS);
+        recheckRuntimeFiles(input, runtime);
+
+        const credential = trackerAdmissionMiningCredential;
+        trackerAdmissionMiningCredential = undefined;
+        let launchedPrimary: OwnedNode | undefined;
+        consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          credential,
+          binding.miningTargetPublicKeyHex,
+          ephemeralMiningMnemonic => {
+            launchedPrimary = spawnOwnedNode(
+              input,
+              runtime!,
+              'primary',
+              'mining',
+              ephemeralMiningMnemonic,
+              continuation.extensionFields,
+            );
+          },
+        );
+        if (launchedPrimary === undefined) {
+          throw new Error(
+            'isolated Ergo checkpoint-bound primary mining process did not start',
+          );
+        }
+        primary = launchedPrimary;
+        await waitForBasicNodeReadiness(primary);
+        assertOwnedNodeIdentity(input, runtime, primary);
+        witness = spawnOwnedNode(
+          input,
+          runtime,
+          'witness',
+          'mining',
+          undefined,
+          continuation.extensionFields,
+        );
+        await waitForBasicNodeReadiness(witness);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        const preFreezeMiningSnapshot = await waitForCommonIndexedSnapshot(
+          primary,
+          witness,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        await stopOwnedNode(primary, true);
+        primary = undefined;
+        await stopOwnedNode(witness, true);
+        witness = undefined;
+        assertPortsUnowned(OWNED_PORTS);
+        recheckRuntimeFiles(input, runtime);
+        primary = spawnOwnedNode(
+          input,
+          runtime,
+          'primary',
+          'non-mining',
+          undefined,
+          continuation.extensionFields,
+        );
+        const frozenSnapshot = await waitForMinimumIndexedSnapshot(primary);
+        witness = spawnOwnedNode(
+          input,
+          runtime,
+          'witness',
+          'non-mining',
+          undefined,
+          continuation.extensionFields,
+        );
+        await waitForExactSnapshot(witness, frozenSnapshot, STARTUP_TIMEOUT_MS);
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        await assertStableExactSnapshot(primary, witness, frozenSnapshot);
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        const executionTargetIdentityDigestHex =
+          deriveExecutionTargetIdentityDigestHex(
+            input,
+            runtime,
+            binding,
+            continuation.extensionFields,
+          );
+        if (
+          executionTargetIdentityDigestHex
+            !== continuation.executionTargetIdentityDigestHex
+        ) {
+          throw new Error(
+            'isolated Ergo checkpoint-bound execution target identity changed',
+          );
+        }
+        const processBindingDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA,
+          executionTargetIdentityDigestHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          preFreezeMiningSnapshot,
+          actionStartSnapshot: frozenSnapshot,
+          primaryProcessId: processId(primary),
+          witnessProcessId: processId(witness),
+        }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_PROCESS_V2');
+        const target = Object.freeze({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false as const,
+          primaryReadOnly: true as const,
+          witnessReadOnly: true as const,
+          miningStopped: true as const,
+          checkpointBound: true as const,
+        });
+        const assertActiveProcesses = (): void => {
+          if (
+            state !== 'action' || primary === undefined || witness === undefined
+            || runtime === undefined || primary.mode !== 'non-mining'
+            || witness.mode !== 'non-mining'
+          ) {
+            throw new Error(
+              'isolated Ergo checkpoint-bound execution processes are not active',
+            );
+          }
+          assertOwnedNodeIdentity(input, runtime, primary);
+          assertOwnedNodeIdentity(input, runtime, witness);
+          assertOwnedListenerBindings(primary, witness);
+          recheckRuntimeFiles(input, runtime);
+        };
+        OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS.set(
+          target,
+          Object.freeze({
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            assertActiveProcesses,
+          }),
+        );
+        state = 'action';
+        ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS.delete(target);
+        }
+        state = 'read-only';
+
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        await assertStableExactSnapshot(primary, witness, frozenSnapshot);
+        const [actionEndSnapshot, witnessActionEndSnapshot] = await Promise.all([
+          readTargetSnapshot(primary),
+          readTargetSnapshot(witness),
+        ]);
+        assertExactSnapshot(actionEndSnapshot, frozenSnapshot, 'primary');
+        assertExactSnapshot(witnessActionEndSnapshot, frozenSnapshot, 'witness');
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+        checkpointExecutionContinuation = undefined;
+
+        const receipt:
+          SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV2Receipt =
+          Object.freeze({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA,
+            version: 2 as const,
+            primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+            witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+            primaryMiningDuringAction: false as const,
+            primaryReadOnlyDuringAction: true as const,
+            witnessReadOnlyDuringAction: true as const,
+            miningStoppedBeforeAction: true as const,
+            exactFrozenSnapshotStableAcrossAction: true as const,
+            checkpointExtensionBoundDuringAction: true as const,
+            trackerAdmissionMiningCredentialConsumedOnce: true as const,
+            checkpointSnapshotRevalidatedOnBothNodes: true as const,
+            checkpointExtensionObservationDigestHex:
+              continuation.checkpointExtensionObservationDigestHex,
+            buildIdentityDigestHex: input.buildIdentityDigestHex,
+            executableIdentityDigestHex: input.executableIdentityDigestHex,
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
+            extensionValueHex: continuation.extensionValueHex,
+            extensionFieldsSha256Hex:
+              continuation.extensionFieldsSha256Hex,
+            checkpointSnapshot: continuation.checkpointSnapshot,
+            preFreezeMiningSnapshot,
+            actionStartSnapshot: frozenSnapshot,
+            actionEndSnapshot,
+          });
+        trackerReservationFreshnessContinuation = Object.freeze({
+          processBindingDigestHex,
+          executionTargetIdentityDigestHex,
+          extensionValueHex: continuation.extensionValueHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          checkpointExtensionObservationDigestHex:
+            continuation.checkpointExtensionObservationDigestHex,
+          frozenSnapshot: actionEndSnapshot,
+        });
+        return Object.freeze({ value, receipt });
+      } catch (error) {
+        return await failWithCleanup(error);
+      } finally {
+        activeOperation = undefined;
+      }
+    },
+    withCheckpointBoundReservationFreshnessRevalidationTarget: async <T>(
+      action: (
+        target: Readonly<
+          SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+        >,
+      ) => Promise<T>,
+    ) => {
+      if (
+        state !== 'read-only' || activeOperation !== undefined
+        || runtime === undefined || primary === undefined || witness === undefined
+        || primary.mode !== 'non-mining' || witness.mode !== 'non-mining'
+        || trackerReservationFreshnessContinuation === undefined
+      ) {
+        throw new Error(
+          'isolated tracker reservation freshness requires one completed frozen tracker check',
+        );
+      }
+      if (typeof action !== 'function') {
+        throw new Error(
+          'isolated tracker reservation freshness action is required',
+        );
+      }
+      activeOperation = 'checkpoint-freshness';
+      try {
+        const continuation = trackerReservationFreshnessContinuation;
+        trackerReservationFreshnessContinuation = undefined;
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.frozenSnapshot,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+        const [actionStartSnapshot, witnessActionStartSnapshot] =
+          await Promise.all([
+            readTargetSnapshot(primary),
+            readTargetSnapshot(witness),
+          ]);
+        assertExactSnapshot(
+          actionStartSnapshot,
+          continuation.frozenSnapshot,
+          'primary',
+        );
+        assertExactSnapshot(
+          witnessActionStartSnapshot,
+          continuation.frozenSnapshot,
+          'witness',
+        );
+
+        const executionTargetIdentityDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+          trackerCheckExecutionTargetIdentityDigestHex:
+            continuation.executionTargetIdentityDigestHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          trackerCheckSnapshot: continuation.frozenSnapshot,
+        });
+        const processBindingDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+          executionTargetIdentityDigestHex,
+          trackerCheckProcessBindingDigestHex:
+            continuation.processBindingDigestHex,
+          primaryProcessId: processId(primary),
+          witnessProcessId: processId(witness),
+          actionStartSnapshot,
+        });
+
+        const target = Object.freeze({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false as const,
+          primaryReadOnly: true as const,
+          witnessReadOnly: true as const,
+          miningStopped: true as const,
+          checkpointBound: true as const,
+          reservationFreshnessRevalidation: true as const,
+        });
+        const assertActiveProcesses = (): void => {
+          if (
+            state !== 'action' || primary === undefined || witness === undefined
+            || runtime === undefined || primary.mode !== 'non-mining'
+            || witness.mode !== 'non-mining'
+          ) {
+            throw new Error(
+              'isolated tracker reservation freshness processes are not active',
+            );
+          }
+          assertOwnedNodeIdentity(input, runtime, primary);
+          assertOwnedNodeIdentity(input, runtime, witness);
+          assertOwnedListenerBindings(primary, witness);
+          recheckRuntimeFiles(input, runtime);
+        };
+        OWNED_TRACKER_RESERVATION_FRESHNESS_TARGET_BINDINGS.set(
+          target,
+          Object.freeze({
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            assertActiveProcesses,
+          }),
+        );
+        state = 'action';
+        ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS.delete(target);
+        }
+        state = 'read-only';
+
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.frozenSnapshot,
+        );
+        const [actionEndSnapshot, witnessActionEndSnapshot] = await Promise.all([
+          readTargetSnapshot(primary),
+          readTargetSnapshot(witness),
+        ]);
+        assertExactSnapshot(
+          actionEndSnapshot,
+          continuation.frozenSnapshot,
+          'primary',
+        );
+        assertExactSnapshot(
+          witnessActionEndSnapshot,
+          continuation.frozenSnapshot,
+          'witness',
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        const receipt:
+          SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessExecutionV1Receipt =
+          Object.freeze({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+            version: 1 as const,
+            primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+            witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+            primaryReadOnlyDuringAction: true as const,
+            witnessReadOnlyDuringAction: true as const,
+            miningStoppedBeforeAction: true as const,
+            exactFrozenSnapshotStableAcrossAction: true as const,
+            sameProcessesAsTrackerCheck: true as const,
+            buildIdentityDigestHex: input.buildIdentityDigestHex,
+            executableIdentityDigestHex: input.executableIdentityDigestHex,
+            trackerCheckProcessBindingDigestHex:
+              continuation.processBindingDigestHex,
+            trackerCheckExecutionTargetIdentityDigestHex:
+              continuation.executionTargetIdentityDigestHex,
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            trackerCheckSnapshot: continuation.frozenSnapshot,
+            actionStartSnapshot,
+            actionEndSnapshot,
+            checkpointExtensionBoundDuringAction: true as const,
+            checkpointSnapshotRevalidatedOnBothNodes: true as const,
+            checkpointExtensionObservationDigestHex:
+              continuation.checkpointExtensionObservationDigestHex,
+            extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
+            extensionValueHex: continuation.extensionValueHex,
+            extensionFieldsSha256Hex:
+              continuation.extensionFieldsSha256Hex,
+            checkpointSnapshot: continuation.checkpointSnapshot,
+          });
+        trackerTransportContinuation = Object.freeze({
+          reservationFreshnessTarget: target,
+          reservationFreshnessProcessBindingDigestHex: processBindingDigestHex,
+          reservationFreshnessExecutionTargetIdentityDigestHex:
+            executionTargetIdentityDigestHex,
+          extensionValueHex: continuation.extensionValueHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          checkpointExtensionObservationDigestHex:
+            continuation.checkpointExtensionObservationDigestHex,
+          frozenSnapshot: actionEndSnapshot,
+        });
+        return Object.freeze({ value, receipt });
+      } catch (error) {
+        return await failWithCleanup(error);
+      } finally {
+        activeOperation = undefined;
+      }
+    },
+    withCheckpointBoundTrackerTransportTarget: async <T>(
+      completion: Readonly<
+        SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
+      >,
+      action: (
+        target: Readonly<
+          SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1
+        >,
+      ) => Promise<T>,
+    ) => {
+      if (
+        state !== 'read-only' || activeOperation !== undefined
+        || runtime === undefined || primary === undefined || witness === undefined
+        || primary.mode !== 'non-mining' || witness.mode !== 'non-mining'
+        || trackerTransportContinuation === undefined
+      ) {
+        throw new Error(
+          'isolated tracker transport requires one completed reservation freshness check',
+        );
+      }
+      if (typeof action !== 'function') {
+        throw new Error('isolated tracker transport action is required');
+      }
+      const completionBinding =
+        OWNED_TRACKER_RESERVATION_FRESHNESS_COMPLETIONS.get(completion);
+      if (
+        completionBinding === undefined
+        || completionBinding.target
+          !== trackerTransportContinuation.reservationFreshnessTarget
+        || completionBinding.binding.processBindingDigestHex
+          !== trackerTransportContinuation
+            .reservationFreshnessProcessBindingDigestHex
+        || completionBinding.binding.executionTargetIdentityDigestHex
+          !== trackerTransportContinuation
+            .reservationFreshnessExecutionTargetIdentityDigestHex
+      ) {
+        throw new Error(
+          'isolated tracker transport lacks exact reservation freshness completion',
+        );
+      }
+      OWNED_TRACKER_RESERVATION_FRESHNESS_COMPLETIONS.delete(completion);
+      activeOperation = 'tracker-transport';
+      try {
+        const continuation = trackerTransportContinuation;
+        trackerTransportContinuation = undefined;
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.frozenSnapshot,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+        const [actionStartSnapshot, witnessActionStartSnapshot] =
+          await Promise.all([
+            readTargetSnapshot(primary),
+            readTargetSnapshot(witness),
+          ]);
+        assertExactSnapshot(
+          actionStartSnapshot,
+          continuation.frozenSnapshot,
+          'primary',
+        );
+        assertExactSnapshot(
+          witnessActionStartSnapshot,
+          continuation.frozenSnapshot,
+          'witness',
+        );
+
+        const executionTargetIdentityDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
+          reservationFreshnessExecutionTargetIdentityDigestHex:
+            continuation.reservationFreshnessExecutionTargetIdentityDigestHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          reservationFreshnessSnapshot: continuation.frozenSnapshot,
+        });
+        const processBindingDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
+          executionTargetIdentityDigestHex,
+          reservationFreshnessProcessBindingDigestHex:
+            continuation.reservationFreshnessProcessBindingDigestHex,
+          primaryProcessId: processId(primary),
+          witnessProcessId: processId(witness),
+          actionStartSnapshot,
+        });
+        const target = Object.freeze({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false as const,
+          witnessReadOnly: true as const,
+          miningStopped: true as const,
+          checkpointBound: true as const,
+          reservationFreshnessCheckBound: true as const,
+          trackerTransport: true as const,
+        });
+        const assertActiveProcesses = (): void => {
+          if (
+            state !== 'action' || primary === undefined || witness === undefined
+            || runtime === undefined || primary.mode !== 'non-mining'
+            || witness.mode !== 'non-mining'
+          ) {
+            throw new Error(
+              'isolated tracker transport processes are not active',
+            );
+          }
+          assertOwnedNodeIdentity(input, runtime, primary);
+          assertOwnedNodeIdentity(input, runtime, witness);
+          assertOwnedListenerBindings(primary, witness);
+          recheckRuntimeFiles(input, runtime);
+        };
+        OWNED_TRACKER_TRANSPORT_TARGET_BINDINGS.set(
+          target,
+          Object.freeze({
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            reservationFreshnessProcessBindingDigestHex:
+              continuation.reservationFreshnessProcessBindingDigestHex,
+            reservationFreshnessExecutionTargetIdentityDigestHex:
+              continuation.reservationFreshnessExecutionTargetIdentityDigestHex,
+            assertActiveProcesses,
+          }),
+        );
+        state = 'action';
+        ACTIVE_OWNED_TRACKER_TRANSPORT_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_TRACKER_TRANSPORT_TARGETS.delete(target);
+        }
+        state = 'read-only';
+
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.frozenSnapshot,
+        );
+        const [actionEndSnapshot, witnessActionEndSnapshot] = await Promise.all([
+          readTargetSnapshot(primary),
+          readTargetSnapshot(witness),
+        ]);
+        assertExactSnapshot(
+          actionEndSnapshot,
+          continuation.frozenSnapshot,
+          'primary',
+        );
+        assertExactSnapshot(
+          witnessActionEndSnapshot,
+          continuation.frozenSnapshot,
+          'witness',
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        const receipt:
+          SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV1Receipt =
+          Object.freeze({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
+            version: 1 as const,
+            primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+            witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+            primaryMiningStoppedDuringAction: true as const,
+            trackerTransportTargetActiveOnlyDuringAction: true as const,
+            witnessReadOnlyDuringAction: true as const,
+            miningStoppedBeforeAction: true as const,
+            exactFrozenChainSnapshotStableAcrossAction: true as const,
+            sameProcessesAsReservationFreshness: true as const,
+            buildIdentityDigestHex: input.buildIdentityDigestHex,
+            executableIdentityDigestHex: input.executableIdentityDigestHex,
+            reservationFreshnessProcessBindingDigestHex:
+              continuation.reservationFreshnessProcessBindingDigestHex,
+            reservationFreshnessExecutionTargetIdentityDigestHex:
+              continuation.reservationFreshnessExecutionTargetIdentityDigestHex,
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            reservationFreshnessSnapshot: continuation.frozenSnapshot,
+            actionStartSnapshot,
+            actionEndSnapshot,
+            checkpointExtensionBoundDuringAction: true as const,
+            checkpointSnapshotRevalidatedOnBothNodes: true as const,
+            checkpointExtensionObservationDigestHex:
+              continuation.checkpointExtensionObservationDigestHex,
+            extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
+            extensionValueHex: continuation.extensionValueHex,
+            extensionFieldsSha256Hex:
+              continuation.extensionFieldsSha256Hex,
+            checkpointSnapshot: continuation.checkpointSnapshot,
+          });
+        trackerConfirmationContinuation = Object.freeze({
+          trackerTransportProcessBindingDigestHex: processBindingDigestHex,
+          trackerTransportExecutionTargetIdentityDigestHex:
+            executionTargetIdentityDigestHex,
+          extensionValueHex: continuation.extensionValueHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          checkpointExtensionObservationDigestHex:
+            continuation.checkpointExtensionObservationDigestHex,
+          transportSnapshot: actionEndSnapshot,
+        });
+        return Object.freeze({ value, receipt });
+      } catch (error) {
+        return await failWithCleanup(error);
+      } finally {
+        activeOperation = undefined;
+      }
+    },
+    withTrackerTransportConfirmationMiningTarget: async <T>(
+      expectedTransactionIdHexValue: string,
+      action: (
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => Promise<T>,
+    ) => {
+      if (
+        state !== 'read-only' || activeOperation !== undefined
+        || runtime === undefined || primary === undefined || witness === undefined
+        || primary.mode !== 'non-mining' || witness.mode !== 'non-mining'
+        || trackerConfirmationContinuation === undefined
+      ) {
+        throw new Error(
+          'isolated tracker confirmation requires one completed transport attempt',
+        );
+      }
+      if (trackerConfirmationMiningCredential === undefined) {
+        throw new Error(
+          'isolated tracker-confirmation mining credential is absent, consumed, or revoked',
+        );
+      }
+      if (typeof action !== 'function') {
+        throw new Error('isolated tracker confirmation action is required');
+      }
+      const confirmedTransactionIdHex = fixedHex(
+        expectedTransactionIdHexValue,
+        32,
+        'isolated tracker confirmation transaction ID',
+      );
+      activeOperation = 'tracker-confirmation';
+      try {
+        const continuation = trackerConfirmationContinuation;
+        trackerConfirmationContinuation = undefined;
+        await assertStableExactSnapshot(
+          primary,
+          witness,
+          continuation.transportSnapshot,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        await stopOwnedNode(primary, true);
+        primary = undefined;
+        await stopOwnedNode(witness, true);
+        witness = undefined;
+        assertPortsUnowned(OWNED_PORTS);
+        recheckRuntimeFiles(input, runtime);
+
+        const credential = trackerConfirmationMiningCredential;
+        trackerConfirmationMiningCredential = undefined;
+        let launchedPrimary: OwnedNode | undefined;
+        consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          credential,
+          binding.miningTargetPublicKeyHex,
+          ephemeralMiningMnemonic => {
+            launchedPrimary = spawnOwnedNode(
+              input,
+              runtime!,
+              'primary',
+              'mining',
+              ephemeralMiningMnemonic,
+              `${CHECKPOINT_EXTENSION_KEY_HEX}:${continuation.extensionValueHex}`,
+            );
+          },
+        );
+        if (launchedPrimary === undefined) {
+          throw new Error(
+            'isolated tracker-confirmation primary mining process did not start',
+          );
+        }
+        primary = launchedPrimary;
+        await waitForBasicNodeReadiness(primary);
+        assertOwnedNodeIdentity(input, runtime, primary);
+        witness = spawnOwnedNode(
+          input,
+          runtime,
+          'witness',
+          'mining',
+          undefined,
+          `${CHECKPOINT_EXTENSION_KEY_HEX}:${continuation.extensionValueHex}`,
+        );
+        await waitForBasicNodeReadiness(witness);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        const initialSnapshot = await waitForCommonIndexedSnapshot(
+          primary,
+          witness,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        const executionTargetIdentityDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
+          trackerTransportExecutionTargetIdentityDigestHex:
+            continuation.trackerTransportExecutionTargetIdentityDigestHex,
+          confirmedTransactionIdHex,
+          extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+          checkpointSnapshot: continuation.checkpointSnapshot,
+          transportSnapshot: continuation.transportSnapshot,
+        });
+        const processBindingDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
+          executionTargetIdentityDigestHex,
+          trackerTransportProcessBindingDigestHex:
+            continuation.trackerTransportProcessBindingDigestHex,
+          primaryProcessId: processId(primary),
+          witnessProcessId: processId(witness),
+          initialSnapshot,
+        });
+        const target = Object.freeze({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: true as const,
+          witnessReadOnly: true as const,
+        });
+        const assertActiveProcesses = (): void => {
+          if (
+            state !== 'action' || primary === undefined || witness === undefined
+            || runtime === undefined || primary.mode !== 'mining'
+          ) {
+            throw new Error(
+              'isolated tracker-confirmation processes are not active',
+            );
+          }
+          assertOwnedNodeIdentity(input, runtime, primary);
+          assertOwnedNodeIdentity(input, runtime, witness);
+          assertOwnedListenerBindings(primary, witness);
+          recheckRuntimeFiles(input, runtime);
+        };
+        OWNED_EXECUTION_TARGET_BINDINGS.set(target, Object.freeze({
+          processBindingDigestHex,
+          executionTargetIdentityDigestHex,
+          assertActiveProcesses,
+        }));
+        state = 'action';
+        ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
+        let value: T;
+        try {
+          value = await runManagedAction(action, target);
+        } finally {
+          ACTIVE_OWNED_EXECUTION_TARGETS.delete(target);
+        }
+        state = 'mining';
+
+        assertOwnedNodeIdentity(input, runtime, primary);
+        assertOwnedNodeIdentity(input, runtime, witness);
+        assertOwnedListenerBindings(primary, witness);
+        const finalSnapshot = await waitForCommonIndexedSnapshot(
+          primary,
+          witness,
+        );
+        await assertCheckpointRemainsCanonical(
+          primary,
+          witness,
+          continuation.checkpointSnapshot,
+        );
+        recheckRuntimeFiles(input, runtime);
+
+        const receipt:
+          SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt =
+          Object.freeze({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
+            version: 1 as const,
+            primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+            witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+            primaryMiningDuringAction: true as const,
+            witnessReadOnlyDuringAction: true as const,
+            buildIdentityDigestHex: input.buildIdentityDigestHex,
+            executableIdentityDigestHex: input.executableIdentityDigestHex,
+            processBindingDigestHex,
+            executionTargetIdentityDigestHex,
+            initialSnapshot,
+            finalSnapshot,
+            trackerConfirmationMiningCredentialConsumedOnce: true as const,
+            exactTrackerTransportBound: true as const,
+            confirmedTransactionIdHex,
+            trackerTransportProcessBindingDigestHex:
+              continuation.trackerTransportProcessBindingDigestHex,
+            trackerTransportExecutionTargetIdentityDigestHex:
+              continuation.trackerTransportExecutionTargetIdentityDigestHex,
+            checkpointExtensionBoundDuringAction: true as const,
+            checkpointSnapshotRevalidatedOnBothNodes: true as const,
+            checkpointExtensionObservationDigestHex:
+              continuation.checkpointExtensionObservationDigestHex,
+            extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
+            extensionValueHex: continuation.extensionValueHex,
+            extensionFieldsSha256Hex: continuation.extensionFieldsSha256Hex,
+            checkpointSnapshot: continuation.checkpointSnapshot,
+            transportSnapshot: continuation.transportSnapshot,
+          });
+        return Object.freeze({ value, receipt });
+      } catch (error) {
+        return await failWithCleanup(error);
+      } finally {
+        activeOperation = undefined;
+      }
+    },
     stop,
   });
 }
@@ -1312,6 +2607,8 @@ function normalizeProcessConstruction(
   checkpointMiningCredentialValue?:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
   trackerAdmissionMiningCredentialValue?:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
+  trackerConfirmationMiningCredentialValue?:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>,
 ): Readonly<{
   readonly input: Readonly<NormalizedProcessInput>;
@@ -1356,6 +2653,23 @@ function normalizeProcessConstruction(
         );
       }
     }
+    if (trackerConfirmationMiningCredentialValue !== undefined) {
+      assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerConfirmationMiningCredentialValue,
+        binding.miningTargetPublicKeyHex,
+      );
+      if (
+        trackerConfirmationMiningCredentialValue === miningCredentialValue
+        || trackerConfirmationMiningCredentialValue
+          === checkpointMiningCredentialValue
+        || trackerConfirmationMiningCredentialValue
+          === trackerAdmissionMiningCredentialValue
+      ) {
+        throw new Error(
+          'isolated tracker-confirmation mining credential must be independently one-shot',
+        );
+      }
+    }
     return Object.freeze({ input, binding });
   } catch (error) {
     revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
@@ -1377,6 +2691,18 @@ function normalizeProcessConstruction(
     ) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         trackerAdmissionMiningCredentialValue,
+      );
+    }
+    if (
+      trackerConfirmationMiningCredentialValue !== undefined
+      && trackerConfirmationMiningCredentialValue !== miningCredentialValue
+      && trackerConfirmationMiningCredentialValue
+        !== checkpointMiningCredentialValue
+      && trackerConfirmationMiningCredentialValue
+        !== trackerAdmissionMiningCredentialValue
+    ) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerConfirmationMiningCredentialValue,
       );
     }
     throw error;
@@ -1867,54 +3193,12 @@ export function deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObserva
   primaryObservationDigestHex: string,
   witnessObservationDigestHex: string,
 ): string {
-  const normalizedCheckpoint = Object.freeze({
-    network: checkpoint.network,
-    fullHeight: nonnegativeInteger(
-      checkpoint.fullHeight,
-      'isolated Ergo checkpoint full height',
-    ),
-    indexedHeight: nonnegativeInteger(
-      checkpoint.indexedHeight,
-      'isolated Ergo checkpoint indexed height',
-    ),
-    headerIdHex: fixedHex(
-      checkpoint.headerIdHex,
-      32,
-      'isolated Ergo checkpoint header ID',
-    ),
-  });
-  if (
-    normalizedCheckpoint.network !== 'devnet'
-    || normalizedCheckpoint.indexedHeight !== normalizedCheckpoint.fullHeight
-  ) {
-    throw new Error('isolated Ergo checkpoint snapshot is not fully indexed devnet state');
-  }
-  const normalizedExtensionValueHex = fixedHex(
+  return deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromNodeDigestsV1(
+    checkpoint,
     expectedExtensionValueHex,
-    64,
-    'isolated Ergo checkpoint extension value',
-  );
-  const normalizedPrimaryDigestHex = digest(
     primaryObservationDigestHex,
-    'isolated Ergo primary checkpoint extension observation digest',
-  );
-  const normalizedWitnessDigestHex = digest(
     witnessObservationDigestHex,
-    'isolated Ergo witness checkpoint extension observation digest',
   );
-  if (normalizedPrimaryDigestHex !== normalizedWitnessDigestHex) {
-    throw new Error(
-      'isolated Ergo checkpoint extension observations disagree',
-    );
-  }
-  return sha256CanonicalJson({
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_PROCESS_V1_SCHEMA,
-    checkpoint: normalizedCheckpoint,
-    extensionKeyHex: CHECKPOINT_EXTENSION_KEY_HEX,
-    extensionValueHex: normalizedExtensionValueHex,
-    primaryObservationDigestHex: normalizedPrimaryDigestHex,
-    witnessObservationDigestHex: normalizedWitnessDigestHex,
-  }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_EXTENSION_OBSERVATION_V1');
 }
 
 async function observeExactCheckpointExtension(
@@ -2041,14 +3325,19 @@ export function deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObs
       `isolated Ergo ${role} checkpoint extension root changed`,
     );
   }
-  return sha256CanonicalJson({
-    headerIdHex,
-    height: identity.height,
+  return deriveSubstrateFederatedIsolatedDevnetCanonicalCheckpointExtensionNodeObservationDigestV1({
+    checkpoint: {
+      network: 'devnet',
+      fullHeight: identity.height,
+      indexedHeight: identity.height,
+      headerIdHex,
+    },
+    expectedExtensionValueHex: normalizedExtensionValueHex,
     canonicalHeaderBytesHex: canonicalHeaderBytes.toString('hex'),
     extensionRootHex,
-    fields,
+    extensionFields: fields,
     extensionMembershipProofHex: membership.proof.toString('hex'),
-  }, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_EXTENSION_NODE_OBSERVATION_V1');
+  });
 }
 
 async function waitForExactSnapshot(

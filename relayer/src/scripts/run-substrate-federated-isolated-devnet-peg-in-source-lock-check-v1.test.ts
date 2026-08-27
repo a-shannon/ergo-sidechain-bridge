@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, parse, resolve } from 'node:path';
+import { delimiter, dirname, join, parse, resolve, sep } from 'node:path';
 
 import {
   beforeEach,
@@ -407,6 +407,57 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       restoreEnvironment('Path', originalPath);
       restoreEnvironment('LIB', originalLib);
       rmSync(cargoHome, { recursive: true, force: true });
+    }
+  });
+
+  it('filters normalized worktree PATH origins without weakening path safety', () => {
+    const originalPath = process.env.Path;
+    const fakeWorktree = mkdtempSync(join(tmpdir(), 'isolated-worker-worktree-'));
+    const cargoHome = mkdtempSync(join(tmpdir(), 'isolated-worker-cargo-home-'));
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'isolated-worker-outside-'));
+    const externalBin = dirname(process.execPath);
+    const linkedParent = join(fakeWorktree, 'relayer', 'node_modules');
+    const linkedBin = join(linkedParent, '.bin');
+    const insideBin = join(fakeWorktree, 'relayer', 'inside-bin');
+    const outsideJunction = join(outsideRoot, 'inside-bin-link');
+    const systemBin = join(process.env.SystemRoot ?? '', 'System32');
+    mkdirSync(linkedParent, { recursive: true });
+    mkdirSync(insideBin, { recursive: true });
+    symlinkSync(externalBin, linkedBin, 'junction');
+    symlinkSync(insideBin, outsideJunction, 'junction');
+    try {
+      const dotDotWorktreeEntry =
+        `${linkedParent}${sep}..${sep}node_modules${sep}.bin`;
+      expect(dotDotWorktreeEntry).toContain(`${sep}..${sep}`);
+      for (const worktreeEntry of [
+        linkedBin,
+        dotDotWorktreeEntry,
+        linkedBin.toUpperCase(),
+      ]) {
+        process.env.Path = [worktreeEntry, systemBin].join(delimiter);
+        const environment = childEnvironment(fakeWorktree, {
+          cargoHomeDirectory: cargoHome,
+        });
+        const childPath = environment.Path?.split(delimiter) ?? [];
+        expect(childPath).toEqual([systemBin]);
+        expect(childPath).not.toContain(externalBin);
+        expect(childPath).not.toContain(worktreeEntry);
+      }
+
+      process.env.Path = [outsideJunction, systemBin].join(delimiter);
+      expect(() => childEnvironment(fakeWorktree, {
+        cargoHomeDirectory: cargoHome,
+      })).toThrow('Path must be one link-free non-sensitive directory');
+
+      process.env.Path = ['relayer/node_modules/.bin', systemBin].join(delimiter);
+      expect(() => childEnvironment(fakeWorktree, {
+        cargoHomeDirectory: cargoHome,
+      })).toThrow('Path contains an unsafe path');
+    } finally {
+      restoreEnvironment('Path', originalPath);
+      rmSync(fakeWorktree, { recursive: true, force: true });
+      rmSync(cargoHome, { recursive: true, force: true });
+      rmSync(outsideRoot, { recursive: true, force: true });
     }
   });
 
