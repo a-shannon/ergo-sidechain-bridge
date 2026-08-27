@@ -31,14 +31,14 @@ import {
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 import {
   isKnownFrozenObservedAnchorTrackerCheckCampaignBindingLabelV7,
-  isKnownFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7,
-  type FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7,
 } from './run-substrate-federated-isolated-devnet-peg-in-frozen-observed-anchor-tracker-check-campaign-receipt-v7.js';
 import {
+  isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
   parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9,
   parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9,
   type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9,
   type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
 } from './run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v9.js';
 
 const WORKER_TIMEOUT_MS = 150 * 60_000;
@@ -78,12 +78,13 @@ const workerDiagnosticHints = new WeakSet<object>();
 
 class TrackerTransportCampaignWorkerDiagnosticHintV9 extends Error {
   readonly binding: string | undefined;
-  readonly phase: FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7 | undefined;
+  readonly phase:
+    SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 | undefined;
   readonly authoritative = false;
 
   constructor(diagnostic: Readonly<{
     readonly binding?: string;
-    readonly phase?: FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7;
+    readonly phase?: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9;
   }>) {
     super('isolated tracker transport campaign worker diagnostic hint');
     this.name = 'TrackerTransportCampaignWorkerDiagnosticHintV9';
@@ -105,7 +106,7 @@ function isWorkerDiagnosticHint(
       isKnownFrozenObservedAnchorTrackerCheckCampaignBindingLabelV7(
         (error as { readonly binding?: unknown }).binding,
       )
-      || isKnownFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(
+      || isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
         (error as { readonly phase?: unknown }).phase,
       )
     );
@@ -388,7 +389,7 @@ function parseSafeWorkerDiagnostic(
   stderr: string,
 ): Readonly<{
   readonly binding?: string;
-  readonly phase?: FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7;
+  readonly phase?: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9;
 }> | undefined {
   if (!stderr.endsWith('\n')) return undefined;
   const line = stderr.slice(0, -1);
@@ -401,7 +402,9 @@ function parseSafeWorkerDiagnostic(
   }
   if (line.startsWith(SAFE_WORKER_PHASE_FAILURE_PREFIX)) {
     const phase = line.slice(SAFE_WORKER_PHASE_FAILURE_PREFIX.length);
-    return isKnownFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(phase)
+    return isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+      phase,
+    )
       ? Object.freeze({ phase })
       : undefined;
   }

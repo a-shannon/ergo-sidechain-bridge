@@ -28,6 +28,7 @@ import {
 const mocks = vi.hoisted(() => ({
   assertRootReceipt: vi.fn(),
   loadRequest: vi.fn(),
+  projectManagedPhase: vi.fn(),
   projectRootFailure: vi.fn(),
   resolveDirectory: vi.fn(),
   runRoot: vi.fn(),
@@ -50,6 +51,14 @@ vi.mock(
 );
 
 vi.mock(
+  '../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js',
+  () => ({
+    projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9:
+      mocks.projectManagedPhase,
+  }),
+);
+
+vi.mock(
   './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js',
   () => ({
     loadCanonicalBootstrapRequestBoundWithProvenanceV1: mocks.loadRequest,
@@ -65,6 +74,7 @@ vi.mock(
 
 import {
   formatSafeTrackerTransportCampaignWorkerFailureV9,
+  isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
   parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9,
   parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9,
   resolveCanonicalWorkerRootsV9,
@@ -114,6 +124,7 @@ describe('isolated tracker transport campaign worker V9', () => {
     relayerCargoRoot = directory(root, 'relayer-cargo');
     previousCargoHome = process.env.CARGO_HOME;
     process.env.CARGO_HOME = relayerCargoRoot;
+    mocks.projectManagedPhase.mockReturnValue(null);
     mocks.projectRootFailure.mockReturnValue(null);
     mocks.resolveDirectory.mockImplementation((value: string) =>
       realpathSync(value));
@@ -578,6 +589,43 @@ describe('isolated tracker transport campaign worker V9', () => {
         expectedPegIn,
       )
     ).toThrow(/duplicate/iu);
+  });
+
+  it.each([
+    'ergo node build',
+    'node startup and mining',
+  ] as const)('projects process-issued managed phase %s without leaking its cause', async workerPhase => {
+    const privateDiagnostic = `private ${workerPhase} diagnostic under ${root}`;
+    const rootFailure = new Error(privateDiagnostic);
+    mocks.runRoot.mockRejectedValueOnce(rootFailure);
+    mocks.projectManagedPhase.mockImplementation((value: unknown) =>
+      value === rootFailure ? workerPhase : null);
+
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(
+        argumentsFor(journalRoot),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    const output = formatSafeTrackerTransportCampaignWorkerFailureV9(failure);
+    expect(output).toBe(
+      `isolated tracker transport campaign worker failed: phase failed: ${workerPhase}\n`,
+    );
+    expect(output).not.toContain(privateDiagnostic);
+    expect(output).not.toContain(root);
+    expect(
+      isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+        workerPhase,
+      ),
+    ).toBe(true);
+    expect(
+      isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+        privateDiagnostic,
+      ),
+    ).toBe(false);
   });
 
   it('projects an untyped pre-transport root failure to one finite safe phase', async () => {

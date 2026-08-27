@@ -23,6 +23,9 @@ import {
 import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
+import {
+  projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
+} from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
 
 const mocked = vi.hoisted(() => ({
   build: vi.fn(),
@@ -2937,6 +2940,90 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ).toThrow(/lacks exact runtime provenance/);
   });
 
+  it.each([
+    ['build', 'ergo node build'],
+    ['setup', 'setup and packet session'],
+  ] as const)('projects only the finite V9 %s phase before node construction', async (
+    boundary,
+    expectedPhase,
+  ) => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), `e2s-tracker-${boundary}-phase-`),
+    );
+    const privateDiagnostic =
+      `synthetic private ${boundary} failure under ${journalRoot}`;
+    const rejected = new Error(privateDiagnostic);
+    if (boundary === 'build') {
+      mocked.build.mockRejectedValueOnce(rejected);
+    } else {
+      mocked.setup.mockRejectedValueOnce(rejected);
+    }
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe(expectedPhase);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          new AggregateError([failure, new Error('cleanup failed')]),
+        ),
+      ).toBeNull();
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          new Error(privateDiagnostic),
+        ),
+      ).toBeNull();
+      expect(mocked.process).not.toHaveBeenCalled();
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('projects the V9 node-start phase across teardown aggregation', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-node-start-phase-'),
+    );
+    const privateDiagnostic = `synthetic private node failure under ${journalRoot}`;
+    processSession.startMining.mockRejectedValueOnce(
+      new Error(privateDiagnostic),
+    );
+    processSession.stop.mockRejectedValueOnce(
+      new Error(`synthetic private teardown failure under ${journalRoot}`),
+    );
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe('node startup and mining');
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(processSession.stop).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
   it('records and canonically confirms one durable tracker transport attempt before teardown', async () => {
     const journalRoot = mkdtempSync(
       join(tmpdir(), 'e2s-tracker-transport-root-'),
@@ -3086,6 +3173,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
         projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
           failure,
         );
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBeNull();
       expect(receipt).toMatchObject({
         schema:
           'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v9',
@@ -3152,6 +3244,17 @@ describe('isolated devnet genesis setup execution root V1', () => {
           new AggregateError([
             failure,
             new Error('synthetic cleanup failure'),
+          ]),
+        ),
+      ).toBe(receipt);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          new AggregateError([
+            new AggregateError([
+              failure,
+              new Error('synthetic reservation cleanup failure'),
+            ]),
+            new Error('synthetic campaign teardown failure'),
           ]),
         ),
       ).toBe(receipt);

@@ -22,16 +22,16 @@ import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
+  projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
+} from '../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
+import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
   loadCanonicalBootstrapRequestBoundWithProvenanceV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
 import {
-  createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7,
   readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7,
-  readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7,
-  type FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7,
 } from './run-substrate-federated-isolated-devnet-peg-in-frozen-observed-anchor-tracker-check-campaign-receipt-v7.js';
 import {
   explicitExistingLocalNonSensitivePath,
@@ -47,6 +47,29 @@ const FAILURE_RECEIPT_DIGEST_DOMAIN =
 const TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation-failure-diagnostic.v1' as const;
 const TRACKER_CANONICAL_CONFIRMATION_BUDGET_MS_V1 = 2 * 60_000;
+const TRACKER_TRANSPORT_WORKER_PHASES_V9 = Object.freeze([
+  'worker arguments',
+  'worker platform',
+  'worker roots',
+  'external roots',
+  'bootstrap request',
+  'campaign root',
+  'worker receipt',
+  'ergo node build',
+  'setup and packet session',
+  'node process construction',
+  'node startup and mining',
+  'managed setup execution',
+  'checkpoint anchor',
+  'observed tracker check',
+  'frozen tracker check',
+  'tracker reservation and transport',
+  'campaign teardown',
+] as const);
+const TRACKER_TRANSPORT_WORKER_PHASE_SET_V9: ReadonlySet<string> =
+  new Set(TRACKER_TRANSPORT_WORKER_PHASES_V9);
+export type SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 =
+  typeof TRACKER_TRANSPORT_WORKER_PHASES_V9[number];
 const TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1 = Object.freeze([
   'managed_deadline_elapsed',
   'confirmation_budget_elapsed',
@@ -175,13 +198,48 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWo
 const WORKER_FAILURE_RECEIPTS = new WeakMap<Error, Readonly<
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9
 >>();
+const WORKER_PHASE_FAILURES_V9 = new WeakMap<
+  Error,
+  SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9
+>();
+
+export function isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+  value: unknown,
+): value is SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 {
+  return typeof value === 'string'
+    && TRACKER_TRANSPORT_WORKER_PHASE_SET_V9.has(value);
+}
+
+function createTrackerTransportWorkerPhaseFailureV9(
+  phase: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
+  cause: unknown,
+): Error {
+  if (!isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+    phase,
+  )) {
+    throw new Error('tracker transport worker phase is invalid');
+  }
+  const failure = cause instanceof Error
+    ? cause
+    : new Error('isolated tracker transport campaign worker phase failed');
+  WORKER_PHASE_FAILURES_V9.set(failure, phase);
+  return failure;
+}
+
+function readTrackerTransportWorkerPhaseFailureV9(
+  error: unknown,
+): SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 | undefined {
+  return error instanceof Error
+    ? WORKER_PHASE_FAILURES_V9.get(error)
+    : undefined;
+}
 
 export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(
   argv: readonly string[],
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9
 >> {
-  let phase: FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7 =
+  let phase: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 =
     'worker arguments';
   try {
     assertArguments(argv);
@@ -282,8 +340,20 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
         projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
           error,
         );
-      if (rootFailure === null) throw error;
-      throw createWorkerFailure(rootFailure, argv[3]!, pegIn, error);
+      if (rootFailure !== null) {
+        throw createWorkerFailure(rootFailure, argv[3]!, pegIn, error);
+      }
+      const managedPhase =
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          error,
+        );
+      if (managedPhase !== null) {
+        throw createTrackerTransportWorkerPhaseFailureV9(
+          managedPhase,
+          error,
+        );
+      }
+      throw error;
     }
 
     phase = 'worker receipt';
@@ -296,12 +366,11 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       (error instanceof Error && WORKER_FAILURE_RECEIPTS.has(error))
       || readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7(error)
         !== undefined
-      || readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(error)
-        !== undefined
+      || readTrackerTransportWorkerPhaseFailureV9(error) !== undefined
     ) {
       throw error;
     }
-    throw createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7(
+    throw createTrackerTransportWorkerPhaseFailureV9(
       phase,
       error,
     );
@@ -507,8 +576,7 @@ export function formatSafeTrackerTransportCampaignWorkerFailureV9(
   if (binding !== undefined) {
     return `${WORKER_FAILURE_PREFIX}: producer-to-consumer binding changed: ${binding}\n`;
   }
-  const phase =
-    readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(error);
+  const phase = readTrackerTransportWorkerPhaseFailureV9(error);
   if (phase !== undefined) {
     return `${WORKER_FAILURE_PREFIX}: phase failed: ${phase}\n`;
   }

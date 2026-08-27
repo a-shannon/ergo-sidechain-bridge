@@ -233,29 +233,36 @@ describe('isolated tracker transport campaign command V9', () => {
     expect(() => readFileSync(outputPath, 'utf8')).toThrow();
   });
 
-  it('relays only allowlisted worker phases without publishing a receipt', async () => {
-    mocked.process.mockRejectedValue(new BoundedProcessExitError({
-      label: 'isolated tracker worker',
-      exitCode: 1,
-      stdout: '',
-      stderr:
-        'isolated tracker transport campaign worker failed: phase failed: campaign root\n',
-    }));
+  it.each([
+    'campaign root',
+    'ergo node build',
+    'node startup and mining',
+  ] as const)(
+    'relays only allowlisted worker phase %s without publishing a receipt',
+    async workerPhase => {
+      mocked.process.mockRejectedValue(new BoundedProcessExitError({
+        label: 'isolated tracker worker',
+        exitCode: 1,
+        stdout: '',
+        stderr:
+          `isolated tracker transport campaign worker failed: phase failed: ${workerPhase}\n`,
+      }));
 
-    let failure: unknown;
-    try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
-        argumentsFor(),
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+          argumentsFor(),
+        );
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(formatSafeTrackerTransportCampaignCommandFailureV9(failure)).toBe(
+        `isolated peg-in tracker transport campaign failed: untrusted worker phase hint: ${workerPhase}\n`,
       );
-    } catch (error) {
-      failure = error;
-    }
-
-    expect(formatSafeTrackerTransportCampaignCommandFailureV9(failure)).toBe(
-      'isolated peg-in tracker transport campaign failed: untrusted worker phase hint: campaign root\n',
-    );
-    expect(() => readFileSync(outputPath, 'utf8')).toThrow();
-  });
+      expect(() => readFileSync(outputPath, 'utf8')).toThrow();
+    },
+  );
 
   it('relays only allowlisted worker bindings without publishing a receipt', async () => {
     mocked.process.mockRejectedValue(new BoundedProcessExitError({

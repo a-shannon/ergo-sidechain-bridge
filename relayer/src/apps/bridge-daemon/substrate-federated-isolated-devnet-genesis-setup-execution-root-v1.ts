@@ -49,6 +49,11 @@ import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
+  createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9 as createTrackerTransportManagedCampaignPhaseFailureV9,
+  projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9 as projectTrackerTransportManagedCampaignPhaseFailureV9,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseV9 as TrackerTransportManagedCampaignPhaseV9,
+} from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
+import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
   normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
@@ -4306,32 +4311,34 @@ function projectDirectOrPrimaryAggregateFailureV1<T>(
   value: unknown,
   registry: WeakMap<Error, Readonly<T>>,
 ): Readonly<T> | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const direct = registry.get(value as Error);
-  if (direct !== undefined) return direct;
-  if (!isNativeError(value)) return null;
-  const errorsDescriptor = Object.getOwnPropertyDescriptor(value, 'errors');
-  if (
-    errorsDescriptor === undefined
-    || !('value' in errorsDescriptor)
-    || !Array.isArray(errorsDescriptor.value)
-    || isProxy(errorsDescriptor.value)
-  ) {
-    return null;
+  let current = value;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (typeof current !== 'object' || current === null) return null;
+    const direct = registry.get(current as Error);
+    if (direct !== undefined) return direct;
+    if (!isNativeError(current) || isProxy(current)) return null;
+    const errorsDescriptor = Object.getOwnPropertyDescriptor(
+      current,
+      'errors',
+    );
+    if (
+      errorsDescriptor === undefined
+      || !('value' in errorsDescriptor)
+      || !Array.isArray(errorsDescriptor.value)
+      || isProxy(errorsDescriptor.value)
+    ) {
+      return null;
+    }
+    const primaryDescriptor = Object.getOwnPropertyDescriptor(
+      errorsDescriptor.value,
+      '0',
+    );
+    if (primaryDescriptor === undefined || !('value' in primaryDescriptor)) {
+      return null;
+    }
+    current = primaryDescriptor.value;
   }
-  const primaryDescriptor = Object.getOwnPropertyDescriptor(
-    errorsDescriptor.value,
-    '0',
-  );
-  if (
-    primaryDescriptor === undefined
-    || !('value' in primaryDescriptor)
-    || typeof primaryDescriptor.value !== 'object'
-    || primaryDescriptor.value === null
-  ) {
-    return null;
-  }
-  return registry.get(primaryDescriptor.value as Error) ?? null;
+  return null;
 }
 
 /**
@@ -4376,7 +4383,20 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       requestBinding: requestCampaignBinding,
       journalRoot: trackerTransportJournalRoot,
     }),
-  );
+  ).catch(error => {
+    if (
+      projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        error,
+      ) !== null
+      || projectTrackerTransportManagedCampaignPhaseFailureV9(error) !== null
+    ) {
+      throw error;
+    }
+    throw createTrackerTransportManagedCampaignPhaseFailureV9(
+      'ergo node build',
+      error,
+    );
+  });
   const material = execution.trackerReservationFreshness;
   if (material === undefined || material.transport === undefined) {
     throw new Error(
@@ -4636,6 +4656,8 @@ async function runManagedCampaign(
   );
   assertCapabilityFreePlainData(built, 'isolated devnet node build result');
   deepFreeze(built);
+  let managedPhase: TrackerTransportManagedCampaignPhaseV9 =
+    'setup and packet session';
   let setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
   let packetSession:
@@ -4696,6 +4718,7 @@ async function runManagedCampaign(
       ?? claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(
         setupSession,
       );
+    managedPhase = 'node process construction';
     nodeSession = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
       processInput,
       launchBinding,
@@ -4705,7 +4728,9 @@ async function runManagedCampaign(
       credentialSequence?.trackerAdmissionMiningCredential,
       credentialSequence?.trackerConfirmationMiningCredential,
     );
+    managedPhase = 'node startup and mining';
     await nodeSession.startMining();
+    managedPhase = 'managed setup execution';
     managed = await nodeSession.withMiningActiveExecutionTarget(
       async target => await executeManagedSetupAction(
         lifecycleInput,
@@ -4757,6 +4782,7 @@ async function runManagedCampaign(
           minimumTipHeight: OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT,
         })
         : Object.freeze({});
+      managedPhase = 'checkpoint anchor';
       const anchored = await nodeSession.withCheckpointExtensionMiningTarget(
         extensionValueHex,
         checkpointMiningPolicy,
@@ -4784,6 +4810,7 @@ async function runManagedCampaign(
         'isolated devnet checkpoint anchor result',
       );
       if (pegInAction === 'check-observed-anchor-tracker') {
+        managedPhase = 'observed tracker check';
         const stage = trackerStage!;
         const checked =
           await nodeSession.withCheckpointBoundMiningActiveExecutionTarget(
@@ -4846,6 +4873,7 @@ async function runManagedCampaign(
           'isolated devnet observed-anchor tracker result',
         );
       } else if (isFrozenTrackerCheckAction(pegInAction)) {
+        managedPhase = 'frozen tracker check';
         const stage = trackerStage!;
         const checked =
           await nodeSession.withCheckpointBoundMiningStoppedExecutionTarget(
@@ -4911,6 +4939,7 @@ async function runManagedCampaign(
           pegInAction === 'revalidate-tracker-reservation-freshness'
           || pegInAction === 'submit-tracker-once'
         ) {
+          managedPhase = 'tracker reservation and transport';
           trackerReservationFreshness =
             await runTrackerReservationFreshnessCampaignV8({
               buildReceipt: built.receipt,
@@ -4931,7 +4960,15 @@ async function runManagedCampaign(
       }
     }
   } catch (error) {
-    failure = error;
+    failure = trackerTransportCampaign === undefined
+      || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        error,
+      ) !== null
+      ? error
+      : createTrackerTransportManagedCampaignPhaseFailureV9(
+        managedPhase,
+        error,
+      );
   }
 
   const teardownErrors: unknown[] = [];
@@ -4962,18 +4999,33 @@ async function runManagedCampaign(
   }
   if (failure !== undefined) {
     if (teardownErrors.length > 0) {
-      throw new AggregateError(
+      const aggregate = new AggregateError(
         [failure, ...teardownErrors],
         'isolated genesis setup execution failed and teardown was incomplete',
       );
+      throw trackerTransportCampaign === undefined
+        || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          failure,
+        ) !== null
+        ? aggregate
+        : createTrackerTransportManagedCampaignPhaseFailureV9(
+          managedPhase,
+          aggregate,
+        );
     }
     throw failure;
   }
   if (teardownErrors.length > 0) {
-    throw new AggregateError(
+    const aggregate = new AggregateError(
       teardownErrors,
       'isolated genesis setup execution teardown was incomplete',
     );
+    throw trackerTransportCampaign === undefined
+      ? aggregate
+      : createTrackerTransportManagedCampaignPhaseFailureV9(
+        'campaign teardown',
+        aggregate,
+      );
   }
   if (managed === undefined) {
     throw new Error('isolated genesis setup execution produced no result');
