@@ -24,6 +24,12 @@ import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
 import {
+  createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+  projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
   projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
 } from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
 
@@ -2990,6 +2996,198 @@ describe('isolated devnet genesis setup execution root V1', () => {
     }
   });
 
+  it('keeps the shared managed-phase marker finite and process-local', () => {
+    for (
+      const phase of
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1
+    ) {
+      const failure = new Error(`private ${phase} detail`);
+      expect(
+        createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          phase,
+          failure,
+        ),
+      ).toBe(failure);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          failure,
+        ),
+      ).toBe(phase);
+    }
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        new Error('frozen tracker check'),
+      ),
+    ).toBeNull();
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        'private phase' as any,
+        new Error('private detail'),
+      )
+    ).toThrow(/managed campaign phase is invalid/iu);
+
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+        'private phase' as any,
+        new Error('private detail'),
+      )
+    ).toThrow('tracker transport managed campaign phase is invalid');
+    const compatibilityFailure =
+      createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+        'frozen tracker check',
+        'private detail',
+      );
+    expect(compatibilityFailure.message).toBe(
+      'isolated tracker transport managed campaign phase failed',
+    );
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        compatibilityFailure,
+      ),
+    ).toBe('frozen tracker check');
+    expect(
+      projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+        compatibilityFailure,
+      ),
+    ).toBe('frozen tracker check');
+  });
+
+  it.each([
+    ['build', 'ergo node build'],
+    ['setup', 'setup and packet session'],
+  ] as const)('projects only the finite V7 %s phase before node construction', async (
+    boundary,
+    expectedPhase,
+  ) => {
+    const privateDiagnostic = `synthetic private V7 ${boundary} failure`;
+    if (boundary === 'build') {
+      mocked.build.mockRejectedValueOnce(new Error(privateDiagnostic));
+    } else {
+      mocked.setup.mockRejectedValueOnce(new Error(privateDiagnostic));
+    }
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput() as any,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        failure,
+      ),
+    ).toBe(expectedPhase);
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        new Error(privateDiagnostic),
+      ),
+    ).toBeNull();
+    expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['source history', 'source history collection'],
+    ['frozen tracker', 'frozen tracker check'],
+  ] as const)('projects the exact V7 %s managed subphase', async (
+    boundary,
+    expectedPhase,
+  ) => {
+    const privateDiagnostic = `synthetic private V7 ${boundary} failure`;
+    if (boundary === 'source history') {
+      mocked.sourceHistory.mockRejectedValueOnce(new Error(privateDiagnostic));
+    } else {
+      mocked.checkpointBoundFrozenObserve.mockRejectedValueOnce(
+        new Error(privateDiagnostic),
+      );
+    }
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput() as any,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        failure,
+      ),
+    ).toBe(expectedPhase);
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        new Error(privateDiagnostic),
+      ),
+    ).toBeNull();
+  });
+
+  it('retains the V7 primary managed phase across teardown aggregation', async () => {
+    mocked.sourceHistory.mockRejectedValueOnce(
+      new Error('synthetic private V7 source history failure'),
+    );
+    processSession.stop.mockRejectedValueOnce(
+      new Error('synthetic private V7 teardown failure'),
+    );
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput() as any,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        failure,
+      ),
+    ).toBe('source history collection');
+  });
+
+  it('classifies a V7 teardown-only failure without diagnostic text', async () => {
+    processSession.stop.mockRejectedValueOnce(
+      new Error('synthetic private V7 teardown-only failure'),
+    );
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+        pegInApplicationCheckpointRootInput() as any,
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        failure,
+      ),
+    ).toBe('campaign teardown');
+  });
+
+  it('does not project managed campaign phases for the adjacent V8 action', async () => {
+    mocked.setup.mockRejectedValueOnce(
+      new Error('synthetic private V8 setup failure'),
+    );
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(
+      projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+        failure,
+      ),
+    ).toBeNull();
+  });
+
   it.each([
     ['source history', 'source history collection'],
     ['Ergo funding', 'ergo funding and history'],
@@ -3029,6 +3227,36 @@ describe('isolated devnet genesis setup execution root V1', () => {
       }
     },
   );
+
+  it('preserves the V9 non-Error compatibility message through the root', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-non-error-phase-'),
+    );
+    mocked.sourceHistory.mockRejectedValueOnce('private non-Error cause');
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe(
+        'isolated tracker transport managed campaign phase failed',
+      );
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe('source history collection');
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
 
   it('assigns the V9 genesis transport phase before support construction', async () => {
     const journalRoot = mkdtempSync(

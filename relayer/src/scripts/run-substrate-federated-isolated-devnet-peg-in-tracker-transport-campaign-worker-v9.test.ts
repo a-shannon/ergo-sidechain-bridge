@@ -24,6 +24,9 @@ import {
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 
 const mocks = vi.hoisted(() => ({
   assertRootReceipt: vi.fn(),
@@ -95,7 +98,8 @@ const OUTCOME_DIGEST = '88'.repeat(32);
 const RESPONSE_DIGEST = '99'.repeat(32);
 const CONFIRMATION_HEADER_ID = 'aa'.repeat(32);
 const CONFIRMATION_OBSERVATION_DIGEST = 'bb'.repeat(32);
-const RECIPIENT = 'ab'.repeat(20);
+const RECIPIENT =
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1.slice(2);
 const REQUEST_BINDING = Object.freeze({
   schema:
     'e2s.substrate-federated-isolated-devnet-bootstrap-request-binding.v1',
@@ -137,7 +141,10 @@ describe('isolated tracker transport campaign worker V9', () => {
               cargoExecutablePath: 'C:\\tools\\cargo.exe',
               rustcExecutablePath: 'C:\\tools\\rustc.exe',
               gitExecutablePath: 'C:\\tools\\git.exe',
-              expectedSudoAddress: `0x${RECIPIENT}`,
+              bridgeOwnerAddress:
+                SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+              expectedSudoAddress:
+                '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
             },
           },
         },
@@ -696,7 +703,7 @@ describe('isolated tracker transport campaign worker V9', () => {
         args,
       ),
     ).rejects.toThrow(
-      'tracker transport recipient must match the reviewed LAB owner',
+      'Frontier LAB bridge owner or recipient differs from the deterministic deployment',
     );
     expect(mocks.runRoot).not.toHaveBeenCalled();
   });

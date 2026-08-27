@@ -183,6 +183,13 @@ function staticRelativeDependencies(
       ) {
         continue;
       }
+      if (
+        (ts.isImportDeclaration(statement)
+          && statement.importClause?.isTypeOnly === true)
+        || (ts.isExportDeclaration(statement) && statement.isTypeOnly)
+      ) {
+        continue;
+      }
       const specifier = statement.moduleSpecifier.text;
       if (!specifier.startsWith('.')) continue;
       const base = toPosix(join(dirname(rel), specifier));
@@ -207,6 +214,20 @@ function reachesTestFixture(
   visited.add(rel);
   return (dependencies.get(rel) ?? []).some(dependency =>
     reachesTestFixture(dependency, dependencies, visited)
+  );
+}
+
+function reachesDependency(
+  rel: string,
+  target: string,
+  dependencies: ReadonlyMap<string, ReadonlyArray<string>>,
+  visited = new Set<string>(),
+): boolean {
+  if (rel === target) return true;
+  if (visited.has(rel)) return false;
+  visited.add(rel);
+  return (dependencies.get(rel) ?? []).some(dependency =>
+    reachesDependency(dependency, target, dependencies, visited)
   );
 }
 
@@ -306,6 +327,26 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(productionSources(), 'npostDirect')).toEqual([
       'scripts/devnet-consolidate-rewards.ts',
     ]);
+  });
+
+  it('keeps V35 request creation and preflight outside launcher module graphs', () => {
+    const dependencies = staticRelativeDependencies(productionSources());
+    const entrypoints = [
+      'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
+      'scripts/preflight-substrate-federated-isolated-devnet-campaign-v1.ts',
+    ];
+    const forbiddenLaunchModules = [
+      'scripts/run-substrate-federated-isolated-devnet-bootstrap-worker-v1.ts',
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
+      'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts',
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    ];
+
+    for (const entrypoint of entrypoints) {
+      expect(forbiddenLaunchModules.filter(target =>
+        reachesDependency(entrypoint, target, dependencies)
+      )).toEqual([]);
+    }
   });
 
   it('keeps the FED-6-LAB checked transport confined to its static execution root', () => {

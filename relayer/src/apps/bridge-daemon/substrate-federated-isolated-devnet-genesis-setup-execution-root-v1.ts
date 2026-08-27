@@ -49,9 +49,12 @@ import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
+  createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1 as createManagedCampaignPhaseFailureV1,
+  projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1 as projectManagedCampaignPhaseFailureV1,
+  type SubstrateFederatedIsolatedDevnetManagedCampaignPhaseV1 as ManagedCampaignPhaseV1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
+import {
   createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9 as createTrackerTransportManagedCampaignPhaseFailureV9,
-  projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9 as projectTrackerTransportManagedCampaignPhaseFailureV9,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseV9 as TrackerTransportManagedCampaignPhaseV9,
 } from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
 import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
@@ -3435,7 +3438,12 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
     undefined,
     applicationRunner,
     sourceAcceptanceBuildWorkspace,
-  );
+  ).catch(error => {
+    if (projectManagedCampaignPhaseFailureV1(error) !== null) {
+      throw error;
+    }
+    throw createManagedCampaignPhaseFailureV1('ergo node build', error);
+  });
   return Object.freeze({
     receipt: finalizeFrozenObservedAnchorTrackerCheckCampaignRootV7(
       execution,
@@ -4388,7 +4396,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
         error,
       ) !== null
-      || projectTrackerTransportManagedCampaignPhaseFailureV9(error) !== null
+      || projectManagedCampaignPhaseFailureV1(error) !== null
     ) {
       throw error;
     }
@@ -4638,6 +4646,15 @@ async function runManagedCampaign(
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   const applicationCheckpointAction =
     isApplicationCheckpointAction(pegInAction);
+  const managedPhaseProjectionEnabled =
+    pegInAction === 'check-observed-anchor-tracker-frozen'
+    || pegInAction === 'submit-tracker-once';
+  const createManagedPhaseFailure = (
+    phase: ManagedCampaignPhaseV1,
+    cause: unknown,
+  ): Error => pegInAction === 'submit-tracker-once'
+    ? createTrackerTransportManagedCampaignPhaseFailureV9(phase, cause)
+    : createManagedCampaignPhaseFailureV1(phase, cause);
   if (
     (pegInAction === 'consume-mint-proof')
       !== (frontierMintProofConsumer !== undefined)
@@ -4656,7 +4673,7 @@ async function runManagedCampaign(
   );
   assertCapabilityFreePlainData(built, 'isolated devnet node build result');
   deepFreeze(built);
-  let managedPhase: TrackerTransportManagedCampaignPhaseV9 =
+  let managedPhase: ManagedCampaignPhaseV1 =
     'setup and packet session';
   let setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
@@ -4963,12 +4980,13 @@ async function runManagedCampaign(
       }
     }
   } catch (error) {
-    failure = trackerTransportCampaign === undefined
+    failure = !managedPhaseProjectionEnabled
       || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
         error,
       ) !== null
+      || projectManagedCampaignPhaseFailureV1(error) !== null
       ? error
-      : createTrackerTransportManagedCampaignPhaseFailureV9(
+      : createManagedPhaseFailure(
         managedPhase,
         error,
       );
@@ -5002,17 +5020,19 @@ async function runManagedCampaign(
   }
   if (failure !== undefined) {
     if (teardownErrors.length > 0) {
+      const primaryManagedPhase =
+        projectManagedCampaignPhaseFailureV1(failure) ?? managedPhase;
       const aggregate = new AggregateError(
         [failure, ...teardownErrors],
         'isolated genesis setup execution failed and teardown was incomplete',
       );
-      throw trackerTransportCampaign === undefined
+      throw !managedPhaseProjectionEnabled
         || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
           failure,
         ) !== null
         ? aggregate
-        : createTrackerTransportManagedCampaignPhaseFailureV9(
-          managedPhase,
+        : createManagedPhaseFailure(
+          primaryManagedPhase,
           aggregate,
         );
     }
@@ -5023,9 +5043,9 @@ async function runManagedCampaign(
       teardownErrors,
       'isolated genesis setup execution teardown was incomplete',
     );
-    throw trackerTransportCampaign === undefined
+    throw !managedPhaseProjectionEnabled
       ? aggregate
-      : createTrackerTransportManagedCampaignPhaseFailureV9(
+      : createManagedPhaseFailure(
         'campaign teardown',
         aggregate,
       );
@@ -5748,7 +5768,7 @@ async function executeManagedSetupAction(
       readonly sharedCargoHomeRoot: string;
     }> | undefined,
   setManagedPhase: (
-    phase: TrackerTransportManagedCampaignPhaseV9,
+    phase: ManagedCampaignPhaseV1,
   ) => void,
 ): Promise<Readonly<ExecutionActionResult>> {
   const applicationCheckpointAction =

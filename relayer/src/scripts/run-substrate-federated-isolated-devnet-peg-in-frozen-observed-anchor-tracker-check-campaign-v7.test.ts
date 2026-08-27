@@ -138,6 +138,10 @@ import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
 import {
+  createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
+} from '../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_TRACKER_OBSERVATION_V2_SCHEMA,
 } from '../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js';
 import {
@@ -262,6 +266,7 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       'bootstrap request',
       'campaign root',
       'worker receipt',
+      ...SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
     ] as const) {
       expect(
         formatSafeFrozenObservedAnchorTrackerCheckCampaignWorkerFailureV7(
@@ -1685,9 +1690,9 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       mkdirSync(cargoCache);
       mkdirSync(relayerCargoCache);
       mocked.root.mockRejectedValueOnce(
-        createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7(
-          'worker arguments',
-          new Error('campaign root failed'),
+        createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          'frozen tracker check',
+          new Error(`private root detail under ${resolve('private-source')}`),
         ),
       );
       let workerFailure: unknown;
@@ -1711,14 +1716,20 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
         workerFailure = error;
       }
       expect(workerFailure).toBeInstanceOf(Error);
-      expect((workerFailure as Error).message).toMatch(/campaign root failed/iu);
       expect(
         formatSafeFrozenObservedAnchorTrackerCheckCampaignWorkerFailureV7(
           workerFailure,
         ),
       ).toBe(
         'isolated frozen-observed-anchor-tracker-check campaign worker failed: '
-        + 'phase failed: campaign root\n',
+        + 'phase failed: frozen tracker check\n',
+      );
+      expect(
+        formatSafeFrozenObservedAnchorTrackerCheckCampaignWorkerFailureV7(
+          new Error('frozen tracker check: private detail'),
+        ),
+      ).toBe(
+        'isolated frozen-observed-anchor-tracker-check campaign worker failed\n',
       );
       expect(currentBuildEnvironment()).toEqual(previousEnvironment);
     } finally {

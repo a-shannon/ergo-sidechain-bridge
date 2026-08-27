@@ -28,6 +28,9 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
+} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
   loadCanonicalBootstrapRequestBoundWithProvenanceV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
 import {
@@ -316,14 +319,10 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       recipientAddressHex: argv[7]!,
     });
     const acceptance = input.lifecycle.sourceHistory.acceptance;
-    if (
-      !/^0x[0-9a-f]{40}$/u.test(acceptance.expectedSudoAddress)
-      || `0x${pegIn.recipientAddressHex}` !== acceptance.expectedSudoAddress
-    ) {
-      throw new Error(
-        'tracker transport recipient must match the reviewed LAB owner',
-      );
-    }
+    assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+      bridgeOwnerAddressHex: acceptance.bridgeOwnerAddress,
+      recipientAddressHex: pegIn.recipientAddressHex,
+    });
 
     phase = 'campaign root';
     let result: Awaited<ReturnType<

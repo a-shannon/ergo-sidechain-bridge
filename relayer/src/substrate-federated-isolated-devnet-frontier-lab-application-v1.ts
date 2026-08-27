@@ -4,6 +4,9 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1 =
   '0xc01ee7f10ea4af4673cfff62710e1d7792aba8f3' as const;
 
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1 =
+  '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac' as const;
+
 export function assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1(
   application: Readonly<{
     readonly bridgeAddressHex: string;
@@ -18,6 +21,24 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1(
   ) {
     throw new Error(
       'Frontier LAB proof application differs from the deterministic deployment',
+    );
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1(
+  identity: Readonly<{
+    readonly bridgeOwnerAddressHex: string;
+    readonly recipientAddressHex: string;
+  }>,
+): void {
+  if (
+    canonicalAddress(identity.bridgeOwnerAddressHex, 'bridge owner')
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1
+    || canonicalAddress(`0x${identity.recipientAddressHex}`, 'recipient')
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1
+  ) {
+    throw new Error(
+      'Frontier LAB bridge owner or recipient differs from the deterministic deployment',
     );
   }
 }
