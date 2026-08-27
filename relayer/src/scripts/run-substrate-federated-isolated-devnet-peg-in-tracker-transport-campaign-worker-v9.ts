@@ -28,6 +28,12 @@ import {
   loadCanonicalBootstrapRequestBoundWithProvenanceV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
 import {
+  createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7,
+  readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7,
+  readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7,
+  type FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7,
+} from './run-substrate-federated-isolated-devnet-peg-in-frozen-observed-anchor-tracker-check-campaign-receipt-v7.js';
+import {
   explicitExistingLocalNonSensitivePath,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 
@@ -175,101 +181,131 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9
 >> {
-  assertArguments(argv);
-  if (process.platform !== 'win32') {
-    throw new Error('isolated tracker transport campaign worker requires Windows');
-  }
-  const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-  const { bridgeRoot, worktreeRoot } = resolveCanonicalWorkerRootsV9(
-    scriptDirectory,
-  );
-  const temporaryDirectoryRoot = externalDirectory(
-    argv[9]!,
-    'Frontier tracker transport temporary root',
-    worktreeRoot,
-  );
-  const cargoDependencyCacheDirectory = externalDirectory(
-    argv[11]!,
-    'Frontier tracker transport Cargo dependency cache',
-    worktreeRoot,
-  );
-  const trackerTransportJournalRoot = externalDirectory(
-    argv[13]!,
-    'tracker transport journal root',
-    worktreeRoot,
-  );
-  const relayerCargoCacheDirectory = externalDirectory(
-    process.env.CARGO_HOME,
-    'relayer artifact Cargo dependency cache',
-    worktreeRoot,
-  );
-  const externalRoots = [
-    temporaryDirectoryRoot,
-    cargoDependencyCacheDirectory,
-    trackerTransportJournalRoot,
-    relayerCargoCacheDirectory,
-  ];
-  for (let left = 0; left < externalRoots.length; left += 1) {
-    for (let right = left + 1; right < externalRoots.length; right += 1) {
-      if (pathsOverlap(externalRoots[left]!, externalRoots[right]!)) {
-        throw new Error(
-          'tracker transport temporary, journal, and Cargo roots must not overlap',
-        );
+  let phase: FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7 =
+    'worker arguments';
+  try {
+    assertArguments(argv);
+
+    phase = 'worker platform';
+    if (process.platform !== 'win32') {
+      throw new Error('isolated tracker transport campaign worker requires Windows');
+    }
+
+    phase = 'worker roots';
+    const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+    const { bridgeRoot, worktreeRoot } = resolveCanonicalWorkerRootsV9(
+      scriptDirectory,
+    );
+
+    phase = 'external roots';
+    const temporaryDirectoryRoot = externalDirectory(
+      argv[9]!,
+      'Frontier tracker transport temporary root',
+      worktreeRoot,
+    );
+    const cargoDependencyCacheDirectory = externalDirectory(
+      argv[11]!,
+      'Frontier tracker transport Cargo dependency cache',
+      worktreeRoot,
+    );
+    const trackerTransportJournalRoot = externalDirectory(
+      argv[13]!,
+      'tracker transport journal root',
+      worktreeRoot,
+    );
+    const relayerCargoCacheDirectory = externalDirectory(
+      process.env.CARGO_HOME,
+      'relayer artifact Cargo dependency cache',
+      worktreeRoot,
+    );
+    const externalRoots = [
+      temporaryDirectoryRoot,
+      cargoDependencyCacheDirectory,
+      trackerTransportJournalRoot,
+      relayerCargoCacheDirectory,
+    ];
+    for (let left = 0; left < externalRoots.length; left += 1) {
+      for (let right = left + 1; right < externalRoots.length; right += 1) {
+        if (pathsOverlap(externalRoots[left]!, externalRoots[right]!)) {
+          throw new Error(
+            'tracker transport temporary, journal, and Cargo roots must not overlap',
+          );
+        }
       }
     }
-  }
-  const loaded = loadCanonicalBootstrapRequestBoundWithProvenanceV1(
-    argv[1]!,
-    bridgeRoot,
-    worktreeRoot,
-    argv[3]!,
-  );
-  const input = loaded.input;
-  const pegIn = Object.freeze({
-    amountNanoErg: argv[5]!,
-    recipientAddressHex: argv[7]!,
-  });
-  const acceptance = input.lifecycle.sourceHistory.acceptance;
-  if (
-    !/^0x[0-9a-f]{40}$/u.test(acceptance.expectedSudoAddress)
-    || `0x${pegIn.recipientAddressHex}` !== acceptance.expectedSudoAddress
-  ) {
-    throw new Error(
-      'tracker transport recipient must match the reviewed LAB owner',
+
+    phase = 'bootstrap request';
+    const loaded = loadCanonicalBootstrapRequestBoundWithProvenanceV1(
+      argv[1]!,
+      bridgeRoot,
+      worktreeRoot,
+      argv[3]!,
+    );
+    const input = loaded.input;
+    const pegIn = Object.freeze({
+      amountNanoErg: argv[5]!,
+      recipientAddressHex: argv[7]!,
+    });
+    const acceptance = input.lifecycle.sourceHistory.acceptance;
+    if (
+      !/^0x[0-9a-f]{40}$/u.test(acceptance.expectedSudoAddress)
+      || `0x${pegIn.recipientAddressHex}` !== acceptance.expectedSudoAddress
+    ) {
+      throw new Error(
+        'tracker transport recipient must match the reviewed LAB owner',
+      );
+    }
+
+    phase = 'campaign root';
+    let result: Awaited<ReturnType<
+      typeof runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9
+    >>;
+    try {
+      result =
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          ...input,
+          pegIn,
+          frontierApplicationRunner: Object.freeze({
+            frontierSourceDirectory: acceptance.frontierSourcePath,
+            temporaryDirectoryRoot,
+            cargoDependencyCacheDirectory,
+            cargoExecutablePath: acceptance.cargoExecutablePath,
+            rustcExecutablePath: acceptance.rustcExecutablePath,
+            gitExecutablePath: acceptance.gitExecutablePath,
+            offline: true as const,
+          }),
+          requestBinding: loaded.requestBinding,
+          trackerTransportJournalRoot,
+        });
+    } catch (error) {
+      const rootFailure =
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          error,
+        );
+      if (rootFailure === null) throw error;
+      throw createWorkerFailure(rootFailure, argv[3]!, pegIn, error);
+    }
+
+    phase = 'worker receipt';
+    assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+      result.receipt,
+    );
+    return projectReceipt(result.receipt, argv[3]!, pegIn);
+  } catch (error) {
+    if (
+      (error instanceof Error && WORKER_FAILURE_RECEIPTS.has(error))
+      || readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7(error)
+        !== undefined
+      || readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(error)
+        !== undefined
+    ) {
+      throw error;
+    }
+    throw createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7(
+      phase,
+      error,
     );
   }
-  let result: Awaited<ReturnType<
-    typeof runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9
-  >>;
-  try {
-    result =
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
-        ...input,
-        pegIn,
-        frontierApplicationRunner: Object.freeze({
-          frontierSourceDirectory: acceptance.frontierSourcePath,
-          temporaryDirectoryRoot,
-          cargoDependencyCacheDirectory,
-          cargoExecutablePath: acceptance.cargoExecutablePath,
-          rustcExecutablePath: acceptance.rustcExecutablePath,
-          gitExecutablePath: acceptance.gitExecutablePath,
-          offline: true as const,
-        }),
-        requestBinding: loaded.requestBinding,
-        trackerTransportJournalRoot,
-      });
-  } catch (error) {
-    const rootFailure =
-      projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
-        error,
-      );
-    if (rootFailure === null) throw error;
-    throw createWorkerFailure(rootFailure, argv[3]!, pegIn, error);
-  }
-  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
-    result.receipt,
-  );
-  return projectReceipt(result.receipt, argv[3]!, pegIn);
 }
 
 function projectReceipt(
@@ -465,6 +501,16 @@ export function formatSafeTrackerTransportCampaignWorkerFailureV9(
   if (error instanceof Error) {
     const receipt = WORKER_FAILURE_RECEIPTS.get(error);
     if (receipt !== undefined) return `${canonicalJson(receipt)}\n`;
+  }
+  const binding =
+    readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7(error);
+  if (binding !== undefined) {
+    return `${WORKER_FAILURE_PREFIX}: producer-to-consumer binding changed: ${binding}\n`;
+  }
+  const phase =
+    readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(error);
+  if (phase !== undefined) {
+    return `${WORKER_FAILURE_PREFIX}: phase failed: ${phase}\n`;
   }
   return `${WORKER_FAILURE_PREFIX}\n`;
 }

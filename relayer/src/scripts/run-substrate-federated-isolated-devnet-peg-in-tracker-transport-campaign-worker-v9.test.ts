@@ -580,6 +580,50 @@ describe('isolated tracker transport campaign worker V9', () => {
     ).toThrow(/duplicate/iu);
   });
 
+  it('projects an untyped pre-transport root failure to one finite safe phase', async () => {
+    const privateDiagnostic = `private diagnostic under ${root}`;
+    mocks.runRoot.mockRejectedValueOnce(new Error(privateDiagnostic));
+
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(
+        argumentsFor(journalRoot),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    const output = formatSafeTrackerTransportCampaignWorkerFailureV9(failure);
+    expect(output).toBe(
+      'isolated tracker transport campaign worker failed: phase failed: campaign root\n',
+    );
+    expect(output).not.toContain(privateDiagnostic);
+    expect(output).not.toContain(root);
+  });
+
+  it('attributes post-root provenance rejection to worker receipt', async () => {
+    const privateDiagnostic = `private provenance diagnostic under ${root}`;
+    mocks.assertRootReceipt.mockImplementationOnce(() => {
+      throw new Error(privateDiagnostic);
+    });
+
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(
+        argumentsFor(journalRoot),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    const output = formatSafeTrackerTransportCampaignWorkerFailureV9(failure);
+    expect(output).toBe(
+      'isolated tracker transport campaign worker failed: phase failed: worker receipt\n',
+    );
+    expect(output).not.toContain(privateDiagnostic);
+    expect(output).not.toContain(root);
+  });
+
   it('rejects overlapping journal and build roots before loading the request', async () => {
     await expect(
       runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(

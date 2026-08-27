@@ -233,6 +233,83 @@ describe('isolated tracker transport campaign command V9', () => {
     expect(() => readFileSync(outputPath, 'utf8')).toThrow();
   });
 
+  it('relays only allowlisted worker phases without publishing a receipt', async () => {
+    mocked.process.mockRejectedValue(new BoundedProcessExitError({
+      label: 'isolated tracker worker',
+      exitCode: 1,
+      stdout: '',
+      stderr:
+        'isolated tracker transport campaign worker failed: phase failed: campaign root\n',
+    }));
+
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+        argumentsFor(),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(formatSafeTrackerTransportCampaignCommandFailureV9(failure)).toBe(
+      'isolated peg-in tracker transport campaign failed: untrusted worker phase hint: campaign root\n',
+    );
+    expect(() => readFileSync(outputPath, 'utf8')).toThrow();
+  });
+
+  it('relays only allowlisted worker bindings without publishing a receipt', async () => {
+    mocked.process.mockRejectedValue(new BoundedProcessExitError({
+      label: 'isolated tracker worker',
+      exitCode: 1,
+      stdout: '',
+      stderr:
+        'isolated tracker transport campaign worker failed: producer-to-consumer binding changed: tracker candidate input\n',
+    }));
+
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+        argumentsFor(),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(formatSafeTrackerTransportCampaignCommandFailureV9(failure)).toBe(
+      'isolated peg-in tracker transport campaign failed: untrusted worker binding hint: tracker candidate input\n',
+    );
+    expect(() => readFileSync(outputPath, 'utf8')).toThrow();
+  });
+
+  it('rejects unknown or multiline worker phase diagnostics as opaque', async () => {
+    for (const diagnostic of [
+      'isolated tracker transport campaign worker failed: phase failed: private phase\n',
+      'isolated tracker transport campaign worker failed: producer-to-consumer binding changed: private binding\n',
+      'private prelude\nisolated tracker transport campaign worker failed: phase failed: campaign root\n',
+    ]) {
+      mocked.process.mockRejectedValueOnce(new BoundedProcessExitError({
+        label: 'isolated tracker worker',
+        exitCode: 1,
+        stdout: '',
+        stderr: diagnostic,
+      }));
+
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+          argumentsFor(),
+        );
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(formatSafeTrackerTransportCampaignCommandFailureV9(failure)).toBe(
+        'isolated peg-in tracker transport campaign failed: command phase failed: worker receipt\n',
+      );
+    }
+    expect(() => readFileSync(outputPath, 'utf8')).toThrow();
+  });
+
   it('fails closed on process loss without publishing or retrying', async () => {
     mocked.process.mockRejectedValueOnce(new Error(`process lost under ${root}`));
 
@@ -249,6 +326,32 @@ describe('isolated tracker transport campaign command V9', () => {
     expect(formatSafeTrackerTransportCampaignCommandFailureV9(failure)).toBe(
       'isolated peg-in tracker transport campaign failed: command phase failed: worker launch\n',
     );
+    expect(() => readFileSync(outputPath, 'utf8')).toThrow();
+  });
+
+  it('attributes a nonzero worker exit with stdout to receipt validation', async () => {
+    const privateOutput = `private stdout under ${root}`;
+    mocked.process.mockRejectedValueOnce(new BoundedProcessExitError({
+      label: 'isolated tracker worker',
+      exitCode: 1,
+      stdout: privateOutput,
+      stderr: '',
+    }));
+
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+        argumentsFor(),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    const safe = formatSafeTrackerTransportCampaignCommandFailureV9(failure);
+    expect(safe).toBe(
+      'isolated peg-in tracker transport campaign failed: command phase failed: worker receipt\n',
+    );
+    expect(safe).not.toContain(privateOutput);
     expect(() => readFileSync(outputPath, 'utf8')).toThrow();
   });
 
