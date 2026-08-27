@@ -44,6 +44,7 @@
     "federated:local-devnet:genesis-check": "tsx src/scripts/check-substrate-federated-local-devnet-genesis.ts",
     "federated:legacy-compatibility:devnet-spec": "npm run node:guard && tsx src/scripts/build-substrate-federated-legacy-compatibility-devnet-chain-spec.ts",
     "federated:authority-safe:devnet-spec": "npm run node:guard && tsx src/scripts/build-substrate-federated-authority-safe-devnet-chain-spec.ts",
+    "federated:authority-safe:refresh-build-pins": "npm run node:guard && tsx src/scripts/refresh-substrate-federated-authority-safe-devnet-build-pins-v1.ts",
     "federated:authority-safe:accept": "npm run node:guard && tsx src/scripts/accept-substrate-federated-authority-safe-devnet-v1.ts",
     "federated:authority-safe:history": "npm run node:guard && tsx src/scripts/accept-substrate-federated-authority-safe-devnet-v1.ts --operation history",
     "federated:greenfield:replay": "npm run node:guard && tsx src/scripts/replay-substrate-federated-greenfield-launch-v1.ts",

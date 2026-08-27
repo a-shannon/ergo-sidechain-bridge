@@ -28,6 +28,7 @@ import {
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
+  runBoundedProcess,
   runBoundedNativeBuildProcess,
   terminateNativeBuildProcessTree,
   validateNativeVerifierToolchainLock,
@@ -443,6 +444,25 @@ describe('pinned local native verifier build conformance', () => {
       message: 'test bounded diagnostics failed',
     });
     expect((outcome.error as BoundedProcessExitError).exitCode).not.toBe(0);
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
+
+  it('retains successful process stdout as exact raw bytes', async () => {
+    const expected = Buffer.from([0xff, 0x00, 0x61]);
+    const result = await runBoundedProcess({
+      executablePath: process.execPath,
+      args: [
+        '-e',
+        `process.stdout.write(Buffer.from('${expected.toString('hex')}', 'hex'))`,
+      ],
+      cwd: bridgeRoot,
+      env: minimalTestProcessEnvironment(),
+      timeoutMs: 5_000,
+      maxOutputBytes: 1_024,
+      label: 'test bounded raw output',
+    });
+
+    expect(result.stdoutBytes).toEqual(expected);
+    expect(result.stderrBytes).toEqual(Buffer.alloc(0));
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {

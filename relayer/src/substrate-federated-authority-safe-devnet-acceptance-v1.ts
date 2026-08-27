@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { delimiter, dirname, isAbsolute, join, parse, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import {
   inspectConsensusSourceBaseline,
@@ -18,13 +18,17 @@ import {
 } from './native-executable-pin.js';
 import { validateReadOnlyNodeUrl } from './read-only-node-url.js';
 import {
-  buildPinnedLocalNativeReproducibleRustFlags,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
   runBoundedProcess,
-  validateNativeVerifierToolchainLock,
   type NativeVerifierBuildToolObservation,
 } from './pinned-local-native-verifier-build.js';
+import {
+  assertSubstrateFederatedAuthoritySafeBuildSpecStderrV1,
+  buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1,
+  buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1,
+  inspectSubstrateFederatedAuthoritySafePinnedToolchainV1,
+} from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
 import {
   buildSubstrateFederatedAuthoritySafeDevnetChainSpecV1,
   type BuildSubstrateFederatedAuthoritySafeDevnetChainSpecV1Input,
@@ -82,8 +86,6 @@ const MAX_TEST_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CHAIN_SPEC_OUTPUT_BYTES = 16 * 1024 * 1024;
 const MAX_ACCEPTED_ACTION_RPC_RESPONSE_BYTES = 8 * 1024 * 1024;
 const FRONTIER_PACKAGE = 'frontier-template-node';
-const FRONTIER_BUILD_SPEC_STATUS =
-  /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} Building chain spec$/;
 const SOURCE_TESTS = Object.freeze([
   'bridge_atomicity_tests::authority_safe_genesis_quarantines_owner_mint_without_sudo_or_active_profile',
   'bridge_atomicity_tests::inactive_profile_rejects_direct_owner_mint_before_evm_and_preserves_authoring',
@@ -476,7 +478,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     input.expectedFrontierPatchSha256Hex,
     'before build',
   );
-  const toolchainBefore = await inspectPinnedToolchain({
+  const toolchainBefore = await inspectSubstrateFederatedAuthoritySafePinnedToolchainV1({
     bridgeRoot,
     cargoExecutablePath,
     rustcExecutablePath,
@@ -492,7 +494,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     });
   const cargoTargetDirectory = buildWorkspace.buildTargetPath;
   try {
-    const cargoEnvironment = minimalCargoEnvironment({
+    const cargoEnvironment = buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1({
       cargoTargetDirectory,
       cargoHomeDirectory: buildWorkspace.cargoHomePath,
       cargoExecutablePath,
@@ -525,7 +527,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     const binaryVersion = await exactVersion({
       executablePath: binaryPath,
       cwd: frontierSourcePath,
-      environment: minimalToolEnvironment(),
+      environment: buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1(),
       expected: expectedBinaryVersion,
       label: 'Frontier binary',
     });
@@ -534,15 +536,17 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       executablePath: binaryPath,
       args: ['build-spec', '--chain', 'dev', '--disable-default-bootnode'],
       cwd: frontierSourcePath,
-      env: minimalToolEnvironment(),
+      env: buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1(),
       timeoutMs: SHORT_PROCESS_TIMEOUT_MS,
       maxOutputBytes: MAX_CHAIN_SPEC_OUTPUT_BYTES,
       maxStdoutBytes: MAX_CHAIN_SPEC_OUTPUT_BYTES,
       maxStderrBytes: 64 * 1024,
       label: 'freshly built Frontier base-spec reproduction',
     });
-    assertExpectedBuildSpecStderr(reproducedBaseResult.stderr);
-    const reproducedBaseBytes = Buffer.from(reproducedBaseResult.stdout, 'utf8');
+    assertSubstrateFederatedAuthoritySafeBuildSpecStderrV1(
+      reproducedBaseResult.stderr,
+    );
+    const reproducedBaseBytes = Buffer.from(reproducedBaseResult.stdoutBytes);
     const reproducedBaseSha256Hex = sha256(reproducedBaseBytes);
     const suppliedBaseSpecBytes = 'baseSpecBytes' in input
       ? Buffer.from(input.baseSpecBytes)
@@ -621,7 +625,8 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       baselineBeforeExecution,
       'patched Frontier source changed during build or source tests',
     );
-    const toolchainBeforeExecution = await inspectPinnedToolchain({
+    const toolchainBeforeExecution =
+      await inspectSubstrateFederatedAuthoritySafePinnedToolchainV1({
       bridgeRoot,
       cargoExecutablePath,
       rustcExecutablePath,
@@ -801,7 +806,8 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       binaryStat.size,
       'built Frontier binary after process observation',
     );
-    const toolchainAfter = await inspectPinnedToolchain({
+    const toolchainAfter =
+      await inspectSubstrateFederatedAuthoritySafePinnedToolchainV1({
       bridgeRoot,
       cargoExecutablePath,
       rustcExecutablePath,
@@ -964,80 +970,6 @@ export function assertSubstrateFederatedAuthoritySafeDevnetAcceptanceV1Provenanc
   }
 }
 
-async function inspectPinnedToolchain(input: Readonly<{
-  bridgeRoot: string;
-  cargoExecutablePath: string;
-  rustcExecutablePath: string;
-  gitExecutablePath: string;
-  cwd: string;
-}>): Promise<Readonly<NativeVerifierBuildToolObservation>> {
-  const lockPath = canonicalRegularFile(
-    join(input.bridgeRoot, 'sources', 'native-verifier-toolchain-lock.json'),
-    'native verifier toolchain lock',
-  );
-  const lockBytes = readFileSync(lockPath);
-  if (sha256(lockBytes) !== EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256) {
-    throw new Error('native verifier toolchain lock differs from the compiled pin');
-  }
-  const parsed = JSON.parse(lockBytes.toString('utf8')) as unknown;
-  const platformKey = `${process.platform}-${process.arch}`;
-  const profile = record(record(record(parsed)?.profiles)?.[platformKey]);
-  const rustTarget = boundedToken(profile?.rustTarget, 'pinned Rust target');
-  const cargoProfile = requiredToolProfile(profile?.cargo, 'Cargo');
-  const rustcProfile = requiredToolProfile(profile?.rustc, 'Rust compiler');
-  const gitProfile = requiredToolProfile(profile?.git, 'Git');
-  const environment = minimalToolEnvironment();
-  const observation = Object.freeze({
-    platformKey,
-    rustTarget,
-    cargo: Object.freeze({
-      version: await exactVersion({
-        executablePath: input.cargoExecutablePath,
-        cwd: input.cwd,
-        environment,
-        expected: cargoProfile.version,
-        label: 'Cargo',
-      }),
-      sha256: sha256(readFileSync(input.cargoExecutablePath)),
-    }),
-    rustc: Object.freeze({
-      version: await exactVersion({
-        executablePath: input.rustcExecutablePath,
-        cwd: input.cwd,
-        environment,
-        expected: rustcProfile.version,
-        label: 'Rust compiler',
-      }),
-      sha256: sha256(readFileSync(input.rustcExecutablePath)),
-    }),
-    git: Object.freeze({
-      version: await exactVersion({
-        executablePath: input.gitExecutablePath,
-        cwd: input.cwd,
-        environment,
-        expected: gitProfile.version,
-        label: 'Git',
-      }),
-      sha256: sha256(readFileSync(input.gitExecutablePath)),
-    }),
-  });
-  const validation = validateNativeVerifierToolchainLock(parsed, observation);
-  if (validation.errors.length > 0) {
-    throw new Error('native build tools differ from the pinned toolchain lock');
-  }
-  return observation;
-}
-
-function requiredToolProfile(
-  value: unknown,
-  label: string,
-): Readonly<{ version: string; sha256: string }> {
-  const profile = record(value);
-  const version = boundedLine(profile?.version, `${label} lock version`);
-  const sha256Hex = digest(profile?.sha256, `${label} lock SHA-256`);
-  return Object.freeze({ version, sha256: sha256Hex });
-}
-
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -1178,16 +1110,6 @@ function assertExactCargoTestEvidence(
   }
   if (summaries === 0 || passed !== 1 || failed !== 0) {
     throw new Error(`source-locked Frontier test ${expectedName} lacks one exact passing result`);
-  }
-}
-
-function assertExpectedBuildSpecStderr(stderr: string): void {
-  const buildSpecStatus = stderr.trim();
-  if (
-    buildSpecStatus !== ''
-    && !FRONTIER_BUILD_SPEC_STATUS.test(buildSpecStatus)
-  ) {
-    throw new Error('Frontier chain-spec acceptance wrote unexpected stderr');
   }
 }
 
@@ -1364,15 +1286,15 @@ async function assertExactBinaryAcceptsChainSpec(input: Readonly<{
         '--disable-default-bootnode',
       ],
       cwd: temporaryDirectory,
-      env: minimalToolEnvironment(),
+      env: buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1(),
       timeoutMs: SHORT_PROCESS_TIMEOUT_MS,
       maxOutputBytes: MAX_CHAIN_SPEC_OUTPUT_BYTES,
       maxStdoutBytes: MAX_CHAIN_SPEC_OUTPUT_BYTES,
       maxStderrBytes: 64 * 1024,
       label: input.processLabel,
     });
-    assertExpectedBuildSpecStderr(result.stderr);
-    nodeAcceptedBytes = Buffer.from(result.stdout, 'utf8');
+    assertSubstrateFederatedAuthoritySafeBuildSpecStderrV1(result.stderr);
+    nodeAcceptedBytes = Buffer.from(result.stdoutBytes);
   } finally {
     rmSync(temporaryDirectory, {
       recursive: true,
@@ -1495,7 +1417,12 @@ function strictUtf8(value: Uint8Array, label: string): string {
   if (!(value instanceof Uint8Array) || value.length === 0) {
     throw new Error(`${label} must contain bytes`);
   }
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(value);
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(value);
+  } catch {
+    throw new Error(`${label} must be encoded as UTF-8`);
+  }
   if (text.charCodeAt(0) === 0xfeff) {
     throw new Error(`${label} must not contain a UTF-8 BOM`);
   }
@@ -1524,112 +1451,6 @@ function canonicalRegularFile(value: unknown, label: string): string {
     throw new Error(`${label} must be one regular file`);
   }
   return realpathSync(path);
-}
-
-function minimalToolEnvironment(): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = {};
-  for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP']) {
-    if (process.env[key]) environment[key] = process.env[key];
-  }
-  if (process.platform === 'win32') {
-    const configuredSystemRoot = process.env.SystemRoot
-      ?? process.env.SYSTEMROOT
-      ?? process.env.WINDIR;
-    if (configuredSystemRoot === undefined || !isAbsolute(configuredSystemRoot)) {
-      throw new Error('SystemRoot must be one absolute Windows directory');
-    }
-    const canonicalSystemRoot = realpathSync(configuredSystemRoot);
-    const expectedSystemDrive = parse(canonicalSystemRoot).root.replace(/[\\/]+$/u, '');
-    const systemDrive = process.env.SystemDrive;
-    if (systemDrive === undefined || !/^[A-Za-z]:$/u.test(systemDrive)) {
-      throw new Error('SystemDrive must be one Windows drive designator');
-    }
-    if (systemDrive.toUpperCase() !== expectedSystemDrive.toUpperCase()) {
-      throw new Error('SystemDrive must match the canonical SystemRoot drive');
-    }
-    environment.SystemRoot = canonicalSystemRoot;
-    environment.WINDIR = canonicalSystemRoot;
-    environment.SystemDrive = expectedSystemDrive;
-  }
-  return environment;
-}
-
-function minimalCargoEnvironment(input: Readonly<{
-  cargoTargetDirectory: string;
-  cargoHomeDirectory: string;
-  cargoExecutablePath: string;
-  frontierSourcePath: string;
-  rustcExecutablePath: string;
-  rustTarget: string;
-}>): NodeJS.ProcessEnv {
-  const environment = minimalToolEnvironment();
-  const cargoToolDirectory = dirname(input.cargoExecutablePath);
-  if (dirname(input.rustcExecutablePath) !== cargoToolDirectory) {
-    throw new Error('Cargo and Rust compiler must come from one pinned toolchain directory');
-  }
-  const inheritedPath = process.env.Path ?? process.env.PATH ?? '';
-  delete environment.PATH;
-  delete environment.Path;
-  environment[process.platform === 'win32' ? 'Path' : 'PATH'] =
-    `${cargoToolDirectory}${delimiter}${inheritedPath}`;
-  for (const key of ['USERPROFILE', 'HOME', 'RUSTUP_HOME']) {
-    if (process.env[key]) environment[key] = process.env[key];
-  }
-  if (process.platform === 'win32') {
-    for (const key of ['LIB', 'LIBPATH', 'INCLUDE']) {
-      if (process.env[key]) environment[key] = process.env[key];
-    }
-  }
-  environment.CARGO_HOME = input.cargoHomeDirectory;
-  environment.CARGO_TARGET_DIR = input.cargoTargetDirectory;
-  environment.WASM_BUILD_WORKSPACE_HINT = input.frontierSourcePath;
-  environment.CARGO_NET_OFFLINE = 'true';
-  environment.CARGO_NET_GIT_FETCH_WITH_CLI = 'false';
-  environment.CARGO_INCREMENTAL = '0';
-  environment.CARGO_PROFILE_DEV_INCREMENTAL = 'false';
-  environment.CARGO_PROFILE_DEV_DEBUG = '0';
-  environment.CARGO_PROFILE_DEV_CODEGEN_UNITS = '1';
-  environment.RUSTC = input.rustcExecutablePath;
-  environment.RUSTC_WRAPPER = '';
-  environment.RUSTC_WORKSPACE_WRAPPER = '';
-  const userProfile = process.platform === 'win32'
-    ? process.env.USERPROFILE
-    : process.env.HOME;
-  if (!userProfile) {
-    throw new Error('user profile path is required for deterministic Wasm path remapping');
-  }
-  const remappedUserProfile = rustFlagPathToken(userProfile, 'user profile');
-  const remappedBuildTarget = rustFlagPathToken(
-    input.cargoTargetDirectory,
-    'Cargo target',
-  );
-  const remappedFrontierSource = rustFlagPathToken(
-    input.frontierSourcePath,
-    'Frontier source',
-  );
-  environment.WASM_BUILD_RUSTFLAGS = [
-    `--remap-path-prefix=${remappedUserProfile}=/e2s/user-profile`,
-    `--remap-path-prefix=${remappedBuildTarget}=/e2s/build-target`,
-    `--remap-path-prefix=${remappedFrontierSource}=/e2s/frontier-source`,
-  ].join(' ');
-  const nativeRustFlags = buildPinnedLocalNativeReproducibleRustFlags({
-    frontierSourcePath: remappedFrontierSource,
-    buildTargetPath: remappedBuildTarget,
-    rustTarget: input.rustTarget,
-  });
-  environment[
-    `CARGO_TARGET_${input.rustTarget.toUpperCase().replaceAll('-', '_')}_RUSTFLAGS`
-  ] = nativeRustFlags.join(' ');
-  return environment;
-}
-
-function rustFlagPathToken(value: string, label: string): string {
-  if (/[\p{White_Space}\p{Cc}=]/u.test(value)) {
-    throw new Error(
-      `${label} path must not contain Unicode whitespace, control characters, or equals signs in Rust flags`,
-    );
-  }
-  return value;
 }
 
 function boundedLine(value: unknown, label: string): string {

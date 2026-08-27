@@ -132,6 +132,8 @@ let paths: ReturnType<typeof createPaths>;
 let mutateReproducedBaseSpec: ((value: Record<string, unknown>) => void) | undefined;
 let mutateAcceptedSpec: ((value: Record<string, unknown>) => void) | undefined;
 let mutateDuringOwnedProcess: ((nodeBinaryPath: string) => void) | undefined;
+let reproducedBaseSpecRawBytes: Buffer | undefined;
+let acceptedChainSpecRawBytes: Buffer | undefined;
 let buildSpecStderr: string;
 
 describe('Substrate federated authority-safe devnet acceptance V1', () => {
@@ -140,6 +142,8 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     mutateReproducedBaseSpec = undefined;
     mutateAcceptedSpec = undefined;
     mutateDuringOwnedProcess = undefined;
+    reproducedBaseSpecRawBytes = undefined;
+    acceptedChainSpecRawBytes = undefined;
     buildSpecStderr = '2026-08-13 17:21:14 Building chain spec    \r\n';
     paths = createPaths();
     mocks.inspectBaseline.mockReturnValue(passingBaseline());
@@ -530,9 +534,12 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     mocks.runProcess.mockImplementation(async value => {
       const result = await runProcess(value);
       if (value.args[0] !== 'test') return result;
+      const stdout =
+        'running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured';
       return {
         ...result,
-        stdout: 'running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured',
+        stdoutBytes: Buffer.from(stdout, 'utf8'),
+        stdout,
       };
     });
 
@@ -588,6 +595,24 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       `freshly built Frontier binary did not reproduce the pinned base chain spec: observed ${observedDigest}, expected ${expectedDigest}`,
     );
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('compares the exact reproduced base-spec stdout bytes', async () => {
+    reproducedBaseSpecRawBytes = Buffer.from([0xff]);
+
+    await expect(
+      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+    ).rejects.toThrow(/did not reproduce the pinned base chain spec/);
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('parses the exact node-accepted chain-spec stdout bytes', async () => {
+    acceptedChainSpecRawBytes = Buffer.from([0xff]);
+
+    await expect(
+      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+    ).rejects.toThrow(/must be encoded as UTF-8/);
+    expect(mocks.observe).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -762,6 +787,8 @@ async function runProcess(value: Readonly<{
 }>): Promise<Readonly<{
   pid: number;
   exitCode: 0;
+  stdoutBytes: Buffer;
+  stderrBytes: Buffer;
   stdout: string;
   stderr: string;
 }>> {
@@ -808,7 +835,19 @@ async function runProcess(value: Readonly<{
   } else {
     throw new Error(`unexpected mocked process: ${value.args.join(' ')}`);
   }
-  return { pid: 1, exitCode: 0, stdout, stderr };
+  const stdoutBytes = value.args[0] === 'build-spec'
+    ? value.args[2] === 'dev'
+      ? reproducedBaseSpecRawBytes ?? Buffer.from(stdout, 'utf8')
+      : acceptedChainSpecRawBytes ?? Buffer.from(stdout, 'utf8')
+    : Buffer.from(stdout, 'utf8');
+  return {
+    pid: 1,
+    exitCode: 0,
+    stdoutBytes,
+    stderrBytes: Buffer.from(stderr, 'utf8'),
+    stdout,
+    stderr,
+  };
 }
 
 async function withOwnedProcesses(

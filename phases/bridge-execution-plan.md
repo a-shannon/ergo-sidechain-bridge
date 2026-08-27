@@ -13,7 +13,7 @@ It is not a production-ready or mainnet-readiness claim.
 | Field | Current value |
 |---|---|
 | Active work package | **WP-06-FED - EIP-independent federated reference profile.** Deliver a complete, funds-safe bridge path under an explicit, versioned federation trust model. Reuse the reviewed commitment, application-binding, conservation, replay, cutover, and lifecycle invariants, but create new federated statement/profile domains wherever authority semantics differ. Do not restore unrestricted owner minting, the historical fee-from-backing payout, overlapping source-lock branches, timeout payout after burn disappearance, single-attestor legacy R9 admission, or route-local replay cutover. This track may become a usable institutional reference profile, but it is never labelled trustless. |
-| Active internal slice | **FED-6-LAB - canonical tracker transport and confirmation.** V16 completed the strict no-submit frozen-tracker campaign. V20, V22 and V23 are terminal and must not be retried or treated as transport/admission evidence. A direct phase-only replay proved the exact V22 Ergo node build itself succeeds, so V23 used a new request and fresh source, artifact, journal and receipt roots from commit `e0a97ce`. Its exact source, topology and empty-state preflights passed, but its single loopback attempt terminated with only the non-authoritative phase hint `managed setup execution`; it published no artifact or receipt, and teardown left no matching process or listener. Commit `e2bc976d` subdivides that boundary into finite source-history, funding, packet, setup-transport, peg-in, application-checkpoint and tracker-construction phases without exposing causes or granting retry, receipt, submission, admission or funds authority. The next action is one fresh V24 lineage from this reviewed commit, with the same preflights and at most one local attempt. Any failure closes V24 and routes work to its finite phase. Global replay insertion, external-fee payout and recovery remain later joins. Source finality is still a disclosed dual-RPC depth policy, and the anchor observation does not authenticate Ergo proof of work. This self-operated research evidence does not establish independent custody, Gate 5, trustless status, deployment readiness or support for public funds. |
+| Active internal slice | **FED-6-LAB - canonical tracker transport and confirmation.** V16 completed the strict no-submit frozen-tracker campaign. V20 and V22-V28 are terminal; none may be retried or reused as transport/admission evidence. Three attempted cross-root rebuild routes - path/toolchain remapping, a stable junction alias and fixed Wasm metadata - failed to reproduce the canonical chain-spec/runtime bytes and remain falsified. V29 replaces those routes with a source-owned two-build pin refresh under one exact patched Frontier checkout and pinned Rust 1.82 toolchain. Two distinct fresh Cargo targets reproduced byte-identical base spec `fc76c9b9f05d2ee3152cb61705d54859337cc7bbd6f7985bfbb316dc15e96b69` and runtime code `992646c37f477d0a6cc4d2594f92d5d80ad9aebb739003d90af5a42908cfa969`; the native binary digests differed, so native-binary, cross-root, hermetic and independent-build reproducibility remain explicitly false. The outputs are create-only external build inputs, not target acceptance or authority evidence. The next action is one fresh single-use FED-6 lineage generated from the reviewed V29 producer and pins, with fresh source, artifact, journal and receipt roots, unchanged preflights and at most one local attempt. No earlier request is an input. Global replay insertion, external-fee payout and recovery remain later joins. Source finality is still a disclosed dual-RPC depth policy, and the anchor observation does not authenticate Ergo proof of work. This self-operated research evidence does not establish independent custody, Gate 5, trustless status, deployment readiness or support for public funds. |
 | Public coordination | Public `main` is protected by both required CI jobs, one approving review from someone other than the last pusher, stale-review dismissal, conversation resolution, linear history and disabled force-push/deletion. Public research-alpha commit `faba91b8a560f7f0ee0a93b72a6e63b560c5117a` passed hosted run `33045090020`: both the public-audit candidate gate and exact Frontier/Ergo source rebuild succeeded. [Issue #1](https://github.com/a-shannon/ergo-sidechain-bridge/issues/1) owns independent review of exact commit `ee0686b84483e6f0af85c764e93b8a43383cc54a`; [issue #2](https://github.com/a-shannon/ergo-sidechain-bridge/issues/2) owns external target and custody evidence for a later independently operated FED-6 campaign. Private vulnerability reporting is enabled. The public issues remain parallel assurance lanes and do not authorize or describe FED-6-LAB. |
 | Frozen upgrade track | **WP-06-STARK - Ergo-verifiable finality / EIP-0045 STARK upgrade.** The V4/V5/V6 proof and cutover artifacts through commit `d7420756` remain frozen. Resume only when an activated compatible target can execute the exact verifier profile and no-submit acceptance route. The absence of an activated EIP-0045 verifier or equivalent reviewed Ergo-verifiable consumer blocks the trustless upgrade, not WP-06-FED or the bridge reference implementation as a whole. |
 | WP-08F state | The original WP-08F exact-envelope lifecycle contained the relayer owner-mint capability but still left an executable owner-mint signing operation and transport. P1-LR1 supersedes that containment by removing the owner-mint envelope/signing methods, submitter, adapter, application root, executor, daemon composition, and journal APIs that could create a new owner-mint attempt. The supported `deploy:sidechain` command and script are removed, `SidechainClient` is observation-only, the Frontier extraction spike is synthetic-only, and active readiness preflights reject historical owner-mint deployments even when their code is present. Peg-in stops after exact committed-vault verification and waits for an authenticated V4 pending reservation and atomic runtime consumption; only historical transaction confirmation/reconciliation remains. The historical Solidity owner entrypoint, historical deployments, and protocol funds authority are not removed by this change and remain outside its claim boundary |
@@ -1483,29 +1483,42 @@ most one attempt after the same source, topology and empty-state preflights; a
 failure closes that lineage and routes work back to the hinted code boundary,
 never to an automatic retry.
 
-A direct phase-only replay then proved the exact V22 Ergo node build succeeds
-without starting a node, signing or transporting a transaction. Fresh V23 was
-bound to request SHA-256
-`fdf409b4361ae406981db4cb4ec4264b73f128a5fb1d886990b4a8f9147c0b10`,
-the locked Frontier commit `75329a2df49e2cc7981485392c31160929d1bd48`
-and the locked Ergo commit `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1`.
-Its source, runner-topology and create-only destination preflights passed. The
-single local attempt crossed the build, setup-session, process-construction and
-node-start phases, then terminated with only the non-authoritative hint
-`managed setup execution`. It produced no command receipt or artifact; all
-matching processes and listeners were absent after teardown, and its private
-journal remains excluded. V23 is terminal and cannot authorize a retry.
+A direct phase-only replay proved the exact V22 Ergo node build succeeds without
+starting a node, signing or transporting a transaction. Fresh V23 then passed
+its source, runner-topology and create-only destination preflights, crossed the
+build, setup-session, process-construction and node-start phases, and terminated
+with only the non-authoritative hint `managed setup execution`. It produced no
+command receipt or artifact; teardown left no matching process or listener.
+V23 is terminal. Commit `e2bc976d` split that remaining boundary into the finite
+source-history, funding/history, packet, setup-transport, peg-in,
+application-checkpoint, tracker-construction and finalization phases without
+granting a retry or authority claim.
 
-Commit `e2bc976d` splits that remaining boundary into a finite sequence covering
-source history, Ergo funding/history, packet production, setup batch and
-genesis transport, peg-in candidate/lock/vault transitions, application
-checkpoint, tracker construction and finalization. Phase identity remains
-process-owned and causes stay private; a projected hint is diagnostic only.
-The affected closure passed 195 tests, TypeScript and the 124-module layered
-import check, and independent review found no remaining P0-P3. The next
-campaign must be a fresh V24 request and runtime lineage from that commit, with
-one attempt only after the unchanged exact preflights. Gate 5, tracker
-admission, global replay, payout and funds authority remain false.
+Fresh lineages V25-V28 are also terminal. Their failed routes bounded three
+cross-root hypotheses: path/toolchain remapping, a stable junction alias and
+fixed Wasm metadata. None reproduced the canonical chain-spec/runtime bytes,
+none published admission evidence, and none may be retried or used as input to
+another request. V29 instead runs a source-owned pin refresh against exact
+Frontier commit `75329a2df49e2cc7981485392c31160929d1bd48` and patch SHA-256
+`47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813`.
+Two fresh Cargo targets under the same pinned Rust 1.82 toolchain and explicitly
+selected Cargo cache root reproduced the same 3,941,916-byte base spec, SHA-256
+`fc76c9b9f05d2ee3152cb61705d54859337cc7bbd6f7985bfbb316dc15e96b69`,
+and the same 1,969,735-byte runtime code, SHA-256
+`992646c37f477d0a6cc4d2594f92d5d80ad9aebb739003d90af5a42908cfa969`.
+The native binary digests differed, so native-binary reproducibility is not
+claimed; cross-root reproducibility, complete tool closure, dependency-cache
+attestation, hermeticity and independent build attestation also remain false.
+Canonical report digest
+`ce5929e66fe2cdd7b1a66d10f16062dbbc4820b74ca9da5b6a9fca9d32f16a9a`
+binds those limits.
+
+The next campaign must be a new single-use request and runtime lineage generated
+from the reviewed V29 producer and exact base-spec/runtime pins, with fresh
+source, artifact, journal and receipt roots. It receives at most one local
+attempt after the unchanged exact preflights. No V20-V28 request or private
+journal is an input. Gate 5, tracker admission, global replay, payout, target
+acceptance and funds authority remain false.
 
 The retained V2 source-attestation session now also exposes a one-shot
 checkpoint capability for one canonical 512-byte statement under the exact

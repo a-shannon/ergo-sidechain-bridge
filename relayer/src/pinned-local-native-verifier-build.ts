@@ -1518,6 +1518,8 @@ export interface BoundedProcessInput {
 export interface BoundedProcessResult {
   pid: number;
   exitCode: 0;
+  stdoutBytes: Buffer;
+  stderrBytes: Buffer;
   stdout: string;
   stderr: string;
 }
@@ -1819,11 +1821,15 @@ export async function runBoundedProcess(
         return;
       }
       settled = true;
+      const stdoutBuffer = Buffer.concat(stdoutChunks);
+      const stderrBuffer = Buffer.concat(stderrChunks);
       resolvePromise({
         pid: child.pid,
         exitCode: 0,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        stdoutBytes: stdoutBuffer,
+        stderrBytes: stderrBuffer,
+        stdout: stdoutBuffer.toString('utf8'),
+        stderr: stderrBuffer.toString('utf8'),
       });
     }
   });
