@@ -729,8 +729,8 @@ describe('isolated tracker transport campaign worker V9', () => {
   it('canonicalizes junctioned direct-worker source roots', ({ skip }) => {
     const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-link-'));
     try {
-      const physicalBridgeRoot = realpathSync(resolve(process.cwd(), '..'));
-      const physicalWorktreeRoot = realpathSync(
+      const physicalBridgeRoot = realpathSync.native(resolve(process.cwd(), '..'));
+      const physicalWorktreeRoot = realpathSync.native(
         discoverBridgeRepositoryRoot(physicalBridgeRoot),
       );
       const bridgeAlias = join(fixture, 'bridge-alias');
@@ -767,8 +767,8 @@ describe('isolated tracker transport campaign worker V9', () => {
       expect(resolveCanonicalWorkerRootsV9(
         join(bridgeRoot, 'relayer', 'src', 'scripts'),
       )).toEqual({
-        bridgeRoot: realpathSync(bridgeRoot),
-        worktreeRoot: realpathSync(bridgeRoot),
+        bridgeRoot: realpathSync.native(bridgeRoot),
+        worktreeRoot: realpathSync.native(bridgeRoot),
       });
     } finally {
       rmSync(fixture, { recursive: true, force: true });
@@ -800,8 +800,8 @@ describe('isolated tracker transport campaign worker V9', () => {
       expect(resolveCanonicalWorkerRootsV9(
         join(linkedRoot, 'relayer', 'src', 'scripts'),
       )).toEqual({
-        bridgeRoot: realpathSync(linkedRoot),
-        worktreeRoot: realpathSync(linkedRoot),
+        bridgeRoot: realpathSync.native(linkedRoot),
+        worktreeRoot: realpathSync.native(linkedRoot),
       });
     } finally {
       rmSync(fixture, { recursive: true, force: true });
@@ -820,8 +820,8 @@ describe('isolated tracker transport campaign worker V9', () => {
       expect(resolveCanonicalWorkerRootsV9(
         join(bridgeRoot, 'relayer', 'src', 'scripts'),
       )).toEqual({
-        bridgeRoot: realpathSync(bridgeRoot),
-        worktreeRoot: realpathSync(worktreeRoot),
+        bridgeRoot: realpathSync.native(bridgeRoot),
+        worktreeRoot: realpathSync.native(worktreeRoot),
       });
     } finally {
       rmSync(fixture, { recursive: true, force: true });
