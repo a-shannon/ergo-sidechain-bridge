@@ -1,11 +1,14 @@
+import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
+  symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -21,6 +24,7 @@ import {
   canonicalJson,
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
+import { discoverBridgeRepositoryRoot } from '../bridge-repository-layout.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
@@ -722,6 +726,128 @@ describe('isolated tracker transport campaign worker V9', () => {
     expect(mocks.runRoot).not.toHaveBeenCalled();
   });
 
+  it('canonicalizes junctioned direct-worker source roots', ({ skip }) => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-link-'));
+    try {
+      const physicalBridgeRoot = realpathSync(resolve(process.cwd(), '..'));
+      const physicalWorktreeRoot = realpathSync(
+        discoverBridgeRepositoryRoot(physicalBridgeRoot),
+      );
+      const bridgeAlias = join(fixture, 'bridge-alias');
+      try {
+        symlinkSync(physicalBridgeRoot, bridgeAlias, 'junction');
+      } catch (error) {
+        if (['EPERM', 'EACCES', 'UNKNOWN', 'ENOTSUP'].includes(
+          (error as NodeJS.ErrnoException).code ?? '',
+        )) {
+          skip();
+          return;
+        }
+        throw error;
+      }
+      expect(resolveCanonicalWorkerRootsV9(
+        join(bridgeAlias, 'relayer', 'src', 'scripts'),
+      )).toEqual({
+        bridgeRoot: physicalBridgeRoot,
+        worktreeRoot: physicalWorktreeRoot,
+      });
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves standalone repositories backed by Git directories', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-standalone-'));
+    try {
+      const bridgeRoot = join(fixture, 'bridge');
+      mkdirSync(join(bridgeRoot, 'relayer', 'src', 'scripts'), {
+        recursive: true,
+      });
+      runGit(bridgeRoot, ['init']);
+      expect(resolveCanonicalWorkerRootsV9(
+        join(bridgeRoot, 'relayer', 'src', 'scripts'),
+      )).toEqual({
+        bridgeRoot: realpathSync(bridgeRoot),
+        worktreeRoot: realpathSync(bridgeRoot),
+      });
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves standalone linked worktrees backed by Git files', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-worktree-'));
+    try {
+      const primaryRoot = join(fixture, 'primary');
+      const linkedRoot = join(fixture, 'linked');
+      mkdirSync(primaryRoot);
+      runGit(primaryRoot, ['init']);
+      writeFileSync(join(primaryRoot, 'seed.txt'), 'seed\n');
+      runGit(primaryRoot, ['add', 'seed.txt']);
+      runGit(primaryRoot, [
+        '-c',
+        'user.name=A. Shannon',
+        '-c',
+        'user.email=a.shannon@users.noreply.github.com',
+        'commit',
+        '-m',
+        'seed',
+      ]);
+      runGit(primaryRoot, ['worktree', 'add', '--detach', linkedRoot, 'HEAD']);
+      mkdirSync(join(linkedRoot, 'relayer', 'src', 'scripts'), {
+        recursive: true,
+      });
+      expect(resolveCanonicalWorkerRootsV9(
+        join(linkedRoot, 'relayer', 'src', 'scripts'),
+      )).toEqual({
+        bridgeRoot: realpathSync(linkedRoot),
+        worktreeRoot: realpathSync(linkedRoot),
+      });
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('resolves internal superprojects backed by Git directories', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-superproject-'));
+    try {
+      const worktreeRoot = join(fixture, 'superproject');
+      const bridgeRoot = join(worktreeRoot, 'ergo-sidechain-bridge');
+      mkdirSync(join(bridgeRoot, 'relayer', 'src', 'scripts'), {
+        recursive: true,
+      });
+      runGit(worktreeRoot, ['init']);
+      expect(resolveCanonicalWorkerRootsV9(
+        join(bridgeRoot, 'relayer', 'src', 'scripts'),
+      )).toEqual({
+        bridgeRoot: realpathSync(bridgeRoot),
+        worktreeRoot: realpathSync(worktreeRoot),
+      });
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects malformed Git repository metadata', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-invalid-'));
+    try {
+      const bridgeRoot = join(fixture, 'bridge-copy');
+      const scriptDirectory = join(
+        bridgeRoot,
+        'relayer',
+        'src',
+        'scripts',
+      );
+      mkdirSync(scriptDirectory, { recursive: true });
+      writeFileSync(join(bridgeRoot, '.git'), 'not git metadata\n');
+      expect(() => resolveCanonicalWorkerRootsV9(scriptDirectory)).toThrow(
+        'bridge Git repository root is unavailable',
+      );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('rejects malformed arguments and keeps failures opaque', async () => {
     await expect(
       runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9([]),
@@ -752,6 +878,14 @@ describe('isolated tracker transport campaign worker V9', () => {
     ];
   }
 });
+
+function runGit(cwd: string, args: readonly string[]): string {
+  return execFileSync('git', ['-C', cwd, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  }).trim();
+}
 
 function directory(root: string, name: string): string {
   const value = join(root, name);

@@ -1,4 +1,3 @@
-import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -13,6 +12,7 @@ import {
   canonicalPathIdentity,
   isPathInside,
 } from '../create-only-out-of-repository-artifact.js';
+import { resolveCanonicalBridgeRepositoryRoots } from '../bridge-repository-layout.js';
 import {
   assertNoDuplicateJsonKeys,
   canonicalJson,
@@ -510,11 +510,9 @@ function assertArguments(argv: readonly string[]): void {
 export function resolveCanonicalWorkerRootsV9(
   scriptDirectory: string,
 ): Readonly<{ readonly bridgeRoot: string; readonly worktreeRoot: string }> {
-  const bridgeRoot = realpathSync(resolve(scriptDirectory, '..', '..', '..'));
-  return Object.freeze({
-    bridgeRoot,
-    worktreeRoot: realpathSync(resolve(bridgeRoot, '..')),
-  });
+  return resolveCanonicalBridgeRepositoryRoots(
+    resolve(scriptDirectory, '..', '..', '..'),
+  );
 }
 
 function externalDirectory(

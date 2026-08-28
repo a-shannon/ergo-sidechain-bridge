@@ -13,6 +13,11 @@ export interface BridgeRepositoryLayout {
   frontierSubmoduleName: string;
 }
 
+export interface CanonicalBridgeRepositoryRoots {
+  readonly bridgeRoot: string;
+  readonly worktreeRoot: string;
+}
+
 const BRIDGE_DIRECTORY_NAME = 'ergo-sidechain-bridge';
 
 export function resolveBridgeRepositoryLayout(input: {
@@ -67,6 +72,21 @@ export function discoverBridgeRepositoryRoot(
   const repositoryRoot = path.resolve(output);
   resolveBridgeRepositoryLayout({ repositoryRoot, bridgeRoot });
   return repositoryRoot;
+}
+
+export function resolveCanonicalBridgeRepositoryRoots(
+  bridgeRootInput: string,
+): Readonly<CanonicalBridgeRepositoryRoots> {
+  const bridgeRoot = realpathSync.native(path.resolve(bridgeRootInput));
+  let repositoryRoot: string;
+  try {
+    repositoryRoot = discoverBridgeRepositoryRoot(bridgeRoot);
+  } catch {
+    throw new Error('bridge Git repository root is unavailable');
+  }
+  const worktreeRoot = realpathSync.native(repositoryRoot);
+  resolveBridgeRepositoryLayout({ repositoryRoot: worktreeRoot, bridgeRoot });
+  return Object.freeze({ bridgeRoot, worktreeRoot });
 }
 
 function canonicalizeExistingPath(input: string): string {

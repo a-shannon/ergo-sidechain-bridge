@@ -1,4 +1,3 @@
-import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -9,6 +8,7 @@ import {
   canonicalPathIdentity,
   isPathInside,
 } from '../create-only-out-of-repository-artifact.js';
+import { resolveCanonicalBridgeRepositoryRoots } from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import {
   projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
@@ -200,11 +200,9 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
 export function resolveCanonicalFrozenObservedAnchorTrackerCheckCampaignWorkerRootsV7(
   scriptDirectory: string,
 ): Readonly<{ readonly bridgeRoot: string; readonly worktreeRoot: string }> {
-  const bridgeRoot = realpathSync(resolve(scriptDirectory, '..', '..', '..'));
-  return Object.freeze({
-    bridgeRoot,
-    worktreeRoot: realpathSync(resolve(bridgeRoot, '..')),
-  });
+  return resolveCanonicalBridgeRepositoryRoots(
+    resolve(scriptDirectory, '..', '..', '..'),
+  );
 }
 
 function pathsOverlap(left: string, right: string): boolean {

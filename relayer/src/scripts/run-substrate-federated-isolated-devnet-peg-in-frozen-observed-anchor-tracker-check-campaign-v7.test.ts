@@ -19,6 +19,13 @@ import {
   vi,
 } from 'vitest';
 
+import { discoverBridgeRepositoryRoot } from '../bridge-repository-layout.js';
+
+const CURRENT_BRIDGE_ROOT = realpathSync(resolve(process.cwd(), '..'));
+const CURRENT_WORKTREE_ROOT = realpathSync(
+  discoverBridgeRepositoryRoot(CURRENT_BRIDGE_ROOT),
+);
+
 const mocked = vi.hoisted(() => ({
   applicationAssert: vi.fn(),
   commandReceiptFailure: false,
@@ -703,8 +710,8 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
 
       expect(mocked.loader).toHaveBeenCalledWith(
         requestPath,
-        resolve(process.cwd(), '..'),
-        resolve(process.cwd(), '..', '..'),
+        CURRENT_BRIDGE_ROOT,
+        CURRENT_WORKTREE_ROOT,
         REQUEST_DIGEST_HEX,
       );
       expect(mocked.root).toHaveBeenCalledTimes(1);
@@ -826,7 +833,7 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       expect(processInput.timeoutMs).toBe(120 * 60_000);
       expect(processInput.env).toEqual({ PATH: 'controlled' });
       expect(mocked.environment).toHaveBeenCalledWith(
-        resolve(process.cwd(), '..', '..'),
+        CURRENT_WORKTREE_ROOT,
         { cargoHomeDirectory: relayerCargoCache },
       );
       const published = readFileSync(outputPath, 'utf8');
@@ -1885,10 +1892,11 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
   it('canonicalizes junctioned direct-worker source roots', ({ skip }) => {
     const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-link-'));
     try {
-      const physicalWorktreeRoot = resolve(process.cwd(), '..', '..');
-      const worktreeAlias = join(fixture, 'worktree-alias');
+      const physicalBridgeRoot = CURRENT_BRIDGE_ROOT;
+      const physicalWorktreeRoot = CURRENT_WORKTREE_ROOT;
+      const bridgeAlias = join(fixture, 'bridge-alias');
       try {
-        symlinkSync(physicalWorktreeRoot, worktreeAlias, 'junction');
+        symlinkSync(physicalBridgeRoot, bridgeAlias, 'junction');
       } catch (error) {
         if (['EPERM', 'EACCES', 'UNKNOWN', 'ENOTSUP'].includes(
           (error as NodeJS.ErrnoException).code ?? '',
@@ -1900,14 +1908,13 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       }
       expect(resolveCanonicalFrozenObservedAnchorTrackerCheckCampaignWorkerRootsV7(
         join(
-          worktreeAlias,
-          'ergo-sidechain-bridge',
+          bridgeAlias,
           'relayer',
           'src',
           'scripts',
         ),
       )).toEqual({
-        bridgeRoot: realpathSync(resolve(process.cwd(), '..')),
+        bridgeRoot: physicalBridgeRoot,
         worktreeRoot: realpathSync(physicalWorktreeRoot),
       });
     } finally {
