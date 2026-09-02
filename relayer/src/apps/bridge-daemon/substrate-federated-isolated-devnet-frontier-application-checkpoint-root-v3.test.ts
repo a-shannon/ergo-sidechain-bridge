@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   runner: undefined as object | undefined,
   checkpoint: undefined as object | undefined,
   runnerInput: undefined as Record<string, unknown> | undefined,
+  runnerDeadline: undefined as number | undefined,
   checkpointInput: undefined as Record<string, unknown> | undefined,
   targetDescriptorDigestHex: '11'.repeat(32),
   packetReceiptDigestHex: '12'.repeat(32),
@@ -166,6 +167,8 @@ vi.mock(
 vi.mock(
   '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
   () => ({
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1:
+      45 * 60_000,
     assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance:
       (value: unknown) => assertRegistered(
         mocks.runnerReceipts,
@@ -181,9 +184,13 @@ vi.mock(
         return Object.freeze({ ...input });
       },
     runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2:
-      async (input: Record<string, unknown>) => {
+      async (
+        input: Record<string, unknown>,
+        completionDeadline: number | undefined,
+      ) => {
         mocks.sequence.push('application-burn');
         mocks.runnerInput = input;
+        mocks.runnerDeadline = completionDeadline;
         if (mocks.runnerFailure !== null) {
           throw mocks.runnerFailure;
         }
@@ -254,6 +261,7 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     mocks.runner = undefined;
     mocks.checkpoint = undefined;
     mocks.runnerInput = undefined;
+    mocks.runnerDeadline = undefined;
     mocks.checkpointInput = undefined;
   });
 
@@ -319,6 +327,21 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
         { ...receipt },
       )
     ).toThrow(/lacks process provenance/u);
+  });
+
+  it('caps an outer action deadline to the runner completion budget', async () => {
+    const now = 1_000;
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(now);
+    try {
+      await runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3(
+        rootInput() as never,
+        now + 60 * 60_000,
+      );
+
+      expect(mocks.runnerDeadline).toBe(now + 45 * 60_000);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('rejects callback, mint-receipt and accessor input surfaces before custody', async () => {

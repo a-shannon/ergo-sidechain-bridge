@@ -133,7 +133,7 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', () 
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA:
     'e2s.substrate-federated-isolated-devnet-checkpoint-bound-frozen-execution.v2',
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1:
-    31 * 60_000,
+    78 * 60_000,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA:
     'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-execution.v1',
 }));
@@ -238,6 +238,8 @@ vi.mock('../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-
     mocked.frontierConsumer,
 }));
 vi.mock('./substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js', () => ({
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3:
+    45 * 60_000,
   assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance:
     mocked.applicationCheckpointAssert,
   createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3:
@@ -6842,6 +6844,25 @@ describe('isolated devnet genesis setup execution root V1', () => {
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
     );
   });
+
+  it('reserves the runner and all twelve confirmation windows in the application action deadline', async () => {
+    const now = 1_000;
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(now);
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+      const continuation =
+        mocked.applicationCheckpointContinuation.mock.results[0]!.value;
+      const completionDeadline =
+        continuation.executeApplication.mock.calls[0]![2];
+      expect(completionDeadline).toBe(now + 77 * 60_000);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
 });
 
 function executeThroughPorts(order: string[]) {

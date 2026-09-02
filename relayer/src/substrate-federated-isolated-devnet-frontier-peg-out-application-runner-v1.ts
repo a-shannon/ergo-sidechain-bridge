@@ -128,7 +128,8 @@ const OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256 =
 const EXPECTED_OWNER_ADDRESS =
   '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const EXPECTED_MINT_AMOUNT_NANO_ERG = '15000000';
-const MAX_RUNNER_RUNTIME_MS = 45 * 60_000;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1 =
+  45 * 60_000;
 const POST_CARGO_REVALIDATION_BUDGET_MS = 90_000;
 const RECEIPTS = new WeakSet<object>();
 const V2_RECEIPTS = new WeakMap<
@@ -1538,15 +1539,19 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationD
 
 function requireCompletionDeadline(value: unknown): number {
   const now = performance.now();
-  const deadline = value === undefined ? now + MAX_RUNNER_RUNTIME_MS : value;
+  const deadline = value === undefined
+    ? now
+      + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1
+    : value;
   if (
     typeof deadline !== 'number'
     || !Number.isFinite(deadline)
     || deadline <= now
-    || deadline - now > MAX_RUNNER_RUNTIME_MS
+    || deadline - now
+      > SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1
   ) {
     throw new Error(
-      `Frontier peg-out runner deadline must be within ${MAX_RUNNER_RUNTIME_MS} milliseconds`,
+      `Frontier peg-out runner deadline must be within ${SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1} milliseconds`,
     );
   }
   return deadline;

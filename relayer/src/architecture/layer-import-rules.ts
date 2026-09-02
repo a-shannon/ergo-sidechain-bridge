@@ -589,6 +589,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance',
           'preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
           'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1',
           'RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input',
           'SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2',
         ]),
@@ -944,6 +945,12 @@ const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Map([
       [
+        './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js',
+        new Set([
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3',
+        ]),
+      ],
+      [
         '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
         new Set([
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
@@ -964,6 +971,17 @@ const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js',
         new Set([
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_CHECK_V1_SCHEMA',
+        ]),
+      ],
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    new Map([
+      [
+        '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
+        new Set([
+          'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1',
         ]),
       ],
     ]),
@@ -1096,6 +1114,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3',
       'runSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3',
       'RunSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootV3Input',
+      'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3',
       'SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3',
       'SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3',
       'SubstrateFederatedIsolatedDevnetFrontierCheckpointAdmissionV3',

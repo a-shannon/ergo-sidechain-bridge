@@ -160,6 +160,7 @@ import {
   type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2,
 } from '../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3,
   assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance,
   createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
   preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3,
@@ -414,16 +415,27 @@ const MAX_ADMISSION_VALIDITY_BLOCKS = '64';
 const CONFIRMATION_POLL_MS = 250;
 const TRANSACTION_CONFIRMATION_BUDGET_MS = 2 * 60_000;
 const MAX_CONFIRMATION_WINDOWS = 11;
+const APPLICATION_CHECKPOINT_ADDITIONAL_CONFIRMATION_WINDOWS = 1;
 const NON_CONFIRMATION_ACTION_BUDGET_MS = 8 * 60_000;
 const OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT = 11;
 const ACTION_COMPLETION_BUDGET_MS =
   (MAX_CONFIRMATION_WINDOWS * TRANSACTION_CONFIRMATION_BUDGET_MS)
   + NON_CONFIRMATION_ACTION_BUDGET_MS;
+const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS =
+  (
+    (MAX_CONFIRMATION_WINDOWS
+      + APPLICATION_CHECKPOINT_ADDITIONAL_CONFIRMATION_WINDOWS)
+    * TRANSACTION_CONFIRMATION_BUDGET_MS
+  )
+  + NON_CONFIRMATION_ACTION_BUDGET_MS
+  + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3;
 
 if (
   TRANSACTION_CONFIRMATION_BUDGET_MS
     <= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1
   || ACTION_COMPLETION_BUDGET_MS
+    >= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1
+  || APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS
     >= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1
 ) {
   throw new Error('isolated managed confirmation timing envelope is invalid');
@@ -6317,7 +6329,10 @@ async function executeManagedSetupAction(
       'isolated devnet Frontier consumer must match the managed action',
     );
   }
-  const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
+  const completionDeadline = performance.now()
+    + (applicationCheckpointAction
+      ? APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS
+      : ACTION_COMPLETION_BUDGET_MS);
   setManagedPhase('source history collection');
   const sourceHistory = await (async () => {
     try {

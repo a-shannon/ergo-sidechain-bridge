@@ -17,6 +17,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1,
   type RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input,
   type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2,
 } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
@@ -26,6 +27,8 @@ import type {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-frontier-application-checkpoint-root.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3 =
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1;
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3';
@@ -436,7 +439,7 @@ async function executeApplicationCheckpointContinuation(
         ...plan.applicationRunnerInput,
         mintSourceProofReceipt: mintSourceProof.sourceProof,
       },
-      completionDeadline,
+      capApplicationRunnerCompletionDeadline(completionDeadline),
     );
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
     applicationRunner,
@@ -452,6 +455,17 @@ async function executeApplicationCheckpointContinuation(
     mintSourceProof,
     applicationRunner,
   });
+}
+
+function capApplicationRunnerCompletionDeadline(
+  completionDeadline: number | undefined,
+): number | undefined {
+  if (completionDeadline === undefined) return undefined;
+  return Math.min(
+    completionDeadline,
+    performance.now()
+      + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3,
+  );
 }
 
 function attestApplicationCheckpointContinuation(
