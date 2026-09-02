@@ -283,7 +283,7 @@
       {
         "path": "bridge/checkpoint-verifier/tests/cli.rs",
         "status": "added",
-        "patchedBlob": "4382936c1184a9a09cbe63357b1062b5bd255347"
+        "patchedBlob": "766e3feee94b98f276e9095f5b58374c91bc9d4f"
       },
       {
         "path": "bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs",
