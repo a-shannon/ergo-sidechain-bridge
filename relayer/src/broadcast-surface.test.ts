@@ -391,7 +391,7 @@ describe('broadcast surface isolation', () => {
       'export async function runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6',
     );
     const trackerTransportRootStart = executionRootSource.indexOf(
-      'export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9',
+      'export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10',
       trackerRootStart,
     );
     const trackerRootEnd = trackerTransportRootStart;

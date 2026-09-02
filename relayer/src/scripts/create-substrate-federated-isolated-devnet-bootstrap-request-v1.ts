@@ -15,7 +15,17 @@ import {
   readBoundedRegularFile,
   writeNewFile,
 } from '../create-only-out-of-repository-artifact.js';
+import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
+import {
+  buildAuthoritySafeLegacyMintProbeV1,
+} from '../substrate-federated-authority-safe-devnet-observation-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
+} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   assertCreateOnlyOutput,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
@@ -76,10 +86,12 @@ export function createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgume
   argv: readonly string[],
 ): Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result> {
   const args = parseArguments(argv);
+  assertRequestPublicationBindings(args.request);
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
   const relayerRoot = resolve(scriptDirectory, '..', '..');
-  const bridgeRoot = resolve(relayerRoot, '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(relayerRoot, '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const outputPath = assertCreateOnlyOutput(
     args.outputPath,
     worktreeRoot,
@@ -238,6 +250,31 @@ function parseArguments(argv: readonly string[]): Readonly<{
     },
   };
   return Object.freeze({ request: deepFreeze(request), outputPath: values['--output'] });
+}
+
+function assertRequestPublicationBindings(
+  request: Readonly<BootstrapCommandRequestV1>,
+): void {
+  const source = request.sourceTarget;
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: source.bridgeAddress,
+    tokenAddressHex: source.tokenAddress,
+  });
+  const probe = buildAuthoritySafeLegacyMintProbeV1({
+    signedTransactionHex: source.signedLegacyOwnerMintTransactionHex,
+    expectedChainId: BigInt(source.expectedChainId),
+    expectedBridgeAddress: source.bridgeAddress,
+    expectedBridgeOwnerAddress: source.bridgeOwnerAddress,
+  });
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+    bridgeOwnerAddressHex: source.bridgeOwnerAddress,
+    recipientAddressHex: probe.recipientAddress.slice(2),
+  });
+  if (source.expectedSudoAddress.toLowerCase() !== probe.signerAddress) {
+    throw new Error(
+      'canonical bootstrap request Sudo differs from the signed LAB owner',
+    );
+  }
 }
 
 function exactPort(value: string): number {

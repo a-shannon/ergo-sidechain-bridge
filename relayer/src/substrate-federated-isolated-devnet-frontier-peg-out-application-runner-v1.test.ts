@@ -496,11 +496,12 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
       "environment.CARGO_ENCODED_RUSTFLAGS = reproducibleRustFlags.join('\\x1f');",
     );
     expect(source).toContain(
-      "environment.WASM_BUILD_RUSTFLAGS = reproducibleRustFlags",
+      'buildPinnedLocalWasmPathRemapRustFlags({',
     );
     expect(source).toContain(
-      ".filter(flag => !flag.startsWith('-Clink-arg='))",
+      'rustcExecutablePath: input.rustcExecutablePath',
     );
+    expect(source).not.toContain(".filter(flag => !flag.startsWith('-Clink-arg='))");
   });
 
   it('detects an indirect V2-to-V1 receipt registration mutant', () => {

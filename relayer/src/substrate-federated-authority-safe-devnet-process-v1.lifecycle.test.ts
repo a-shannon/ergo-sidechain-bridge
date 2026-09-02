@@ -159,6 +159,8 @@ interface FakeBlock {
 let children: FakeChild[];
 let wrongListenerOwner: boolean;
 let wrongListenerAddress: boolean;
+let portProbeFailureAt: number | undefined;
+let portProbeCommands: string[];
 let wrongPeerIdentity: boolean;
 let retainListenersAfterStop: boolean;
 let witnessStartupFailure: boolean;
@@ -186,6 +188,8 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     children = [];
     wrongListenerOwner = false;
     wrongListenerAddress = false;
+    portProbeFailureAt = undefined;
+    portProbeCommands = [];
     wrongPeerIdentity = false;
     retainListenersAfterStop = false;
     witnessStartupFailure = false;
@@ -226,6 +230,12 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
       const command = String(args.at(-1) ?? '');
       if (command.includes('Get-Process -Id')) {
         return syncResult(runningImagePath);
+      }
+      if (command.includes('[System.Net.Sockets.TcpListener]')) {
+        portProbeCommands.push(command);
+        return portProbeCommands.length === portProbeFailureAt
+          ? syncFailure('synthetic loopback bind rejection')
+          : syncResult('');
       }
       const requestedPorts = command.match(/\$ports=@\(([^)]*)\)/)?.[1]
         ?.split(',')
@@ -551,7 +561,12 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
       const index = args.indexOf('--sealing');
       return index >= 0 && args[index + 1] === 'manual';
     })).toBe(true);
-    expect(children.filter(child => child.role === 'witness')).toHaveLength(3);
+    const witnessChildren = children.filter(child => child.role === 'witness');
+    expect(witnessChildren).toHaveLength(3);
+    expect(portProbeCommands.slice(1)).toHaveLength(witnessChildren.length);
+    expect(portProbeCommands.slice(1).every(command => command.includes(
+      `@(${PORTS.witnessRpc},${PORTS.witnessP2p},${PORTS.witnessPrometheus})`,
+    ))).toBe(true);
     expect(children.every(child => !child.alive)).toBe(true);
   });
 
@@ -736,6 +751,35 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
       withOwnedAuthoritySafeDevnetProcessesV1(input(), async () => 'unreachable'),
     ).rejects.toThrow(/listener is not exclusively loopback-owned/);
     expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('rejects unowned ports that Windows refuses to bind', async () => {
+    portProbeFailureAt = 1;
+    await expect(
+      withOwnedAuthoritySafeDevnetProcessesV1(input(), async () => 'unreachable'),
+    ).rejects.toThrow(/port is not bindable on IPv4 loopback/);
+    expect(portProbeCommands).toHaveLength(1);
+    expect(portProbeCommands[0]).toContain(
+      `@(${PORTS.primaryRpc},${PORTS.witnessRpc},${PORTS.primaryP2p},${PORTS.witnessP2p},${PORTS.primaryPrometheus},${PORTS.witnessPrometheus})`,
+    );
+    expect(portProbeCommands[0]).toMatch(/finally.*\.Stop\(\)/);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+  });
+
+  it('reprobes witness ports before launch and cleans up the primary on rejection', async () => {
+    portProbeFailureAt = 2;
+    await expect(
+      withOwnedAuthoritySafeDevnetProcessesV1(input(), async () => 'unreachable'),
+    ).rejects.toThrow(/port is not bindable on IPv4 loopback/);
+    expect(portProbeCommands).toHaveLength(2);
+    expect(portProbeCommands[1]).toContain(
+      `@(${PORTS.witnessRpc},${PORTS.witnessP2p},${PORTS.witnessPrometheus})`,
+    );
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    expect(children).toHaveLength(1);
+    expect(children[0]?.role).toBe('primary');
+    expect(children[0]?.alive).toBe(false);
   });
 
   it('rejects a running process image from a different regular-file path', async () => {
@@ -970,6 +1014,17 @@ function syncResult(stdout: string) {
     stdout,
     stderr: '',
     status: 0,
+    signal: null,
+  };
+}
+
+function syncFailure(stderr: string) {
+  return {
+    pid: 99,
+    output: [null, '', stderr],
+    stdout: '',
+    stderr,
+    status: 1,
     signal: null,
   };
 }

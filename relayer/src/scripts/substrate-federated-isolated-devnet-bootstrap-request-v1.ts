@@ -302,6 +302,14 @@ function parseBootstrapRequest(value: unknown): Readonly<BootstrapCommandRequest
   if (!/^[1-9][0-9]*$/u.test(expectedChainId)) {
     throw new Error('source target chain ID must be a positive decimal integer');
   }
+  const expectedNodeVersion = requiredString(
+    sourceTarget.expectedNodeVersion,
+    'source node version',
+  );
+  const expectedFrontierBinaryVersion = exactFrontierBinaryVersion(
+    sourceTarget.expectedFrontierBinaryVersion,
+    expectedNodeVersion,
+  );
   return Object.freeze({
     schema:
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_BOOTSTRAP_COMMAND_REQUEST_V1_SCHEMA,
@@ -376,10 +384,7 @@ function parseBootstrapRequest(value: unknown): Readonly<BootstrapCommandRequest
         sourceTarget.expectedSudoAddress,
         'Sudo address',
       ),
-      expectedFrontierBinaryVersion: requiredString(
-        sourceTarget.expectedFrontierBinaryVersion,
-        'Frontier binary version',
-      ),
+      expectedFrontierBinaryVersion,
       primaryRpcUrl: requiredString(
         sourceTarget.primaryRpcUrl,
         'primary source RPC',
@@ -406,10 +411,7 @@ function parseBootstrapRequest(value: unknown): Readonly<BootstrapCommandRequest
         sourceTarget.expectedNodeName,
         'source node name',
       ),
-      expectedNodeVersion: requiredString(
-        sourceTarget.expectedNodeVersion,
-        'source node version',
-      ),
+      expectedNodeVersion,
       signedLegacyOwnerMintTransactionHex: requiredString(
         sourceTarget.signedLegacyOwnerMintTransactionHex,
         'legacy owner-mint rejection transaction',
@@ -520,6 +522,30 @@ function requiredString(value: unknown, label: string): string {
     throw new Error(`${label} must be a non-empty string`);
   }
   return value;
+}
+
+function exactFrontierBinaryVersion(
+  value: unknown,
+  expectedNodeVersion: string,
+): string {
+  const version = requiredString(value, 'Frontier binary version');
+  const suffix = ` ${expectedNodeVersion}`;
+  if (!version.endsWith(suffix)) {
+    throw new Error(
+      'Frontier binary version must bind one executable identity to the exact source node version',
+    );
+  }
+  const executableIdentity = version.slice(0, -suffix.length);
+  if (
+    executableIdentity.length === 0
+    || executableIdentity.trim() !== executableIdentity
+    || /\s/u.test(executableIdentity)
+  ) {
+    throw new Error(
+      'Frontier binary version must bind one executable identity to the exact source node version',
+    );
+  }
+  return version;
 }
 
 function exactPort(value: unknown, label: string): number {

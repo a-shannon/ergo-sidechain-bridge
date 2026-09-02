@@ -13,7 +13,7 @@ It is not a production-ready or mainnet-readiness claim.
 | Field | Current value |
 |---|---|
 | Active work package | **WP-06-FED - EIP-independent federated reference profile.** Deliver a complete, funds-safe bridge path under an explicit, versioned federation trust model. Reuse the reviewed commitment, application-binding, conservation, replay, cutover, and lifecycle invariants, but create new federated statement/profile domains wherever authority semantics differ. Do not restore unrestricted owner minting, the historical fee-from-backing payout, overlapping source-lock branches, timeout payout after burn disappearance, single-attestor legacy R9 admission, or route-local replay cutover. This track may become a usable institutional reference profile, but it is never labelled trustless. |
-| Active internal slice | **FED-6-LAB - terminal V35 classification and deterministic LAB owner binding.** V16 remains the strict no-submit frozen-tracker baseline. V20, V22-V29 and V31-V35 are terminal campaign lineages; none may be retried or reused as transport or admission evidence. The V30 Frontier pins remain the only admissible build basis: base spec `004df7fd3f7138146c01d66d4e241be4007c9fede9ec849bc7e687ea242f38ea`, runtime code `3836e30fe811f5fe08aa59997f87416d7b5d294a8279da509388d1939c27bdac`, and canonical report `d3028c94f7c1bf73660008c1cad13749e41a16c1bd1a5d60d0a8968378fc83ad`. V35 used the source-owned canonical request, SHA-256 `32d1af586611277bf6a961909ef7cc483ee1c3c2f17096fe1012fe8e9a01a3fe`, and passed the pure no-launch preflight with receipt digest `9b31db5287a9808fb700503a536ff31afd3eb29d38511af0d48a370aa64505b3`. Its single authorized campaign then terminated in the worker's `bootstrap request` phase before node launch, tracker transport, signing, submission or broadcast because the worker compared the EVM recipient with the SS58 Sudo address instead of the request-bound Frontier bridge owner. The current source slice moves that invariant into one shared LAB application helper and applies it in both the preflight and worker; the worker fixture now keeps the EVM owner and Substrate Sudo identities distinct. No V35 campaign artifact or final command receipt exists, and teardown left no owned process or reserved listener. Only a fresh request and pure preflight may establish a future lineage; V35 must never be retried. Global replay insertion, external-fee payout and recovery remain later joins. Source finality is still a disclosed dual-RPC depth policy, and the anchor observation does not authenticate Ergo proof of work. This self-operated research evidence does not establish independent custody, Gate 5, trustless status, deployment readiness or support for public funds. |
+| Active internal slice | **FED-6-LAB - V130 terminal at application-checkpoint execution; concrete root-cause isolation next.** V130 passed its pure request-bound preflight, invoked V11 exactly once, and progressed through source build, owned-node genesis, peg-in source-lock execution, and committed-vault execution. It then stopped fail-closed in the application-checkpoint join. It produced no command receipt and no canonical tracker confirmation; all V130 mutable state is terminal and must never be reused. A focused offline application-runner integration falsifier passed against the same pinned toolchain, so the next serial action is to isolate the process-produced mint proof, remaining campaign deadline, and outer checkpoint join, then fix only the concrete falsified cause before creating any fresh lineage. The standalone checkout root is now resolved through the reviewed dual-layout helper rather than fixed parent traversal. Gate 5, funds authority, trustless status, deployment readiness, and support for public funds remain false. |
 | Public coordination | Public `main` is protected by both required CI jobs, one approving review from someone other than the last pusher, stale-review dismissal, conversation resolution, linear history and disabled force-push/deletion. Public research-alpha commit `b6395b7c916f882834ff69ba61dcd30a589113cc` passed hosted run `33089620519`: both the public-audit candidate gate and exact Frontier/Ergo source rebuild succeeded. [Issue #1](https://github.com/a-shannon/ergo-sidechain-bridge/issues/1) owns independent review of exact commit `ee0686b84483e6f0af85c764e93b8a43383cc54a`; [issue #2](https://github.com/a-shannon/ergo-sidechain-bridge/issues/2) owns external target and custody evidence for a later independently operated FED-6 campaign. Private vulnerability reporting is enabled. The public issues remain parallel assurance lanes and do not authorize or describe FED-6-LAB. |
 | Frozen upgrade track | **WP-06-STARK - Ergo-verifiable finality / EIP-0045 STARK upgrade.** The V4/V5/V6 proof and cutover artifacts through commit `d7420756` remain frozen. Resume only when an activated compatible target can execute the exact verifier profile and no-submit acceptance route. The absence of an activated EIP-0045 verifier or equivalent reviewed Ergo-verifiable consumer blocks the trustless upgrade, not WP-06-FED or the bridge reference implementation as a whole. |
 | WP-08F state | The original WP-08F exact-envelope lifecycle contained the relayer owner-mint capability but still left an executable owner-mint signing operation and transport. P1-LR1 supersedes that containment by removing the owner-mint envelope/signing methods, submitter, adapter, application root, executor, daemon composition, and journal APIs that could create a new owner-mint attempt. The supported `deploy:sidechain` command and script are removed, `SidechainClient` is observation-only, the Frontier extraction spike is synthetic-only, and active readiness preflights reject historical owner-mint deployments even when their code is present. Peg-in stops after exact committed-vault verification and waits for an authenticated V4 pending reservation and atomic runtime consumption; only historical transaction confirmation/reconciliation remains. The historical Solidity owner entrypoint, historical deployments, and protocol funds authority are not removed by this change and remain outside its claim boundary |
@@ -99,10 +99,10 @@ It is not a production-ready or mainnet-readiness claim.
 | WP-08A closeout C2 historical operational capability separation | At C2, the daemon's committed-vault, SCS-update, and DUP-heartbeat routes entered three fixed compatibility facades backed by one network-free `relayer-core` lifecycle and six single-capability adapters. Subsequent slices retired all three concrete submission facades. New committed-vault deposits remain refundable because the daemon does not select a fee box, reserve a transaction, or submit their transition while authenticated V4 mint authority is unavailable. Already-recorded committed-vault, SCS, and DUP attempts retain exact observation and fail-closed reconciliation but cannot create a new submission; the daemon observes the configured finalized sidechain head only for operator health. Historical operation profiles remain for identity decoding, reconciliation, and generic journal-schema compatibility. The source-closure digest consumed by the V4 review profile and V5 eligibility candidate binds the absent fixed facade, the daemon markers, and the whole-runtime AST retirement guard, and requires legacy deploy/redeploy entrypoints to remain absent. This is local source-capability removal only: it does not retire an already deployed `MainChainLock`, `SideChainState`, or DUP route, repair historical contract predicates, authenticate source consensus, establish deterministic finality, close Gate 5, or authorize mint, payout, signing, submission, broadcast or readiness. |
 | Last completed package | P1 V5 integrated proof-engine and complete settlement predicate closure |
 | Active package | **WP-06-FED - EIP-independent federated reference profile.** FED-1 through FED-4 are frozen local, non-activating checkpoints. The FED-5A/FED-5B migration path owns target-specific compilation, global replay import, legacy-retirement requirement freeze, unsigned materialization and a non-executable setup-check request. The separate FED-5G1/G2 greenfield path now owns a threshold-authenticated launch baseline, empty replay derivation, distinct unsigned provisioning generation and config-free fresh-process replay; no concrete target packet has passed it. FED-6 owns exact signed JVM and `/transactions/check` setup acceptance, separately authorized setup submission and canonical confirmation, and only then peg-in/peg-out acceptance and execution under separate exact-candidate approvals. The separate WP-06-STARK lane and proof-system ID `2` remain dormant. |
-| Latest completed slice | **FED-6-LAB fresh-source V30 build-pin packet.** The source-owned producer ran two builds from one fresh exact patched Frontier checkout with distinct Cargo targets and the same pinned Rust 1.82 toolchain. Exact source and toolchain checks passed around both builds; base-spec and runtime-code bytes reproduced, and the canonical report digest, base-spec digest and runtime digest independently recompute exactly. This closes only same-checkout build-pin production. Cross-root, native-binary, complete-tool-closure, dependency-cache, hermetic and independent-build reproducibility remain false, and no target acceptance or authority follows. |
-| FED-6 local validation map | **Invariant:** retained bridge code may model and journal the exact setup lifecycle, but no local result, journal row or injected port may expose a reusable signer or transport capability or become funds authority. V7 freezes the dual-node read-only target and same-target JVM check; V8 persists and revalidates the exact reservation across a real file-backed close/reopen boundary; V9 creates one single-use transport authorization and durable attempt, then persists an exact accepted or ambiguous outcome before confirmation. A successful HTTP response is not canonical admission. A failure receipt proves only the process-owned attempt/outcome binding and bounded observer facts. The diagnostic does not claim rollback or replacement unless a later chain observation independently proves it. **Owned paths:** the patched-devnet runner and no-submit conformance/check modules; signer-first session, reward-input discovery and canonical history producers; bounded read-only node client; local execution root; V7-V9 workers and receipts; reservation/attempt authorization and persistence; generic operational lifecycle; `StateTracker`; and exact source-checkout inspection. **Current checks:** the 22-test source-baseline module, Node 24 typecheck and an actual fresh `core.autocrlf=true` Frontier patch checkout pass; the separate real two-node mining/freeze lifecycle also passed without submission. Earlier unchanged campaign, architecture and proof checks remain reusable. The value-path root still stops before canonical tracker admission. Official target approval, authenticated route-retirement evidence, source-consensus authentication, global replay import, peg-out, recovery and activation remain unvalidated. |
-| Following boundary | **FED-6-LAB fresh frozen-tracker campaign.** Create a new request and ephemeral runtime lineage from current reviewed code, prove that no prior failed campaign or private runtime state is reused, freeze the exact target identity and candidate, and run the no-submission V8 path through the same-target JVM check. Any typed terminal result closes that fresh campaign without retry. V9 transport remains a later, separately authorized boundary. |
-| Next implementation action | **Prepare and execute one fresh isolated frozen-observed-anchor tracker-check campaign under the existing local-devnet authorization.** Bind current `HEAD`, request digest, clean source identities, target identity, candidate transaction and empty prior-attempt state before starting. Require the exact patched Frontier and Ergo sources, dual-node target, `0x0401` anchor observation and same-target JVM check to remain in one fresh lineage. Never reuse the failed campaign, infer admission from local state, submit a transaction in this V8 step, or use a public network, existing wallet material or real funds. Transport, global absent-to-present replay and external-fee payout remain blocked until this no-submission boundary is green; every Gate-5, trustless and readiness boundary remains false. |
+| Latest completed slice | **FED-6-LAB V130 terminal boundary and standalone checkout closure.** One fresh V130 lineage passed pure preflight, executed V11 exactly once, and crossed source build, owned-node genesis, source-lock execution, and committed-vault execution before failing closed during application-checkpoint execution. It produced no command receipt and no canonical tracker confirmation. The exact offline application runner subsequently passed its focused dynamic-mint-proof-to-burn-evidence integration falsifier under the same pinned toolchain, narrowing the unresolved boundary to the process-produced proof, remaining campaign deadline, or outer checkpoint join. Public promotion validation also exposed a fixed-depth worktree-root assumption; the execution root now uses the reviewed dual-layout resolver and its import is restricted to that one owner and symbol. Both nested and standalone matrices pass. |
+| FED-6 local validation map | **Invariant:** retained bridge code may model and journal the exact setup lifecycle, but no local result, journal row, injected tool path, error message or injected port may expose a reusable signer or transport capability or become funds authority. V7 freezes the dual-node read-only target and same-target JVM check; V8 persists and revalidates the exact reservation across a real file-backed close/reopen boundary; V9 creates one single-use transport authorization and durable attempt, then persists an exact accepted or ambiguous V1 outcome before confirmation. V10 preserves those boundaries while starting the primary miner before the sole POST and requiring the same primary/witness process identities through canonical confirmation. V11 preserves all historical bytes and adds a separately digest-bound process-local response classification; a successful HTTP response is still not canonical admission. **Frozen inputs:** exact V130 source, patch, tool, base-spec, runtime, authority-safe-spec, native-genesis and request identities. **Reusable checks:** build-environment, TypeScript, V11 receipt, WP-08A dependency, WP-07 containment, exact source/patch, setup/check, and dual-layout matrices remain reusable while their transitive inputs stay unchanged. All V112-V130 mutable campaign state is terminal and ineligible for reuse. **Next due checks:** isolate the process-produced mint proof, remaining campaign deadline, and outer application-checkpoint join with focused offline falsifiers. A fresh campaign is permitted only after a concrete cause is fixed and its affected closure is green. Official target approval, authenticated route-retirement evidence, source-consensus authentication, global replay import, peg-out, recovery, and activation remain unvalidated. |
+| Following boundary | **FED-6-LAB V130 application-checkpoint root-cause isolation.** Compare the passing standalone application-runner integration path with the exact process-produced inputs and outer checkpoint composition, without reading or reusing V130 private runtime state. Test proof production, deadline ownership, and outer error projection independently. Fix only a reproduced defect, then create a wholly fresh campaign lineage if and only if the affected closure is green. |
+| Next implementation action | **Close the concrete V130 application-checkpoint join before another campaign.** Do not retry V130. Use focused offline falsifiers to determine whether the missing join is caused by process-produced mint-proof bytes, the remaining bounded deadline, or outer composition. Preserve every existing signer, checker, authorization, submission, transport, journal, and confirmation boundary. If a later fresh campaign canonically confirms the exact tracker successor, move directly to burn/checkpoint binding, global replay insertion, external-fee payout, and profile-specific recovery rather than another evidence-only slice. Public networks, existing wallet material, real funds, Gate 5, trustless status, and readiness remain outside this LAB action. |
 | Public delivery cadence | **Push coherent green bridge milestones, not intermediate WIP.** Keep edit-loop work and broken candidates local. Before each public promotion, review the exact diff, run the validation closure whose transitive inputs changed, run the publication guard, and preserve the superproject-source to standalone-tree mapping. Use review branches or PRs for protocol, contract, proof, authority, signing, settlement, or other security-sensitive changes; direct updates are reserved for bounded CI/docs/package corrections with explicit authorization. A push never authorizes a release, deployment, signing operation, submission, broadcast, live funds, or stronger readiness claim. |
 | Parallel blocker lane | EIP-0045 B4-B8 activation, an exact target-node ingress/schedule identity, and non-broadcast stateful acceptance remain external. The current EIP work has closed B1-B3 but still has B4-B8 open; the producer matrix is 218/254 and no activation generation, height, node version, or testnet schedule exists. No compatible activated node currently exists, and the 226,795-byte proofless candidate exceeds the official 98,304-byte default ingress limit; the proposed 262,144-byte ceiling is not deployed. Track upstream activation and build the acceptance packet only when an exact compatible node exists. Do not create another local surrogate, enable proof-system ID `2`, or substitute local JVM acceptance, legacy R9 attestation, or two-node agreement for an activated Ergo value-release path. |
 | WP-07A peg-in recovery state | Ergo route reconstruction and the dual-source Frontier event/receipt/mapping view are joined and persisted atomically as a non-authorizing cache. Restart, database-loss rebuild, route invalidation, mixed-generation reads, tamper rejection, read-only inspection, and lifecycle-authority preservation are covered. A bounded daemon pass now binds explicit route/profile configuration to the active deployment, recollects distinct Ergo and Frontier views, and applies exact lifecycle/cache CAS holds before the first lifecycle selection. The pinned Frontier patch defines Peg-In Runtime State V1: a versioned active profile and persistent successful-`PegIn` record keyed independently of profile rotation. The V1 native finalized-state proof profile authenticates historical membership directly and current non-membership against the exact active profile; its separately versioned signed execution policy authorizes only `verify-peg-in-state`. The separate V2 proof-core defines raw `:code` verification under the same finalized state root and a read-only collector requests exactly `[:code, record]` or `[:code, active profile, record]` in one bounded proof. Rust vectors, TypeScript bindings, policy tests, and collector negatives keep V1 and V2 schemas and boundaries distinct. WP-06T12 adds separate runtime-Wasm and native-V2-verifier attestation families, a policy signed through the native attestation, contained dual-registry execution authority, and a provenance-bound candidate-output path. WP-06T13 binds that route to the exact content-addressed launcher image and V2 authority record while retaining the image handle and rotation mutex. WP-06T14 pairs an execution membership candidate with its exact direct-parent non-membership candidate and selects the expected producer code from the parent request, while retaining both child outputs as quarantined digests. The elevated installation campaign, accepted state proofs, complete runtime history, external attestor custody, and target execution identity are still absent, so sidechain finality, historical mint absence, cutover, and mint authority remain false. No daemon or reconciliation consumer imports the lineage candidate, and no reconciliation hold is released. Missing configuration, source disagreement, recollection failure, proof drift, registry loss, policy drift, ancestry drift, or CAS drift fails closed. Full runtime history, cutover semantics, committed-vault binding, hold release, and a concrete approved dual-node exercise remain open; current runtime reports always deny lifecycle selection. |
@@ -114,6 +114,74 @@ It is not a production-ready or mainnet-readiness claim.
 Update this table in the same commit that completes or changes a work package.
 Do not advance the active package because a test, document, or evidence packet
 exists; advance it only when the package Definition of Done is satisfied.
+
+## Reduced Critical Path And Evidence Plan
+
+The 2026-08-31 read-only plan audit separated implementation dependencies from
+historical campaign records, external assurance and the dormant trustless
+upgrade. The active federated delivery path is:
+
+```text
+frozen foundations
+  -> canonical tracker admission (V130 stopped before admission; isolate and fix its application-checkpoint join, then use one wholly fresh bounded campaign)
+  -> burn/checkpoint + global DUP insertion + external-fee payout
+  -> profile-specific restart/reorg/RPC-disagreement/database-loss recovery
+  -> complete exact local FED-6 campaign
+  -> exact external target/custody activation and both value paths
+  -> operational drills + reproducibility + independent review
+  -> profile-correct evidence decision
+  -> bounded FED-7 federated reference package
+```
+
+Frozen foundations include WP-01/03/04/05, FED-1 through FED-5G, the WP-07
+containment baseline and WP-08A. They remain prerequisites but are not rerun or
+reimplemented while their exact source, format, authority and toolchain inputs
+remain unchanged. V20-V97 are terminal diagnostics, not an execution ladder or
+forward dependency.
+
+Three lanes may advance in parallel without giving two writers ownership of the
+same authority path:
+
+1. exact non-mainnet target, role-custody and approval preparation;
+2. greenfield target packet and empty replay derivation, with migration used
+   only when a concrete historical target is selected;
+3. early reviewer onboarding and source familiarization, while the final
+   verdict remains bound to the exact stable candidate.
+
+WP-06-STARK remains a separate externally blocked upgrade lane. EIP-0045 or an
+equivalent Ergo-verifiable consumer is required for a trustless claim, but not
+for the explicitly federated FED-7 package. Gate 6 governance and showcase/AVL
+expansion remain secondary unless a concrete active-profile validator or
+operator drill requires them.
+
+### Evidence Reuse And Invalidation
+
+| Evidence family | Reuse boundary | Invalidating change | Next due action |
+|---|---|---|---|
+| V130 source/build inputs and locked tools | Exact source, patch, command, tool, cache-source, base-spec, runtime, authority-safe-spec and native-genesis identities | Source relocation or any source, patch, command, toolchain, cache-source or generated-byte drift | Reuse for focused root-cause falsification; rebuild only on drift and never reuse V130 mutable campaign state |
+| V1 domains, codecs, vectors and ErgoTrees | Exact statement/profile semantics and bytes | Domain, version, field, codec, vector, contract or tree change | Reuse for FED-6; never reinterpret for STARK |
+| WP-08A architecture closure | Import graph, allowlists, composition roots and capability registry | Changed dependency edge, registry, root or ambient capability | Run focused architecture check when one of those inputs changes |
+| WP-07 containment baseline | Journal schema, recovery ports, reorg policy and consumers | Changed lifecycle schema, port, policy or downstream funds consumer | Reuse until the federated payout identities exist, then run profile integration |
+| Prior no-submit/JVM receipts | Exact candidate bytes, signer/checker/node pins and request policy | Changed transaction, contract, signer/checker, node, request or tracker identity | Produce fresh target receipt only for the exact promoted candidate |
+| Mutable local campaign evidence | One exact fresh process and storage lineage | Terminal attempt, process replacement, request drift or target-state change | V112-V130 are terminal; create another lineage only after a concrete cause is fixed and never reuse a terminal attempt as authority |
+| Recovery evidence | Both exact value-path identities and active profile | Any value-path, journal, finality, replay or authority change | Run once after peg-in and peg-out are integrated |
+| Independent review | Exact stable commit and documented claim boundary | Any reviewed critical-path byte or claim change | Onboard early; issue final verdict only after candidate freeze |
+| Gate 5/STARK evidence | Exact activated verifier profile and compatible target | Upstream verifier, activation, ingress, statement or target change | Remain dormant until an authoritative external input changes |
+
+Gate 3 lifecycle evidence must receive a separately implemented and equally
+strict FED profile producer/validator before release promotion. The existing
+`authenticated-external-fee-v1` tuple is legacy-profile evidence and must not be
+renamed or treated as `substrate-federated-v1` evidence. This profile-specific
+evidence join follows the working value paths; it does not block canonical
+tracker admission.
+
+During iteration, run the nearest deciding test and isolated negative. At a
+coherent checkpoint, run the changed producer, consumer and cross-language
+join once. Run the full applicable closure and independent review once after
+the package stabilizes. Promotion rechecks exact bytes, current target state,
+claims and publication boundaries. Documentation-only commits should be batched
+with the next code promotion until CI path filters stop launching consensus and
+full audit jobs for documentation changes alone.
 
 WP-01 and WP-02 source controls and manifest-bound observation tools are
 implemented. Neither tool authenticates manifest review, activates a
@@ -385,9 +453,9 @@ history collection starts. The existing V1 family remains fixed to
 | **WP-03** | Reproducible consensus-source baseline | Repository dependency decision | Independent source/dependency ownership | **Complete locally; controlled private CI may run, first public hosted run waits for the WP-08A publication gate** |
 | **WP-04** | Full-transaction ErgoScript VM closure | WP-01/02 contracts stable | Can run beside WP-05 format/vector freeze | **Complete locally** |
 | **WP-05** | Versioned runtime commitment and finality producer | WP-03 | Freeze one canonical format/vector first; then use disjoint runtime, Ergo, and verifier owners | **Implementation complete relative to reviewed trust root; live capture and Ergo-verifiable finality bridge open** |
-| **WP-06-FED** | EIP-independent federated peg-in and peg-out profile | WP-01/04/05 foundations plus reviewed V4/V6 conservation and WP-07 lifecycle | Federated statement/tracker, peg-in admission, settlement family, daemon integration, and cutover are sequential authority joins; disjoint target/retirement evidence work may run in parallel only when real inputs exist | **Migration targets remain at the FED-6 external boundary. FED-6-LAB has composed its three peg-in joins in one fresh real-component campaign and now executes the reviewed mint-to-burn application path through one source-locked same-process Frontier runner. The process-proven burn/root is not yet joined to the federated checkpoint, tracker, global replay state or external-fee Ergo payout. FED-1 through FED-4, FED-5A/B migration generation, and the distinct greenfield baseline/generation/provisioning/portable-replay joins remain frozen. Recovery, static registration, independent custody and externally approved target evidence remain open.** |
+| **WP-06-FED** | EIP-independent federated peg-in and peg-out profile | WP-01/04/05 foundations plus the completed WP-07 containment baseline | Federated statement/tracker, peg-in admission, settlement family and daemon integration are sequential authority joins; target/custody preparation, greenfield packet work and reviewer onboarding may run in parallel | **V11 exposes the bounded response-classification boundary without changing V1/V10 evidence or weakening retry denial. V130 passed pure preflight and progressed through source build, owned-node genesis, source-lock execution, and committed-vault execution before stopping fail-closed at application-checkpoint execution. It produced no command receipt or canonical tracker confirmation and is terminal. The same-toolchain offline application-runner integration falsifier passes, so proof production, remaining deadline, and outer checkpoint composition are the next focused diagnostic boundary. A fresh campaign is allowed only after a concrete cause is fixed. Burn/checkpoint binding, global replay insertion, external-fee payout, and profile-specific recovery follow serially after canonical tracker confirmation. FED-1 through FED-5G and the WP-07 containment baseline remain frozen inputs, not work to repeat. Migration is selected only for a concrete historical target. Independent custody and externally approved target evidence remain open.** |
 | **WP-06-STARK** | Ergo-verifiable finality and STARK upgrade | WP-06-FED shared invariants plus an activated compatible verifier target | Dormant external-blocker lane; no repeated local wrappers or evidence refresh | **Local V4/V5/V6 proof chain frozen; EIP-0045 activation and target acceptance remain external blockers.** |
-| **WP-07** | Reconstructible lifecycle and adversarial recovery | WP-06-FED local candidate boundaries for integration; activated profile authority for completion | Chain-derived recovery integrates with WP-06-FED while WP-06-STARK remains dormant; independent attack review follows the complete federated matrix | **Local reorg lifecycle and process/filesystem funds-release containment are complete through commits `992be302` and `92915d27`; no supported recovery command or on-chain/global pause is claimed, and the new federated authority has not yet been connected.** |
+| **WP-07** | Reconstructible lifecycle and adversarial recovery | Baseline containment precedes FED-6; profile-specific integration follows exact peg-in and peg-out identities | Recovery-port review may run beside value-path design, but final restart/reorg/database-loss execution waits for both exact paths | **Local reorg lifecycle and process/filesystem funds-release containment are complete through commits `992be302` and `92915d27` and are reusable prerequisites. Federated profile integration remains open; it does not wait for Gate 5. No supported recovery command or on-chain/global pause is claimed.** |
 | **WP-08A** | Reusable layer extraction | Recorded WP-07 behavior baseline and frozen Gate 5 interfaces | Disjoint core, profile, adapter, dependency-rule, and conformance owners after inventory freeze | **Complete locally at C2; static profile dispatch, fixture-domain isolation, cross-boundary behavior replay, active operational capability separation, exact clean-checkout validation, and independent review are complete; this closes only the WP-08A prerequisite, while every other WP-08 dependency and all publication or funds authority remain separate** |
 | **WP-08** | Institutional operations and public-audit alpha | WP-01 through WP-07 plus WP-08A | Packaging/docs/CI may parallelize after interfaces freeze | **In progress; WP-08B through WP-08L are complete as bounded non-authorizing local slices and policy permits source publication for public research only after the exact candidate passes promotion checks. Real external delivery/acknowledgement, external evidence and review remain prerequisites for supported release claims.** |
 | **WP-09** | External assurance and reference-release hardening | WP-08 | Independent review and noncritical release gates | Deferred |
@@ -1504,8 +1572,8 @@ request, generated chain spec or runtime state may be reused.
 V30 reran the source-owned pin producer against a fresh exact checkout at
 Frontier commit `75329a2df49e2cc7981485392c31160929d1bd48` and patch SHA-256
 `47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813`.
-Two fresh Cargo targets under the same pinned Rust 1.82 toolchain and explicitly
-selected Cargo cache root reproduced the same 3,939,162-byte base spec, SHA-256
+Two fresh Cargo targets under the same exact portable Rust 1.82 installation
+root and explicitly selected Cargo cache root reproduced the same 3,939,162-byte base spec, SHA-256
 `004df7fd3f7138146c01d66d4e241be4007c9fede9ec849bc7e687ea242f38ea`,
 and the same 1,968,358-byte runtime code, SHA-256
 `3836e30fe811f5fe08aa59997f87416d7b5d294a8279da509388d1939c27bdac`.
@@ -1515,13 +1583,330 @@ recomputes exactly with the repository implementation. The two native binary
 digests differ, so native-binary, cross-root, complete-tool-closure,
 dependency-cache, hermetic and independent-build reproducibility remain false.
 
-The next campaign must preserve that exact V30 source checkout unchanged and
-create one new single-use request and runtime lineage from its exact
-base-spec/runtime pins, with fresh artifact, journal and receipt roots. It
-receives at most one local attempt after the unchanged exact preflights. No
-V20-V29 request, generated target or private journal is an input. Gate 5,
+V95 later proved that the historical V30 base-spec and runtime outputs no
+longer matched a fresh exact build even though direct comparison found the
+patched source checkout byte-identical. V96 therefore reran the source-owned
+producer twice from fresh Cargo targets under the same locked commit, patch,
+Rust toolchain and cache source. Both builds reproduced a 3,934,558-byte base
+spec at SHA-256
+`695dff1af74f5dc1aa7e95a7991441c08c6330a0edb5bfb3392da73d8561ecff`
+and 1,966,056-byte runtime code at SHA-256
+`b66ebccf925671f33f3d098889154feb44171369d7834c62fe09295a6ada14fa`.
+The corresponding authority-safe application spec has SHA-256
+`27154212cc4a18f58c9898405ab1bd9ef7010e5959332b917ca4e5c9f342fff5`,
+and an isolated loopback observation returned native genesis hash
+`0xc8c9290d9aed2734839081b471c65695c2cb3a52d72d1b517a59a99489c2b36a`.
+V30 remains historical evidence only; V96 is the exact pin family for the
+current retained-root campaign line.
+The native executables still differed byte-for-byte, so this refresh does not
+establish native-binary reproducibility, hermeticity, independent attestation,
+target acceptance, funds authority, Gate 5 or readiness.
+
+V97 passed its request-bound preflight and invoked V10 exactly once. It failed
+closed at `source target binary and base spec` before node launch. A build-only
+differential from the relocated checkout reproduced base-spec SHA-256
+`f4dab6ff441e249179d4d78069905b3895557bfbaba086455dc54e86fc14665a`
+and runtime SHA-256
+`ef5d665eccf3401ca38f08e55d3541a3f390c2c74513dc7c143cf37b757e5f79`.
+The chain-spec structure outside `runtimeGenesis.code` remained identical. A
+separate new target beneath the retained V96 source root then reproduced both
+selected V96 pins exactly. The source root is therefore an explicit pin input;
+byte-identical relocation is not supported. V97 published no receipt or
+artifact, changed no request bytes, released all six ports and left tracked Git
+clean. No V97 mutable input is eligible for reuse.
+
+V98 retained the exact V96 source root, passed all twelve request-bound
+preflight checks and invoked V10 exactly once. It advanced beyond the V97
+source-target failure, then failed closed during pre-action tracker-target
+activation before transport authorization, journal reservation, transport
+preflight or submission. Commit `5aa7a074` subsequently split that envelope
+into finite process-owned phases without changing signer, transport or funds
+authority. V98 produced no public receipt and none of its mutable state is
+eligible for reuse.
+
+V99 used wholly fresh mutable roots and passed the same twelve preflight checks
+under receipt digest
+`21733604c137db94cb1ef98dd3afe2c916eefe0981126abe7d0fca8a85eee0c7`.
+Its single V10 invocation failed before node launch at `source target chain spec
+generation`: request and probe chain ID `31337` conflicted with chain ID `42`
+inside the exact retained V96 base spec. The preflight had bound the base-spec
+digest but had not executed the authority-safe chain-spec generator that owns
+that semantic identity check. V99 produced no artifact or public receipt,
+released every port and process, and changed no source checkout. The preflight
+now executes that same pure generator before Frontier native preflight, Cargo
+operations or node/campaign launch.
+
+V100 and V101 remained caller-preparation failures. V100 stopped before Node
+because `cmd.exe` rejected the quoted Visual Studio batch path. V101 reached
+the pinned Protobuf check but inherited a trailing space in `PROTOC`. Neither
+attempt invoked V10 or launched a node. The replacement launcher captures the
+verified Visual Studio amd64 environment and starts exact Node directly; the
+production Protobuf inspector then passes under the locked platform, version
+and executable digest.
+
+V102 used wholly fresh chain-ID-`42` inputs. Its request-bound pure preflight
+passed all twelve checks, then its sole V10 invocation failed closed at
+`tracker transport post-restart continuity` before transport authorization,
+journal reservation or submission. The owned nodes restarted in mining mode
+and advanced beyond the frozen pre-restart tip, exposing an over-strict exact
+tip-equality check. The corrected boundary accepts only a common fully indexed
+tip at or above the frozen height and separately requires both nodes to retain
+the exact frozen block ID at that height. Replacement of that block remains a
+pre-authorization failure. V102 produced no public campaign receipt, and none
+of its mutable state is eligible for reuse. V103 must start from wholly fresh
+mutable inputs after this correction passes focused critical validation and
+independent review.
+
+V103 used another wholly fresh chain-ID-`42` input set after that correction.
+All twelve preflight checks passed and the sole V10 invocation preserved the
+frozen block beneath a higher common indexed descendant, authorized and durably
+reserved one exact tracker transport, and issued exactly one local POST. The
+expected transaction was not observed before the 120-second confirmation
+budget expired, so the campaign emitted a bounded terminal receipt with
+canonical confirmation, tracker admission and retry authorization all false.
+The follow-up response-classification foundation creates a separately
+versioned process-local diagnostic bound to the exact response digest. V11
+projects that diagnostic while keeping the durable V1 outcome and all V10
+receipt schemas unchanged, exposes no raw response data and cannot convert a
+transport response into admission. No V103 mutable state was reused.
+
+V104 used wholly fresh mutable inputs and passed all twelve request-bound pure
+preflights. Its sole V11 invocation then stopped before node launch at the
+source-target binary/base-spec join: V96 pins produced with the direct Rust
+toolchain root were paired with byte-identical Cargo/rustc executables under a
+different physical sysroot. It created no public campaign receipt or artifact,
+issued no transport and granted no retry authority. A bounded offline
+falsifier rebuilt each layout twice. Each layout was internally reproducible,
+but the layouts produced different runtime and base-spec bytes. Adding the
+Rust toolchain source-path remap removed the physical sysroot from generated
+diagnostics but did not make the raw remap-flag identities equal. Cross-root
+reproducibility therefore remains explicitly false. V105 must use wholly fresh
+mutable inputs, a newly reproduced same-root pin pair and the exact Cargo/rustc
+paths that produced that pair.
+
+V105-V119 then closed the exact build-to-execution identity boundary and
+committed the create-once executable snapshot consumed by source-owned target
+acceptance. V120 produced one exact same-invocation pin pair, generated the
+authority-safe spec and calibrated its native genesis. A separate direct-`tsx`
+acceptance wrapper rebuilt different base/runtime bytes and failed before node
+startup. V121 reproduced the V120 pins in another official npm producer
+invocation, isolating launcher context rather than source or cache bytes as the
+remaining differential.
+
+V122 changed only that launcher context to the supported npm path. The
+source-owned acceptance API completed its exact source/build checks, executable
+snapshot binding, two-node observation and all three legacy owner-mint
+rejection checks. Its ephemeral wrapper then asked the returned V1 report for a
+nonexistent aggregate funds-authority field and failed after teardown, before
+retaining the report digest. V122 is therefore deciding diagnostic evidence but
+not a promotable acceptance artifact. It must not be replayed merely to recover
+that digest, and no bridge-code patch is justified by the wrapper defect.
+
+V123 started from a wholly fresh physical source/cache lineage at bridge HEAD
+`3e5661ed3f68924b350f2f2379b3d268eaa37e9d`. Its official two-build producer
+was internally reproducible, but a fresh calibration build produced different
+runtime bytes before node launch. A same-Cargo-home falsifier also diverged,
+and inspection found physical Cargo registry and Git checkout paths in the
+uncompressed runtime. V123 is therefore terminal and none of its generated
+specs, mutable state or private journals are eligible for reuse.
+
+The V124 build environment adds an explicit Cargo-home remap after every
+broader prefix, matching Rust's last-match precedence, and rejects ambiguous
+Cargo-home path tokens before build execution. Its official producer reproduced
+a 3,927,522-byte base spec at SHA-256
+`1df4b8797a5ac4f712a534daa5dd1d3fc2420b63736618fea33c555fe8218d1d`
+and a 1,962,538-byte runtime at SHA-256
+`766adab74595b42c2951d570d3eb213d289b02c8d98ce227a0208d8cc16c4fe7`.
+A third build under a physically distinct Cargo home reproduced both exact
+bytes, and the uncompressed runtime contained neither physical Cargo-home nor
+build-target path. Native executables still differed, so broad cross-root,
+native-binary, hermetic and complete-tool-closure reproducibility remain false.
+No node, listener, RPC, request, signed transaction, campaign, submission or
+broadcast was created in this checkpoint. V124 must next reproduce a fresh
+create-only authority-safe spec, calibrate its native genesis without creating
+a transaction, and pass one fresh request-bound preflight before V11 may run
+exactly once.
+
+V44 proved that executable hashes and versions alone do not reproduce these
+bytes when the Rust installation root changes: rust-src paths embedded by the
+Wasm build remain root-sensitive. A subsequent no-node producer build using
+the retained V30 toolchain root reproduced both frozen hashes exactly. This
+classifies the toolchain root as an explicit V30 build input without upgrading
+the packet to cross-root, hermetic or complete-tool-closure evidence.
+
+V45 closed the missing explicit pinned-`PROTOC` capability between the parent
+and isolated worker. Fresh V46 then passed all twelve pure preflights before its
+single campaign attempt terminated in source-target process construction and
+startup. It produced no output receipt or artifact. A same-binary diagnostic
+proved that the six requested ports were unowned but inside a Windows excluded
+range: their loopback binds failed with `WSAEACCES`, while Frontier silently
+selected ephemeral RPC ports. Listener-ownership checks alone could not detect
+that state. The process owner now probes actual IPv4 loopback bindability,
+releases every probe, and rechecks ownership before each node launch.
+
+V47 used fresh exact caches, a fresh patched Ergo checkout and proven-bindable
+ports, but its single pure preflight rejected a disjoint process TEMP root where
+the build-root predicate requires the immutable V30 Frontier checkout to remain
+inside its declared containing root. It launched no process and produced no
+artifact or receipt. V48 separated those roots, passed all twelve pure
+preflights with request SHA-256
+`f55a7484e3279fbb3cc439e3c54792cd9c71aad19a6a968142363d178c3f62c0`
+and preflight receipt digest
+`160e1592527c816cf4364ac56992ad8758b48d3eedc338b9de2f82593b7bef3c`,
+then crossed source-target startup/readiness/history and Ergo funding/history.
+Its single campaign terminated inside the broad `packet production` phase
+before publishing an artifact or campaign receipt; teardown left no owned
+listener or process.
+
+The packet producer now marks failures with one of five process-owned,
+WeakMap-backed categories: input/contract binding, tracker compilation,
+settlement compilation, relayer artifact production, or launch/portable replay.
+The managed campaign, isolated worker and parent command relay only that finite
+category; raw causes, paths and process output remain private. Successful packet
+bytes and identities are unchanged. The affected closure passes 271 focused
+tests under pinned Node 24, TypeScript, the Node-version guard and the layered
+architecture check.
+
+V49 then used proven-bindable ports `21240-21245`, exact fresh copies of the
+closed public V37 Cargo caches, and a new public Ergo checkout at
+`2cdbb8cf...a9991b1` whose patched Windows source hashes reproduce
+`be810fd8...6710e6d` and `69647c3e...e443fc`. Its 2,579-byte request has
+SHA-256 `8454193d2c57cf0ef67f10e5f2063b27d8621eb6cc3cde20a1bb463a29e7f4fc`.
+The single pure preflight rejected before any launch because the absolute Node
+24 directory on `D:` was mistakenly prepended to `PATH` after normalization;
+the source-owned child environment accepts only existing system/worktree-drive
+entries. A bounded helper differential rejects that contaminated `PATH` and
+accepts the `C:`-only form. The request remains unchanged, the artifact and
+receipt are absent, and teardown observes no listener or owned process.
+
+V50 used fresh ports `21340-21345`, exact copies of both closed V37 Cargo
+caches, a new patched Ergo checkout with the locked Windows source hashes and a
+2,578-byte canonical request with SHA-256
+`8cf37f28eb3ba7c9ac6a6bcee140a6c77f29f3e48ac860050eb9625f54a1ae5d`.
+The wrapper intended to enter the Visual Studio amd64 environment passed
+literal backslash-escaped quotes around the batch path. `cmd.exe` rejected that
+first command before Node or the preflight script started. The request remained
+unchanged, every artifact and receipt stayed absent, and no worker, node,
+listener or owned process remained.
+
+V50 is terminal under the single-use rule. V51 must use a wholly fresh request,
+ports, cache copies, patched Ergo checkout, journal, artifact, receipt and
+process TEMP lineage. Before consuming V51, demonstrate the Windows-native
+wrapper with a harmless no-campaign command and assert the resulting environment
+through the existing guard. Invoke pinned Node by absolute path without adding
+its `D:` directory to `PATH`. Run exactly one pure preflight and, only after
+PASS, one owned-loopback campaign. No V20-V50 mutable input may seed it. Gate 5,
 tracker admission, global replay, payout, target acceptance and funds authority
 remain false.
+
+V51 used fresh ports `21440-21445`, exact copies of both closed V37 Cargo
+caches, a new patched Ergo checkout with the locked Windows source hashes and a
+2,578-byte canonical request with SHA-256
+`b6e6eec207e76251b17be4e9df7c98fe2bd5a18fd685685fbfdb7c21f0c46422`.
+The corrected Windows-native wrapper executed, but the single pure preflight
+rejected before launch because the supplied fresh process TEMP root did not
+contain the immutable V30 Frontier checkout. The exact source predicate requires
+that checkout to be a strict descendant of the declared build-containing root;
+the retained V30 root satisfies that relation. The request remained unchanged,
+every artifact and receipt stayed absent, and no worker, node, listener or owned
+process remained.
+
+V51 is terminal under the single-use rule. V52 must use a wholly fresh mutable
+lineage, pass the immutable V30 containing root to the Frontier preflight and
+retain a separate fresh process TEMP root. Run exactly one pure preflight and,
+only after PASS, one owned-loopback campaign. No V20-V51 mutable input may seed
+it. Gate 5, tracker admission, global replay, payout, target acceptance and
+funds authority remain false.
+
+V52 used fresh ports `21540-21545`, exact copies of both closed V37 Cargo
+caches, a new patched Ergo checkout with the locked Windows source hashes, the
+immutable V30 Frontier containing root and a separate fresh process TEMP root.
+Its 2,578-byte request had SHA-256
+`a9d96c5628c705af3b6328324b1e0a63fa1c3065ce17ca47dda8b0c828e6e355`.
+The single pure preflight passed with receipt digest
+`445fcb921467b9f5a1be3942b016c7bc2b3dd7cbd706a4a398062bee1c151d44`;
+the one authorized campaign then terminated in `packet tracker compilation`.
+Static lock evaluation identified the exact mismatch: Node `24.18.1` was used,
+but the tracker compiler requires Node `24.14.0` and executable SHA-256
+`63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088`.
+The request remained unchanged, no artifact or campaign receipt existed and no
+owned process or listener remained. V52 is terminal.
+
+V53 used the official Node `24.14.0` Windows x64 distribution. Its executable
+matched the locked SHA-256 exactly; the downloaded archive had SHA-256
+`313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85c66`.
+Fresh ports `21640-21645`, cache copies, patched Ergo source, process TEMP,
+journal, artifact and receipt roots were bound by a new 2,578-byte request with
+SHA-256
+`bc8259e4b9cc1660d27805e49338ce792b55d58e2f1732296d045fe84a1c7aed`.
+Its single pure preflight passed with receipt digest
+`672b7c4b2bcaef377570828a7f56c5ec8f876766c8ca5a26161b560045cafd6c`.
+The one authorized campaign crossed packet production and created the bounded
+packet artifact, then terminated under the broad public phase
+`tracker reservation and transport` before campaign-receipt publication. The
+request remained unchanged and teardown left no owned process or listener.
+Private journal, database and log contents were not inspected. V53 is terminal
+and its mutable inputs cannot seed another campaign.
+
+The managed campaign now separates that broad historical phase into the finite
+process-owned labels `tracker reservation authorization`,
+`tracker reservation persistence`, `tracker freshness revalidation`,
+`tracker transport preflight`, `tracker transport submission`,
+`tracker canonical confirmation`, `tracker transport result finalization` and
+`tracker reservation cleanup`. The labels remain WeakMap-backed, relay no raw
+cause or path and do not alter successful transaction, proof, authorization or
+transport bytes.
+
+V54 used fresh ports `21740-21745`, cache copies, patched Ergo source, process
+TEMP, journal, artifact and receipt roots under request SHA-256
+`1e942d342460615a2a8016f3935742afc04c0e01d704011fa5c084017f392b2c`.
+Its one pure preflight failed before node or campaign launch because the
+invocation had not imported the Visual Studio `LIB`, `LIBPATH` and `INCLUDE`
+environment required by the locked native-host preflight. V55 replaced every
+mutable input, used ports `21840-21845` and request SHA-256
+`53d0e86df36ac1d5e997494dfb7a4970f5dafa62b9849c69ed04f1aebc9bb0c5`,
+and ran through a separately proven amd64 Visual Studio wrapper. Its one pure
+preflight still failed before node or campaign launch, but the historical CLI
+reported only a generic failure. Both requests remained unchanged; neither
+lineage created an artifact or receipt or left an owned listener. V54 and V55
+are terminal, and their mutable inputs cannot seed another campaign.
+
+The pure preflight now projects the finite labels `arguments and platform`,
+`canonical request loading`, `pinned Git and bridge checkout`,
+`base spec application and topology`, `external root binding`,
+`Frontier native host preflight`, `pinned Protobuf compiler`,
+`pinned Rust source before closure`, `offline Frontier dependency closure`,
+`pinned Rust source after closure` and `receipt finalization`. The CLI emits
+only the current finite label on failure; it still suppresses raw errors,
+paths and child-process diagnostics.
+
+V56 used fresh ports `21940-21945`, cache copies, patched Ergo source, process
+TEMP, journal, artifact and receipt roots under a 2,580-byte request with
+SHA-256
+`86d3e16fab1a403adb2636aa948a2d0b377ab69db13e9bcb2f7b4a22036f58a5`.
+Its one actual pure preflight terminated at `external root binding`: the caller
+had supplied the fresh process TEMP root as `--frontier-temporary-root`, while
+that argument must be the exact containing root of the immutable V30 Frontier
+source. The request remained unchanged; no node or campaign launched, no
+artifact or receipt was created, and all six ports were free afterward. V56 is
+terminal and its mutable inputs cannot seed another campaign.
+
+V57 used wholly fresh mutable inputs and the corrected V30 source-containing
+root, but its one actual pure preflight terminated at `arguments and platform`.
+The caller supplied the peg-in recipient with a `0x` prefix while the parser
+requires exactly 40 lowercase hexadecimal characters. The 2,586-byte request
+remained bound to SHA-256
+`13704baf4137a73e34e7771e984e1be8f29667804b1846b2bc877460f37070d6`;
+no node or campaign launched, no artifact or receipt was created, and all six
+ports were free afterward. V57 is terminal and its mutable inputs cannot seed
+another campaign.
+
+V58 must start from wholly fresh mutable inputs, retain the corrected V30
+source-containing root and separate process `TEMP`/`TMP`, and pass the recipient
+in the exact unprefixed grammar required by the preflight. It receives at most
+one pure preflight and, only after complete PASS, one campaign. No V20-V57
+mutable input may seed it. Gate 5, tracker admission, global replay, payout,
+target acceptance and funds authority remain false.
 
 The retained V2 source-attestation session now also exposes a one-shot
 checkpoint capability for one canonical 512-byte statement under the exact
@@ -5750,10 +6135,11 @@ tracker history can be rebuilt into an empty database and replaced after a
 rollback without using SQLite as authority. After WP-06T11, bounded WP-07A
 reconstruction work may proceed in parallel because it neither replaces the
 Gate 5 proof path nor grants execution authority. WP-07 authority integration
-and package completion remain gated on WP-06. The remaining matrix must still
-bind the sidechain mint leg of the peg-in direction, run a concrete dual-node
-runtime exercise, and integrate final authority after the Gate 5 consumer
-exists.
+is split at the real dependency boundary. The containment and no-authority
+recovery baseline is already a prerequisite to FED-6; profile-specific
+integration follows the exact active peg-in and peg-out identities. The
+federated integration does not wait for Gate 5. Only the STARK profile's
+recovery consumer depends on the Gate 5 authority path.
 
 **WP-07 local funds-release containment checkpoint:** commit `992be302`
 persists exact digest-bound peg-in verification receipts, detects pre- and
@@ -6944,7 +7330,8 @@ WP-08A-T8C2A durable submission-journal closeout matrix:
 | `confirmed` cannot be synthesized without observation authority | SQLite checks and row mapping require one `confirmed_final` observation, complete inclusion fields, at least two bounded sources, consensus digest and `confirmed_at` | Complete final observation and accepted expected transaction identity | Read-only confirmation/reconciliation consumers | Coordinated DB edits could skip observation authority and disappear from restart work | SQL constraint, ignored-constraint mapper bypass and incomplete-source mutation reject | Local confirmation evidence only; not Gate 5 or funds authority |
 
 Authority integration and package completion remain blocked until WP-06
-supplies the live Gate 5 authority path.
+supplies the exact active-profile funds-authority path. For the current route
+that is WP-06-FED; Gate 5 is required only for the WP-06-STARK trustless path.
 
 Package completion requires an independent architecture/code review packet with
 all critical/high findings either fixed or explicitly blocking the next package.
@@ -8083,11 +8470,14 @@ readiness claims remain blocked by their respective critical/high gaps.
 
 ## WP-09 — External Assurance And Reference-Release Hardening
 
-Only after WP-08 may the project spend sustained effort on completed Gate 5
-evidence, independent protocol/contract review closure, SBOM/dependency review,
-live non-mainnet rehearsals, governance drills, benchmarks, and the technical
-addendum. Gate 6 and Gate 7 can run in parallel when they correspond to real
-implemented surfaces.
+Final assurance verdicts and release evidence follow a stable WP-08/FED-6
+candidate. Target and custody acquisition, greenfield packet preparation,
+reviewer onboarding, SBOM preparation and non-authorizing rehearsal design may
+start earlier when they do not freeze unstable bytes or duplicate the active
+implementation lane. Live non-mainnet execution, final independent-review
+closure and claim-bearing evidence remain bound to the exact promoted
+candidate. Gate 6 and Gate 7 can run in parallel only when they correspond to
+real implemented surfaces.
 
 Gate 5 closes only when root production, anchor authentication, sidechain
 finality, inclusion, payout binding, DUP replay rejection, full-transaction VM

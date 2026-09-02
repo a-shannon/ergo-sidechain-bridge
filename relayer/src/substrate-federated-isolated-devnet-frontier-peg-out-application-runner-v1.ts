@@ -22,6 +22,7 @@ import {
 } from './peg-in-causal-admission-v2.js';
 import {
   buildPinnedLocalNativeReproducibleRustFlags,
+  buildPinnedLocalWasmPathRemapRustFlags,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
   runBoundedProcess,
@@ -1434,12 +1435,15 @@ function buildCargoEnvironment(input: Readonly<{
     buildPinnedLocalNativeReproducibleRustFlags({
       frontierSourcePath: input.frontierSourceDirectory,
       buildTargetPath: input.cargoTargetDirectory,
+      rustcExecutablePath: input.rustcExecutablePath,
       rustTarget: input.rustTarget,
     });
   environment.CARGO_ENCODED_RUSTFLAGS = reproducibleRustFlags.join('\x1f');
-  environment.WASM_BUILD_RUSTFLAGS = reproducibleRustFlags
-    .filter(flag => !flag.startsWith('-Clink-arg='))
-    .join(' ');
+  environment.WASM_BUILD_RUSTFLAGS = buildPinnedLocalWasmPathRemapRustFlags({
+    frontierSourcePath: input.frontierSourceDirectory,
+    buildTargetPath: input.cargoTargetDirectory,
+    rustcExecutablePath: input.rustcExecutablePath,
+  }).join(' ');
   for (const [key, value] of Object.entries(input.authorityEnvironment)) {
     environment[key] = value;
   }

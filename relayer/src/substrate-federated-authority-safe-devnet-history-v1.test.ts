@@ -61,6 +61,10 @@ import {
 import {
   collectSubstrateFederatedAuthoritySafeDevnetHistoryActionV1,
 } from './substrate-federated-authority-safe-devnet-history-action-v1.js';
+import {
+  createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1,
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 
 const BRIDGE_ADDRESS = `0x${'06'.repeat(20)}`;
 const TOKEN_ADDRESS = `0x${'07'.repeat(20)}`;
@@ -199,6 +203,49 @@ describe('Substrate federated authority-safe devnet history V1', () => {
       buildWorkspace,
     );
     expect(JSON.stringify(history.receipt)).not.toContain('D:/reviewed');
+  });
+
+  it('classifies post-acceptance provenance and materialization failures as source history', async () => {
+    mocks.accept.mockResolvedValueOnce(Object.freeze({
+      acceptance: mocks.acceptance,
+      value: Object.freeze({}),
+    }));
+
+    let failure: unknown;
+    try {
+      await collectHistory();
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source history rpc and finality');
+  });
+
+  it('preserves an earlier classified acceptance failure', async () => {
+    const acceptanceFailure =
+      createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+        'source target readiness and observation',
+        new Error('synthetic private acceptance failure'),
+      );
+    mocks.accept.mockRejectedValueOnce(acceptanceFailure);
+
+    let failure: unknown;
+    try {
+      await collectHistory();
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBe(acceptanceFailure);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target readiness and observation');
   });
 
   it.each([

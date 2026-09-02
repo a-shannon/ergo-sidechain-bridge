@@ -13,7 +13,15 @@ import { join, resolve } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1,
 } from './create-substrate-federated-isolated-devnet-bootstrap-request-v1.js';
@@ -24,6 +32,14 @@ import {
 
 const roots: string[] = [];
 const EXPECTED_HEAD = 'a'.repeat(40);
+const SIGNED_LAB_OWNER_MINT_TRANSACTION =
+  '0xf8c78001830f424094970951a12f975e6762482aca81e57d5a2a4e73f480b864'
+  + 'f28ee187000000000000000000000000f24ff3a9cf04c71dbc94d0b566f7a27b'
+  + '94566cac0000000000000000000000000000000000000000000000000000000000'
+  + 'e4e1c0111111111111111111111111111111111111111111111111111111111111'
+  + '111182f4f6a0fa641f8c5f81386dcf8913566ae9af37878a0f2599557c8543da'
+  + 'a63f2e6a4461a0757c09b0c4cff077e8212ddac96fb05690d5c82e5cdd293dd8'
+  + 'f3ac2538d6cce6';
 
 afterEach(() => {
   while (roots.length > 0) {
@@ -60,8 +76,9 @@ describe('canonical isolated bootstrap request producer V1', () => {
       expectedHeadCommitSha1Hex: EXPECTED_HEAD,
     });
 
-    const bridgeRoot = resolve(process.cwd(), '..');
-    const worktreeRoot = resolve(bridgeRoot, '..');
+    const inferredBridgeRoot = resolve(process.cwd(), '..');
+    const { bridgeRoot, worktreeRoot } =
+      resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
     const loaded = loadCanonicalBootstrapRequestBoundToSha256(
       fixture.outputPath,
       bridgeRoot,
@@ -100,6 +117,28 @@ describe('canonical isolated bootstrap request producer V1', () => {
     expect(existsSync(overlapFixture.outputPath)).toBe(false);
   });
 
+  it.each([
+    ['missing executable identity', '1.0.0'],
+    ['different node version', 'bridge-node 2.0.0'],
+    ['whitespace in executable identity', 'bridge node 1.0.0'],
+  ])('rejects a binary version with %s before publication', (
+    _case,
+    expectedFrontierBinaryVersion,
+  ) => {
+    const fixture = createFixture();
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1(
+        requestArguments(fixture, {
+          expectedFrontierBinaryVersion,
+        }),
+      )).toThrow(/bind one executable identity to the exact source node version/iu);
+    expect(existsSync(fixture.outputPath)).toBe(false);
+    expect(
+      readdirSync(fixture.root)
+        .filter(name => name.startsWith('.e2s-bootstrap-request-v1-')),
+    ).toEqual([]);
+  });
+
   it('fails closed on reordered arguments, invalid ports and occupied output', () => {
     const fixture = createFixture();
     const reordered = requestArguments(fixture);
@@ -122,6 +161,25 @@ describe('canonical isolated bootstrap request producer V1', () => {
     expect(readFileSync(fixture.outputPath, 'utf8')).toBe('occupied');
   });
 
+  it('rejects a malformed probe or mismatched Sudo before request publication', () => {
+    const fixture = createFixture();
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1(
+        requestArguments(fixture, {
+          signedLegacyOwnerMintTransaction: '0x01020304',
+        }),
+      )).toThrow(/rlp payload|transaction/iu);
+    expect(existsSync(fixture.outputPath)).toBe(false);
+
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1(
+        requestArguments(fixture, {
+          expectedSudoAddress: `0x${'4'.repeat(40)}`,
+        }),
+      )).toThrow(/Sudo differs from the signed LAB owner/iu);
+    expect(existsSync(fixture.outputPath)).toBe(false);
+  });
+
   it('keeps the command source generic on failure and free of runtime authority', () => {
     const source = readFileSync(
       resolve(
@@ -134,7 +192,7 @@ describe('canonical isolated bootstrap request producer V1', () => {
       "process.stderr.write('canonical isolated bootstrap request creation failed\\n')",
     );
     expect(source).not.toMatch(
-      /dotenv|mnemonic|privateKey|node-wallet|signer|submitter|broadcaster|runBoundedProcess/iu,
+      /dotenv|mnemonic|privateKey|node-wallet|submitter|broadcaster|runBoundedProcess/iu,
     );
     const packageJson = JSON.parse(
       readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'),
@@ -201,6 +259,9 @@ function requestArguments(
     tokenAddress?: string;
     expectedBaseSpecSha256Hex?: string;
     artifactDestination?: string;
+    expectedSudoAddress?: string;
+    expectedFrontierBinaryVersion?: string;
+    signedLegacyOwnerMintTransaction?: string;
   }> = {},
 ): string[] {
   return [
@@ -213,16 +274,21 @@ function requestArguments(
     '--frontier-source', fixture.frontierSource,
     '--base-spec', fixture.baseSpec,
     '--expected-chain-id', overrides.expectedChainId ?? '31337',
-    '--bridge-address', overrides.bridgeAddress ?? `0x${'1'.repeat(40)}`,
-    '--token-address', overrides.tokenAddress ?? `0x${'2'.repeat(40)}`,
-    '--bridge-owner-address', `0x${'3'.repeat(40)}`,
+    '--bridge-address', overrides.bridgeAddress
+      ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+    '--token-address', overrides.tokenAddress
+      ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+    '--bridge-owner-address',
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
     '--expected-base-spec-sha256',
     overrides.expectedBaseSpecSha256Hex ?? '4'.repeat(64),
     '--expected-frontier-commit', '5'.repeat(40),
     '--expected-frontier-patch-sha256', '6'.repeat(64),
     '--expected-runtime-code-sha256', '7'.repeat(64),
-    '--expected-sudo-address', `5${'8'.repeat(47)}`,
-    '--expected-frontier-binary-version', 'bridge-node 1.0.0',
+    '--expected-sudo-address', overrides.expectedSudoAddress
+      ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+    '--expected-frontier-binary-version',
+    overrides.expectedFrontierBinaryVersion ?? 'bridge-node 1.0.0',
     '--primary-rpc-url', 'http://127.0.0.1:9944',
     '--witness-rpc-url', 'http://127.0.0.1:9945',
     '--primary-p2p-port', overrides.primaryP2pPort ?? '30333',
@@ -232,7 +298,9 @@ function requestArguments(
     '--expected-native-genesis-hash', `0x${'9'.repeat(64)}`,
     '--expected-node-name', 'bridge-node',
     '--expected-node-version', '1.0.0',
-    '--signed-legacy-owner-mint-transaction', '0x01020304',
+    '--signed-legacy-owner-mint-transaction',
+    overrides.signedLegacyOwnerMintTransaction
+      ?? SIGNED_LAB_OWNER_MINT_TRANSACTION,
     '--ergo-source', fixture.ergoSource,
     '--expected-head', EXPECTED_HEAD,
     '--artifact-destination',

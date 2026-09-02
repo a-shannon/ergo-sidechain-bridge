@@ -9,6 +9,9 @@ import {
   runSubstrateFederatedIsolatedDevnetBootstrapRootV1,
   type SubstrateFederatedIsolatedDevnetBootstrapRootV1Receipt,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.js';
+import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import {
   loadCanonicalBootstrapRequestMaterialBoundToSha256V1,
@@ -37,8 +40,9 @@ export async function runSubstrateFederatedIsolatedDevnetBootstrapWorkerFromArgu
     throw new Error('isolated no-submit bootstrap worker requires Windows');
   }
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-  const bridgeRoot = resolve(scriptDirectory, '..', '..', '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(scriptDirectory, '..', '..', '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const input = loadCanonicalBootstrapRequestV1(
     argv[1],
     bridgeRoot,

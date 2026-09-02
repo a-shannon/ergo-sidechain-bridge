@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, parse, resolve } from 'node:path';
+import { delimiter, dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,11 +19,14 @@ const mocks = vi.hoisted(() => ({
   assertObservation: vi.fn(),
   runProcess: vi.fn(),
   validateToolchain: vi.fn(),
+  inspectProtoc: vi.fn(),
+  inspectRustSrc: vi.fn(),
   withOwnedProcesses: vi.fn(),
   assertOwnedProcess: vi.fn(),
   captureRecoveryTimeline: vi.fn(),
   assertRecoveryTimeline: vi.fn(),
   collectHistory: vi.fn(),
+  buildWorkspaceCleanupFailure: undefined as Error | undefined,
 }));
 
 vi.mock('./consensus-source-baseline.js', async importOriginal => {
@@ -39,10 +42,42 @@ vi.mock('./pinned-local-native-verifier-build.js', async importOriginal => {
   >();
   return {
     ...actual,
+    createPinnedLocalNativeBuildWorkspace: (
+      ...args: Parameters<
+        typeof actual.createPinnedLocalNativeBuildWorkspace
+      >
+    ) => {
+      const workspace = actual.createPinnedLocalNativeBuildWorkspace(...args);
+      return {
+        ...workspace,
+        cleanup() {
+          workspace.cleanup();
+          if (mocks.buildWorkspaceCleanupFailure !== undefined) {
+            throw mocks.buildWorkspaceCleanupFailure;
+          }
+        },
+      };
+    },
     runBoundedProcess: mocks.runProcess,
     validateNativeVerifierToolchainLock: mocks.validateToolchain,
   };
 });
+
+vi.mock(
+  './substrate-federated-authority-safe-devnet-protoc-v1.js',
+  () => ({
+    inspectSubstrateFederatedAuthoritySafePinnedProtocV1:
+      mocks.inspectProtoc,
+  }),
+);
+
+vi.mock(
+  './substrate-federated-authority-safe-devnet-rust-src-v1.js',
+  () => ({
+    inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1:
+      mocks.inspectRustSrc,
+  }),
+);
 
 vi.mock(
   './substrate-federated-authority-safe-devnet-history-action-v1.js',
@@ -102,6 +137,10 @@ import {
   type SubstrateFederatedAuthoritySafeDevnetAcceptedActionContextV1,
 } from './substrate-federated-authority-safe-devnet-acceptance-v1.js';
 import {
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_SOURCE_FAILURE_PHASES_V1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
+import {
   loadTrackedDeploymentIdentityArtifactProfile,
 } from './read-only-deployment-identity-observer.js';
 import { discoverBridgeRepositoryRoot } from './bridge-repository-layout.js';
@@ -131,7 +170,12 @@ const temporaryDirectories: string[] = [];
 let paths: ReturnType<typeof createPaths>;
 let mutateReproducedBaseSpec: ((value: Record<string, unknown>) => void) | undefined;
 let mutateAcceptedSpec: ((value: Record<string, unknown>) => void) | undefined;
+let mutateAfterSourceTests: ((nodeBinaryPath: string) => void) | undefined;
+let mutateDuringChainSpecAcceptance:
+  ((nodeBinaryPath: string, ordinal: number) => void) | undefined;
 let mutateDuringOwnedProcess: ((nodeBinaryPath: string) => void) | undefined;
+let chainSpecAcceptanceOrdinal: number;
+let ownedProcessBinaryBytes: Buffer | undefined;
 let reproducedBaseSpecRawBytes: Buffer | undefined;
 let acceptedChainSpecRawBytes: Buffer | undefined;
 let buildSpecStderr: string;
@@ -141,11 +185,18 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     vi.clearAllMocks();
     mutateReproducedBaseSpec = undefined;
     mutateAcceptedSpec = undefined;
+    mutateAfterSourceTests = undefined;
+    mutateDuringChainSpecAcceptance = undefined;
     mutateDuringOwnedProcess = undefined;
+    chainSpecAcceptanceOrdinal = 0;
+    ownedProcessBinaryBytes = undefined;
     reproducedBaseSpecRawBytes = undefined;
     acceptedChainSpecRawBytes = undefined;
+    mocks.buildWorkspaceCleanupFailure = undefined;
     buildSpecStderr = '2026-08-13 17:21:14 Building chain spec    \r\n';
     paths = createPaths();
+    mocks.inspectProtoc.mockReset().mockReturnValue(protocObservation());
+    mocks.inspectRustSrc.mockReset().mockReturnValue(rustSrcObservation());
     mocks.inspectBaseline.mockReturnValue(passingBaseline());
     mocks.runProcess.mockImplementation(runProcess);
     mocks.observe.mockImplementation(observation);
@@ -226,15 +277,74 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     const buildCall = mocks.runProcess.mock.calls.find(
       call => call[0].args[0] === 'build',
     )?.[0];
+    const acceptedProcess = mocks.withOwnedProcesses.mock.calls[0]?.[0];
+    const builtBinaryPath = join(
+      buildCall?.env?.CARGO_TARGET_DIR ?? '',
+      'debug',
+      process.platform === 'win32'
+        ? 'frontier-template-node.exe'
+        : 'frontier-template-node',
+    );
+    const acceptedBuildSpecCall = mocks.runProcess.mock.calls.find(
+      call => call[0].args[0] === 'build-spec' && call[0].args[2] !== 'dev',
+    )?.[0];
+    expect(acceptedProcess?.nodeBinaryPath).not.toBe(builtBinaryPath);
+    expect(acceptedProcess?.nodeBinaryPath).toMatch(
+      /[\\/]exec-[^\\/]+[\\/]frontier-template-node(?:\.exe)?$/,
+    );
+    expect(acceptedBuildSpecCall?.executablePath).toBe(
+      acceptedProcess?.nodeBinaryPath,
+    );
+    expect(ownedProcessBinaryBytes).toEqual(paths.binaryBytes);
+    const buildPath = buildCall?.env?.[
+      process.platform === 'win32' ? 'Path' : 'PATH'
+    ];
+    const sharedToolDirectory = realpathSync(dirname(paths.git));
+    const buildPathEntries: string[] = typeof buildPath === 'string'
+      ? buildPath.split(delimiter)
+      : [];
+    expect(buildPathEntries[0]).toBe(sharedToolDirectory);
+    expect(buildPathEntries.filter(value =>
+      process.platform === 'win32'
+        ? value.toLowerCase() === sharedToolDirectory.toLowerCase()
+        : value === sharedToolDirectory
+    )).toHaveLength(1);
     const profilePath = process.platform === 'win32'
       ? process.env.USERPROFILE
       : process.env.HOME;
     expect(profilePath).toBeTruthy();
     expect(buildCall?.env?.WASM_BUILD_RUSTFLAGS).toBe([
       `--remap-path-prefix=${profilePath}=/e2s/user-profile`,
-      `--remap-path-prefix=${buildCall?.env?.CARGO_TARGET_DIR}=/e2s/build-target`,
       `--remap-path-prefix=${paths.source}=/e2s/frontier-source`,
+      `--remap-path-prefix=${buildCall?.env?.CARGO_TARGET_DIR}=/e2s/build-target`,
+      `--remap-path-prefix=${resolve(dirname(paths.rustc), '..')}=/e2s/rust-toolchain`,
+      `--remap-path-prefix=${buildCall?.env?.CARGO_HOME}=/e2s/cargo-home`,
     ].join(' '));
+    expect(buildCall?.env?.WASM_BUILD_RUSTFLAGS?.indexOf('/e2s/user-profile'))
+      .toBeLessThan(
+        buildCall?.env?.WASM_BUILD_RUSTFLAGS?.indexOf('/e2s/frontier-source') ?? -1,
+      );
+    for (const broaderPrefix of [
+      '/e2s/user-profile',
+      '/e2s/frontier-source',
+      '/e2s/build-target',
+      '/e2s/rust-toolchain',
+    ]) {
+      expect(buildCall?.env?.WASM_BUILD_RUSTFLAGS?.indexOf(broaderPrefix))
+        .toBeLessThan(
+          buildCall?.env?.WASM_BUILD_RUSTFLAGS?.indexOf('/e2s/cargo-home') ?? -1,
+        );
+    }
+    const nativeRustFlagsValue = Object.entries(buildCall?.env ?? {})
+      .find(([key]) => /^CARGO_TARGET_.+_RUSTFLAGS$/.test(key))?.[1];
+    const nativeRustFlags = typeof nativeRustFlagsValue === 'string'
+      ? nativeRustFlagsValue
+      : undefined;
+    expect(nativeRustFlags).toContain(
+      `--remap-path-prefix=${buildCall?.env?.CARGO_HOME}=/e2s/cargo-home`,
+    );
+    expect(nativeRustFlags?.endsWith('/e2s/cargo-home')).toBe(true);
+    expect(buildCall?.env?.PROTOC).toBe(realpathSync(paths.protoc));
     expect(mocks.assertObservation).toHaveBeenCalledOnce();
     expect(mocks.assertOwnedProcess).toHaveBeenCalledOnce();
     expect(() =>
@@ -530,6 +640,144 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     expect(mocks.assertOwnedProcess).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['build', 'source target Frontier build'],
+    ['process', 'source target process construction and startup'],
+    ['observation', 'source target readiness and observation'],
+    ['observation provenance', 'source target readiness and observation'],
+    ['history', 'source history rpc and finality'],
+  ] as const)(
+    'projects the bounded %s failure without making diagnostic text authoritative',
+    async (boundary, expectedPhase) => {
+      const privateDiagnostic =
+        `synthetic private ${boundary} failure under ${paths.source}`;
+      const rejected = new Error(privateDiagnostic);
+      if (boundary === 'build') {
+        mocks.runProcess.mockImplementation(async value => {
+          if (value.args[0] === 'build') throw rejected;
+          return await runProcess(value);
+        });
+      } else if (boundary === 'process') {
+        mocks.withOwnedProcesses.mockRejectedValueOnce(rejected);
+      } else if (boundary === 'observation') {
+        mocks.observe.mockRejectedValueOnce(rejected);
+      } else if (boundary === 'observation provenance') {
+        mocks.assertObservation.mockImplementationOnce(() => {
+          throw rejected;
+        });
+      } else {
+        mocks.collectHistory.mockRejectedValueOnce(rejected);
+      }
+
+      let failure: unknown;
+      try {
+        await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(input());
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBe(rejected);
+      expect(
+        projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+          failure,
+        ),
+      ).toBe(expectedPhase);
+      expect(
+        projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+          new Error(privateDiagnostic),
+        ),
+      ).toBeNull();
+      expect(
+        projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+          new AggregateError([failure, new Error('private cleanup failure')]),
+        ),
+      ).toBe(expectedPhase);
+    },
+  );
+
+  it('keeps the source failure vocabulary finite', () => {
+    expect(
+      SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_SOURCE_FAILURE_PHASES_V1,
+    ).toEqual([
+      'source target build and source tests',
+      'source target input and baseline',
+      'source target toolchain and build workspace',
+      'source target Frontier build',
+      'source target binary and base spec',
+      'source target chain spec generation',
+      'source target runtime source tests',
+      'source target post-build invariants',
+      'source target build workspace cleanup',
+      'source target process construction and startup',
+      'source target readiness and observation',
+      'source history rpc and finality',
+    ]);
+  });
+
+  it('classifies source canonicalization before build workspace allocation', async () => {
+    const request = input();
+    let failure: unknown;
+    try {
+      await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1({
+        ...request,
+        frontierSourcePath: join(request.frontierSourcePath, 'missing'),
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target input and baseline');
+    expect(mocks.runProcess).not.toHaveBeenCalled();
+  });
+
+  it('preserves a classified source failure through build-workspace cleanup failure', async () => {
+    const sourceFailure = new Error('synthetic private source build failure');
+    const cleanupFailure = new Error('synthetic private cleanup failure');
+    mocks.buildWorkspaceCleanupFailure = cleanupFailure;
+    mocks.runProcess.mockImplementation(async value => {
+      if (value.args[0] === 'build') throw sourceFailure;
+      return await runProcess(value);
+    });
+
+    let failure: unknown;
+    try {
+      await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(input());
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      sourceFailure,
+      cleanupFailure,
+    ]);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target Frontier build');
+  });
+
+  it('classifies a standalone build-workspace cleanup failure', async () => {
+    const cleanupFailure = new Error('synthetic private cleanup failure');
+    mocks.buildWorkspaceCleanupFailure = cleanupFailure;
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBe(cleanupFailure);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target build workspace cleanup');
+  });
+
   it('rejects Cargo success when the exact source test did not execute', async () => {
     mocks.runProcess.mockImplementation(async value => {
       const result = await runProcess(value);
@@ -543,9 +791,16 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       };
     });
 
-    await expect(
-      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/did not execute exactly once/);
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/did not execute exactly once/);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target runtime source tests');
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
   });
 
@@ -580,6 +835,71 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     expect(mocks.observe).not.toHaveBeenCalled();
   });
 
+  it('rejects binary drift after source tests before chain-spec acceptance', async () => {
+    mutateAfterSourceTests = nodeBinaryPath => {
+      writeFileSync(nodeBinaryPath, Buffer.alloc(paths.binaryBytes.length, 0x41));
+    };
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /built authority-safe Frontier binary before execution snapshot SHA-256/,
+    );
+    expect(
+      mocks.runProcess.mock.calls.filter(
+        ([value]) => value.args[0] === 'build-spec' && value.args[2] !== 'dev',
+      ),
+    ).toHaveLength(0);
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('rejects binary drift during chain-spec acceptance before trusting stdout', async () => {
+    mutateDuringChainSpecAcceptance = (nodeBinaryPath, ordinal) => {
+      if (ordinal === 1) {
+        writeFileSync(nodeBinaryPath, Buffer.alloc(paths.binaryBytes.length, 0x42));
+      }
+    };
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /built authority-safe Frontier binary after exact Frontier chain-spec acceptance SHA-256/,
+    );
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('rejects binary drift during recovery chain-spec acceptance', async () => {
+    const { baseSpecBytes: _baseSpecBytes, ...sourceLockedInput } = input();
+    mutateDuringChainSpecAcceptance = (nodeBinaryPath, ordinal) => {
+      if (ordinal === 2) {
+        writeFileSync(nodeBinaryPath, Buffer.alloc(paths.binaryBytes.length, 0x43));
+      }
+    };
+
+    const failure = await captureSubstrateFederatedSourceLockedRecoveryTimelineV1({
+      ...sourceLockedInput,
+      recoveryObservation: {
+        sidechainIdHex: '42'.repeat(32),
+        expectedBridgeCodeHashHex: '43'.repeat(32),
+        expectedSergCodeHashHex: '44'.repeat(32),
+      },
+    }).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /built authority-safe Frontier binary after exact Frontier recovery-drill chain-spec acceptance SHA-256/,
+    );
+    expect(chainSpecAcceptanceOrdinal).toBe(2);
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+    expect(mocks.captureRecoveryTimeline).not.toHaveBeenCalled();
+  });
+
   it('rejects a fresh binary whose built-in runtime does not reproduce the pinned base spec', async () => {
     const changedBaseSpec = baseSpec() as Record<string, unknown>;
     changedBaseSpec.protocolId = 'different-built-runtime';
@@ -589,11 +909,18 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       value.protocolId = 'different-built-runtime';
     };
 
-    await expect(
-      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
       `freshly built Frontier binary did not reproduce the pinned base chain spec: observed ${observedDigest}, expected ${expectedDigest}`,
     );
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target binary and base spec');
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
   });
 
@@ -603,6 +930,21 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     await expect(
       acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
     ).rejects.toThrow(/did not reproduce the pinned base chain spec/);
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('classifies invalid generated chain-spec inputs after base-spec reproduction', async () => {
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1({
+      ...input(),
+      expectedChainId: 0n,
+    }).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target chain spec generation');
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
   });
 
@@ -666,16 +1008,131 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
 
     await expect(
       acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/built authority-safe Frontier binary SHA-256/);
+    ).rejects.toThrow(/authority-safe Frontier execution snapshot SHA-256/);
   });
 
   it('rejects build tools outside the repository-pinned toolchain lock', async () => {
     mocks.validateToolchain.mockReturnValueOnce({ errors: ['Cargo digest drift'] });
 
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/differ from the pinned toolchain lock/);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target toolchain and build workspace');
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'executablePath',
+    'platformKey',
+    'version',
+    'sha256Hex',
+  ] as const)(
+    'rejects Protobuf compiler %s drift after build and source tests',
+    async field => {
+      const before = protocObservation();
+      mocks.inspectProtoc
+        .mockReset()
+        .mockReturnValueOnce(before)
+        .mockReturnValueOnce({
+          ...before,
+          [field]: `${before[field]}-changed`,
+        });
+
+      await expect(
+        acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+      ).rejects.toThrow(/Protobuf compiler changed during build or source tests/);
+      expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+    },
+  );
+
+  it('masks a PROTOC path removed before Cargo environment construction', async () => {
+    const removedPath = paths.protoc;
+    mocks.inspectProtoc.mockReset().mockImplementationOnce(() => {
+      const observation = protocObservation();
+      rmSync(removedPath);
+      return observation;
+    });
+
+    const error = await acceptSubstrateFederatedAuthoritySafeDevnetV1(input())
+      .then(() => undefined, value => value as unknown);
+    expect(error).toBeInstanceOf(Error);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toBe('Protobuf compiler executable must be one regular file');
+    expect(message).not.toContain(removedPath);
+    expect(
+      mocks.runProcess.mock.calls.some(call => call[0].args[0] === 'build'),
+    ).toBe(false);
+  });
+
+  it('masks a Git executable removed before Cargo environment construction', async () => {
+    const removedPath = paths.git;
+    mocks.validateToolchain.mockImplementationOnce(() => {
+      rmSync(removedPath);
+      return { errors: [] };
+    });
+
+    const error = await acceptSubstrateFederatedAuthoritySafeDevnetV1(input())
+      .then(() => undefined, value => value as unknown);
+    expect(error).toBeInstanceOf(Error);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toBe('Git executable must be one regular file');
+    expect(message).not.toContain(removedPath);
+    expect(
+      mocks.runProcess.mock.calls.some(call => call[0].args[0] === 'build'),
+    ).toBe(false);
+  });
+
+  it('rejects Protobuf compiler drift after the owned target observation', async () => {
+    const before = protocObservation();
+    mocks.inspectProtoc
+      .mockReset()
+      .mockReturnValueOnce(before)
+      .mockReturnValueOnce(before)
+      .mockReturnValueOnce({ ...before, sha256Hex: '9'.repeat(64) });
+
     await expect(
       acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/differ from the pinned toolchain lock/);
+    ).rejects.toThrow(/Protobuf compiler changed during target acceptance/);
+    expect(mocks.withOwnedProcesses).toHaveBeenCalledOnce();
+  });
+
+  it('rejects rust-src drift after build and source tests', async () => {
+    const before = rustSrcObservation();
+    mocks.inspectRustSrc
+      .mockReset()
+      .mockReturnValueOnce(before)
+      .mockReturnValueOnce({
+        ...before,
+        cargoLockSha256Hex: '8'.repeat(64),
+      });
+
+    await expect(
+      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+    ).rejects.toThrow(/Rust standard-library source changed during build or source tests/);
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('rejects rust-src drift after the owned target observation', async () => {
+    const before = rustSrcObservation();
+    mocks.inspectRustSrc
+      .mockReset()
+      .mockReturnValueOnce(before)
+      .mockReturnValueOnce(before)
+      .mockReturnValueOnce({
+        ...before,
+        cargoManifestSha256Hex: '7'.repeat(64),
+      });
+
+    await expect(
+      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
+    ).rejects.toThrow(/Rust standard-library source changed during target acceptance/);
+    expect(mocks.withOwnedProcesses).toHaveBeenCalledOnce();
   });
 
   it('rejects source drift found by the post-build revalidation', async () => {
@@ -691,9 +1148,18 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
         },
       });
 
-    await expect(
-      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/complete source lock after build and source tests/);
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /complete source lock after build and source tests/,
+    );
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target post-build invariants');
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
   });
 
@@ -730,6 +1196,35 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
   });
 });
 
+function protocObservation() {
+  return Object.freeze({
+    executablePath: paths.protoc,
+    platformKey: `${process.platform}-${process.arch}`,
+    version: 'libprotoc fixture',
+    sha256Hex: sha256(Buffer.from('protoc')),
+  });
+}
+
+function rustSrcObservation() {
+  const libraryPath = join(
+    dirname(paths.rustc),
+    '..',
+    'lib',
+    'rustlib',
+    'src',
+    'rust',
+    'library',
+  );
+  return Object.freeze({
+    libraryPath,
+    cargoManifestPath: join(libraryPath, 'Cargo.toml'),
+    cargoLockPath: join(libraryPath, 'Cargo.lock'),
+    cargoManifestSha256Hex: '1'.repeat(64),
+    cargoLockSha256Hex: '2'.repeat(64),
+    rustSrcLockSha256Hex: '3'.repeat(64),
+  });
+}
+
 function createPaths() {
   const root = mkdtempSync(join(tmpdir(), 'fed6g1c-acceptance-test-'));
   temporaryDirectories.push(root);
@@ -740,11 +1235,16 @@ function createPaths() {
   const cargo = join(tools, process.platform === 'win32' ? 'cargo.exe' : 'cargo');
   const rustc = join(tools, process.platform === 'win32' ? 'rustc.exe' : 'rustc');
   const git = join(tools, process.platform === 'win32' ? 'git.exe' : 'git');
+  const protoc = join(
+    tools,
+    process.platform === 'win32' ? 'protoc.exe' : 'protoc',
+  );
   const binaryBytes = Buffer.from('source-locked-frontier-binary');
   writeFileSync(cargo, 'cargo');
   writeFileSync(rustc, 'rustc');
   writeFileSync(git, 'git');
-  return { source, cargo, rustc, git, binaryBytes };
+  writeFileSync(protoc, 'protoc');
+  return { source, cargo, rustc, git, protoc, binaryBytes };
 }
 
 function input(): AcceptSubstrateFederatedAuthoritySafeDevnetV1Input {
@@ -821,12 +1321,31 @@ async function runProcess(value: Readonly<{
       '',
       'test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out',
     ].join('\n');
+    if (
+      value.args[5]
+      === 'bridge_atomicity_tests::inactive_profile_rejects_direct_owner_mint_before_evm_and_preserves_authoring'
+    ) {
+      const target = value.env?.CARGO_TARGET_DIR;
+      if (!target) throw new Error('mocked Cargo test requires CARGO_TARGET_DIR');
+      mutateAfterSourceTests?.(join(
+        target,
+        'debug',
+        process.platform === 'win32'
+          ? 'frontier-template-node.exe'
+          : 'frontier-template-node',
+      ));
+    }
   } else if (value.args[0] === 'build-spec') {
     if (value.args[2] === 'dev') {
       const spec = baseSpec();
       mutateReproducedBaseSpec?.(spec);
       stdout = JSON.stringify(spec);
     } else {
+      chainSpecAcceptanceOrdinal += 1;
+      mutateDuringChainSpecAcceptance?.(
+        value.executablePath,
+        chainSpecAcceptanceOrdinal,
+      );
       const spec = JSON.parse(readFileSync(value.args[2], 'utf8')) as Record<string, unknown>;
       mutateAcceptedSpec?.(spec);
       stdout = `${JSON.stringify(sortObjectKeys(spec), null, 2)}\n`;
@@ -861,6 +1380,7 @@ async function withOwnedProcesses(
     witnessRpcUrl: string;
   }>) => Promise<unknown>,
 ) {
+  ownedProcessBinaryBytes = readFileSync(value.nodeBinaryPath);
   const result = await action({
     primaryRpcUrl: value.primaryRpcUrl,
     witnessRpcUrl: value.witnessRpcUrl,

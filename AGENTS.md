@@ -16,7 +16,9 @@ explicitly authorizes that exact critical operation.
 
 ## Current Direction
 
-- Gate 5 / Phase 011 is the critical path.
+- WP-06-FED is the active EIP-independent delivery path. Gate 5 / Phase 011 is
+  the critical path for the separate trustless WP-06-STARK upgrade and does not
+  block an explicitly federated reference package.
 - Substrate/Frontier provides EVM compatibility and commitment production; it
   is not the final trust layer.
 - Gate 6 governance work is secondary unless a concrete validator requires it.

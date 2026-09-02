@@ -116,6 +116,46 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('limits checkout layout discovery to reviewed Gate 5 entry points', () => {
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const layoutTarget = 'bridge-repository-layout.ts';
+    expect(inspect({
+      [reviewedRoot]: `
+        import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../../bridge-repository-layout.js';
+        resolveBridgeRepositoryRootsFromCheckoutLayout('bridge');
+      `,
+      [layoutTarget]: `
+        export function resolveBridgeRepositoryRootsFromCheckoutLayout(_root: string) {}
+        export function discoverBridgeRepositoryRoot(_root: string) {}
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import { discoverBridgeRepositoryRoot } from '../../bridge-repository-layout.js';
+        discoverBridgeRepositoryRoot('bridge');
+      `,
+      [layoutTarget]: `
+        export function discoverBridgeRepositoryRoot(_root: string) {}
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'restricted capability import binding is not allowlisted: ../../bridge-repository-layout.js#discoverBridgeRepositoryRoot',
+    ]);
+
+    expect(inspect({
+      'scripts/unreviewed-entry-point.ts': `
+        import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../bridge-repository-layout.js';
+        resolveBridgeRepositoryRootsFromCheckoutLayout('bridge');
+      `,
+      [layoutTarget]: `
+        export function resolveBridgeRepositoryRootsFromCheckoutLayout(_root: string) {}
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'exclusive authority import has the wrong owner: ../bridge-repository-layout.js#resolveBridgeRepositoryRootsFromCheckoutLayout',
+    ]);
+  });
+
   it('pins the federated application/checkpoint root to direct reviewed calls', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
@@ -408,7 +448,7 @@ describe('layer import rules', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const receipt =
-      'SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt';
+      'SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV2Receipt';
     expect(inspect({
       [processModule]: `export interface ${receipt} {}`,
       [reviewedRoot]: `

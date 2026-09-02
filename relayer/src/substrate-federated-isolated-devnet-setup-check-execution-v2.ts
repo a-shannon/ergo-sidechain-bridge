@@ -58,7 +58,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
-  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2,
@@ -67,7 +67,7 @@ import {
   type SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1,
   type SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1,
   type SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   replaySubstrateFederatedIsolatedDevnetPortableV1,
@@ -233,7 +233,7 @@ export interface SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV
 const TRACKER_TRANSPORT_EXECUTION_CHECKS = new WeakMap<
   object,
   Readonly<{
-    target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+    target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
     binding: Readonly<
       SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1
     >;
@@ -597,7 +597,7 @@ export function promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshne
   receipt: Readonly<
     SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt
   >,
-  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>,
 ): Readonly<
   SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1
 > {
@@ -606,7 +606,7 @@ export function promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshne
   );
   const material = TRACKER_RESERVATION_FRESHNESS_CHECK_V1_MATERIAL.get(receipt);
   const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(target);
+    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
   if (
     material === undefined
     || material.binding.processBindingDigestHex
@@ -649,13 +649,13 @@ export function assertSubstrateFederatedIsolatedDevnetTrackerTransportExecutionC
   value: Readonly<
     SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1
   >,
-  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>,
 ): Readonly<
   SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1
 > {
   const material = TRACKER_TRANSPORT_EXECUTION_CHECKS.get(value);
   const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(target);
+    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
   if (
     material === undefined
     || material.target !== target

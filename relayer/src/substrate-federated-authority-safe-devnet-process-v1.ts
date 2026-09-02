@@ -762,6 +762,8 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     'authority-safe owned-process node binary',
   );
   assertPortsUnowned(ports);
+  assertPortsBindable(ports);
+  assertPortsUnowned(ports);
 
   const runtimeDirectory = mkdtempSync(join(tmpdir(), 'e2s-fed6g1c-runtime-'));
   const specPath = join(runtimeDirectory, 'authority-safe.json');
@@ -787,6 +789,9 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     if (witness !== undefined) {
       throw new Error('authority-safe witness process is already running');
     }
+    assertPortsUnowned(witnessPorts);
+    assertPortsBindable(witnessPorts);
+    assertPortsUnowned(witnessPorts);
     const retainedPeerId = witnessPeerId;
     witness = spawnNode(nodeBinaryPath, [
       '--chain', specPath,
@@ -1760,6 +1765,43 @@ function assertPortsUnowned(ports: readonly number[]): void {
   const bindings = listenerBindings(ports);
   if ([...bindings.values()].some(value => value.length > 0)) {
     throw new Error('authority-safe process port is already owned');
+  }
+}
+
+function assertPortsBindable(ports: readonly number[]): void {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot || !isAbsolute(systemRoot)) {
+    throw new Error('Windows SystemRoot is unavailable for port bindability');
+  }
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    '$listeners=@()',
+    'try { foreach ($port in @(' + ports.join(',') + ')) { '
+      + '$listener=[System.Net.Sockets.TcpListener]::new('
+      + '[System.Net.IPAddress]::Loopback,$port); '
+      + '$listener.Start(); $listeners+=,$listener } } '
+      + 'finally { foreach ($listener in $listeners) { $listener.Stop() } }',
+  ].join('; ');
+  const result = spawnSync(
+    resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      cwd: systemRoot,
+      env: minimalEnvironment(),
+      encoding: 'utf8',
+      timeout: 30_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+    },
+  );
+  if (
+    result.error
+    || result.signal !== null
+    || result.status !== 0
+    || result.stdout.trim() !== ''
+    || result.stderr.trim() !== ''
+  ) {
+    throw new Error('authority-safe process port is not bindable on IPv4 loopback');
   }
 }
 

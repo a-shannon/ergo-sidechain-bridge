@@ -23,6 +23,8 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
+  assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1,
@@ -31,8 +33,8 @@ import {
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V2_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V2_SCHEMA,
   decideSubstrateFederatedIsolatedDevnetCleanupAuthorityV1,
   type SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -204,6 +206,18 @@ describe.skipIf(process.platform !== 'win32')(
           checkpointBound: true,
           reservationFreshnessCheckBound: true,
           trackerTransport: true,
+        })
+      ).toThrow(/not owned by the active tracker-transport action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: true,
+          witnessReadOnly: true,
+          checkpointBound: true,
+          reservationFreshnessCheckBound: true,
+          trackerTransport: true,
+          sameProcessCanonicalConfirmation: true,
         })
       ).toThrow(/not owned by the active tracker-transport action/);
       await expect(session.startMining()).rejects.toThrow(/exactly once/);
@@ -538,6 +552,78 @@ describe.skipIf(process.platform !== 'win32')(
       }
     });
 
+    it('accepts a higher indexed tip when the exact frozen block remains canonical', () => {
+      const frozenSnapshot = Object.freeze({
+        network: 'devnet' as const,
+        fullHeight: 11,
+        indexedHeight: 11,
+        headerIdHex: '11'.repeat(32),
+      });
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1({
+          actionStartSnapshot: Object.freeze({
+            network: 'devnet' as const,
+            fullHeight: 12,
+            indexedHeight: 12,
+            headerIdHex: '22'.repeat(32),
+          }),
+          frozenSnapshot,
+          primaryHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+          witnessHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+        })
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['primary', '33'.repeat(32), '11'.repeat(32)],
+      ['witness', '11'.repeat(32), '33'.repeat(32)],
+    ] as const)(
+      'rejects a %s frozen-block replacement beneath a higher indexed tip',
+      (role, primaryHeaderIdHex, witnessHeaderIdHex) => {
+        const frozenSnapshot = Object.freeze({
+          network: 'devnet' as const,
+          fullHeight: 11,
+          indexedHeight: 11,
+          headerIdHex: '11'.repeat(32),
+        });
+        expect(() =>
+          assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1({
+            actionStartSnapshot: Object.freeze({
+              network: 'devnet' as const,
+              fullHeight: 12,
+              indexedHeight: 12,
+              headerIdHex: '22'.repeat(32),
+            }),
+            frozenSnapshot,
+            primaryHeaderIdsAtFrozenHeight: [primaryHeaderIdHex],
+            witnessHeaderIdsAtFrozenHeight: [witnessHeaderIdHex],
+          })
+        ).toThrow(new RegExp(`${role} frozen snapshot is not canonical`, 'u'));
+      },
+    );
+
+    it('rejects a common indexed tip below the frozen height', () => {
+      const frozenSnapshot = Object.freeze({
+        network: 'devnet' as const,
+        fullHeight: 12,
+        indexedHeight: 12,
+        headerIdHex: '11'.repeat(32),
+      });
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1({
+          actionStartSnapshot: Object.freeze({
+            network: 'devnet' as const,
+            fullHeight: 11,
+            indexedHeight: 11,
+            headerIdHex: '22'.repeat(32),
+          }),
+          frozenSnapshot,
+          primaryHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+          witnessHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+        })
+      ).toThrow(/not an indexed descendant of the frozen target/);
+    });
+
     const liveJavaPath = process.env.G1DI3B_JAVA_PATH;
     const liveJarPath = process.env.G1DI3B_ERGO_JAR_PATH;
     it.skipIf(!liveJavaPath || !liveJarPath)(
@@ -673,7 +759,7 @@ describe.skipIf(process.platform !== 'win32')(
           Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1>[0]
             | undefined;
         let transportTarget:
-          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1>[0]
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2>[0]
             | undefined;
         let freshnessCompletion:
           ReturnType<
@@ -884,15 +970,15 @@ describe.skipIf(process.platform !== 'win32')(
               async target => {
                 transportTarget = target;
                 expect(target).toMatchObject({
-                  primaryMining: false,
+                  primaryMining: true,
                   witnessReadOnly: true,
-                  miningStopped: true,
                   checkpointBound: true,
                   reservationFreshnessCheckBound: true,
                   trackerTransport: true,
+                  sameProcessCanonicalConfirmation: true,
                 });
                 const binding =
-                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(
                     target,
                   );
                 expect(binding.reservationFreshnessProcessBindingDigestHex)
@@ -904,15 +990,21 @@ describe.skipIf(process.platform !== 'win32')(
               },
             );
           expect(transport.receipt.schema).toBe(
-            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V1_SCHEMA,
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V2_SCHEMA,
           );
           expect(transport.receipt.sameProcessesAsReservationFreshness)
+            .toBe(false);
+          expect(transport.receipt.primaryMiningDuringAction)
             .toBe(true);
-          expect(transport.receipt.primaryMiningStoppedDuringAction)
-            .toBe(true);
+          expect(
+            transport.receipt
+              .trackerConfirmationMiningCredentialConsumedBeforeTransportOnce,
+          ).toBe(true);
+          expect(
+            transport.receipt
+              .exactReservationFreshnessSnapshotRevalidatedBeforeAction,
+          ).toBe(true);
           expect(transport.receipt.trackerTransportTargetActiveOnlyDuringAction)
-            .toBe(true);
-          expect(transport.receipt.exactFrozenChainSnapshotStableAcrossAction)
             .toBe(true);
           expect(transport.receipt.reservationFreshnessProcessBindingDigestHex)
             .toBe(freshness.receipt.processBindingDigestHex);
@@ -922,14 +1014,18 @@ describe.skipIf(process.platform !== 'win32')(
           ).toBe(freshness.receipt.executionTargetIdentityDigestHex);
           expect(transport.receipt.reservationFreshnessSnapshot)
             .toEqual(freshness.receipt.actionEndSnapshot);
-          expect(transport.receipt.actionStartSnapshot)
-            .toEqual(freshness.receipt.actionEndSnapshot);
-          expect(transport.receipt.actionEndSnapshot)
-            .toEqual(freshness.receipt.actionEndSnapshot);
+          expect(transport.receipt.actionStartSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(
+              freshness.receipt.actionEndSnapshot.fullHeight,
+            );
+          expect(transport.receipt.actionStartSnapshot.indexedHeight)
+            .toBe(transport.receipt.actionStartSnapshot.fullHeight);
+          expect(transport.receipt.actionEndSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(transport.receipt.actionStartSnapshot.fullHeight);
           expect(transport.value.processBindingDigestHex)
             .toBe(transport.receipt.processBindingDigestHex);
           expect(() =>
-            assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(
+            assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(
               transportTarget!,
             )
           ).toThrow(/not owned by the active tracker-transport action/);
@@ -957,11 +1053,11 @@ describe.skipIf(process.platform !== 'win32')(
                 ),
             );
           expect(confirmation.receipt.schema).toBe(
-            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V1_SCHEMA,
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V2_SCHEMA,
           );
           expect(confirmation.receipt.confirmedTransactionIdHex)
             .toBe(confirmationTransactionIdHex);
-          expect(confirmation.receipt.trackerConfirmationMiningCredentialConsumedOnce)
+          expect(confirmation.receipt.sameProcessesAsTrackerTransport)
             .toBe(true);
           expect(confirmation.receipt.exactTrackerTransportBound).toBe(true);
           expect(

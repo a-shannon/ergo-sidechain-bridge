@@ -48,6 +48,9 @@ const mocks = vi.hoisted(() => ({
   replayInputs: [] as any[],
   trackerCompileEntered: undefined as (() => void) | undefined,
   trackerCompileWait: undefined as Promise<void> | undefined,
+  packetFailure: undefined as Error | undefined,
+  packetFailurePhase: undefined as string | undefined,
+  postSettlementBindingFailure: undefined as Error | undefined,
   tamperRelayerRole: undefined as string | undefined,
   tamperRelayerSetDigest: false,
   tamperTargetRuntimeProfileId: false,
@@ -203,6 +206,11 @@ vi.mock(
     return {
       ...actual,
       buildSubstrateFederatedTrackerCompilerRequestV1: vi.fn((input: any) => {
+        if (
+          mocks.packetFailurePhase === 'packet input and contract binding'
+        ) {
+          throw mocks.packetFailure;
+        }
         mocks.trackerInputs.push(input);
         return Object.freeze({
           requestDigestHex: 'a1'.repeat(32),
@@ -225,6 +233,9 @@ vi.mock(
       ...actual,
       compileSubstrateFederatedTrackerWithPinnedJvmV1:
         vi.fn(async (input: any) => {
+          if (mocks.packetFailurePhase === 'packet tracker compilation') {
+            throw mocks.packetFailure;
+          }
           mocks.trackerCompilerInputs.push(input);
           mocks.trackerCompileEntered?.();
           await mocks.trackerCompileWait;
@@ -247,6 +258,9 @@ vi.mock(
       ...actual,
       compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1:
         vi.fn(async (input: any) => {
+          if (mocks.packetFailurePhase === 'packet settlement compilation') {
+            throw mocks.packetFailure;
+          }
           mocks.familyCompilerInputs.push(input);
           const request =
             buildSubstrateFederatedSettlementFamilyV1CompilerRequest({
@@ -305,6 +319,9 @@ vi.mock(
       ...actual,
       deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1:
         vi.fn((input: any) => {
+          if (mocks.postSettlementBindingFailure !== undefined) {
+            throw mocks.postSettlementBindingFailure;
+          }
           mocks.targetInputs.push(input);
           const descriptor = Object.freeze({
             descriptorDigestHex: 'b1'.repeat(32),
@@ -430,6 +447,11 @@ vi.mock(
       ...actual,
       produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1:
         vi.fn(async (input: any) => {
+          if (
+            mocks.packetFailurePhase === 'packet relayer artifact production'
+          ) {
+            throw mocks.packetFailure;
+          }
           mkdirSync(input.destinationDirectory);
           const contents = {
             sourceArchive: Buffer.from('real-source-archive'),
@@ -484,6 +506,11 @@ vi.mock(
       ...actual,
       replaySubstrateFederatedIsolatedDevnetPortableV1:
         vi.fn(async (input: any) => {
+          if (
+            mocks.packetFailurePhase === 'packet launch and portable replay'
+          ) {
+            throw mocks.packetFailure;
+          }
           mocks.replayInputs.push(input);
           const packet = JSON.parse(
             Buffer.from(input.artifacts.attestationPacket).toString('utf8'),
@@ -519,6 +546,11 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1,
+  projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCTION_PHASES_V1,
+} from './relayer-core/substrate-federated-isolated-devnet-packet-production-phase-v1.js';
 import {
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
@@ -637,6 +669,9 @@ beforeEach(() => {
   mocks.replayInputs = [];
   mocks.trackerCompileEntered = undefined;
   mocks.trackerCompileWait = undefined;
+  mocks.packetFailure = undefined;
+  mocks.packetFailurePhase = undefined;
+  mocks.postSettlementBindingFailure = undefined;
   mocks.tamperRelayerRole = undefined;
   mocks.tamperRelayerSetDigest = false;
   mocks.tamperTargetRuntimeProfileId = false;
@@ -709,6 +744,88 @@ describe('isolated-devnet portable packet producer', () => {
     );
     expect(packet.signatures.map((value: any) => value.signerPublicKeyHex))
       .toEqual(session.signer.sourceAttestationPublicKeysHex.slice(0, 2));
+  });
+
+  it.each(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCTION_PHASES_V1)(
+    'projects only the process-owned packet phase %s',
+    async expectedPhase => {
+      const privateDiagnostic =
+        `private ${expectedPhase} diagnostic under a local runtime path`;
+      const rejected = new Error(privateDiagnostic);
+      mocks.packetFailure = rejected;
+      mocks.packetFailurePhase = expectedPhase;
+      const session = packetSession();
+      let failure: unknown;
+
+      try {
+        await session.produce(packetInput());
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBe(rejected);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+          failure,
+        ),
+      ).toBe(expectedPhase);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+          new Error(privateDiagnostic),
+        ),
+      ).toBeNull();
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+          structuredClone(rejected),
+        ),
+      ).toBeNull();
+    },
+  );
+
+  it('rejects unknown packet phases and sanitizes non-Error causes', () => {
+    expect(() =>
+      createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+        'private packet phase' as never,
+        new Error('private detail'),
+      )
+    ).toThrow('isolated devnet packet production phase is invalid');
+    const failure =
+      createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+        'packet tracker compilation',
+        'private non-Error detail',
+      );
+    expect(failure.message).toBe(
+      'isolated devnet packet production phase failed',
+    );
+    expect(
+      projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+        failure,
+      ),
+    ).toBe('packet tracker compilation');
+  });
+
+  it('projects post-settlement target failures as input and contract binding', async () => {
+    const rejected = new Error(
+      'private post-settlement target-binding diagnostic',
+    );
+    mocks.postSettlementBindingFailure = rejected;
+    const session = packetSession();
+    let failure: unknown;
+
+    try {
+      await session.produce(packetInput());
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBe(rejected);
+    expect(mocks.trackerCompilerInputs).toHaveLength(1);
+    expect(mocks.familyCompilerInputs).toHaveLength(1);
+    expect(
+      projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+        failure,
+      ),
+    ).toBe('packet input and contract binding');
   });
 
   it('consumes the exact snapshot-anchored V2 Ergo history producer', async () => {

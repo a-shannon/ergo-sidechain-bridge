@@ -4,16 +4,21 @@ import { join } from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+  createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+} from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
+
 const fixture = vi.hoisted(() => ({
   target: Object.freeze({
     primaryNodeOrigin: 'http://127.0.0.1:9051',
     witnessNodeOrigin: 'http://127.0.0.1:9052',
-    primaryMining: false,
+    primaryMining: true,
     witnessReadOnly: true,
-    miningStopped: true,
     checkpointBound: true,
     reservationFreshnessCheckBound: true,
     trackerTransport: true,
+    sameProcessCanonicalConfirmation: true,
   }),
   processBindingDigestHex: '41'.repeat(32),
   executionTargetIdentityDigestHex: '42'.repeat(32),
@@ -25,17 +30,31 @@ const fixture = vi.hoisted(() => ({
   checkResponseDigestHex: '53'.repeat(32),
   freshnessReceiptDigestHex: '54'.repeat(32),
   signedCandidate: Object.freeze({
+    profile: 'synthetic-fresh-signed-candidate',
     txId: '0d'.repeat(32),
+    nodeOrigin: 'http://127.0.0.1:9051',
     signedTransactionDigestHex: '51'.repeat(32),
     signedTransactionBytesSha256Hex: '52'.repeat(32),
     signedTransactionBytesLength: 226_795,
+    signerContext: Object.freeze({ profile: 'synthetic-fresh-signer' }),
   }),
   handle: Object.freeze({
+    profile: 'e2s.local-wasm-checked-submission-handle.v1',
     txId: '0d'.repeat(32),
+    nodeOrigin: 'http://127.0.0.1:9051',
     signedTransactionDigestHex: '51'.repeat(32),
     signedTransactionBytesSha256Hex: '52'.repeat(32),
     signedTransactionBytesLength: 226_795,
     checkResponseDigestHex: '53'.repeat(32),
+    checkerIdentity: Object.freeze({ profile: 'synthetic-checker' }),
+  }),
+  signedTransaction: Object.freeze({
+    id: '0d'.repeat(32),
+    inputs: Object.freeze([
+      Object.freeze({ boxId: '0c'.repeat(32) }),
+      Object.freeze({ boxId: '0e'.repeat(32) }),
+    ]),
+    proofs: Object.freeze(['fresh-opaque-proof']),
   }),
   requestBinding: Object.freeze({
     schema:
@@ -53,6 +72,12 @@ const fixture = vi.hoisted(() => ({
   }),
   requestBindingConsumed: false,
   relayerLineageConsumed: false,
+  handleConsumed: false,
+  transportEvents: [] as string[],
+}));
+
+const node = vi.hoisted(() => ({
+  post: vi.fn(),
 }));
 
 vi.mock('../../fleet-signer.js', () => ({
@@ -62,12 +87,67 @@ vi.mock('../../fleet-signer.js', () => ({
     }
     return fixture.inputBoxIdsHex;
   },
+  assertLocalWasmSignedCheckCandidateProvenance: (value: unknown) => {
+    if (value !== fixture.signedCandidate) {
+      throw new Error('synthetic signed candidate provenance is absent');
+    }
+  },
+  assertLocalWasmCheckedSubmissionHandleV1Provenance: (value: unknown) => {
+    if (value !== fixture.handle || fixture.handleConsumed) {
+      throw new Error('synthetic checked handle provenance is absent');
+    }
+  },
+  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding: (
+    value: unknown,
+    binding: Readonly<{
+      processBindingDigestHex: string;
+      executionTargetIdentityDigestHex: string;
+    }>,
+  ) => {
+    if (
+      value !== fixture.handle
+      || Object.keys(binding).sort().join(',')
+        !== 'executionTargetIdentityDigestHex,processBindingDigestHex'
+      || binding.processBindingDigestHex !== fixture.processBindingDigestHex
+      || binding.executionTargetIdentityDigestHex
+        !== fixture.executionTargetIdentityDigestHex
+    ) {
+      throw new Error('synthetic checked handle execution binding changed');
+    }
+  },
+  consumeLocalWasmCheckedSubmissionHandleV1: async (
+    handle: unknown,
+    signedCandidate: unknown,
+    consume: (signedTransaction: Readonly<Record<string, unknown>>) =>
+      Promise<unknown>,
+  ) => {
+    if (
+      handle !== fixture.handle
+      || signedCandidate !== fixture.signedCandidate
+      || fixture.handleConsumed
+    ) {
+      throw new Error('synthetic checked submission material is absent');
+    }
+    fixture.handleConsumed = true;
+    fixture.transportEvents.push('consume');
+    return await consume(fixture.signedTransaction);
+  },
+}));
+
+vi.mock('axios', () => ({
+  default: {
+    post: node.post,
+    isAxiosError: (error: unknown) =>
+      typeof error === 'object'
+      && error !== null
+      && (error as { isAxiosError?: unknown }).isAxiosError === true,
+  },
 }));
 
 vi.mock(
   '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
   () => ({
-    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1:
+    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2:
       (value: unknown) => {
         if (value !== fixture.target) {
           throw new Error('synthetic tracker transport target is absent');
@@ -189,7 +269,11 @@ import {
   createSubstrateFederatedIsolatedDevnetTrackerTransportJournalV1,
   createSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1,
   issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1,
+  projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
 } from './substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js';
+import {
+  submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1,
+} from './substrate-federated-isolated-devnet-tracker-checked-transport-v1.js';
 
 let syntheticExecutionCheck: any;
 let syntheticDurableReservation: any;
@@ -197,6 +281,9 @@ let syntheticDurableReservation: any;
 beforeEach(() => {
   fixture.requestBindingConsumed = false;
   fixture.relayerLineageConsumed = false;
+  fixture.handleConsumed = false;
+  fixture.transportEvents.length = 0;
+  node.post.mockReset();
   syntheticExecutionCheck = Object.freeze({
     receipt: Object.freeze({
       unsignedTransactionIdHex: fixture.transactionIdHex,
@@ -216,6 +303,84 @@ beforeEach(() => {
 });
 
 describe('isolated tracker transport authorization and durable attempt V1', () => {
+  it('composes fresh checked bytes through durable accepted transport', async () => {
+    await withAsyncState(async (state, reservation) => {
+      syntheticDurableReservation = durableReceipt(reservation);
+      const authorization = authorize();
+      const journal = createJournal(state);
+      const attempt = journal.reserve(authorization);
+      const preflight = createPreflight(journal, attempt, authorization);
+      node.post.mockImplementation(async (url, signedTransaction) => {
+        expect(url).toBe('http://127.0.0.1:9051/transactions');
+        expect(signedTransaction).toBe(fixture.signedTransaction);
+        expect(
+          state.getSubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1(
+            reservation.reservationIdentityHex,
+          ),
+        ).toMatchObject({ status: 'pending' });
+        fixture.transportEvents.push('post');
+        return { status: 200, data: fixture.transactionIdHex };
+      });
+
+      const submission =
+        await submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
+          target: fixture.target as any,
+          executionCheck: syntheticExecutionCheck,
+          authorization,
+          journal,
+          attempt,
+          preflight,
+        });
+      expect(submission).toMatchObject({
+        status: 'accepted',
+        submittedTransactionIdHex: fixture.transactionIdHex,
+      });
+      const outcome = journal.finalize(attempt, submission);
+      expect(outcome).toMatchObject({
+        status: 'accepted',
+        submittedTransactionIdHex: fixture.transactionIdHex,
+        trackerAdmissionEstablished: false,
+      });
+      expect(fixture.transportEvents).toEqual(['consume', 'post']);
+      expect(node.post).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('composes fresh checked bytes through durable ambiguous transport', async () => {
+    await withAsyncState(async (state, reservation) => {
+      syntheticDurableReservation = durableReceipt(reservation);
+      const authorization = authorize();
+      const journal = createJournal(state);
+      const attempt = journal.reserve(authorization);
+      const preflight = createPreflight(journal, attempt, authorization);
+      node.post.mockRejectedValue({
+        isAxiosError: true,
+        response: { status: 503 },
+      });
+
+      const submission =
+        await submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
+          target: fixture.target as any,
+          executionCheck: syntheticExecutionCheck,
+          authorization,
+          journal,
+          attempt,
+          preflight,
+        });
+      expect(submission).toMatchObject({
+        status: 'ambiguous',
+        submittedTransactionIdHex: null,
+      });
+      expect(journal.finalize(attempt, submission)).toMatchObject({
+        status: 'ambiguous',
+        submittedTransactionIdHex: null,
+        trackerAdmissionEstablished: false,
+      });
+      expect(fixture.transportEvents).toEqual(['consume']);
+      expect(node.post).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('binds exact checked material, persists before claim, and finalizes accepted', () => {
     withState((state, reservation) => {
       syntheticDurableReservation = durableReceipt(reservation);
@@ -280,6 +445,8 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
           {
             status: 'accepted',
             submittedTransactionIdHex: fixture.transactionIdHex,
+            responseCategory: 'accepted',
+            httpStatus: 200,
             responseDigestHex: '61'.repeat(32),
           },
         )
@@ -314,6 +481,13 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
         status: 'accepted',
         submittedTransactionIdHex: fixture.transactionIdHex,
         responseDigestHex: '61'.repeat(32),
+        responseClassification:
+          createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+            status: 'accepted',
+            responseCategory: 'accepted',
+            httpStatus: 200,
+            responseDigestHex: '61'.repeat(32),
+          }),
         resultArtifact: Object.freeze({
           schema:
             'e2s.substrate-federated-isolated-devnet-tracker-transport-outcome.v1',
@@ -326,6 +500,8 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
         {
           status: 'accepted',
           submittedTransactionIdHex: fixture.transactionIdHex,
+          responseCategory: 'accepted',
+          httpStatus: 200,
           responseDigestHex: '61'.repeat(32),
         },
       );
@@ -335,6 +511,23 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
         submittedTransactionIdHex: fixture.transactionIdHex,
         trackerAdmissionEstablished: false,
       });
+      expect(outcome).not.toHaveProperty('responseCategory');
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+          outcome,
+        ),
+      ).toMatchObject({
+        status: 'accepted',
+        responseCategory: 'accepted',
+        httpStatus: 200,
+        responseDigestHex: '61'.repeat(32),
+        classificationDigestHex: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      });
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+          structuredClone(outcome),
+        ),
+      ).toBeNull();
       expect(outcome.outcomeDigestHex).toMatch(/^[0-9a-f]{64}$/u);
     });
   });
@@ -378,16 +571,126 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
         {
           status: 'ambiguous',
           submittedTransactionIdHex: null,
+          responseCategory: 'ambiguous_http_response',
+          httpStatus: 503,
           responseDigestHex: '62'.repeat(32),
         },
       );
-      expect(journal.finalize(attempt, result)).toMatchObject({
+      const outcome = journal.finalize(attempt, result);
+      expect(outcome).toMatchObject({
         status: 'ambiguous',
         submittedTransactionIdHex: null,
         trackerAdmissionEstablished: false,
       });
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+          outcome,
+        ),
+      ).toMatchObject({
+        status: 'ambiguous',
+        responseCategory: 'ambiguous_http_response',
+        httpStatus: 503,
+        responseDigestHex: '62'.repeat(32),
+      });
     });
   });
+
+  it('rejects a coherent response-pair mutation that retains the old digest', () => {
+    const classification =
+      createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+        status: 'ambiguous',
+        responseCategory: 'ambiguous_http_response',
+        httpStatus: 503,
+        responseDigestHex: '63'.repeat(32),
+      });
+    const mutated = Object.freeze({
+      ...classification,
+      responseCategory: 'ambiguous_no_response' as const,
+      httpStatus: null,
+    });
+
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+        mutated,
+      )
+    ).toThrow(/response classification changed/u);
+  });
+
+  it.each([
+    ['schema', (value: any) => { value.schema = 'unknown'; }],
+    ['version', (value: any) => { value.version = 2; }],
+    ['status', (value: any) => { value.status = 'accepted'; }],
+    ['response category', (value: any) => {
+      value.responseCategory = 'ambiguous_no_response';
+    }],
+    ['HTTP status', (value: any) => { value.httpStatus = 502; }],
+    ['response digest', (value: any) => {
+      value.responseDigestHex = '65'.repeat(32);
+    }],
+    ['classification digest', (value: any) => {
+      value.classificationDigestHex = '66'.repeat(32);
+    }],
+    ['extra key', (value: any) => { value.unexpected = true; }],
+    ['missing key', (value: any) => { delete value.version; }],
+  ] as const)(
+    'rejects exact response-classification field drift: %s',
+    (_label, mutate) => {
+      const classification =
+        createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+          status: 'ambiguous',
+          responseCategory: 'ambiguous_http_response',
+          httpStatus: 503,
+          responseDigestHex: '63'.repeat(32),
+        });
+      const mutated = structuredClone(classification);
+      mutate(mutated);
+
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+          mutated,
+        )
+      ).toThrow(/response classification (?:changed|is invalid)/u);
+    },
+  );
+
+  it.each([
+    ['accepted category on ambiguous status', 'ambiguous', null, 'accepted', 200],
+    ['ambiguous category on accepted status', 'accepted', fixture.transactionIdHex, 'ambiguous_success_response', 200],
+    ['missing accepted HTTP status', 'accepted', fixture.transactionIdHex, 'accepted', null],
+    ['HTTP status on no-response category', 'ambiguous', null, 'ambiguous_no_response', 503],
+    ['non-success status on success-response category', 'ambiguous', null, 'ambiguous_success_response', 503],
+    ['success status on HTTP-response category', 'ambiguous', null, 'ambiguous_http_response', 200],
+    ['missing ambiguous HTTP status', 'ambiguous', null, 'ambiguous_http_response', null],
+  ] as const)(
+    'rejects incoherent response classification: %s',
+    (_label, status, submittedTransactionIdHex, responseCategory, httpStatus) => {
+      withState((state, reservation) => {
+        syntheticDurableReservation = durableReceipt(reservation);
+        const authorization = authorize();
+        const journal = createJournal(state);
+        const attempt = journal.reserve(authorization);
+        claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1(
+          journal,
+          attempt,
+          authorization,
+        );
+
+        expect(() =>
+          issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1(
+            journal,
+            attempt,
+            {
+              status,
+              submittedTransactionIdHex,
+              responseCategory,
+              httpStatus,
+              responseDigestHex: '64'.repeat(32),
+            },
+          )
+        ).toThrow(/tracker transport response classification changed/u);
+      });
+    },
+  );
 
   it('rejects copied request or packet lineage before a preflight exists', () => {
     withState((state, reservation) => {
@@ -528,6 +831,42 @@ function withState(
         targetIdentityDigestHex: '10'.repeat(32),
       }).reservation;
     run(state, reservation);
+  } finally {
+    state.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function withAsyncState(
+  run: (
+    state: StateTracker,
+    reservation: ReturnType<
+      StateTracker['reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1']
+    >['reservation'],
+  ) => Promise<void>,
+): Promise<void> {
+  const root = mkdtempSync(join(tmpdir(), 'tracker-transport-join-test-'));
+  const state = new StateTracker(join(root, 'state-store'));
+  try {
+    const reservation = state
+      .reserveSubstrateFederatedIsolatedDevnetTrackerAdmissionV1({
+        reservationIdentityHex: '01'.repeat(32),
+        operationProfileDigestHex: '02'.repeat(32),
+        rootReceiptDigestHex: '03'.repeat(32),
+        authorizationDigestHex: '04'.repeat(32),
+        sourceProfileDigestHex: '05'.repeat(32),
+        trackerSetupDigestHex: '06'.repeat(32),
+        checkpointAnchorDigestHex: '07'.repeat(32),
+        frozenTargetDigestHex: '08'.repeat(32),
+        trackerCandidateDigestHex: '09'.repeat(32),
+        jvmCheckDigestHex: '0a'.repeat(32),
+        statementIdHex: '0b'.repeat(32),
+        trackerInputBoxIdHex: fixture.trackerInputBoxIdHex,
+        unsignedTransactionIdHex: fixture.transactionIdHex,
+        anchorHeaderIdHex: '0f'.repeat(32),
+        targetIdentityDigestHex: '10'.repeat(32),
+      }).reservation;
+    await run(state, reservation);
   } finally {
     state.close();
     rmSync(root, { recursive: true, force: true });

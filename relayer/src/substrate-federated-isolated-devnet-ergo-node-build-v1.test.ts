@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   assertSubstrateFederatedIsolatedDevnetErgoNodeAssemblyDirectoryReadyV1,
+  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1,
   assertSubstrateFederatedIsolatedDevnetWindowsJobProcessRunnerV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeV1,
   inspectSubstrateFederatedIsolatedDevnetErgoNodeAssemblyFileV1,
@@ -106,6 +107,41 @@ describe('isolated devnet Ergo node build V1', () => {
         aliasOutput,
       )
     ).toThrow(/assembly-free output directory/);
+  });
+
+  it('derives the assembly output directory from the exact build lock', () => {
+    const source = ownedDirectory();
+    const output = join(source, 'target', 'scala-2.12');
+    mkdirSync(output, { recursive: true });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+        bridgeRoot,
+        source,
+      )
+    ).not.toThrow();
+
+    writeFileSync(join(output, 'ergo-stale.jar'), 'stale');
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+        bridgeRoot,
+        source,
+      )
+    ).toThrow(/assembly-free output directory/);
+
+    const aliasedSource = ownedDirectory();
+    const aliasTarget = ownedDirectory();
+    mkdirSync(join(aliasTarget, 'scala-2.12'), { recursive: true });
+    symlinkSync(
+      aliasTarget,
+      join(aliasedSource, 'target'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+        bridgeRoot,
+        aliasedSource,
+      )
+    ).toThrow(/path must not contain a symbolic link or junction/);
   });
 
   it('rejects runner digest drift and post-build multi-link assemblies', () => {

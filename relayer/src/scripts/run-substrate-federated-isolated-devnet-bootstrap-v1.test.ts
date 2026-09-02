@@ -59,6 +59,9 @@ import {
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   runSubstrateFederatedIsolatedDevnetBootstrapCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-v1.js';
 import {
@@ -72,6 +75,10 @@ import {
   consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
   projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1,
 } from '../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js';
+
+const REPOSITORY_ROOTS = resolveBridgeRepositoryRootsFromCheckoutLayout(
+  resolve(process.cwd(), '..'),
+);
 
 describe('isolated devnet tracked no-submit bootstrap command V1', () => {
   beforeEach(() => {
@@ -98,8 +105,8 @@ describe('isolated devnet tracked no-submit bootstrap command V1', () => {
       const input = mocked.root.mock.calls[0]?.[0];
       expect(input).toMatchObject({
         build: {
-          bridgeRoot: resolve(process.cwd(), '..'),
-          worktreeRoot: resolve(process.cwd(), '..', '..'),
+          bridgeRoot: REPOSITORY_ROOTS.bridgeRoot,
+          worktreeRoot: REPOSITORY_ROOTS.worktreeRoot,
           ergoSourcePath: fixture.request.ergoNode.ergoSourcePath,
           gitExecutablePath: fixture.request.toolchain.gitExecutablePath,
           javaExecutablePath: fixture.request.toolchain.javaExecutablePath,
@@ -115,7 +122,7 @@ describe('isolated devnet tracked no-submit bootstrap command V1', () => {
             },
           },
           relayerArtifacts: {
-            bridgeRoot: resolve(process.cwd(), '..'),
+            bridgeRoot: REPOSITORY_ROOTS.bridgeRoot,
             expectedHeadCommitSha1Hex: 'a'.repeat(40),
             destinationDirectory: fixture.artifactDestination,
           },
@@ -137,14 +144,14 @@ describe('isolated devnet tracked no-submit bootstrap command V1', () => {
         .digest('hex');
       expect(() => loadCanonicalBootstrapRequestBoundToSha256(
         fixture.requestPath,
-        resolve(process.cwd(), '..'),
-        resolve(process.cwd(), '..', '..'),
+        REPOSITORY_ROOTS.bridgeRoot,
+        REPOSITORY_ROOTS.worktreeRoot,
         expectedRequestSha256Hex,
       )).not.toThrow();
       expect(() => loadCanonicalBootstrapRequestBoundToSha256(
         fixture.requestPath,
-        resolve(process.cwd(), '..'),
-        resolve(process.cwd(), '..', '..'),
+        REPOSITORY_ROOTS.bridgeRoot,
+        REPOSITORY_ROOTS.worktreeRoot,
         '0'.repeat(64),
       )).toThrow('changed after parent validation');
     });
@@ -157,15 +164,15 @@ describe('isolated devnet tracked no-submit bootstrap command V1', () => {
         .digest('hex');
       const loaded = loadCanonicalBootstrapRequestBoundWithProvenanceV1(
         fixture.requestPath,
-        resolve(process.cwd(), '..'),
-        resolve(process.cwd(), '..', '..'),
+        REPOSITORY_ROOTS.bridgeRoot,
+        REPOSITORY_ROOTS.worktreeRoot,
         expectedRequestSha256Hex,
       );
       const independentlyLoaded =
         loadCanonicalBootstrapRequestBoundWithProvenanceV1(
           fixture.requestPath,
-          resolve(process.cwd(), '..'),
-          resolve(process.cwd(), '..', '..'),
+          REPOSITORY_ROOTS.bridgeRoot,
+          REPOSITORY_ROOTS.worktreeRoot,
           expectedRequestSha256Hex,
         );
 

@@ -2090,16 +2090,70 @@ function minimalCargoEnvironment(input: {
   environment.CARGO_ENCODED_RUSTFLAGS = buildPinnedLocalNativeReproducibleRustFlags({
     frontierSourcePath: input.frontierSourcePath,
     buildTargetPath: input.buildTargetPath,
+    rustcExecutablePath: input.rustcExecutablePath,
     rustTarget: input.rustTarget,
   }).join('\x1f');
   return environment;
 }
 
-export function buildPinnedLocalNativeReproducibleRustFlags(input: {
+interface PinnedLocalReproducibleRustPathInput {
   frontierSourcePath: string;
   buildTargetPath: string;
-  rustTarget: string;
-}): readonly string[] {
+  rustcExecutablePath: string;
+}
+
+export function buildPinnedLocalNativeReproducibleRustFlags(
+  input: PinnedLocalReproducibleRustPathInput & {
+    rustTarget: string;
+  },
+): readonly string[] {
+  const paths = resolvePinnedLocalReproducibleRustPaths(input);
+  if (typeof input?.rustTarget !== 'string' || input.rustTarget.length === 0) {
+    throw new Error('Rust target for reproducible Rust flags must be non-empty');
+  }
+  const flags = [
+    `--remap-path-prefix=${paths.frontierSourcePath}=/e2s/frontier-source`,
+    `--remap-path-prefix=${paths.buildTargetPath}=/e2s/build-target`,
+    `--remap-path-prefix=${paths.rustToolchainRootPath}=/e2s/rust-toolchain`,
+    '-Cdebuginfo=0',
+    '-Ccodegen-units=1',
+  ];
+  if (input.rustTarget.endsWith('-pc-windows-msvc')) {
+    flags.push('-Clink-arg=/Brepro');
+  }
+  return Object.freeze(flags);
+}
+
+export function buildPinnedLocalWasmPathRemapRustFlags(
+  input: PinnedLocalReproducibleRustPathInput,
+): readonly string[] {
+  const paths = resolvePinnedLocalReproducibleRustPaths(input);
+  const frontierSourcePath = spaceDelimitedRustFlagPath(
+    paths.frontierSourcePath,
+    'Frontier source',
+  );
+  const buildTargetPath = spaceDelimitedRustFlagPath(
+    paths.buildTargetPath,
+    'build target',
+  );
+  const rustToolchainRootPath = spaceDelimitedRustFlagPath(
+    paths.rustToolchainRootPath,
+    'Rust toolchain root',
+  );
+  return Object.freeze([
+    `--remap-path-prefix=${frontierSourcePath}=/e2s/frontier-source`,
+    `--remap-path-prefix=${buildTargetPath}=/e2s/build-target`,
+    `--remap-path-prefix=${rustToolchainRootPath}=/e2s/rust-toolchain`,
+  ]);
+}
+
+function resolvePinnedLocalReproducibleRustPaths(
+  input: PinnedLocalReproducibleRustPathInput,
+): Readonly<{
+  frontierSourcePath: string;
+  buildTargetPath: string;
+  rustToolchainRootPath: string;
+}> {
   const frontierSourcePath = resolve(requireAbsolutePath(
     input?.frontierSourcePath,
     'Frontier source path for reproducible Rust flags',
@@ -2108,19 +2162,25 @@ export function buildPinnedLocalNativeReproducibleRustFlags(input: {
     input?.buildTargetPath,
     'build target path for reproducible Rust flags',
   ));
-  if (typeof input?.rustTarget !== 'string' || input.rustTarget.length === 0) {
-    throw new Error('Rust target for reproducible Rust flags must be non-empty');
+  const rustcExecutablePath = resolve(requireAbsolutePath(
+    input?.rustcExecutablePath,
+    'Rust compiler path for reproducible Rust flags',
+  ));
+  const rustToolchainRootPath = resolve(dirname(rustcExecutablePath), '..');
+  return Object.freeze({
+    frontierSourcePath,
+    buildTargetPath,
+    rustToolchainRootPath,
+  });
+}
+
+function spaceDelimitedRustFlagPath(value: string, label: string): string {
+  if (/[\p{White_Space}\p{Cc}=]/u.test(value)) {
+    throw new Error(
+      `${label} path must not contain Unicode whitespace, control characters, or equals signs in space-delimited Rust flags`,
+    );
   }
-  const flags = [
-    `--remap-path-prefix=${frontierSourcePath}=/e2s/frontier-source`,
-    `--remap-path-prefix=${buildTargetPath}=/e2s/build-target`,
-    '-Cdebuginfo=0',
-    '-Ccodegen-units=1',
-  ];
-  if (input.rustTarget.endsWith('-pc-windows-msvc')) {
-    flags.push('-Clink-arg=/Brepro');
-  }
-  return Object.freeze(flags);
+  return value;
 }
 
 function minimalToolEnvironment(): NodeJS.ProcessEnv {

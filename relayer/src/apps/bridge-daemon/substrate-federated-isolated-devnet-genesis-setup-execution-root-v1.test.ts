@@ -29,9 +29,15 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import {
+  SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_SOURCE_FAILURE_PHASES_V1,
+} from '../../relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
+import {
   createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
   projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
 } from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
+import {
+  createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+} from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
 
 const mocked = vi.hoisted(() => ({
   build: vi.fn(),
@@ -52,6 +58,7 @@ const mocked = vi.hoisted(() => ({
   checkpointExtensionEncode: vi.fn(),
   packet: vi.fn(),
   packetContinuation: vi.fn(),
+  packetPhase: vi.fn(),
   packetV2Assert: vi.fn(),
   packetRelayerLineageClaim: vi.fn(),
   requestBindingClaim: vi.fn(),
@@ -68,6 +75,7 @@ const mocked = vi.hoisted(() => ({
   trackerAssert: vi.fn(),
   materializeUnsigned: vi.fn(),
   sourceHistory: vi.fn(),
+  sourceHistoryPhase: vi.fn(),
   rewardDiscovery: vi.fn(),
   rewardDiscoveryAssert: vi.fn(),
   ergoHistory: vi.fn(),
@@ -98,6 +106,7 @@ const mocked = vi.hoisted(() => ({
   trackerTransportAuthorize: vi.fn(),
   trackerTransportJournalCreate: vi.fn(),
   trackerTransportPreflight: vi.fn(),
+  trackerTransportResponseClassificationProject: vi.fn(),
   trackerTransportSubmit: vi.fn(),
   pegInCommittedVaultPromote: vi.fn(),
   pegInCommittedVaultAuthorizationSession: vi.fn(),
@@ -105,6 +114,7 @@ const mocked = vi.hoisted(() => ({
   pegInCommittedVaultJournal: vi.fn(),
   pegInCommittedVaultOutputObserve: vi.fn(),
   pegInCommittedVaultOutputAssert: vi.fn(),
+  operationalRun: vi.fn(),
   execute: vi.fn(),
   revalidator: vi.fn(),
   observer: vi.fn(),
@@ -168,6 +178,18 @@ vi.mock('../../profiles/substrate-federated-v1/checkpoint-statement.js', async i
   encodeSubstrateFederatedCheckpointExtensionValueV1:
     mocked.checkpointExtensionEncode,
 }));
+vi.mock('./ergo-operational-transaction.js', async importOriginal => {
+  const original = await importOriginal<
+    typeof import('./ergo-operational-transaction.js')
+  >();
+  mocked.operationalRun.mockImplementation(
+    original.runErgoOperationalTransaction,
+  );
+  return {
+    ...original,
+    runErgoOperationalTransaction: mocked.operationalRun,
+  };
+});
 vi.mock('../../substrate-federated-isolated-devnet-packet-producer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance:
     mocked.packetV2Assert,
@@ -177,6 +199,21 @@ vi.mock('../../substrate-federated-isolated-devnet-packet-producer-v1.js', () =>
     mocked.packetContinuation,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1: mocked.packet,
 }));
+vi.mock(
+  '../../relayer-core/substrate-federated-isolated-devnet-packet-production-phase-v1.js',
+  () => ({
+    projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1:
+      mocked.packetPhase,
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCTION_PHASES_V1:
+      Object.freeze([
+        'packet input and contract binding',
+        'packet tracker compilation',
+        'packet settlement compilation',
+        'packet relayer artifact production',
+        'packet launch and portable replay',
+      ] as const),
+  }),
+);
 vi.mock(
   '../../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js',
   () => ({
@@ -222,6 +259,16 @@ vi.mock('../../unsigned-ergo-transaction.js', () => ({
 vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => ({
   collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocked.sourceHistory,
 }));
+vi.mock(
+  '../../relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js',
+  async importOriginal => ({
+    ...(await importOriginal<
+      typeof import('../../relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js')
+    >()),
+    projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1:
+      mocked.sourceHistoryPhase,
+  }),
+);
 vi.mock('../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js', () => ({
   assertSubstrateFederatedRewardInputDiscoveryV2Provenance:
     mocked.rewardDiscoveryAssert,
@@ -308,6 +355,8 @@ vi.mock('./substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js',
     mocked.trackerTransportJournalCreate,
   createSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1:
     mocked.trackerTransportPreflight,
+  projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1:
+    mocked.trackerTransportResponseClassificationProject,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1:
@@ -365,8 +414,10 @@ vi.mock('../../state-tracker.js', async (importOriginal) => {
 import {
   assertSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7Provenance,
   assertSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Provenance,
-  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance,
-  projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9,
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance,
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Provenance,
+  projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10,
+  projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11,
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3,
   runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1,
@@ -375,7 +426,8 @@ import {
   runSubstrateFederatedIsolatedDevnetPegInMintProofCampaignRootV1,
   runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7,
   runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8,
-  runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9,
+  runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10,
+  runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11,
   runSubstrateFederatedIsolatedDevnetPegInObservedAnchorTrackerCheckCampaignRootV6,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckExecutionRootV1,
   runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionRootV1,
@@ -388,7 +440,9 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FROZEN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V7,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V8,
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V6,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
@@ -655,6 +709,16 @@ describe('isolated devnet genesis setup execution root V1', () => {
       trackerAdmissionEstablished: false,
       outcomeDigestHex: digest('5'),
     });
+    mocked.trackerTransportResponseClassificationProject.mockImplementation(
+      outcome => outcome === trackerTransportOutcome
+        ? createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+            status: 'accepted',
+            responseCategory: 'accepted',
+            httpStatus: 200,
+            responseDigestHex: digest('4'),
+          })
+        : null,
+    );
     trackerTransportJournal = Object.freeze({
       reserve: vi.fn(authorization => {
         order.push('tracker-transport:journal:reserve');
@@ -1222,6 +1286,8 @@ describe('isolated devnet genesis setup execution root V1', () => {
       order.push('source:history');
       return { source: 'history' };
     });
+    mocked.sourceHistoryPhase.mockReturnValue(null);
+    mocked.packetPhase.mockReturnValue(null);
     mocked.rewardDiscovery.mockImplementation(async () => {
       rewardDiscoveryCount += 1;
       if (rewardDiscoveryCount === 1) {
@@ -2966,7 +3032,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     }
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3123,6 +3189,39 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ).toBeNull();
   });
 
+  it.each(SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_SOURCE_FAILURE_PHASES_V1)(
+    'projects the bounded V7 source phase %s without exposing its cause',
+    async expectedPhase => {
+      const privateDiagnostic =
+        `synthetic private ${expectedPhase} failure`;
+      const rejected = new Error(privateDiagnostic);
+      mocked.sourceHistory.mockRejectedValueOnce(rejected);
+      mocked.sourceHistoryPhase.mockImplementationOnce(error =>
+        error === rejected ? expectedPhase : null
+      );
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7(
+          pegInApplicationCheckpointRootInput() as any,
+        );
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(
+        projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          failure,
+        ),
+      ).toBe(expectedPhase);
+      expect(mocked.sourceHistoryPhase).toHaveBeenCalledWith(rejected);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          new Error(privateDiagnostic),
+        ),
+      ).toBeNull();
+    },
+  );
+
   it('retains the V7 primary managed phase across teardown aggregation', async () => {
     mocked.sourceHistory.mockRejectedValueOnce(
       new Error('synthetic private V7 source history failure'),
@@ -3206,7 +3305,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       }
       let failure: unknown;
       try {
-        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         });
@@ -3228,6 +3327,464 @@ describe('isolated devnet genesis setup execution root V1', () => {
     },
   );
 
+  it.each([
+    [
+      'operational signing',
+      'peg-in committed-vault operational signing',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultPromote.getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault promoter unavailable');
+        mocked.pegInCommittedVaultPromote.mockImplementationOnce((...args) => ({
+          ...baseline(...args),
+          signedCandidate: null,
+          privateFailure: failure,
+        }));
+      },
+    ],
+    [
+      'operational check',
+      'peg-in committed-vault operational check',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultPromote.getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault promoter unavailable');
+        mocked.pegInCommittedVaultPromote.mockImplementationOnce((...args) => {
+          const executionCheck = baseline(...args);
+          return {
+            ...executionCheck,
+            checkedAcceptance: {
+              ...executionCheck.checkedAcceptance,
+              submissionHandle: null,
+            },
+            privateFailure: failure,
+          };
+        });
+      },
+    ],
+    [
+      'pre-transport revalidation',
+      'peg-in committed-vault pre-transport revalidation',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultAuthorizationSession
+          .getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault authorizer unavailable');
+        mocked.pegInCommittedVaultAuthorizationSession.mockImplementationOnce(
+          (...args) => ({
+            ...baseline(...args),
+            revalidator: {
+              revalidate: vi.fn(async () => {
+                throw failure;
+              }),
+            },
+          }),
+        );
+      },
+    ],
+    [
+      'broadcast authorization',
+      'peg-in committed-vault broadcast authorization',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultAuthorizationSession
+          .getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault authorizer unavailable');
+        mocked.pegInCommittedVaultAuthorizationSession.mockImplementationOnce(
+          (...args) => {
+            const session = baseline(...args);
+            return {
+              ...session,
+              broadcastAuthorizer: {
+                ...session.broadcastAuthorizer,
+                authorize: vi.fn(() => {
+                  throw failure;
+                }),
+              },
+            };
+          },
+        );
+      },
+    ],
+    [
+      'durable reservation',
+      'peg-in committed-vault durable reservation',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultJournal.getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault journal unavailable');
+        mocked.pegInCommittedVaultJournal.mockImplementationOnce((...args) => {
+          const journal = baseline(...args);
+          return {
+            ...journal,
+            journal: {
+              ...journal.journal,
+              reserve: vi.fn(() => {
+                throw failure;
+              }),
+            },
+          };
+        });
+      },
+    ],
+    [
+      'checked submission normalization',
+      'peg-in committed-vault checked submission',
+      (_failure: Error) => {
+        mocked.pegInCommittedVaultTransport.mockReturnValueOnce({
+          submit: vi.fn(async () => ({
+            status: 'accepted' as const,
+            submittedTxId: digest('f'),
+            responseDigestHex: digest('e'),
+          })),
+        });
+      },
+    ],
+    [
+      'outcome persistence',
+      'peg-in committed-vault outcome persistence',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultJournal.getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault journal unavailable');
+        mocked.pegInCommittedVaultJournal.mockImplementationOnce((...args) => {
+          const journal = baseline(...args);
+          return {
+            ...journal,
+            journal: {
+              ...journal.journal,
+              finalize: vi.fn(() => {
+                throw failure;
+              }),
+            },
+          };
+        });
+      },
+    ],
+    [
+      'execution result validation',
+      'peg-in committed-vault execution result validation',
+      (failure: Error) => {
+        const baseline = mocked.operationalRun.getMockImplementation();
+        if (baseline === undefined) throw new Error('operational executor unavailable');
+        mocked.operationalRun.mockImplementationOnce(baseline);
+        mocked.operationalRun.mockImplementationOnce(async (...args) => ({
+          ...await baseline(...args),
+          expectedTxId: failure.message,
+        }));
+      },
+    ],
+    [
+      'pre-transport observation',
+      'peg-in committed-vault pre-transport observation',
+      (failure: Error) => {
+        const baseline = mocked.pegInCommittedVaultAuthorizationSession
+          .getMockImplementation();
+        if (baseline === undefined) throw new Error('committed-vault authorizer unavailable');
+        mocked.pegInCommittedVaultAuthorizationSession.mockImplementationOnce(
+          (...args) => ({
+            ...baseline(...args),
+            takePreTransportObservation: vi.fn(() => {
+              throw failure;
+            }),
+          }),
+        );
+      },
+    ],
+  ] as const)(
+    'projects the exact committed-vault %s subphase without its private cause',
+    async (_boundary, expectedPhase, injectFailure) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-committed-vault-subphase-'),
+      );
+      const failure = new Error(
+        `synthetic private ${expectedPhase} failure under ${journalRoot}`,
+      );
+      injectFailure(failure);
+      let observed: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        observed = error;
+      }
+
+      try {
+        const projectedPhase =
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            observed,
+          );
+        expect(projectedPhase).toBe(expectedPhase);
+        expect(projectedPhase).not.toContain(journalRoot);
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    [
+      'check',
+      'peg-in committed-vault check',
+      () => mocked.pegInCommittedVaultRetainingCheck.mockRejectedValueOnce(
+        new Error('synthetic private committed-vault check failure'),
+      ),
+    ],
+    [
+      'authorization',
+      'peg-in committed-vault authorization',
+      () => mocked.pegInCommittedVaultPromote.mockImplementationOnce(() => {
+        throw new Error('synthetic private committed-vault authorization failure');
+      }),
+    ],
+    [
+      'transport',
+      'peg-in committed-vault transport',
+      () => mocked.pegInCommittedVaultTransport.mockImplementationOnce(() => {
+        throw new Error('synthetic private committed-vault transport failure');
+      }),
+    ],
+    [
+      'output observation',
+      'peg-in committed-vault output observation',
+      () => mocked.pegInCommittedVaultOutputObserve.mockRejectedValueOnce(
+        new Error('synthetic private committed-vault output failure'),
+      ),
+    ],
+  ] as const)(
+    'projects the exact V9 committed-vault %s phase without its private cause',
+    async (_boundary, expectedPhase, injectFailure) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-committed-vault-phase-'),
+      );
+      injectFailure();
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            failure,
+          ),
+        ).toBe(expectedPhase);
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    [
+      'freshness revalidation',
+      'tracker freshness revalidation',
+      () => mocked.trackerReservationFreshnessCheck.mockRejectedValueOnce(
+        new Error('synthetic private freshness failure'),
+      ),
+    ],
+    [
+      'freshness completion claim',
+      'tracker transport target activation',
+      () => mocked.trackerReservationFreshnessCompletionClaim
+        .mockImplementationOnce(() => {
+          throw new Error('synthetic private freshness completion failure');
+        }),
+    ],
+    [
+      'transport target activation',
+      'tracker transport target activation',
+      () => processSession.withCheckpointBoundTrackerTransportTarget
+        .mockRejectedValueOnce(
+          new Error('synthetic private transport target activation failure'),
+        ),
+    ],
+    ...([
+      'tracker transport frozen snapshot revalidation',
+      'tracker transport node shutdown',
+      'tracker transport witness restart',
+      'tracker transport primary restart',
+      'tracker transport post-restart continuity',
+    ] as const).map(expectedPhase => [
+      expectedPhase,
+      expectedPhase,
+      () => processSession.withCheckpointBoundTrackerTransportTarget
+        .mockRejectedValueOnce(
+          createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+            expectedPhase,
+            new Error(`synthetic private ${expectedPhase} failure`),
+          ),
+        ),
+    ] as const),
+    [
+      'freshness promotion',
+      'tracker transport authorization',
+      () => mocked.trackerReservationFreshnessPromote
+        .mockImplementationOnce(() => {
+          throw new Error('synthetic private freshness promotion failure');
+        }),
+    ],
+    [
+      'transport authorization',
+      'tracker transport authorization',
+      () => mocked.trackerTransportAuthorize.mockImplementationOnce(() => {
+        throw new Error('synthetic private transport authorization failure');
+      }),
+    ],
+    [
+      'transport journal construction',
+      'tracker transport journal reservation',
+      () => mocked.trackerTransportJournalCreate.mockImplementationOnce(() => {
+        throw new Error('synthetic private transport journal construction failure');
+      }),
+    ],
+    [
+      'transport journal reservation',
+      'tracker transport journal reservation',
+      () => trackerTransportJournal.reserve.mockImplementationOnce(() => {
+        throw new Error('synthetic private transport journal failure');
+      }),
+    ],
+    [
+      'transport provenance binding',
+      'tracker transport provenance binding',
+      () => mocked.packetRelayerLineageClaim.mockReturnValueOnce(undefined),
+    ],
+    [
+      'transport preflight',
+      'tracker transport preflight',
+      () => mocked.trackerTransportPreflight.mockImplementationOnce(() => {
+        throw new Error('synthetic private transport preflight failure');
+      }),
+    ],
+    [
+      'transport submission',
+      'tracker transport checked submission',
+      () => mocked.trackerTransportSubmit.mockRejectedValueOnce(
+        new Error('synthetic private transport submission failure'),
+      ),
+    ],
+    [
+      'transport outcome persistence',
+      'tracker transport outcome persistence',
+      () => trackerTransportJournal.finalize.mockImplementationOnce(() => {
+        throw new Error('synthetic private transport persistence failure');
+      }),
+    ],
+    [
+      'transport post-action validation',
+      'tracker transport post-action validation',
+      () => processSession.withCheckpointBoundTrackerTransportTarget
+        .mockImplementationOnce(async (_completion, action) => {
+          await action(trackerTransportTarget());
+          throw new Error('synthetic private transport post-action failure');
+        }),
+    ],
+  ] as const)(
+    'projects the exact V9 %s phase without exposing its private cause',
+    async (_boundary, expectedPhase, injectFailure) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-transport-subphase-'),
+      );
+      injectFailure();
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            failure,
+          ),
+        ).toBe(expectedPhase);
+        const beforeTransportAuthorization =
+          expectedPhase === 'tracker transport frozen snapshot revalidation'
+          || expectedPhase === 'tracker transport node shutdown'
+          || expectedPhase === 'tracker transport witness restart'
+          || expectedPhase === 'tracker transport primary restart'
+          || expectedPhase === 'tracker transport post-restart continuity'
+          || expectedPhase === 'tracker transport target activation';
+        if (beforeTransportAuthorization) {
+          expect(mocked.trackerTransportAuthorize).not.toHaveBeenCalled();
+          expect(trackerTransportJournal.reserve).not.toHaveBeenCalled();
+        }
+        if (
+          beforeTransportAuthorization
+          || expectedPhase === 'tracker transport authorization'
+          || expectedPhase === 'tracker transport journal reservation'
+          || expectedPhase === 'tracker transport provenance binding'
+        ) {
+          expect(mocked.trackerTransportPreflight).not.toHaveBeenCalled();
+          expect(mocked.trackerTransportSubmit).not.toHaveBeenCalled();
+          expect(trackerTransportJournal.finalize).not.toHaveBeenCalled();
+        }
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    'packet input and contract binding',
+    'packet tracker compilation',
+    'packet settlement compilation',
+    'packet relayer artifact production',
+    'packet launch and portable replay',
+  ] as const)(
+    'projects the exact V9 packet subphase %s without its private cause',
+    async expectedPhase => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-packet-phase-'),
+      );
+      const privateDiagnostic =
+        `synthetic private ${expectedPhase} failure under ${journalRoot}`;
+      const rejected = new Error(privateDiagnostic);
+      mocked.packetPhase.mockImplementationOnce(error =>
+        error === rejected ? expectedPhase : null
+      );
+      mocked.applicationCheckpointContinuation.mockImplementationOnce(() => ({
+        signer: packetSigner(),
+        dispose: vi.fn(() => order.push('dispose:application-checkpoint-v3')),
+        produce: vi.fn(async () => {
+          throw rejected;
+        }),
+      }));
+      let failure: unknown;
+
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            failure,
+          ),
+        ).toBe(expectedPhase);
+        expect(mocked.packetPhase).toHaveBeenCalledWith(rejected);
+        expect(processSession.startMining).toHaveBeenCalledOnce();
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('preserves the V9 non-Error compatibility message through the root', async () => {
     const journalRoot = mkdtempSync(
       join(tmpdir(), 'e2s-tracker-non-error-phase-'),
@@ -3235,7 +3792,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     mocked.sourceHistory.mockRejectedValueOnce('private non-Error cause');
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3258,7 +3815,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     }
   });
 
-  it('assigns the V9 genesis transport phase before support construction', async () => {
+  it('assigns the V9 genesis support phase before support construction', async () => {
     const journalRoot = mkdtempSync(
       join(tmpdir(), 'e2s-tracker-genesis-transport-phase-'),
     );
@@ -3269,7 +3826,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     });
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3282,8 +3839,386 @@ describe('isolated devnet genesis setup execution root V1', () => {
         projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
           failure,
         ),
-      ).toBe('genesis setup transport');
+      ).toBe('genesis setup support construction');
       expect(processSession.startMining).toHaveBeenCalledOnce();
+      expect(processSession.stop).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    [
+      'journal construction',
+      'genesis setup journal construction',
+      (failure: Error) => mocked.journal.mockImplementationOnce(() => {
+        throw failure;
+      }),
+    ],
+    [
+      'execution admission',
+      'genesis setup execution admission',
+      (failure: Error) => mocked.execute.mockRejectedValueOnce(failure),
+    ],
+    [
+      'signing',
+      'genesis setup signing',
+      (failure: Error) => mocked.execute.mockImplementationOnce(
+        async (_input, ports) => {
+          await ports.signer.sign(Object.freeze({ privateFailure: failure }));
+        },
+      ),
+    ],
+    [
+      'candidate check',
+      'genesis setup candidate check',
+      (failure: Error) => mocked.execute.mockImplementationOnce(
+        async (_input, ports) => {
+          await ports.checker.check(Object.freeze({ privateFailure: failure }));
+        },
+      ),
+    ],
+    [
+      'post-check revalidation',
+      'genesis setup post-check revalidation',
+      (failure: Error) => mocked.revalidator.mockReturnValueOnce({
+        revalidate: vi.fn(async () => {
+          throw failure;
+        }),
+      }),
+    ],
+    [
+      'pre-transport revalidation',
+      'genesis setup pre-transport revalidation',
+      (failure: Error) => {
+        const revalidator = mocked.revalidator();
+        const baseline = revalidator.revalidate.getMockImplementation();
+        if (baseline === undefined) throw new Error('revalidator unavailable');
+        revalidator.revalidate.mockImplementation(async (...args: any[]) => {
+          if (args[1] === 'pre-transport') throw failure;
+          return await baseline(...args);
+        });
+        mocked.revalidator.mockReturnValueOnce(revalidator);
+      },
+    ],
+    [
+      'broadcast authorization',
+      'genesis setup broadcast authorization',
+      (failure: Error) => authorizerPort.authorize.mockImplementationOnce(
+        () => {
+          throw failure;
+        },
+      ),
+    ],
+    [
+      'durable reservation',
+      'genesis setup durable reservation',
+      (failure: Error) => journalPort.journal.reserve.mockImplementationOnce(
+        () => {
+          throw failure;
+        },
+      ),
+    ],
+    [
+      'checked submission',
+      'genesis setup checked submission',
+      (failure: Error) => mocked.transport.mockReturnValueOnce({
+        submit: vi.fn(async () => {
+          throw failure;
+        }),
+      }),
+    ],
+    [
+      'outcome persistence',
+      'genesis setup outcome persistence',
+      (failure: Error) => journalPort.journal.finalize.mockImplementationOnce(
+        () => {
+          throw failure;
+        },
+      ),
+    ],
+    [
+      'execution result validation',
+      'genesis setup execution result validation',
+      (failure: Error) => {
+        const baseline = mocked.execute.getMockImplementation();
+        if (baseline === undefined) throw new Error('executor unavailable');
+        mocked.execute.mockImplementationOnce(async (...args) => Object.freeze({
+          ...await baseline(...args),
+          expectedTxId: failure.message,
+        }));
+      },
+    ],
+    [
+      'durable reconciliation',
+      'genesis setup durable reconciliation',
+      (failure: Error) => journalPort.reconcileActive.mockRejectedValueOnce(
+        failure,
+      ),
+    ],
+    [
+      'confirmation acknowledgement',
+      'genesis setup confirmation acknowledgement',
+      (failure: Error) => authorizerPort.acknowledgeCanonicalConfirmation
+        .mockImplementationOnce(() => {
+          throw failure;
+        }),
+    ],
+    [
+      'finalization',
+      'genesis setup finalization',
+      (failure: Error) => mocked.assertConfirmed.mockImplementationOnce(() => {
+        throw failure;
+      }),
+    ],
+  ] as const)(
+    'projects the V9 genesis %s boundary without its private cause',
+    async (_label, expectedPhase, injectFailure) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-genesis-subphase-'),
+      );
+      const failure = new Error(
+        `synthetic private ${expectedPhase} failure under ${journalRoot}`,
+      );
+      injectFailure(failure);
+      let projectedFailure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        projectedFailure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            projectedFailure,
+          ),
+        ).toBe(expectedPhase);
+        expect(processSession.startMining).toHaveBeenCalledOnce();
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    [
+      0,
+      'tracker',
+      'genesis setup tracker canonical confirmation pending at deadline',
+    ],
+    [
+      1,
+      'duplicatePrevention',
+      'genesis setup duplicatePrevention canonical confirmation pending at deadline',
+    ],
+    [
+      2,
+      'pooledReserve',
+      'genesis setup pooledReserve canonical confirmation pending at deadline',
+    ],
+  ] as const)(
+    'projects the exact %s genesis confirmation role and terminal category',
+    async (ordinal, _role, expectedPhase) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-genesis-confirmation-phase-'),
+      );
+      const expectedTxId = currentBatch.orderedTransactions[ordinal]!
+        .issuance.unsignedTransactionIdHex;
+      const baselineObserve = observerPort.observe.getMockImplementation();
+      if (baselineObserve === undefined) {
+        throw new Error('observer mock is unavailable');
+      }
+      let now = 0;
+      const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+      observerPort.observe.mockImplementation(async (...args) => {
+        if (args[0] === expectedTxId) {
+          now = 2 * 60_000 + 1;
+          return Object.freeze({
+            ...confirmation(expectedTxId, ordinal, 1),
+            status: 'pending' as const,
+            confirmations: 0,
+            confirmationHeight: null,
+            confirmationHeaderIdHex: null,
+          });
+        }
+        return await baselineObserve(...args);
+      });
+      let projectedFailure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        projectedFailure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+            projectedFailure,
+          ),
+        ).toBe(expectedPhase);
+        expect(processSession.startMining).toHaveBeenCalledOnce();
+        expect(processSession.stop).toHaveBeenCalledOnce();
+      } finally {
+        clock.mockRestore();
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('preserves exact genesis port arguments, results, order, and failure identity', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-genesis-transparent-ports-'),
+    );
+    const delegationOrder: string[] = [];
+    const revalidation = Object.freeze({ exact: 'revalidation' });
+    const authorization = Object.freeze({ exact: 'authorization' });
+    const reservation = Object.freeze({ exact: 'reservation' });
+    const submission = Object.freeze({ exact: 'submission' });
+    const finalization = Object.freeze({ exact: 'finalization' });
+    const confirmationObservation = Object.freeze({ exact: 'confirmation' });
+    const revalidate = vi.fn(async (
+      _checked: unknown,
+      _phase: unknown,
+    ) => {
+      delegationOrder.push('revalidate');
+      return revalidation;
+    });
+    const authorize = vi.fn((
+      _revalidated: unknown,
+      _preTransportEvidence: unknown,
+    ) => {
+      delegationOrder.push('authorize');
+      return authorization;
+    });
+    const reserve = vi.fn((_candidate: unknown) => {
+      delegationOrder.push('reserve');
+      return reservation;
+    });
+    const submit = vi.fn(async (_attempt: unknown) => {
+      delegationOrder.push('submit');
+      return submission;
+    });
+    const finalize = vi.fn((_input: unknown) => {
+      delegationOrder.push('finalize');
+      return finalization;
+    });
+    const observe = vi.fn(async (
+      _expectedTxId: string,
+      _nodeOrigin: string,
+    ) => {
+      delegationOrder.push('observe');
+      return confirmationObservation;
+    });
+    const confirm = vi.fn((_input: unknown) => {
+      delegationOrder.push('confirm');
+    });
+    mocked.revalidator.mockReturnValueOnce({ revalidate });
+    mocked.authorizer.mockReturnValueOnce({
+      authorize,
+      acknowledgeCanonicalConfirmation: vi.fn(),
+      nextOrdinal: vi.fn(() => 0),
+    });
+    mocked.transport.mockReturnValueOnce({ submit });
+    mocked.journal.mockReturnValueOnce({
+      journal: { reserve, finalize, confirm },
+      reconcileActive: vi.fn(),
+      revalidateConfirmed: vi.fn(),
+    });
+    mocked.observer.mockReturnValueOnce({ observe });
+    const privateFailure = new Error('synthetic private transparent-port stop');
+    mocked.execute.mockImplementationOnce(async (input, ports) => {
+      const transaction = currentBatch.orderedTransactions[0]!;
+      const admission = Object.freeze({
+        schema: 'e2s.substrate-federated-local-devnet-genesis-execution.v1',
+        ...input,
+        inputBoxIds: Object.freeze([...input.inputBoxIds]),
+        admissionDigestHex: digest('7'),
+      });
+      const signedEvidence = await ports.signer.sign(admission);
+      expect(signedEvidence?.signerArtifact)
+        .toBe(transaction.signedCandidate);
+      const signed = Object.freeze({
+        admission,
+        signedTransactionDigestHex: signedEvidence!.signedTransactionDigestHex,
+        signerArtifact: signedEvidence!.signerArtifact,
+      });
+      const checkEvidence = await ports.checker.check(signed);
+      expect(checkEvidence?.checkerArtifact)
+        .toBe(transaction.checkedAcceptance.submissionHandle);
+      const checked = Object.freeze({ signed, checkEvidence });
+      expect(await ports.revalidator.revalidate(checked, 'post-check'))
+        .toBe(revalidation);
+      expect(await ports.revalidator.revalidate(checked, 'pre-transport'))
+        .toBe(revalidation);
+      const revalidated = Object.freeze({ checked });
+      expect(ports.broadcastAuthorizer.authorize(revalidated, revalidation))
+        .toBe(authorization);
+      const candidate = Object.freeze({ revalidated });
+      expect(ports.journal.reserve(candidate)).toBe(reservation);
+      const attempt = Object.freeze({ candidate });
+      expect(await ports.transport.submit(attempt)).toBe(submission);
+      const finalizationInput = Object.freeze({ attempt, submission });
+      expect(ports.journal.finalize(finalizationInput)).toBe(finalization);
+      expect(await ports.confirmationObserver.observe(
+        input.expectedTxId,
+        'http://127.0.0.1:9051',
+      )).toBe(confirmationObservation);
+      const confirmationInput = Object.freeze({
+        attempt,
+        confirmation: confirmationObservation,
+      });
+      expect(ports.journal.confirm(confirmationInput)).toBeUndefined();
+
+      expect(revalidate.mock.calls[0]).toEqual([checked, 'post-check']);
+      expect(revalidate.mock.calls[0]![0]).toBe(checked);
+      expect(revalidate.mock.calls[1]).toEqual([checked, 'pre-transport']);
+      expect(authorize.mock.calls[0]![0]).toBe(revalidated);
+      expect(authorize.mock.calls[0]![1]).toBe(revalidation);
+      expect(reserve.mock.calls[0]![0]).toBe(candidate);
+      expect(submit.mock.calls[0]![0]).toBe(attempt);
+      expect(finalize.mock.calls[0]![0]).toBe(finalizationInput);
+      expect(observe.mock.calls[0]).toEqual([
+        input.expectedTxId,
+        'http://127.0.0.1:9051',
+      ]);
+      expect(confirm.mock.calls[0]![0]).toBe(confirmationInput);
+      throw privateFailure;
+    });
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(failure).toBe(privateFailure);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe('genesis setup outcome persistence');
+      expect(delegationOrder).toEqual([
+        'revalidate',
+        'revalidate',
+        'authorize',
+        'reserve',
+        'submit',
+        'finalize',
+        'observe',
+        'confirm',
+      ]);
       expect(processSession.stop).toHaveBeenCalledOnce();
     } finally {
       rmSync(journalRoot, { recursive: true, force: true });
@@ -3302,7 +4237,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3336,7 +4271,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3367,7 +4302,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         trackerTransportJournalRoot: journalRoot,
       };
       const result =
-        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9(
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10(
           rootInput,
         );
 
@@ -3419,11 +4354,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
       expect(result.receipt).toMatchObject({
         schema:
-          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v9',
-        version: 9,
+          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v10',
+        version: 10,
         status: 'local_tracker_transport_canonically_confirmed',
         staticExecutionManifestDigestHex:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
         freshness: {
           status:
             'durable_tracker_reservation_reloaded_and_freshness_rechecked',
@@ -3468,13 +4403,28 @@ describe('isolated devnet genesis setup execution root V1', () => {
           existingWalletMaterialUsed: false,
         },
       });
+      expect(result.receipt.transport.execution).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-tracker-transport-execution.v2',
+        version: 2,
+        primaryMiningDuringAction: true,
+        exactReservationFreshnessSnapshotRevalidatedBeforeAction: true,
+        trackerConfirmationMiningCredentialConsumedBeforeTransportOnce: true,
+      });
+      expect(result.receipt.transport.confirmationExecution).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-tracker-confirmation-execution.v2',
+        version: 2,
+        sameProcessesAsTrackerTransport: true,
+      });
       expect(containsFunction(result)).toBe(false);
       expect(JSON.stringify(result)).not.toContain(journalRoot);
-      assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+      expect(result.receipt.receiptDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+      assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
         result.receipt,
       );
       expect(() =>
-        assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+        assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
           structuredClone(result.receipt),
         )
       ).toThrow(/lacks exact runtime provenance/);
@@ -3482,6 +4432,152 @@ describe('isolated devnet genesis setup execution root V1', () => {
       rmSync(journalRoot, { recursive: true, force: true });
     }
   });
+
+  it('projects the exact V10 transport result and process-local response classification as V11', async () => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-transport-root-v11-'),
+    );
+    try {
+      const result =
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+
+      expect(result.receipt).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v11',
+        version: 11,
+        status: 'local_tracker_transport_canonically_confirmed',
+        staticProjectionManifestDigestHex:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11,
+        legacyV10Receipt: {
+          schema:
+            'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v10',
+          version: 10,
+          status: 'local_tracker_transport_canonically_confirmed',
+        },
+        responseClassification: {
+          schema:
+            'e2s.substrate-federated-isolated-devnet-tracker-transport-response-classification.v1',
+          version: 1,
+          status: 'accepted',
+          responseCategory: 'accepted',
+          httpStatus: 200,
+          responseDigestHex: digest('4'),
+        },
+        checks: {
+          exactLegacyV10ProvenanceValidated: true,
+          exactResponseClassificationProjected: true,
+          exactResponseStatusBound: true,
+          exactResponseDigestBound: true,
+          returnedValueContainsRawResponse: false,
+          returnedValueContainsCapabilities: false,
+        },
+        boundaries: {
+          durableOutcomeCommitmentPersistedInTransportJournal: true,
+          responseClassificationPersistedInTransportJournal: false,
+          responseClassificationRestartRecoverableFromTransportJournal: false,
+          responseClassificationProjectedFromSameProcessRuntimeProvenance:
+            true,
+          responseClassificationAuthoritativeForAdmission: false,
+          canonicalConfirmationObserved: true,
+          trackerAdmissionEstablished: true,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+          trustlessStatusEstablished: false,
+          productionReadinessEstablished: false,
+        },
+      });
+      expect(
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
+      ).toBe(
+        'f2ff7977b41ab5adfb169816afaca6b86e3a59ea91b040652482accc7c844f37',
+      );
+      expect(Object.keys(result.receipt.responseClassification).sort()).toEqual([
+        'classificationDigestHex',
+        'httpStatus',
+        'responseCategory',
+        'responseDigestHex',
+        'schema',
+        'status',
+        'version',
+      ]);
+      expect(
+        result.receipt.responseClassification.classificationDigestHex,
+      ).toMatch(/^[0-9a-f]{64}$/u);
+      expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+      expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
+        result.receipt.legacyV10Receipt,
+      );
+      assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Provenance(
+        result.receipt,
+      );
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Provenance(
+          structuredClone(result.receipt),
+        )
+      ).toThrow(/lacks exact runtime provenance/);
+      expect(JSON.stringify(result)).not.toContain(journalRoot);
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'missing_runtime_provenance',
+    'coordinated_status_category_drift',
+    'response_digest_drift',
+  ] as const)(
+    'rejects V11 response classification %s after exactly one V10 attempt',
+    async mode => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-transport-root-v11-negative-'),
+      );
+      if (mode === 'missing_runtime_provenance') {
+        mocked.trackerTransportResponseClassificationProject
+          .mockReturnValueOnce(null);
+      } else if (mode === 'coordinated_status_category_drift') {
+        mocked.trackerTransportResponseClassificationProject
+          .mockReturnValueOnce(
+            createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+              status: 'ambiguous',
+              responseCategory: 'ambiguous_success_response',
+              httpStatus: 200,
+              responseDigestHex: digest('4'),
+            }),
+          );
+      } else {
+        mocked.trackerTransportResponseClassificationProject
+          .mockReturnValueOnce(
+            createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+              status: 'accepted',
+              responseCategory: 'accepted',
+              httpStatus: 200,
+              responseDigestHex: digest('9'),
+            }),
+          );
+      }
+
+      try {
+        await expect(
+          runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11({
+            ...(pegInApplicationCheckpointRootInput() as any),
+            trackerTransportJournalRoot: journalRoot,
+          }),
+        ).rejects.toThrow(
+          mode === 'missing_runtime_provenance'
+            ? /lacks exact runtime provenance/
+            : /response classification binding changed/,
+        );
+        expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+        expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('projects a bounded terminal receipt when the durable transport is not confirmed', async () => {
     const journalRoot = mkdtempSync(
@@ -3493,7 +4589,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       ));
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3503,7 +4599,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
     try {
       const receipt =
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           failure,
         );
       expect(
@@ -3513,11 +4609,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
       ).toBeNull();
       expect(receipt).toMatchObject({
         schema:
-          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v9',
-        version: 9,
+          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10',
+        version: 10,
         status: 'local_tracker_transport_not_canonically_confirmed',
         staticExecutionManifestDigestHex:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
         transport: {
           authorization: {
             expectedTransactionIdHex:
@@ -3552,8 +4648,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
           category: 'confirmation_phase_failure',
           expectedTransactionIdHex:
             trackerTransportAttempt.expectedTransactionIdHex,
-          executionTargetIdentityDigestHex:
-            trackerTransportAuthorization.executionTargetIdentityDigestHex,
+          executionTargetIdentityDigestHex: null,
           confirmationBudgetMs: 120000,
           observationCount: 0,
           lastObservation: null,
@@ -3570,10 +4665,52 @@ describe('isolated devnet genesis setup execution root V1', () => {
         },
       });
       expect(receipt?.receiptDigestHex).toMatch(/^[0-9a-f]{64}$/u);
-      expect(JSON.stringify(receipt)).not.toContain(journalRoot);
-      expect(JSON.stringify(receipt)).not.toContain('synthetic private diagnostic');
       expect(
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+      ).toBe(
+        'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V10',
+      );
+      const receiptV11 =
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11(
+          failure,
+        );
+      expect(receiptV11).toMatchObject({
+        schema:
+          'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v11',
+        version: 11,
+        status: 'local_tracker_transport_not_canonically_confirmed',
+        staticProjectionManifestDigestHex:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11,
+        responseClassification: {
+          status: 'accepted',
+          responseCategory: 'accepted',
+          httpStatus: 200,
+          responseDigestHex: digest('4'),
+        },
+        boundaries: {
+          durableOutcomeCommitmentPersistedInTransportJournal: true,
+          responseClassificationPersistedInTransportJournal: false,
+          responseClassificationRestartRecoverableFromTransportJournal: false,
+          responseClassificationProjectedFromSameProcessRuntimeProvenance:
+            true,
+          responseClassificationAuthoritativeForAdmission: false,
+          exactNodeAcceptanceObserved: true,
+          canonicalConfirmationObserved: false,
+          trackerAdmissionEstablished: false,
+          fundsAuthorityEstablished: false,
+          gate5Closed: false,
+        },
+      });
+      expect(receiptV11?.legacyV10Receipt).toBe(receipt);
+      expect(receiptV11?.receiptDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+      expect(JSON.stringify(receipt)).not.toContain(journalRoot);
+      expect(JSON.stringify(receiptV11)).not.toContain(journalRoot);
+      expect(JSON.stringify(receipt)).not.toContain('synthetic private diagnostic');
+      expect(JSON.stringify(receiptV11)).not.toContain(
+        'synthetic private diagnostic',
+      );
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           new AggregateError([
             failure,
             new Error('synthetic cleanup failure'),
@@ -3581,7 +4718,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         ),
       ).toBe(receipt);
       expect(
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           new AggregateError([
             new AggregateError([
               failure,
@@ -3592,7 +4729,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         ),
       ).toBe(receipt);
       expect(
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           new AggregateError([
             new Error('synthetic cleanup failure'),
             failure,
@@ -3600,13 +4737,26 @@ describe('isolated devnet genesis setup execution root V1', () => {
         ),
       ).toBeNull();
       expect(
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           new Error('forged failure'),
         ),
       ).toBeNull();
       expect(
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           new AggregateError([new Error('forged aggregate')]),
+        ),
+      ).toBeNull();
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11(
+          new AggregateError([
+            failure,
+            new Error('synthetic cleanup failure'),
+          ]),
+        ),
+      ).toBe(receiptV11);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11(
+          new Error('forged failure'),
         ),
       ).toBeNull();
       expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
@@ -3616,6 +4766,57 @@ describe('isolated devnet genesis setup execution root V1', () => {
       rmSync(journalRoot, { recursive: true, force: true });
     }
   });
+
+  it.each(['absent', 'throws'] as const)(
+    'preserves the V10 terminal projection when V11 classification projection %s',
+    async projectionMode => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-transport-v10-compatibility-'),
+      );
+      if (projectionMode === 'absent') {
+        mocked.trackerTransportResponseClassificationProject
+          .mockReturnValueOnce(null);
+      } else {
+        mocked.trackerTransportResponseClassificationProject
+          .mockImplementationOnce(() => {
+            throw new Error('synthetic V11 projection failure');
+          });
+      }
+      processSession.withTrackerTransportConfirmationMiningTarget
+        .mockRejectedValueOnce(new Error('synthetic confirmation failure'));
+      let failure: unknown;
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+          ...(pegInApplicationCheckpointRootInput() as any),
+          trackerTransportJournalRoot: journalRoot,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      try {
+        expect(
+          projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
+            failure,
+          ),
+        ).toMatchObject({
+          schema:
+            'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10',
+          version: 10,
+          status: 'local_tracker_transport_not_canonically_confirmed',
+        });
+        expect(
+          projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11(
+            failure,
+          ),
+        ).toBeNull();
+        expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+        expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.each([
     ['pending', 'pending_at_deadline'],
@@ -3632,6 +4833,14 @@ describe('isolated devnet genesis setup execution root V1', () => {
       if (baselineObserve === undefined) {
         throw new Error('observer mock is unavailable');
       }
+      mocked.observer.mockImplementation(() =>
+        order.includes('tracker-confirmation:enter')
+          ? Object.freeze({
+              ...observerPort,
+              reconciliationIdentityDigestHex: digest('a'),
+            })
+          : observerPort
+      );
       let now = 0;
       let confirmationClockReads = 0;
       const clock = vi.spyOn(performance, 'now').mockImplementation(() => {
@@ -3698,7 +4907,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       }
       let failure: unknown;
       try {
-        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         });
@@ -3708,7 +4917,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
       try {
         const receipt =
-          projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+          projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
             failure,
           );
         expect(receipt?.confirmation).toMatchObject({
@@ -3717,7 +4926,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
           version: 1,
           category: expectedCategory,
           expectedTransactionIdHex: digest('c'),
-          executionTargetIdentityDigestHex: digest('6'),
+          executionTargetIdentityDigestHex: digest('a'),
           confirmationBudgetMs: 120000,
           observationCount: mode === 'budget' ? 0 : 1,
           lastObservation: mode === 'observer_failure' || mode === 'budget'
@@ -3726,6 +4935,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
         });
         expect(JSON.stringify(receipt)).not.toContain(journalRoot);
         expect(JSON.stringify(receipt)).not.toContain('private observer diagnostic');
+        expect(
+          receipt?.transport.authorization.executionTargetIdentityDigestHex,
+        ).toBe(digest('6'));
+        expect(receipt?.confirmation.executionTargetIdentityDigestHex)
+          .toBe(digest('a'));
         expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
       } finally {
         clock.mockRestore();
@@ -3767,7 +4981,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       .mockRejectedValueOnce(opaqueFailure);
     let failure: unknown;
     try {
-      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
         ...(pegInApplicationCheckpointRootInput() as any),
         trackerTransportJournalRoot: journalRoot,
       });
@@ -3777,7 +4991,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
     try {
       const receipt =
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           failure,
         );
       expect(receipt?.confirmation.category)
@@ -3838,7 +5052,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         .mockRejectedValueOnce(new Error('synthetic confirmation failure'));
       try {
         await expect(
-          runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+          runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
             ...(pegInApplicationCheckpointRootInput() as any),
             trackerTransportJournalRoot: journalRoot,
           }),
@@ -3851,7 +5065,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     },
   );
 
-  it('does not restart mining when durable outcome finalization fails after POST', async () => {
+  it('does not enter canonical confirmation when durable outcome finalization fails after POST', async () => {
     const journalRoot = mkdtempSync(
       join(tmpdir(), 'e2s-tracker-transport-finalize-failure-'),
     );
@@ -3861,7 +5075,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     });
     try {
       await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         }),
@@ -3891,7 +5105,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       });
     try {
       await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         }),
@@ -3902,6 +5116,70 @@ describe('isolated devnet genesis setup execution root V1', () => {
       rmSync(journalRoot, { recursive: true, force: true });
     }
   });
+
+  it.each([
+    ['reservation freshness snapshot', 'transport',
+      { exactReservationFreshnessSnapshotRevalidatedBeforeAction: false }],
+    ['pre-transport mining credential', 'transport',
+      { trackerConfirmationMiningCredentialConsumedBeforeTransportOnce: false }],
+    ['transport process continuity', 'confirmation',
+      { sameProcessesAsTrackerTransport: false }],
+  ] as const)(
+    'rejects canonically confirmed tracker transport with invalid %s evidence',
+    async (_label, receiptKind, mutation) => {
+      const journalRoot = mkdtempSync(
+        join(tmpdir(), 'e2s-tracker-transport-process-binding-'),
+      );
+      if (receiptKind === 'transport') {
+        const baseline = processSession
+          .withCheckpointBoundTrackerTransportTarget.getMockImplementation();
+        if (baseline === undefined) {
+          throw new Error('tracker transport action mock is unavailable');
+        }
+        processSession.withCheckpointBoundTrackerTransportTarget
+          .mockImplementationOnce(async (...args) => {
+            const result = await baseline(...args);
+            return {
+              ...result,
+              receipt: {
+                ...result.receipt,
+                ...mutation,
+              } as unknown as typeof result.receipt,
+            };
+          });
+      } else {
+        const baseline = processSession
+          .withTrackerTransportConfirmationMiningTarget.getMockImplementation();
+        if (baseline === undefined) {
+          throw new Error('tracker confirmation action mock is unavailable');
+        }
+        processSession.withTrackerTransportConfirmationMiningTarget
+          .mockImplementationOnce(async (...args) => {
+            const result = await baseline(...args);
+            return {
+              ...result,
+              receipt: {
+                ...result.receipt,
+                ...mutation,
+              } as unknown as typeof result.receipt,
+            };
+          });
+      }
+
+      try {
+        await expect(
+          runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+            ...(pegInApplicationCheckpointRootInput() as any),
+            trackerTransportJournalRoot: journalRoot,
+          }),
+        ).rejects.toThrow('isolated tracker transport outcome binding changed');
+        expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
+        expect(processSession.stop).toHaveBeenCalledTimes(1);
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('rejects direct tracker journal paths inside or above the worktree', async () => {
     const worktreeRoot = realpathSync(resolve(
@@ -3914,7 +5192,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ));
     for (const journalRoot of [worktreeRoot, dirname(worktreeRoot)]) {
       await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         }),
@@ -3934,13 +5212,13 @@ describe('isolated devnet genesis setup execution root V1', () => {
     symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
     try {
       await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: link,
         }),
       ).rejects.toThrow(/must be one link-free directory/);
       await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: nonempty,
         }),
@@ -3957,13 +5235,13 @@ describe('isolated devnet genesis setup execution root V1', () => {
     );
     try {
       const first =
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         });
       expect(readdirSync(journalRoot)).toEqual(['tracker-transport-attempt']);
       await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
         }),
@@ -3987,15 +5265,25 @@ describe('isolated devnet genesis setup execution root V1', () => {
       writeFileSync(reservedRoot, 'replaced');
       return validBuild();
     });
+    let failure: unknown;
     try {
-      await expect(
-        runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+      try {
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...(pegInApplicationCheckpointRootInput() as any),
           trackerTransportJournalRoot: journalRoot,
-        }),
-      ).rejects.toThrow(
-        'isolated tracker transport campaign journal root changed before opening',
+        });
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toMatch(
+        /isolated tracker transport campaign journal root changed before opening/,
       );
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe('tracker reservation persistence');
       expect(mocked.trackerTransportJournalCreate).not.toHaveBeenCalled();
       expect(mocked.trackerTransportSubmit).not.toHaveBeenCalled();
       expect(processSession.stop).toHaveBeenCalledTimes(1);
@@ -4103,6 +5391,33 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ).rejects.toThrow(
       /tracker reservation freshness binding changed or gained authority/,
     );
+    expect(mocked.stateClose).toHaveBeenCalledTimes(3);
+    expect(order).toContain('process:stop');
+  });
+
+  it('accepts fresh proof bytes and JVM response for the exact frozen tracker transaction', async () => {
+    trackerReservationFreshnessCheck = Object.freeze({
+      ...trackerReservationFreshnessCheck,
+      signedTransactionCanonicalJsonSha256Hex: digest('a'),
+      signedTransactionBytesSha256Hex: digest('b'),
+      signedTransactionBytesLength: 2_049,
+      checkResponseSha256Hex: digest('c'),
+      receiptDigestHex: digest('d'),
+    }) as ReturnType<typeof validTrackerReservationFreshnessCheck>;
+
+    const result =
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8(
+        pegInApplicationCheckpointRootInput(),
+      );
+
+    expect(result.receipt.freshness.check).toMatchObject({
+      signedTransactionIdHex:
+        result.receipt.frozenTrackerRoot.tracker.check.signedTransactionIdHex,
+      signedTransactionCanonicalJsonSha256Hex: digest('a'),
+      signedTransactionBytesSha256Hex: digest('b'),
+      signedTransactionBytesLength: 2_049,
+      checkResponseSha256Hex: digest('c'),
+    });
     expect(mocked.stateClose).toHaveBeenCalledTimes(3);
     expect(order).toContain('process:stop');
   });
@@ -6004,16 +7319,17 @@ function trackerTransportExecutionReceipt() {
   const freshness = trackerReservationFreshnessExecutionReceipt();
   return {
     schema:
-      'e2s.substrate-federated-isolated-devnet-tracker-transport-execution.v1',
-    version: 1,
+      'e2s.substrate-federated-isolated-devnet-tracker-transport-execution.v2',
+    version: 2,
     primaryNodeOrigin: freshness.primaryNodeOrigin,
     witnessNodeOrigin: freshness.witnessNodeOrigin,
-    primaryMiningStoppedDuringAction: true,
+    primaryMiningDuringAction: true,
     trackerTransportTargetActiveOnlyDuringAction: true,
     witnessReadOnlyDuringAction: true,
-    miningStoppedBeforeAction: true,
-    exactFrozenChainSnapshotStableAcrossAction: true,
-    sameProcessesAsReservationFreshness: true,
+    miningRestartedBeforeAction: true,
+    sameProcessesAsReservationFreshness: false,
+    exactReservationFreshnessSnapshotRevalidatedBeforeAction: true,
+    trackerConfirmationMiningCredentialConsumedBeforeTransportOnce: true,
     buildIdentityDigestHex: freshness.buildIdentityDigestHex,
     executableIdentityDigestHex: freshness.executableIdentityDigestHex,
     reservationFreshnessProcessBindingDigestHex:
@@ -6041,8 +7357,8 @@ function trackerConfirmationExecutionReceipt() {
   const anchor = validCheckpointAnchorObservation();
   return {
     schema:
-      'e2s.substrate-federated-isolated-devnet-tracker-confirmation-execution.v1',
-    version: 1,
+      'e2s.substrate-federated-isolated-devnet-tracker-confirmation-execution.v2',
+    version: 2,
     primaryNodeOrigin: transport.primaryNodeOrigin,
     witnessNodeOrigin: transport.witnessNodeOrigin,
     primaryMiningDuringAction: true,
@@ -6058,7 +7374,7 @@ function trackerConfirmationExecutionReceipt() {
       indexedHeight: transport.actionEndSnapshot.indexedHeight + 1,
       headerIdHex: digest('f'),
     },
-    trackerConfirmationMiningCredentialConsumedOnce: true,
+    sameProcessesAsTrackerTransport: true,
     exactTrackerTransportBound: true,
     confirmedTransactionIdHex: digest('c'),
     trackerTransportProcessBindingDigestHex: transport.processBindingDigestHex,
@@ -6503,7 +7819,7 @@ function validObservedTrackerCheck(
     signedTransactionIdHex: context.unsignedTransactionIdHex,
     signedTransactionCanonicalJsonSha256Hex: digest('2'),
     signedTransactionBytesSha256Hex: digest('3'),
-    signedTransactionBytesLength: 2_048,
+    signedTransactionBytesLength: 2_048 as number,
     checkResponseSha256Hex: digest('4'),
     target: Object.freeze({ ...targetBinding }),
     signer: Object.freeze({
@@ -6706,12 +8022,12 @@ function trackerTransportTarget() {
   return {
     primaryNodeOrigin: 'http://127.0.0.1:9051',
     witnessNodeOrigin: 'http://127.0.0.1:9052',
-    primaryMining: false,
+    primaryMining: true,
     witnessReadOnly: true,
-    miningStopped: true,
     checkpointBound: true,
     reservationFreshnessCheckBound: true,
     trackerTransport: true,
+    sameProcessCanonicalConfirmation: true,
   } as const;
 }
 
