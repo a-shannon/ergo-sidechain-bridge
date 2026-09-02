@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -62,7 +62,7 @@ describe('bridge repository checkout layout', () => {
   });
 
   function temporaryRoot(prefix: string): string {
-    const root = mkdtempSync(join(tmpdir(), prefix));
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), prefix)));
     roots.push(root);
     return root;
   }
