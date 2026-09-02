@@ -3775,9 +3775,11 @@ function windowsListenerBindings(
   const powershell = windowsPowerShellPath();
   const script = [
     `$ports=@(${ports.join(',')})`,
-    '$rows=@(Get-NetTCPConnection -State Listen -ErrorAction Stop '
-      + '| Where-Object { $ports -contains $_.LocalPort } '
-      + '| Select-Object LocalAddress,LocalPort,OwningProcess)',
+    'try { $rows=@(Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop '
+      + '| Select-Object LocalAddress,LocalPort,OwningProcess) } '
+      + 'catch { if ($_.FullyQualifiedErrorId '
+      + '-like "CmdletizationQuery_NotFound,Get-NetTCPConnection*") '
+      + '{ $rows=@() } else { throw } }',
     'ConvertTo-Json -Compress -InputObject $rows',
   ].join('; ');
   const result = spawnSync(
@@ -3829,9 +3831,11 @@ function windowsProcessListenerBindings(pids: readonly number[]): ListenerBindin
   }
   const script = [
     `$pids=@(${pids.join(',')})`,
-    '$rows=@(Get-NetTCPConnection -State Listen -ErrorAction Stop '
-      + '| Where-Object { $pids -contains $_.OwningProcess } '
-      + '| Select-Object LocalAddress,LocalPort,OwningProcess)',
+    'try { $rows=@(Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction Stop '
+      + '| Select-Object LocalAddress,LocalPort,OwningProcess) } '
+      + 'catch { if ($_.FullyQualifiedErrorId '
+      + '-like "CmdletizationQuery_NotFound,Get-NetTCPConnection*") '
+      + '{ $rows=@() } else { throw } }',
     'ConvertTo-Json -Compress -InputObject $rows',
   ].join('; ');
   const result = spawnSync(

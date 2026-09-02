@@ -73,15 +73,37 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe devnet proce
     expect(occupied.listening).toBe(true);
   }, 45_000);
 
-  it('fails closed while allowing a cold Windows listener ownership query', () => {
+  it('continues past an exact empty listener result before process launch', async () => {
+    const allocated = await allocatePorts(6);
+    const ports = allocated.map(server => portOf(server));
+    for (const server of allocated) {
+      server.close();
+      await once(server, 'close');
+    }
+
+    await expect(withOwnedAuthoritySafeDevnetProcessesV1({
+      ...input(),
+      primaryRpcUrl: `http://127.0.0.1:${ports[0]!}`,
+      witnessRpcUrl: `http://127.0.0.1:${ports[1]!}`,
+      primaryP2pPort: ports[2]!,
+      witnessP2pPort: ports[3]!,
+      primaryPrometheusPort: ports[4]!,
+      witnessPrometheusPort: ports[5]!,
+    }, async () => 'unreachable')).rejects.toThrow(/primary process exited unexpectedly/);
+  }, 45_000);
+
+  it('fails closed while targeting the requested Windows listener ports', () => {
     const source = readFileSync(new URL(
       './substrate-federated-authority-safe-devnet-process-v1.ts',
       import.meta.url,
     ), 'utf8');
     expect(source).toContain(
-      'Get-NetTCPConnection -State Listen -ErrorAction Stop',
+      'Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop',
     );
+    expect(source).toContain('CmdletizationQuery_NotFound,Get-NetTCPConnection*');
+    expect(source).toContain('{ $rows=@() } else { throw }');
     expect(source).toContain('timeout: 30_000');
+    expect(source).not.toContain('Where-Object { $ports -contains $_.LocalPort }');
     expect(source).not.toContain(
       'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue',
     );

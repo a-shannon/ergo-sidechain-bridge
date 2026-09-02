@@ -492,7 +492,16 @@ describe.skipIf(process.platform !== 'win32')(
       );
       expect(source).toContain('unverifiedProcessTerminationFailsStop: true');
       expect(source).toContain('return await holdOwnedNodeCleanupAuthority()');
-      expect(source).toContain('Get-NetTCPConnection -State Listen -ErrorAction Stop');
+      expect(source).toContain(
+        'Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop',
+      );
+      expect(source).toContain(
+        'Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction Stop',
+      );
+      expect(source).toContain('CmdletizationQuery_NotFound,Get-NetTCPConnection*');
+      expect(source).toContain('{ $rows=@() } else { throw }');
+      expect(source).not.toContain('Where-Object { $ports -contains $_.LocalPort }');
+      expect(source).not.toContain('Where-Object { $pids -contains $_.OwningProcess }');
       expect(source.indexOf('return await holdOwnedNodeCleanupAuthority()'))
         .toBeLessThan(source.indexOf('removeOwnedRuntime(ownedRuntimeRoot)'));
       expect(source).not.toContain('processDiagnosticHint');

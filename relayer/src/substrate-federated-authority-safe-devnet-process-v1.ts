@@ -1875,9 +1875,11 @@ function windowsListenerBindings(ports: readonly number[]): Map<number, Listener
   }
   const script = [
     `$ports=@(${ports.join(',')})`,
-    '$rows=@(Get-NetTCPConnection -State Listen -ErrorAction Stop '
-      + '| Where-Object { $ports -contains $_.LocalPort } '
-      + '| Select-Object LocalAddress,LocalPort,OwningProcess)',
+    'try { $rows=@(Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop '
+      + '| Select-Object LocalAddress,LocalPort,OwningProcess) } '
+      + 'catch { if ($_.FullyQualifiedErrorId '
+      + '-like "CmdletizationQuery_NotFound,Get-NetTCPConnection*") '
+      + '{ $rows=@() } else { throw } }',
     'ConvertTo-Json -Compress -InputObject $rows',
   ].join('; ');
   const result = spawnSync(
