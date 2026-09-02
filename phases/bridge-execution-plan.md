@@ -1938,7 +1938,9 @@ atomically. Historical SCALE discriminants remain stable and the new error is
 appended at index 28.
 
 The locked Frontier patch has SHA-256
-`47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813`.
+`bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634`.
+V130 changes only the cross-platform CLI rejection harness in that patch; the
+Frontier runtime sources and their compiled identities remain unchanged.
 The original FED-1 semantic source changes remain limited to
 `template/runtime/src/peg_in_causal_source_proof.rs`,
 `template/runtime/src/peg_in_pooled_reserve_reservation.rs`,

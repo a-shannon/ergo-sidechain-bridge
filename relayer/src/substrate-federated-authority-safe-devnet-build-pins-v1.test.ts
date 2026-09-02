@@ -65,7 +65,7 @@ const WORKTREE_ROOT = existsSync(join(BRIDGE_ROOT, '.git'))
   : resolve(BRIDGE_ROOT, '..');
 const FRONTIER_COMMIT = '75329a2df49e2cc7981485392c31160929d1bd48';
 const FRONTIER_PATCH_SHA256 =
-  '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
+  'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634';
 const CARGO_VERSION = 'cargo 1.82.0 (8f40fc59f 2024-08-21)';
 const RUSTC_VERSION = 'rustc 1.82.0 (f6e511eec 2024-10-15)';
 const GIT_VERSION = 'git version 2.54.0.windows.1';

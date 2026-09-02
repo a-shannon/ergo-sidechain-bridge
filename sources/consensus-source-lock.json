@@ -24,7 +24,7 @@
     "nodeManifestBlob": "82dc5f4e72862643bcd3779f667340db2a82f4a7",
     "runtimeManifestBlob": "5e21a2017e4656113ec5cfc383ab4a2371652351",
     "patchPath": "sources/frontier/0001-bridge-runtime-commitment.patch",
-    "patchSha256": "47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813",
+    "patchSha256": "bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634",
     "bridgeAtomicityFixtures": [
       {
         "artifactPath": "solidity/compiled/SERG.bin",

@@ -13978,10 +13978,10 @@ index 0000000000000000000000000000000000000000..d4ab4342bc43943730033ff30cdb120a
 +}
 diff --git a/bridge/checkpoint-verifier/tests/cli.rs b/bridge/checkpoint-verifier/tests/cli.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..4382936c1184a9a09cbe63357b1062b5bd255347
+index 0000000000000000000000000000000000000000..766e3feee94b98f276e9095f5b58374c91bc9d4f
 --- /dev/null
 +++ b/bridge/checkpoint-verifier/tests/cli.rs
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,114 @@
 +use std::{
 +	io::Write,
 +	process::{Command, Output, Stdio},
@@ -14086,8 +14086,15 @@ index 0000000000000000000000000000000000000000..4382936c1184a9a09cbe63357b1062b5
 +		.stderr(Stdio::piped())
 +		.spawn()
 +		.unwrap();
-+	child.stdin.as_mut().unwrap().write_all(request).unwrap();
-+	child.wait_with_output().unwrap()
++	let write_result = child.stdin.take().unwrap().write_all(request);
++	let output = child.wait_with_output().unwrap();
++	match write_result {
++		Ok(()) => {}
++		Err(error)
++			if !output.status.success() && error.kind() == std::io::ErrorKind::BrokenPipe => {}
++		Err(error) => panic!("failed to write verifier request: {error}"),
++	}
++	output
 +}
 diff --git a/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs b/bridge/checkpoint-verifier/tests/peg_in_causal_mint_transition_v2_cli.rs
 new file mode 100644
