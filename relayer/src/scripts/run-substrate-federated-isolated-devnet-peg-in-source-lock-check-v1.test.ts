@@ -276,7 +276,7 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
         expect(processInput.env.NODE_OPTIONS).toBeUndefined();
         expect(processInput.env.E2S_UNSAFE_TEST_VALUE).toBeUndefined();
         expect(processInput.env.TEMP).toBe(
-          resolve(process.cwd(), '..', '..', '..'),
+          dirname(REPOSITORY_ROOTS.worktreeRoot),
         );
         expect(processInput.env.TMP).toBe(processInput.env.TEMP);
       } finally {
