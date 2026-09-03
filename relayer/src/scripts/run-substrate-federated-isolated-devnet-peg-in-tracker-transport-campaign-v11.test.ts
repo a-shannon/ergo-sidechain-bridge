@@ -416,6 +416,7 @@ describe('isolated tracker transport campaign command V11', () => {
     'campaign root',
     'ergo node build',
     'node startup and mining',
+    'ergo node primary readiness',
     'source history collection',
     'ergo funding and history',
     'packet production',

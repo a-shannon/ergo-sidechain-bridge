@@ -26,6 +26,7 @@ import {
 import {
   createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
   projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import {
@@ -42,6 +43,7 @@ import {
 const mocked = vi.hoisted(() => ({
   build: vi.fn(),
   process: vi.fn(),
+  nodeStartupPhase: vi.fn(),
   setup: vi.fn(),
   claim: vi.fn(),
   checkpointClaim: vi.fn(),
@@ -130,6 +132,8 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () =>
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1: mocked.process,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1:
+    mocked.nodeStartupPhase,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA:
     'e2s.substrate-federated-isolated-devnet-checkpoint-bound-frozen-execution.v2',
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1:
@@ -559,6 +563,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocked.nodeStartupPhase.mockReturnValue(null);
     order = [];
     currentBatch = setupBatch();
     observerPort = validObserver(order);
@@ -3270,8 +3275,10 @@ describe('isolated devnet genesis setup execution root V1', () => {
   });
 
   it('does not project managed campaign phases for the adjacent V8 action', async () => {
-    mocked.setup.mockRejectedValueOnce(
-      new Error('synthetic private V8 setup failure'),
+    const processFailure = new Error('synthetic private V8 process failure');
+    processSession.startMining.mockRejectedValueOnce(processFailure);
+    mocked.nodeStartupPhase.mockImplementation(value =>
+      value === processFailure ? 'ergo node primary readiness' : null
     );
     let failure: unknown;
     try {
@@ -3287,6 +3294,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
         failure,
       ),
     ).toBeNull();
+    expect(mocked.nodeStartupPhase).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -6843,6 +6851,46 @@ describe('isolated devnet genesis setup execution root V1', () => {
     ).toBe(
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
     );
+  });
+
+  it.each(
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
+  )('retains process-owned startup subphase %s across teardown aggregation', async startupPhase => {
+    const journalRoot = mkdtempSync(
+      join(tmpdir(), 'e2s-tracker-node-start-subphase-'),
+    );
+    const privateDiagnostic =
+      `synthetic private ${startupPhase} failure under ${journalRoot}`;
+    const processFailure = new Error(privateDiagnostic);
+    processSession.startMining.mockRejectedValueOnce(processFailure);
+    mocked.nodeStartupPhase.mockImplementation(value =>
+      value === processFailure ? startupPhase : null
+    );
+    processSession.stop.mockRejectedValueOnce(
+      new Error(`synthetic private teardown failure under ${journalRoot}`),
+    );
+    let failure: unknown;
+    try {
+      await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
+        ...(pegInApplicationCheckpointRootInput() as any),
+        trackerTransportJournalRoot: journalRoot,
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    try {
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(
+          failure,
+        ),
+      ).toBe(startupPhase);
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect((failure as AggregateError).errors[0]).toBe(processFailure);
+      expect(processSession.stop).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(journalRoot, { recursive: true, force: true });
+    }
   });
 
   it('reserves the runner and all twelve confirmation windows in the application action deadline', async () => {

@@ -688,6 +688,7 @@ describe('isolated tracker transport campaign worker V10', () => {
   it.each([
     'ergo node build',
     'node startup and mining',
+    'ergo node primary readiness',
     'source history collection',
     'packet input and contract binding',
     'packet tracker compilation',

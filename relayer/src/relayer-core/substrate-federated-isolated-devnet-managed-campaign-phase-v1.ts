@@ -17,12 +17,31 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TARGET_PRE_ACTION_PHASE
 export type SubstrateFederatedIsolatedDevnetTrackerTargetPreActionPhaseV1 =
   typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TARGET_PRE_ACTION_PHASES_V1[number];
 
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1 =
+  Object.freeze([
+    'ergo node startup artifact recheck',
+    'ergo node startup port ownership',
+    'ergo node startup runtime creation',
+    'ergo node startup credential consumption',
+    'ergo node primary spawn',
+    'ergo node primary readiness',
+    'ergo node primary identity',
+    'ergo node witness spawn',
+    'ergo node witness readiness',
+    'ergo node witness identity',
+    'ergo node listener ownership',
+  ] as const);
+
+export type SubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseV1 =
+  typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1[number];
+
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1 =
   Object.freeze([
     'ergo node build',
     'setup and packet session',
     'node process construction',
     'node startup and mining',
+    ...SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
     'managed setup execution',
     'source history collection',
     ...SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_SOURCE_FAILURE_PHASES_V1,

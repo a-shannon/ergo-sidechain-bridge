@@ -41,6 +41,8 @@ import {
 } from './relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
+  type SubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseV1,
   type SubstrateFederatedIsolatedDevnetTrackerTargetPreActionPhaseV1,
 } from './relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
@@ -106,6 +108,10 @@ const CHECKPOINT_EXTENSION_KEY_HEX = '0401' as const;
 const EPHEMERAL_MINING_MNEMONIC_ENVIRONMENT_VARIABLE =
   'E2S_FED6G1DI3B_EPHEMERAL_MINING_MNEMONIC';
 const PROCESS_START_ERRORS = new WeakSet<ChildProcess>();
+const ERGO_NODE_STARTUP_PHASE_FAILURES = new WeakMap<
+  Error,
+  SubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseV1
+>();
 const OWNED_READ_ONLY_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_READ_ONLY_TARGETS = new WeakSet<object>();
 const OWNED_EXECUTION_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
@@ -138,6 +144,32 @@ const OWNED_TRACKER_RESERVATION_FRESHNESS_COMPLETIONS = new WeakMap<
 >();
 const ISSUED_TRACKER_RESERVATION_FRESHNESS_COMPLETION_TARGETS =
   new WeakSet<object>();
+
+export function projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+  value: unknown,
+): SubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseV1 | null {
+  return value instanceof Error
+    ? ERGO_NODE_STARTUP_PHASE_FAILURES.get(value) ?? null
+    : null;
+}
+
+function createErgoNodeStartupPhaseFailureV1(
+  phase: SubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseV1,
+  cause: unknown,
+): Error {
+  if (
+    !SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1.includes(
+      phase,
+    )
+  ) {
+    throw new Error('isolated Ergo node startup phase is invalid');
+  }
+  const failure = cause instanceof Error
+    ? cause
+    : new Error('isolated Ergo node startup phase failed');
+  ERGO_NODE_STARTUP_PHASE_FAILURES.set(failure, phase);
+  return failure;
+}
 
 export function deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
   priorHeight: number,
@@ -1108,14 +1140,19 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         throw new Error('isolated Ergo mining phase can start exactly once');
       }
       activeOperation = 'start';
+      let startupPhase: SubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseV1 =
+        'ergo node startup artifact recheck';
       try {
         recheckProcessArtifacts(input);
+        startupPhase = 'ergo node startup port ownership';
         assertPortsUnowned(OWNED_PORTS);
+        startupPhase = 'ergo node startup runtime creation';
         const createdRoot = createOwnedRuntimeRoot(value => {
           ownedRuntimeRoot = value;
         });
         ownedRuntimeRoot = createdRoot;
         runtime = createRuntimeLayout(createdRoot, binding);
+        startupPhase = 'ergo node startup credential consumption';
         const credential = miningCredential;
         if (credential === undefined) {
           throw new Error('isolated Ergo mining credential is already consumed');
@@ -1126,6 +1163,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           credential,
           binding.miningTargetPublicKeyHex,
           ephemeralMiningMnemonic => {
+            startupPhase = 'ergo node primary spawn';
             launchedPrimary = spawnOwnedNode(
               input,
               runtime!,
@@ -1139,15 +1177,29 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           throw new Error('isolated Ergo primary mining process did not start');
         }
         primary = launchedPrimary;
+        startupPhase = 'ergo node primary readiness';
         await waitForBasicNodeReadiness(primary);
+        startupPhase = 'ergo node primary identity';
         assertOwnedNodeIdentity(input, runtime, primary);
+        startupPhase = 'ergo node witness spawn';
         witness = spawnOwnedNode(input, runtime, 'witness', 'mining');
+        startupPhase = 'ergo node witness readiness';
         await waitForBasicNodeReadiness(witness);
+        startupPhase = 'ergo node witness identity';
         assertOwnedNodeIdentity(input, runtime, witness);
+        startupPhase = 'ergo node listener ownership';
         assertOwnedListenerBindings(primary, witness);
         state = 'mining';
       } catch (error) {
-        return await failWithCleanup(error);
+        const failurePhase = startupPhase;
+        try {
+          return await failWithCleanup(error);
+        } catch (failure) {
+          throw createErgoNodeStartupPhaseFailureV1(
+            failurePhase,
+            failure,
+          );
+        }
       } finally {
         activeOperation = undefined;
       }

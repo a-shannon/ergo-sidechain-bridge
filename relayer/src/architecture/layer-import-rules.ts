@@ -315,6 +315,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
         new Set([
           'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
+          'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA',
@@ -692,6 +693,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
         new Set([
           'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
+          'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA',
           'SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessExecutionV1Receipt',
@@ -1374,6 +1376,12 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [
     'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
     new Map([
+      [
+        'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
+        new Set([
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+        ]),
+      ],
       [
         'assertSubstrateFederatedIsolatedDevnetOwnedCheckpointTargetV1',
         new Set([

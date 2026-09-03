@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
+  copyFileSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,6 +35,7 @@ import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V2_SCHEMA,
@@ -44,6 +49,7 @@ import type {
 import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
@@ -558,6 +564,160 @@ describe.skipIf(process.platform !== 'win32')(
           mutation.binding,
           testMiningCredential(),
         )).toThrow(mutation.error);
+      }
+    });
+
+    it('projects the exact startup subphase without relaxing cleanup', async () => {
+      const credential = testMiningCredential();
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        credential,
+      );
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
+
+      let failure: unknown;
+      try {
+        await session.startMining();
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          failure,
+        ),
+      ).toBe('ergo node startup credential consumption');
+      await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      await expect(session.stop()).resolves.toBeUndefined();
+    });
+
+    it('projects post-construction artifact drift before process launch', async () => {
+      const directory = ownedTestDirectory();
+      const javaPath = join(directory, 'java.exe');
+      const jarPath = join(directory, 'node.jar');
+      copyFileSync(process.execPath, javaPath);
+      copyFileSync(process.execPath, jarPath);
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1({
+        javaExecutablePath: javaPath,
+        expectedJavaExecutableSha256Hex: fileSha256(javaPath),
+        nodeAssemblyJarPath: jarPath,
+        expectedNodeAssemblyJarSha256Hex: fileSha256(jarPath),
+        buildIdentityDigestHex: sha256(Buffer.from('artifact-drift', 'ascii')),
+      }, launchBinding(), testMiningCredential());
+      appendFileSync(jarPath, Buffer.from([0]));
+
+      const failure = await captureStartupFailure(session);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          failure,
+        ),
+      ).toBe('ergo node startup artifact recheck');
+      await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      await expect(session.stop()).resolves.toBeUndefined();
+    });
+
+    it('projects reserved-port ownership before runtime creation', async () => {
+      const blocker = createServer();
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        blocker.once('error', rejectPromise);
+        blocker.listen(9051, '127.0.0.1', resolvePromise);
+      });
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        testMiningCredential(),
+      );
+      try {
+        const failure = await captureStartupFailure(session);
+        expect(
+          projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+            failure,
+          ),
+        ).toBe('ergo node startup port ownership');
+        await expect(session.startMining()).rejects.toThrow(/exactly once/);
+        await expect(session.stop()).resolves.toBeUndefined();
+      } finally {
+        await new Promise<void>((resolvePromise, rejectPromise) => {
+          blocker.close(error => error ? rejectPromise(error) : resolvePromise());
+        });
+      }
+    });
+
+    it('projects failure to create the owned runtime root', async () => {
+      const directory = ownedTestDirectory();
+      const invalidTempRoot = join(directory, 'not-a-directory');
+      writeFileSync(invalidTempRoot, 'file', { encoding: 'ascii', flag: 'wx' });
+      const priorTemp = process.env.TEMP;
+      const priorTmp = process.env.TMP;
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        testMiningCredential(),
+      );
+      try {
+        process.env.TEMP = invalidTempRoot;
+        process.env.TMP = invalidTempRoot;
+        const failure = await captureStartupFailure(session);
+        expect(
+          projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+            failure,
+          ),
+        ).toBe('ergo node startup runtime creation');
+        await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      } finally {
+        restoreEnvironmentVariable('TEMP', priorTemp);
+        restoreEnvironmentVariable('TMP', priorTmp);
+        await session.stop();
+      }
+    });
+
+    it('projects a primary process that exits before readiness', async () => {
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        testMiningCredential(),
+      );
+
+      const failure = await captureStartupFailure(session);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          failure,
+        ),
+      ).toBe('ergo node primary readiness');
+      await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      await expect(session.stop()).resolves.toBeUndefined();
+    });
+
+    it('binds every finite startup subphase immediately before its operation', () => {
+      const source = readFileSync(
+        join(
+          import.meta.dirname,
+          'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        ),
+        'utf8',
+      );
+      const orderedBindings = [
+        ['ergo node startup artifact recheck', 'recheckProcessArtifacts(input);'],
+        ['ergo node startup port ownership', 'assertPortsUnowned(OWNED_PORTS);'],
+        ['ergo node startup runtime creation', 'createOwnedRuntimeRoot(value =>'],
+        ['ergo node startup credential consumption', 'const credential = miningCredential;'],
+        ['ergo node primary spawn', 'launchedPrimary = spawnOwnedNode('],
+        ['ergo node primary readiness', 'await waitForBasicNodeReadiness(primary);'],
+        ['ergo node primary identity', 'assertOwnedNodeIdentity(input, runtime, primary);'],
+        ['ergo node witness spawn', "spawnOwnedNode(input, runtime, 'witness', 'mining');"],
+        ['ergo node witness readiness', 'await waitForBasicNodeReadiness(witness);'],
+        ['ergo node witness identity', 'assertOwnedNodeIdentity(input, runtime, witness);'],
+        ['ergo node listener ownership', 'assertOwnedListenerBindings(primary, witness);'],
+      ] as const;
+      let cursor = source.indexOf('startMining: async () => {');
+      expect(cursor).toBeGreaterThan(-1);
+      for (const [phase, operation] of orderedBindings) {
+        const phaseIndex = source.indexOf(`'${phase}'`, cursor);
+        const operationIndex = source.indexOf(operation, phaseIndex);
+        expect(phaseIndex, phase).toBeGreaterThan(cursor);
+        expect(operationIndex, operation).toBeGreaterThan(phaseIndex);
+        cursor = operationIndex;
       }
     });
 
@@ -1095,6 +1255,32 @@ describe.skipIf(process.platform !== 'win32')(
     );
   },
 );
+
+async function captureStartupFailure(
+  session: ReturnType<
+    typeof createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1
+  >,
+): Promise<unknown> {
+  let failure: unknown;
+  try {
+    await session.startMining();
+  } catch (error) {
+    failure = error;
+  }
+  if (failure === undefined) {
+    await session.stop();
+    throw new Error('isolated test process unexpectedly reached mining');
+  }
+  return failure;
+}
+
+function restoreEnvironmentVariable(
+  name: 'TEMP' | 'TMP',
+  value: string | undefined,
+): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 function launchBinding(): SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1 {
   return {

@@ -96,6 +96,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
@@ -5515,6 +5516,13 @@ async function runManagedCampaign(
       }
     }
   } catch (error) {
+    if (managedPhaseProjectionEnabled) {
+      const startupPhase =
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          error,
+        );
+      if (startupPhase !== null) managedPhase = startupPhase;
+    }
     failure = !managedPhaseProjectionEnabled
       || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
         error,
