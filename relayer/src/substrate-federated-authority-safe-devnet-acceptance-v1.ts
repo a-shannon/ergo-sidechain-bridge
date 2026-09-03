@@ -319,6 +319,21 @@ export async function acceptSubstrateFederatedAuthoritySafeDevnetV1(
   return result.acceptance;
 }
 
+export async function acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1(
+  input: Readonly<AcceptSubstrateFederatedAuthoritySafeDevnetV1Input>,
+): Promise<Readonly<SubstrateFederatedAuthoritySafeDevnetAcceptanceV1>> {
+  // The action is inert; the phase argument only enables in-process tagging.
+  const result = await acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1(
+    input,
+    async () => undefined,
+    undefined,
+    undefined,
+    'source target readiness and observation',
+    true,
+  );
+  return result.acceptance;
+}
+
 export async function acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
   input: Readonly<AcceptSubstrateFederatedAuthoritySafeDevnetV1Input>,
   buildWorkspace?: Readonly<
@@ -449,6 +464,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
   >,
   sourceActionFailurePhase?:
     SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  preserveSourceErrorIdentity = false,
 ): Promise<Readonly<
   SubstrateFederatedAuthoritySafeDevnetAcceptedActionV1<T>
 >> {
@@ -852,7 +868,8 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
             } catch (error) {
               let observationFailure: unknown = error;
               if (
-                error instanceof Error
+                !preserveSourceErrorIdentity
+                && error instanceof Error
                 && error.message.startsWith(
                   'authority-safe native genesis hash differs from the explicit pin:',
                 )

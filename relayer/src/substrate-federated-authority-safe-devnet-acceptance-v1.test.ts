@@ -128,6 +128,7 @@ vi.mock(
 
 import {
   acceptSubstrateFederatedAuthoritySafeDevnetV1,
+  acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1,
   acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1,
   assertSubstrateFederatedAuthoritySafeDevnetAcceptedHistoryV1Provenance,
   assertSubstrateFederatedAuthoritySafeDevnetAcceptanceV1Provenance,
@@ -1193,6 +1194,128 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
     ).rejects.toThrow(/differ from the pinned toolchain lock/);
     expect(mocks.withOwnedProcesses).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['Frontier build', 'source target Frontier build'],
+    ['runtime source tests', 'source target runtime source tests'],
+    ['process startup', 'source target process construction and startup'],
+    ['target observation', 'source target readiness and observation'],
+    ['workspace cleanup', 'source target build workspace cleanup'],
+  ] as const)(
+    'classifies the %s boundary while preserving the in-process error',
+    async (boundary, expectedPhase) => {
+      const sourceFailure = new Error(`private ${boundary} diagnostic`);
+      if (boundary === 'Frontier build') {
+        mocks.runProcess.mockImplementation(async value => {
+          if (value.args[0] === 'build') throw sourceFailure;
+          return await runProcess(value);
+        });
+      } else if (boundary === 'runtime source tests') {
+        mocks.runProcess.mockImplementation(async value => {
+          const result = await runProcess(value);
+          if (value.args[0] !== 'test') return result;
+          return {
+            ...result,
+            stdoutBytes: Buffer.from('running 0 tests', 'utf8'),
+            stdout: 'running 0 tests',
+          };
+        });
+      } else if (boundary === 'process startup') {
+        mocks.withOwnedProcesses.mockRejectedValueOnce(sourceFailure);
+      } else if (boundary === 'target observation') {
+        mocks.observe.mockRejectedValueOnce(sourceFailure);
+      } else {
+        mocks.buildWorkspaceCleanupFailure = sourceFailure;
+      }
+
+      const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1(
+        input(),
+      ).then(() => undefined, error => error as unknown);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect(
+        projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+          failure,
+        ),
+      ).toBe(expectedPhase);
+      if (boundary !== 'runtime source tests') {
+        expect(failure).toBe(sourceFailure);
+      }
+    },
+  );
+
+  it('keeps the compatibility entry point unclassified', async () => {
+    const sourceFailure = new Error('private compatibility diagnostic');
+    mocks.runProcess.mockImplementation(async value => {
+      if (value.args[0] === 'build') throw sourceFailure;
+      return await runProcess(value);
+    });
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBe(sourceFailure);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves a classified native-genesis mismatch without changing compatibility diagnostics', async () => {
+    const prefix =
+      'authority-safe native genesis hash differs from the explicit pin:';
+    const classifiedFailure = new Error(`${prefix} observed 0x11, expected 0x22`);
+    mocks.observe.mockRejectedValueOnce(classifiedFailure);
+
+    const classified =
+      await acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1(
+        input(),
+      ).then(() => undefined, error => error as unknown);
+
+    expect(classified).toBe(classifiedFailure);
+    expect((classified as Error).message).toBe(classifiedFailure.message);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        classified,
+      ),
+    ).toBe('source target readiness and observation');
+
+    const compatibilityFailure = new Error(
+      `${prefix} observed 0x33, expected 0x44`,
+    );
+    mocks.observe.mockRejectedValueOnce(compatibilityFailure);
+    const compatibility = await acceptSubstrateFederatedAuthoritySafeDevnetV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(compatibility).not.toBe(compatibilityFailure);
+    expect((compatibility as Error).message).toMatch(
+      /generated chain-spec SHA-256/,
+    );
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        compatibility,
+      ),
+    ).toBeNull();
+  });
+
+  it('preserves accepted output and provenance while enabling source classification', async () => {
+    const compatibility = await acceptSubstrateFederatedAuthoritySafeDevnetV1(
+      input(),
+    );
+    const result =
+      await acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1(
+        input(),
+      );
+
+    expect(result).toEqual(compatibility);
+    expect(result.status).toBe('isolated_exact_authority_safe_target_accepted');
+    expect(() =>
+      assertSubstrateFederatedAuthoritySafeDevnetAcceptanceV1Provenance(result)
+    ).not.toThrow();
   });
 });
 
