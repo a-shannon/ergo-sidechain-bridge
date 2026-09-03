@@ -32,14 +32,16 @@ import {
 
 const roots: string[] = [];
 const EXPECTED_HEAD = 'a'.repeat(40);
-const SIGNED_LAB_OWNER_MINT_TRANSACTION =
+const REQUEST_BOUND_OWNER =
+  '0x4f9b9f038c4ce5b83af4972f0bf38bcac7316bdd';
+const SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION =
   '0xf8c78001830f424094970951a12f975e6762482aca81e57d5a2a4e73f480b864'
-  + 'f28ee187000000000000000000000000f24ff3a9cf04c71dbc94d0b566f7a27b'
-  + '94566cac0000000000000000000000000000000000000000000000000000000000'
-  + 'e4e1c0111111111111111111111111111111111111111111111111111111111111'
-  + '111182f4f6a0fa641f8c5f81386dcf8913566ae9af37878a0f2599557c8543da'
-  + 'a63f2e6a4461a0757c09b0c4cff077e8212ddac96fb05690d5c82e5cdd293dd8'
-  + 'f3ac2538d6cce6';
+  + 'f28ee1870000000000000000000000004f9b9f038c4ce5b83af4972f0bf38bca'
+  + 'c7316bdd0000000000000000000000000000000000000000000000000000000000'
+  + 'e4e1c0222222222222222222222222222222222222222222222222222222222222'
+  + '222282f4f5a0f1baf442ddff4104e001f0c4c9d429c966282585e5656f514099'
+  + '04018b59640aa0648b3a6b81b4242668e05567c30d7794c8d0a7ed03535ffde4'
+  + 'e218f03ddfb28b';
 
 afterEach(() => {
   while (roots.length > 0) {
@@ -93,6 +95,33 @@ describe('canonical isolated bootstrap request producer V1', () => {
       readdirSync(fixture.root)
         .filter(name => name.startsWith('.e2s-bootstrap-request-v1-')),
     ).toEqual([]);
+  });
+
+  it('publishes a request-bound owner distinct from the removed base Sudo', () => {
+    const fixture = createFixture();
+    const result =
+      createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1(
+        requestArguments(fixture, {
+          bridgeOwnerAddress: REQUEST_BOUND_OWNER,
+          signedLegacyOwnerMintTransaction:
+            SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION,
+        }),
+      );
+    const parsed = JSON.parse(
+      readFileSync(fixture.outputPath, 'utf8'),
+    ) as {
+      sourceTarget: {
+        bridgeOwnerAddress: string;
+        expectedSudoAddress: string;
+      };
+    };
+
+    expect(result.status).toBe('canonical_isolated_bootstrap_request_created');
+    expect(parsed.sourceTarget).toEqual(expect.objectContaining({
+      bridgeOwnerAddress: REQUEST_BOUND_OWNER,
+      expectedSudoAddress:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+    }));
   });
 
   it('does not publish an output when request self-validation fails', () => {
@@ -176,7 +205,7 @@ describe('canonical isolated bootstrap request producer V1', () => {
         requestArguments(fixture, {
           expectedSudoAddress: `0x${'4'.repeat(40)}`,
         }),
-      )).toThrow(/Sudo differs from the signed LAB owner/iu);
+      )).toThrow(/removed base Sudo differs/iu);
     expect(existsSync(fixture.outputPath)).toBe(false);
   });
 
@@ -256,6 +285,7 @@ function requestArguments(
     expectedChainId?: string;
     primaryP2pPort?: string;
     bridgeAddress?: string;
+    bridgeOwnerAddress?: string;
     tokenAddress?: string;
     expectedBaseSpecSha256Hex?: string;
     artifactDestination?: string;
@@ -279,7 +309,8 @@ function requestArguments(
     '--token-address', overrides.tokenAddress
       ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
     '--bridge-owner-address',
-    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+    overrides.bridgeOwnerAddress
+      ?? REQUEST_BOUND_OWNER,
     '--expected-base-spec-sha256',
     overrides.expectedBaseSpecSha256Hex ?? '4'.repeat(64),
     '--expected-frontier-commit', '5'.repeat(40),
@@ -300,7 +331,7 @@ function requestArguments(
     '--expected-node-version', '1.0.0',
     '--signed-legacy-owner-mint-transaction',
     overrides.signedLegacyOwnerMintTransaction
-      ?? SIGNED_LAB_OWNER_MINT_TRANSACTION,
+      ?? SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION,
     '--ergo-source', fixture.ergoSource,
     '--expected-head', EXPECTED_HEAD,
     '--artifact-destination',

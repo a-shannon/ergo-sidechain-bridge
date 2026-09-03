@@ -34,6 +34,7 @@ import {
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   loadCanonicalBootstrapRequestBoundWithProvenanceV1,
@@ -597,6 +598,24 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
 ): Readonly<
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
 > {
+  assertStandaloneV10OwnerPolicy(expectedPegIn);
+  return parseWorkerReceiptProjectionV10(
+    stdout,
+    expectedRequestSha256Hex,
+    expectedPegIn,
+  );
+}
+
+function parseWorkerReceiptProjectionV10(
+  stdout: string,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<{
+    readonly amountNanoErg: string;
+    readonly recipientAddressHex: string;
+  }>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
+> {
   fixedHex(expectedRequestSha256Hex, 32, 'expected request digest');
   assertPegIn(expectedPegIn, 'expected peg-in');
   assertNoDuplicateJsonKeys(stdout);
@@ -733,6 +752,24 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
 }
 
 export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10(
+  stdout: string,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<{
+    readonly amountNanoErg: string;
+    readonly recipientAddressHex: string;
+  }>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
+> {
+  assertStandaloneV10OwnerPolicy(expectedPegIn);
+  return parseWorkerFailureReceiptProjectionV10(
+    stdout,
+    expectedRequestSha256Hex,
+    expectedPegIn,
+  );
+}
+
+function parseWorkerFailureReceiptProjectionV10(
   stdout: string,
   expectedRequestSha256Hex: string,
   expectedPegIn: Readonly<{
@@ -1042,6 +1079,18 @@ function fixedHex(value: unknown, bytes: number, label: string): string {
     throw new Error(`${label} must be canonical lowercase hex`);
   }
   return value;
+}
+
+function assertStandaloneV10OwnerPolicy(
+  pegIn: Readonly<{
+    readonly recipientAddressHex: string;
+  }>,
+): void {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+    bridgeOwnerAddressHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+    recipientAddressHex: pegIn.recipientAddressHex,
+  });
 }
 
 function assertPegIn(value: unknown, label: string): asserts value is Readonly<{

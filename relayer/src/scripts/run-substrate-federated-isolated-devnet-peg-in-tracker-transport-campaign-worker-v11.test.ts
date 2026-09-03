@@ -24,8 +24,12 @@ import {
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
 import {
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_BASE_SUDO_ADDRESS_V2,
+} from '../substrate-federated-isolated-devnet-frontier-lab-owner-binding-v2.js';
 
 const mocks = vi.hoisted(() => ({
   assertRootReceipt: vi.fn(),
@@ -115,8 +119,17 @@ const OUTCOME_DIGEST = '88'.repeat(32);
 const RESPONSE_DIGEST = '99'.repeat(32);
 const CONFIRMATION_HEADER_ID = 'aa'.repeat(32);
 const CONFIRMATION_OBSERVATION_DIGEST = 'bb'.repeat(32);
-const RECIPIENT =
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1.slice(2);
+const REQUEST_BOUND_OWNER =
+  '0x4f9b9f038c4ce5b83af4972f0bf38bcac7316bdd';
+const SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION =
+  '0xf8c78001830f424094970951a12f975e6762482aca81e57d5a2a4e73f480b864'
+  + 'f28ee1870000000000000000000000004f9b9f038c4ce5b83af4972f0bf38bca'
+  + 'c7316bdd0000000000000000000000000000000000000000000000000000000000'
+  + 'e4e1c0222222222222222222222222222222222222222222222222222222222222'
+  + '222282f4f5a0f1baf442ddff4104e001f0c4c9d429c966282585e5656f514099'
+  + '04018b59640aa0648b3a6b81b4242668e05567c30d7794c8d0a7ed03535ffde4'
+  + 'e218f03ddfb28b';
+const RECIPIENT = REQUEST_BOUND_OWNER.slice(2);
 const PEG_IN = Object.freeze({
   amountNanoErg: '15000000',
   recipientAddressHex: RECIPIENT,
@@ -156,23 +169,7 @@ describe('isolated tracker transport campaign worker V11', () => {
     mocks.projectRootFailure.mockReturnValue(null);
     mocks.resolveDirectory.mockImplementation((value: string) =>
       realpathSync(value));
-    mocks.loadRequest.mockReturnValue({
-      input: {
-        lifecycle: {
-          sourceHistory: {
-            acceptance: {
-              frontierSourcePath: 'C:\\external\\frontier',
-              cargoExecutablePath: 'C:\\tools\\cargo.exe',
-              rustcExecutablePath: 'C:\\tools\\rustc.exe',
-              gitExecutablePath: 'C:\\tools\\git.exe',
-              bridgeOwnerAddress:
-                SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
-            },
-          },
-        },
-      },
-      requestBinding: REQUEST_BINDING,
-    });
+    mocks.loadRequest.mockReturnValue(loadedRequestFixture());
     mocks.runRoot.mockResolvedValue(successRootV11Fixture());
   });
 
@@ -256,8 +253,73 @@ describe('isolated tracker transport campaign worker V11', () => {
         PEG_IN,
       )
     ).toThrow();
+    expect(() =>
+      parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10(
+        `${canonicalJson(receipt.legacyV10Receipt)}\n`,
+        REQUEST_DIGEST,
+        PEG_IN,
+      )
+    ).toThrow(/differs from the deterministic deployment/iu);
     expect(output).not.toContain('C:\\external');
     expect(output).not.toContain('signedTransaction');
+  });
+
+  it('rejects recipient drift before the campaign root can execute', async () => {
+    const args = argumentsFor(
+      root,
+      temporaryRoot,
+      frontierCargoRoot,
+      journalRoot,
+    );
+    const recipientIndex = args.indexOf('--recipient-address-hex') + 1;
+    args[recipientIndex] = 'cd'.repeat(20);
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV11(
+        args,
+      ),
+    ).rejects.toThrow(/probe differs from the V11 peg-in plan/iu);
+    expect(mocks.runRoot).not.toHaveBeenCalled();
+  });
+
+  it('rejects amount drift before the campaign root can execute', async () => {
+    const args = argumentsFor(
+      root,
+      temporaryRoot,
+      frontierCargoRoot,
+      journalRoot,
+    );
+    const amountIndex = args.indexOf('--amount-nano-erg') + 1;
+    args[amountIndex] = '15000001';
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV11(
+        args,
+      ),
+    ).rejects.toThrow(/probe differs from the V11 peg-in plan/iu);
+    expect(mocks.runRoot).not.toHaveBeenCalled();
+  });
+
+  it('rejects signer drift before the campaign root can execute', async () => {
+    const differentOwner = `0x${'ab'.repeat(20)}`;
+    mocks.loadRequest.mockReturnValueOnce(loadedRequestFixture({
+      bridgeOwnerAddress: differentOwner,
+    }));
+    const args = argumentsFor(
+      root,
+      temporaryRoot,
+      frontierCargoRoot,
+      journalRoot,
+    );
+    const recipientIndex = args.indexOf('--recipient-address-hex') + 1;
+    args[recipientIndex] = differentOwner.slice(2);
+
+    await expect(
+      runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV11(
+        args,
+      ),
+    ).rejects.toThrow(/signer is not the exact bridge owner/iu);
+    expect(mocks.runRoot).not.toHaveBeenCalled();
   });
 
   it('rejects classification, legacy V10, and serialized-provenance drift', async () => {
@@ -415,6 +477,13 @@ describe('isolated tracker transport campaign worker V11', () => {
         PEG_IN,
       )
     ).toThrow();
+    expect(() =>
+      parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10(
+        `${canonicalJson(receipt.legacyV10Receipt)}\n`,
+        REQUEST_DIGEST,
+        PEG_IN,
+      )
+    ).toThrow(/differs from the deterministic deployment/iu);
   });
 
   it('rejects failure status/category and response-digest drift even when redigested', async () => {
@@ -698,6 +767,40 @@ function failureRootV10Fixture(): Record<string, unknown> {
       body,
       ROOT_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
     ),
+  };
+}
+
+function loadedRequestFixture(
+  overrides: Readonly<Partial<{
+    bridgeOwnerAddress: string;
+    signedLegacyOwnerMintTransactionHex: string;
+  }>> = {},
+) {
+  return {
+    input: {
+      lifecycle: {
+        sourceHistory: {
+          acceptance: {
+            frontierSourcePath: 'C:\\external\\frontier',
+            cargoExecutablePath: 'C:\\tools\\cargo.exe',
+            rustcExecutablePath: 'C:\\tools\\rustc.exe',
+            gitExecutablePath: 'C:\\tools\\git.exe',
+            expectedChainId: 31_337n,
+            bridgeAddress:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+            tokenAddress:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
+            bridgeOwnerAddress: REQUEST_BOUND_OWNER,
+            expectedSudoAddress:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_BASE_SUDO_ADDRESS_V2,
+            signedLegacyOwnerMintTransactionHex:
+              SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION,
+            ...overrides,
+          },
+        },
+      },
+    },
+    requestBinding: REQUEST_BINDING,
   };
 }
 

@@ -5,6 +5,8 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Provenance,
   projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11,
   runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import {
@@ -35,8 +37,11 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
-  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
-} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+  buildAuthoritySafeLegacyMintProbeV1,
+} from '../substrate-federated-authority-safe-devnet-observation-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2,
+} from '../substrate-federated-isolated-devnet-frontier-lab-owner-binding-v2.js';
 import {
   loadCanonicalBootstrapRequestBoundWithProvenanceV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
@@ -47,8 +52,6 @@ import {
   explicitExistingLocalNonSensitivePath,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
 import {
-  parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10,
-  parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10,
   resolveCanonicalWorkerRootsV10,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA,
@@ -67,6 +70,19 @@ const LEGACY_RECEIPT_DIGEST_DOMAIN_V10 =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10';
 const LEGACY_FAILURE_RECEIPT_DIGEST_DOMAIN_V10 =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10';
+const TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation-failure-diagnostic.v1' as const;
+const TRACKER_CANONICAL_CONFIRMATION_BUDGET_MS_V1 = 2 * 60_000;
+const TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1 = Object.freeze([
+  'managed_deadline_elapsed',
+  'confirmation_budget_elapsed',
+  'pending_at_deadline',
+  'not_found_at_deadline',
+  'observation_completed_after_deadline',
+  'observer_failure',
+  'clock_failure',
+  'confirmation_phase_failure',
+] as const);
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V11_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-receipt.v11' as const;
@@ -255,9 +271,26 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       recipientAddressHex: argv[7]!,
     });
     const acceptance = loaded.input.lifecycle.sourceHistory.acceptance;
-    assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+    const probe = buildAuthoritySafeLegacyMintProbeV1({
+      signedTransactionHex: acceptance.signedLegacyOwnerMintTransactionHex,
+      expectedChainId: acceptance.expectedChainId,
+      expectedBridgeAddress: acceptance.bridgeAddress,
+      expectedBridgeOwnerAddress: acceptance.bridgeOwnerAddress,
+    });
+    if (
+      probe.recipientAddress !== `0x${pegIn.recipientAddressHex}`
+      || probe.amount !== pegIn.amountNanoErg
+    ) {
+      throw new Error(
+        'canonical bootstrap request owner-mint probe differs from the V11 peg-in plan',
+      );
+    }
+    assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2({
+      bridgeAddressHex: acceptance.bridgeAddress,
       bridgeOwnerAddressHex: acceptance.bridgeOwnerAddress,
       recipientAddressHex: pegIn.recipientAddressHex,
+      removedBaseSudoAddressHex: acceptance.expectedSudoAddress,
+      tokenAddressHex: acceptance.tokenAddress,
     });
 
     phase = 'campaign root';
@@ -570,8 +603,8 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     expectedPegIn,
   );
   const legacyV10Receipt =
-    parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10(
-      `${canonicalJson(receipt.legacyV10Receipt)}\n`,
+    parseEmbeddedLegacyWorkerReceiptV10(
+      receipt.legacyV10Receipt,
       expectedRequestSha256Hex,
       expectedPegIn,
     );
@@ -621,8 +654,8 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     expectedPegIn,
   );
   const legacyV10Receipt =
-    parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10(
-      `${canonicalJson(receipt.legacyV10Receipt)}\n`,
+    parseEmbeddedLegacyWorkerFailureReceiptV10(
+      receipt.legacyV10Receipt,
       expectedRequestSha256Hex,
       expectedPegIn,
     );
@@ -651,6 +684,414 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(receipt);
   return deepFreeze(receipt) as unknown as Readonly<
     SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV11
+  >;
+}
+
+function parseEmbeddedLegacyWorkerReceiptV10(
+  value: unknown,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<PegInV11>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
+> {
+  fixedHex(expectedRequestSha256Hex, 32, 'expected request digest');
+  assertPegIn(expectedPegIn, 'expected peg-in');
+  const receipt = exactRecord(value, [
+    'boundaries',
+    'freshnessReceiptDigestHex',
+    'pegIn',
+    'receiptDigestHex',
+    'requestSha256Hex',
+    'rootReceiptDigestHex',
+    'schema',
+    'staticExecutionManifestDigestHex',
+    'status',
+    'transport',
+    'version',
+  ], 'embedded legacy V10 worker receipt');
+  if (
+    receipt.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA
+    || receipt.version !== 10
+    || receipt.status !== 'local_tracker_transport_canonically_confirmed'
+    || receipt.requestSha256Hex !== expectedRequestSha256Hex
+    || receipt.staticExecutionManifestDigestHex
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10
+  ) {
+    throw new Error('embedded legacy V10 worker identity changed');
+  }
+  assertPegIn(receipt.pegIn, 'embedded legacy V10 worker peg-in');
+  if (
+    receipt.pegIn.amountNanoErg !== expectedPegIn.amountNanoErg
+    || receipt.pegIn.recipientAddressHex
+      !== expectedPegIn.recipientAddressHex
+  ) {
+    throw new Error('embedded legacy V10 worker peg-in changed');
+  }
+  fixedHex(receipt.rootReceiptDigestHex, 32, 'legacy V10 root receipt digest');
+  fixedHex(
+    receipt.freshnessReceiptDigestHex,
+    32,
+    'legacy V10 freshness receipt digest',
+  );
+
+  const transport = exactRecord(receipt.transport, [
+    'authorizationDigestHex',
+    'confirmationHeaderIdHex',
+    'confirmationHeight',
+    'confirmationObservationDigestHex',
+    'confirmations',
+    'durableAttemptDigestHex',
+    'expectedTransactionIdHex',
+    'outcomeDigestHex',
+    'responseDigestHex',
+    'status',
+    'submittedTransactionIdHex',
+  ], 'embedded legacy V10 worker transport');
+  const expectedTransactionIdHex = fixedHex(
+    transport.expectedTransactionIdHex,
+    32,
+    'legacy V10 tracker transport transaction ID',
+  );
+  const transportStatus = transport.status;
+  if (
+    (transportStatus !== 'accepted' && transportStatus !== 'ambiguous')
+    || (
+      transportStatus === 'accepted'
+        ? fixedHex(
+          transport.submittedTransactionIdHex,
+          32,
+          'legacy V10 submitted tracker transaction ID',
+        ) !== expectedTransactionIdHex
+        : transport.submittedTransactionIdHex !== null
+    )
+    || !Number.isSafeInteger(transport.confirmations)
+    || Number(transport.confirmations)
+      < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS
+    || !Number.isSafeInteger(transport.confirmationHeight)
+    || Number(transport.confirmationHeight) < 1
+  ) {
+    throw new Error('embedded legacy V10 worker confirmation changed');
+  }
+  for (const [field, label] of [
+    [transport.authorizationDigestHex, 'legacy V10 transport authorization digest'],
+    [transport.durableAttemptDigestHex, 'legacy V10 transport attempt digest'],
+    [transport.outcomeDigestHex, 'legacy V10 transport outcome digest'],
+    [transport.responseDigestHex, 'legacy V10 transport response digest'],
+    [transport.confirmationHeaderIdHex, 'legacy V10 confirmation header ID'],
+    [transport.confirmationObservationDigestHex, 'legacy V10 confirmation observation digest'],
+  ] as const) {
+    fixedHex(field, 32, label);
+  }
+
+  const expectedBoundaries = Object.freeze({
+    localIsolatedDevnetOnly: true,
+    oneTransportAttemptRecorded: true,
+    canonicalConfirmationObserved: true,
+    trackerAdmissionEstablished: true,
+    signedTrackerBytesPersisted: false,
+    publicNetworkUsed: false,
+    realFundsUsed: false,
+    existingWalletMaterialUsed: false,
+    gate5Closed: false,
+    trustlessStatusEstablished: false,
+    productionReadinessEstablished: false,
+  });
+  const boundaries = exactRecord(
+    receipt.boundaries,
+    Object.keys(expectedBoundaries),
+    'embedded legacy V10 worker boundaries',
+  );
+  for (const [key, expected] of Object.entries(expectedBoundaries)) {
+    if (boundaries[key] !== expected) {
+      throw new Error('embedded legacy V10 worker boundary changed');
+    }
+  }
+  assertReceiptDigest(
+    receipt,
+    LEGACY_RECEIPT_DIGEST_DOMAIN_V10,
+    'embedded legacy V10 worker receipt',
+  );
+  assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(receipt);
+  return deepFreeze(receipt) as unknown as Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
+  >;
+}
+
+function parseEmbeddedLegacyWorkerFailureReceiptV10(
+  value: unknown,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<PegInV11>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
+> {
+  fixedHex(expectedRequestSha256Hex, 32, 'expected request digest');
+  assertPegIn(expectedPegIn, 'expected peg-in');
+  const receipt = exactRecord(value, [
+    'boundaries',
+    'confirmation',
+    'pegIn',
+    'receiptDigestHex',
+    'requestSha256Hex',
+    'rootFailureReceiptDigestHex',
+    'schema',
+    'staticExecutionManifestDigestHex',
+    'status',
+    'transport',
+    'version',
+  ], 'embedded legacy V10 worker failure receipt');
+  if (
+    receipt.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA
+    || receipt.version !== 10
+    || receipt.status !== 'local_tracker_transport_not_canonically_confirmed'
+    || receipt.requestSha256Hex !== expectedRequestSha256Hex
+    || receipt.staticExecutionManifestDigestHex
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10
+  ) {
+    throw new Error('embedded legacy V10 worker failure identity changed');
+  }
+  assertPegIn(receipt.pegIn, 'embedded legacy V10 worker failure peg-in');
+  if (
+    receipt.pegIn.amountNanoErg !== expectedPegIn.amountNanoErg
+    || receipt.pegIn.recipientAddressHex !== expectedPegIn.recipientAddressHex
+  ) {
+    throw new Error('embedded legacy V10 worker failure peg-in changed');
+  }
+  const rootFailureReceiptDigestHex = fixedHex(
+    receipt.rootFailureReceiptDigestHex,
+    32,
+    'legacy V10 root failure receipt digest',
+  );
+  const transport = exactRecord(receipt.transport, [
+    'attempt',
+    'authorization',
+    'outcome',
+  ], 'embedded legacy V10 worker failure transport');
+  const authorization = exactRecord(transport.authorization, [
+    'authorizationDigestHex',
+    'executionTargetIdentityDigestHex',
+    'expectedTransactionIdHex',
+  ], 'embedded legacy V10 worker failure authorization');
+  const attempt = exactRecord(transport.attempt, [
+    'durableAttemptDigestHex',
+    'expectedTransactionIdHex',
+  ], 'embedded legacy V10 worker failure attempt');
+  const outcome = exactRecord(transport.outcome, [
+    'durableAttemptDigestHex',
+    'expectedTransactionIdHex',
+    'outcomeDigestHex',
+    'responseDigestHex',
+    'status',
+    'submittedTransactionIdHex',
+  ], 'embedded legacy V10 worker failure outcome');
+  const transactionIdHex = fixedHex(
+    attempt.expectedTransactionIdHex,
+    32,
+    'legacy V10 attempted tracker transaction ID',
+  );
+  const durableAttemptDigestHex = fixedHex(
+    attempt.durableAttemptDigestHex,
+    32,
+    'legacy V10 durable attempt digest',
+  );
+  if (
+    fixedHex(
+      authorization.expectedTransactionIdHex,
+      32,
+      'legacy V10 authorization transaction ID',
+    ) !== transactionIdHex
+    || fixedHex(
+      outcome.expectedTransactionIdHex,
+      32,
+      'legacy V10 outcome transaction ID',
+    ) !== transactionIdHex
+    || fixedHex(
+      outcome.durableAttemptDigestHex,
+      32,
+      'legacy V10 outcome durable attempt digest',
+    ) !== durableAttemptDigestHex
+    || !['accepted', 'ambiguous'].includes(String(outcome.status))
+    || (
+      outcome.status === 'accepted'
+        ? outcome.submittedTransactionIdHex !== transactionIdHex
+        : outcome.submittedTransactionIdHex !== null
+    )
+  ) {
+    throw new Error('embedded legacy V10 worker failure binding changed');
+  }
+  fixedHex(
+    authorization.authorizationDigestHex,
+    32,
+    'legacy V10 authorization digest',
+  );
+  fixedHex(
+    authorization.executionTargetIdentityDigestHex,
+    32,
+    'legacy V10 authorization target identity digest',
+  );
+  fixedHex(outcome.outcomeDigestHex, 32, 'legacy V10 outcome digest');
+  fixedHex(outcome.responseDigestHex, 32, 'legacy V10 response digest');
+
+  const confirmation = exactRecord(receipt.confirmation, [
+    'category',
+    'confirmationBudgetMs',
+    'executionTargetIdentityDigestHex',
+    'expectedTransactionIdHex',
+    'lastObservation',
+    'observationCount',
+    'schema',
+    'version',
+  ], 'embedded legacy V10 worker failure confirmation diagnostic');
+  const confirmationExecutionTargetIdentityDigestHex =
+    confirmation.executionTargetIdentityDigestHex === null
+      ? null
+      : fixedHex(
+          confirmation.executionTargetIdentityDigestHex,
+          32,
+          'legacy V10 confirmation target identity digest',
+        );
+  if (
+    confirmation.schema
+      !== TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA
+    || confirmation.version !== 1
+    || !TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1.includes(
+      String(confirmation.category) as
+        typeof TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1[number],
+    )
+    || confirmation.expectedTransactionIdHex !== transactionIdHex
+    || (confirmation.category === 'confirmation_phase_failure'
+      ? confirmationExecutionTargetIdentityDigestHex !== null
+      : confirmationExecutionTargetIdentityDigestHex === null)
+    || confirmation.confirmationBudgetMs
+      !== TRACKER_CANONICAL_CONFIRMATION_BUDGET_MS_V1
+    || !Number.isSafeInteger(confirmation.observationCount)
+    || Number(confirmation.observationCount) < 0
+  ) {
+    throw new Error('embedded legacy V10 worker failure confirmation changed');
+  }
+  const lastObservation = confirmation.lastObservation === null
+    ? null
+    : exactRecord(confirmation.lastObservation, [
+        'confirmations',
+        'observationDigestHex',
+        'observedAtHeight',
+        'status',
+      ], 'embedded legacy V10 worker failure last confirmation observation');
+  if (lastObservation !== null) {
+    if (
+      !['confirmed', 'pending', 'not_found'].includes(
+        String(lastObservation.status),
+      )
+      || !Number.isSafeInteger(lastObservation.confirmations)
+      || Number(lastObservation.confirmations) < 0
+      || !Number.isSafeInteger(lastObservation.observedAtHeight)
+      || Number(lastObservation.observedAtHeight) < 0
+      || (lastObservation.status === 'not_found'
+        && lastObservation.confirmations !== 0)
+      || (lastObservation.status === 'pending'
+        && Number(lastObservation.confirmations)
+          >= SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS)
+      || (lastObservation.status === 'confirmed'
+        && Number(lastObservation.confirmations)
+          < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS)
+    ) {
+      throw new Error(
+        'embedded legacy V10 worker failure observation changed',
+      );
+    }
+    fixedHex(
+      lastObservation.observationDigestHex,
+      32,
+      'legacy V10 confirmation observation digest',
+    );
+  }
+  if (
+    (confirmation.category === 'pending_at_deadline'
+      && lastObservation?.status !== 'pending')
+    || (confirmation.category === 'not_found_at_deadline'
+      && lastObservation?.status !== 'not_found')
+    || (confirmation.category === 'observation_completed_after_deadline'
+      && lastObservation?.status !== 'confirmed')
+    || (lastObservation !== null
+      && Number(confirmation.observationCount) === 0)
+    || (confirmation.category === 'observer_failure'
+      && Number(confirmation.observationCount) === 0)
+    || (['observer_failure', 'clock_failure'].includes(
+      String(confirmation.category),
+    ) && lastObservation?.status === 'confirmed')
+    || (['managed_deadline_elapsed', 'confirmation_budget_elapsed',
+      'confirmation_phase_failure'].includes(String(confirmation.category))
+      && (Number(confirmation.observationCount) !== 0
+        || lastObservation !== null))
+  ) {
+    throw new Error(
+      'embedded legacy V10 worker failure confirmation category changed',
+    );
+  }
+
+  const boundaries = exactRecord(receipt.boundaries, [
+    'canonicalConfirmationObserved',
+    'exactNodeAcceptanceObserved',
+    'existingWalletMaterialUsed',
+    'gate5Closed',
+    'localIsolatedDevnetOnly',
+    'oneTransportAttemptRecorded',
+    'productionReadinessEstablished',
+    'publicNetworkUsed',
+    'realFundsUsed',
+    'signedTrackerBytesPersisted',
+    'trackerAdmissionEstablished',
+    'transportOutcomePersisted',
+    'trustlessStatusEstablished',
+  ], 'embedded legacy V10 worker failure boundaries');
+  const expectedBoundaries = {
+    canonicalConfirmationObserved: false,
+    exactNodeAcceptanceObserved: outcome.status === 'accepted',
+    existingWalletMaterialUsed: false,
+    gate5Closed: false,
+    localIsolatedDevnetOnly: true,
+    oneTransportAttemptRecorded: true,
+    productionReadinessEstablished: false,
+    publicNetworkUsed: false,
+    realFundsUsed: false,
+    signedTrackerBytesPersisted: false,
+    trackerAdmissionEstablished: false,
+    transportOutcomePersisted: true,
+    trustlessStatusEstablished: false,
+  } as const;
+  for (const [key, expected] of Object.entries(expectedBoundaries)) {
+    if (boundaries[key] !== expected) {
+      throw new Error('embedded legacy V10 worker failure boundary changed');
+    }
+  }
+  const rootFailureBody = {
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10',
+    version: 10,
+    status: 'local_tracker_transport_not_canonically_confirmed',
+    staticExecutionManifestDigestHex:
+      receipt.staticExecutionManifestDigestHex,
+    transport,
+    confirmation,
+    boundaries,
+  } as const;
+  if (
+    rootFailureReceiptDigestHex !== sha256CanonicalJson(
+      rootFailureBody,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+    )
+  ) {
+    throw new Error('embedded legacy V10 root failure digest changed');
+  }
+  assertReceiptDigest(
+    receipt,
+    LEGACY_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+    'embedded legacy V10 worker failure receipt',
+  );
+  assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(receipt);
+  return deepFreeze(receipt) as unknown as Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
   >;
 }
 

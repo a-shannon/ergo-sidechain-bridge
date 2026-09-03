@@ -20,8 +20,10 @@ import {
 } from '../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
-  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2,
+} from '../substrate-federated-isolated-devnet-frontier-lab-owner-binding-v2.js';
 import {
   buildAuthoritySafeLegacyMintProbeV1,
 } from '../substrate-federated-authority-safe-devnet-observation-v1.js';
@@ -161,6 +163,31 @@ export function preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1
   );
   const acceptance = input.lifecycle.sourceHistory.acceptance;
   const relayerArtifacts = input.lifecycle.relayerArtifacts;
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: acceptance.bridgeAddress,
+    tokenAddressHex: acceptance.tokenAddress,
+  });
+  const probe = buildAuthoritySafeLegacyMintProbeV1({
+    signedTransactionHex: acceptance.signedLegacyOwnerMintTransactionHex,
+    expectedChainId: acceptance.expectedChainId,
+    expectedBridgeAddress: acceptance.bridgeAddress,
+    expectedBridgeOwnerAddress: acceptance.bridgeOwnerAddress,
+  });
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2({
+    bridgeAddressHex: acceptance.bridgeAddress,
+    bridgeOwnerAddressHex: acceptance.bridgeOwnerAddress,
+    recipientAddressHex: args.pegIn.recipientAddressHex,
+    removedBaseSudoAddressHex: acceptance.expectedSudoAddress,
+    tokenAddressHex: acceptance.tokenAddress,
+  });
+  if (
+    probe.recipientAddress !== `0x${args.pegIn.recipientAddressHex}`
+    || probe.amount !== args.pegIn.amountNanoErg
+  ) {
+    throw new Error(
+      'Frontier LAB owner-mint rejection probe differs from the peg-in plan',
+    );
+  }
   const expectedHeadCommitSha1Hex = exactCommit(
     relayerArtifacts.expectedHeadCommitSha1Hex,
   );
@@ -202,28 +229,6 @@ export function preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1
     expectedRuntimeCodeSha256Hex: acceptance.expectedRuntimeCodeSha256Hex,
     expectedSudoAddress: acceptance.expectedSudoAddress,
   });
-  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
-    bridgeAddressHex: acceptance.bridgeAddress,
-    tokenAddressHex: acceptance.tokenAddress,
-  });
-  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
-    bridgeOwnerAddressHex: acceptance.bridgeOwnerAddress,
-    recipientAddressHex: args.pegIn.recipientAddressHex,
-  });
-  const probe = buildAuthoritySafeLegacyMintProbeV1({
-    signedTransactionHex: acceptance.signedLegacyOwnerMintTransactionHex,
-    expectedChainId: acceptance.expectedChainId,
-    expectedBridgeAddress: acceptance.bridgeAddress,
-    expectedBridgeOwnerAddress: acceptance.bridgeOwnerAddress,
-  });
-  if (
-    probe.recipientAddress !== `0x${args.pegIn.recipientAddressHex}`
-    || probe.amount !== args.pegIn.amountNanoErg
-  ) {
-    throw new Error(
-      'Frontier LAB owner-mint rejection probe differs from the peg-in plan',
-    );
-  }
   assertDistinctLoopbackTopology(
     acceptance.primaryRpcUrl,
     acceptance.witnessRpcUrl,

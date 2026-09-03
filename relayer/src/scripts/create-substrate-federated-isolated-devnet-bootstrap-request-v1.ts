@@ -24,8 +24,10 @@ import {
 } from '../substrate-federated-authority-safe-devnet-observation-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
-  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2,
+} from '../substrate-federated-isolated-devnet-frontier-lab-owner-binding-v2.js';
 import {
   assertCreateOnlyOutput,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-execution-v1.js';
@@ -266,15 +268,13 @@ function assertRequestPublicationBindings(
     expectedBridgeAddress: source.bridgeAddress,
     expectedBridgeOwnerAddress: source.bridgeOwnerAddress,
   });
-  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2({
+    bridgeAddressHex: source.bridgeAddress,
     bridgeOwnerAddressHex: source.bridgeOwnerAddress,
     recipientAddressHex: probe.recipientAddress.slice(2),
+    removedBaseSudoAddressHex: source.expectedSudoAddress,
+    tokenAddressHex: source.tokenAddress,
   });
-  if (source.expectedSudoAddress.toLowerCase() !== probe.signerAddress) {
-    throw new Error(
-      'canonical bootstrap request Sudo differs from the signed LAB owner',
-    );
-  }
 }
 
 function exactPort(value: string): number {

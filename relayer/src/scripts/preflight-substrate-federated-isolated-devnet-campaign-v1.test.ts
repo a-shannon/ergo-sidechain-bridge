@@ -104,7 +104,17 @@ const FIXTURE_GIT_BYTES = Buffer.from('fixture-git', 'utf8');
 const FIXTURE_GIT_SHA256 = createHash('sha256')
   .update(FIXTURE_GIT_BYTES)
   .digest('hex');
-const SIGNED_LAB_OWNER_MINT_TRANSACTION =
+const REQUEST_BOUND_OWNER =
+  '0x4f9b9f038c4ce5b83af4972f0bf38bcac7316bdd';
+const SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION =
+  '0xf8c78001830f424094970951a12f975e6762482aca81e57d5a2a4e73f480b864'
+  + 'f28ee1870000000000000000000000004f9b9f038c4ce5b83af4972f0bf38bca'
+  + 'c7316bdd0000000000000000000000000000000000000000000000000000000000'
+  + 'e4e1c0222222222222222222222222222222222222222222222222222222222222'
+  + '222282f4f5a0f1baf442ddff4104e001f0c4c9d429c966282585e5656f514099'
+  + '04018b59640aa0648b3a6b81b4242668e05567c30d7794c8d0a7ed03535ffde4'
+  + 'e218f03ddfb28b';
+const SIGNED_FIXED_OWNER_MINT_TRANSACTION =
   '0xf8c78001830f424094970951a12f975e6762482aca81e57d5a2a4e73f480b864'
   + 'f28ee187000000000000000000000000f24ff3a9cf04c71dbc94d0b566f7a27b'
   + '94566cac0000000000000000000000000000000000000000000000000000000000'
@@ -177,9 +187,7 @@ describe('isolated campaign pure preflight V1', () => {
       },
       pegIn: {
         amountNanoErg: '15000000',
-        recipientAddressHex:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1
-            .slice(2),
+        recipientAddressHex: REQUEST_BOUND_OWNER.slice(2),
       },
       checks: {
         canonicalRequestDigestBound: true,
@@ -229,7 +237,7 @@ describe('isolated campaign pure preflight V1', () => {
       tokenAddress:
         SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
       bridgeOwnerAddress:
-        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+        REQUEST_BOUND_OWNER,
       expectedBaseSpecSha256Hex: fixture.baseSpecSha256Hex,
       expectedFrontierCommit: '5'.repeat(40),
       expectedFrontierPatchSha256Hex: '6'.repeat(64),
@@ -297,6 +305,66 @@ describe('isolated campaign pure preflight V1', () => {
       offline: true,
     });
     expect(inventory(fixture.root)).toEqual(before);
+  });
+
+  it('preflights a request-bound owner distinct from the removed base Sudo', () => {
+    const fixture = createFixture();
+    const request = createRequest(fixture, {
+      bridgeOwnerAddress: REQUEST_BOUND_OWNER,
+      signedLegacyOwnerMintTransaction:
+        SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION,
+    });
+
+    const receipt =
+      preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1(
+        preflightArguments(fixture, request.requestSha256Hex, {
+          recipientAddressHex: REQUEST_BOUND_OWNER.slice(2),
+        }),
+      );
+
+    expect(receipt.pegIn.recipientAddressHex).toBe(
+      REQUEST_BOUND_OWNER.slice(2),
+    );
+    expect(mocks.buildChainSpec).toHaveBeenCalledWith(expect.objectContaining({
+      bridgeOwnerAddress: REQUEST_BOUND_OWNER,
+      expectedSudoAddress:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+    }));
+  });
+
+  it('rejects an owner/Sudo collision before subprocess or chain-spec work', () => {
+    const fixture = createFixture();
+    createRequest(fixture);
+    const request = JSON.parse(
+      readFileSync(fixture.requestPath, 'utf8'),
+    ) as {
+      sourceTarget: {
+        bridgeOwnerAddress: string;
+        signedLegacyOwnerMintTransactionHex: string;
+      };
+    };
+    request.sourceTarget.bridgeOwnerAddress =
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1;
+    request.sourceTarget.signedLegacyOwnerMintTransactionHex =
+      SIGNED_FIXED_OWNER_MINT_TRANSACTION;
+    const requestBytes = Buffer.from(`${canonicalJson(request)}\n`, 'utf8');
+    writeFileSync(fixture.requestPath, requestBytes);
+    const requestDigest = createHash('sha256').update(requestBytes).digest('hex');
+    mocks.spawnSync.mockClear();
+    mocks.buildChainSpec.mockClear();
+    mocks.applicationPreflight.mockClear();
+
+    expect(() =>
+      preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1(
+        preflightArguments(fixture, requestDigest, {
+          recipientAddressHex:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1
+              .slice(2),
+        }),
+      )).toThrow(/owner must differ from the removed base Sudo/iu);
+    expect(mocks.spawnSync).not.toHaveBeenCalled();
+    expect(mocks.buildChainSpec).not.toHaveBeenCalled();
+    expect(mocks.applicationPreflight).not.toHaveBeenCalled();
   });
 
   it('preserves the exact successful receipt bytes when phase observation is enabled', () => {
@@ -412,10 +480,11 @@ describe('isolated campaign pure preflight V1', () => {
       observe => {
         const fixture = createFixture();
         const request = createRequest(fixture);
+        mocks.buildChainSpec.mockImplementationOnce(() => {
+          throw new Error('base spec sentinel');
+        });
         preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1(
-          preflightArguments(fixture, request.requestSha256Hex, {
-            recipientAddressHex: 'cd'.repeat(20),
-          }),
+          preflightArguments(fixture, request.requestSha256Hex),
           observe,
         );
       },
@@ -1059,6 +1128,7 @@ function createRequest(
     primaryRpcUrl?: string;
     witnessP2pPort?: string;
     ergoSource?: string;
+    signedLegacyOwnerMintTransaction?: string;
   }> = {},
 ) {
   return createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1([
@@ -1077,7 +1147,7 @@ function createRequest(
     '--token-address', overrides.tokenAddress
       ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
     '--bridge-owner-address', overrides.bridgeOwnerAddress
-      ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+      ?? REQUEST_BOUND_OWNER,
     '--expected-base-spec-sha256',
     overrides.expectedBaseSpecSha256Hex ?? fixture.baseSpecSha256Hex,
     '--expected-frontier-commit', '5'.repeat(40),
@@ -1096,7 +1166,8 @@ function createRequest(
     '--expected-node-name', 'bridge-node',
     '--expected-node-version', '1.0.0',
     '--signed-legacy-owner-mint-transaction',
-    SIGNED_LAB_OWNER_MINT_TRANSACTION,
+    overrides.signedLegacyOwnerMintTransaction
+      ?? SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION,
     '--ergo-source', overrides.ergoSource ?? fixture.ergoSource,
     '--expected-head', EXPECTED_HEAD,
     '--artifact-destination', fixture.artifactDestination,
@@ -1119,8 +1190,7 @@ function preflightArguments(
     '--amount-nano-erg', overrides.amountNanoErg ?? '15000000',
     '--recipient-address-hex',
     overrides.recipientAddressHex
-      ?? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1
-        .slice(2),
+      ?? REQUEST_BOUND_OWNER.slice(2),
     '--frontier-temporary-root', fixture.frontierTemporaryRoot,
     '--frontier-cargo-cache', fixture.frontierCargoCache,
     '--relayer-cargo-cache',
