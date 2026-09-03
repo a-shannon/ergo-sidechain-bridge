@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +37,7 @@ import type {
 } from './substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.js';
 import {
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
@@ -42,9 +50,13 @@ const PUBLIC_KEY_HEX =
   '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 const PRIMARY_PID = 41_001;
 const WITNESS_PID = 41_002;
+const temporaryDirectories: string[] = [];
 
 type InjectedPhase =
+  | 'ergo node startup runtime creation'
+  | 'ergo node startup credential consumption'
   | 'ergo node primary spawn'
+  | 'ergo node primary readiness'
   | 'ergo node primary identity'
   | 'ergo node witness spawn'
   | 'ergo node witness readiness'
@@ -143,10 +155,69 @@ describe.skipIf(process.platform !== 'win32')(
 
     afterEach(() => {
       vi.unstubAllGlobals();
+      for (const path of temporaryDirectories.splice(0)) {
+        rmSync(path, { recursive: true, force: true, maxRetries: 3 });
+      }
+    });
+
+    it('projects credential consumption without consulting host ports', async () => {
+      injectedPhase = 'ergo node startup credential consumption';
+      const credential = issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        MNEMONIC,
+        PUBLIC_KEY_HEX,
+      );
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        credential,
+      );
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
+
+      const failure = await captureStartupFailure(session);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          failure,
+        ),
+      ).toBe('ergo node startup credential consumption');
+      await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      await expect(session.stop()).resolves.toBeUndefined();
+    });
+
+    it('projects runtime-root creation without consulting host ports', async () => {
+      injectedPhase = 'ergo node startup runtime creation';
+      const directory = ownedTestDirectory();
+      const invalidTempRoot = join(directory, 'not-a-directory');
+      writeFileSync(invalidTempRoot, 'file', { encoding: 'ascii', flag: 'wx' });
+      const priorTemp = process.env.TEMP;
+      const priorTmp = process.env.TMP;
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          MNEMONIC,
+          PUBLIC_KEY_HEX,
+        ),
+      );
+      try {
+        process.env.TEMP = invalidTempRoot;
+        process.env.TMP = invalidTempRoot;
+        const failure = await captureStartupFailure(session);
+        expect(
+          projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+            failure,
+          ),
+        ).toBe('ergo node startup runtime creation');
+        await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      } finally {
+        restoreEnvironmentVariable('TEMP', priorTemp);
+        restoreEnvironmentVariable('TMP', priorTmp);
+        await session.stop();
+      }
     });
 
     it.each([
       'ergo node primary spawn',
+      'ergo node primary readiness',
       'ergo node primary identity',
       'ergo node witness spawn',
       'ergo node witness readiness',
@@ -185,6 +256,38 @@ describe.skipIf(process.platform !== 'win32')(
     });
   },
 );
+
+async function captureStartupFailure(
+  session: ReturnType<
+    typeof createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1
+  >,
+): Promise<unknown> {
+  let failure: unknown;
+  try {
+    await session.startMining();
+  } catch (error) {
+    failure = error;
+  }
+  if (failure === undefined) {
+    await session.stop();
+    throw new Error('isolated test process unexpectedly reached mining');
+  }
+  return failure;
+}
+
+function ownedTestDirectory(): string {
+  const directory = mkdtempSync(join(tmpdir(), 'bridge-ergo-startup-phase-test-'));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+function restoreEnvironmentVariable(
+  name: 'TEMP' | 'TMP',
+  value: string | undefined,
+): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
 
 function processInput(): SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input {
   const executableSha256Hex = sha256(readFileSync(process.execPath));

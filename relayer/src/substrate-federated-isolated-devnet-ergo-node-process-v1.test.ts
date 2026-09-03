@@ -5,7 +5,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -49,7 +48,6 @@ import type {
 import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
-  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
@@ -567,31 +565,6 @@ describe.skipIf(process.platform !== 'win32')(
       }
     });
 
-    it('projects the exact startup subphase without relaxing cleanup', async () => {
-      const credential = testMiningCredential();
-      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
-        processInput(),
-        launchBinding(),
-        credential,
-      );
-      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
-
-      let failure: unknown;
-      try {
-        await session.startMining();
-      } catch (error) {
-        failure = error;
-      }
-
-      expect(
-        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
-          failure,
-        ),
-      ).toBe('ergo node startup credential consumption');
-      await expect(session.startMining()).rejects.toThrow(/exactly once/);
-      await expect(session.stop()).resolves.toBeUndefined();
-    });
-
     it('projects post-construction artifact drift before process launch', async () => {
       const directory = ownedTestDirectory();
       const javaPath = join(directory, 'java.exe');
@@ -642,51 +615,6 @@ describe.skipIf(process.platform !== 'win32')(
           blocker.close(error => error ? rejectPromise(error) : resolvePromise());
         });
       }
-    });
-
-    it('projects failure to create the owned runtime root', async () => {
-      const directory = ownedTestDirectory();
-      const invalidTempRoot = join(directory, 'not-a-directory');
-      writeFileSync(invalidTempRoot, 'file', { encoding: 'ascii', flag: 'wx' });
-      const priorTemp = process.env.TEMP;
-      const priorTmp = process.env.TMP;
-      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
-        processInput(),
-        launchBinding(),
-        testMiningCredential(),
-      );
-      try {
-        process.env.TEMP = invalidTempRoot;
-        process.env.TMP = invalidTempRoot;
-        const failure = await captureStartupFailure(session);
-        expect(
-          projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
-            failure,
-          ),
-        ).toBe('ergo node startup runtime creation');
-        await expect(session.startMining()).rejects.toThrow(/exactly once/);
-      } finally {
-        restoreEnvironmentVariable('TEMP', priorTemp);
-        restoreEnvironmentVariable('TMP', priorTmp);
-        await session.stop();
-      }
-    });
-
-    it('projects a primary process that exits before readiness', async () => {
-      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
-        processInput(),
-        launchBinding(),
-        testMiningCredential(),
-      );
-
-      const failure = await captureStartupFailure(session);
-      expect(
-        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
-          failure,
-        ),
-      ).toBe('ergo node primary readiness');
-      await expect(session.startMining()).rejects.toThrow(/exactly once/);
-      await expect(session.stop()).resolves.toBeUndefined();
     });
 
     it('binds every finite startup subphase immediately before its operation', () => {
@@ -1272,14 +1200,6 @@ async function captureStartupFailure(
     throw new Error('isolated test process unexpectedly reached mining');
   }
   return failure;
-}
-
-function restoreEnvironmentVariable(
-  name: 'TEMP' | 'TMP',
-  value: string | undefined,
-): void {
-  if (value === undefined) delete process.env[name];
-  else process.env[name] = value;
 }
 
 function launchBinding(): SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1 {
