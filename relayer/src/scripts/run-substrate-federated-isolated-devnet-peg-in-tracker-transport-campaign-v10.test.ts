@@ -76,6 +76,9 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA,
 } from './run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v10.js';
@@ -99,7 +102,8 @@ const OUTCOME_DIGEST = '66'.repeat(32);
 const RESPONSE_DIGEST = '77'.repeat(32);
 const CONFIRMATION_HEADER_ID = '88'.repeat(32);
 const CONFIRMATION_OBSERVATION_DIGEST = '99'.repeat(32);
-const RECIPIENT_ADDRESS_HEX = 'ab'.repeat(20);
+const RECIPIENT_ADDRESS_HEX =
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1.slice(2);
 const AMOUNT_NANO_ERG = '15000000';
 const PROTOC_EXECUTABLE_PATH = 'C:\\toolchain\\protoc.exe';
 const PREFLIGHT_RECEIPT_DIGEST = 'aa'.repeat(32);
