@@ -4037,13 +4037,25 @@ function removeOwnedRuntime(path: string): void {
 function assertOwnedRuntimePath(path: string): void {
   const resolved = resolve(path);
   const tempRoot = realpathSync(tmpdir());
-  if (
-    !isStrictDescendant(tempRoot, resolved)
-    || !resolve(resolved).startsWith(resolve(tempRoot) + sep)
-    || !resolved.split(/[\\/]/u).at(-1)?.startsWith('e2s-fed6g1di3b-ergo-')
-  ) {
+  if (!isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1(
+    tempRoot,
+    resolved,
+  )) {
     throw new Error('isolated Ergo runtime root is outside the dedicated temp namespace');
   }
+}
+
+export function isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1(
+  tempRootValue: string,
+  runtimeRootValue: string,
+): boolean {
+  const tempRoot = resolve(tempRootValue);
+  const runtimeRoot = resolve(runtimeRootValue);
+  const tempPrefix = tempRoot.endsWith(sep) ? tempRoot : `${tempRoot}${sep}`;
+  return isStrictDescendant(tempRoot, runtimeRoot)
+    && runtimeRoot.startsWith(tempPrefix)
+    && runtimeRoot.split(/[\\/]/u).at(-1)
+      ?.startsWith('e2s-fed6g1di3b-ergo-') === true;
 }
 
 function isStrictDescendant(parent: string, child: string): boolean {

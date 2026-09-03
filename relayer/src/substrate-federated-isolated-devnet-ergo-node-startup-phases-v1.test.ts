@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -29,6 +29,7 @@ vi.mock('node:child_process', async importOriginal => {
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import {
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   type SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -213,6 +214,26 @@ describe.skipIf(process.platform !== 'win32')(
         restoreEnvironmentVariable('TMP', priorTmp);
         await session.stop();
       }
+    });
+
+    it('accepts only the reserved namespace beneath a volume-root temp directory', () => {
+      const volumeRoot = parse(import.meta.dirname).root;
+      expect(isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1(
+        volumeRoot,
+        join(volumeRoot, 'e2s-fed6g1di3b-ergo-candidate'),
+      )).toBe(true);
+      expect(isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1(
+        volumeRoot,
+        volumeRoot,
+      )).toBe(false);
+      expect(isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1(
+        volumeRoot,
+        join(volumeRoot, 'unowned-runtime'),
+      )).toBe(false);
+      expect(isSubstrateFederatedIsolatedDevnetOwnedRuntimePathV1(
+        join(volumeRoot, 'temp'),
+        join(volumeRoot, 'temp-sibling', 'e2s-fed6g1di3b-ergo-candidate'),
+      )).toBe(false);
     });
 
     it.each([
