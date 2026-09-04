@@ -614,7 +614,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       label: 'source-locked authority-safe Frontier build',
     });
 
-    sourceFailurePhase = 'source target binary and base spec';
+    sourceFailurePhase = 'source target built binary artifact';
     const binaryPath = canonicalRegularFile(
       join(
         cargoTargetDirectory,
@@ -627,6 +627,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     );
     const binaryStat = statSync(binaryPath);
     const builtBinaryDigest = sha256(readFileSync(binaryPath));
+    sourceFailurePhase = 'source target binary identity and version';
     const binaryVersion = await exactVersion({
       executablePath: binaryPath,
       cwd: frontierSourcePath,
@@ -635,6 +636,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       label: 'Frontier binary',
     });
 
+    sourceFailurePhase = 'source target base spec process';
     const reproducedBaseResult = await runBoundedProcess({
       executablePath: binaryPath,
       args: ['build-spec', '--chain', 'dev', '--disable-default-bootnode'],
@@ -646,9 +648,11 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       maxStderrBytes: 64 * 1024,
       label: 'freshly built Frontier base-spec reproduction',
     });
+    sourceFailurePhase = 'source target base spec stderr policy';
     assertSubstrateFederatedAuthoritySafeBuildSpecStderrV1(
       reproducedBaseResult.stderr,
     );
+    sourceFailurePhase = 'source target base spec exact reproduction';
     const reproducedBaseBytes = Buffer.from(reproducedBaseResult.stdoutBytes);
     const reproducedBaseSha256Hex = sha256(reproducedBaseBytes);
     const suppliedBaseSpecBytes = 'baseSpecBytes' in input

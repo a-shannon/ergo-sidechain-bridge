@@ -705,6 +705,11 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       'source target toolchain and build workspace',
       'source target Frontier build',
       'source target binary and base spec',
+      'source target built binary artifact',
+      'source target binary identity and version',
+      'source target base spec process',
+      'source target base spec stderr policy',
+      'source target base spec exact reproduction',
       'source target chain spec generation',
       'source target runtime source tests',
       'source target post-build invariants',
@@ -901,6 +906,82 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     expect(mocks.captureRecoveryTimeline).not.toHaveBeenCalled();
   });
 
+  it('classifies a missing built binary artifact before version execution', async () => {
+    mocks.runProcess.mockImplementation(async value => {
+      const result = await runProcess(value);
+      if (value.args[0] === 'build') {
+        const target = value.env?.CARGO_TARGET_DIR;
+        if (!target) throw new Error('mocked Cargo build requires CARGO_TARGET_DIR');
+        rmSync(join(
+          target,
+          'debug',
+          process.platform === 'win32'
+            ? 'frontier-template-node.exe'
+            : 'frontier-template-node',
+        ));
+      }
+      return result;
+    });
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target built binary artifact');
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('classifies built binary identity or version execution failure', async () => {
+    const rejected = new Error('synthetic private binary-version failure');
+    mocks.runProcess.mockImplementation(async value => {
+      if (
+        value.args[0] === '--version'
+        && ![paths.cargo, paths.rustc, paths.git].includes(value.executablePath)
+      ) {
+        throw rejected;
+      }
+      return await runProcess(value);
+    });
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBe(rejected);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target binary identity and version');
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
+  it('classifies built-in base-spec process failure', async () => {
+    const rejected = new Error('synthetic private base-spec process failure');
+    mocks.runProcess.mockImplementation(async value => {
+      if (value.args[0] === 'build-spec' && value.args[2] === 'dev') {
+        throw rejected;
+      }
+      return await runProcess(value);
+    });
+
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBe(rejected);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target base spec process');
+    expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
+  });
+
   it('rejects a fresh binary whose built-in runtime does not reproduce the pinned base spec', async () => {
     const changedBaseSpec = baseSpec() as Record<string, unknown>;
     changedBaseSpec.protocolId = 'different-built-runtime';
@@ -921,7 +1002,7 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
         failure,
       ),
-    ).toBe('source target binary and base spec');
+    ).toBe('source target base spec exact reproduction');
     expect(mocks.withOwnedProcesses).not.toHaveBeenCalled();
   });
 
@@ -982,9 +1063,19 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
   it('rejects any chain-spec stderr outside the exact Frontier status line', async () => {
     buildSpecStderr = 'warning: unreviewed chain-spec fallback';
 
-    await expect(
-      acceptSubstrateFederatedAuthoritySafeDevnetV1(input()),
-    ).rejects.toThrow(/chain-spec acceptance wrote unexpected stderr/);
+    const failure = await acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
+      input(),
+    ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /chain-spec acceptance wrote unexpected stderr/,
+    );
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target base spec stderr policy');
     expect(mocks.observe).not.toHaveBeenCalled();
   });
 
