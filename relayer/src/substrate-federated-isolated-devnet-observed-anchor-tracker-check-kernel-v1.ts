@@ -257,6 +257,8 @@ function assertReservationFreshnessMatchesFrozenCheck(
   freshness: Readonly<ObservedAnchorTrackerCheckKernelResultBase>,
   frozen: Readonly<ObservedAnchorTrackerCheckKernelV2Result>,
 ): void {
+  // Revalidation signs again, so proof and JVM-response bytes may change while
+  // the unsigned transaction, authority, context, and checker remain exact.
   if (
     freshness.trackerInputBoxIdHex !== frozen.trackerInputBoxIdHex
     || freshness.statementIdHex !== frozen.statementIdHex
@@ -267,13 +269,6 @@ function assertReservationFreshnessMatchesFrozenCheck(
     || freshness.unsignedTransactionDigestHex
       !== frozen.unsignedTransactionDigestHex
     || freshness.signedTransactionIdHex !== frozen.signedTransactionIdHex
-    || freshness.signedTransactionCanonicalJsonSha256Hex
-      !== frozen.signedTransactionCanonicalJsonSha256Hex
-    || freshness.signedTransactionBytesSha256Hex
-      !== frozen.signedTransactionBytesSha256Hex
-    || freshness.signedTransactionBytesLength
-      !== frozen.signedTransactionBytesLength
-    || freshness.checkResponseSha256Hex !== frozen.checkResponseSha256Hex
     || freshness.signer.derivation !== frozen.signer.derivation
     || freshness.signer.publicKeyHex !== frozen.signer.publicKeyHex
     || freshness.signer.p2pkErgoTreeHex !== frozen.signer.p2pkErgoTreeHex

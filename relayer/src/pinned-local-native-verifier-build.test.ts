@@ -24,6 +24,7 @@ import {
   BoundedProcessExitError,
   buildPinnedLocalNativeCargoArgs,
   buildPinnedLocalNativeReproducibleRustFlags,
+  buildPinnedLocalWasmPathRemapRustFlags,
   canonicalizePinnedGeneratedJsonVectorBytes,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256,
@@ -178,15 +179,23 @@ describe('pinned local native verifier build conformance', () => {
   });
 
   it('pins local reproducibility flags and requests deterministic MSVC linking', () => {
+    const rustcExecutablePath = resolve(
+      tmpdir(),
+      'e2s-rust-toolchain',
+      'bin',
+      'rustc.exe',
+    );
     const flags = buildPinnedLocalNativeReproducibleRustFlags({
       frontierSourcePath: resolve(bridgeRoot, '.source-cache', 'frontier-patched'),
       buildTargetPath: resolve(tmpdir(), 'e2s-pinned-local-native-example'),
+      rustcExecutablePath,
       rustTarget: 'x86_64-pc-windows-msvc',
     });
 
     expect(flags).toEqual([
       expect.stringMatching(/^--remap-path-prefix=.*=\/e2s\/frontier-source$/),
       expect.stringMatching(/^--remap-path-prefix=.*=\/e2s\/build-target$/),
+      `--remap-path-prefix=${resolve(dirname(rustcExecutablePath), '..')}=/e2s/rust-toolchain`,
       '-Cdebuginfo=0',
       '-Ccodegen-units=1',
       '-Clink-arg=/Brepro',
@@ -196,10 +205,65 @@ describe('pinned local native verifier build conformance', () => {
     const nonMsvcFlags = buildPinnedLocalNativeReproducibleRustFlags({
       frontierSourcePath: resolve(bridgeRoot, '.source-cache', 'frontier-patched'),
       buildTargetPath: resolve(tmpdir(), 'e2s-pinned-local-native-example'),
+      rustcExecutablePath,
       rustTarget: 'x86_64-unknown-linux-gnu',
     });
     expect(nonMsvcFlags).not.toContain('-Clink-arg=/Brepro');
   });
+
+  it('remaps distinct Rust layouts without claiming equal flag identities', () => {
+    const rootLayout = resolve(tmpdir(), 'e2s-rust-root-layout');
+    const nestedLayout = resolve(
+      tmpdir(),
+      'e2s-rust-nested-layout',
+      'toolchains',
+      '1.82.0-x86_64-pc-windows-msvc',
+    );
+    const input = {
+      frontierSourcePath: resolve(tmpdir(), 'e2s-frontier-source'),
+      buildTargetPath: resolve(tmpdir(), 'e2s-build-target'),
+      rustTarget: 'x86_64-pc-windows-msvc',
+    } as const;
+
+    const rootFlags = buildPinnedLocalNativeReproducibleRustFlags({
+      ...input,
+      rustcExecutablePath: resolve(rootLayout, 'bin', 'rustc.exe'),
+    });
+    const nestedFlags = buildPinnedLocalNativeReproducibleRustFlags({
+      ...input,
+      rustcExecutablePath: resolve(nestedLayout, 'bin', 'rustc.exe'),
+    });
+
+    expect(rootFlags).toContain(
+      `--remap-path-prefix=${rootLayout}=/e2s/rust-toolchain`,
+    );
+    expect(nestedFlags).toContain(
+      `--remap-path-prefix=${nestedLayout}=/e2s/rust-toolchain`,
+    );
+    expect(rootFlags.join(' ')).not.toContain(nestedLayout);
+    expect(nestedFlags.join(' ')).not.toContain(rootLayout);
+    expect(rootFlags).not.toEqual(nestedFlags);
+  });
+
+  it.each([
+    ['Frontier source', 'frontierSourcePath', resolve(tmpdir(), 'frontier source')],
+    ['build target', 'buildTargetPath', resolve(tmpdir(), 'build target')],
+    [
+      'Rust toolchain root',
+      'rustcExecutablePath',
+      resolve(tmpdir(), 'rust toolchain', 'bin', 'rustc.exe'),
+    ],
+  ] as const)(
+    'rejects a non-token %s path before space-delimited WASM flags',
+    (label, field, value) => {
+      expect(() => buildPinnedLocalWasmPathRemapRustFlags({
+        frontierSourcePath: resolve(tmpdir(), 'frontier-source'),
+        buildTargetPath: resolve(tmpdir(), 'build-target'),
+        rustcExecutablePath: resolve(tmpdir(), 'rust-toolchain', 'bin', 'rustc.exe'),
+        [field]: value,
+      })).toThrow(new RegExp(`${label} path must not contain`, 'iu'));
+    },
+  );
 
   it('creates the Windows target suspended inside a kill-on-close Job Object', () => {
     const source = readFileSync(

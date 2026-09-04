@@ -116,6 +116,46 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('limits checkout layout discovery to reviewed Gate 5 entry points', () => {
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const layoutTarget = 'bridge-repository-layout.ts';
+    expect(inspect({
+      [reviewedRoot]: `
+        import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../../bridge-repository-layout.js';
+        resolveBridgeRepositoryRootsFromCheckoutLayout('bridge');
+      `,
+      [layoutTarget]: `
+        export function resolveBridgeRepositoryRootsFromCheckoutLayout(_root: string) {}
+        export function discoverBridgeRepositoryRoot(_root: string) {}
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [reviewedRoot]: `
+        import { discoverBridgeRepositoryRoot } from '../../bridge-repository-layout.js';
+        discoverBridgeRepositoryRoot('bridge');
+      `,
+      [layoutTarget]: `
+        export function discoverBridgeRepositoryRoot(_root: string) {}
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'restricted capability import binding is not allowlisted: ../../bridge-repository-layout.js#discoverBridgeRepositoryRoot',
+    ]);
+
+    expect(inspect({
+      'scripts/unreviewed-entry-point.ts': `
+        import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../bridge-repository-layout.js';
+        resolveBridgeRepositoryRootsFromCheckoutLayout('bridge');
+      `,
+      [layoutTarget]: `
+        export function resolveBridgeRepositoryRootsFromCheckoutLayout(_root: string) {}
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'exclusive authority import has the wrong owner: ../bridge-repository-layout.js#resolveBridgeRepositoryRootsFromCheckoutLayout',
+    ]);
+  });
+
   it('pins the federated application/checkpoint root to direct reviewed calls', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
@@ -402,13 +442,40 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('reserves node-startup phase projection to the reviewed composition root', () => {
+    const processModule =
+      'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
+    const reviewedRoot =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const projector =
+      'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1';
+    expect(inspect({
+      [processModule]: `export const ${projector} = () => {};`,
+      [reviewedRoot]: `
+        import { ${projector} } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        ${projector}({});
+      `,
+    })).toEqual([]);
+
+    expect(inspect({
+      [processModule]: `export const ${projector} = () => {};`,
+      'apps/bridge-daemon/forged-startup-phase-root.ts': `
+        import { ${projector} } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        ${projector}({});
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'apps must not import an unclassified legacy module: substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      `exclusive authority import has the wrong owner: ../../substrate-federated-isolated-devnet-ergo-node-process-v1.js#${projector}`,
+    ]);
+  });
+
   it('keeps the tracker confirmation receipt type inside the reviewed composition root', () => {
     const processModule =
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const receipt =
-      'SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt';
+      'SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV2Receipt';
     expect(inspect({
       [processModule]: `export interface ${receipt} {}`,
       [reviewedRoot]: `

@@ -7,6 +7,7 @@ import {
   isPathInside,
   readBoundedRegularFile,
 } from '../create-only-out-of-repository-artifact.js';
+import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../bridge-repository-layout.js';
 import {
   assertNoDuplicateJsonKeys,
   canonicalJson,
@@ -19,6 +20,10 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
+import {
+  isKnownSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1,
+  type SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1,
+} from '../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
 import type {
   SubstrateFederatedIsolatedDevnetPegInPlanV1,
 } from './run-substrate-federated-isolated-devnet-peg-in-source-lock-receipt-v1.js';
@@ -33,13 +38,18 @@ import {
   isKnownFrozenObservedAnchorTrackerCheckCampaignBindingLabelV7,
 } from './run-substrate-federated-isolated-devnet-peg-in-frozen-observed-anchor-tracker-check-campaign-receipt-v7.js';
 import {
-  isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
-  parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9,
-  parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9,
-  type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9,
-  type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
-} from './run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v9.js';
+  preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1,
+  type SubstrateFederatedIsolatedDevnetCampaignPreflightV1Receipt,
+  type SubstrateFederatedIsolatedDevnetCampaignPreflightV1Phase,
+} from './preflight-substrate-federated-isolated-devnet-campaign-v1.js';
+import {
+  isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10,
+  parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10,
+  parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10,
+  type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10,
+  type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10,
+} from './run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v10.js';
 
 const WORKER_TIMEOUT_MS = 150 * 60_000;
 const MAX_REQUEST_BYTES = 1024 * 1024;
@@ -53,20 +63,24 @@ const SAFE_WORKER_BINDING_FAILURE_PREFIX =
   `${SAFE_WORKER_FAILURE_PREFIX}: producer-to-consumer binding changed: `;
 const SAFE_WORKER_PHASE_FAILURE_PREFIX =
   `${SAFE_WORKER_FAILURE_PREFIX}: phase failed: `;
+const SAFE_WORKER_CHECKED_SUBMISSION_FAILURE_PREFIX =
+  `${SAFE_WORKER_FAILURE_PREFIX}: checked submission failed: `;
 const COMMAND_RECEIPT_SCHEMA =
-  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-command-receipt.v9' as const;
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-command-receipt.v10' as const;
 const COMMAND_FAILURE_RECEIPT_SCHEMA =
-  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-command-failure-receipt.v9' as const;
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-command-failure-receipt.v10' as const;
 const COMMAND_RECEIPT_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_COMMAND_RECEIPT_V9';
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_COMMAND_RECEIPT_V10';
 const COMMAND_FAILURE_RECEIPT_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_COMMAND_FAILURE_RECEIPT_V9';
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_COMMAND_FAILURE_RECEIPT_V10';
 const ERGO_POSITIVE_LONG_MAX = 0x7fff_ffff_ffff_ffffn;
 const COMMAND_PHASES = Object.freeze([
   'command arguments',
+  'repository layout',
   'request binding',
   'external roots',
   'output reservation',
+  'request-bound preflight',
   'worker launch',
   'worker receipt',
   'command receipt',
@@ -74,21 +88,53 @@ const COMMAND_PHASES = Object.freeze([
 ] as const);
 type CommandPhase = typeof COMMAND_PHASES[number];
 const commandPhaseErrors = new WeakSet<object>();
+const preflightDiagnosticHints = new WeakSet<object>();
 const workerDiagnosticHints = new WeakSet<object>();
 
-class TrackerTransportCampaignWorkerDiagnosticHintV9 extends Error {
+class TrackerTransportCampaignPreflightDiagnosticHintV10 extends Error {
+  readonly phase: SubstrateFederatedIsolatedDevnetCampaignPreflightV1Phase;
+  readonly authoritative = false;
+
+  constructor(
+    phase: SubstrateFederatedIsolatedDevnetCampaignPreflightV1Phase,
+  ) {
+    super('isolated tracker transport campaign preflight diagnostic hint');
+    this.name = 'TrackerTransportCampaignPreflightDiagnosticHintV10';
+    this.phase = phase;
+    preflightDiagnosticHints.add(this);
+    Object.freeze(this);
+  }
+}
+
+function isPreflightDiagnosticHint(
+  error: unknown,
+): error is TrackerTransportCampaignPreflightDiagnosticHintV10 {
+  return typeof error === 'object'
+    && error !== null
+    && preflightDiagnosticHints.has(error)
+    && (error as { readonly authoritative?: unknown }).authoritative === false;
+}
+
+class TrackerTransportCampaignWorkerDiagnosticHintV10 extends Error {
   readonly binding: string | undefined;
+  readonly checkedSubmissionFailureCode:
+    SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1
+    | undefined;
   readonly phase:
-    SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 | undefined;
+    SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10 | undefined;
   readonly authoritative = false;
 
   constructor(diagnostic: Readonly<{
     readonly binding?: string;
-    readonly phase?: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9;
+    readonly checkedSubmissionFailureCode?:
+      SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1;
+    readonly phase?: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10;
   }>) {
     super('isolated tracker transport campaign worker diagnostic hint');
-    this.name = 'TrackerTransportCampaignWorkerDiagnosticHintV9';
+    this.name = 'TrackerTransportCampaignWorkerDiagnosticHintV10';
     this.binding = diagnostic.binding;
+    this.checkedSubmissionFailureCode =
+      diagnostic.checkedSubmissionFailureCode;
     this.phase = diagnostic.phase;
     workerDiagnosticHints.add(this);
     Object.freeze(this);
@@ -97,7 +143,7 @@ class TrackerTransportCampaignWorkerDiagnosticHintV9 extends Error {
 
 function isWorkerDiagnosticHint(
   error: unknown,
-): error is TrackerTransportCampaignWorkerDiagnosticHintV9 {
+): error is TrackerTransportCampaignWorkerDiagnosticHintV10 {
   return typeof error === 'object'
     && error !== null
     && workerDiagnosticHints.has(error)
@@ -106,18 +152,22 @@ function isWorkerDiagnosticHint(
       isKnownFrozenObservedAnchorTrackerCheckCampaignBindingLabelV7(
         (error as { readonly binding?: unknown }).binding,
       )
-      || isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+      || isKnownSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1(
+        (error as { readonly checkedSubmissionFailureCode?: unknown })
+          .checkedSubmissionFailureCode,
+      )
+      || isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10(
         (error as { readonly phase?: unknown }).phase,
       )
     );
 }
 
-class TrackerTransportCampaignCommandPhaseErrorV9 extends Error {
+class TrackerTransportCampaignCommandPhaseErrorV10 extends Error {
   readonly phase: CommandPhase;
 
   constructor(phase: CommandPhase, cause: unknown) {
     super(phase, { cause });
-    this.name = 'TrackerTransportCampaignCommandPhaseErrorV9';
+    this.name = 'TrackerTransportCampaignCommandPhaseErrorV10';
     this.phase = phase;
     commandPhaseErrors.add(this);
     Object.freeze(this);
@@ -126,7 +176,7 @@ class TrackerTransportCampaignCommandPhaseErrorV9 extends Error {
 
 function isCommandPhaseError(
   error: unknown,
-): error is TrackerTransportCampaignCommandPhaseErrorV9 {
+): error is TrackerTransportCampaignCommandPhaseErrorV10 {
   return typeof error === 'object'
     && error !== null
     && commandPhaseErrors.has(error)
@@ -137,28 +187,30 @@ function isCommandPhaseError(
 }
 
 type WorkerReceipt =
-  | Readonly<SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9>
-  | Readonly<SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9>;
+  | Readonly<SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10>
+  | Readonly<SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10>;
 
-export type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandV9Result =
+export type SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandV10Result =
   | Readonly<{
     readonly status:
       'isolated_peg_in_tracker_transport_canonically_confirmed_receipt_published';
     readonly canonicalConfirmationObserved: true;
+    readonly preflightReceiptDigestHex: string;
     readonly receiptDigestHex: string;
   }>
   | Readonly<{
     readonly status:
       'isolated_peg_in_tracker_transport_not_canonically_confirmed_receipt_published';
     readonly canonicalConfirmationObserved: false;
+    readonly preflightReceiptDigestHex: string;
     readonly receiptDigestHex: string;
   }>;
 
-export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV9 {
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV10 {
   readonly schema:
     | typeof COMMAND_RECEIPT_SCHEMA
     | typeof COMMAND_FAILURE_RECEIPT_SCHEMA;
-  readonly version: 9;
+  readonly version: 10;
   readonly status:
     | 'request_bound_local_peg_in_tracker_transport_canonically_confirmed'
     | 'request_bound_local_peg_in_tracker_transport_not_canonically_confirmed';
@@ -195,18 +247,21 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCo
   readonly receiptDigestHex: string;
 }
 
-export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV10(
   argv: readonly string[],
 ): Promise<Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandV9Result
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandV10Result
 >> {
   let phase: CommandPhase = 'command arguments';
   try {
     const args = parseArguments(argv);
     const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-    const relayerRoot = resolve(scriptDirectory, '..', '..');
-    const bridgeRoot = resolve(relayerRoot, '..');
-    const worktreeRoot = resolve(bridgeRoot, '..');
+    phase = 'repository layout';
+    const { bridgeRoot, worktreeRoot } =
+      resolveBridgeRepositoryRootsFromCheckoutLayout(
+        resolve(scriptDirectory, '..', '..', '..'),
+      );
+    const relayerRoot = resolve(bridgeRoot, 'relayer');
 
     phase = 'request binding';
     const request = readBoundedRegularFile(
@@ -264,10 +319,49 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
     assertOutputOutsideRuntimeRoots(outputPath, externalRoots);
     const workerPath = resolve(
       scriptDirectory,
-      'run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v9.ts',
+      'run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v10.ts',
+    );
+
+    phase = 'request-bound preflight';
+    let preflightPhase:
+      SubstrateFederatedIsolatedDevnetCampaignPreflightV1Phase =
+        'arguments and platform';
+    let preflightReceipt:
+      Readonly<SubstrateFederatedIsolatedDevnetCampaignPreflightV1Receipt>;
+    try {
+      preflightReceipt =
+        preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1([
+          '--request', request.canonicalPath,
+          '--expected-request-sha256', commandRequestSha256Hex,
+          '--amount-nano-erg', args.pegIn.amountNanoErg,
+          '--recipient-address-hex', args.pegIn.recipientAddressHex,
+          '--frontier-temporary-root', externalRoots[0],
+          '--frontier-cargo-cache', externalRoots[1],
+          '--relayer-cargo-cache', externalRoots[2],
+        ], currentPhase => {
+          preflightPhase = currentPhase;
+        });
+    } catch {
+      throw new TrackerTransportCampaignPreflightDiagnosticHintV10(
+        preflightPhase,
+      );
+    }
+    assertExactRequestBoundPreflight(
+      preflightReceipt,
+      commandRequestSha256Hex,
+      args.pegIn,
     );
 
     phase = 'worker launch';
+    const protocExecutablePath = process.env.PROTOC;
+    if (
+      protocExecutablePath === undefined
+      || protocExecutablePath.length === 0
+    ) {
+      throw new Error(
+        'isolated tracker transport campaign requires explicit PROTOC',
+      );
+    }
     let workerReceipt: WorkerReceipt;
     try {
       const result = await runBoundedProcess({
@@ -293,6 +387,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
         cwd: relayerRoot,
         env: childEnvironment(worktreeRoot, {
           cargoHomeDirectory: externalRoots[2],
+          protocExecutablePath,
         }),
         timeoutMs: WORKER_TIMEOUT_MS,
         terminationGraceMs: 30_000,
@@ -308,7 +403,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
         );
       }
       workerReceipt =
-        parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9(
+        parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10(
           result.stdout,
           commandRequestSha256Hex,
           args.pegIn,
@@ -327,10 +422,10 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       phase = 'worker receipt';
       const diagnostic = parseSafeWorkerDiagnostic(error.stderr);
       if (diagnostic !== undefined) {
-        throw new TrackerTransportCampaignWorkerDiagnosticHintV9(diagnostic);
+        throw new TrackerTransportCampaignWorkerDiagnosticHintV10(diagnostic);
       }
       workerReceipt =
-        parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9(
+        parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10(
           error.stderr,
           commandRequestSha256Hex,
           args.pegIn,
@@ -368,6 +463,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
         status:
           'isolated_peg_in_tracker_transport_canonically_confirmed_receipt_published' as const,
         canonicalConfirmationObserved: true as const,
+        preflightReceiptDigestHex: preflightReceipt.receiptDigestHex,
         receiptDigestHex: receipt.receiptDigestHex,
       });
     }
@@ -375,21 +471,73 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       status:
         'isolated_peg_in_tracker_transport_not_canonically_confirmed_receipt_published' as const,
       canonicalConfirmationObserved: false as const,
+      preflightReceiptDigestHex: preflightReceipt.receiptDigestHex,
       receiptDigestHex: receipt.receiptDigestHex,
     });
   } catch (error) {
-    if (isCommandPhaseError(error) || isWorkerDiagnosticHint(error)) {
+    if (
+      isCommandPhaseError(error)
+      || isPreflightDiagnosticHint(error)
+      || isWorkerDiagnosticHint(error)
+    ) {
       throw error;
     }
-    throw new TrackerTransportCampaignCommandPhaseErrorV9(phase, error);
+    throw new TrackerTransportCampaignCommandPhaseErrorV10(phase, error);
   }
+}
+
+function assertExactRequestBoundPreflight(
+  receipt: Readonly<SubstrateFederatedIsolatedDevnetCampaignPreflightV1Receipt>,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<SubstrateFederatedIsolatedDevnetPegInPlanV1>,
+): void {
+  if (
+    receipt.status !== 'request_bound_lab_campaign_preflight_passed'
+    || receipt.requestSha256Hex !== expectedRequestSha256Hex
+    || receipt.pegIn.amountNanoErg !== expectedPegIn.amountNanoErg
+    || receipt.pegIn.recipientAddressHex !== expectedPegIn.recipientAddressHex
+    || !/^[0-9a-f]{64}$/u.test(receipt.receiptDigestHex)
+  ) {
+    throw new Error('isolated campaign preflight receipt binding changed');
+  }
+  assertExpectedBooleanRecord(receipt.checks, {
+    canonicalRequestDigestBound: true,
+    pinnedGitExecutableBound: true,
+    exactBridgeHeadObserved: true,
+    trackedWorktreeClean: true,
+    exactBaseSpecBytesBound: true,
+    deterministicLabApplicationBound: true,
+    distinctLoopbackSourceTopologyBound: true,
+    freshArtifactDestinationBound: true,
+    externalRootsDisjointAndOutsideWorktree: true,
+    exactPegInPlanBound: true,
+    visualStudioAndOfflineFrontierPreflightPassed: true,
+    workerNodeAndCampaignLaunchAbsent: true,
+  }, 'request-bound preflight checks');
+  assertExpectedBooleanRecord(receipt.boundaries, {
+    localPreflightOnly: true,
+    sourceConsensusAuthenticated: false,
+    ergoConsensusAuthenticated: false,
+    targetNodeAcceptanceEstablished: false,
+    signingAuthorized: false,
+    submissionAuthorized: false,
+    broadcastAuthorized: false,
+    trackerAdmissionEstablished: false,
+    fundsAuthorityEstablished: false,
+    gate5Closed: false,
+    trustlessStatusEstablished: false,
+    productionReadinessEstablished: false,
+    hostileSameUserMutationResistanceEstablished: false,
+  }, 'request-bound preflight boundaries');
 }
 
 function parseSafeWorkerDiagnostic(
   stderr: string,
 ): Readonly<{
   readonly binding?: string;
-  readonly phase?: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9;
+  readonly checkedSubmissionFailureCode?:
+    SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1;
+  readonly phase?: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10;
 }> | undefined {
   if (!stderr.endsWith('\n')) return undefined;
   const line = stderr.slice(0, -1);
@@ -400,9 +548,19 @@ function parseSafeWorkerDiagnostic(
       ? Object.freeze({ binding })
       : undefined;
   }
+  if (line.startsWith(SAFE_WORKER_CHECKED_SUBMISSION_FAILURE_PREFIX)) {
+    const checkedSubmissionFailureCode = line.slice(
+      SAFE_WORKER_CHECKED_SUBMISSION_FAILURE_PREFIX.length,
+    );
+    return isKnownSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1(
+      checkedSubmissionFailureCode,
+    )
+      ? Object.freeze({ checkedSubmissionFailureCode })
+      : undefined;
+  }
   if (line.startsWith(SAFE_WORKER_PHASE_FAILURE_PREFIX)) {
     const phase = line.slice(SAFE_WORKER_PHASE_FAILURE_PREFIX.length);
-    return isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+    return isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10(
       phase,
     )
       ? Object.freeze({ phase })
@@ -416,13 +574,13 @@ function buildCommandReceipt(
   pegIn: Readonly<SubstrateFederatedIsolatedDevnetPegInPlanV1>,
   executionReceipt: WorkerReceipt,
 ): Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV10
 > {
   const confirmed =
     executionReceipt.status === 'local_tracker_transport_canonically_confirmed';
   const body = {
     schema: confirmed ? COMMAND_RECEIPT_SCHEMA : COMMAND_FAILURE_RECEIPT_SCHEMA,
-    version: 9 as const,
+    version: 10 as const,
     status: confirmed
       ? 'request_bound_local_peg_in_tracker_transport_canonically_confirmed' as const
       : 'request_bound_local_peg_in_tracker_transport_not_canonically_confirmed' as const,
@@ -471,13 +629,13 @@ function buildCommandReceipt(
   return receipt;
 }
 
-export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV9(
+export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV10(
   serialized: string,
   expectedReceiptDigestHex: string,
   expectedRequestSha256Hex: string,
   expectedPegIn: Readonly<SubstrateFederatedIsolatedDevnetPegInPlanV1>,
 ): Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV10
 > {
   fixedHex(expectedReceiptDigestHex, 32, 'expected command receipt digest');
   fixedHex(expectedRequestSha256Hex, 32, 'expected command request digest');
@@ -513,7 +671,7 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     && receipt.status
       === 'request_bound_local_peg_in_tracker_transport_not_canonically_confirmed';
   if (
-    receipt.version !== 9
+    receipt.version !== 10
     || (!confirmed && !notConfirmed)
     || receipt.commandRequestSha256Hex !== expectedRequestSha256Hex
   ) {
@@ -527,12 +685,12 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     throw new Error('tracker transport command receipt peg-in changed');
   }
   const executionReceipt = confirmed
-    ? parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9(
+    ? parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10(
       `${canonicalJson(receipt.executionReceipt)}\n`,
       expectedRequestSha256Hex,
       pegIn,
     )
-    : parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9(
+    : parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10(
       `${canonicalJson(receipt.executionReceipt)}\n`,
       expectedRequestSha256Hex,
       pegIn,
@@ -589,7 +747,7 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     ...receipt,
     executionReceipt,
   }) as unknown as Readonly<
-    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV9
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandReceiptV10
   >;
 }
 
@@ -758,11 +916,20 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
-export function formatSafeTrackerTransportCampaignCommandFailureV9(
+export function formatSafeTrackerTransportCampaignCommandFailureV10(
   error: unknown,
 ): string {
+  if (isPreflightDiagnosticHint(error)) {
+    return `${COMMAND_FAILURE_PREFIX}: preflight phase failed: ${error.phase}\n`;
+  }
   if (isWorkerDiagnosticHint(error) && error.binding !== undefined) {
     return `${COMMAND_FAILURE_PREFIX}: untrusted worker binding hint: ${error.binding}\n`;
+  }
+  if (
+    isWorkerDiagnosticHint(error)
+    && error.checkedSubmissionFailureCode !== undefined
+  ) {
+    return `${COMMAND_FAILURE_PREFIX}: untrusted worker checked-submission failure hint: ${error.checkedSubmissionFailureCode}\n`;
   }
   if (isWorkerDiagnosticHint(error) && error.phase !== undefined) {
     return `${COMMAND_FAILURE_PREFIX}: untrusted worker phase hint: ${error.phase}\n`;
@@ -775,7 +942,7 @@ export function formatSafeTrackerTransportCampaignCommandFailureV9(
 
 async function main(): Promise<void> {
   const result =
-    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV9(
+    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignCommandFromArgumentsV10(
       process.argv.slice(2),
     );
   process.stdout.write(`${canonicalJson(result)}\n`);
@@ -787,7 +954,7 @@ const invokedPath = process.argv[1]
   : undefined;
 if (invokedPath === import.meta.url) {
   main().catch(error => {
-    process.stderr.write(formatSafeTrackerTransportCampaignCommandFailureV9(error));
+    process.stderr.write(formatSafeTrackerTransportCampaignCommandFailureV10(error));
     process.exitCode = 1;
   });
 }

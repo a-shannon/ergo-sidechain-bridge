@@ -82,7 +82,7 @@ describe('standalone consensus-source build workflow', () => {
       sourceLock,
     );
     expect(siblingJob.errors).toContain(
-      'workflow jobs must be exactly audit-alpha and consensus-sources',
+      'workflow jobs must be exactly audit-alpha, solidity-audit, and consensus-sources',
     );
   });
 
@@ -101,6 +101,56 @@ describe('standalone consensus-source build workflow', () => {
     );
     expect(decodedTargetTrigger.errors).toContain(
       'workflow triggers must be exactly pull_request and push',
+    );
+
+    const duplicateFeaturePush = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace('      - "a-shannon/research-alpha"', '      - "a-shannon/**"'),
+      sourceLock,
+    );
+    expect(duplicateFeaturePush.errors).toContain(
+      'push branches and paths must match the reviewed workflow coverage',
+    );
+  });
+
+  it('keeps dependency auditing fail-closed while bounding transient fetch retries', () => {
+    const missingRetry = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(' --fetch-retries=5', ''),
+      sourceLock,
+    );
+    expect(missingRetry.errors).toContain(
+      'Audit Solidity dependencies: run command must match the reviewed command graph',
+    );
+    expect(missingRetry.checks.exactCommandGraphValid).toBe(false);
+
+    const ignoredAuditFailure = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace('--fetch-timeout=30000', '--fetch-timeout=30000 || true'),
+      sourceLock,
+    );
+    expect(ignoredAuditFailure.errors).toContain(
+      'Audit Solidity dependencies: run command must match the reviewed command graph',
+    );
+    expect(ignoredAuditFailure.checks.exactCommandGraphValid).toBe(false);
+
+    const redirectedRegistry = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '--registry=https://registry.npmjs.org/',
+        '--registry=https://example.invalid/',
+      ),
+      sourceLock,
+    );
+    expect(redirectedRegistry.errors).toContain(
+      'Audit Solidity dependencies: run command must match the reviewed command graph',
+    );
+
+    const omittedDevelopmentDependencies = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        ' --include=dev --include=optional --include=peer',
+        ' --omit=dev --include=optional --include=peer',
+      ),
+      sourceLock,
+    );
+    expect(omittedDevelopmentDependencies.errors).toContain(
+      'Audit Solidity dependencies: run command must match the reviewed command graph',
     );
   });
 

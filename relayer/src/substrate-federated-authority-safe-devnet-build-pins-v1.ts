@@ -23,6 +23,14 @@ import {
   buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1,
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1,
 } from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
+import {
+  inspectSubstrateFederatedAuthoritySafePinnedProtocV1,
+  type SubstrateFederatedAuthoritySafePinnedProtocV1Observation,
+} from './substrate-federated-authority-safe-devnet-protoc-v1.js';
+import {
+  inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1,
+  type SubstrateFederatedAuthoritySafePinnedRustSrcV1Observation,
+} from './substrate-federated-authority-safe-devnet-rust-src-v1.js';
 import { parseStrictJsonPreservingNumbers } from
   './substrate-federated-legacy-compatibility-devnet-chain-spec-v1.js';
 
@@ -150,6 +158,12 @@ interface BuildObservation {
   readonly nativeBinaryVersion: string;
   readonly source: Readonly<ConsensusSourceBaselineReport>;
   readonly toolchain: Readonly<NativeVerifierBuildToolObservation>;
+  readonly protoc: Readonly<
+    SubstrateFederatedAuthoritySafePinnedProtocV1Observation
+  >;
+  readonly rustSrc: Readonly<
+    SubstrateFederatedAuthoritySafePinnedRustSrcV1Observation
+  >;
 }
 
 export async function refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1(
@@ -267,6 +281,16 @@ export async function refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1(
     second.toolchain,
     'locked native toolchain changed between the two builds',
   );
+  assertSameObservation(
+    first.protoc,
+    second.protoc,
+    'locked Protobuf compiler changed between the two builds',
+  );
+  assertSameObservation(
+    first.rustSrc,
+    second.rustSrc,
+    'locked Rust standard-library source changed between the two builds',
+  );
 
   const baseSpecSha256Hex = sha256(first.baseSpecBytes);
   const runtimeCodeSha256Hex = sha256(first.runtimeCodeBytes);
@@ -370,6 +394,15 @@ async function buildOnce(
       gitExecutablePath: input.gitExecutablePath,
       cwd: input.frontierSourcePath,
     });
+  const protocBefore = inspectSubstrateFederatedAuthoritySafePinnedProtocV1({
+    bridgeRoot: input.bridgeRoot,
+    cwd: input.frontierSourcePath,
+  });
+  const rustSrcBefore =
+    inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1({
+      bridgeRoot: input.bridgeRoot,
+      rustcExecutablePath: input.rustcExecutablePath,
+    });
   const workspace = createPinnedLocalNativeBuildWorkspace(undefined, {
     cargoDependencyMode: 'shared-cache',
     temporaryDirectoryRoot: input.temporaryDirectoryRoot,
@@ -383,6 +416,8 @@ async function buildOnce(
         cargoHomeDirectory: workspace.cargoHomePath,
         cargoExecutablePath: input.cargoExecutablePath,
         frontierSourcePath: input.frontierSourcePath,
+        gitExecutablePath: input.gitExecutablePath,
+        protocExecutablePath: protocBefore.executablePath,
         rustcExecutablePath: input.rustcExecutablePath,
         rustTarget: toolchainBefore.rustTarget,
       });
@@ -443,6 +478,10 @@ async function buildOnce(
         gitExecutablePath: input.gitExecutablePath,
         cwd: input.frontierSourcePath,
       });
+    const protocAfter = inspectSubstrateFederatedAuthoritySafePinnedProtocV1({
+      bridgeRoot: input.bridgeRoot,
+      cwd: input.frontierSourcePath,
+    });
     assertSameObservation(
       sourceBefore,
       sourceAfter,
@@ -453,6 +492,21 @@ async function buildOnce(
       toolchainAfter,
       'locked native toolchain changed during one pin build',
     );
+    assertSameObservation(
+      protocBefore,
+      protocAfter,
+      'locked Protobuf compiler changed during one pin build',
+    );
+    const rustSrcAfter =
+      inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1({
+        bridgeRoot: input.bridgeRoot,
+        rustcExecutablePath: input.rustcExecutablePath,
+      });
+    assertSameObservation(
+      rustSrcBefore,
+      rustSrcAfter,
+      'locked Rust standard-library source changed during one pin build',
+    );
     return Object.freeze({
       buildTargetPath,
       baseSpecBytes,
@@ -462,6 +516,8 @@ async function buildOnce(
       nativeBinaryVersion,
       source: sourceBefore,
       toolchain: toolchainBefore,
+      protoc: protocBefore,
+      rustSrc: rustSrcBefore,
     });
   } finally {
     workspace.cleanup();

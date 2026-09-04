@@ -7,6 +7,7 @@ import {
   isPathInside,
   readBoundedRegularFile,
 } from '../create-only-out-of-repository-artifact.js';
+import { resolveCanonicalBridgeRepositoryRoots } from '../bridge-repository-layout.js';
 import {
   canonicalJson,
   sha256CanonicalJson,
@@ -312,9 +313,10 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
   try {
     const args = parseArguments(argv);
     const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-    const relayerRoot = resolve(scriptDirectory, '..', '..');
-    const bridgeRoot = resolve(relayerRoot, '..');
-    const worktreeRoot = resolve(bridgeRoot, '..');
+    const { bridgeRoot, worktreeRoot } = resolveCanonicalBridgeRepositoryRoots(
+      resolve(scriptDirectory, '..', '..', '..'),
+    );
+    const relayerRoot = resolve(bridgeRoot, 'relayer');
 
     phase = 'request binding';
     const request = readBoundedRegularFile(

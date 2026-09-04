@@ -8,6 +8,10 @@ import {
 import { join } from 'node:path';
 
 import {
+  createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1,
+  type SubstrateFederatedIsolatedDevnetPacketProductionPhaseV1,
+} from './relayer-core/substrate-federated-isolated-devnet-packet-production-phase-v1.js';
+import {
   decodePegInSourceIntentV2Hex,
 } from './peg-in-causal-admission-v2.js';
 import {
@@ -1219,6 +1223,42 @@ async function producePacket(
   | SubstrateFederatedIsolatedDevnetPacketV1
   | SubstrateFederatedIsolatedDevnetPacketV2
 >> {
+  let phase: SubstrateFederatedIsolatedDevnetPacketProductionPhaseV1 =
+    'packet input and contract binding';
+  try {
+    return await producePacketWithPhaseV1(
+      input,
+      sourceAttestation,
+      signerBinding,
+      mode,
+      nextPhase => {
+        phase = nextPhase;
+      },
+    );
+  } catch (error) {
+    throw createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(
+      phase,
+      error,
+    );
+  }
+}
+
+async function producePacketWithPhaseV1(
+  input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
+  sourceAttestation: Readonly<
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
+    | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
+  >,
+  signerBinding:
+    Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>,
+  mode: 'v1' | 'v2',
+  setPhase: (
+    phase: SubstrateFederatedIsolatedDevnetPacketProductionPhaseV1,
+  ) => void,
+): Promise<Readonly<
+  | SubstrateFederatedIsolatedDevnetPacketV1
+  | SubstrateFederatedIsolatedDevnetPacketV2
+>> {
   const captured = captureInput(input);
   assertSubstrateFederatedAuthoritySafeDevnetHistoryV1Provenance(
     captured.sourceHistory,
@@ -1255,8 +1295,10 @@ async function producePacket(
     profile,
     application,
   });
+  setPhase('packet tracker compilation');
   const trackerReceipt =
     await compileSubstrateFederatedTrackerWithPinnedJvmV1(trackerRequest);
+  setPhase('packet input and contract binding');
   const familyTemplates = {
     duplicatePrevention: {
       relativePath:
@@ -1272,6 +1314,7 @@ async function producePacket(
       source: contracts.templates.pooledReserve,
     },
   };
+  setPhase('packet settlement compilation');
   const familyReceipt =
     await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
       trackerRequest,
@@ -1282,6 +1325,7 @@ async function producePacket(
       pooledReserveGenesisInputBoxIdHex:
         ergoReceipt.genesisBoxIds.pooledReserve,
     });
+  setPhase('packet input and contract binding');
   const historyBundle = {
     acceptanceReport: sourceArtifacts.acceptanceReport,
     reportedFinalizedBlocks: sourceArtifacts.reportedFinalizedBlocks,
@@ -1332,6 +1376,7 @@ async function producePacket(
     utxoTransitionsManifest: ergoArtifacts.utxoTransitions,
   });
 
+  setPhase('packet relayer artifact production');
   const relayerReceipt =
     await produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1(
       captured.relayerArtifacts,
@@ -1347,6 +1392,7 @@ async function producePacket(
     captured.relayerArtifacts.destinationDirectory,
     relayerReceipt.artifacts,
   );
+  setPhase('packet launch and portable replay');
   const relayerClosure = buildSubstrateFederatedIsolatedDevnetRelayerClosureV1({
     target,
     gitCommitSha1Hex: relayerReceipt.headCommitSha1Hex,

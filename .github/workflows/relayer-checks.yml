@@ -22,7 +22,7 @@ on:
     branches:
       - main
       - master
-      - "a-shannon/**"
+      - "a-shannon/research-alpha"
     paths:
       - ".github/workflows/relayer-checks.yml"
       - ".gitattributes"
@@ -184,6 +184,46 @@ jobs:
           & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  solidity-audit:
+    name: Audit Solidity dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout dependency lock
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: solidity/package-lock.json
+
+      - name: Install Solidity dependencies
+        working-directory: solidity
+        run: npm ci --ignore-scripts --include=dev
+
+      - name: Audit Solidity dependencies
+        working-directory: solidity
+        run: |
+          status=1
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high --registry=https://registry.npmjs.org/ --include=dev --include=optional --include=peer --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=10000 --fetch-timeout=30000; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              delay=$((attempt * 10))
+              echo "npm audit attempt ${attempt} failed; retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          exit "$status"
+
   consensus-sources:
     name: Rebuild pinned Frontier and Ergo sources
     runs-on: ubuntu-latest
@@ -228,7 +268,6 @@ jobs:
         run: |
           npm ci --ignore-scripts --include=dev
           npm run check
-          npm audit --audit-level=high
 
       - name: Verify standalone consensus workflow
         working-directory: relayer

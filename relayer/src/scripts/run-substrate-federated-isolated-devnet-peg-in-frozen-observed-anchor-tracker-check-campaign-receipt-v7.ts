@@ -22,6 +22,9 @@ import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
+} from '../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
+import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
 import {
@@ -222,6 +225,7 @@ const WORKER_PHASES = Object.freeze([
   'bootstrap request',
   'campaign root',
   'worker receipt',
+  ...SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
 ] as const);
 const WORKER_PHASE_SET: ReadonlySet<string> = new Set(WORKER_PHASES);
 export type FrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7 =

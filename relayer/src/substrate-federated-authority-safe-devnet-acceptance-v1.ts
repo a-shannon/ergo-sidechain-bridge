@@ -8,7 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, isAbsolute, join, resolve } from 'node:path';
 
 import {
   inspectConsensusSourceBaseline,
@@ -29,6 +29,12 @@ import {
   buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1,
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1,
 } from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
+import {
+  inspectSubstrateFederatedAuthoritySafePinnedProtocV1,
+} from './substrate-federated-authority-safe-devnet-protoc-v1.js';
+import {
+  inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1,
+} from './substrate-federated-authority-safe-devnet-rust-src-v1.js';
 import {
   buildSubstrateFederatedAuthoritySafeDevnetChainSpecV1,
   type BuildSubstrateFederatedAuthoritySafeDevnetChainSpecV1Input,
@@ -58,6 +64,11 @@ import {
   type SubstrateFederatedAuthoritySafeDevnetReadOnlyRpcMethodV1,
   type SubstrateFederatedAuthoritySafeDevnetReadOnlyRpcV1,
 } from './substrate-federated-authority-safe-devnet-history-action-v1.js';
+import {
+  createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1,
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  type SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 import { parseStrictJson } from './strict-json.js';
 
 export type {
@@ -308,6 +319,21 @@ export async function acceptSubstrateFederatedAuthoritySafeDevnetV1(
   return result.acceptance;
 }
 
+export async function acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1(
+  input: Readonly<AcceptSubstrateFederatedAuthoritySafeDevnetV1Input>,
+): Promise<Readonly<SubstrateFederatedAuthoritySafeDevnetAcceptanceV1>> {
+  // The action is inert; the phase argument only enables in-process tagging.
+  const result = await acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1(
+    input,
+    async () => undefined,
+    undefined,
+    undefined,
+    'source target readiness and observation',
+    true,
+  );
+  return result.acceptance;
+}
+
 export async function acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
   input: Readonly<AcceptSubstrateFederatedAuthoritySafeDevnetV1Input>,
   buildWorkspace?: Readonly<
@@ -319,6 +345,7 @@ export async function acceptSubstrateFederatedAuthoritySafeDevnetWithHistoryV1(
     collectSubstrateFederatedAuthoritySafeDevnetHistoryActionV1,
     undefined,
     buildWorkspace,
+    'source history rpc and finality',
   );
 }
 
@@ -435,73 +462,148 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
   buildWorkspaceInput?: Readonly<
     SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1
   >,
+  sourceActionFailurePhase?:
+    SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  preserveSourceErrorIdentity = false,
 ): Promise<Readonly<
   SubstrateFederatedAuthoritySafeDevnetAcceptedActionV1<T>
 >> {
   if (typeof action !== 'function') {
     throw new Error('authority-safe accepted-target action is required');
   }
-  const worktreeRoot = canonicalDirectory(input.worktreeRoot, 'bridge worktree root');
-  const bridgeRoot = canonicalDirectory(input.bridgeRoot, 'bridge root');
-  const frontierSourcePath = canonicalDirectory(
-    input.frontierSourcePath,
-    'patched Frontier source',
-  );
-  const cargoExecutablePath = canonicalRegularFile(
-    input.cargoExecutablePath,
-    'Cargo executable',
-  );
-  const rustcExecutablePath = canonicalRegularFile(
-    input.rustcExecutablePath,
-    'Rust compiler executable',
-  );
-  const gitExecutablePath = canonicalRegularFile(
-    input.gitExecutablePath,
-    'Git executable',
-  );
-  const expectedBinaryVersion = boundedLine(
-    input.expectedFrontierBinaryVersion,
-    'Frontier binary version',
-  );
-
-  const baselineBefore = inspectConsensusSourceBaseline({
+  let sourceFailurePhase:
+    SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1 =
+      'source target input and baseline';
+  const sourceInputs = (() => {
+    try {
+      return {
+        worktreeRoot: canonicalDirectory(
+          input.worktreeRoot,
+          'bridge worktree root',
+        ),
+        bridgeRoot: canonicalDirectory(input.bridgeRoot, 'bridge root'),
+        frontierSourcePath: canonicalDirectory(
+          input.frontierSourcePath,
+          'patched Frontier source',
+        ),
+        cargoExecutablePath: canonicalRegularFile(
+          input.cargoExecutablePath,
+          'Cargo executable',
+        ),
+        rustcExecutablePath: canonicalRegularFile(
+          input.rustcExecutablePath,
+          'Rust compiler executable',
+        ),
+        gitExecutablePath: canonicalRegularFile(
+          input.gitExecutablePath,
+          'Git executable',
+        ),
+        expectedBinaryVersion: boundedLine(
+          input.expectedFrontierBinaryVersion,
+          'Frontier binary version',
+        ),
+      };
+    } catch (error) {
+      if (sourceActionFailurePhase !== undefined) {
+        throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+          sourceFailurePhase,
+          error,
+        );
+      }
+      throw error;
+    }
+  })();
+  const {
     worktreeRoot,
     bridgeRoot,
     frontierSourcePath,
-    requireFrontierCheckout: true,
-    requireErgoCheckout: false,
-    gitExecutablePath,
-  });
-  assertExactSourceBaselinePins(
-    baselineBefore,
-    input.expectedFrontierCommit,
-    input.expectedFrontierPatchSha256Hex,
-    'before build',
-  );
-  const toolchainBefore = await inspectSubstrateFederatedAuthoritySafePinnedToolchainV1({
-    bridgeRoot,
     cargoExecutablePath,
     rustcExecutablePath,
     gitExecutablePath,
-    cwd: frontierSourcePath,
-  });
+    expectedBinaryVersion,
+  } = sourceInputs;
 
-  const buildWorkspace = buildWorkspaceInput === undefined
-    ? createPinnedLocalNativeBuildWorkspace()
-    : createPinnedLocalNativeBuildWorkspace(undefined, {
-      temporaryDirectoryRoot: buildWorkspaceInput.temporaryDirectoryRoot,
-      sharedCargoHomeRoot: buildWorkspaceInput.sharedCargoHomeRoot,
-    });
+  const sourcePreparation = await (async () => {
+    try {
+      sourceFailurePhase = 'source target input and baseline';
+      const baselineBefore = inspectConsensusSourceBaseline({
+        worktreeRoot,
+        bridgeRoot,
+        frontierSourcePath,
+        requireFrontierCheckout: true,
+        requireErgoCheckout: false,
+        gitExecutablePath,
+      });
+      assertExactSourceBaselinePins(
+        baselineBefore,
+        input.expectedFrontierCommit,
+        input.expectedFrontierPatchSha256Hex,
+        'before build',
+      );
+      sourceFailurePhase = 'source target toolchain and build workspace';
+      const toolchainBefore =
+        await inspectSubstrateFederatedAuthoritySafePinnedToolchainV1({
+          bridgeRoot,
+          cargoExecutablePath,
+          rustcExecutablePath,
+          gitExecutablePath,
+          cwd: frontierSourcePath,
+        });
+      const protocBefore =
+        inspectSubstrateFederatedAuthoritySafePinnedProtocV1({
+          bridgeRoot,
+          cwd: frontierSourcePath,
+        });
+      const rustSrcBefore =
+        inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1({
+          bridgeRoot,
+          rustcExecutablePath,
+        });
+      const buildWorkspace = buildWorkspaceInput === undefined
+        ? createPinnedLocalNativeBuildWorkspace()
+        : createPinnedLocalNativeBuildWorkspace(undefined, {
+          temporaryDirectoryRoot: buildWorkspaceInput.temporaryDirectoryRoot,
+          sharedCargoHomeRoot: buildWorkspaceInput.sharedCargoHomeRoot,
+        });
+      return {
+        baselineBefore,
+        toolchainBefore,
+        protocBefore,
+        rustSrcBefore,
+        buildWorkspace,
+      };
+    } catch (error) {
+      if (sourceActionFailurePhase !== undefined) {
+        throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+          sourceFailurePhase,
+          error,
+        );
+      }
+      throw error;
+    }
+  })();
+  const {
+    baselineBefore,
+    toolchainBefore,
+    protocBefore,
+    rustSrcBefore,
+    buildWorkspace,
+  } = sourcePreparation;
   const cargoTargetDirectory = buildWorkspace.buildTargetPath;
+  let classifiedSourceFailure: unknown;
   try {
+    sourceFailurePhase = 'source target toolchain and build workspace';
     const cargoEnvironment = buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1({
       cargoTargetDirectory,
       cargoHomeDirectory: buildWorkspace.cargoHomePath,
       cargoExecutablePath,
       frontierSourcePath,
+      gitExecutablePath,
+      protocExecutablePath: protocBefore.executablePath,
       rustcExecutablePath,
       rustTarget: toolchainBefore.rustTarget,
     });
+    sourceFailurePhase = 'source target Frontier build';
     await runBoundedProcess({
       executablePath: cargoExecutablePath,
       args: ['build', '--locked', '--offline', '-p', FRONTIER_PACKAGE],
@@ -512,6 +614,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       label: 'source-locked authority-safe Frontier build',
     });
 
+    sourceFailurePhase = 'source target built binary artifact';
     const binaryPath = canonicalRegularFile(
       join(
         cargoTargetDirectory,
@@ -524,6 +627,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     );
     const binaryStat = statSync(binaryPath);
     const builtBinaryDigest = sha256(readFileSync(binaryPath));
+    sourceFailurePhase = 'source target binary identity and version';
     const binaryVersion = await exactVersion({
       executablePath: binaryPath,
       cwd: frontierSourcePath,
@@ -532,6 +636,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       label: 'Frontier binary',
     });
 
+    sourceFailurePhase = 'source target base spec process';
     const reproducedBaseResult = await runBoundedProcess({
       executablePath: binaryPath,
       args: ['build-spec', '--chain', 'dev', '--disable-default-bootnode'],
@@ -543,9 +648,11 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       maxStderrBytes: 64 * 1024,
       label: 'freshly built Frontier base-spec reproduction',
     });
+    sourceFailurePhase = 'source target base spec stderr policy';
     assertSubstrateFederatedAuthoritySafeBuildSpecStderrV1(
       reproducedBaseResult.stderr,
     );
+    sourceFailurePhase = 'source target base spec exact reproduction';
     const reproducedBaseBytes = Buffer.from(reproducedBaseResult.stdoutBytes);
     const reproducedBaseSha256Hex = sha256(reproducedBaseBytes);
     const suppliedBaseSpecBytes = 'baseSpecBytes' in input
@@ -571,6 +678,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
         + input.expectedBaseSpecSha256Hex,
       );
     }
+    sourceFailurePhase = 'source target chain spec generation';
     const generated = buildSubstrateFederatedAuthoritySafeDevnetChainSpecV1({
       bridgeRoot,
       baseSpecBytes: reproducedBaseBytes,
@@ -586,6 +694,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     });
     assertExactSourceBaseline(baselineBefore, generated.report, 'before build');
 
+    sourceFailurePhase = 'source target runtime source tests';
     const runtimeTests = [] as Array<Readonly<{
       name: typeof SOURCE_TESTS[number];
       outputDigestHex: string;
@@ -607,6 +716,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       }));
     }
 
+    sourceFailurePhase = 'source target post-build invariants';
     const baselineBeforeExecution = inspectConsensusSourceBaseline({
       worktreeRoot,
       bridgeRoot,
@@ -638,9 +748,39 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       toolchainBeforeExecution,
       'locked native toolchain changed during build or source tests',
     );
+    const protocBeforeExecution =
+      inspectSubstrateFederatedAuthoritySafePinnedProtocV1({
+        bridgeRoot,
+        cwd: frontierSourcePath,
+      });
+    assertSameObservation(
+      protocBefore,
+      protocBeforeExecution,
+      'locked Protobuf compiler changed during build or source tests',
+    );
+    const rustSrcBeforeExecution =
+      inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1({
+        bridgeRoot,
+        rustcExecutablePath,
+      });
+    assertSameObservation(
+      rustSrcBefore,
+      rustSrcBeforeExecution,
+      'locked Rust standard-library source changed during build or source tests',
+    );
 
-    const acceptedChainSpec = await assertExactBinaryAcceptsChainSpec({
+    const executionBinaryPath = createExactAuthoritySafeExecutionBinarySnapshot({
       binaryPath,
+      expectedBinarySha256Hex: builtBinaryDigest,
+      expectedBinaryByteLength: binaryStat.size,
+      temporaryRoot: cargoTargetDirectory,
+    });
+
+    sourceFailurePhase = 'source target process construction and startup';
+    const acceptedChainSpec = await assertExactBinaryAcceptsChainSpec({
+      binaryPath: executionBinaryPath,
+      expectedBinarySha256Hex: builtBinaryDigest,
+      expectedBinaryByteLength: binaryStat.size,
       temporaryRoot: cargoTargetDirectory,
       chainSpecBytes: generated.chainSpecBytes,
       fileName: 'authority-safe.json',
@@ -652,19 +792,9 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     });
     const nodeAcceptedBytes = acceptedChainSpec.nodeAcceptedBytes;
     const generatedSemanticBytes = acceptedChainSpec.sourceSemanticBytes;
-    await verifyExecutableSha256(
-      binaryPath,
-      `0x${builtBinaryDigest}`,
-      'built authority-safe Frontier binary',
-    );
-    assertFileByteLength(
-      binaryPath,
-      binaryStat.size,
-      'built Frontier binary before process launch',
-    );
 
     const ownedProcessInput = Object.freeze({
-      nodeBinaryPath: binaryPath,
+      nodeBinaryPath: executionBinaryPath,
       expectedNodeBinarySha256Hex: builtBinaryDigest,
       chainSpecBytes: generated.chainSpecBytes,
       expectedChainSpecSha256Hex: generated.report.chainSpecSha256Hex,
@@ -681,7 +811,9 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       const recoveryChainSpecBytes =
         buildAuthoritySafeRecoveryDrillChainSpec(generated.chainSpecBytes);
       await assertExactBinaryAcceptsChainSpec({
-        binaryPath,
+        binaryPath: executionBinaryPath,
+        expectedBinarySha256Hex: builtBinaryDigest,
+        expectedBinaryByteLength: binaryStat.size,
         temporaryRoot: cargoTargetDirectory,
         chainSpecBytes: recoveryChainSpecBytes,
         fileName: 'authority-safe-recovery-drill.json',
@@ -697,97 +829,164 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
         expectedChainSpecSha256Hex: sha256(recoveryChainSpecBytes),
       });
     }
-    const ownedProcesses = await withOwnedAuthoritySafeDevnetProcessesV1(
-      ownedProcessInput,
-      async endpoints => {
-      let observation: Awaited<
-        ReturnType<typeof observeSubstrateFederatedAuthoritySafeDevnetV1>
-      >;
+    const ownedProcesses = await (async () => {
       try {
-        observation = await observeSubstrateFederatedAuthoritySafeDevnetV1({
-          bridgeRoot,
-          primaryRpcUrl: endpoints.primaryRpcUrl,
-          witnessRpcUrl: endpoints.witnessRpcUrl,
-          expectedChainName: generated.report.chain.name,
-          expectedChainId: input.expectedChainId,
-          expectedNativeGenesisHashHex: input.expectedNativeGenesisHashHex,
-          expectedNodeName: input.expectedNodeName,
-          expectedNodeVersion: input.expectedNodeVersion,
-          expectedRuntimeCodeBytes: generated.report.source.runtimeCodeByteLength,
-          expectedRuntimeCodeSha256Hex: generated.report.source.runtimeCodeSha256Hex,
-          expectedStorageLayoutDigestHex:
-            substrateFederatedAuthoritySafeStorageLayoutDigestV1(
-              generated.report.source.runtimeCodeSha256Hex,
-            ),
-          bridgeAddress: input.bridgeAddress,
-          tokenAddress: input.tokenAddress,
-          bridgeOwnerAddress: input.bridgeOwnerAddress,
-          signedLegacyOwnerMintTransactionHex:
-            input.signedLegacyOwnerMintTransactionHex,
-        });
+        return await withOwnedAuthoritySafeDevnetProcessesV1(
+          ownedProcessInput,
+          async endpoints => {
+            let observation: Awaited<
+              ReturnType<
+                typeof observeSubstrateFederatedAuthoritySafeDevnetV1
+              >
+            >;
+            let observationFailurePhase:
+              SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1 =
+                'source target readiness and observation';
+            try {
+              observation =
+                await observeSubstrateFederatedAuthoritySafeDevnetV1({
+                  bridgeRoot,
+                  primaryRpcUrl: endpoints.primaryRpcUrl,
+                  witnessRpcUrl: endpoints.witnessRpcUrl,
+                  expectedChainName: generated.report.chain.name,
+                  expectedChainId: input.expectedChainId,
+                  expectedNativeGenesisHashHex:
+                    input.expectedNativeGenesisHashHex,
+                  expectedNodeName: input.expectedNodeName,
+                  expectedNodeVersion: input.expectedNodeVersion,
+                  expectedRuntimeCodeBytes:
+                    generated.report.source.runtimeCodeByteLength,
+                  expectedRuntimeCodeSha256Hex:
+                    generated.report.source.runtimeCodeSha256Hex,
+                  expectedStorageLayoutDigestHex:
+                    substrateFederatedAuthoritySafeStorageLayoutDigestV1(
+                      generated.report.source.runtimeCodeSha256Hex,
+                    ),
+                  bridgeAddress: input.bridgeAddress,
+                  tokenAddress: input.tokenAddress,
+                  bridgeOwnerAddress: input.bridgeOwnerAddress,
+                  signedLegacyOwnerMintTransactionHex:
+                    input.signedLegacyOwnerMintTransactionHex,
+                }, sourceActionFailurePhase !== undefined);
+              observationFailurePhase =
+                'source target observation provenance';
+              assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance(
+                observation,
+              );
+              observationFailurePhase =
+                'source target generated observation join';
+              assertJoinedTarget(generated.report, observation);
+            } catch (error) {
+              let observationFailure: unknown = error;
+              const projectedFailurePhase =
+                projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+                  error,
+                );
+              if (
+                !preserveSourceErrorIdentity
+                && error instanceof Error
+                && error.message.startsWith(
+                  'authority-safe native genesis hash differs from the explicit pin:',
+                )
+              ) {
+                observationFailure = new Error(
+                  `${error.message}; generated chain-spec SHA-256 `
+                  + generated.report.chainSpecSha256Hex,
+                );
+                if (projectedFailurePhase !== null) {
+                  observationFailure =
+                    createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+                      projectedFailurePhase,
+                      observationFailure,
+                    );
+                }
+              }
+              if (sourceActionFailurePhase !== undefined) {
+                throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+                  observationFailurePhase,
+                  observationFailure,
+                );
+              }
+              throw observationFailure;
+            }
+            const actionContext = Object.freeze({
+              primaryRpc: readOnlyAcceptedActionRpc(
+                endpoints.primaryRpcUrl,
+                'primary',
+              ),
+              witnessRpc: readOnlyAcceptedActionRpc(
+                endpoints.witnessRpcUrl,
+                'witness',
+              ),
+              chain: Object.freeze({
+                name: generated.report.chain.name,
+                id: generated.report.chain.id,
+                protocolId: generated.report.chain.protocolId,
+                chainId: generated.report.chain.chainId,
+                generatedSpecSha256Hex: generated.report.chainSpecSha256Hex,
+              }),
+              source: Object.freeze({
+                frontierCommit: generated.report.source.frontierCommit,
+                frontierPatchSha256Hex:
+                  generated.report.source.frontierPatchSha256Hex,
+                runtimeCodeBytes: generated.report.source.runtimeCodeByteLength,
+                runtimeCodeSha256Hex:
+                  generated.report.source.runtimeCodeSha256Hex,
+                storageLayoutDigestHex:
+                  observation.target.storageLayoutDigestHex,
+              }),
+              application: Object.freeze({
+                bridgeAddress: observation.target.bridgeAddress,
+                tokenAddress: observation.target.tokenAddress,
+                bridgeOwnerAddress: observation.target.bridgeOwnerAddress,
+                bridgeRuntimeCodeBytes:
+                  observation.view.bridgeRuntimeByteLength,
+                bridgeRuntimeCodeSha256Hex:
+                  observation.view.bridgeRuntimeBytecodeSha256Hex,
+                tokenRuntimeCodeBytes: observation.view.tokenRuntimeByteLength,
+                tokenRuntimeCodeSha256Hex:
+                  observation.view.tokenRuntimeBytecodeSha256Hex,
+              }),
+              observation: Object.freeze({
+                nativeGenesisHashHex: observation.target.nativeGenesisHashHex,
+                nativeTipHeight: observation.view.nativeTipHeight,
+                nativeTipHashHex: observation.view.nativeTipHashHex,
+                evmTipHashHex: observation.view.evmTipHashHex,
+                observationDigestHex: observation.observationDigestHex,
+              }),
+            });
+            let value: T;
+            try {
+              value = await action(actionContext);
+            } catch (error) {
+              if (sourceActionFailurePhase !== undefined) {
+                throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+                  sourceActionFailurePhase,
+                  error,
+                );
+              }
+              throw error;
+            }
+            return Object.freeze({ observation, value });
+          },
+        );
       } catch (error) {
         if (
-          error instanceof Error
-          && error.message.startsWith(
-            'authority-safe native genesis hash differs from the explicit pin:',
-          )
+          sourceActionFailurePhase === undefined
+          || projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+            error,
+          ) !== null
         ) {
-          throw new Error(
-            `${error.message}; generated chain-spec SHA-256 `
-            + generated.report.chainSpecSha256Hex,
-          );
+          throw error;
         }
-        throw error;
+        throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+          'source target process construction and startup',
+          error,
+        );
       }
-      assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance(observation);
-      assertJoinedTarget(generated.report, observation);
-      const value = await action(Object.freeze({
-        primaryRpc: readOnlyAcceptedActionRpc(
-          endpoints.primaryRpcUrl,
-          'primary',
-        ),
-        witnessRpc: readOnlyAcceptedActionRpc(
-          endpoints.witnessRpcUrl,
-          'witness',
-        ),
-        chain: Object.freeze({
-          name: generated.report.chain.name,
-          id: generated.report.chain.id,
-          protocolId: generated.report.chain.protocolId,
-          chainId: generated.report.chain.chainId,
-          generatedSpecSha256Hex: generated.report.chainSpecSha256Hex,
-        }),
-        source: Object.freeze({
-          frontierCommit: generated.report.source.frontierCommit,
-          frontierPatchSha256Hex:
-            generated.report.source.frontierPatchSha256Hex,
-          runtimeCodeBytes: generated.report.source.runtimeCodeByteLength,
-          runtimeCodeSha256Hex: generated.report.source.runtimeCodeSha256Hex,
-          storageLayoutDigestHex: observation.target.storageLayoutDigestHex,
-        }),
-        application: Object.freeze({
-          bridgeAddress: observation.target.bridgeAddress,
-          tokenAddress: observation.target.tokenAddress,
-          bridgeOwnerAddress: observation.target.bridgeOwnerAddress,
-          bridgeRuntimeCodeBytes: observation.view.bridgeRuntimeByteLength,
-          bridgeRuntimeCodeSha256Hex:
-            observation.view.bridgeRuntimeBytecodeSha256Hex,
-          tokenRuntimeCodeBytes: observation.view.tokenRuntimeByteLength,
-          tokenRuntimeCodeSha256Hex:
-            observation.view.tokenRuntimeBytecodeSha256Hex,
-        }),
-        observation: Object.freeze({
-          nativeGenesisHashHex: observation.target.nativeGenesisHashHex,
-          nativeTipHeight: observation.view.nativeTipHeight,
-          nativeTipHashHex: observation.view.nativeTipHashHex,
-          evmTipHashHex: observation.view.evmTipHashHex,
-          observationDigestHex: observation.observationDigestHex,
-        }),
-      }));
-      return Object.freeze({ observation, value });
-      },
-    );
+    })();
     assertOwnedAuthoritySafeDevnetProcessV1Receipt(ownedProcesses.receipt);
+    sourceFailurePhase = 'source target readiness and observation';
     const { observation, value } = ownedProcesses.value;
     if (afterAcceptedTarget !== undefined) {
       if (recoveryProcessInput === undefined) {
@@ -797,14 +996,14 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     }
 
     await verifyExecutableSha256(
-      binaryPath,
+      executionBinaryPath,
       `0x${builtBinaryDigest}`,
-      'built authority-safe Frontier binary',
+      'authority-safe Frontier execution snapshot',
     );
     assertFileByteLength(
-      binaryPath,
+      executionBinaryPath,
       binaryStat.size,
-      'built Frontier binary after process observation',
+      'authority-safe Frontier execution snapshot after process observation',
     );
     const toolchainAfter =
       await inspectSubstrateFederatedAuthoritySafePinnedToolchainV1({
@@ -818,6 +1017,25 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       toolchainBefore,
       toolchainAfter,
       'locked native toolchain changed during target acceptance',
+    );
+    const protocAfter = inspectSubstrateFederatedAuthoritySafePinnedProtocV1({
+      bridgeRoot,
+      cwd: frontierSourcePath,
+    });
+    assertSameObservation(
+      protocBefore,
+      protocAfter,
+      'locked Protobuf compiler changed during target acceptance',
+    );
+    const rustSrcAfter =
+      inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1({
+        bridgeRoot,
+        rustcExecutablePath,
+      });
+    assertSameObservation(
+      rustSrcBefore,
+      rustSrcAfter,
+      'locked Rust standard-library source changed during target acceptance',
     );
     const baselineAfter = inspectConsensusSourceBaseline({
       worktreeRoot,
@@ -939,8 +1157,38 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
     const result = Object.freeze({ acceptance, value });
     ACTION_RESULTS.add(result);
     return result;
+  } catch (error) {
+    let failure: unknown = error;
+    if (
+      sourceActionFailurePhase !== undefined
+      && projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(error)
+        === null
+    ) {
+      failure = createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+        sourceFailurePhase,
+        error,
+      );
+    }
+    if (sourceActionFailurePhase !== undefined) {
+      classifiedSourceFailure = failure;
+    }
+    throw failure;
   } finally {
-    buildWorkspace.cleanup();
+    try {
+      buildWorkspace.cleanup();
+    } catch (cleanupError) {
+      if (sourceActionFailurePhase === undefined) throw cleanupError;
+      if (classifiedSourceFailure !== undefined) {
+        throw new AggregateError(
+          [classifiedSourceFailure, cleanupError],
+          'authority-safe source phase and build-workspace cleanup failed',
+        );
+      }
+      throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+        'source target build workspace cleanup',
+        cleanupError,
+      );
+    }
   }
 }
 
@@ -1119,6 +1367,61 @@ function assertFileByteLength(path: string, expected: number, label: string): vo
   }
 }
 
+function createExactAuthoritySafeExecutionBinarySnapshot(input: Readonly<{
+  binaryPath: string;
+  expectedBinarySha256Hex: string;
+  expectedBinaryByteLength: number;
+  temporaryRoot: string;
+}>): string {
+  const sourceBytes = readFileSync(input.binaryPath);
+  assertExactBinaryBytes(
+    sourceBytes,
+    input.expectedBinarySha256Hex,
+    input.expectedBinaryByteLength,
+    'built authority-safe Frontier binary before execution snapshot',
+  );
+  const snapshotDirectory = mkdtempSync(join(input.temporaryRoot, 'exec-'));
+  try {
+    const snapshotPath = join(snapshotDirectory, basename(input.binaryPath));
+    writeFileSync(snapshotPath, sourceBytes, {
+      flag: 'wx',
+      mode: 0o700,
+    });
+    const canonicalSnapshotPath = canonicalRegularFile(
+      snapshotPath,
+      'authority-safe Frontier execution snapshot',
+    );
+    assertExactBinaryBytes(
+      readFileSync(canonicalSnapshotPath),
+      input.expectedBinarySha256Hex,
+      input.expectedBinaryByteLength,
+      'authority-safe Frontier execution snapshot after creation',
+    );
+    return canonicalSnapshotPath;
+  } catch (error) {
+    rmSync(snapshotDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+    });
+    throw error;
+  }
+}
+
+function assertExactBinaryBytes(
+  bytes: Uint8Array,
+  expectedSha256Hex: string,
+  expectedByteLength: number,
+  label: string,
+): void {
+  if (bytes.length !== expectedByteLength) {
+    throw new Error(`${label} byte length differs from the explicit pin`);
+  }
+  if (sha256(bytes) !== expectedSha256Hex) {
+    throw new Error(`${label} SHA-256 digest does not match the reviewed pin`);
+  }
+}
+
 function toolchainSummary(
   value: Readonly<NativeVerifierBuildToolObservation>,
 ): SubstrateFederatedAuthoritySafeDevnetAcceptanceV1['toolchain'] {
@@ -1258,6 +1561,8 @@ function buildAuthoritySafeRecoveryDrillChainSpec(
 
 async function assertExactBinaryAcceptsChainSpec(input: Readonly<{
   binaryPath: string;
+  expectedBinarySha256Hex: string;
+  expectedBinaryByteLength: number;
   temporaryRoot: string;
   chainSpecBytes: Uint8Array;
   fileName: string;
@@ -1277,6 +1582,10 @@ async function assertExactBinaryAcceptsChainSpec(input: Readonly<{
       flag: 'wx',
       mode: 0o600,
     });
+    await assertExactChainSpecAcceptanceBinary(
+      input,
+      `before ${input.processLabel}`,
+    );
     const result = await runBoundedProcess({
       executablePath: input.binaryPath,
       args: [
@@ -1293,6 +1602,10 @@ async function assertExactBinaryAcceptsChainSpec(input: Readonly<{
       maxStderrBytes: 64 * 1024,
       label: input.processLabel,
     });
+    await assertExactChainSpecAcceptanceBinary(
+      input,
+      `after ${input.processLabel}`,
+    );
     assertSubstrateFederatedAuthoritySafeBuildSpecStderrV1(result.stderr);
     nodeAcceptedBytes = Buffer.from(result.stdoutBytes);
   } finally {
@@ -1331,6 +1644,23 @@ async function assertExactBinaryAcceptsChainSpec(input: Readonly<{
     );
   }
   return Object.freeze({ nodeAcceptedBytes, sourceSemanticBytes });
+}
+
+async function assertExactChainSpecAcceptanceBinary(input: Readonly<{
+  binaryPath: string;
+  expectedBinarySha256Hex: string;
+  expectedBinaryByteLength: number;
+}>, label: string): Promise<void> {
+  await verifyExecutableSha256(
+    input.binaryPath,
+    `0x${input.expectedBinarySha256Hex}`,
+    `built authority-safe Frontier binary ${label}`,
+  );
+  assertFileByteLength(
+    input.binaryPath,
+    input.expectedBinaryByteLength,
+    `built authority-safe Frontier binary ${label}`,
+  );
 }
 
 function firstJsonDifferencePath(

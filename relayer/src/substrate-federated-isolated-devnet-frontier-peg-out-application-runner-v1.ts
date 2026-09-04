@@ -22,6 +22,7 @@ import {
 } from './peg-in-causal-admission-v2.js';
 import {
   buildPinnedLocalNativeReproducibleRustFlags,
+  buildPinnedLocalWasmPathRemapRustFlags,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
   runBoundedProcess,
@@ -38,6 +39,10 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
 } from './substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
+import {
+  preflightSubstrateFederatedIsolatedDevnetFrontierApplicationV1,
+  type SubstrateFederatedIsolatedDevnetFrontierApplicationPreflightV1Input,
+} from './substrate-federated-isolated-devnet-frontier-application-preflight-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1-fixture.js';
@@ -113,7 +118,7 @@ const CARGO_ARGUMENTS = Object.freeze([
   '--nocapture',
 ] as const);
 const CANONICAL_FRONTIER_PATCH_SHA256 =
-  '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
+  'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634';
 const APPLICATION_OVERLAY_PATCH_SHA256 =
   '2a7504ece8f175ba0ab25a2ab5ad9076afcf3b195618efbca6103544fadec495';
 const OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256 =
@@ -123,25 +128,8 @@ const OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256 =
 const EXPECTED_OWNER_ADDRESS =
   '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const EXPECTED_MINT_AMOUNT_NANO_ERG = '15000000';
-const WINDOWS_CLASSIC_SOURCE_PATH_MAX_CHARS = 259;
-const WINDOWS_LOCKED_NATIVE_SOURCE_PATH_SUFFIX = path.join(
-  'e2s-pinned-local-native-XXXXXX',
-  'cargo-home',
-  'registry',
-  'src',
-  'index.crates.io-6f17d22bba15001f',
-  'librocksdb-sys-0.11.0+8.1.1',
-  'rocksdb',
-  'utilities',
-  'transactions',
-  'lock',
-  'range',
-  'range_tree',
-  'lib',
-  'portability',
-  'toku_external_pthread.h',
-);
-const MAX_RUNNER_RUNTIME_MS = 45 * 60_000;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1 =
+  45 * 60_000;
 const POST_CARGO_REVALIDATION_BUDGET_MS = 90_000;
 const RECEIPTS = new WeakSet<object>();
 const V2_RECEIPTS = new WeakMap<
@@ -155,15 +143,8 @@ const V2_RECEIPTS = new WeakMap<
 >();
 const ACTIVE_SOURCE_DIRECTORIES = new Set<string>();
 
-export interface RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input {
-  readonly frontierSourceDirectory: string;
-  readonly temporaryDirectoryRoot: string;
-  readonly cargoDependencyCacheDirectory: string;
-  readonly cargoExecutablePath: string;
-  readonly rustcExecutablePath: string;
-  readonly gitExecutablePath: string;
-  readonly offline: true;
-}
+export type RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input =
+  SubstrateFederatedIsolatedDevnetFrontierApplicationPreflightV1Input;
 
 export interface RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input
   extends RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input {
@@ -295,123 +276,7 @@ export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicati
 ): Readonly<
   RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input
 > {
-  const record = exactRecord(input, [
-    'cargoExecutablePath',
-    'cargoDependencyCacheDirectory',
-    'frontierSourceDirectory',
-    'gitExecutablePath',
-    'offline',
-    'rustcExecutablePath',
-    'temporaryDirectoryRoot',
-  ], 'Frontier peg-out application runner input');
-  if (record.offline !== true) {
-    throw new Error('Frontier peg-out application runner requires offline Cargo');
-  }
-  const bridgeRoot = resolveBridgeRoot();
-  const repositoryRoot = resolveRepositoryRoot(bridgeRoot);
-  const temporaryDirectoryRoot = requireDirectory(
-    record.temporaryDirectoryRoot,
-    'runner temporary directory root',
-  );
-  assertWhitespaceFreeRustRemapPath(
-    temporaryDirectoryRoot,
-    'runner temporary directory root',
-  );
-  if (isSameOrDescendant(temporaryDirectoryRoot, repositoryRoot)) {
-    throw new Error(
-      'Frontier peg-out application runner requires an external temporary root',
-    );
-  }
-  const frontierSourceDirectory = requireDirectory(
-    record.frontierSourceDirectory,
-    'task-owned Frontier scratch source',
-  );
-  assertWhitespaceFreeRustRemapPath(
-    frontierSourceDirectory,
-    'task-owned Frontier scratch source',
-  );
-  if (isSameOrDescendant(frontierSourceDirectory, repositoryRoot)) {
-    throw new Error(
-      'Frontier peg-out application runner refuses to mutate the bridge worktree',
-    );
-  }
-  if (!isStrictDescendant(frontierSourceDirectory, temporaryDirectoryRoot)) {
-    throw new Error(
-      'Frontier peg-out application runner source must be inside its external temporary root',
-    );
-  }
-  const cargoDependencyCacheDirectory = requireDirectory(
-    record.cargoDependencyCacheDirectory,
-    'runner Cargo dependency cache',
-  );
-  if (isSameOrDescendant(cargoDependencyCacheDirectory, repositoryRoot)) {
-    throw new Error(
-      'Frontier peg-out application runner requires an external Cargo dependency cache',
-    );
-  }
-  assertFrontierNativeBuildHostPreflight(
-    temporaryDirectoryRoot,
-    cargoDependencyCacheDirectory,
-  );
-  return Object.freeze({
-    frontierSourceDirectory,
-    cargoDependencyCacheDirectory,
-    temporaryDirectoryRoot,
-    cargoExecutablePath: requireRegularFile(
-      record.cargoExecutablePath,
-      'Cargo executable',
-    ),
-    rustcExecutablePath: requireRegularFile(
-      record.rustcExecutablePath,
-      'Rust compiler executable',
-    ),
-    gitExecutablePath: requireRegularFile(
-      record.gitExecutablePath,
-      'Git executable',
-    ),
-    offline: true,
-  });
-}
-
-function assertFrontierNativeBuildHostPreflight(
-  temporaryDirectoryRoot: string,
-  cargoDependencyCacheDirectory: string,
-): void {
-  for (const directory of ['registry', 'git']) {
-    const cachePath = path.join(cargoDependencyCacheDirectory, directory);
-    if (!existsSync(cachePath)) {
-      throw new Error(
-        `Frontier offline Cargo dependency cache is missing ${directory}`,
-      );
-    }
-    const cacheStat = lstatSync(cachePath);
-    if (!cacheStat.isDirectory() || cacheStat.isSymbolicLink()) {
-      throw new Error(
-        `Frontier offline Cargo dependency cache ${directory} must be a regular directory`,
-      );
-    }
-  }
-  if (process.platform !== 'win32') return;
-
-  const projectedNativeSourcePath = path.resolve(
-    temporaryDirectoryRoot,
-    WINDOWS_LOCKED_NATIVE_SOURCE_PATH_SUFFIX,
-  );
-  if (
-    projectedNativeSourcePath.length
-      > WINDOWS_CLASSIC_SOURCE_PATH_MAX_CHARS
-  ) {
-    throw new Error(
-      'Frontier native build temporary root exceeds the locked MSVC source-path budget',
-    );
-  }
-  for (const key of ['LIB', 'LIBPATH', 'INCLUDE']) {
-    if (!process.env[key]?.trim()) {
-      throw new Error(
-        `Frontier native build requires the Visual Studio ${key} environment`,
-      );
-    }
-  }
+  return preflightSubstrateFederatedIsolatedDevnetFrontierApplicationV1(input);
 }
 
 export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
@@ -1571,27 +1436,19 @@ function buildCargoEnvironment(input: Readonly<{
     buildPinnedLocalNativeReproducibleRustFlags({
       frontierSourcePath: input.frontierSourceDirectory,
       buildTargetPath: input.cargoTargetDirectory,
+      rustcExecutablePath: input.rustcExecutablePath,
       rustTarget: input.rustTarget,
     });
   environment.CARGO_ENCODED_RUSTFLAGS = reproducibleRustFlags.join('\x1f');
-  environment.WASM_BUILD_RUSTFLAGS = reproducibleRustFlags
-    .filter(flag => !flag.startsWith('-Clink-arg='))
-    .join(' ');
+  environment.WASM_BUILD_RUSTFLAGS = buildPinnedLocalWasmPathRemapRustFlags({
+    frontierSourcePath: input.frontierSourceDirectory,
+    buildTargetPath: input.cargoTargetDirectory,
+    rustcExecutablePath: input.rustcExecutablePath,
+  }).join(' ');
   for (const [key, value] of Object.entries(input.authorityEnvironment)) {
     environment[key] = value;
   }
   return environment;
-}
-
-function assertWhitespaceFreeRustRemapPath(
-  value: string,
-  label: string,
-): void {
-  if (/\s/u.test(value)) {
-    throw new Error(
-      `${label} must be whitespace-free for deterministic WASM Rust flags`,
-    );
-  }
 }
 
 function minimalToolEnvironment(
@@ -1682,15 +1539,19 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationD
 
 function requireCompletionDeadline(value: unknown): number {
   const now = performance.now();
-  const deadline = value === undefined ? now + MAX_RUNNER_RUNTIME_MS : value;
+  const deadline = value === undefined
+    ? now
+      + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1
+    : value;
   if (
     typeof deadline !== 'number'
     || !Number.isFinite(deadline)
     || deadline <= now
-    || deadline - now > MAX_RUNNER_RUNTIME_MS
+    || deadline - now
+      > SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1
   ) {
     throw new Error(
-      `Frontier peg-out runner deadline must be within ${MAX_RUNNER_RUNTIME_MS} milliseconds`,
+      `Frontier peg-out runner deadline must be within ${SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1} milliseconds`,
     );
   }
   return deadline;
@@ -1712,25 +1573,6 @@ function assertDeadline(completionDeadline: number, stage: string): void {
   if (performance.now() >= completionDeadline) {
     throw new Error(`Frontier peg-out runner exceeded its deadline at ${stage}`);
   }
-}
-
-function requireDirectory(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) {
-    throw new Error(`${label} must be an absolute existing directory`);
-  }
-  const resolved = path.resolve(value);
-  if (!existsSync(resolved)) {
-    throw new Error(`${label} must be an absolute existing directory`);
-  }
-  const stat = lstatSync(resolved);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) {
-    throw new Error(`${label} must be an absolute existing directory`);
-  }
-  const canonical = realpathSync(resolved);
-  if (pathIdentity(canonical) !== pathIdentity(resolved)) {
-    throw new Error(`${label} must be canonical and non-symlinked`);
-  }
-  return canonical;
 }
 
 function requireRegularFile(value: unknown, label: string): string {
@@ -1769,17 +1611,6 @@ function resolveRepositoryRoot(bridgeRoot: string): string {
   }
   resolveBridgeRepositoryLayout({ repositoryRoot, bridgeRoot });
   return realpathSync(repositoryRoot);
-}
-
-function isSameOrDescendant(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return relative === ''
-    || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-
-function isStrictDescendant(candidate: string, root: string): boolean {
-  return pathIdentity(candidate) !== pathIdentity(root)
-    && isSameOrDescendant(candidate, root);
 }
 
 function pathIdentity(value: string): string {

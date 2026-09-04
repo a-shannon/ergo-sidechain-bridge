@@ -5,6 +5,9 @@ import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1,
   type SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import {
   loadCanonicalBootstrapRequestBoundToSha256,
@@ -29,8 +32,9 @@ export async function runSubstrateFederatedIsolatedDevnetGenesisSetupWorkerFromA
     throw new Error('isolated genesis setup worker requires Windows');
   }
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-  const bridgeRoot = resolve(scriptDirectory, '..', '..', '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(scriptDirectory, '..', '..', '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const input = loadCanonicalBootstrapRequestBoundToSha256(
     argv[1],
     bridgeRoot,

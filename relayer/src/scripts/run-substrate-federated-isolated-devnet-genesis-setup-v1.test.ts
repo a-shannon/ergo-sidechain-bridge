@@ -44,11 +44,18 @@ import {
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupCommandFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-genesis-setup-v1.js';
 import {
   runSubstrateFederatedIsolatedDevnetGenesisSetupWorkerFromArgumentsV1,
 } from './run-substrate-federated-isolated-devnet-genesis-setup-worker-v1.js';
+
+const REPOSITORY_ROOTS = resolveBridgeRepositoryRootsFromCheckoutLayout(
+  resolve(process.cwd(), '..'),
+);
 
 describe('isolated devnet genesis setup execution command V1', () => {
   beforeEach(() => {
@@ -80,8 +87,8 @@ describe('isolated devnet genesis setup execution command V1', () => {
     expect(receipt).toEqual(executionReceipt());
     expect(mocked.loader).toHaveBeenCalledWith(
       requestPath,
-      resolve(process.cwd(), '..'),
-      resolve(process.cwd(), '..', '..'),
+      REPOSITORY_ROOTS.bridgeRoot,
+      REPOSITORY_ROOTS.worktreeRoot,
       expectedRequestSha256Hex,
     );
     expect(mocked.root).toHaveBeenCalledTimes(1);

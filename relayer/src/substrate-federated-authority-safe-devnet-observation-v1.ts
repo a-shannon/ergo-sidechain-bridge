@@ -13,6 +13,11 @@ import { validateReadOnlyNodeUrl } from './read-only-node-url.js';
 import {
   parseStrictJson,
 } from './strict-json.js';
+import {
+  createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1,
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  type SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 
 export const SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_OBSERVATION_V1_SCHEMA =
   'e2s.substrate-federated-authority-safe-devnet-observation.v1' as const;
@@ -256,72 +261,151 @@ interface AuthoritySafeNodeView {
 
 export async function observeSubstrateFederatedAuthoritySafeDevnetV1(
   input: Readonly<ObserveSubstrateFederatedAuthoritySafeDevnetV1Input>,
+  classifySourceFailures = false,
 ): Promise<SubstrateFederatedAuthoritySafeDevnetObservationV1> {
-  const expected = normalizeExpectedTarget(input);
-  const probe = buildAuthoritySafeLegacyMintProbeV1({
-    signedTransactionHex: input.signedLegacyOwnerMintTransactionHex,
-    expectedChainId: BigInt(expected.chainId),
-    expectedBridgeAddress: expected.bridgeAddress,
-    expectedBridgeOwnerAddress: expected.bridgeOwnerAddress,
-  });
-  const deploymentProfile = loadTrackedDeploymentIdentityArtifactProfile(
-    input.bridgeRoot,
-  );
-  const deploymentSources = createDeploymentIdentitySourcePair({
-    primaryRpcUrl: input.primaryRpcUrl,
-    witnessRpcUrl: input.witnessRpcUrl,
-  });
-  const authoritySources = createAuthoritySafeSourcePair({
-    primaryRpcUrl: input.primaryRpcUrl,
-    witnessRpcUrl: input.witnessRpcUrl,
-  });
-  const sourceBinding = authoritySafeSourcePairBinding(authoritySources);
+  let sourceFailurePhase:
+    SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1 =
+      'source target observation input and source binding';
+  try {
+    const expected = normalizeExpectedTarget(input);
+    const probe = buildAuthoritySafeLegacyMintProbeV1({
+      signedTransactionHex: input.signedLegacyOwnerMintTransactionHex,
+      expectedChainId: BigInt(expected.chainId),
+      expectedBridgeAddress: expected.bridgeAddress,
+      expectedBridgeOwnerAddress: expected.bridgeOwnerAddress,
+    });
+    const deploymentProfile = loadTrackedDeploymentIdentityArtifactProfile(
+      input.bridgeRoot,
+    );
+    const deploymentSources = createDeploymentIdentitySourcePair({
+      primaryRpcUrl: input.primaryRpcUrl,
+      witnessRpcUrl: input.witnessRpcUrl,
+    });
+    const authoritySources = createAuthoritySafeSourcePair({
+      primaryRpcUrl: input.primaryRpcUrl,
+      witnessRpcUrl: input.witnessRpcUrl,
+    });
+    const sourceBinding = authoritySafeSourcePairBinding(authoritySources);
 
-  let lastSnapshotError: Error | undefined;
-  for (let attempt = 1; attempt <= MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
-    try {
-      const deploymentCandidate = await observeMatchingDeploymentIdentityCandidate({
-        sources: deploymentSources,
-        artifactProfile: deploymentProfile,
-        networkScope: 'local-devnet',
-        expectedChainId: BigInt(expected.chainId),
-        bridgeAddress: expected.bridgeAddress,
-        tokenAddress: expected.tokenAddress,
-      });
-      assertDeploymentIdentityCandidateProvenance(deploymentCandidate);
-      const views = await Promise.all([
-        observeAuthoritySafeNodeView(
-          sourceBinding.primary,
+    let lastSnapshotError: Error | undefined;
+    for (let attempt = 1; attempt <= MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
+      try {
+        sourceFailurePhase = 'source target deployment identity observation';
+        const deploymentCandidate = await observeMatchingDeploymentIdentityCandidate({
+          sources: deploymentSources,
+          artifactProfile: deploymentProfile,
+          networkScope: 'local-devnet',
+          expectedChainId: BigInt(expected.chainId),
+          bridgeAddress: expected.bridgeAddress,
+          tokenAddress: expected.tokenAddress,
+        });
+        assertDeploymentIdentityCandidateProvenance(deploymentCandidate);
+        sourceFailurePhase =
+          'source target two-node observation finalization';
+        const pendingViews = [
+          observeAuthoritySafeNodeView(
+            sourceBinding.primary,
+            expected,
+            deploymentCandidate,
+            deploymentProfile,
+            probe,
+            classifySourceFailures,
+          ),
+          observeAuthoritySafeNodeView(
+            sourceBinding.witness,
+            expected,
+            deploymentCandidate,
+            deploymentProfile,
+            probe,
+            classifySourceFailures,
+          ),
+        ] as const;
+        const views = classifySourceFailures
+          ? await settleClassifiedAuthoritySafeNodeViews(pendingViews)
+          : await Promise.all(pendingViews);
+        return finalizeObservation(
           expected,
           deploymentCandidate,
-          deploymentProfile,
           probe,
-        ),
-        observeAuthoritySafeNodeView(
-          sourceBinding.witness,
-          expected,
-          deploymentCandidate,
-          deploymentProfile,
-          probe,
-        ),
-      ]);
-      return finalizeObservation(
-        expected,
-        deploymentCandidate,
-        probe,
-        authoritySources,
-        views,
-      );
-    } catch (error) {
-      const normalized = error instanceof Error ? error : new Error(String(error));
-      if (!isRetryableSnapshotError(normalized) || attempt === MAX_SNAPSHOT_ATTEMPTS) {
-        throw normalized;
+          authoritySources,
+          views,
+        );
+      } catch (error) {
+        const normalized = error instanceof Error
+          ? error
+          : new Error(String(error));
+        if (
+          !isRetryableSnapshotError(normalized)
+          || attempt === MAX_SNAPSHOT_ATTEMPTS
+        ) {
+          throw normalized;
+        }
+        lastSnapshotError = normalized;
+        await delay(SNAPSHOT_RETRY_DELAY_MS);
       }
-      lastSnapshotError = normalized;
-      await delay(SNAPSHOT_RETRY_DELAY_MS);
     }
+    throw lastSnapshotError
+      ?? new Error('authority-safe observation did not complete');
+  } catch (error) {
+    if (!classifySourceFailures) throw error;
+    throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+      sourceFailurePhase,
+      error,
+    );
   }
-  throw lastSnapshotError ?? new Error('authority-safe observation did not complete');
+}
+
+async function settleClassifiedAuthoritySafeNodeViews(
+  pending: readonly [
+    Promise<AuthoritySafeNodeView>,
+    Promise<AuthoritySafeNodeView>,
+  ],
+): Promise<readonly [AuthoritySafeNodeView, AuthoritySafeNodeView]> {
+  const [primary, witness] = await Promise.allSettled(pending);
+  if (primary.status === 'fulfilled' && witness.status === 'fulfilled') {
+    return [primary.value, witness.value];
+  }
+
+  const failures: Error[] = [];
+  if (primary.status === 'rejected') {
+    failures.push(normalizeNodeObservationFailure(primary.reason));
+  }
+  if (witness.status === 'rejected') {
+    failures.push(normalizeNodeObservationFailure(witness.reason));
+  }
+  const nonRetryable = failures.filter(
+    failure => !isRetryableSnapshotError(failure),
+  );
+  const deciding = nonRetryable.length > 0 ? nonRetryable : failures;
+  if (deciding.length === 1) throw deciding[0];
+
+  const aggregate = new AggregateError(
+    deciding,
+    'authority-safe node observations failed concurrently',
+  );
+  const phases = deciding.map(
+    projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  );
+  const firstPhase = phases[0] ?? null;
+  if (
+    firstPhase !== null
+    && phases.every(phase => phase === firstPhase)
+  ) {
+    throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+      firstPhase,
+      aggregate,
+    );
+  }
+  throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+    'source target two-node observation finalization',
+    aggregate,
+  );
+}
+
+function normalizeNodeObservationFailure(value: unknown): Error {
+  return value instanceof Error
+    ? value
+    : new Error('authority-safe node observation failed');
 }
 
 export function assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance(
@@ -532,41 +616,47 @@ async function observeAuthoritySafeNodeView(
   deploymentCandidate: DeploymentIdentityCandidate,
   deploymentProfile: ReturnType<typeof loadTrackedDeploymentIdentityArtifactProfile>,
   probe: AuthoritySafeLegacyMintProbeV1,
+  classifySourceFailures: boolean,
 ): Promise<AuthoritySafeNodeView> {
-  const nativeTipHeight = BigInt(deploymentCandidate.view.tipHeight);
-  const nativeTipHashHex = canonicalHash(
-    await source.request('chain_getBlockHash', [toQuantityHex(nativeTipHeight)]),
-    'native tip hash',
-  );
-  const nativeGenesisHashHex = canonicalHash(
-    await source.request('chain_getBlockHash', [0]),
-    'native genesis hash',
-  );
-  if (nativeGenesisHashHex !== expected.nativeGenesisHashHex) {
-    throw new Error(
-      'authority-safe native genesis hash differs from the explicit pin: '
-      + `observed ${nativeGenesisHashHex}, expected ${expected.nativeGenesisHashHex}`,
+  let sourceFailurePhase:
+    SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1 =
+      'source target native and EVM tip observation';
+  try {
+    const nativeTipHeight = BigInt(deploymentCandidate.view.tipHeight);
+    const nativeTipHashHex = canonicalHash(
+      await source.request('chain_getBlockHash', [toQuantityHex(nativeTipHeight)]),
+      'native tip hash',
     );
-  }
-  const nativeHeader = record(
-    await source.request('chain_getHeader', [nativeTipHashHex]),
-    'authority-safe native header',
-  );
-  if (rpcQuantity(nativeHeader.number, 'native header height') !== nativeTipHeight) {
-    throw new Error('authority-safe native header height differs from the deployment snapshot');
-  }
-  const evmBlock = record(
-    await source.request('eth_getBlockByNumber', [toQuantityHex(nativeTipHeight), false]),
-    'authority-safe EVM block',
-  );
-  if (rpcQuantity(evmBlock.number, 'authority-safe EVM tip height') !== nativeTipHeight) {
-    throw new Error('authority-safe EVM tip height differs from the deployment snapshot');
-  }
-  const evmTipHashHex = canonicalHash(evmBlock.hash, 'authority-safe EVM tip hash');
-  if (evmTipHashHex.slice(2) !== deploymentCandidate.view.tipHashHex) {
-    throw new Error('authority-safe EVM tip differs from the deployment snapshot');
-  }
+    const nativeGenesisHashHex = canonicalHash(
+      await source.request('chain_getBlockHash', [0]),
+      'native genesis hash',
+    );
+    if (nativeGenesisHashHex !== expected.nativeGenesisHashHex) {
+      throw new Error(
+        'authority-safe native genesis hash differs from the explicit pin: '
+        + `observed ${nativeGenesisHashHex}, expected ${expected.nativeGenesisHashHex}`,
+      );
+    }
+    const nativeHeader = record(
+      await source.request('chain_getHeader', [nativeTipHashHex]),
+      'authority-safe native header',
+    );
+    if (rpcQuantity(nativeHeader.number, 'native header height') !== nativeTipHeight) {
+      throw new Error('authority-safe native header height differs from the deployment snapshot');
+    }
+    const evmBlock = record(
+      await source.request('eth_getBlockByNumber', [toQuantityHex(nativeTipHeight), false]),
+      'authority-safe EVM block',
+    );
+    if (rpcQuantity(evmBlock.number, 'authority-safe EVM tip height') !== nativeTipHeight) {
+      throw new Error('authority-safe EVM tip height differs from the deployment snapshot');
+    }
+    const evmTipHashHex = canonicalHash(evmBlock.hash, 'authority-safe EVM tip hash');
+    if (evmTipHashHex.slice(2) !== deploymentCandidate.view.tipHashHex) {
+      throw new Error('authority-safe EVM tip differs from the deployment snapshot');
+    }
 
+  sourceFailurePhase = 'source target node RPC snapshot observation';
   const [
     chainNameRaw,
     nodeNameRaw,
@@ -626,6 +716,7 @@ async function observeAuthoritySafeNodeView(
     source.request('system_dryRunAt', [probe.dryRunExtrinsicHex, nativeTipHashHex]),
   ]);
 
+  sourceFailurePhase = 'source target node identity and runtime validation';
   const chainName = exactString(chainNameRaw, 'authority-safe chain name');
   const nodeName = exactString(nodeNameRaw, 'authority-safe node name');
   const nodeVersion = exactString(nodeVersionRaw, 'authority-safe node version');
@@ -666,6 +757,7 @@ async function observeAuthoritySafeNodeView(
     throw new Error('authority-safe runtime code differs from the explicit pin');
   }
 
+  sourceFailurePhase = 'source target application identity validation';
   const bridgeCodeGenesis = observedRuntimeCode(
     bridgeCodeGenesisRaw,
     deploymentProfile.bridge.runtimeByteLength,
@@ -697,6 +789,7 @@ async function observeAuthoritySafeNodeView(
   assertAddressWord(tokenOwnerGenesisRaw, expected.bridgeAddress, 'genesis token owner');
   assertAddressWord(tokenOwnerTipRaw, expected.bridgeAddress, 'tip token owner');
 
+  sourceFailurePhase = 'source target owner-mint quarantine validation';
   if (rpcQuantity(ownerNonceRaw, 'owner-mint nonce').toString() !== probe.nonce) {
     throw new Error('owner-mint dry-run nonce differs from the exact target account nonce');
   }
@@ -709,12 +802,14 @@ async function observeAuthoritySafeNodeView(
     throw new Error('direct legacy owner mint was not rejected with Custom(181)');
   }
 
+  sourceFailurePhase = 'source target top-trie policy observation';
   await assertAuthoritySafeTopTrie(
     source,
     expected.bridgeAddress,
     nativeGenesisHashHex,
     nativeTipHashHex,
   );
+  sourceFailurePhase = 'source target tip stability observation';
   const revalidatedTipHashHex = canonicalHash(
     await source.request('chain_getBlockHash', [toQuantityHex(nativeTipHeight)]),
     'revalidated native tip hash',
@@ -741,12 +836,19 @@ async function observeAuthoritySafeNodeView(
     tokenCodeTipSha256Hex: tokenCodeTip.sha256Hex,
     ownerMintResultHex,
   } as const;
-  return Object.freeze({
-    ...sharedBinding,
-    peerId,
-    peerCount,
-    viewDigestHex: sha256Canonical(sharedBinding),
-  });
+    return Object.freeze({
+      ...sharedBinding,
+      peerId,
+      peerCount,
+      viewDigestHex: sha256Canonical(sharedBinding),
+    });
+  } catch (error) {
+    if (!classifySourceFailures) throw error;
+    throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+      sourceFailurePhase,
+      error,
+    );
+  }
 }
 
 async function assertAuthoritySafeTopTrie(
@@ -1022,6 +1124,10 @@ function encodeUnsignedLittleEndian(value: bigint, bytes: number): Buffer {
 }
 
 function isRetryableSnapshotError(error: Error): boolean {
+  if (error instanceof AggregateError) {
+    const failures = error.errors.map(normalizeNodeObservationFailure);
+    return failures.length > 0 && failures.every(isRetryableSnapshotError);
+  }
   return /tip|snapshot|sources disagree|height changed/i.test(error.message);
 }
 

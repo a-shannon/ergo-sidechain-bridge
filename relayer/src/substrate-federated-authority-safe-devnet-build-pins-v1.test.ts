@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +17,8 @@ const mocks = vi.hoisted(() => ({
   inspectBaseline: vi.fn(),
   runProcess: vi.fn(),
   validateToolchain: vi.fn(),
+  inspectProtoc: vi.fn(),
+  inspectRustSrc: vi.fn(),
 }));
 
 vi.mock('./consensus-source-baseline.js', async importOriginal => ({
@@ -30,17 +34,38 @@ vi.mock('./pinned-local-native-verifier-build.js', async importOriginal => ({
   validateNativeVerifierToolchainLock: mocks.validateToolchain,
 }));
 
+vi.mock(
+  './substrate-federated-authority-safe-devnet-protoc-v1.js',
+  () => ({
+    inspectSubstrateFederatedAuthoritySafePinnedProtocV1:
+      mocks.inspectProtoc,
+  }),
+);
+
+vi.mock(
+  './substrate-federated-authority-safe-devnet-rust-src-v1.js',
+  () => ({
+    inspectSubstrateFederatedAuthoritySafePinnedRustSrcV1:
+      mocks.inspectRustSrc,
+  }),
+);
+
 import {
   refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1,
   type RefreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1Input,
 } from './substrate-federated-authority-safe-devnet-build-pins-v1.js';
+import {
+  buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1,
+} from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
 
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const BRIDGE_ROOT = resolve(MODULE_DIRECTORY, '..', '..');
-const WORKTREE_ROOT = resolve(BRIDGE_ROOT, '..');
+const WORKTREE_ROOT = existsSync(join(BRIDGE_ROOT, '.git'))
+  ? BRIDGE_ROOT
+  : resolve(BRIDGE_ROOT, '..');
 const FRONTIER_COMMIT = '75329a2df49e2cc7981485392c31160929d1bd48';
 const FRONTIER_PATCH_SHA256 =
-  '47fdb34df23ebd5aad7d64885d030f67b3ae1aa25d1990bccc010903039a8813';
+  'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634';
 const CARGO_VERSION = 'cargo 1.82.0 (8f40fc59f 2024-08-21)';
 const RUSTC_VERSION = 'rustc 1.82.0 (f6e511eec 2024-10-15)';
 const GIT_VERSION = 'git version 2.54.0.windows.1';
@@ -64,6 +89,8 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
     secondBaseSpecRawBytes = undefined;
     buildCalls.length = 0;
     paths = createPaths();
+    mocks.inspectProtoc.mockReset().mockReturnValue(protocObservation());
+    mocks.inspectRustSrc.mockReset().mockReturnValue(rustSrcObservation());
     mocks.inspectBaseline.mockReturnValue(passingBaseline());
     mocks.runProcess.mockImplementation(runProcess);
     mocks.validateToolchain.mockReturnValue({ errors: [] });
@@ -125,9 +152,15 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
     expect(buildCalls[0]?.env?.CARGO_HOME)
       .not.toBe(buildCalls[1]?.env?.CARGO_HOME);
     for (const call of buildCalls) {
+      const buildPath = call.env?.[process.platform === 'win32' ? 'Path' : 'PATH'];
+      expect(buildPath?.split(delimiter).slice(0, 2)).toEqual([
+        realpathSync(dirname(paths.git)),
+        realpathSync(dirname(paths.cargo)),
+      ]);
       expect(call.env).toMatchObject({
         CARGO_NET_OFFLINE: 'true',
         CARGO_INCREMENTAL: '0',
+        PROTOC: realpathSync(paths.protoc),
         CARGO_PROFILE_DEV_INCREMENTAL: 'false',
         CARGO_PROFILE_DEV_DEBUG: '0',
         CARGO_PROFILE_DEV_CODEGEN_UNITS: '1',
@@ -136,8 +169,22 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
         '--remap-path-prefix=',
       );
       expect(call.env?.WASM_BUILD_RUSTFLAGS).toContain(
+        `--remap-path-prefix=${call.env?.CARGO_HOME}=/e2s/cargo-home`,
+      );
+      expect(call.env?.WASM_BUILD_RUSTFLAGS).toContain(
         '=/e2s/build-target',
       );
+      expect(call.env?.WASM_BUILD_RUSTFLAGS).toContain(
+        '=/e2s/rust-toolchain',
+      );
+      const nativeFlags = Object.entries(call.env ?? {})
+        .find(([key]) => /^CARGO_TARGET_.+_RUSTFLAGS$/.test(key))?.[1];
+      expect(nativeFlags).toContain(
+        `--remap-path-prefix=${call.env?.CARGO_HOME}=/e2s/cargo-home`,
+      );
+      expect(call.env?.WASM_BUILD_RUSTFLAGS?.endsWith('/e2s/cargo-home'))
+        .toBe(true);
+      expect(nativeFlags?.endsWith('/e2s/cargo-home')).toBe(true);
     }
     const publicReport = JSON.stringify(result.report);
     expect(publicReport).not.toContain(paths.root);
@@ -204,6 +251,38 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
     expect(buildCount).toBe(1);
   });
 
+  it('rejects a Protobuf compiler change between the two pin builds', async () => {
+    const first = protocObservation();
+    const second = { ...first, version: `${first.version}-changed` };
+    mocks.inspectProtoc
+      .mockReset()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second)
+      .mockReturnValueOnce(second);
+
+    await expect(
+      refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1(input()),
+    ).rejects.toThrow(/Protobuf compiler changed between the two builds/);
+    expect(buildCount).toBe(2);
+  });
+
+  it('rejects a rust-src change between the two pin builds', async () => {
+    const first = rustSrcObservation();
+    const second = { ...first, cargoLockSha256Hex: '9'.repeat(64) };
+    mocks.inspectRustSrc
+      .mockReset()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second)
+      .mockReturnValueOnce(second);
+
+    await expect(
+      refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1(input()),
+    ).rejects.toThrow(/Rust standard-library source changed between the two builds/);
+    expect(buildCount).toBe(2);
+  });
+
   it('rejects Cargo and rustc from different toolchain directories before building', async () => {
     const otherToolDirectory = join(paths.root, 'other-tools');
     mkdirSync(otherToolDirectory);
@@ -219,6 +298,31 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
         rustcExecutablePath: otherRustc,
       }),
     ).rejects.toThrow(/one pinned toolchain directory/);
+    expect(buildCount).toBe(0);
+  });
+
+  it.each([
+    ['ASCII whitespace', 'cargo home'],
+    ['Unicode whitespace', 'cargo\u00a0home'],
+    ['equals sign', 'cargo=home'],
+  ])('rejects a Cargo home with %s before building', (_case, name) => {
+    const ambiguousCargoHome = join(paths.root, name);
+    mkdirSync(ambiguousCargoHome);
+
+    expect(() => buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1({
+      cargoTargetDirectory: paths.temporaryRoot,
+      cargoHomeDirectory: ambiguousCargoHome,
+      cargoExecutablePath: paths.cargo,
+      frontierSourcePath: paths.source,
+      gitExecutablePath: paths.git,
+      protocExecutablePath: paths.protoc,
+      rustcExecutablePath: paths.rustc,
+      rustTarget: process.platform === 'win32'
+        ? 'x86_64-pc-windows-msvc'
+        : 'x86_64-unknown-linux-gnu',
+    })).toThrow(
+      /Cargo home path must not contain Unicode whitespace, control characters, or equals signs/,
+    );
     expect(buildCount).toBe(0);
   });
 
@@ -270,6 +374,35 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
   );
 });
 
+function protocObservation() {
+  return Object.freeze({
+    executablePath: paths.protoc,
+    platformKey: `${process.platform}-${process.arch}`,
+    version: 'libprotoc fixture',
+    sha256Hex: sha256(Buffer.from('protoc')),
+  });
+}
+
+function rustSrcObservation() {
+  const libraryPath = join(
+    dirname(paths.rustc),
+    '..',
+    'lib',
+    'rustlib',
+    'src',
+    'rust',
+    'library',
+  );
+  return Object.freeze({
+    libraryPath,
+    cargoManifestPath: join(libraryPath, 'Cargo.toml'),
+    cargoLockPath: join(libraryPath, 'Cargo.lock'),
+    cargoManifestSha256Hex: '1'.repeat(64),
+    cargoLockSha256Hex: '2'.repeat(64),
+    rustSrcLockSha256Hex: '3'.repeat(64),
+  });
+}
+
 function createPaths() {
   const root = mkdtempSync(join(tmpdir(), 'fed-build-pins-v1-'));
   temporaryDirectories.push(root);
@@ -293,10 +426,30 @@ function createPaths() {
     gitTools,
     process.platform === 'win32' ? 'git.exe' : 'git',
   );
+  const decoyGit = join(
+    rustTools,
+    process.platform === 'win32' ? 'git.exe' : 'git',
+  );
+  const protoc = join(
+    gitTools,
+    process.platform === 'win32' ? 'protoc.exe' : 'protoc',
+  );
   writeFileSync(cargo, 'cargo');
   writeFileSync(rustc, 'rustc');
   writeFileSync(git, 'git');
-  return { root, source, temporaryRoot, cargoHome, cargo, rustc, git };
+  writeFileSync(decoyGit, 'unverified-git');
+  writeFileSync(protoc, 'protoc');
+  return {
+    root,
+    source,
+    temporaryRoot,
+    cargoHome,
+    cargo,
+    rustc,
+    git,
+    decoyGit,
+    protoc,
+  };
 }
 
 function input(): RefreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1Input {

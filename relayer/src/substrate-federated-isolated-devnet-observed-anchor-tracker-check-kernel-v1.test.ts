@@ -167,6 +167,53 @@ describe('isolated devnet observed-anchor tracker check kernel V1', () => {
     expect(harness.operations.checkCandidate).toHaveBeenCalledTimes(1);
   });
 
+  it('accepts a fresh valid Sigma proof for the exact frozen transaction', async () => {
+    const expectedFrozenCheck = await checkedFrozenResult();
+    const harness = buildHarness();
+    const freshSignedCandidate = Object.freeze({
+      ...harness.signedCandidate,
+      signedTransactionDigestHex: hex('5'),
+      signedTransactionBytesSha256Hex: hex('6'),
+      signedTransactionBytesLength: 2_049,
+    });
+    harness.setPreparedBatch(Object.freeze({
+      ...harness.preparedBatch,
+      candidates: Object.freeze([Object.freeze({
+        ...harness.preparedBatch.candidates[0]!,
+        signedCandidate: freshSignedCandidate,
+      })]),
+    }));
+    harness.setChecked(Object.freeze({
+      ...harness.checked,
+      checkResult: Object.freeze({ accepted: true, revalidated: true }),
+      signedTransactionDigestHex:
+        freshSignedCandidate.signedTransactionDigestHex,
+      signedTransactionBytesSha256Hex:
+        freshSignedCandidate.signedTransactionBytesSha256Hex,
+      signedTransactionBytesLength:
+        freshSignedCandidate.signedTransactionBytesLength,
+    }));
+
+    const result =
+      await executeObservedAnchorTrackerReservationFreshnessCheckKernelV1({
+        ...harness.input,
+        target: freshnessTarget(),
+        expectedFrozenCheck,
+      });
+
+    expect(result).toMatchObject({
+      unsignedTransactionIdHex: expectedFrozenCheck.unsignedTransactionIdHex,
+      unsignedTransactionDigestHex:
+        expectedFrozenCheck.unsignedTransactionDigestHex,
+      signedTransactionIdHex: expectedFrozenCheck.signedTransactionIdHex,
+      signedTransactionCanonicalJsonSha256Hex: hex('5'),
+      signedTransactionBytesSha256Hex: hex('6'),
+      signedTransactionBytesLength: 2_049,
+    });
+    expect(result.checkResponseSha256Hex)
+      .not.toBe(expectedFrozenCheck.checkResponseSha256Hex);
+  });
+
   it('rejects a reservation-freshness target through the V2 entrypoint', async () => {
     const harness = buildHarness();
 

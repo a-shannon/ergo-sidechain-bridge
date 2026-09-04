@@ -46,6 +46,9 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_PROOF_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V1,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_COMMITTED_RESERVE_EVIDENCE_V1_SCHEMA,
 } from '../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
@@ -103,6 +106,9 @@ const CONSUMER_RECEIPT_DIGEST_DOMAIN =
 const AMOUNT_NANO_ERG = '10000000';
 const RECIPIENT_ADDRESS_HEX = '11'.repeat(20);
 const REQUEST_DIGEST_HEX = 'f'.repeat(64);
+const REPOSITORY_ROOTS = resolveBridgeRepositoryRootsFromCheckoutLayout(
+  resolve(process.cwd(), '..'),
+);
 
 describe('isolated devnet peg-in mint-proof campaign command V1', () => {
   beforeEach(() => {
@@ -127,8 +133,8 @@ describe('isolated devnet peg-in mint-proof campaign command V1', () => {
 
     expect(mocked.loader).toHaveBeenCalledWith(
       requestPath,
-      resolve(process.cwd(), '..'),
-      resolve(process.cwd(), '..', '..'),
+      REPOSITORY_ROOTS.bridgeRoot,
+      REPOSITORY_ROOTS.worktreeRoot,
       REQUEST_DIGEST_HEX,
     );
     expect(mocked.root).toHaveBeenCalledTimes(1);

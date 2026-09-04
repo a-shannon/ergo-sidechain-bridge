@@ -16,17 +16,24 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
 } from '../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
+  createSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureV1,
+  type SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
-  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1,
 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import type {
+  SubstrateFederatedIsolatedDevnetTrackerTransportResponseCategoryV1,
+} from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1,
   claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1,
@@ -47,7 +54,11 @@ const SUBMISSION_RESPONSE_DIGEST_DOMAIN =
 type AcceptedOrAmbiguousSubmission = Exclude<
   SubstrateFederatedLocalDevnetGenesisSubmission,
   Readonly<{ status: 'rejected' }>
->;
+> & Readonly<{
+  responseCategory:
+    SubstrateFederatedIsolatedDevnetTrackerTransportResponseCategoryV1;
+  httpStatus: number | null;
+}>;
 
 /**
  * Consume one exact tracker check only after its immutable attempt is durable.
@@ -56,7 +67,7 @@ type AcceptedOrAmbiguousSubmission = Exclude<
  */
 export async function submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1(
   input: Readonly<{
-    target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+    target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
     executionCheck:
       Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>;
     authorization:
@@ -69,129 +80,194 @@ export async function submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransp
       Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1>;
   }>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportResultV1>> {
-  const binding =
-    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(
+  const authority = runCheckedSubmissionStageV1('authority_binding', () => {
+    const binding =
+      assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(
+        input.target,
+      );
+    const checkedBinding =
+      assertSubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1(
+        input.executionCheck,
+        input.target,
+      );
+    assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1(
+      input.authorization,
       input.target,
-    );
-  const checkedBinding =
-    assertSubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1(
       input.executionCheck,
-      input.target,
     );
-  assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1(
-    input.authorization,
-    input.target,
-    input.executionCheck,
-  );
-  if (
-    input.target.primaryNodeOrigin
-      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
-    || input.target.primaryMining !== false
-    || input.target.witnessReadOnly !== true
-    || input.target.miningStopped !== true
-    || input.target.checkpointBound !== true
-    || input.target.reservationFreshnessCheckBound !== true
-    || input.target.trackerTransport !== true
-    || checkedBinding.processBindingDigestHex
-      !== binding.processBindingDigestHex
-    || checkedBinding.executionTargetIdentityDigestHex
-      !== binding.executionTargetIdentityDigestHex
-    || input.authorization.processBindingDigestHex
-      !== binding.processBindingDigestHex
-    || input.authorization.executionTargetIdentityDigestHex
-      !== binding.executionTargetIdentityDigestHex
-  ) {
-    throw new Error('isolated tracker transport target binding changed');
-  }
+    if (
+      input.target.primaryNodeOrigin
+        !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
+      || input.target.primaryMining !== true
+      || input.target.witnessReadOnly !== true
+      || input.target.checkpointBound !== true
+      || input.target.reservationFreshnessCheckBound !== true
+      || input.target.trackerTransport !== true
+      || input.target.sameProcessCanonicalConfirmation !== true
+      || checkedBinding.processBindingDigestHex
+        !== binding.processBindingDigestHex
+      || checkedBinding.executionTargetIdentityDigestHex
+        !== binding.executionTargetIdentityDigestHex
+      || input.authorization.processBindingDigestHex
+        !== binding.processBindingDigestHex
+      || input.authorization.executionTargetIdentityDigestHex
+        !== binding.executionTargetIdentityDigestHex
+    ) {
+      throw new Error('isolated tracker transport target binding changed');
+    }
 
-  const signedCandidate = input.executionCheck.signedCandidate;
-  assertLocalWasmSignedCheckCandidateProvenance(signedCandidate);
-  const exactSignedCandidate =
-    signedCandidate as LocalWasmExactBytesSignedCheckCandidate;
-  const submissionHandle =
-    input.executionCheck.checkedAcceptance.submissionHandle;
-  assertLocalWasmCheckedSubmissionHandleV1Provenance(submissionHandle);
-  const exactHandle =
-    submissionHandle as Readonly<LocalWasmCheckedSubmissionHandleV1>;
-  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
-    exactHandle,
-    binding,
-  );
-  assertExactAttemptBinding(
-    exactHandle,
-    exactSignedCandidate,
-    input.authorization.expectedTransactionIdHex,
-    input.target.primaryNodeOrigin,
-    input.authorization.signedTransactionDigestHex,
-    input.authorization.checkResponseDigestHex,
-  );
-  if (
-    exactSignedCandidate.signedTransactionBytesSha256Hex
-      !== input.authorization.signedTransactionBytesSha256Hex
-    || exactSignedCandidate.signedTransactionBytesLength
-      !== input.authorization.signedTransactionBytesLength
-    || input.attempt.expectedTransactionIdHex
-      !== input.authorization.expectedTransactionIdHex
-    || input.attempt.authorization !== input.authorization
-  ) {
-    throw new Error('isolated tracker transport signed binding changed');
-  }
+    const signedCandidate = input.executionCheck.signedCandidate;
+    assertLocalWasmSignedCheckCandidateProvenance(signedCandidate);
+    const exactSignedCandidate =
+      signedCandidate as LocalWasmExactBytesSignedCheckCandidate;
+    const submissionHandle =
+      input.executionCheck.checkedAcceptance.submissionHandle;
+    assertLocalWasmCheckedSubmissionHandleV1Provenance(submissionHandle);
+    const exactHandle =
+      submissionHandle as Readonly<LocalWasmCheckedSubmissionHandleV1>;
+    const checkedHandleExecutionBinding:
+      Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> =
+        Object.freeze({
+          processBindingDigestHex: binding.processBindingDigestHex,
+          executionTargetIdentityDigestHex:
+            binding.executionTargetIdentityDigestHex,
+        });
+    assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+      exactHandle,
+      checkedHandleExecutionBinding,
+    );
+    assertExactAttemptBinding(
+      exactHandle,
+      exactSignedCandidate,
+      input.authorization.expectedTransactionIdHex,
+      input.target.primaryNodeOrigin,
+      input.authorization.signedTransactionDigestHex,
+      input.authorization.checkResponseDigestHex,
+    );
+    if (
+      exactSignedCandidate.signedTransactionBytesSha256Hex
+        !== input.authorization.signedTransactionBytesSha256Hex
+      || exactSignedCandidate.signedTransactionBytesLength
+        !== input.authorization.signedTransactionBytesLength
+      || input.attempt.expectedTransactionIdHex
+        !== input.authorization.expectedTransactionIdHex
+      || input.attempt.authorization !== input.authorization
+    ) {
+      throw new Error('isolated tracker transport signed binding changed');
+    }
+    return Object.freeze({
+      checkedHandleExecutionBinding,
+      exactHandle,
+      exactSignedCandidate,
+    });
+  });
 
-  const persisted =
-    claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1(
+  const persisted = runCheckedSubmissionStageV1(
+    'durable_attempt_claim',
+    () => claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1(
       input.journal,
       input.attempt,
       input.authorization,
-    );
-  if (
-    persisted.status !== 'pending'
-    || persisted.expectedTransactionIdHex
-      !== input.authorization.expectedTransactionIdHex
-    || persisted.durableAttemptDigestHex
-      !== input.attempt.durableAttemptDigestHex
-  ) {
-    throw new Error('isolated tracker transport durable attempt changed');
-  }
+    ),
+  );
+  runCheckedSubmissionStageV1('durable_attempt_claim', () => {
+    if (
+      persisted.status !== 'pending'
+      || persisted.expectedTransactionIdHex
+        !== input.authorization.expectedTransactionIdHex
+      || persisted.durableAttemptDigestHex
+        !== input.attempt.durableAttemptDigestHex
+    ) {
+      throw new Error('isolated tracker transport durable attempt changed');
+    }
+  });
 
-  const submission = await consumeLocalWasmCheckedSubmissionHandleV1(
-    exactHandle,
-    exactSignedCandidate,
-    async signedTransaction => {
-      consumeSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1(
-        input.preflight,
-        {
-          target: input.target,
-          executionCheck: input.executionCheck,
-          authorization: input.authorization,
-          journal: input.journal,
-          attempt: input.attempt,
-        },
-      );
-      return await submitExactTransaction(
-        signedTransaction,
-        input.authorization.expectedTransactionIdHex,
-        input.attempt.durableAttemptDigestHex,
-        input.authorization.authorizationDigestHex,
-        exactHandle,
-        binding,
-      );
+  const submission = await runCheckedSubmissionAsyncStageV1(
+    'checked_handle_consumption',
+    async () => await consumeLocalWasmCheckedSubmissionHandleV1(
+      authority.exactHandle,
+      authority.exactSignedCandidate,
+      async signedTransaction => {
+        runCheckedSubmissionStageV1('preflight_consumption', () => {
+          consumeSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1(
+            input.preflight,
+            {
+              target: input.target,
+              executionCheck: input.executionCheck,
+              authorization: input.authorization,
+              journal: input.journal,
+              attempt: input.attempt,
+            },
+          );
+        });
+        return await runCheckedSubmissionAsyncStageV1(
+          'transport_response_projection',
+          async () => await submitExactTransaction(
+            signedTransaction,
+            input.authorization.expectedTransactionIdHex,
+            input.attempt.durableAttemptDigestHex,
+            input.authorization.authorizationDigestHex,
+            authority.exactHandle,
+            authority.checkedHandleExecutionBinding,
+          ),
+        );
+      },
+    ),
+  );
+  const responseDigestHex = runCheckedSubmissionStageV1(
+    'submission_result_validation',
+    () => {
+      if (
+        typeof submission.responseDigestHex !== 'string'
+        || !/^[0-9a-f]{64}$/u.test(submission.responseDigestHex)
+      ) {
+        throw new Error('isolated tracker transport response digest is missing');
+      }
+      return submission.responseDigestHex;
     },
   );
-  if (
-    typeof submission.responseDigestHex !== 'string'
-    || !/^[0-9a-f]{64}$/u.test(submission.responseDigestHex)
-  ) {
-    throw new Error('isolated tracker transport response digest is missing');
-  }
-  return issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1(
-    input.journal,
-    input.attempt,
-    Object.freeze({
-    status: submission.status,
-    submittedTransactionIdHex: submission.submittedTxId,
-    responseDigestHex: submission.responseDigestHex,
-    }),
+  return runCheckedSubmissionStageV1(
+    'result_issuance',
+    () => issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1(
+      input.journal,
+      input.attempt,
+      Object.freeze({
+        status: submission.status,
+        submittedTransactionIdHex: submission.submittedTxId,
+        responseCategory: submission.responseCategory,
+        httpStatus: submission.httpStatus,
+        responseDigestHex,
+      }),
+    ),
   );
+}
+
+function runCheckedSubmissionStageV1<T>(
+  code: SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1,
+  action: () => T,
+): T {
+  try {
+    return action();
+  } catch (error) {
+    throw createSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureV1(
+      code,
+      error,
+    );
+  }
+}
+
+async function runCheckedSubmissionAsyncStageV1<T>(
+  code: SubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1,
+  action: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    throw createSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureV1(
+      code,
+      error,
+    );
+  }
 }
 
 function assertExactAttemptBinding(
@@ -240,10 +316,11 @@ async function submitExactTransaction(
       },
     );
     const submittedTxId = canonicalTxId(response.data);
+    const httpStatus = finiteHttpStatus(response.status);
     if (submittedTxId !== expectedTxId) {
       return ambiguousResponse({
         outcome: 'ambiguous_success_response',
-        httpStatus: finiteHttpStatus(response.status),
+        httpStatus,
         observedTxId: submittedTxId,
         expectedTxId,
         durableAttemptDigestHex,
@@ -255,9 +332,11 @@ async function submitExactTransaction(
     return Object.freeze({
       status: 'accepted' as const,
       submittedTxId,
+      responseCategory: 'accepted' as const,
+      httpStatus,
       responseDigestHex: responseDigest({
         outcome: 'accepted',
-        httpStatus: finiteHttpStatus(response.status),
+        httpStatus,
         observedTxId: submittedTxId,
         expectedTxId,
         durableAttemptDigestHex,
@@ -291,6 +370,8 @@ function ambiguousResponse(
   return Object.freeze({
     status: 'ambiguous' as const,
     submittedTxId: null,
+    responseCategory: input.outcome,
+    httpStatus: input.httpStatus,
     responseDigestHex: responseDigest(input),
   });
 }

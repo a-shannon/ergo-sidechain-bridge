@@ -1,4 +1,3 @@
-import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -9,7 +8,11 @@ import {
   canonicalPathIdentity,
   isPathInside,
 } from '../create-only-out-of-repository-artifact.js';
+import { resolveCanonicalBridgeRepositoryRoots } from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
+import {
+  projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+} from '../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import {
   loadCanonicalBootstrapRequestBoundToSha256,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
@@ -140,20 +143,37 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
     const acceptance = input.lifecycle.sourceHistory.acceptance;
 
     phase = 'campaign root';
-    const result =
-      await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7({
-        ...input,
-        pegIn,
-        frontierApplicationRunner: Object.freeze({
-          frontierSourceDirectory: acceptance.frontierSourcePath,
-          temporaryDirectoryRoot,
-          cargoDependencyCacheDirectory,
-          cargoExecutablePath: acceptance.cargoExecutablePath,
-          rustcExecutablePath: acceptance.rustcExecutablePath,
-          gitExecutablePath: acceptance.gitExecutablePath,
-          offline: true as const,
-        }),
-      });
+    let result: Awaited<ReturnType<
+      typeof runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7
+    >>;
+    try {
+      result =
+        await runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignRootV7({
+          ...input,
+          pegIn,
+          frontierApplicationRunner: Object.freeze({
+            frontierSourceDirectory: acceptance.frontierSourcePath,
+            temporaryDirectoryRoot,
+            cargoDependencyCacheDirectory,
+            cargoExecutablePath: acceptance.cargoExecutablePath,
+            rustcExecutablePath: acceptance.rustcExecutablePath,
+            gitExecutablePath: acceptance.gitExecutablePath,
+            offline: true as const,
+          }),
+        });
+    } catch (error) {
+      const managedPhase =
+        projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          error,
+        );
+      if (managedPhase !== null) {
+        throw createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7(
+          managedPhase,
+          error,
+        );
+      }
+      throw error;
+    }
 
     phase = 'worker receipt';
     return buildSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerCheckCampaignWorkerReceiptV8(
@@ -164,6 +184,8 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
   } catch (error) {
     if (
       readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7(error)
+        !== undefined
+      || readSafeFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseV7(error)
         !== undefined
     ) {
       throw error;
@@ -178,11 +200,9 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
 export function resolveCanonicalFrozenObservedAnchorTrackerCheckCampaignWorkerRootsV7(
   scriptDirectory: string,
 ): Readonly<{ readonly bridgeRoot: string; readonly worktreeRoot: string }> {
-  const bridgeRoot = realpathSync(resolve(scriptDirectory, '..', '..', '..'));
-  return Object.freeze({
-    bridgeRoot,
-    worktreeRoot: realpathSync(resolve(bridgeRoot, '..')),
-  });
+  return resolveCanonicalBridgeRepositoryRoots(
+    resolve(scriptDirectory, '..', '..', '..'),
+  );
 }
 
 function pathsOverlap(left: string, right: string): boolean {

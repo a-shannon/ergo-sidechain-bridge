@@ -19,6 +19,13 @@ import {
   vi,
 } from 'vitest';
 
+import { discoverBridgeRepositoryRoot } from '../bridge-repository-layout.js';
+
+const CURRENT_BRIDGE_ROOT = realpathSync(resolve(process.cwd(), '..'));
+const CURRENT_WORKTREE_ROOT = realpathSync(
+  discoverBridgeRepositoryRoot(CURRENT_BRIDGE_ROOT),
+);
+
 const mocked = vi.hoisted(() => ({
   applicationAssert: vi.fn(),
   commandReceiptFailure: false,
@@ -137,6 +144,10 @@ import {
   deriveSubstrateFederatedIsolatedDevnetCanonicalCheckpointExtensionObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-checkpoint-extension-observation-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
+} from '../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_TRACKER_OBSERVATION_V2_SCHEMA,
 } from '../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js';
@@ -262,6 +273,7 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       'bootstrap request',
       'campaign root',
       'worker receipt',
+      ...SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
     ] as const) {
       expect(
         formatSafeFrozenObservedAnchorTrackerCheckCampaignWorkerFailureV7(
@@ -698,8 +710,8 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
 
       expect(mocked.loader).toHaveBeenCalledWith(
         requestPath,
-        resolve(process.cwd(), '..'),
-        resolve(process.cwd(), '..', '..'),
+        CURRENT_BRIDGE_ROOT,
+        CURRENT_WORKTREE_ROOT,
         REQUEST_DIGEST_HEX,
       );
       expect(mocked.root).toHaveBeenCalledTimes(1);
@@ -821,7 +833,7 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       expect(processInput.timeoutMs).toBe(120 * 60_000);
       expect(processInput.env).toEqual({ PATH: 'controlled' });
       expect(mocked.environment).toHaveBeenCalledWith(
-        resolve(process.cwd(), '..', '..'),
+        CURRENT_WORKTREE_ROOT,
         { cargoHomeDirectory: relayerCargoCache },
       );
       const published = readFileSync(outputPath, 'utf8');
@@ -1685,9 +1697,9 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       mkdirSync(cargoCache);
       mkdirSync(relayerCargoCache);
       mocked.root.mockRejectedValueOnce(
-        createFrozenObservedAnchorTrackerCheckCampaignWorkerPhaseFailureV7(
-          'worker arguments',
-          new Error('campaign root failed'),
+        createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1(
+          'frozen tracker check',
+          new Error(`private root detail under ${resolve('private-source')}`),
         ),
       );
       let workerFailure: unknown;
@@ -1711,14 +1723,20 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
         workerFailure = error;
       }
       expect(workerFailure).toBeInstanceOf(Error);
-      expect((workerFailure as Error).message).toMatch(/campaign root failed/iu);
       expect(
         formatSafeFrozenObservedAnchorTrackerCheckCampaignWorkerFailureV7(
           workerFailure,
         ),
       ).toBe(
         'isolated frozen-observed-anchor-tracker-check campaign worker failed: '
-        + 'phase failed: campaign root\n',
+        + 'phase failed: frozen tracker check\n',
+      );
+      expect(
+        formatSafeFrozenObservedAnchorTrackerCheckCampaignWorkerFailureV7(
+          new Error('frozen tracker check: private detail'),
+        ),
+      ).toBe(
+        'isolated frozen-observed-anchor-tracker-check campaign worker failed\n',
       );
       expect(currentBuildEnvironment()).toEqual(previousEnvironment);
     } finally {
@@ -1874,10 +1892,11 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
   it('canonicalizes junctioned direct-worker source roots', ({ skip }) => {
     const fixture = mkdtempSync(join(tmpdir(), 'fed6lab-worker-root-link-'));
     try {
-      const physicalWorktreeRoot = resolve(process.cwd(), '..', '..');
-      const worktreeAlias = join(fixture, 'worktree-alias');
+      const physicalBridgeRoot = CURRENT_BRIDGE_ROOT;
+      const physicalWorktreeRoot = CURRENT_WORKTREE_ROOT;
+      const bridgeAlias = join(fixture, 'bridge-alias');
       try {
-        symlinkSync(physicalWorktreeRoot, worktreeAlias, 'junction');
+        symlinkSync(physicalBridgeRoot, bridgeAlias, 'junction');
       } catch (error) {
         if (['EPERM', 'EACCES', 'UNKNOWN', 'ENOTSUP'].includes(
           (error as NodeJS.ErrnoException).code ?? '',
@@ -1889,14 +1908,13 @@ describe('isolated devnet peg-in frozen-observed-anchor-tracker-check campaign r
       }
       expect(resolveCanonicalFrozenObservedAnchorTrackerCheckCampaignWorkerRootsV7(
         join(
-          worktreeAlias,
-          'ergo-sidechain-bridge',
+          bridgeAlias,
           'relayer',
           'src',
           'scripts',
         ),
       )).toEqual({
-        bridgeRoot: realpathSync(resolve(process.cwd(), '..')),
+        bridgeRoot: physicalBridgeRoot,
         worktreeRoot: realpathSync(physicalWorktreeRoot),
       });
     } finally {
