@@ -78,7 +78,14 @@ interface RpcRequest {
 
 interface RpcFixtureOptions {
   readonly peerId?: string;
+  readonly peerCount?: number;
+  readonly isSyncing?: boolean;
   readonly shouldHavePeers?: boolean;
+  readonly chainName?: unknown;
+  readonly nodeName?: unknown;
+  readonly nodeVersion?: unknown;
+  readonly observationChainId?: bigint;
+  readonly runtimeVersion?: unknown;
   readonly runtimeCodeHex?: string;
   readonly bridgeRuntimeCodeHex?: string;
   readonly directOwnerMintResultHex?: string;
@@ -238,10 +245,34 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
 
   it.each([
     [
+      'a disconnected peer view',
+      { peerCount: 0 },
+      /node is not a connected stable peer/i,
+      'source target peer health validation',
+    ],
+    [
+      'node identity drift',
+      { nodeVersion: '0.0.0-other' },
+      /node identity differs from the explicit pins/i,
+      'source target node identity validation',
+    ],
+    [
+      'EVM chain identity drift',
+      { observationChainId: CHAIN_ID + 1n },
+      /EVM chain ID differs from the explicit pin/i,
+      'source target EVM chain identity validation',
+    ],
+    [
+      'an invalid runtime version',
+      { runtimeVersion: { specName: null, specVersion: 100 } },
+      /runtime spec name/i,
+      'source target runtime version validation',
+    ],
+    [
       'runtime code drift',
       { runtimeCodeHex: '0x01020305' },
       /runtime code differs from the explicit pin/i,
-      'source target node identity and runtime validation',
+      'source target runtime code validation',
     ],
     [
       'bridge application code drift',
@@ -328,7 +359,7 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
       await expectObservationFailurePhase(
         primaryOptions,
         witnessOptions,
-        'source target node identity and runtime validation',
+        'source target runtime code validation',
       );
     },
   );
@@ -636,7 +667,11 @@ function rpcResult(
 ): unknown {
   switch (method) {
     case 'eth_chainId':
-      return quantity(CHAIN_ID);
+      return quantity(
+        methodIndex < 2
+          ? CHAIN_ID
+          : (options.observationChainId ?? CHAIN_ID),
+      );
     case 'eth_blockNumber':
       return quantity(TIP_HEIGHT);
     case 'eth_getBlockByNumber':
@@ -680,17 +715,17 @@ function rpcResult(
       throw new Error('unsupported fixture call');
     }
     case 'system_chain':
-      return CHAIN_NAME;
+      return options.chainName ?? CHAIN_NAME;
     case 'system_name':
-      return NODE_NAME;
+      return options.nodeName ?? NODE_NAME;
     case 'system_version':
-      return NODE_VERSION;
+      return options.nodeVersion ?? NODE_VERSION;
     case 'system_localPeerId':
       return options.peerId ?? PRIMARY_PEER_ID;
     case 'system_health':
       return {
-        peers: 1,
-        isSyncing: false,
+        peers: options.peerCount ?? 1,
+        isSyncing: options.isSyncing ?? false,
         shouldHavePeers: options.shouldHavePeers ?? true,
       };
     case 'chain_getBlockHash': {
@@ -706,7 +741,8 @@ function rpcResult(
       return { number: quantity(TIP_HEIGHT) };
     case 'state_getRuntimeVersion':
       assertExact(params[0], NATIVE_TIP_HASH_HEX, 'runtime-version block hash');
-      return { specName: 'frontier-template', specVersion: 100 };
+      return options.runtimeVersion
+        ?? { specName: 'frontier-template', specVersion: 100 };
     case 'state_getStorage': {
       if (![NATIVE_GENESIS_HASH_HEX, NATIVE_TIP_HASH_HEX].includes(String(params[1]))) {
         throw new Error('native storage read must bind genesis or the exact tip hash');
