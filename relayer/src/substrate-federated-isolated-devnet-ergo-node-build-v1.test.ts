@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   assertSubstrateFederatedIsolatedDevnetErgoNodeAssemblyDirectoryReadyV1,
+  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1,
   assertSubstrateFederatedIsolatedDevnetWindowsJobProcessRunnerV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeV1,
   inspectSubstrateFederatedIsolatedDevnetErgoNodeAssemblyFileV1,
@@ -40,7 +41,7 @@ describe('isolated devnet Ergo node build V1', () => {
       kind: 'substrate-federated-isolated-devnet-node-build-lock',
       platform: 'win32-x64',
       consensusSourceLockSha256Hex:
-        '7599111d2129ee5177dda236ef96e8beb1b1e33b42745d9607cb525c0a7795c8',
+        '905a839ce4a5db0d7f5a578e5b2990cd2c2ca9e27467b6b9c2f11469b8f2f80e',
       ergoNodeBaseCommit: '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1',
       ergoPatchSha256Hex:
         '31b27cf9acd7ad6d7c05282d964f51be15b5aa78767b354f8f29ee28d39ebf23',
@@ -106,6 +107,41 @@ describe('isolated devnet Ergo node build V1', () => {
         aliasOutput,
       )
     ).toThrow(/assembly-free output directory/);
+  });
+
+  it('derives the assembly output directory from the exact build lock', () => {
+    const source = ownedDirectory();
+    const output = join(source, 'target', 'scala-2.12');
+    mkdirSync(output, { recursive: true });
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+        bridgeRoot,
+        source,
+      )
+    ).not.toThrow();
+
+    writeFileSync(join(output, 'ergo-stale.jar'), 'stale');
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+        bridgeRoot,
+        source,
+      )
+    ).toThrow(/assembly-free output directory/);
+
+    const aliasedSource = ownedDirectory();
+    const aliasTarget = ownedDirectory();
+    mkdirSync(join(aliasTarget, 'scala-2.12'), { recursive: true });
+    symlinkSync(
+      aliasTarget,
+      join(aliasedSource, 'target'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+        bridgeRoot,
+        aliasedSource,
+      )
+    ).toThrow(/path must not contain a symbolic link or junction/);
   });
 
   it('rejects runner digest drift and post-build multi-link assemblies', () => {

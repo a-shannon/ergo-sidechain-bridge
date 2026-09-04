@@ -18,6 +18,9 @@ import {
   writeNewFile,
 } from '../create-only-out-of-repository-artifact.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   canonicalJson,
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
@@ -64,8 +67,9 @@ export async function runSubstrateFederatedIsolatedDevnetPegInSourceLockCheckCom
   const args = parseArguments(argv);
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
   const relayerRoot = resolve(scriptDirectory, '..', '..');
-  const bridgeRoot = resolve(relayerRoot, '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(relayerRoot, '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const request = readBoundedRegularFile(
     explicitExistingLocalNonSensitivePath(
       args.requestPath,

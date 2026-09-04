@@ -4,6 +4,7 @@ import { delimiter, dirname, isAbsolute, join, parse, resolve } from 'node:path'
 
 import {
   buildPinnedLocalNativeReproducibleRustFlags,
+  buildPinnedLocalWasmPathRemapRustFlags,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
   runBoundedProcess,
   validateNativeVerifierToolchainLock,
@@ -115,6 +116,8 @@ export function buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1(
     cargoHomeDirectory: string;
     cargoExecutablePath: string;
     frontierSourcePath: string;
+    gitExecutablePath: string;
+    protocExecutablePath: string;
     rustcExecutablePath: string;
     rustTarget: string;
   }>,
@@ -124,11 +127,23 @@ export function buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1(
   if (dirname(input.rustcExecutablePath) !== cargoToolDirectory) {
     throw new Error('Cargo and Rust compiler must come from one pinned toolchain directory');
   }
+  const gitToolDirectory = dirname(canonicalRegularFile(
+    input.gitExecutablePath,
+    'Git executable',
+  ));
+  const pinnedToolDirectories = sameCanonicalPath(
+    cargoToolDirectory,
+    gitToolDirectory,
+  )
+    ? [gitToolDirectory]
+    : [gitToolDirectory, cargoToolDirectory];
   const inheritedPath = process.env.Path ?? process.env.PATH ?? '';
   delete environment.PATH;
   delete environment.Path;
   environment[process.platform === 'win32' ? 'Path' : 'PATH'] =
-    `${cargoToolDirectory}${delimiter}${inheritedPath}`;
+    [...pinnedToolDirectories, inheritedPath]
+      .filter(value => value !== '')
+      .join(delimiter);
   for (const key of ['USERPROFILE', 'HOME', 'RUSTUP_HOME']) {
     if (process.env[key]) environment[key] = process.env[key];
   }
@@ -146,6 +161,10 @@ export function buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1(
   environment.CARGO_PROFILE_DEV_INCREMENTAL = 'false';
   environment.CARGO_PROFILE_DEV_DEBUG = '0';
   environment.CARGO_PROFILE_DEV_CODEGEN_UNITS = '1';
+  environment.PROTOC = canonicalRegularFile(
+    input.protocExecutablePath,
+    'Protobuf compiler executable',
+  );
   environment.RUSTC = input.rustcExecutablePath;
   environment.RUSTC_WRAPPER = '';
   environment.RUSTC_WORKSPACE_WRAPPER = '';
@@ -156,6 +175,10 @@ export function buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1(
     throw new Error('user profile path is required for deterministic Wasm path remapping');
   }
   const remappedUserProfile = rustFlagPathToken(userProfile, 'user profile');
+  const remappedCargoHome = rustFlagPathToken(
+    input.cargoHomeDirectory,
+    'Cargo home',
+  );
   const remappedBuildTarget = rustFlagPathToken(
     input.cargoTargetDirectory,
     'Cargo target',
@@ -164,19 +187,27 @@ export function buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1(
     input.frontierSourcePath,
     'Frontier source',
   );
-  environment.WASM_BUILD_RUSTFLAGS = [
-    `--remap-path-prefix=${remappedUserProfile}=/e2s/user-profile`,
-    `--remap-path-prefix=${remappedBuildTarget}=/e2s/build-target`,
-    `--remap-path-prefix=${remappedFrontierSource}=/e2s/frontier-source`,
-  ].join(' ');
   const nativeRustFlags = buildPinnedLocalNativeReproducibleRustFlags({
     frontierSourcePath: remappedFrontierSource,
     buildTargetPath: remappedBuildTarget,
+    rustcExecutablePath: input.rustcExecutablePath,
     rustTarget: input.rustTarget,
   });
+  const wasmPathRemapRustFlags = buildPinnedLocalWasmPathRemapRustFlags({
+    frontierSourcePath: remappedFrontierSource,
+    buildTargetPath: remappedBuildTarget,
+    rustcExecutablePath: input.rustcExecutablePath,
+  });
+  const cargoHomeRemap =
+    `--remap-path-prefix=${remappedCargoHome}=/e2s/cargo-home`;
+  environment.WASM_BUILD_RUSTFLAGS = [
+    `--remap-path-prefix=${remappedUserProfile}=/e2s/user-profile`,
+    ...wasmPathRemapRustFlags,
+    cargoHomeRemap,
+  ].join(' ');
   environment[
     `CARGO_TARGET_${input.rustTarget.toUpperCase().replaceAll('-', '_')}_RUSTFLAGS`
-  ] = nativeRustFlags.join(' ');
+  ] = [...nativeRustFlags, cargoHomeRemap].join(' ');
   return environment;
 }
 
@@ -196,12 +227,20 @@ function canonicalRegularFile(value: unknown, label: string): string {
   if (typeof value !== 'string' || !isAbsolute(value) || value.includes('\0')) {
     throw new Error(`${label} must be one local absolute path`);
   }
-  const path = resolve(value);
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink()) {
+  try {
+    const path = resolve(value);
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error();
+    return realpathSync(path);
+  } catch {
     throw new Error(`${label} must be one regular file`);
   }
-  return realpathSync(path);
+}
+
+function sameCanonicalPath(left: string, right: string): boolean {
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
 }
 
 async function exactVersion(input: Readonly<{

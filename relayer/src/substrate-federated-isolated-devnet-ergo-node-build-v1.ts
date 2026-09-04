@@ -191,6 +191,15 @@ export function inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(
   });
 }
 
+export function assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+  bridgeRootValue: string,
+  ergoSourcePathValue: string,
+): void {
+  const bridgeRoot = canonicalDirectory(bridgeRootValue, 'bridge root');
+  const ergoSourcePath = canonicalDirectory(ergoSourcePathValue, 'Ergo source');
+  assertBuildOutputReady(ergoSourcePath, loadBuildLock(bridgeRoot));
+}
+
 /**
  * Builds the exact source-lock-defined patched Ergo node and returns one
  * process-only artifact handoff plus a path-free receipt. It does not start a
@@ -244,12 +253,7 @@ export async function buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
 
   const sourceBaselineBefore = exactSourceBaseline(input, lock);
   const sourceBaselineDigestHex = sourceBaselineDigest(sourceBaselineBefore);
-  const assemblyDirectory = resolveUncreatedUnlinkedInside(
-    input.ergoSourcePath,
-    lock.assemblyDirectory,
-    'Ergo assembly directory',
-  );
-  assertNoPreexistingAssemblyCandidates(assemblyDirectory, lock);
+  const assemblyDirectory = assertBuildOutputReady(input.ergoSourcePath, lock);
 
   await runPinnedBuild({ input, lock, javaHome });
   assertUnlinkedPathInside(
@@ -553,6 +557,22 @@ function assertNoPreexistingAssemblyCandidates(
       'pinned Ergo node build requires an assembly-free output directory',
     );
   }
+}
+
+function assertBuildOutputReady(
+  ergoSourcePath: string,
+  lock: Readonly<Pick<
+    NodeBuildLockV1,
+    'assemblyDirectory' | 'assemblyNamePattern'
+  >>,
+): string {
+  const assemblyDirectory = resolveUncreatedUnlinkedInside(
+    ergoSourcePath,
+    lock.assemblyDirectory,
+    'Ergo assembly directory',
+  );
+  assertNoPreexistingAssemblyCandidates(assemblyDirectory, lock);
+  return assemblyDirectory;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetErgoNodeAssemblyDirectoryReadyV1(

@@ -20,6 +20,9 @@ import {
   canonicalJson,
   sha256CanonicalJson,
 } from './strict-json.js';
+import {
+  createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 
 export {
   SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_APPLICATION_HISTORY_V1_SCHEMA,
@@ -140,6 +143,25 @@ export interface SubstrateFederatedAuthoritySafeDevnetHistoryV1 {
 }
 
 export async function collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
+  input: Readonly<CollectSubstrateFederatedAuthoritySafeDevnetHistoryV1Input>,
+  sourceAcceptanceBuildWorkspace?: Readonly<
+    SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1
+  >,
+): Promise<Readonly<SubstrateFederatedAuthoritySafeDevnetHistoryV1>> {
+  try {
+    return await collectUnclassifiedSubstrateFederatedAuthoritySafeDevnetHistoryV1(
+      input,
+      sourceAcceptanceBuildWorkspace,
+    );
+  } catch (error) {
+    throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+      'source history rpc and finality',
+      error,
+    );
+  }
+}
+
+async function collectUnclassifiedSubstrateFederatedAuthoritySafeDevnetHistoryV1(
   input: Readonly<CollectSubstrateFederatedAuthoritySafeDevnetHistoryV1Input>,
   sourceAcceptanceBuildWorkspace?: Readonly<
     SubstrateFederatedAuthoritySafeDevnetBuildWorkspaceV1

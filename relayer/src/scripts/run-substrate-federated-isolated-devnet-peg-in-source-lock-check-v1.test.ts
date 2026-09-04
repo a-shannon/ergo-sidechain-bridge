@@ -50,6 +50,9 @@ import {
   canonicalJson,
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
+import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
 import { encodePegInSourceIntentV2Hex } from '../peg-in-causal-admission-v2.js';
 import {
   runSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCommandFromArgumentsV1,
@@ -85,6 +88,13 @@ import {
 
 const AMOUNT_NANO_ERG = '10000000';
 const RECIPIENT_ADDRESS_HEX = '11'.repeat(20);
+const REPOSITORY_ROOTS = resolveBridgeRepositoryRootsFromCheckoutLayout(
+  resolve(process.cwd(), '..'),
+);
+const CROSS_DRIVE_FIXTURE_ROOT = alternateDriveRoot(
+  tmpdir(),
+  process.env.SystemRoot ?? 'C:\\Windows',
+);
 
 describe('isolated devnet peg-in source-lock check command V1', () => {
   beforeEach(() => {
@@ -137,8 +147,8 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
     );
     expect(mocked.loader).toHaveBeenCalledWith(
       requestPath,
-      resolve(process.cwd(), '..'),
-      resolve(process.cwd(), '..', '..'),
+      REPOSITORY_ROOTS.bridgeRoot,
+      REPOSITORY_ROOTS.worktreeRoot,
       expectedRequestSha256Hex,
     );
     expect(mocked.root).toHaveBeenCalledTimes(1);
@@ -266,7 +276,7 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
         expect(processInput.env.NODE_OPTIONS).toBeUndefined();
         expect(processInput.env.E2S_UNSAFE_TEST_VALUE).toBeUndefined();
         expect(processInput.env.TEMP).toBe(
-          resolve(process.cwd(), '..', '..', '..'),
+          dirname(REPOSITORY_ROOTS.worktreeRoot),
         );
         expect(processInput.env.TMP).toBe(processInput.env.TEMP);
       } finally {
@@ -375,19 +385,23 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
   it('filters npm-injected worktree PATH entries before worker launch', () => {
     const originalPath = process.env.Path;
     const originalLib = process.env.LIB;
-    const worktreeRoot = resolve(process.cwd(), '..', '..');
+    const worktreeRoot = REPOSITORY_ROOTS.worktreeRoot;
     const worktreeDirectory = resolve(process.cwd(), 'src');
-    const externalBin = dirname(process.execPath);
+    const systemBin = resolve(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
     const cargoHome = mkdtempSync(join(tmpdir(), 'isolated-worker-cargo-home-'));
-    process.env.Path = [worktreeDirectory, externalBin].join(delimiter);
+    const protocExecutablePath = process.env.ComSpec
+      ?? resolve(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe');
+    process.env.Path = [worktreeDirectory, systemBin].join(delimiter);
     try {
       const environment = childEnvironment(worktreeRoot, {
         cargoHomeDirectory: cargoHome,
+        protocExecutablePath,
       });
       const childPath = environment.Path?.split(delimiter) ?? [];
-      expect(childPath).toContain(externalBin);
+      expect(childPath).toContain(systemBin);
       expect(childPath).not.toContain(worktreeDirectory);
       expect(environment.CARGO_HOME).toBe(cargoHome);
+      expect(environment.PROTOC).toBe(protocExecutablePath);
       expect(environment.SystemDrive).toBe(
         parse(environment.SystemRoot ?? '').root.replace(/[\\/]+$/u, ''),
       );
@@ -396,8 +410,19 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
         unexpected: cargoHome,
       } as any)).toThrow('isolated worker environment options are invalid');
       expect(() => childEnvironment(worktreeRoot, {
+        cargoHomeDirectory: cargoHome,
+        omitInheritedCargoHome: true,
+      })).toThrow('isolated worker environment options are invalid');
+      expect(() => childEnvironment(worktreeRoot, {
+        omitInheritedCargoHome: 'yes',
+      } as any)).toThrow('isolated worker environment options are invalid');
+      expect(() => childEnvironment(worktreeRoot, {
         cargoHomeDirectory: resolve(process.cwd(), 'src'),
       })).toThrow('CARGO_HOME override must remain outside the worktree');
+      expect(() => childEnvironment(worktreeRoot, {
+        cargoHomeDirectory: cargoHome,
+        protocExecutablePath: resolve(process.cwd(), 'package.json'),
+      })).toThrow('PROTOC override must remain outside the worktree');
 
       process.env.LIB = worktreeDirectory;
       expect(() => childEnvironment(worktreeRoot)).toThrow(
@@ -407,6 +432,23 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       restoreEnvironment('Path', originalPath);
       restoreEnvironment('LIB', originalLib);
       rmSync(cargoHome, { recursive: true, force: true });
+    }
+  });
+
+  it('can omit ambient Cargo capability from a non-Cargo child', () => {
+    const originalCargoHome = process.env.CARGO_HOME;
+    const worktreeRoot = REPOSITORY_ROOTS.worktreeRoot;
+    process.env.CARGO_HOME = resolve(process.cwd(), 'src');
+    try {
+      const environment = childEnvironment(worktreeRoot, {
+        omitInheritedCargoHome: true,
+      });
+      expect(environment).not.toHaveProperty('CARGO_HOME');
+      expect(() => childEnvironment(worktreeRoot)).toThrow(
+        'CARGO_HOME must remain outside the worktree',
+      );
+    } finally {
+      restoreEnvironment('CARGO_HOME', originalCargoHome);
     }
   });
 
@@ -460,6 +502,84 @@ describe('isolated devnet peg-in source-lock check command V1', () => {
       rmSync(outsideRoot, { recursive: true, force: true });
     }
   });
+
+  it('rejects invalid explicit Protobuf compiler capability paths', () => {
+    const originalPath = process.env.Path;
+    const fakeWorktree = mkdtempSync(join(tmpdir(), 'isolated-worker-worktree-'));
+    const cargoHome = mkdtempSync(join(tmpdir(), 'isolated-worker-cargo-home-'));
+    const toolRoot = mkdtempSync(join(tmpdir(), 'isolated-worker-tools-'));
+    const realToolRoot = join(toolRoot, 'real');
+    const linkedToolRoot = join(toolRoot, 'linked');
+    const protocExecutablePath = join(realToolRoot, 'protoc.exe');
+    const systemBin = resolve(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
+    mkdirSync(realToolRoot);
+    writeFileSync(protocExecutablePath, 'fixture');
+    symlinkSync(realToolRoot, linkedToolRoot, 'junction');
+    process.env.Path = systemBin;
+    try {
+      const environment = childEnvironment(fakeWorktree, {
+        cargoHomeDirectory: cargoHome,
+        protocExecutablePath,
+      });
+      expect(environment.PROTOC).toBe(protocExecutablePath);
+      expect(environment.Path).toBe(systemBin);
+      expect(() => childEnvironment(fakeWorktree, {
+        cargoHomeDirectory: cargoHome,
+        protocExecutablePath: realToolRoot,
+      })).toThrow('PROTOC override must be one link-free non-sensitive file');
+      expect(() => childEnvironment(fakeWorktree, {
+        cargoHomeDirectory: cargoHome,
+        protocExecutablePath: join(linkedToolRoot, 'protoc.exe'),
+      })).toThrow('PROTOC override must be one link-free non-sensitive file');
+      expect(() => childEnvironment(fakeWorktree, {
+        cargoHomeDirectory: cargoHome,
+        protocExecutablePath: join(toolRoot, 'missing-protoc.exe'),
+      })).toThrow();
+      expect(environmentPathUsesAllowedLocalDrive(
+        'E:\\unapproved-tools\\protoc.exe',
+        ['C:\\', 'D:\\'],
+      )).toBe(false);
+    } finally {
+      restoreEnvironment('Path', originalPath);
+      rmSync(fakeWorktree, { recursive: true, force: true });
+      rmSync(cargoHome, { recursive: true, force: true });
+      rmSync(toolRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(CROSS_DRIVE_FIXTURE_ROOT === undefined)(
+    'accepts an explicit Protobuf compiler on another local drive without widening PATH',
+    () => {
+      if (CROSS_DRIVE_FIXTURE_ROOT === undefined) {
+        throw new Error('cross-drive fixture root unexpectedly unavailable');
+      }
+      const originalPath = process.env.Path;
+      const fakeWorktree = mkdtempSync(join(tmpdir(), 'isolated-worker-worktree-'));
+      const cargoHome = mkdtempSync(join(tmpdir(), 'isolated-worker-cargo-home-'));
+      const toolRoot = mkdtempSync(join(CROSS_DRIVE_FIXTURE_ROOT, 'e2s-worker-tool-'));
+      const systemBin = resolve(process.env.SystemRoot ?? 'C:\\Windows', 'System32');
+      process.env.Path = systemBin;
+      try {
+        const protocExecutablePath = join(toolRoot, 'protoc.exe');
+        writeFileSync(protocExecutablePath, 'fixture');
+        const environment = childEnvironment(fakeWorktree, {
+          cargoHomeDirectory: cargoHome,
+          protocExecutablePath,
+        });
+        expect(environment.PROTOC).toBe(protocExecutablePath);
+        expect(environment.Path).toBe(systemBin);
+        expect(environmentPathUsesAllowedLocalDrive(
+          protocExecutablePath,
+          [parse(fakeWorktree).root, parse(systemBin).root],
+        )).toBe(false);
+      } finally {
+        restoreEnvironment('Path', originalPath);
+        rmSync(fakeWorktree, { recursive: true, force: true });
+        rmSync(cargoHome, { recursive: true, force: true });
+        rmSync(toolRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it('allows only the explicit system and worktree drives', () => {
     expect(environmentPathUsesAllowedLocalDrive(
@@ -2404,4 +2524,20 @@ function refreshExecutionWorkerReceiptDigest(receipt: any): void {
 function restoreEnvironment(key: string, value: string | undefined): void {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
+}
+
+function alternateDriveRoot(...excludedPaths: readonly string[]): string | undefined {
+  if (process.platform !== 'win32') return undefined;
+  const excludedRoots = new Set(
+    excludedPaths.map(path => parse(path).root.toLowerCase()),
+  );
+  const candidateRoots = new Set([
+    parse(process.execPath).root,
+    parse(process.cwd()).root,
+  ]);
+  for (const root of candidateRoots) {
+    if (excludedRoots.has(root.toLowerCase())) continue;
+    if (existsSync(root)) return root;
+  }
+  return undefined;
 }

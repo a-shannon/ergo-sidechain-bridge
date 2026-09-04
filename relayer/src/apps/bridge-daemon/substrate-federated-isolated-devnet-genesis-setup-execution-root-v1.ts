@@ -23,6 +23,9 @@ import {
   sha256CanonicalJson,
 } from '../../ergo-settlement-core/strict-json.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../../bridge-repository-layout.js';
+import {
   BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE,
   BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
   buildBridgeValidityTrackerObservedHeaderContextV1,
@@ -49,9 +52,18 @@ import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
+  createSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1 as createManagedCampaignPhaseFailureV1,
+  projectSubstrateFederatedIsolatedDevnetManagedCampaignPhaseFailureV1 as projectManagedCampaignPhaseFailureV1,
+  type SubstrateFederatedIsolatedDevnetManagedCampaignPhaseV1 as ManagedCampaignPhaseV1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
+import {
+  projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-packet-production-phase-v1.js';
+import {
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+} from '../../relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
+import {
   createSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9 as createTrackerTransportManagedCampaignPhaseFailureV9,
-  projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9 as projectTrackerTransportManagedCampaignPhaseFailureV9,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseV9 as TrackerTransportManagedCampaignPhaseV9,
 } from '../../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
 import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
@@ -84,6 +96,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
@@ -91,11 +104,11 @@ import {
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionV2Receipt,
   type SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt,
   type SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt,
-  type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1,
+  type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
   type SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessExecutionV1Receipt,
-  type SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV1Receipt,
+  type SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV2Receipt,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV2Receipt,
 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
@@ -148,6 +161,7 @@ import {
   type SubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2,
 } from '../../substrate-federated-isolated-devnet-frontier-mint-proof-consumer-v2.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3,
   assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance,
   createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3,
   preflightSubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3,
@@ -239,9 +253,14 @@ import {
   authorizeSubstrateFederatedIsolatedDevnetTrackerTransportV1,
   createSubstrateFederatedIsolatedDevnetTrackerTransportJournalV1,
   createSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1,
+  projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
   type SubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1,
   type SubstrateFederatedIsolatedDevnetTrackerTransportOutcomeV1,
 } from './substrate-federated-isolated-devnet-tracker-transport-attempt-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+} from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1,
@@ -324,8 +343,10 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_OBSERVED_ANCHOR_TRACKER_
   'e2s.substrate-federated-isolated-devnet-peg-in-observed-anchor-tracker-check-campaign-root.v6' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_ROOT_V8_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-tracker-reservation-freshness-campaign-root.v8' as const;
-export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_SCHEMA =
-  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v9' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v10' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-root.v11' as const;
 const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CANONICAL_CONFIRMATION_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation.v1' as const;
 const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA =
@@ -353,9 +374,13 @@ const PEG_IN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
 const PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_ROOT_V8';
 const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9';
-export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V9 =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V9';
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10';
+const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN_V11 =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10 =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V10';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V11 =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V11';
 const STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SETUP_STATIC_EXECUTION_V1';
 const PEG_IN_CANDIDATE_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
@@ -381,7 +406,9 @@ const PEG_IN_FROZEN_OBSERVED_ANCHOR_TRACKER_CHECK_CAMPAIGN_STATIC_EXECUTION_MANI
 const PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_STATIC_EXECUTION_V8';
 const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_V9';
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_V10';
+const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_DOMAIN_V11 =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_V11';
 const PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_FUNDING_BOX_V1';
 const FEDERATION_EPOCH = '1';
@@ -389,16 +416,27 @@ const MAX_ADMISSION_VALIDITY_BLOCKS = '64';
 const CONFIRMATION_POLL_MS = 250;
 const TRANSACTION_CONFIRMATION_BUDGET_MS = 2 * 60_000;
 const MAX_CONFIRMATION_WINDOWS = 11;
+const APPLICATION_CHECKPOINT_ADDITIONAL_CONFIRMATION_WINDOWS = 1;
 const NON_CONFIRMATION_ACTION_BUDGET_MS = 8 * 60_000;
 const OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT = 11;
 const ACTION_COMPLETION_BUDGET_MS =
   (MAX_CONFIRMATION_WINDOWS * TRANSACTION_CONFIRMATION_BUDGET_MS)
   + NON_CONFIRMATION_ACTION_BUDGET_MS;
+const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS =
+  (
+    (MAX_CONFIRMATION_WINDOWS
+      + APPLICATION_CHECKPOINT_ADDITIONAL_CONFIRMATION_WINDOWS)
+    * TRANSACTION_CONFIRMATION_BUDGET_MS
+  )
+  + NON_CONFIRMATION_ACTION_BUDGET_MS
+  + SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3;
 
 if (
   TRANSACTION_CONFIRMATION_BUDGET_MS
     <= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1
   || ACTION_COMPLETION_BUDGET_MS
+    >= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1
+  || APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS
     >= SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1
 ) {
   throw new Error('isolated managed confirmation timing envelope is invalid');
@@ -798,8 +836,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRES
 const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST =
   Object.freeze({
     schema:
-      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-static-execution.v9',
-    version: 9 as const,
+      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-static-execution.v10',
+    version: 10 as const,
     reservationFreshnessManifestDigestHex:
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V8,
     additionalOperations: Object.freeze([
@@ -822,23 +860,26 @@ const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST =
         'caller-owned file-backed SQLite attempt journal retained after execution',
       signing: 'same synthetic WASM root signer retained in-process',
       acceptance:
-        'same-target frozen local JVM /transactions/check result only',
+        'exact signed bytes accepted by frozen local JVM /transactions/check before mining restart; build and chain snapshot are revalidated on the replacement transport processes',
       preflight:
         'process-proven exact request bytes and reviewed relayer packet lineage bound to one atomically inserted pending attempt',
       transport:
         'one credential-free POST to the fixed loopback primary node without retry',
       confirmationMining:
-        'fourth independent one-shot synthetic mining credential after durable outcome finalization',
+        'fourth independent one-shot synthetic mining credential consumed before the only transport POST',
       canonicalConfirmation:
-        'exact attempted transaction observed canonically by primary and witness before teardown',
+        'exact attempted transaction observed canonically by primary and witness on the same processes that accepted transport',
       trackerAdmission: true as const,
       payout: false as const,
     }),
     restartBoundary: Object.freeze({
       attemptPersistedBeforePost: true as const,
+      miningRestartedBeforePost: true as const,
+      exactReservationFreshnessSnapshotRevalidatedBeforePost: true as const,
       durableAttemptClaimedBeforeFreshPreflightConsumption: true as const,
       exactFreshPreflightConsumedInCheckedCallbackImmediatelyBeforePost:
         true as const,
+      acceptedTransportAndConfirmationShareProcesses: true as const,
       anExistingAttemptPreventsAnotherPost: true as const,
       acceptedAndAmbiguousOutcomesRetained: true as const,
       localDatabaseAuthoritative: false as const,
@@ -846,10 +887,53 @@ const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST =
     exposedCapabilities: Object.freeze([]),
   });
 
-export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9 =
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10 =
   sha256CanonicalJson(
     PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST,
     PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_DOMAIN,
+  );
+
+const PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_V11 =
+  Object.freeze({
+    schema:
+      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-static-projection.v11',
+    version: 11 as const,
+    legacyExecutionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
+    projectionOperations: Object.freeze([
+      'runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10',
+      'assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance',
+      'projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1',
+      'assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1',
+      'bindClassificationToExactV10OutcomeStatusAndResponseDigest',
+      'finalizeCapabilityFreeV11Projection',
+    ]),
+    authorityBoundary: Object.freeze({
+      durableOutcome:
+        'historical V1 outcome remains the only journal-persisted transport result',
+      responseClassification:
+        'exact process-local diagnostic provenance projected without raw response content',
+      admission:
+        'response classification cannot authorize transport, canonical confirmation, tracker admission, payout, or funds',
+    }),
+    compatibilityBoundary: Object.freeze({
+      successProjection:
+        'exact registered V10 receipt reused without re-encoding',
+      failureProjection:
+        'exact registered V10 failure receipt reused without re-encoding when same-process classification exists',
+      legacyParsers:
+        'distinct V11 schemas do not reinterpret V10 receipts',
+      responseClassificationPersistedInTransportJournal: false as const,
+      responseClassificationRestartRecoverableFromTransportJournal:
+        false as const,
+    }),
+    exposedCapabilities: Object.freeze([]),
+  });
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11 =
+  sha256CanonicalJson(
+    PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_V11,
+    PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_DOMAIN_V11,
   );
 
 export interface RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input {
@@ -894,12 +978,15 @@ export type RunSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnchorTrackerC
 export type RunSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Input =
   RunSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3Input;
 
-export interface RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Input
+export interface RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Input
   extends RunSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Input {
   readonly requestBinding:
     Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestBindingV1>;
   readonly trackerTransportJournalRoot: string;
 }
+
+export type RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Input =
+  RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Input;
 
 export interface SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt {
   readonly schema:
@@ -1862,7 +1949,7 @@ interface SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessMaterialV8 
   >;
   readonly transport?: Readonly<{
     readonly execution: Readonly<
-      SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV1Receipt
+      SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV2Receipt
     >;
     readonly authorization: Readonly<
       SubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1
@@ -1875,7 +1962,7 @@ interface SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessMaterialV8 
       SubstrateFederatedIsolatedDevnetTrackerTransportOutcomeV1
     >;
     readonly confirmationExecution: Readonly<
-      SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt
+      SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV2Receipt
     >;
     readonly confirmation: Readonly<
       SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationV1
@@ -1979,10 +2066,10 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnes
 const TRACKER_RESERVATION_FRESHNESS_CAMPAIGN_ROOT_V8_RECEIPTS =
   new WeakSet<object>();
 
-export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Receipt {
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Receipt {
   readonly schema:
-    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_SCHEMA;
-  readonly version: 9;
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_SCHEMA;
+  readonly version: 10;
   readonly status: 'local_tracker_transport_canonically_confirmed';
   readonly staticExecutionManifestDigestHex: string;
   readonly freshness: Readonly<
@@ -1990,7 +2077,7 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRo
   >;
   readonly transport: Readonly<{
     readonly execution: Readonly<
-      SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV1Receipt
+      SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV2Receipt
     >;
     readonly authorization: Readonly<
       SubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1
@@ -2003,7 +2090,7 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRo
       SubstrateFederatedIsolatedDevnetTrackerTransportOutcomeV1
     >;
     readonly confirmationExecution: Readonly<
-      SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt
+      SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV2Receipt
     >;
     readonly confirmation: Readonly<
       SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationV1
@@ -2044,18 +2131,68 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRo
   readonly receiptDigestHex: string;
 }
 
-export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9 {
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10 {
   readonly receipt: Readonly<
-    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Receipt
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Receipt
   >;
 }
 
-const TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_RECEIPTS = new WeakSet<object>();
+const TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_RECEIPTS = new WeakSet<object>();
 
-interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9Receipt {
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Receipt {
   readonly schema:
-    'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v9';
-  readonly version: 9;
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_SCHEMA;
+  readonly version: 11;
+  readonly status: 'local_tracker_transport_canonically_confirmed';
+  readonly staticProjectionManifestDigestHex: string;
+  readonly legacyV10Receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Receipt
+  >;
+  readonly responseClassification: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+  >;
+  readonly checks: Readonly<{
+    readonly exactLegacyV10ProvenanceValidated: true;
+    readonly exactResponseClassificationProjected: true;
+    readonly exactResponseStatusBound: true;
+    readonly exactResponseDigestBound: true;
+    readonly returnedValueContainsRawResponse: false;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localIsolatedDevnetOnly: true;
+    readonly durableOutcomeCommitmentPersistedInTransportJournal: true;
+    readonly responseClassificationPersistedInTransportJournal: false;
+    readonly responseClassificationRestartRecoverableFromTransportJournal:
+      false;
+    readonly responseClassificationProjectedFromSameProcessRuntimeProvenance:
+      true;
+    readonly responseClassificationAuthoritativeForAdmission: false;
+    readonly canonicalConfirmationObserved: true;
+    readonly trackerAdmissionEstablished: true;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11 {
+  readonly receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Receipt
+  >;
+}
+
+const TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_RECEIPTS = new WeakSet<object>();
+
+interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10Receipt {
+  readonly schema:
+    'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10';
+  readonly version: 10;
   readonly status: 'local_tracker_transport_not_canonically_confirmed';
   readonly staticExecutionManifestDigestHex: string;
   readonly transport: Readonly<{
@@ -2098,9 +2235,57 @@ interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9
   readonly receiptDigestHex: string;
 }
 
-const TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V9_RECEIPTS =
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11Receipt {
+  readonly schema:
+    'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v11';
+  readonly version: 11;
+  readonly status: 'local_tracker_transport_not_canonically_confirmed';
+  readonly staticProjectionManifestDigestHex: string;
+  readonly legacyV10Receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10Receipt
+  >;
+  readonly responseClassification: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+  >;
+  readonly checks: Readonly<{
+    readonly exactLegacyV10ProvenanceValidated: true;
+    readonly exactResponseClassificationProjected: true;
+    readonly exactResponseStatusBound: true;
+    readonly exactResponseDigestBound: true;
+    readonly returnedValueContainsRawResponse: false;
+    readonly returnedValueContainsCapabilities: false;
+  }>;
+  readonly boundaries: Readonly<{
+    readonly localIsolatedDevnetOnly: true;
+    readonly oneTransportAttemptRecorded: true;
+    readonly durableOutcomeCommitmentPersistedInTransportJournal: true;
+    readonly responseClassificationPersistedInTransportJournal: false;
+    readonly responseClassificationRestartRecoverableFromTransportJournal:
+      false;
+    readonly responseClassificationProjectedFromSameProcessRuntimeProvenance:
+      true;
+    readonly responseClassificationAuthoritativeForAdmission: false;
+    readonly exactNodeAcceptanceObserved: boolean;
+    readonly canonicalConfirmationObserved: false;
+    readonly trackerAdmissionEstablished: false;
+    readonly fundsAuthorityEstablished: false;
+    readonly gate5Closed: false;
+    readonly trustlessStatusEstablished: false;
+    readonly productionReadinessEstablished: false;
+    readonly publicNetworkUsed: false;
+    readonly realFundsUsed: false;
+    readonly existingWalletMaterialUsed: false;
+  }>;
+  readonly receiptDigestHex: string;
+}
+
+const TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V10_RECEIPTS =
   new WeakMap<Error, Readonly<
-    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9Receipt
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10Receipt
+  >>();
+const TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V11_RECEIPTS =
+  new WeakMap<Error, Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11Receipt
   >>();
 
 type SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationFailureCategoryV1 =
@@ -2120,7 +2305,7 @@ interface SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationFailureDia
   readonly category:
     SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationFailureCategoryV1;
   readonly expectedTransactionIdHex: string;
-  readonly executionTargetIdentityDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string | null;
   readonly confirmationBudgetMs: number;
   readonly observationCount: number;
   readonly lastObservation: Readonly<{
@@ -2145,6 +2330,76 @@ const TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1 = Object.freeze([
   'clock_failure',
   'confirmation_phase_failure',
 ] as const);
+
+type GenesisSetupCanonicalConfirmationPhaseKeyV1 =
+  | SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationFailureCategoryV1
+  | 'unclassified';
+
+const GENESIS_SETUP_CANONICAL_CONFIRMATION_PHASES_V1 = Object.freeze({
+  tracker: Object.freeze({
+    unclassified: 'genesis setup tracker canonical confirmation',
+    managed_deadline_elapsed:
+      'genesis setup tracker canonical confirmation managed deadline elapsed',
+    confirmation_budget_elapsed:
+      'genesis setup tracker canonical confirmation confirmation budget elapsed',
+    pending_at_deadline:
+      'genesis setup tracker canonical confirmation pending at deadline',
+    not_found_at_deadline:
+      'genesis setup tracker canonical confirmation not found at deadline',
+    observation_completed_after_deadline:
+      'genesis setup tracker canonical confirmation observation completed after deadline',
+    observer_failure:
+      'genesis setup tracker canonical confirmation observer failure',
+    clock_failure:
+      'genesis setup tracker canonical confirmation clock failure',
+    confirmation_phase_failure:
+      'genesis setup tracker canonical confirmation phase failure',
+  }),
+  duplicatePrevention: Object.freeze({
+    unclassified: 'genesis setup duplicatePrevention canonical confirmation',
+    managed_deadline_elapsed:
+      'genesis setup duplicatePrevention canonical confirmation managed deadline elapsed',
+    confirmation_budget_elapsed:
+      'genesis setup duplicatePrevention canonical confirmation confirmation budget elapsed',
+    pending_at_deadline:
+      'genesis setup duplicatePrevention canonical confirmation pending at deadline',
+    not_found_at_deadline:
+      'genesis setup duplicatePrevention canonical confirmation not found at deadline',
+    observation_completed_after_deadline:
+      'genesis setup duplicatePrevention canonical confirmation observation completed after deadline',
+    observer_failure:
+      'genesis setup duplicatePrevention canonical confirmation observer failure',
+    clock_failure:
+      'genesis setup duplicatePrevention canonical confirmation clock failure',
+    confirmation_phase_failure:
+      'genesis setup duplicatePrevention canonical confirmation phase failure',
+  }),
+  pooledReserve: Object.freeze({
+    unclassified: 'genesis setup pooledReserve canonical confirmation',
+    managed_deadline_elapsed:
+      'genesis setup pooledReserve canonical confirmation managed deadline elapsed',
+    confirmation_budget_elapsed:
+      'genesis setup pooledReserve canonical confirmation confirmation budget elapsed',
+    pending_at_deadline:
+      'genesis setup pooledReserve canonical confirmation pending at deadline',
+    not_found_at_deadline:
+      'genesis setup pooledReserve canonical confirmation not found at deadline',
+    observation_completed_after_deadline:
+      'genesis setup pooledReserve canonical confirmation observation completed after deadline',
+    observer_failure:
+      'genesis setup pooledReserve canonical confirmation observer failure',
+    clock_failure:
+      'genesis setup pooledReserve canonical confirmation clock failure',
+    confirmation_phase_failure:
+      'genesis setup pooledReserve canonical confirmation phase failure',
+  }),
+} satisfies Record<
+  SubstrateFederatedLocalDevnetGenesisRole,
+  Readonly<Record<
+    GenesisSetupCanonicalConfirmationPhaseKeyV1,
+    ManagedCampaignPhaseV1
+  >>
+>);
 
 interface PegInCandidatePlanV1 {
   readonly amountNanoErg: string;
@@ -3435,7 +3690,12 @@ export async function runSubstrateFederatedIsolatedDevnetPegInFrozenObservedAnch
     undefined,
     applicationRunner,
     sourceAcceptanceBuildWorkspace,
-  );
+  ).catch(error => {
+    if (projectManagedCampaignPhaseFailureV1(error) !== null) {
+      throw error;
+    }
+    throw createManagedCampaignPhaseFailureV1('ergo node build', error);
+  });
   return Object.freeze({
     receipt: finalizeFrozenObservedAnchorTrackerCheckCampaignRootV7(
       execution,
@@ -4098,14 +4358,16 @@ function normalizeTrackerTransportJournalRootV9(value: unknown): string {
       'isolated tracker transport journal root must be one link-free directory',
     );
   }
-  const worktreeRoot = realpathSync(resolve(
+  const bridgeRoot = realpathSync(resolve(
     dirname(fileURLToPath(import.meta.url)),
     '..',
     '..',
     '..',
     '..',
-    '..',
   ));
+  const { worktreeRoot } = resolveBridgeRepositoryRootsFromCheckoutLayout(
+    bridgeRoot,
+  );
   if (pathsOverlapV9(worktreeRoot, canonical)) {
     throw new Error(
       'isolated tracker transport journal root must remain outside the worktree',
@@ -4184,20 +4446,19 @@ function trackerTransportCanonicalConfirmationFailureV9(
   outcome: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportOutcomeV1>,
   cause: unknown,
 ): Error {
-  const confirmation =
-    projectTrackerCanonicalConfirmationFailureDiagnosticV1(cause)
-    ?? deepFreeze({
-      schema:
-        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA,
-      version: 1 as const,
-      category: 'confirmation_phase_failure' as const,
-      expectedTransactionIdHex: attempt.expectedTransactionIdHex,
-      executionTargetIdentityDigestHex:
-        authorization.executionTargetIdentityDigestHex,
-      confirmationBudgetMs: TRANSACTION_CONFIRMATION_BUDGET_MS,
-      observationCount: 0,
-      lastObservation: null,
-    });
+  const projectedConfirmation =
+    projectTrackerCanonicalConfirmationFailureDiagnosticV1(cause);
+  const confirmation = projectedConfirmation ?? deepFreeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA,
+    version: 1 as const,
+    category: 'confirmation_phase_failure' as const,
+    expectedTransactionIdHex: attempt.expectedTransactionIdHex,
+    executionTargetIdentityDigestHex: null,
+    confirmationBudgetMs: TRANSACTION_CONFIRMATION_BUDGET_MS,
+    observationCount: 0,
+    lastObservation: null,
+  });
   if (
     authorization.expectedTransactionIdHex !== attempt.expectedTransactionIdHex
     || outcome.expectedTransactionIdHex !== attempt.expectedTransactionIdHex
@@ -4211,8 +4472,13 @@ function trackerTransportCanonicalConfirmationFailureV9(
     )
     || confirmation.expectedTransactionIdHex
       !== attempt.expectedTransactionIdHex
-    || confirmation.executionTargetIdentityDigestHex
-      !== authorization.executionTargetIdentityDigestHex
+    // Confirmation restarts mining under a new, separately bound target.
+    || (projectedConfirmation === null
+      ? confirmation.executionTargetIdentityDigestHex !== null
+      : confirmation.executionTargetIdentityDigestHex === null
+        || !/^[0-9a-f]{64}$/u.test(
+          confirmation.executionTargetIdentityDigestHex,
+        ))
     || confirmation.confirmationBudgetMs !== TRANSACTION_CONFIRMATION_BUDGET_MS
     || (outcome.status !== 'accepted' && outcome.status !== 'ambiguous')
     || (
@@ -4227,11 +4493,11 @@ function trackerTransportCanonicalConfirmationFailureV9(
   }
   const body = {
     schema:
-      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v9' as const,
-    version: 9 as const,
+      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10' as const,
+    version: 10 as const,
     status: 'local_tracker_transport_not_canonically_confirmed' as const,
     staticExecutionManifestDigestHex:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
     transport: Object.freeze({
       authorization: Object.freeze({
         expectedTransactionIdHex: authorization.expectedTransactionIdHex,
@@ -4271,7 +4537,7 @@ function trackerTransportCanonicalConfirmationFailureV9(
   };
   const receipt = finalizeReceipt(
     body,
-    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V9,
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
   );
   assertCapabilityFreePlainData(
     receipt,
@@ -4281,8 +4547,131 @@ function trackerTransportCanonicalConfirmationFailureV9(
     'isolated tracker transport was not canonically confirmed',
     { cause },
   );
-  TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V9_RECEIPTS.set(failure, receipt);
+  TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V10_RECEIPTS.set(failure, receipt);
+  tryRegisterTrackerTransportCampaignFailureV11(
+    failure,
+    receipt,
+    outcome,
+  );
   return failure;
+}
+
+function tryRegisterTrackerTransportCampaignFailureV11(
+  failure: Error,
+  legacyV10Receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10Receipt
+  >,
+  outcome: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportOutcomeV1>,
+): void {
+  try {
+    const responseClassification =
+      projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+        outcome,
+      );
+    if (responseClassification === null) return;
+    assertTrackerTransportCampaignFailureV10ReceiptBinding(
+      legacyV10Receipt,
+    );
+    assertTrackerTransportResponseClassificationBindingV11(
+      responseClassification,
+      outcome,
+    );
+    const body = {
+      schema:
+        'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v11' as const,
+      version: 11 as const,
+      status: 'local_tracker_transport_not_canonically_confirmed' as const,
+      staticProjectionManifestDigestHex:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11,
+      legacyV10Receipt,
+      responseClassification,
+      checks: Object.freeze({
+        exactLegacyV10ProvenanceValidated: true as const,
+        exactResponseClassificationProjected: true as const,
+        exactResponseStatusBound: true as const,
+        exactResponseDigestBound: true as const,
+        returnedValueContainsRawResponse: false as const,
+        returnedValueContainsCapabilities: false as const,
+      }),
+      boundaries: Object.freeze({
+        localIsolatedDevnetOnly: true as const,
+        oneTransportAttemptRecorded: true as const,
+        durableOutcomeCommitmentPersistedInTransportJournal: true as const,
+        responseClassificationPersistedInTransportJournal: false as const,
+        responseClassificationRestartRecoverableFromTransportJournal:
+          false as const,
+        responseClassificationProjectedFromSameProcessRuntimeProvenance:
+          true as const,
+        responseClassificationAuthoritativeForAdmission: false as const,
+        exactNodeAcceptanceObserved:
+          legacyV10Receipt.boundaries.exactNodeAcceptanceObserved,
+        canonicalConfirmationObserved: false as const,
+        trackerAdmissionEstablished: false as const,
+        fundsAuthorityEstablished: false as const,
+        gate5Closed: false as const,
+        trustlessStatusEstablished: false as const,
+        productionReadinessEstablished: false as const,
+        publicNetworkUsed: false as const,
+        realFundsUsed: false as const,
+        existingWalletMaterialUsed: false as const,
+      }),
+    };
+    const receipt = finalizeReceipt(
+      body,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V11,
+    );
+    assertCapabilityFreePlainData(
+      receipt,
+      'isolated devnet tracker transport failure V11 receipt',
+    );
+    TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V11_RECEIPTS.set(failure, receipt);
+  } catch {
+    // V11 diagnostics must never alter the established V10 terminal path.
+  }
+}
+
+function assertTrackerTransportCampaignFailureV10ReceiptBinding(
+  receipt: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10Receipt
+  >,
+): void {
+  const { receiptDigestHex, ...body } = receipt;
+  if (
+    receipt.schema
+      !== 'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10'
+    || receipt.version !== 10
+    || receipt.status !== 'local_tracker_transport_not_canonically_confirmed'
+    || receipt.staticExecutionManifestDigestHex
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10
+    || sha256CanonicalJson(
+      body,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+    ) !== receiptDigestHex
+  ) {
+    throw new Error('isolated tracker transport failure V10 binding changed');
+  }
+}
+
+function assertTrackerTransportResponseClassificationBindingV11(
+  classification: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+  >,
+  outcome: Readonly<{
+    readonly status: 'accepted' | 'ambiguous';
+    readonly responseDigestHex: string;
+  }>,
+): void {
+  assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+    classification,
+  );
+  if (
+    classification.status !== outcome.status
+    || classification.responseDigestHex !== outcome.responseDigestHex
+  ) {
+    throw new Error(
+      'isolated tracker transport response classification binding changed',
+    );
+  }
 }
 
 function projectTrackerCanonicalConfirmationFailureDiagnosticV1(
@@ -4296,14 +4685,37 @@ function projectTrackerCanonicalConfirmationFailureDiagnosticV1(
   );
 }
 
-export function projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+function genesisSetupCanonicalConfirmationPhaseV1(
+  role: SubstrateFederatedLocalDevnetGenesisRole,
+  failure?: unknown,
+): ManagedCampaignPhaseV1 {
+  const diagnostic = failure === undefined
+    ? null
+    : projectTrackerCanonicalConfirmationFailureDiagnosticV1(failure);
+  return GENESIS_SETUP_CANONICAL_CONFIRMATION_PHASES_V1[role][
+    diagnostic?.category ?? 'unclassified'
+  ];
+}
+
+export function projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
   value: unknown,
 ): Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9Receipt
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10Receipt
 > | null {
   return projectDirectOrPrimaryAggregateFailureV1(
     value,
-    TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V9_RECEIPTS,
+    TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V10_RECEIPTS,
+  );
+}
+
+export function projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11(
+  value: unknown,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV11Receipt
+> | null {
+  return projectDirectOrPrimaryAggregateFailureV1(
+    value,
+    TRACKER_TRANSPORT_CAMPAIGN_FAILURE_V11_RECEIPTS,
   );
 }
 
@@ -4346,12 +4758,12 @@ function projectDirectOrPrimaryAggregateFailureV1<T>(
  * retained journal is intentionally not returned. The exact attempt must be
  * canonically confirmed in the same owned devnet lifecycle before teardown.
  */
-export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9(
+export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10(
   input: Readonly<
-    RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Input
+    RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Input
   >,
 ): Promise<Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10
 >> {
   const trackerTransportJournalRoot =
     normalizeTrackerTransportJournalRootV9(input.trackerTransportJournalRoot);
@@ -4385,10 +4797,10 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
     }),
   ).catch(error => {
     if (
-      projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+      projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
         error,
       ) !== null
-      || projectTrackerTransportManagedCampaignPhaseFailureV9(error) !== null
+      || projectManagedCampaignPhaseFailureV1(error) !== null
     ) {
       throw error;
     }
@@ -4420,6 +4832,12 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       !== transport.attempt.expectedTransactionIdHex
     || transport.confirmationExecution.confirmedTransactionIdHex
       !== transport.attempt.expectedTransactionIdHex
+    || transport.execution.primaryMiningDuringAction !== true
+    || transport.execution
+      .exactReservationFreshnessSnapshotRevalidatedBeforeAction !== true
+    || transport.execution
+      .trackerConfirmationMiningCredentialConsumedBeforeTransportOnce !== true
+    || transport.confirmationExecution.sameProcessesAsTrackerTransport !== true
     || transport.confirmationExecution
       .trackerTransportProcessBindingDigestHex
       !== transport.execution.processBindingDigestHex
@@ -4438,11 +4856,11 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
 
   const body = {
     schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_SCHEMA,
-    version: 9 as const,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_SCHEMA,
+    version: 10 as const,
     status: 'local_tracker_transport_canonically_confirmed' as const,
     staticExecutionManifestDigestHex:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
     freshness,
     transport,
     checks: {
@@ -4484,48 +4902,171 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
   );
   assertCapabilityFreePlainData(
     receipt,
-    'isolated devnet tracker transport root V9 receipt',
+    'isolated devnet tracker transport root V10 receipt',
   );
-  TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_RECEIPTS.add(receipt);
+  TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_RECEIPTS.add(receipt);
   return Object.freeze({ receipt });
 }
 
-export function assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+export function assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
   value: unknown,
 ): asserts value is Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Receipt
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Receipt
 > {
   if (
     value === null
     || typeof value !== 'object'
     || Array.isArray(value)
     || !Object.isFrozen(value)
-    || !TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_RECEIPTS.has(value)
+    || !TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_RECEIPTS.has(value)
   ) {
     throw new Error(
-      'isolated devnet tracker transport root V9 lacks exact runtime provenance',
+      'isolated devnet tracker transport root V10 lacks exact runtime provenance',
     );
   }
   const receipt = value as Readonly<
-    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Receipt
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Receipt
   >;
   const { receiptDigestHex, ...body } = receipt;
   if (
     receipt.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V9_SCHEMA
-    || receipt.version !== 9
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V10_SCHEMA
+    || receipt.version !== 10
     || receipt.status !== 'local_tracker_transport_canonically_confirmed'
     || receipt.staticExecutionManifestDigestHex
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10
     || sha256CanonicalJson(
       body,
       PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN,
     ) !== receiptDigestHex
   ) {
-    throw new Error('isolated devnet tracker transport root V9 binding changed');
+    throw new Error('isolated devnet tracker transport root V10 binding changed');
   }
   assertSubstrateFederatedIsolatedDevnetPegInTrackerReservationFreshnessCampaignRootV8Provenance(
     receipt.freshness,
+  );
+}
+
+/**
+ * Project the exact V10 execution and its process-local response
+ * classification without changing the historical durable outcome or receipt.
+ */
+export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11(
+  input: Readonly<
+    RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Input
+  >,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11
+>> {
+  const legacy =
+    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10(
+      input,
+    );
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
+    legacy.receipt,
+  );
+  const responseClassification =
+    projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+      legacy.receipt.transport.outcome,
+    );
+  if (responseClassification === null) {
+    throw new Error(
+      'isolated tracker transport response classification lacks exact runtime provenance',
+    );
+  }
+  assertTrackerTransportResponseClassificationBindingV11(
+    responseClassification,
+    legacy.receipt.transport.outcome,
+  );
+  const body = {
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_SCHEMA,
+    version: 11 as const,
+    status: 'local_tracker_transport_canonically_confirmed' as const,
+    staticProjectionManifestDigestHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11,
+    legacyV10Receipt: legacy.receipt,
+    responseClassification,
+    checks: Object.freeze({
+      exactLegacyV10ProvenanceValidated: true as const,
+      exactResponseClassificationProjected: true as const,
+      exactResponseStatusBound: true as const,
+      exactResponseDigestBound: true as const,
+      returnedValueContainsRawResponse: false as const,
+      returnedValueContainsCapabilities: false as const,
+    }),
+    boundaries: Object.freeze({
+      localIsolatedDevnetOnly: true as const,
+      durableOutcomeCommitmentPersistedInTransportJournal: true as const,
+      responseClassificationPersistedInTransportJournal: false as const,
+      responseClassificationRestartRecoverableFromTransportJournal:
+        false as const,
+      responseClassificationProjectedFromSameProcessRuntimeProvenance:
+        true as const,
+      responseClassificationAuthoritativeForAdmission: false as const,
+      canonicalConfirmationObserved: true as const,
+      trackerAdmissionEstablished: true as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+      publicNetworkUsed: false as const,
+      realFundsUsed: false as const,
+      existingWalletMaterialUsed: false as const,
+    }),
+  };
+  const receipt = finalizeReceipt(
+    body,
+    PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN_V11,
+  );
+  assertCapabilityFreePlainData(
+    receipt,
+    'isolated devnet tracker transport root V11 receipt',
+  );
+  TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_RECEIPTS.add(receipt);
+  return Object.freeze({ receipt });
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Provenance(
+  value: unknown,
+): asserts value is Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Receipt
+> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Array.isArray(value)
+    || !Object.isFrozen(value)
+    || !TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_RECEIPTS.has(value)
+  ) {
+    throw new Error(
+      'isolated devnet tracker transport root V11 lacks exact runtime provenance',
+    );
+  }
+  const receipt = value as Readonly<
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Receipt
+  >;
+  const { receiptDigestHex, ...body } = receipt;
+  if (
+    receipt.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_V11_SCHEMA
+    || receipt.version !== 11
+    || receipt.status !== 'local_tracker_transport_canonically_confirmed'
+    || receipt.staticProjectionManifestDigestHex
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_PROJECTION_MANIFEST_DIGEST_V11
+    || sha256CanonicalJson(
+      body,
+      PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_ROOT_RECEIPT_DIGEST_DOMAIN_V11,
+    ) !== receiptDigestHex
+  ) {
+    throw new Error('isolated devnet tracker transport root V11 binding changed');
+  }
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
+    receipt.legacyV10Receipt,
+  );
+  assertTrackerTransportResponseClassificationBindingV11(
+    receipt.responseClassification,
+    receipt.legacyV10Receipt.transport.outcome,
   );
 }
 
@@ -4638,6 +5179,15 @@ async function runManagedCampaign(
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   const applicationCheckpointAction =
     isApplicationCheckpointAction(pegInAction);
+  const managedPhaseProjectionEnabled =
+    pegInAction === 'check-observed-anchor-tracker-frozen'
+    || pegInAction === 'submit-tracker-once';
+  const createManagedPhaseFailure = (
+    phase: ManagedCampaignPhaseV1,
+    cause: unknown,
+  ): Error => pegInAction === 'submit-tracker-once'
+    ? createTrackerTransportManagedCampaignPhaseFailureV9(phase, cause)
+    : createManagedCampaignPhaseFailureV1(phase, cause);
   if (
     (pegInAction === 'consume-mint-proof')
       !== (frontierMintProofConsumer !== undefined)
@@ -4656,14 +5206,14 @@ async function runManagedCampaign(
   );
   assertCapabilityFreePlainData(built, 'isolated devnet node build result');
   deepFreeze(built);
-  let managedPhase: TrackerTransportManagedCampaignPhaseV9 =
+  let managedPhase: ManagedCampaignPhaseV1 =
     'setup and packet session';
   let setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2> | undefined;
   let packetSession:
     SubstrateFederatedIsolatedDevnetPacketSessionV1OrV2OrV3 | undefined;
   let nodeSession:
-    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1>
+    Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2>
     | undefined;
   let managed: ManagedCampaignExecutionV1['managed'] | undefined;
   let checkpointAnchor: ManagedCampaignExecutionV1['checkpointAnchor'];
@@ -4955,6 +5505,9 @@ async function runManagedCampaign(
               pegIn,
               application,
               extensionValueHex,
+              setManagedPhase: phase => {
+                managedPhase = phase;
+              },
               ...(trackerTransportCampaign === undefined
                 ? {}
                 : { trackerTransportCampaign }),
@@ -4963,12 +5516,20 @@ async function runManagedCampaign(
       }
     }
   } catch (error) {
-    failure = trackerTransportCampaign === undefined
-      || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+    if (managedPhaseProjectionEnabled) {
+      const startupPhase =
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          error,
+        );
+      if (startupPhase !== null) managedPhase = startupPhase;
+    }
+    failure = !managedPhaseProjectionEnabled
+      || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
         error,
       ) !== null
+      || projectManagedCampaignPhaseFailureV1(error) !== null
       ? error
-      : createTrackerTransportManagedCampaignPhaseFailureV9(
+      : createManagedPhaseFailure(
         managedPhase,
         error,
       );
@@ -5002,17 +5563,19 @@ async function runManagedCampaign(
   }
   if (failure !== undefined) {
     if (teardownErrors.length > 0) {
+      const primaryManagedPhase =
+        projectManagedCampaignPhaseFailureV1(failure) ?? managedPhase;
       const aggregate = new AggregateError(
         [failure, ...teardownErrors],
         'isolated genesis setup execution failed and teardown was incomplete',
       );
-      throw trackerTransportCampaign === undefined
-        || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+      throw !managedPhaseProjectionEnabled
+        || projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           failure,
         ) !== null
         ? aggregate
-        : createTrackerTransportManagedCampaignPhaseFailureV9(
-          managedPhase,
+        : createManagedPhaseFailure(
+          primaryManagedPhase,
           aggregate,
         );
     }
@@ -5023,9 +5586,9 @@ async function runManagedCampaign(
       teardownErrors,
       'isolated genesis setup execution teardown was incomplete',
     );
-    throw trackerTransportCampaign === undefined
+    throw !managedPhaseProjectionEnabled
       ? aggregate
-      : createTrackerTransportManagedCampaignPhaseFailureV9(
+      : createManagedPhaseFailure(
         'campaign teardown',
         aggregate,
       );
@@ -5061,7 +5624,7 @@ async function runTrackerReservationFreshnessCampaignV8(
       ManagedCampaignExecutionV1['frozenObservedAnchorTracker']
     >;
     readonly nodeSession:
-      Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV1>;
+      Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2>;
     readonly setupSession:
       Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
     readonly trackerStage:
@@ -5072,6 +5635,7 @@ async function runTrackerReservationFreshnessCampaignV8(
       SubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignMaterialV3
     >;
     readonly extensionValueHex: string;
+    readonly setManagedPhase: (phase: ManagedCampaignPhaseV1) => void;
     readonly trackerTransportCampaign?: Readonly<{
       readonly requestBinding:
         Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1>;
@@ -5081,6 +5645,7 @@ async function runTrackerReservationFreshnessCampaignV8(
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessMaterialV8
 >> {
+  input.setManagedPhase('tracker reservation authorization');
   const frozenTrackerRoot =
     finalizeFrozenObservedAnchorTrackerCheckCampaignRootV7({
       buildReceipt: input.buildReceipt,
@@ -5096,6 +5661,7 @@ async function runTrackerReservationFreshnessCampaignV8(
     authorization,
   );
 
+  input.setManagedPhase('tracker reservation persistence');
   const persistentReservationRoot =
     input.trackerTransportCampaign !== undefined;
   const reservationRoot = input.trackerTransportCampaign?.journalRoot ?? mkdtempSync(
@@ -5154,6 +5720,7 @@ async function runTrackerReservationFreshnessCampaignV8(
       authorization,
     );
 
+    input.setManagedPhase('tracker freshness revalidation');
     const checked =
       await input.nodeSession
         .withCheckpointBoundReservationFreshnessRevalidationTarget(
@@ -5250,6 +5817,7 @@ async function runTrackerReservationFreshnessCampaignV8(
     let transport:
       SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessMaterialV8['transport'];
     if (persistentReservationRoot) {
+      input.setManagedPhase('tracker transport target activation');
       const completion =
         claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
           checked.value.check,
@@ -5258,6 +5826,7 @@ async function runTrackerReservationFreshnessCampaignV8(
         .withCheckpointBoundTrackerTransportTarget(
           completion,
           async target => {
+            input.setManagedPhase('tracker transport authorization');
             const executionCheck =
               promoteSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1(
                 checked.value.check,
@@ -5270,12 +5839,14 @@ async function runTrackerReservationFreshnessCampaignV8(
                 target,
                 durableReservation,
               });
+            input.setManagedPhase('tracker transport journal reservation');
             const journal =
               createSubstrateFederatedIsolatedDevnetTrackerTransportJournalV1({
                 state: reopenedStore!,
                 durableReservation,
               });
             const attempt = journal.reserve(transportAuthorization);
+            input.setManagedPhase('tracker transport provenance binding');
             const relayerLineage = MANAGED_CAMPAIGN_RELAYER_LINEAGES_V9.get(
               input.managed.value,
             );
@@ -5287,6 +5858,7 @@ async function runTrackerReservationFreshnessCampaignV8(
                 'isolated tracker transport campaign lacks reviewed request and relayer lineage',
               );
             }
+            input.setManagedPhase('tracker transport preflight');
             const preflight =
               createSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1({
                 requestBinding:
@@ -5298,6 +5870,7 @@ async function runTrackerReservationFreshnessCampaignV8(
                 journal,
                 attempt,
               });
+            input.setManagedPhase('tracker transport checked submission');
             const submission =
               await submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
                 target,
@@ -5307,7 +5880,9 @@ async function runTrackerReservationFreshnessCampaignV8(
                 attempt,
                 preflight,
               });
+            input.setManagedPhase('tracker transport outcome persistence');
             const outcome = journal.finalize(attempt, submission);
+            input.setManagedPhase('tracker transport post-action validation');
             return deepFreeze({
               authorization: transportAuthorization,
               attempt: {
@@ -5318,13 +5893,14 @@ async function runTrackerReservationFreshnessCampaignV8(
             });
           },
         );
+      input.setManagedPhase('tracker canonical confirmation');
       const confirmationDeadline = performance.now()
         + ACTION_COMPLETION_BUDGET_MS;
       let confirmed: Readonly<{
         readonly value:
           Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
         readonly receipt: Readonly<
-          SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV1Receipt
+          SubstrateFederatedIsolatedDevnetTrackerConfirmationExecutionV2Receipt
         >;
       }>;
       try {
@@ -5381,6 +5957,7 @@ async function runTrackerReservationFreshnessCampaignV8(
         'isolated devnet tracker transport result',
       );
     }
+    input.setManagedPhase('tracker transport result finalization');
     result = deepFreeze({
       frozenTrackerRoot,
       authorization,
@@ -5400,6 +5977,9 @@ async function runTrackerReservationFreshnessCampaignV8(
   }
 
   const cleanupErrors: unknown[] = [];
+  if (failure === undefined) {
+    input.setManagedPhase('tracker reservation cleanup');
+  }
   if (retainedFreshnessCheck !== undefined) {
     discardSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1(
       retainedFreshnessCheck,
@@ -5554,6 +6134,8 @@ function assertTrackerReservationFreshnessBindingsV8(
   const anchor = context.trackerTransition.headers[
     context.trackerTransition.anchorContextIndex
   ];
+  // Freshness retains semantic and authority identity; the newly checked proof
+  // bytes are intentionally fresh and become the exact transport material.
   if (
     contextTip === undefined
     || anchor === undefined
@@ -5655,13 +6237,6 @@ function assertTrackerReservationFreshnessBindingsV8(
     || check.unsignedTransactionDigestHex
       !== frozenCheck.unsignedTransactionDigestHex
     || check.signedTransactionIdHex !== frozenCheck.signedTransactionIdHex
-    || check.signedTransactionCanonicalJsonSha256Hex
-      !== frozenCheck.signedTransactionCanonicalJsonSha256Hex
-    || check.signedTransactionBytesSha256Hex
-      !== frozenCheck.signedTransactionBytesSha256Hex
-    || check.signedTransactionBytesLength
-      !== frozenCheck.signedTransactionBytesLength
-    || check.checkResponseSha256Hex !== frozenCheck.checkResponseSha256Hex
     || check.target.processBindingDigestHex !== execution.processBindingDigestHex
     || check.target.executionTargetIdentityDigestHex
       !== execution.executionTargetIdentityDigestHex
@@ -5748,7 +6323,7 @@ async function executeManagedSetupAction(
       readonly sharedCargoHomeRoot: string;
     }> | undefined,
   setManagedPhase: (
-    phase: TrackerTransportManagedCampaignPhaseV9,
+    phase: ManagedCampaignPhaseV1,
   ) => void,
 ): Promise<Readonly<ExecutionActionResult>> {
   const applicationCheckpointAction =
@@ -5762,13 +6337,24 @@ async function executeManagedSetupAction(
       'isolated devnet Frontier consumer must match the managed action',
     );
   }
-  const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
+  const completionDeadline = performance.now()
+    + (applicationCheckpointAction
+      ? APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS
+      : ACTION_COMPLETION_BUDGET_MS);
   setManagedPhase('source history collection');
-  const sourceHistory =
-    await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
-      input.sourceHistory,
-      sourceAcceptanceBuildWorkspace,
-    );
+  const sourceHistory = await (async () => {
+    try {
+      return await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
+        input.sourceHistory,
+        sourceAcceptanceBuildWorkspace,
+      );
+    } catch (error) {
+      const sourceFailurePhase =
+        projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(error);
+      if (sourceFailurePhase !== null) setManagedPhase(sourceFailurePhase);
+      throw error;
+    }
+  })();
   setManagedPhase('ergo funding and history');
   const rewardInputs = await discoverSubstrateFederatedRewardInputsV2(
     setupSession.signer,
@@ -5778,12 +6364,21 @@ async function executeManagedSetupAction(
       rewardInputs,
     );
   setManagedPhase('packet production');
-  const packet = await packetSession.produce({
-    sourceHistory,
-    ergoHistory,
-    expectedProfilePins: profilePins,
-    relayerArtifacts: input.relayerArtifacts,
-  });
+  const packet = await (async () => {
+    try {
+      return await packetSession.produce({
+        sourceHistory,
+        ergoHistory,
+        expectedProfilePins: profilePins,
+        relayerArtifacts: input.relayerArtifacts,
+      });
+    } catch (error) {
+      const packetPhase =
+        projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(error);
+      if (packetPhase !== null) setManagedPhase(packetPhase);
+      throw error;
+    }
+  })();
   const setupExecutionInput = {
     portableReplayInput: packet.portableReplayInput,
     primaryNodeOrigin: target.primaryNodeOrigin,
@@ -5799,7 +6394,7 @@ async function executeManagedSetupAction(
   assertCanonicalBatch(batch);
 
   const targetBinding = batch.targetBinding;
-  setManagedPhase('genesis setup transport');
+  setManagedPhase('genesis setup support construction');
   const observer =
     createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
       target,
@@ -5820,6 +6415,7 @@ async function executeManagedSetupAction(
       authorizer,
     );
 
+  setManagedPhase('genesis setup journal construction');
   const localStateRoot = mkdtempSync(join(tmpdir(), 'e2s-fed6lab-'));
   journalRoots.add(localStateRoot);
   const markerDirectory = join(localStateRoot, 'attempt-markers');
@@ -5841,6 +6437,7 @@ async function executeManagedSetupAction(
       if (role !== ROLE_ORDER[ordinal]) {
         throw new Error('isolated genesis execution role order changed');
       }
+      setManagedPhase('genesis setup execution admission');
       const execution = await executeSubstrateFederatedLocalDevnetGenesisV1(
         executionInput(batch, transaction, role),
         executionPorts(
@@ -5853,15 +6450,26 @@ async function executeManagedSetupAction(
           transport,
           observer,
           completionDeadline,
+          setManagedPhase,
         ),
       );
+      setManagedPhase('genesis setup execution result validation');
       assertTransportExecution(execution, role, transaction);
-      const confirmation = await waitForCanonicalConfirmation(
-        observer,
-        transaction.issuance.unsignedTransactionIdHex,
-        completionDeadline,
-        `setup:${role}`,
-      );
+      setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role));
+      let confirmation:
+        Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+      try {
+        confirmation = await waitForCanonicalConfirmation(
+          observer,
+          transaction.issuance.unsignedTransactionIdHex,
+          completionDeadline,
+          `setup:${role}`,
+        );
+      } catch (error) {
+        setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role, error));
+        throw error;
+      }
+      setManagedPhase('genesis setup durable reconciliation');
       const reconciliation = await journal.reconcileActive(observer);
       if (
         execution.confirmationStatus === 'confirmed'
@@ -5870,6 +6478,7 @@ async function executeManagedSetupAction(
       ) {
         throw new Error('isolated genesis durable reconciliation changed');
       }
+      setManagedPhase('genesis setup confirmation acknowledgement');
       authorizer.acknowledgeCanonicalConfirmation(role, confirmation);
       transactions.push(Object.freeze({
         ordinal: ordinal as 0 | 1 | 2,
@@ -5883,6 +6492,7 @@ async function executeManagedSetupAction(
         confirmationHeaderIdHex: confirmation.confirmationHeaderIdHex!,
       }));
     }
+    setManagedPhase('genesis setup finalization');
     assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
       authorizer,
       target,
@@ -5959,6 +6569,7 @@ async function executeManagedSetupAction(
             state,
             observer,
             completionDeadline,
+            setManagedPhase,
             pegInAction === 'check-observed-anchor-tracker'
               || isFrozenTrackerCheckAction(pegInAction),
           );
@@ -6568,6 +7179,7 @@ async function executeManagedPegInCommittedVault(
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   completionDeadline: number,
+  setManagedPhase: (phase: ManagedCampaignPhaseV1) => void,
   retainSignerForTrackerCheck = false,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']>> {
   const sourceLockExecution = pegIn.sourceLockExecution;
@@ -6593,6 +7205,7 @@ async function executeManagedPegInCommittedVault(
       packet.boxes.transitionFeeFunding.boxId,
     unsignedTransaction: reserveTransition,
   };
+  setManagedPhase('peg-in committed-vault check');
   const committedVaultCheck = retainSignerForTrackerCheck
     ? await setupSession.checkPegInCommittedVaultRetainingSigner(
       committedVaultCheckInput,
@@ -6632,6 +7245,7 @@ async function executeManagedPegInCommittedVault(
   ) {
     throw new Error('isolated committed-vault check binding changed');
   }
+  setManagedPhase('peg-in committed-vault authorization');
   const executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1> =
     promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
@@ -6657,6 +7271,7 @@ async function executeManagedPegInCommittedVault(
   if (await committedVaultJournal.reconcileActive(observer) !== 'none') {
     throw new Error('unexpected prior committed-vault attempt was reconciled');
   }
+  setManagedPhase('peg-in committed-vault transport');
   const committedVaultTransport =
     createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
       target,
@@ -6678,6 +7293,7 @@ async function executeManagedPegInCommittedVault(
     unsignedTransaction: reserveTransition.eip12Tx,
   }, {
     sign: async admission => {
+      setManagedPhase('peg-in committed-vault operational signing');
       assertCommittedVaultOperationalAdmission(
         admission,
         executionCheck,
@@ -6697,6 +7313,7 @@ async function executeManagedPegInCommittedVault(
       });
     },
     check: async signed => {
+      setManagedPhase('peg-in committed-vault operational check');
       if (
         signed.signerArtifact !== executionCheck.signedCandidate
         || signed.signedTransactionDigestHex
@@ -6714,14 +7331,24 @@ async function executeManagedPegInCommittedVault(
           executionCheck.checkedAcceptance.submissionHandle,
       });
     },
-    revalidate: checked =>
-      authorizationSession.revalidator.revalidate(checked),
-    authorize: revalidated =>
-      authorizationSession.broadcastAuthorizer.authorize(revalidated),
-    reserve: authorization =>
-      committedVaultJournal.journal.reserve(authorization),
-    finalize: input => committedVaultJournal.journal.finalize(input),
+    revalidate: checked => {
+      setManagedPhase('peg-in committed-vault pre-transport revalidation');
+      return authorizationSession.revalidator.revalidate(checked);
+    },
+    authorize: revalidated => {
+      setManagedPhase('peg-in committed-vault broadcast authorization');
+      return authorizationSession.broadcastAuthorizer.authorize(revalidated);
+    },
+    reserve: authorization => {
+      setManagedPhase('peg-in committed-vault durable reservation');
+      return committedVaultJournal.journal.reserve(authorization);
+    },
+    finalize: input => {
+      setManagedPhase('peg-in committed-vault outcome persistence');
+      return committedVaultJournal.journal.finalize(input);
+    },
     submit: attempt => {
+      setManagedPhase('peg-in committed-vault checked submission');
       assertFullConfirmationWindowAvailable(
         completionDeadline,
         'committed-vault',
@@ -6729,13 +7356,16 @@ async function executeManagedPegInCommittedVault(
       return committedVaultTransport.submit(attempt);
     },
   });
+  setManagedPhase('peg-in committed-vault execution result validation');
   assertCommittedVaultTransportExecution(execution, reserveTransition.txId);
+  setManagedPhase('peg-in committed-vault pre-transport observation');
   const preTransportObservation =
     authorizationSession.takePreTransportObservation();
   assertCapabilityFreePlainData(
     preTransportObservation,
     'isolated committed-vault pre-transport observation',
   );
+  setManagedPhase('peg-in committed-vault canonical confirmation');
   await waitForCanonicalConfirmation(
     observer,
     reserveTransition.txId,
@@ -6751,6 +7381,7 @@ async function executeManagedPegInCommittedVault(
     throw new Error('committed-vault confirmed attempt count changed');
   }
   const latestConfirmation = latestConfirmations[0]!;
+  setManagedPhase('peg-in committed-vault output observation');
   const outputObservation =
     await observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
       target,
@@ -7628,10 +8259,13 @@ function executionPorts(
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   completionDeadline: number,
+  setManagedPhase: (phase: ManagedCampaignPhaseV1) => void,
 ): Readonly<SubstrateFederatedLocalDevnetGenesisExecutionPorts> {
+  const operationalJournal = journal.journal;
   return Object.freeze({
     signer: Object.freeze({
       sign: async (admission: SubstrateFederatedLocalDevnetGenesisAdmission) => {
+        setManagedPhase('genesis setup signing');
         assertAdmissionMatchesTransaction(admission, batch, transaction, role);
         return Object.freeze({
           signedTransactionDigestHex:
@@ -7644,6 +8278,7 @@ function executionPorts(
       check: async (
         signed: SubstrateFederatedLocalDevnetGenesisSignedCandidate,
       ) => {
+        setManagedPhase('genesis setup candidate check');
         assertAdmissionMatchesTransaction(
           signed.admission,
           batch,
@@ -7665,12 +8300,49 @@ function executionPorts(
         });
       },
     }),
-    revalidator,
-    broadcastAuthorizer: authorizer,
-    journal: journal.journal,
+    revalidator: Object.freeze({
+      revalidate: (
+        ...args: Parameters<typeof revalidator.revalidate>
+      ) => {
+        setManagedPhase(
+          args[1] === 'post-check'
+            ? 'genesis setup post-check revalidation'
+            : 'genesis setup pre-transport revalidation',
+        );
+        return revalidator.revalidate(...args);
+      },
+    }),
+    broadcastAuthorizer: Object.freeze({
+      authorize: (
+        ...args: Parameters<typeof authorizer.authorize>
+      ) => {
+        setManagedPhase('genesis setup broadcast authorization');
+        return authorizer.authorize(...args);
+      },
+    }),
+    journal: Object.freeze({
+      reserve: (
+        ...args: Parameters<typeof operationalJournal.reserve>
+      ) => {
+        setManagedPhase('genesis setup durable reservation');
+        return operationalJournal.reserve(...args);
+      },
+      finalize: (
+        ...args: Parameters<typeof operationalJournal.finalize>
+      ) => {
+        setManagedPhase('genesis setup outcome persistence');
+        return operationalJournal.finalize(...args);
+      },
+      confirm: (
+        ...args: Parameters<typeof operationalJournal.confirm>
+      ) => {
+        setManagedPhase('genesis setup outcome persistence');
+        return operationalJournal.confirm(...args);
+      },
+    }),
     transport: Object.freeze({
-      ...transport,
       submit: (attempt: Parameters<typeof transport.submit>[0]) => {
+        setManagedPhase('genesis setup checked submission');
         assertFullConfirmationWindowAvailable(
           completionDeadline,
           `setup:${role}`,
@@ -7678,7 +8350,14 @@ function executionPorts(
         return transport.submit(attempt);
       },
     }),
-    confirmationObserver: observer,
+    confirmationObserver: Object.freeze({
+      observe: (
+        ...args: Parameters<typeof observer.observe>
+      ) => {
+        setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role));
+        return observer.observe(...args);
+      },
+    }),
   });
 }
 

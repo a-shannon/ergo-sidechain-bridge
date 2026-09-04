@@ -8,14 +8,19 @@ import {
   type SubstrateFederatedIsolatedDevnetTrackerTransportAttemptV1,
 } from '../../state-tracker.js';
 import {
-  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   type SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1,
-  type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1,
 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
+  type SubstrateFederatedIsolatedDevnetTrackerTransportResponseCategoryV1,
+} from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
 import {
   sha256CanonicalJson,
 } from '../../ergo-settlement-core/strict-json.js';
@@ -56,7 +61,7 @@ const AUTHORIZATIONS = new WeakMap<object, Readonly<{
   readonly executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>;
   readonly target:
-    Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+    Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
   readonly binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetBindingV1>;
   readonly durableReservation:
@@ -81,7 +86,7 @@ const PREFLIGHTED_DURABLE_ATTEMPTS = new WeakSet<object>();
 const CONSUMED_PREFLIGHTS = new WeakSet<object>();
 const TRANSPORT_PREFLIGHTS = new WeakMap<object, Readonly<{
   readonly target:
-    Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+    Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
   readonly executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>;
   readonly authorization:
@@ -100,8 +105,14 @@ const TRANSPORT_RESULTS = new WeakMap<object, Readonly<{
     readonly status: 'accepted' | 'ambiguous';
     readonly submittedTransactionIdHex: string | null;
     readonly responseDigestHex: string;
+    readonly responseClassification: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+    >;
   }>;
 }>>();
+const OUTCOME_RESPONSE_CLASSIFICATIONS = new WeakMap<object, Readonly<
+  SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+>>();
 
 export interface SubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1 {
   readonly schema:
@@ -195,6 +206,9 @@ export interface SubstrateFederatedIsolatedDevnetTrackerTransportResultV1 {
   readonly status: 'accepted' | 'ambiguous';
   readonly submittedTransactionIdHex: string | null;
   readonly responseDigestHex: string;
+  readonly responseClassification: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+  >;
   readonly resultArtifact: Readonly<{
     readonly schema:
       typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_OUTCOME_V1_SCHEMA;
@@ -241,7 +255,7 @@ export function authorizeSubstrateFederatedIsolatedDevnetTrackerTransportV1(
   input: Readonly<{
     executionCheck:
       Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>;
-    target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+    target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
     durableReservation:
       Readonly<SubstrateFederatedIsolatedDevnetTrackerAdmissionDurableReservationReceiptV1>;
   }>,
@@ -377,7 +391,7 @@ export function authorizeSubstrateFederatedIsolatedDevnetTrackerTransportV1(
 
 export function assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1(
   value: unknown,
-  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>,
   executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>,
 ): asserts value is Readonly<
@@ -390,7 +404,7 @@ export function assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizat
   }
   const material = AUTHORIZATIONS.get(value);
   const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1(target);
+    assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
   const authorization = value as Readonly<
     SubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1
   >;
@@ -532,10 +546,15 @@ export function createSubstrateFederatedIsolatedDevnetTrackerTransportJournalV1(
         responseDigestHex: finalized.responseDigestHex!,
         trackerAdmissionEstablished: false as const,
       });
-      return Object.freeze({
+      const outcome = Object.freeze({
         ...body,
         outcomeDigestHex: sha256CanonicalJson(body, OUTCOME_DIGEST_DOMAIN),
       });
+      OUTCOME_RESPONSE_CLASSIFICATIONS.set(
+        outcome,
+        submission.responseClassification,
+      );
+      return outcome;
     },
   });
   JOURNALS.set(journal, Object.freeze({
@@ -559,7 +578,7 @@ export function createSubstrateFederatedIsolatedDevnetTrackerTransportPreflightV
     readonly relayerLineage:
       Readonly<SubstrateFederatedIsolatedDevnetPacketRelayerLineageV1>;
     readonly target:
-      Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+      Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
     readonly executionCheck:
       Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>;
     readonly authorization:
@@ -694,7 +713,7 @@ export function consumeSubstrateFederatedIsolatedDevnetTrackerTransportPreflight
     Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportPreflightV1>,
   input: Readonly<{
     readonly target:
-      Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV1>;
+      Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
     readonly executionCheck:
       Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportExecutionCheckV1>;
     readonly authorization:
@@ -773,6 +792,9 @@ export function issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1(
   submission: Readonly<{
     readonly status: 'accepted' | 'ambiguous';
     readonly submittedTransactionIdHex: string | null;
+    readonly responseCategory:
+      SubstrateFederatedIsolatedDevnetTrackerTransportResponseCategoryV1;
+    readonly httpStatus: number | null;
     readonly responseDigestHex: string;
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportResultV1> {
@@ -804,6 +826,13 @@ export function issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1(
   ) {
     throw new Error('tracker transport result binding changed');
   }
+  const responseClassification =
+    createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1({
+      status: submission.status,
+      responseCategory: submission.responseCategory,
+      httpStatus: submission.httpStatus,
+      responseDigestHex: submission.responseDigestHex,
+    });
   const resultArtifact = Object.freeze({
     schema:
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_OUTCOME_V1_SCHEMA,
@@ -813,14 +842,29 @@ export function issueSubstrateFederatedIsolatedDevnetTrackerTransportResultV1(
     status: submission.status,
     submittedTransactionIdHex: submission.submittedTransactionIdHex,
     responseDigestHex: submission.responseDigestHex,
+    responseClassification,
     resultArtifact,
   });
   TRANSPORT_RESULTS.set(resultArtifact, Object.freeze({
     journal,
     attempt,
-    submission: Object.freeze({ ...submission }),
+    submission: Object.freeze({
+      status: submission.status,
+      submittedTransactionIdHex: submission.submittedTransactionIdHex,
+      responseDigestHex: submission.responseDigestHex,
+      responseClassification,
+    }),
   }));
   return result;
+}
+
+export function projectSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1(
+  outcome: unknown,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+> | null {
+  if (outcome === null || typeof outcome !== 'object') return null;
+  return OUTCOME_RESPONSE_CLASSIFICATIONS.get(outcome) ?? null;
 }
 
 export function claimSubstrateFederatedIsolatedDevnetTrackerTransportDurableAttemptV1(
@@ -895,6 +939,9 @@ function requireTransportResult(
   readonly status: 'accepted' | 'ambiguous';
   readonly submittedTransactionIdHex: string | null;
   readonly responseDigestHex: string;
+  readonly responseClassification: Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1
+  >;
 }> {
   if (
     result === null
@@ -912,6 +959,8 @@ function requireTransportResult(
     || material.submission.submittedTransactionIdHex
       !== result.submittedTransactionIdHex
     || material.submission.responseDigestHex !== result.responseDigestHex
+    || material.submission.responseClassification
+      !== result.responseClassification
   ) {
     throw new Error('tracker transport result binding changed');
   }

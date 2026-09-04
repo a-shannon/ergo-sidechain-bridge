@@ -18,6 +18,9 @@ import {
   writeNewFile,
 } from '../create-only-out-of-repository-artifact.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   canonicalJson,
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
@@ -67,8 +70,9 @@ export async function runSubstrateFederatedIsolatedDevnetPegInSourceLockExecutio
   const args = parseArguments(argv);
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
   const relayerRoot = resolve(scriptDirectory, '..', '..');
-  const bridgeRoot = resolve(relayerRoot, '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(relayerRoot, '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const request = readBoundedRegularFile(
     explicitExistingLocalNonSensitivePath(
       args.requestPath,
@@ -336,7 +340,11 @@ export function assertCreateOnlyOutput(
 
 export function childEnvironment(
   worktreeRoot: string,
-  options?: Readonly<{ readonly cargoHomeDirectory?: string }>,
+  options?: Readonly<{
+    readonly cargoHomeDirectory?: string;
+    readonly omitInheritedCargoHome?: boolean;
+    readonly protocExecutablePath?: string;
+  }>,
 ): NodeJS.ProcessEnv {
   if (
     options !== undefined
@@ -344,7 +352,19 @@ export function childEnvironment(
       options === null
       || typeof options !== 'object'
       || Array.isArray(options)
-      || Object.keys(options).some(key => key !== 'cargoHomeDirectory')
+      || Object.keys(options).some(key => ![
+        'cargoHomeDirectory',
+        'omitInheritedCargoHome',
+        'protocExecutablePath',
+      ].includes(key))
+      || (
+        options.omitInheritedCargoHome !== undefined
+        && typeof options.omitInheritedCargoHome !== 'boolean'
+      )
+      || (
+        options.omitInheritedCargoHome === true
+        && options.cargoHomeDirectory !== undefined
+      )
     )
   ) {
     throw new Error('isolated worker environment options are invalid');
@@ -375,6 +395,14 @@ export function childEnvironment(
       canonicalPathIdentity(candidate) === canonicalPathIdentity(root)
     ) === index,
   );
+  const protocOverride = options?.protocExecutablePath === undefined
+    ? undefined
+    : safeEnvironmentPath(
+      options.protocExecutablePath,
+      'PROTOC override',
+      'file',
+      canonicalWorktreeRoot,
+    );
   const systemDrive = systemDriveRoot.replace(/[\\/]+$/u, '');
   const comSpec = safeEnvironmentPath(
     process.env.ComSpec ?? process.env.COMSPEC,
@@ -412,7 +440,13 @@ export function childEnvironment(
     environment.PATHEXT = pathExt;
   }
   for (const key of CHILD_DIRECTORY_ENVIRONMENT_KEYS) {
-    if (key === 'CARGO_HOME' && cargoHomeOverride !== undefined) continue;
+    if (
+      key === 'CARGO_HOME'
+      && (
+        cargoHomeOverride !== undefined
+        || options?.omitInheritedCargoHome === true
+      )
+    ) continue;
     const value = process.env[key];
     if (value !== undefined && value.length > 0) {
       environment[key] = safeEnvironmentPath(
@@ -426,6 +460,9 @@ export function childEnvironment(
   }
   if (cargoHomeOverride !== undefined) {
     environment.CARGO_HOME = cargoHomeOverride;
+  }
+  if (protocOverride !== undefined) {
+    environment.PROTOC = protocOverride;
   }
   for (const key of CHILD_PATH_LIST_ENVIRONMENT_KEYS) {
     const value = process.env[key];

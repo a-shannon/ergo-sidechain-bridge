@@ -1,18 +1,18 @@
-import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
-  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance,
-  projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9,
-  runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9,
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V9,
-  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9,
+  assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance,
+  projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10,
+  runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import {
   canonicalPathIdentity,
   isPathInside,
 } from '../create-only-out-of-repository-artifact.js';
+import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../bridge-repository-layout.js';
 import {
   assertNoDuplicateJsonKeys,
   canonicalJson,
@@ -22,11 +22,20 @@ import {
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1,
 } from '../relayer-core/substrate-federated-isolated-devnet-receipt-data-safety-v1.js';
 import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
+} from '../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
+import {
+  isKnownSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1,
+  projectSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureV1,
   projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9,
 } from '../relayer-core/substrate-federated-isolated-devnet-tracker-transport-managed-phase-v9.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
 } from '../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+} from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   loadCanonicalBootstrapRequestBoundWithProvenanceV1,
 } from './run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js';
@@ -41,13 +50,13 @@ const ERGO_POSITIVE_LONG_MAX = 0x7fff_ffff_ffff_ffffn;
 const WORKER_FAILURE_PREFIX =
   'isolated tracker transport campaign worker failed';
 const RECEIPT_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V9';
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10';
 const FAILURE_RECEIPT_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V9';
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10';
 const TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-tracker-canonical-confirmation-failure-diagnostic.v1' as const;
 const TRACKER_CANONICAL_CONFIRMATION_BUDGET_MS_V1 = 2 * 60_000;
-const TRACKER_TRANSPORT_WORKER_PHASES_V9 = Object.freeze([
+const TRACKER_TRANSPORT_WORKER_PHASES_V10 = Object.freeze([
   'worker arguments',
   'worker platform',
   'worker roots',
@@ -55,32 +64,12 @@ const TRACKER_TRANSPORT_WORKER_PHASES_V9 = Object.freeze([
   'bootstrap request',
   'campaign root',
   'worker receipt',
-  'ergo node build',
-  'setup and packet session',
-  'node process construction',
-  'node startup and mining',
-  'managed setup execution',
-  'source history collection',
-  'ergo funding and history',
-  'packet production',
-  'setup batch construction',
-  'genesis setup transport',
-  'peg-in candidate construction',
-  'peg-in source-lock execution',
-  'peg-in committed-vault execution',
-  'application checkpoint execution',
-  'tracker candidate construction',
-  'managed setup finalization',
-  'checkpoint anchor',
-  'observed tracker check',
-  'frozen tracker check',
-  'tracker reservation and transport',
-  'campaign teardown',
+  ...SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_CAMPAIGN_PHASES_V1,
 ] as const);
-const TRACKER_TRANSPORT_WORKER_PHASE_SET_V9: ReadonlySet<string> =
-  new Set(TRACKER_TRANSPORT_WORKER_PHASES_V9);
-export type SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 =
-  typeof TRACKER_TRANSPORT_WORKER_PHASES_V9[number];
+const TRACKER_TRANSPORT_WORKER_PHASE_SET_V10: ReadonlySet<string> =
+  new Set(TRACKER_TRANSPORT_WORKER_PHASES_V10);
+export type SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10 =
+  typeof TRACKER_TRANSPORT_WORKER_PHASES_V10[number];
 const TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1 = Object.freeze([
   'managed_deadline_elapsed',
   'confirmation_budget_elapsed',
@@ -92,13 +81,13 @@ const TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1 = Object.freeze([
   'confirmation_phase_failure',
 ] as const);
 
-export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V9_SCHEMA =
-  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-receipt.v9' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-receipt.v10' as const;
 
-export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9 {
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10 {
   readonly schema:
-    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V9_SCHEMA;
-  readonly version: 9;
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA;
+  readonly version: 10;
   readonly status: 'local_tracker_transport_canonically_confirmed';
   readonly requestSha256Hex: string;
   readonly pegIn: Readonly<{
@@ -137,13 +126,13 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWo
   readonly receiptDigestHex: string;
 }
 
-export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V9_SCHEMA =
-  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-failure-receipt.v9' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-failure-receipt.v10' as const;
 
-export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9 {
+export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10 {
   readonly schema:
-    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V9_SCHEMA;
-  readonly version: 9;
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA;
+  readonly version: 10;
   readonly status: 'local_tracker_transport_not_canonically_confirmed';
   readonly requestSha256Hex: string;
   readonly pegIn: Readonly<{
@@ -178,7 +167,7 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWo
     readonly category:
       typeof TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1[number];
     readonly expectedTransactionIdHex: string;
-    readonly executionTargetIdentityDigestHex: string;
+    readonly executionTargetIdentityDigestHex: string | null;
     readonly confirmationBudgetMs: number;
     readonly observationCount: number;
     readonly lastObservation: Readonly<{
@@ -207,25 +196,25 @@ export interface SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWo
 }
 
 const WORKER_FAILURE_RECEIPTS = new WeakMap<Error, Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
 >>();
-const WORKER_PHASE_FAILURES_V9 = new WeakMap<
+const WORKER_PHASE_FAILURES_V10 = new WeakMap<
   Error,
-  SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9
+  SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10
 >();
 
-export function isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+export function isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10(
   value: unknown,
-): value is SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 {
+): value is SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10 {
   return typeof value === 'string'
-    && TRACKER_TRANSPORT_WORKER_PHASE_SET_V9.has(value);
+    && TRACKER_TRANSPORT_WORKER_PHASE_SET_V10.has(value);
 }
 
-function createTrackerTransportWorkerPhaseFailureV9(
-  phase: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9,
+function createTrackerTransportWorkerPhaseFailureV10(
+  phase: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10,
   cause: unknown,
 ): Error {
-  if (!isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9(
+  if (!isKnownSubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10(
     phase,
   )) {
     throw new Error('tracker transport worker phase is invalid');
@@ -233,24 +222,24 @@ function createTrackerTransportWorkerPhaseFailureV9(
   const failure = cause instanceof Error
     ? cause
     : new Error('isolated tracker transport campaign worker phase failed');
-  WORKER_PHASE_FAILURES_V9.set(failure, phase);
+  WORKER_PHASE_FAILURES_V10.set(failure, phase);
   return failure;
 }
 
-function readTrackerTransportWorkerPhaseFailureV9(
+function readTrackerTransportWorkerPhaseFailureV10(
   error: unknown,
-): SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 | undefined {
+): SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10 | undefined {
   return error instanceof Error
-    ? WORKER_PHASE_FAILURES_V9.get(error)
+    ? WORKER_PHASE_FAILURES_V10.get(error)
     : undefined;
 }
 
-export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(
+export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV10(
   argv: readonly string[],
 ): Promise<Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
 >> {
-  let phase: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV9 =
+  let phase: SubstrateFederatedIsolatedDevnetTrackerTransportWorkerPhaseV10 =
     'worker arguments';
   try {
     assertArguments(argv);
@@ -262,7 +251,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
 
     phase = 'worker roots';
     const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-    const { bridgeRoot, worktreeRoot } = resolveCanonicalWorkerRootsV9(
+    const { bridgeRoot, worktreeRoot } = resolveCanonicalWorkerRootsV10(
       scriptDirectory,
     );
 
@@ -316,22 +305,18 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       recipientAddressHex: argv[7]!,
     });
     const acceptance = input.lifecycle.sourceHistory.acceptance;
-    if (
-      !/^0x[0-9a-f]{40}$/u.test(acceptance.expectedSudoAddress)
-      || `0x${pegIn.recipientAddressHex}` !== acceptance.expectedSudoAddress
-    ) {
-      throw new Error(
-        'tracker transport recipient must match the reviewed LAB owner',
-      );
-    }
+    assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+      bridgeOwnerAddressHex: acceptance.bridgeOwnerAddress,
+      recipientAddressHex: pegIn.recipientAddressHex,
+    });
 
     phase = 'campaign root';
     let result: Awaited<ReturnType<
-      typeof runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9
+      typeof runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10
     >>;
     try {
       result =
-        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9({
+        await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10({
           ...input,
           pegIn,
           frontierApplicationRunner: Object.freeze({
@@ -348,7 +333,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
         });
     } catch (error) {
       const rootFailure =
-        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9(
+        projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
           error,
         );
       if (rootFailure !== null) {
@@ -359,7 +344,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
           error,
         );
       if (managedPhase !== null) {
-        throw createTrackerTransportWorkerPhaseFailureV9(
+        throw createTrackerTransportWorkerPhaseFailureV10(
           managedPhase,
           error,
         );
@@ -368,7 +353,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
     }
 
     phase = 'worker receipt';
-    assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9Provenance(
+    assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
       result.receipt,
     );
     return projectReceipt(result.receipt, argv[3]!, pegIn);
@@ -377,11 +362,11 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       (error instanceof Error && WORKER_FAILURE_RECEIPTS.has(error))
       || readSafeFrozenObservedAnchorTrackerCheckCampaignBindingFailureV7(error)
         !== undefined
-      || readTrackerTransportWorkerPhaseFailureV9(error) !== undefined
+      || readTrackerTransportWorkerPhaseFailureV10(error) !== undefined
     ) {
       throw error;
     }
-    throw createTrackerTransportWorkerPhaseFailureV9(
+    throw createTrackerTransportWorkerPhaseFailureV10(
       phase,
       error,
     );
@@ -390,7 +375,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
 
 function projectReceipt(
   rootReceipt: Awaited<ReturnType<
-    typeof runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV9
+    typeof runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10
   >>['receipt'],
   requestSha256Hex: string,
   pegIn: Readonly<{
@@ -398,7 +383,7 @@ function projectReceipt(
     readonly recipientAddressHex: string;
   }>,
 ): Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
 > {
   const outcome = rootReceipt.transport.outcome;
   const confirmation = rootReceipt.transport.confirmation;
@@ -428,8 +413,8 @@ function projectReceipt(
   }
   const body = {
     schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V9_SCHEMA,
-    version: 9 as const,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA,
+    version: 10 as const,
     status: 'local_tracker_transport_canonically_confirmed' as const,
     requestSha256Hex,
     pegIn,
@@ -508,14 +493,12 @@ function assertArguments(argv: readonly string[]): void {
   }
 }
 
-export function resolveCanonicalWorkerRootsV9(
+export function resolveCanonicalWorkerRootsV10(
   scriptDirectory: string,
 ): Readonly<{ readonly bridgeRoot: string; readonly worktreeRoot: string }> {
-  const bridgeRoot = realpathSync(resolve(scriptDirectory, '..', '..', '..'));
-  return Object.freeze({
-    bridgeRoot,
-    worktreeRoot: realpathSync(resolve(bridgeRoot, '..')),
-  });
+  return resolveBridgeRepositoryRootsFromCheckoutLayout(
+    resolve(scriptDirectory, '..', '..', '..'),
+  );
 }
 
 function externalDirectory(
@@ -542,7 +525,7 @@ function pathsOverlap(left: string, right: string): boolean {
 
 function createWorkerFailure(
   rootFailure: NonNullable<ReturnType<
-    typeof projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV9
+    typeof projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10
   >>,
   requestSha256Hex: string,
   pegIn: Readonly<{
@@ -553,8 +536,8 @@ function createWorkerFailure(
 ): Error {
   const body = {
     schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V9_SCHEMA,
-    version: 9 as const,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA,
+    version: 10 as const,
     status: 'local_tracker_transport_not_canonically_confirmed' as const,
     requestSha256Hex,
     pegIn,
@@ -575,7 +558,7 @@ function createWorkerFailure(
   return failure;
 }
 
-export function formatSafeTrackerTransportCampaignWorkerFailureV9(
+export function formatSafeTrackerTransportCampaignWorkerFailureV10(
   error: unknown,
 ): string {
   if (error instanceof Error) {
@@ -587,14 +570,25 @@ export function formatSafeTrackerTransportCampaignWorkerFailureV9(
   if (binding !== undefined) {
     return `${WORKER_FAILURE_PREFIX}: producer-to-consumer binding changed: ${binding}\n`;
   }
-  const phase = readTrackerTransportWorkerPhaseFailureV9(error);
+  const checkedSubmissionFailure =
+    projectSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureV1(
+      error,
+    );
+  if (
+    isKnownSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureCodeV1(
+      checkedSubmissionFailure,
+    )
+  ) {
+    return `${WORKER_FAILURE_PREFIX}: checked submission failed: ${checkedSubmissionFailure}\n`;
+  }
+  const phase = readTrackerTransportWorkerPhaseFailureV10(error);
   if (phase !== undefined) {
     return `${WORKER_FAILURE_PREFIX}: phase failed: ${phase}\n`;
   }
   return `${WORKER_FAILURE_PREFIX}\n`;
 }
 
-export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9(
+export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10(
   stdout: string,
   expectedRequestSha256Hex: string,
   expectedPegIn: Readonly<{
@@ -602,7 +596,25 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     readonly recipientAddressHex: string;
   }>,
 ): Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
+> {
+  assertStandaloneV10OwnerPolicy(expectedPegIn);
+  return parseWorkerReceiptProjectionV10(
+    stdout,
+    expectedRequestSha256Hex,
+    expectedPegIn,
+  );
+}
+
+function parseWorkerReceiptProjectionV10(
+  stdout: string,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<{
+    readonly amountNanoErg: string;
+    readonly recipientAddressHex: string;
+  }>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
 > {
   fixedHex(expectedRequestSha256Hex, 32, 'expected request digest');
   assertPegIn(expectedPegIn, 'expected peg-in');
@@ -633,12 +645,12 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   ], 'tracker transport worker receipt');
   if (
     receipt.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V9_SCHEMA
-    || receipt.version !== 9
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_RECEIPT_V10_SCHEMA
+    || receipt.version !== 10
     || receipt.status !== 'local_tracker_transport_canonically_confirmed'
     || receipt.requestSha256Hex !== expectedRequestSha256Hex
     || receipt.staticExecutionManifestDigestHex
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10
   ) {
     throw new Error('tracker transport worker identity changed');
   }
@@ -735,11 +747,11 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   }
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(receipt);
   return deepFreeze(receipt) as unknown as Readonly<
-    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV9
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerReceiptV10
   >;
 }
 
-export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9(
+export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10(
   stdout: string,
   expectedRequestSha256Hex: string,
   expectedPegIn: Readonly<{
@@ -747,7 +759,25 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     readonly recipientAddressHex: string;
   }>,
 ): Readonly<
-  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
+> {
+  assertStandaloneV10OwnerPolicy(expectedPegIn);
+  return parseWorkerFailureReceiptProjectionV10(
+    stdout,
+    expectedRequestSha256Hex,
+    expectedPegIn,
+  );
+}
+
+function parseWorkerFailureReceiptProjectionV10(
+  stdout: string,
+  expectedRequestSha256Hex: string,
+  expectedPegIn: Readonly<{
+    readonly amountNanoErg: string;
+    readonly recipientAddressHex: string;
+  }>,
+): Readonly<
+  SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
 > {
   fixedHex(expectedRequestSha256Hex, 32, 'expected request digest');
   assertPegIn(expectedPegIn, 'expected peg-in');
@@ -778,12 +808,12 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   ], 'tracker transport worker failure receipt');
   if (
     receipt.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V9_SCHEMA
-    || receipt.version !== 9
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_WORKER_FAILURE_RECEIPT_V10_SCHEMA
+    || receipt.version !== 10
     || receipt.status !== 'local_tracker_transport_not_canonically_confirmed'
     || receipt.requestSha256Hex !== expectedRequestSha256Hex
     || receipt.staticExecutionManifestDigestHex
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V9
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V10
   ) {
     throw new Error('tracker transport worker failure identity changed');
   }
@@ -857,6 +887,11 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     throw new Error('tracker transport worker failure binding changed');
   }
   fixedHex(authorization.authorizationDigestHex, 32, 'authorization digest');
+  fixedHex(
+    authorization.executionTargetIdentityDigestHex,
+    32,
+    'authorization target identity digest',
+  );
   fixedHex(outcome.outcomeDigestHex, 32, 'outcome digest');
   fixedHex(outcome.responseDigestHex, 32, 'response digest');
   const confirmation = exactRecord(receipt.confirmation, [
@@ -869,6 +904,14 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
     'schema',
     'version',
   ], 'tracker transport worker failure confirmation diagnostic');
+  const confirmationExecutionTargetIdentityDigestHex =
+    confirmation.executionTargetIdentityDigestHex === null
+      ? null
+      : fixedHex(
+          confirmation.executionTargetIdentityDigestHex,
+          32,
+          'confirmation target identity digest',
+        );
   if (
     confirmation.schema
       !== TRACKER_CANONICAL_CONFIRMATION_FAILURE_DIAGNOSTIC_V1_SCHEMA
@@ -878,15 +921,9 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
         typeof TRACKER_CANONICAL_CONFIRMATION_FAILURE_CATEGORIES_V1[number],
     )
     || confirmation.expectedTransactionIdHex !== transactionIdHex
-    || fixedHex(
-      confirmation.executionTargetIdentityDigestHex,
-      32,
-      'confirmation target identity digest',
-    ) !== fixedHex(
-      authorization.executionTargetIdentityDigestHex,
-      32,
-      'authorization target identity digest',
-    )
+    || (confirmation.category === 'confirmation_phase_failure'
+      ? confirmationExecutionTargetIdentityDigestHex !== null
+      : confirmationExecutionTargetIdentityDigestHex === null)
     || confirmation.confirmationBudgetMs
       !== TRACKER_CANONICAL_CONFIRMATION_BUDGET_MS_V1
     || !Number.isSafeInteger(confirmation.observationCount)
@@ -988,8 +1025,8 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   }
   const rootFailureBody = {
     schema:
-      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v9',
-    version: 9,
+      'e2s.substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-failure.v10',
+    version: 10,
     status: 'local_tracker_transport_not_canonically_confirmed',
     staticExecutionManifestDigestHex:
       receipt.staticExecutionManifestDigestHex,
@@ -1000,7 +1037,7 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   if (
     rootFailureReceiptDigestHex !== sha256CanonicalJson(
       rootFailureBody,
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V9,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_TRANSPORT_CAMPAIGN_FAILURE_RECEIPT_DIGEST_DOMAIN_V10,
     )
   ) {
     throw new Error('tracker transport root failure digest changed');
@@ -1014,7 +1051,7 @@ export function parseSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampai
   }
   assertSubstrateFederatedIsolatedDevnetReceiptDataSafeV1(receipt);
   return deepFreeze(receipt) as unknown as Readonly<
-    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV9
+    SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFailureReceiptV10
   >;
 }
 
@@ -1042,6 +1079,18 @@ function fixedHex(value: unknown, bytes: number, label: string): string {
     throw new Error(`${label} must be canonical lowercase hex`);
   }
   return value;
+}
+
+function assertStandaloneV10OwnerPolicy(
+  pegIn: Readonly<{
+    readonly recipientAddressHex: string;
+  }>,
+): void {
+  assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerV1({
+    bridgeOwnerAddressHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
+    recipientAddressHex: pegIn.recipientAddressHex,
+  });
 }
 
 function assertPegIn(value: unknown, label: string): asserts value is Readonly<{
@@ -1074,7 +1123,7 @@ function deepFreeze<T>(value: T): T {
 
 async function main(): Promise<void> {
   const receipt =
-    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV9(
+    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV10(
       process.argv.slice(2),
     );
   process.stdout.write(`${canonicalJson(receipt)}\n`);
@@ -1085,7 +1134,7 @@ const invokedPath = process.argv[1]
   : undefined;
 if (invokedPath === import.meta.url) {
   main().catch(error => {
-    process.stderr.write(formatSafeTrackerTransportCampaignWorkerFailureV9(error));
+    process.stderr.write(formatSafeTrackerTransportCampaignWorkerFailureV10(error));
     process.exitCode = 1;
   });
 }
