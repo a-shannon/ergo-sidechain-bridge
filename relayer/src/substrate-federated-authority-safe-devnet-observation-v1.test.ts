@@ -251,10 +251,28 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
       'source target peer health validation',
     ],
     [
-      'node identity drift',
+      'a malformed node identity',
+      { nodeName: 7 },
+      /node name/i,
+      'source target node identity decoding',
+    ],
+    [
+      'chain name drift',
+      { chainName: 'Other Chain' },
+      /chain name differs from the explicit pin/i,
+      'source target chain name validation',
+    ],
+    [
+      'node name drift',
+      { nodeName: 'Other Node' },
+      /node name differs from the explicit pin/i,
+      'source target node name validation',
+    ],
+    [
+      'node version drift',
       { nodeVersion: '0.0.0-other' },
-      /node identity differs from the explicit pins/i,
-      'source target node identity validation',
+      /node version differs from the explicit pin/i,
+      'source target node version validation',
     ],
     [
       'EVM chain identity drift',

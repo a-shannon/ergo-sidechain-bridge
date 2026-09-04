@@ -716,7 +716,7 @@ async function observeAuthoritySafeNodeView(
     source.request('system_dryRunAt', [probe.dryRunExtrinsicHex, nativeTipHashHex]),
   ]);
 
-  sourceFailurePhase = 'source target node identity validation';
+  sourceFailurePhase = 'source target node identity decoding';
   const chainName = exactString(chainNameRaw, 'authority-safe chain name');
   const nodeName = exactString(nodeNameRaw, 'authority-safe node name');
   const nodeVersion = exactString(nodeVersionRaw, 'authority-safe node version');
@@ -732,13 +732,17 @@ async function observeAuthoritySafeNodeView(
     throw new Error('authority-safe node is not a connected stable peer');
   }
 
-  sourceFailurePhase = 'source target node identity validation';
-  if (
-    chainName !== expected.chainName
-    || nodeName !== expected.nodeName
-    || nodeVersion !== expected.nodeVersion
-  ) {
-    throw new Error('authority-safe node identity differs from the explicit pins');
+  sourceFailurePhase = 'source target chain name validation';
+  if (chainName !== expected.chainName) {
+    throw new Error('authority-safe chain name differs from the explicit pin');
+  }
+  sourceFailurePhase = 'source target node name validation';
+  if (nodeName !== expected.nodeName) {
+    throw new Error('authority-safe node name differs from the explicit pin');
+  }
+  sourceFailurePhase = 'source target node version validation';
+  if (nodeVersion !== expected.nodeVersion) {
+    throw new Error('authority-safe node version differs from the explicit pin');
   }
 
   sourceFailurePhase = 'source target EVM chain identity validation';
