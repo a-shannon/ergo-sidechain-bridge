@@ -3,12 +3,13 @@
 Reference implementation for settling an EVM-compatible Substrate/Frontier
 sidechain on Ergo.
 
-> **Status:** local research/reference candidate. Peg-in and peg-out containment,
-> deterministic transaction construction, restart/reorg handling, and explicit
-> transport authorization are implemented locally. Gate 5 remains open because
-> an activated Ergo-verifiable sidechain-finality profile and exact target-node
-> acceptance do not yet exist. Public source availability does not support
-> trustless, production-readiness, or mainnet-readiness claims.
+> **Status:** public research alpha, not an operational two-way release.
+> The active delivery target is an explicitly federated reference that works
+> without EIP-0045. Local evidence covers setup, committed reserve, mint, burn
+> and checkpoint production; canonical tracker admission, complete withdrawal
+> and composed recovery remain open. The separate trustless upgrade requires
+> an activated Ergo-verifiable profile and full Gate 5 acceptance. Neither
+> public source availability nor green CI supports production or mainnet use.
 
 ## Audit First
 
@@ -19,9 +20,15 @@ supported release status remains blocked. The manifest inventories the
 implemented WP-08 surfaces and assigns every remaining critical/high gap to an
 owner role and claim impact.
 
-Populate the bridge-owned Frontier submodule before running the audit. In the
-current superproject layout, initialize only that path so unrelated sibling
-gitlinks cannot affect the bridge checkout:
+For the public standalone repository, clone recursively and enter `relayer`:
+
+```powershell
+git clone --recurse-submodules https://github.com/a-shannon/ergo-sidechain-bridge.git
+Set-Location ergo-sidechain-bridge/relayer
+```
+
+For a checkout inside the Ergo superproject, initialize only the bridge-owned
+Frontier submodule so unrelated sibling gitlinks cannot affect the audit:
 
 ```powershell
 git submodule sync -- ergo-sidechain-bridge/substrate-node
@@ -29,8 +36,7 @@ git submodule update --init --recursive -- ergo-sidechain-bridge/substrate-node
 Set-Location ergo-sidechain-bridge/relayer
 ```
 
-In a future standalone bridge repository, clone recursively and enter
-`relayer`. Then run:
+Then run:
 
 ```powershell
 npm.cmd ci
@@ -52,18 +58,19 @@ clone and validate it.
 
 The audit command binds the repository index, verifies the pinned
 source identity and release-evidence structure, rebuilds the local development
-closure, runs the complete bounded test gate, and executes the two config-free
-no-external-transport operator drills. It does not contact
+closure, runs the complete bounded test gate, and executes the config-free
+operator drills. It does not contact
 chain RPCs, load deployment state, use operator or persistent signing keys,
 submit or broadcast externally, deploy, or move funds. Bounded tests do use
 ephemeral test keys and in-memory or mock transports. Package installation may
 contact the configured npm registry.
 
-The exact consensus-source rebuild remains separately exercised by the active
-superproject workflow described in the
-[Consensus Source Baseline](docs/consensus-source-baseline.md). Porting that
-hosted build workflow into a standalone publication repository is still an
-explicit blocker, not an implied result of `audit:alpha`.
+The standalone [CI workflow](.github/workflows/relayer-checks.yml) separately
+rebuilds the pinned Frontier and Ergo sources. See the
+[Consensus Source Baseline](docs/consensus-source-baseline.md) and
+[GitHub Actions](https://github.com/a-shannon/ergo-sidechain-bridge/actions)
+for the exact source and run identities. This hosted build exists; a green run
+does not replace profile-specific runtime or release evidence.
 
 ## Current Architecture
 
@@ -87,6 +94,11 @@ for producer/consumer authority boundaries and dependency rules.
 
 ## Value Paths
 
+These are the required end-to-end flows, not currently enabled daemon routes.
+The ordinary daemon holds new peg-ins and legacy payouts; exact historical
+confirmation and recovery remain available. FED-specific local campaign
+results do not enable operational funds authority.
+
 ### Peg-In
 
 1. A canonical Ergo deposit is observed.
@@ -94,8 +106,8 @@ for producer/consumer authority boundaries and dependency rules.
    committed vault.
 3. The commitment receipt binds source, vault, amount, asset, recipient, and
    mint identity.
-4. The daemon may prepare one exact EVM mint only after confirmation and fresh
-   dual-chain revalidation.
+4. The selected profile must authorize one exact mint after confirmation and
+   fresh dual-chain revalidation; the ordinary daemon cannot initiate it.
 5. Exact signed-envelope reservation and explicit transport authorization are
    required before one raw-byte send.
 
@@ -159,19 +171,21 @@ singleton checkpoint `observedAt` timestamp must be ISO UTC and no older than
 
 ## Open Blockers
 
-The canonical manifest currently blocks supported release and readiness claims
-for:
+For the **federated reference**, the critical path is canonical tracker
+admission, a complete withdrawal with global replay protection and external
+miner-fee funding, then two-way recovery and operational integration. Exact
+target/custody approval, key-loss/rotation rehearsal, alert/recovery actions,
+reproducibility and independent review remain due for the selected profile.
+Greenfield launch and historical migration have distinct lineage obligations.
 
-- Gate 5 native-profile activation and target-node acceptance;
-- complete historical authority and replay-lineage cutover;
-- cross-surface key rotation and member-loss rehearsal;
-- current-HEAD recovery and clean-checkout evidence;
-- independent security review;
-- standalone consensus-source build CI;
-- alert delivery and reviewed recovery actions.
+For the **trustless upgrade**, an activated Ergo-verifiable finality consumer
+and complete Gate 5 target acceptance remain prerequisites. They do not block
+engineering the explicitly federated reference.
 
-These blockers cap claims; they do not invalidate the local engineering results
-that `audit:alpha` reproduces.
+The [research-alpha manifest](docs/public-audit-alpha-manifest.json) retains
+its bounded release-evidence holds. Existing hosted builds and local drills
+must not be relabelled as completed FED operational evidence. The
+[execution plan](phases/bridge-execution-plan.md) owns the current work order.
 
 ## Origins
 
