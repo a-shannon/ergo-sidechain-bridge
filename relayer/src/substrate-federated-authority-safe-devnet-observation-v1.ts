@@ -716,11 +716,13 @@ async function observeAuthoritySafeNodeView(
     source.request('system_dryRunAt', [probe.dryRunExtrinsicHex, nativeTipHashHex]),
   ]);
 
-  sourceFailurePhase = 'source target node identity and runtime validation';
+  sourceFailurePhase = 'source target node identity validation';
   const chainName = exactString(chainNameRaw, 'authority-safe chain name');
   const nodeName = exactString(nodeNameRaw, 'authority-safe node name');
   const nodeVersion = exactString(nodeVersionRaw, 'authority-safe node version');
   const peerId = canonicalPeerId(peerIdRaw);
+
+  sourceFailurePhase = 'source target peer health validation';
   const health = record(healthRaw, 'authority-safe node health');
   const peerCount = safeInteger(health.peers, 'authority-safe peer count');
   if (typeof health.shouldHavePeers !== 'boolean') {
@@ -729,6 +731,8 @@ async function observeAuthoritySafeNodeView(
   if (health.isSyncing !== false || peerCount < 1) {
     throw new Error('authority-safe node is not a connected stable peer');
   }
+
+  sourceFailurePhase = 'source target node identity validation';
   if (
     chainName !== expected.chainName
     || nodeName !== expected.nodeName
@@ -736,13 +740,18 @@ async function observeAuthoritySafeNodeView(
   ) {
     throw new Error('authority-safe node identity differs from the explicit pins');
   }
+
+  sourceFailurePhase = 'source target EVM chain identity validation';
   if (rpcQuantity(chainIdRaw, 'authority-safe EVM chain ID') !== BigInt(expected.chainId)) {
     throw new Error('authority-safe EVM chain ID differs from the explicit pin');
   }
 
+  sourceFailurePhase = 'source target runtime version validation';
   const runtimeVersion = record(runtimeVersionRaw, 'authority-safe runtime version');
   const runtimeSpecName = exactString(runtimeVersion.specName, 'runtime spec name');
   const runtimeSpecVersion = safeInteger(runtimeVersion.specVersion, 'runtime spec version');
+
+  sourceFailurePhase = 'source target runtime code validation';
   const runtimeCode = canonicalBytesHex(
     runtimeCodeRaw,
     'authority-safe runtime code',
