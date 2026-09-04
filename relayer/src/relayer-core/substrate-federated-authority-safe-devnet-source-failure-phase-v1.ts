@@ -16,6 +16,18 @@ export const SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_SOURCE_FAILURE_PHASES_V1 
     'source target build workspace cleanup',
     'source target process construction and startup',
     'source target readiness and observation',
+    'source target observation input and source binding',
+    'source target deployment identity observation',
+    'source target native and EVM tip observation',
+    'source target node RPC snapshot observation',
+    'source target node identity and runtime validation',
+    'source target application identity validation',
+    'source target owner-mint quarantine validation',
+    'source target top-trie policy observation',
+    'source target tip stability observation',
+    'source target two-node observation finalization',
+    'source target observation provenance',
+    'source target generated observation join',
     'source history rpc and finality',
   ] as const);
 

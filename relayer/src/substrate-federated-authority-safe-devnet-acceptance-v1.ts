@@ -839,6 +839,9 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
                 typeof observeSubstrateFederatedAuthoritySafeDevnetV1
               >
             >;
+            let observationFailurePhase:
+              SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1 =
+                'source target readiness and observation';
             try {
               observation =
                 await observeSubstrateFederatedAuthoritySafeDevnetV1({
@@ -864,13 +867,21 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
                   bridgeOwnerAddress: input.bridgeOwnerAddress,
                   signedLegacyOwnerMintTransactionHex:
                     input.signedLegacyOwnerMintTransactionHex,
-                });
+                }, sourceActionFailurePhase !== undefined);
+              observationFailurePhase =
+                'source target observation provenance';
               assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance(
                 observation,
               );
+              observationFailurePhase =
+                'source target generated observation join';
               assertJoinedTarget(generated.report, observation);
             } catch (error) {
               let observationFailure: unknown = error;
+              const projectedFailurePhase =
+                projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+                  error,
+                );
               if (
                 !preserveSourceErrorIdentity
                 && error instanceof Error
@@ -882,10 +893,17 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
                   `${error.message}; generated chain-spec SHA-256 `
                   + generated.report.chainSpecSha256Hex,
                 );
+                if (projectedFailurePhase !== null) {
+                  observationFailure =
+                    createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+                      projectedFailurePhase,
+                      observationFailure,
+                    );
+                }
               }
               if (sourceActionFailurePhase !== undefined) {
                 throw createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
-                  'source target readiness and observation',
+                  observationFailurePhase,
                   observationFailure,
                 );
               }

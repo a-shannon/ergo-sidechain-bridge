@@ -645,7 +645,7 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     ['build', 'source target Frontier build'],
     ['process', 'source target process construction and startup'],
     ['observation', 'source target readiness and observation'],
-    ['observation provenance', 'source target readiness and observation'],
+    ['observation provenance', 'source target observation provenance'],
     ['history', 'source history rpc and finality'],
   ] as const)(
     'projects the bounded %s failure without making diagnostic text authoritative',
@@ -716,6 +716,18 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
       'source target build workspace cleanup',
       'source target process construction and startup',
       'source target readiness and observation',
+      'source target observation input and source binding',
+      'source target deployment identity observation',
+      'source target native and EVM tip observation',
+      'source target node RPC snapshot observation',
+      'source target node identity and runtime validation',
+      'source target application identity validation',
+      'source target owner-mint quarantine validation',
+      'source target top-trie policy observation',
+      'source target tip stability observation',
+      'source target two-node observation finalization',
+      'source target observation provenance',
+      'source target generated observation join',
       'source history rpc and finality',
     ]);
   });
@@ -1391,6 +1403,35 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
         compatibility,
       ),
     ).toBeNull();
+  });
+
+  it('classifies a generated-target join failure after observation provenance', async () => {
+    mocks.observe.mockImplementationOnce(async value => {
+      const observed = await observation(value);
+      return {
+        ...observed,
+        target: {
+          ...observed.target,
+          chainName: 'different generated target',
+        },
+      };
+    });
+
+    const failure =
+      await acceptSubstrateFederatedAuthoritySafeDevnetWithClassifiedSourceFailuresV1(
+        input(),
+      ).then(() => undefined, error => error as unknown);
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /two-node observation differs from the exact generated target/i,
+    );
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target generated observation join');
+    expect(mocks.assertObservation).toHaveBeenCalledOnce();
   });
 
   it('preserves accepted output and provenance while enabling source classification', async () => {

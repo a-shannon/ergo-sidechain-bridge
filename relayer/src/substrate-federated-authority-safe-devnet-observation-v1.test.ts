@@ -19,6 +19,10 @@ import {
   substrateFederatedAuthoritySafeStorageLayoutDigestV1,
   type ObserveSubstrateFederatedAuthoritySafeDevnetV1Input,
 } from './substrate-federated-authority-safe-devnet-observation-v1.js';
+import {
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+  type SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 
 const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const BRIDGE_ROOT = resolve(MODULE_DIRECTORY, '..', '..');
@@ -76,10 +80,13 @@ interface RpcFixtureOptions {
   readonly peerId?: string;
   readonly shouldHavePeers?: boolean;
   readonly runtimeCodeHex?: string;
+  readonly bridgeRuntimeCodeHex?: string;
   readonly directOwnerMintResultHex?: string;
   readonly sudoValue?: string | null;
   readonly activeProfileValue?: string | null;
   readonly evmBlockNumber?: bigint;
+  readonly failMethod?: string;
+  readonly unstableTip?: boolean;
 }
 
 interface RpcFixture {
@@ -157,8 +164,16 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
       const observation = await observeSubstrateFederatedAuthoritySafeDevnetV1(
         await observationInput(primary.rpcUrl, witness.rpcUrl),
       );
+      const primaryCompatibilityRequestCount = primary.requests.length;
+      const witnessCompatibilityRequestCount = witness.requests.length;
+      const classified = await observeSubstrateFederatedAuthoritySafeDevnetV1(
+        await observationInput(primary.rpcUrl, witness.rpcUrl),
+        true,
+      );
 
       assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance(observation);
+      assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance(classified);
+      expect(classified).toEqual(observation);
       expect(observation.status).toBe('isolated_two_node_runtime_observation');
       expect(observation.target).toMatchObject({
         chainName: CHAIN_NAME,
@@ -197,12 +212,22 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
         trustlessStatusEstablished: false,
         productionReadinessEstablished: false,
       });
-      expect(primary.methods.filter(method => method === 'system_dryRunAt')).toHaveLength(1);
-      expect(witness.methods.filter(method => method === 'system_dryRunAt')).toHaveLength(1);
+      expect(primary.methods.filter(method => method === 'system_dryRunAt')).toHaveLength(2);
+      expect(witness.methods.filter(method => method === 'system_dryRunAt')).toHaveLength(2);
       expect([...primary.methods, ...witness.methods]).not.toContain('author_submitExtrinsic');
       expect([...primary.methods, ...witness.methods]).not.toContain('eth_sendRawTransaction');
-      assertExactRpcRequestClosure(primary.requests);
-      assertExactRpcRequestClosure(witness.requests);
+      assertExactRpcRequestClosure(
+        primary.requests.slice(0, primaryCompatibilityRequestCount),
+      );
+      assertExactRpcRequestClosure(
+        primary.requests.slice(primaryCompatibilityRequestCount),
+      );
+      assertExactRpcRequestClosure(
+        witness.requests.slice(0, witnessCompatibilityRequestCount),
+      );
+      assertExactRpcRequestClosure(
+        witness.requests.slice(witnessCompatibilityRequestCount),
+      );
       expect(() => assertSubstrateFederatedAuthoritySafeDevnetObservationV1Provenance({
         ...observation,
       })).toThrow(/provenance is missing/i);
@@ -216,30 +241,64 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
       'runtime code drift',
       { runtimeCodeHex: '0x01020305' },
       /runtime code differs from the explicit pin/i,
+      'source target node identity and runtime validation',
+    ],
+    [
+      'bridge application code drift',
+      { bridgeRuntimeCodeHex: '0x01' },
+      /genesis bridge runtime code differs from the tracked artifact/i,
+      'source target application identity validation',
     ],
     [
       'a populated Sudo key',
       { sudoValue: '0x01' },
       /Sudo key must remain absent/i,
+      'source target top-trie policy observation',
     ],
     [
       'an active peg-in profile',
       { activeProfileValue: '0x01' },
       /profile or enforcement state must remain absent/i,
+      'source target top-trie policy observation',
     ],
     [
       'a weaker direct owner-mint result',
       { directOwnerMintResultHex: '0x00' },
       /was not rejected with Custom\(181\)/i,
+      'source target owner-mint quarantine validation',
     ],
     [
       'an inconsistent EVM block height',
       { evmBlockNumber: TIP_HEIGHT + 1n },
       /EVM tip height differs from the deployment snapshot/i,
+      'source target native and EVM tip observation',
     ],
-  ] as const)('rejects %s', async (_label, options, expected) => {
-    await expectObservationFailure(options, {}, expected);
-  });
+    [
+      'a deployment identity RPC failure',
+      { failMethod: 'eth_blockNumber' },
+      /read-only deployment RPC eth_blockNumber returned an error/i,
+      'source target deployment identity observation',
+    ],
+    [
+      'a node snapshot RPC failure',
+      { failMethod: 'system_chain' },
+      /fixture forced system_chain failure/i,
+      'source target node RPC snapshot observation',
+    ],
+    [
+      'a tip replacement during revalidation',
+      { unstableTip: true },
+      /native tip changed at the observed height/i,
+      'source target tip stability observation',
+    ],
+  ] as const)(
+    'rejects %s',
+    async (_label, options, expected, expectedPhase) => {
+      await expectObservationFailure(options, {}, expected);
+      await expectObservationFailurePhase(options, {}, expectedPhase);
+    },
+    15_000,
+  );
 
   it('rejects two origins that expose the same peer identity', async () => {
     await expectObservationFailure(
@@ -247,7 +306,85 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
       { peerId: PRIMARY_PEER_ID },
       /must expose distinct peer identities/i,
     );
+    await expectObservationFailurePhase(
+      { peerId: PRIMARY_PEER_ID },
+      { peerId: PRIMARY_PEER_ID },
+      'source target two-node observation finalization',
+    );
   });
+
+  it.each([
+    [
+      { unstableTip: true },
+      { runtimeCodeHex: '0x01020305' },
+    ],
+    [
+      { runtimeCodeHex: '0x01020305' },
+      { unstableTip: true },
+    ],
+  ] as const)(
+    'deterministically lets a non-retryable node failure dominate a concurrent retryable failure',
+    async (primaryOptions, witnessOptions) => {
+      await expectObservationFailurePhase(
+        primaryOptions,
+        witnessOptions,
+        'source target node identity and runtime validation',
+      );
+    },
+  );
+
+  it('classifies differing concurrent non-retryable failures as a bounded two-node conflict', async () => {
+    await expectObservationFailurePhase(
+      { runtimeCodeHex: '0x01020305' },
+      { bridgeRuntimeCodeHex: '0x01' },
+      'source target two-node observation finalization',
+    );
+  });
+
+  it('preserves homogeneous retryable node failures through the bounded retry policy', async () => {
+    const primary = await startRpcFixture({
+      peerId: PRIMARY_PEER_ID,
+      unstableTip: true,
+    });
+    const witness = await startRpcFixture({
+      peerId: WITNESS_PEER_ID,
+      unstableTip: true,
+    });
+    try {
+      const failure = await observeSubstrateFederatedAuthoritySafeDevnetV1(
+        await observationInput(primary.rpcUrl, witness.rpcUrl),
+        true,
+      ).then(() => undefined, error => error as unknown);
+
+      expect(failure).toBeInstanceOf(AggregateError);
+      expect(
+        projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+          failure,
+        ),
+      ).toBe('source target tip stability observation');
+      const nested = (failure as AggregateError).errors;
+      expect(nested).toHaveLength(2);
+      for (const nodeFailure of nested) {
+        expect(nodeFailure).toBeInstanceOf(Error);
+        expect((nodeFailure as Error).message).toMatch(
+          /native tip changed at the observed height/i,
+        );
+        expect(
+          projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+            nodeFailure,
+          ),
+        ).toBe('source target tip stability observation');
+      }
+      expect(
+        primary.methods.filter(method => method === 'system_dryRunAt'),
+      ).toHaveLength(8);
+      expect(
+        witness.methods.filter(method => method === 'system_dryRunAt'),
+      ).toHaveLength(8);
+    } finally {
+      await Promise.all([primary.close(), witness.close()]);
+    }
+  }, 10_000);
 
   it('does not retain authority after a rejected snapshot and can recover cleanly', async () => {
     const primaryOptions: {
@@ -300,6 +437,35 @@ describe('Substrate federated authority-safe devnet observation V1', () => {
       expectedStorageLayoutDigestHex: '0'.repeat(64),
     })).rejects.toThrow(/storage-layout digest differs from the source-locked layout/i);
   });
+
+  it('classifies input binding only when source-failure projection is requested', async () => {
+    const signed = await signLegacyOwnerMint();
+    const input = {
+      ...await observationInput(
+        'http://127.0.0.1:9944',
+        'http://127.0.0.1:9955',
+        signed,
+      ),
+      expectedStorageLayoutDigestHex: '0'.repeat(64),
+    };
+    const compatibilityFailure =
+      await observeSubstrateFederatedAuthoritySafeDevnetV1(input)
+        .then(() => undefined, error => error as unknown);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        compatibilityFailure,
+      ),
+    ).toBeNull();
+
+    const classifiedFailure =
+      await observeSubstrateFederatedAuthoritySafeDevnetV1(input, true)
+        .then(() => undefined, error => error as unknown);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        classifiedFailure,
+      ),
+    ).toBe('source target observation input and source binding');
+  });
 });
 
 async function expectObservationFailure(
@@ -313,6 +479,29 @@ async function expectObservationFailure(
     await expect(observeSubstrateFederatedAuthoritySafeDevnetV1(
       await observationInput(primary.rpcUrl, witness.rpcUrl),
     )).rejects.toThrow(expected);
+  } finally {
+    await Promise.all([primary.close(), witness.close()]);
+  }
+}
+
+async function expectObservationFailurePhase(
+  primaryOptions: RpcFixtureOptions,
+  witnessOptions: RpcFixtureOptions,
+  expectedPhase: SubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+): Promise<void> {
+  const primary = await startRpcFixture({ peerId: PRIMARY_PEER_ID, ...primaryOptions });
+  const witness = await startRpcFixture({ peerId: WITNESS_PEER_ID, ...witnessOptions });
+  try {
+    const failure = await observeSubstrateFederatedAuthoritySafeDevnetV1(
+      await observationInput(primary.rpcUrl, witness.rpcUrl),
+      true,
+    ).then(() => undefined, error => error as unknown);
+    expect(failure).toBeInstanceOf(Error);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe(expectedPhase);
   } finally {
     await Promise.all([primary.close(), witness.close()]);
   }
@@ -423,6 +612,9 @@ async function handleRpcFixture(
   const methodIndex = counters.get(body.method) ?? 0;
   counters.set(body.method, methodIndex + 1);
   try {
+    if (options.failMethod === body.method) {
+      throw new Error(`fixture forced ${body.method} failure`);
+    }
     const result = rpcResult(body.method, body.params, options, methodIndex);
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ jsonrpc: '2.0', id: body.id, result }));
@@ -459,7 +651,15 @@ function rpcResult(
     case 'eth_getCode': {
       const address = String(params[0]).toLowerCase();
       assertCodeBlockSelector(params[1]);
-      if (address === BRIDGE_ADDRESS) return profile.bridge.runtimeBytecodeHex;
+      if (address === BRIDGE_ADDRESS) {
+        if (
+          params[1] === '0x0'
+          && options.bridgeRuntimeCodeHex !== undefined
+        ) {
+          return options.bridgeRuntimeCodeHex;
+        }
+        return profile.bridge.runtimeBytecodeHex;
+      }
       if (address === TOKEN_ADDRESS) return profile.token.runtimeBytecodeHex;
       return '0x';
     }
@@ -496,6 +696,9 @@ function rpcResult(
     case 'chain_getBlockHash': {
       if (params[0] === 0) return NATIVE_GENESIS_HASH_HEX;
       assertExact(params[0], quantity(TIP_HEIGHT), 'native block-hash height');
+      if (options.unstableTip && methodIndex % 3 === 2) {
+        return `0x${'44'.repeat(32)}`;
+      }
       return NATIVE_TIP_HASH_HEX;
     }
     case 'chain_getHeader':
