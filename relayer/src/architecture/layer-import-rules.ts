@@ -40,6 +40,13 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
   ReadonlySet<string>
 > = new Map([
   [
+    'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+    new Set([
+      'substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts',
+      'substrate-federated-isolated-devnet-packet-producer-v1.ts',
+    ]),
+  ],
+  [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
     new Set([
       'substrate-federated-authority-safe-devnet-history-v1.ts',
@@ -150,6 +157,21 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [
+    'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+    new Map([
+      ['substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts', new Set([
+        'buildFrontierLabApplicationTransactionPlanV1',
+        'inspectFrontierLabApplicationSignedTransactionsV1',
+      ])],
+      ['substrate-federated-isolated-devnet-packet-producer-v1.ts', new Set([
+        'assertSubstrateFederatedIsolatedDevnetPacketV2Provenance',
+        'assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance',
+        'SubstrateFederatedIsolatedDevnetPacketV2',
+        'SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2',
+      ])],
+    ]),
+  ],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-frozen-tracker-root-v7-provenance.ts',
     new Map([
@@ -649,6 +671,17 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [
+    'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+    new Map([
+      ['../../adapters/frontier-lab-application-owner-v1.js', new Set([
+        'assertFrontierLabApplicationOwnerClaimV1',
+        'disposeFrontierLabApplicationOwnerV1',
+        'signFrontierLabApplicationCallsOnceV1',
+        'FrontierLabApplicationOwnerV1',
+      ])],
+    ]),
+  ],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts',
     new Map([
@@ -1201,6 +1234,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ['claimFrontierLabApplicationOwnerRequestV1', new Set([
         'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
       ])],
+      ['signFrontierLabApplicationCallsOnceV1', new Set([
+        'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+      ])],
     ]),
   ],
   [
@@ -1430,6 +1466,12 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [
+    'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+    new Set([
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    ]),
+  ],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts',
     new Set([
@@ -2404,6 +2446,18 @@ export function inspectLayerImports(
       }
 
       const targetLayer = classifyBridgeLayer(resolved);
+      if (sourceLayer === 'apps' && targetLayer !== null) {
+        const restrictedImports = REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS.get(file);
+        for (const [specifier] of restrictedImports ?? []) {
+          if (!specifier.startsWith('.')
+            || resolveRelativeImport(file, specifier, knownFiles) !== resolved) continue;
+          // Escape analysis tracks canonical specifiers; equivalent spellings must not bypass it.
+          if (imported.value !== specifier) {
+            violations.push(...inspectRestrictedImportBindings(file, imported, new Set()));
+          }
+          break;
+        }
+      }
       if (targetLayer === null) {
         if (
           sourceLayer === 'apps'

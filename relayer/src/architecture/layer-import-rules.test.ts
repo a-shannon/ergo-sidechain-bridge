@@ -432,6 +432,55 @@ describe('layer import rules', () => {
     );
   });
 
+  it('reserves scoped LAB signing to proof composition and that composition to the retained-packet root', () => {
+    const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
+    const sign = 'signFrontierLabApplicationCallsOnceV1';
+    const composition = 'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts';
+    const compose = 'signFrontierLabProofBoundApplicationV1';
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
+    const sources = {
+      [ownerModule]: `export const ${sign} = () => {};`,
+      [composition]: `import { ${sign} } from '../../adapters/frontier-lab-application-owner-v1.js'; export const ${compose} = () => {};`,
+    };
+    expect(inspect({
+      ...sources,
+      [root]: `import { ${compose} } from './frontier-lab-proof-bound-application-signing-v1.js';`,
+    })).toEqual([]);
+    for (const importer of [root, 'apps/bridge-daemon/unreviewed-lab-signing.ts']) {
+      expect(inspect({
+        ...sources,
+        [importer]: `import { ${sign} } from '../../adapters/frontier-lab-application-owner-v1.js';`,
+      }).map(value => value.message)).toContain(
+        `exclusive authority import has the wrong owner: ../../adapters/frontier-lab-application-owner-v1.js#${sign}`,
+      );
+    }
+    expect(inspect({
+      ...sources,
+      'unreviewed-lab-signing.ts': `import { ${compose} } from './apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.js';`,
+    }).map(value => value.message)).toContain(
+      'exclusive runtime module import has the wrong owner: ./apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.js',
+    );
+    for (const escape of [`export { ${sign} };`, `export const rawSigner = ${sign};`]) {
+      expect(inspect({
+        ...sources,
+        [composition]: `import { ${sign} } from '../../adapters/frontier-lab-application-owner-v1.js'; ${escape}`,
+      }).map(value => value.message)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/restricted capability binding must not (?:be re-exported|escape its reviewed call)/),
+      ]));
+    }
+    for (const specifier of [
+      '../../adapters/./frontier-lab-application-owner-v1.js',
+      '../../adapters/../adapters/frontier-lab-application-owner-v1.js',
+    ]) {
+      expect(inspect({
+        ...sources,
+        [composition]: `import { ${sign} } from '${specifier}'; export { ${sign} };`,
+      }).map(value => value.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${specifier}#${sign}`,
+      );
+    }
+  });
+
   it('keeps the tracker attempt journal behind its two reviewed app owners', () => {
     const attempt =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts';

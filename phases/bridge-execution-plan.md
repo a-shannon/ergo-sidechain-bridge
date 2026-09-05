@@ -52,8 +52,9 @@ establish deployment safety or independent operator custody.
   retains that owner's synthetic custody and binds it to the exact request.
   V11 now claims that same-process custody before any build and retains it with
   the actual packet in the application continuation. The fresh-owner route
-  stops before the legacy runner; proof-bound signing and signed-call runner
-  integration remain pending.
+  stops before the legacy runner. A separate proof-bound, one-use signing
+  component now produces and inspects the exact three calls; connecting it to
+  the signed-call runner remains pending.
   Preserve the fresh-owner rule and the separate V1 fixture identity. This is
   a liveness defect, not an observed bypass.
 
@@ -79,7 +80,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB fresh owner -> application -> tracker | Bind the retained packet/custody pair to the mint statement and exact target/runtime; sign the frozen three-call plan once, then integrate the Rust consumer into the runner before another full campaign | Local fresh-owner TestClient execution, request custody and the same-process packet continuation are implemented. V11 rejects missing custody before builds and cannot fall back to the Sudo fixture. Proof-bound signing and the composed runner remain pending. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
+| **Now** | FED-6-LAB fresh owner -> application -> tracker | Connect the retained packet/custody pair and proof-bound signing component to the exact signed-call Rust runner, including the campaign's Ergo recipient, before another full campaign | Local fresh-owner TestClient execution, request custody, packet continuation and one-use signing are implemented separately. V11 rejects missing custody before builds and cannot fall back to the Sudo fixture. The composed runner remains pending. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -96,7 +97,7 @@ and broadcast retain separate exact-candidate authorizations and revalidation.
 |---|---|---|
 | 1. Exact calls | Build mint, bounded approval and peg-out from the canonical reservation statement and Ergo recipient; check canonical signed bytes, fresh signer, chain, nonce, fees, value and complete calldata | Implemented in `substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts`, with focused signed-vector tests. This is a pure planner/inspector, not yet wired into runner V2 and not an execution capability |
 | 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Implemented in [overlay 0003](../sources/frontier/0003-federated-lab-signed-application-calls.patch). Four signed-call checks and one fresh-owner execution pass under an ephemeral source-attestation profile; the separate reference-profile regression passes eight tests with the dynamic entry ignored. Independent source review is complete. Runner integration remains pending |
-| 3. Request custody | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Canonical request creation and one-shot V11 custody claiming are implemented. The continuation retains the original owner with its actual packet, rejects proof/packet target and receipt mismatches, and disposes custody on terminal failure. Full mint-statement/target/runtime binding, one-use application signing and runner consumption remain pending. Private key material stays outside runner environment and receipts |
+| 3. Request custody and signing | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Canonical request creation, one-shot V11 custody claiming and a separate proof-bound signing component are implemented. Signing checks genuine packet/proof provenance, receipt/target bindings, statement and mint identity, and the retained owner; the existing proof validator checks runtime/profile bindings. It emits only one complete, inspected triplet and disposes custody on success or failure. Runner consumption remains pending. Private key material stays outside runner environment and receipts |
 
 Batches 1 and 2 close the local signed-call producer/consumer boundary, not the
 composed campaign. The consumer executes the supplied bytes without re-signing
@@ -133,10 +134,21 @@ possibly replaced file.
 The bootstrap request SHA and source-proof request digest identify different
 objects; they must not be compared as interchangeable identities. Their join
 is the same-process campaign and retained packet, followed by exact proof
-provenance and field checks. Until statement-bound signing and the signed-call
-runner are integrated, the fresh-owner continuation terminates before the old
-runner even with a correctly bound packet proof. This checkpoint establishes
-custody routing and fail-closed cleanup, not successful application execution.
+provenance and field checks. The signing component uses the existing pure
+planner and signed-byte inspector. Its adapter accepts only the three fixed
+LAB calls; it cannot choose proof eligibility or expose a general signer.
+Static imports reserve the signer to proof composition and that composition to
+the retained-packet application root. Tests use real synthetic keys and signed
+transactions; mocked packet/proof provenance isolates the composition checks
+and is not cross-chain proof acceptance evidence.
+
+The final join must pass the campaign's exact Ergo recipient and source-proof
+object alongside those signed calls into the pinned Rust consumer. It must
+preserve the bootstrap request, packet, target and runtime lineage rather than
+reconstruct authority from serialized receipts. Until this integration exists,
+the fresh-owner continuation terminates before the old runner even with a
+correctly bound packet proof. Do not sign calls merely to discard them at that
+hold. Component checks do not establish successful campaign execution.
 
 Do not run another full campaign between these batches. Run focused checks
 while joining the producer and consumer; reuse the affected Rust matrix while
