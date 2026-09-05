@@ -30,6 +30,7 @@ import {
 } from '../substrate-federated-authority-safe-devnet-observation-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2,
@@ -93,6 +94,48 @@ export interface SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Resul
   readonly expectedHeadCommitSha1Hex: string;
 }
 
+export interface SubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1 {
+  readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+  readonly createRequest: (argv: readonly string[]) =>
+    Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result>;
+  readonly dispose: () => void;
+}
+
+/** Retain one synthetic owner while its owner-dependent genesis is calibrated. */
+export async function createSubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1():
+Promise<Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1>> {
+  const owner = await createFrontierLabApplicationOwnerV1(
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+  );
+  let state: 'fresh' | 'consumed' | 'closed' = 'fresh';
+  const dispose = (): void => {
+    if (state === 'closed') return;
+    state = 'closed';
+    disposeFrontierLabApplicationOwnerV1(owner);
+  };
+  return Object.freeze({
+    owner,
+    createRequest: (argv: readonly string[]) => {
+      if (state !== 'fresh') {
+        throw new Error('fresh-owner bootstrap session is already consumed or disposed');
+      }
+      state = 'consumed';
+      try {
+        const values = parseFreshOwnerArguments(argv);
+        values.set('--bridge-owner-address', owner.ownerAddressHex);
+        values.set('--signed-legacy-owner-mint-transaction', owner.signedLegacyOwnerMintTransactionHex);
+        return createCanonicalBootstrapRequest(
+          ARGUMENTS.flatMap(name => [name, values.get(name)!]), owner,
+        );
+      } catch (error) {
+        dispose();
+        throw error;
+      }
+    },
+    dispose,
+  });
+}
+
 /**
  * Same-process request creation. The caller retains and finally disposes owner
  * custody; serializing this return value cannot transfer it to a child worker.
@@ -105,6 +148,18 @@ export async function createSubstrateFederatedIsolatedDevnetBootstrapRequestWith
   requestCreation: Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result>;
   owner: Readonly<FrontierLabApplicationOwnerV1>;
 }>> {
+  const snapshot = Object.freeze([...argv]);
+  parseFreshOwnerArguments(snapshot);
+  const session = await createSubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1();
+  try {
+    return Object.freeze({ requestCreation: session.createRequest(snapshot), owner: session.owner });
+  } catch (error) {
+    session.dispose();
+    throw error;
+  }
+}
+
+function parseFreshOwnerArguments(argv: readonly string[]): Map<ArgumentName, string> {
   if (argv.length !== FRESH_OWNER_ARGUMENTS.length * 2) {
     throw new Error('fresh-owner bootstrap request arguments are invalid');
   }
@@ -124,18 +179,7 @@ export async function createSubstrateFederatedIsolatedDevnetBootstrapRequestWith
     bridgeAddressHex: values.get('--bridge-address')!,
     tokenAddressHex: values.get('--token-address')!,
   });
-  const owner = await createFrontierLabApplicationOwnerV1(values.get('--bridge-address')!);
-  try {
-    values.set('--bridge-owner-address', owner.ownerAddressHex);
-    values.set('--signed-legacy-owner-mint-transaction', owner.signedLegacyOwnerMintTransactionHex);
-    const requestCreation = createCanonicalBootstrapRequest(
-      ARGUMENTS.flatMap(name => [name, values.get(name)!]), owner,
-    );
-    return Object.freeze({ requestCreation, owner });
-  } catch (error) {
-    disposeFrontierLabApplicationOwnerV1(owner);
-    throw error;
-  }
+  return values;
 }
 
 export function createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1(

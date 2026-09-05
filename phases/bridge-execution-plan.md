@@ -77,7 +77,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB fresh owner -> application -> tracker | Run one fresh authorized isolated campaign through the retained-packet root and signed runner V3; confirm the exact tracker successor or record a bounded terminal outcome | The source join carries the actual packet/proof, one-use owner and campaign recipient through signing, execution and checkpoint attestation. Focused orchestration tests do not establish a new Rust execution or canonical tracker admission. Keep unique campaign identity and explicit V2 reference dispatch; reject any V11 fallback |
+| **Now** | FED-6-LAB fresh owner -> application -> tracker | Prepare one fresh owner session, calibrate the owner-dependent genesis, then run its exact request through the retained-packet root and signed runner V3; confirm the tracker successor or record a bounded terminal outcome | Genesis calibration, request creation and later signing must use the same retained owner. The source join carries the actual packet/proof and campaign recipient through execution and checkpoint attestation. Focused tests do not establish a new Rust execution or canonical tracker admission. Keep unique campaign identity and explicit V2 reference dispatch; reject any V11 fallback |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -129,6 +129,26 @@ Binding occurs before create-only publication. If the subsequent file check
 fails, no live handle is returned; a public file may remain. Recovery requires
 a fresh owner and output path, not custody reconstruction or deletion of a
 possibly replaced file.
+
+The LAB chain's genesis includes the bridge owner's address in EVM storage.
+Its hash therefore cannot be calibrated with one owner and then used with a
+newly generated owner. The two-stage request session creates that identity
+first and exposes only its public address and fixed rejection probe for
+calibration. It then creates one canonical request with the same retained
+owner and the calibrated genesis hash. Request preparation failures dispose
+custody; a duplicate creation attempt cannot invalidate the first valid
+request. The caller must dispose the session if calibration or campaign setup
+fails. The session does not perform calibration or authenticate a caller's
+genesis claim; the existing source-locked acceptance checks remain required.
+
+The fresh-owner driver must invoke the exported V11 worker in that same
+process after request-bound preflight. The file-based V11 command starts a
+child process and cannot transfer the parent's retained custody; it is not a
+usable fresh-owner entry point. Do not export a key to make it work. The
+same-process route retains the worker/root checks and distinct Cargo caches,
+and produces the existing worker receipt, not a command receipt claiming a
+child has exited. Verify the selected entry point through the actual root's
+one-shot custody claim before launching the composed campaign.
 
 The bootstrap request SHA and source-proof request digest identify different
 objects; they must not be compared as interchangeable identities. Their join
