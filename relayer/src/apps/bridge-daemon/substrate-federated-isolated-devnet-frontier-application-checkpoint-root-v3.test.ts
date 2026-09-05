@@ -14,6 +14,25 @@ const mocks = vi.hoisted(() => ({
   packetReceipts: new WeakSet<object>(),
   mintReceipts: new WeakSet<object>(),
   runnerReceipts: new WeakSet<object>(),
+  runnerV3Receipts: new WeakSet<object>(),
+  setupSigners: new WeakSet<object>(),
+  setupSigner: undefined as object | undefined,
+  setupSignerChecks: [] as string[],
+  sessionKeys: [] as readonly string[],
+  sessionBindingFailure: false,
+  signFailure: null as Error | null,
+  signGate: undefined as Promise<void> | undefined,
+  signStarted: undefined as (() => void) | undefined,
+  revokeSetupDuringProof: false,
+  revokeSetupDuringSign: false,
+  signArguments: undefined as readonly unknown[] | undefined,
+  signedTransactions: Object.freeze({ mint: '0x0102', approval: '0x0304', pegOut: '0x0506' }),
+  runnerV2Calls: 0,
+  runnerV3Calls: 0,
+  runnerV2Assertions: 0,
+  runnerV3Assertions: 0,
+  runnerVersion: 3,
+  runnerIdentityFault: '' as '' | 'owner' | 'recipient',
   checkpointReceipts: new WeakSet<object>(),
   sequence: [] as string[],
   disposeCalls: 0,
@@ -52,6 +71,33 @@ const mocks = vi.hoisted(() => ({
   tokenAddressHex: `0x${'32'.repeat(20)}`,
 }));
 
+vi.mock('../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance: (value: unknown) => {
+    mocks.setupSignerChecks.push(mocks.sequence.at(-1) ?? 'constructor');
+    assertRegistered(mocks.setupSigners, value, 'setup signer');
+  },
+}));
+
+vi.mock('./frontier-lab-proof-bound-application-signing-v1.js', () => ({
+  signFrontierLabProofBoundApplicationV1: async (
+    owner: Readonly<FrontierLabApplicationOwnerV1>, requestSha256Hex: string,
+    packet: unknown, proof: unknown, ergoRecipientPublicKeyHex: string,
+  ) => {
+    assertFrontierLabApplicationOwnerClaimV1(owner, requestSha256Hex);
+    try {
+      mocks.sequence.push('sign');
+      mocks.signArguments = [owner, requestSha256Hex, packet, proof, ergoRecipientPublicKeyHex];
+      mocks.signStarted?.();
+      if (mocks.signGate !== undefined) await mocks.signGate;
+      if (mocks.revokeSetupDuringSign) mocks.setupSigners.delete(mocks.setupSigner!);
+      if (mocks.signFailure !== null) throw mocks.signFailure;
+      return mocks.signedTransactions;
+    } finally {
+      disposeFrontierLabApplicationOwnerV1(owner);
+    }
+  },
+}));
+
 vi.mock(
   '../../substrate-federated-isolated-devnet-packet-producer-v1.js',
   () => ({
@@ -78,7 +124,10 @@ vi.mock(
         mocks.createSessionCalls += 1;
         mocks.sequence.push('session');
         if (mocks.sessionFailure) throw new Error('injected session failure');
+        mocks.sessionKeys = Object.freeze([mocks.sessionBindingFailure ? 'ff'.repeat(33)
+          : (_signer as { publicKeyHex?: string }).publicKeyHex ?? '']);
         return Object.freeze({
+          signer: Object.freeze({ ergoAdmissionPublicKeysHex: mocks.sessionKeys }),
           dispose: () => {
             mocks.disposeCalls += 1;
             mocks.sequence.push('dispose');
@@ -128,6 +177,7 @@ vi.mock(
             mocks.innerMintSourceProof = innerMintSourceProof;
             if (mocks.mintFault !== 'provenance') mocks.mintReceipts.add(mintSourceProof);
             mocks.mintSourceProof = mintSourceProof;
+            if (mocks.revokeSetupDuringProof) mocks.setupSigners.delete(mocks.setupSigner!);
             return mintSourceProof;
           },
           produceCheckpointAttestation: (
@@ -186,11 +236,57 @@ vi.mock(
     SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1:
       45 * 60_000,
     assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance:
-      (value: unknown) => assertRegistered(
-        mocks.runnerReceipts,
-        value,
-        'application runner',
-      ),
+      (value: unknown) => {
+        mocks.runnerV2Assertions += 1;
+        assertRegistered(mocks.runnerReceipts, value, 'application runner V2');
+      },
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance:
+      (value: unknown) => {
+        mocks.runnerV3Assertions += 1;
+        assertRegistered(mocks.runnerV3Receipts, value, 'application runner V3');
+      },
+    runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3:
+      async (input: Record<string, unknown>, completionDeadline: number | undefined) => {
+        mocks.runnerV3Calls += 1;
+        mocks.sequence.push('runnerV3');
+        mocks.runnerInput = input;
+        mocks.runnerDeadline = completionDeadline;
+        if (mocks.runnerFailure !== null) throw mocks.runnerFailure;
+        if (input.mintSourceProofReceipt !== mocks.innerMintSourceProof) {
+          throw new Error('runner did not receive the exact inner mint proof');
+        }
+        const owner = mocks.signArguments![0] as FrontierLabApplicationOwnerV1;
+        const signedApplication = Object.freeze({
+          ownerAddressHex: mocks.runnerIdentityFault === 'owner' ? `0x${'ff'.repeat(20)}` : owner.ownerAddressHex,
+          ergoRecipientPublicKeyHex: mocks.runnerIdentityFault === 'recipient'
+            ? `0x${'ff'.repeat(33)}` : input.ergoRecipientPublicKeyHex,
+          transactionHashes: Object.freeze({ mint: '41'.repeat(32), approval: '42'.repeat(32), pegOut: '43'.repeat(32) }),
+        });
+        const applicationEvidence = Object.freeze({
+          application: Object.freeze({
+            bridgeAddressHex: mocks.bridgeAddressHex, tokenAddressHex: mocks.tokenAddressHex,
+            ownerAddressHex: signedApplication.ownerAddressHex,
+          }),
+          signedApplication,
+          sourceNativeBlock: Object.freeze({ height: 7, hashHex: mocks.sourceNativeBlockHashHex }),
+          execution: Object.freeze({ sidechainIdHex: mocks.sidechainIdHex, blockHashHex: mocks.executionBlockHashHex }),
+          burn: Object.freeze({ burnIdHex: mocks.burnIdHex, bridgeEventRootHex: mocks.bridgeEventRootHex, burnLeafCount: 1 }),
+        });
+        const runner = Object.freeze({
+          version: mocks.runnerVersion,
+          executionResult: Object.freeze({ applicationEvidence }),
+          signedApplication,
+          mintSourceProof: Object.freeze({
+            receiptDigestHex: mocks.innerMintReceiptDigestHex,
+            targetDescriptorDigestHex: mocks.runnerTargetDrift ? 'ff'.repeat(32) : mocks.targetDescriptorDigestHex,
+          }),
+          receiptDigestHex: mocks.runnerReceiptDigestHex,
+        });
+        // A downgrade has genuine legacy mock provenance, but never V3 provenance.
+        (mocks.runnerVersion === 2 ? mocks.runnerReceipts : mocks.runnerV3Receipts).add(runner);
+        mocks.runner = runner;
+        return runner;
+      },
     preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1:
       (input: Readonly<Record<string, unknown>>) => {
         mocks.runnerPreflightCalls += 1;
@@ -204,6 +300,7 @@ vi.mock(
         input: Record<string, unknown>,
         completionDeadline: number | undefined,
       ) => {
+        mocks.runnerV2Calls += 1;
         mocks.sequence.push('application-burn');
         mocks.runnerInput = input;
         mocks.runnerDeadline = completionDeadline;
@@ -234,6 +331,7 @@ vi.mock(
           }),
         });
         const runner = Object.freeze({
+          version: 2,
           executionResult: Object.freeze({ applicationEvidence }),
           mintSourceProof: Object.freeze({
             receiptDigestHex: mocks.innerMintReceiptDigestHex,
@@ -284,6 +382,24 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     mocks.packetReceipts = new WeakSet<object>();
     mocks.mintReceipts = new WeakSet<object>();
     mocks.runnerReceipts = new WeakSet<object>();
+    mocks.runnerV3Receipts = new WeakSet<object>();
+    mocks.setupSigners = new WeakSet<object>();
+    mocks.setupSigner = undefined;
+    mocks.setupSignerChecks.length = 0;
+    mocks.sessionKeys = [];
+    mocks.sessionBindingFailure = false;
+    mocks.signFailure = null;
+    mocks.signGate = undefined;
+    mocks.signStarted = undefined;
+    mocks.revokeSetupDuringProof = false;
+    mocks.revokeSetupDuringSign = false;
+    mocks.signArguments = undefined;
+    mocks.runnerV2Calls = 0;
+    mocks.runnerV3Calls = 0;
+    mocks.runnerV2Assertions = 0;
+    mocks.runnerV3Assertions = 0;
+    mocks.runnerVersion = 3;
+    mocks.runnerIdentityFault = '';
     mocks.checkpointReceipts = new WeakSet<object>();
     mocks.sequence.length = 0;
     mocks.disposeCalls = 0;
@@ -308,24 +424,68 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     mocks.checkpointInput = undefined;
   });
 
-  it('retains claimed custody with the actual packet and stops before the historical runner', async () => {
+  it('orders the exact retained packet, proof, signing, runner V3 and checkpoint with one-use cleanup', async () => {
     const custody = await retainedOwner();
+    const signer = setupSigner();
     const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
-      {} as never, custody,
+      signer as never, custody,
     );
     const packet = await continuation.produce({} as never);
     await expect(continuation.executeApplication({ ...packet }, applicationInput() as never))
       .rejects.toThrow(/exact retained packet/);
     expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex)).not.toThrow();
-    await expect(continuation.executeApplication(packet, applicationInput() as never))
-      .rejects.toThrow(/requires proof-bound signing and the signed-call runner/);
-    expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'dispose']);
-    expect(mocks.runnerInput).toBeUndefined();
-    expect(mocks.checkpoint).toBeUndefined();
+    expect(mocks.signArguments).toBeUndefined();
+    const input = applicationInput();
+    const deadline = performance.now() + 60_000;
+    const application = await continuation.executeApplication(packet, input as never, deadline);
+    expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'sign', 'runnerV3']);
+    expect(mocks.signArguments?.[0]).toBe(custody.owner);
+    expect(mocks.signArguments?.[1]).toBe(custody.requestSha256Hex);
+    expect(mocks.signArguments?.[2]).toBe(packet);
+    expect(mocks.signArguments?.[3]).toBe(mocks.mintSourceProof);
+    expect(mocks.signArguments?.[4]).toBe(`0x${signer.publicKeyHex}`);
+    expect(mocks.runnerInput).toEqual({
+      ...input.applicationRunnerInput,
+      mintSourceProofReceipt: mocks.innerMintSourceProof,
+      ergoRecipientPublicKeyHex: `0x${signer.publicKeyHex}`,
+      signedTransactions: mocks.signedTransactions,
+    });
+    expect(mocks.runnerInput?.mintSourceProofReceipt).toBe(mocks.innerMintSourceProof);
+    expect(mocks.runnerInput?.signedTransactions).toBe(mocks.signedTransactions);
+    expect(mocks.runnerDeadline).toBe(deadline);
+    expect(mocks.setupSignerChecks).toContain('mint');
+    expect(mocks.setupSignerChecks).toContain('sign');
+    expect(mocks.runnerV3Calls).toBe(1);
+    expect(mocks.runnerV2Calls).toBe(0);
+    expect(mocks.runnerV2Assertions).toBe(0);
     expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
       .toThrow(/live process custody/);
+    expect(() => continuation.attestCheckpoint({ ...application }, rootInput().checkpointAdmission))
+      .toThrow(/exact application stage/);
+    const receipt = continuation.attestCheckpoint(application, rootInput().checkpointAdmission);
+    expect(receipt.version).toBe(3);
+    expect(receipt.applicationRunner.version).toBe(3);
+    expect(receipt.applicationRunner).toBe(mocks.runner);
+    expect(receipt.mintSourceProof).toBe(mocks.mintSourceProof);
+    expect(receipt.checkpoint).toBe(mocks.checkpoint);
+    expect(mocks.checkpointInput).toEqual({
+      sourceNativeBlockHeight: 7, sourceNativeBlockHashHex: mocks.sourceNativeBlockHashHex,
+      executionBlockHashHex: mocks.executionBlockHashHex, bridgeEventRootHex: mocks.bridgeEventRootHex,
+      burnLeafCount: 1, admissionValidFromErgoHeight: '2000', admissionExpiresAtErgoHeight: '2064',
+    });
+    expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'sign', 'runnerV3', 'checkpoint', 'dispose']);
+    expect(() => assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance(receipt))
+      .not.toThrow();
+    expect(mocks.runnerV3Assertions).toBeGreaterThanOrEqual(3);
+    expect(mocks.runnerV2Assertions).toBe(0);
+    expect(() => assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3Provenance({ ...receipt }))
+      .toThrow(/lacks process provenance/);
+    expect(() => continuation.attestCheckpoint(application, rootInput().checkpointAdmission))
+      .toThrow(/exact application stage/);
     await expect(continuation.executeApplication(packet, applicationInput() as never))
       .rejects.toThrow(/exact retained packet/);
+    await expect(continuation.complete(packet, completionInput() as never)).rejects.toThrow(/exact retained packet/);
+    expect(mocks.runnerV3Calls).toBe(1);
     continuation.dispose();
     expect(mocks.disposeCalls).toBe(1);
   });
@@ -339,7 +499,7 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
         requestSha256Hex: fault === 'request' ? 'ff'.repeat(32) : custody.requestSha256Hex,
       };
       expect(() => createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
-        {} as never, candidate,
+        setupSigner() as never, candidate,
       )).toThrow(/not claimed|live process custody|exact request/);
       expect(mocks.createSessionCalls).toBe(0);
     },
@@ -351,11 +511,11 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
       if (fault === 'session') {
         mocks.sessionFailure = true;
         expect(() => createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
-          {} as never, custody,
+          setupSigner() as never, custody,
         )).toThrow(/injected session failure/);
       } else {
         const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
-          {} as never, custody,
+          setupSigner() as never, custody,
         );
         if (fault === 'dispose') {
           mocks.disposeFailure = true;
@@ -384,18 +544,178 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     'rejects mint proof %s drift before application execution and disposes fresh custody', async fault => {
       const custody = await retainedOwner();
       const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
-        {} as never, custody,
+        setupSigner() as never, custody,
       );
       const packet = await continuation.produce({} as never);
       mocks.mintFault = fault;
       await expect(continuation.executeApplication(packet, applicationInput() as never))
         .rejects.toThrow(fault === 'provenance' ? /lacks process provenance/ : /differs from the retained packet or target/);
       expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'dispose']);
+      expect(mocks.signArguments).toBeUndefined();
       expect(mocks.runnerInput).toBeUndefined();
       expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
         .toThrow(/live process custody/);
     },
   );
+
+  it.each(['provenance', 'session-binding'] as const)(
+    'closes fresh owner custody when constructor %s fails', async fault => {
+      const custody = await retainedOwner();
+      const signer = setupSigner();
+      if (fault === 'provenance') mocks.setupSigners.delete(signer);
+      else mocks.sessionBindingFailure = true;
+      expect(() => createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        signer as never, custody,
+      )).toThrow(fault === 'provenance' ? /setup signer lacks process provenance/ : /signer|admission|binding/i);
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
+      expect(mocks.disposeCalls).toBe(fault === 'provenance' ? 0 : 1);
+      expect(mocks.signArguments).toBeUndefined();
+      expect(mocks.runnerV2Calls + mocks.runnerV3Calls).toBe(0);
+    },
+  );
+
+  it.each(['before-execution', 'during-proof', 'during-sign'] as const)(
+    'rejects setup signer revocation %s without invoking either runner', async fault => {
+      const custody = await retainedOwner();
+      const signer = setupSigner();
+      const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        signer as never, custody,
+      );
+      const packet = await continuation.produce({} as never);
+      if (fault === 'before-execution') mocks.setupSigners.delete(signer);
+      if (fault === 'during-proof') mocks.revokeSetupDuringProof = true;
+      if (fault === 'during-sign') mocks.revokeSetupDuringSign = true;
+      await expect(continuation.executeApplication(packet, applicationInput() as never))
+        .rejects.toThrow(/setup signer lacks process provenance/);
+      expect(mocks.sequence.filter(step => step === 'sign')).toHaveLength(fault === 'during-sign' ? 1 : 0);
+      expect(mocks.runnerV2Calls + mocks.runnerV3Calls).toBe(0);
+      expect(mocks.checkpoint).toBeUndefined();
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
+      continuation.dispose();
+      expect(mocks.disposeCalls).toBe(1);
+    },
+  );
+
+  it('keeps the constructor-bound packet admission key immutable through signing', async () => {
+    const custody = await retainedOwner();
+    const signer = setupSigner();
+    const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+      signer as never, custody,
+    );
+    const packet = await continuation.produce({} as never);
+    expect(Object.isFrozen(signer)).toBe(true);
+    expect(Object.isFrozen(continuation.signer.ergoAdmissionPublicKeysHex)).toBe(true);
+    expect(Reflect.set(signer, 'publicKeyHex', `02${'ff'.repeat(32)}`)).toBe(false);
+    expect(Reflect.set(continuation.signer.ergoAdmissionPublicKeysHex, '0', 'ff'.repeat(33))).toBe(false);
+    try {
+      await continuation.complete(packet, completionInput() as never);
+      expect(mocks.signArguments?.[4]).toBe(`0x${signer.publicKeyHex}`);
+      expect(mocks.runnerInput?.ergoRecipientPublicKeyHex).toBe(`0x${signer.publicKeyHex}`);
+      expect(continuation.signer.ergoAdmissionPublicKeysHex).toEqual([signer.publicKeyHex]);
+    } finally {
+      continuation.dispose();
+    }
+    expect(mocks.runnerV3Calls).toBe(1);
+    expect(mocks.runnerV2Calls).toBe(0);
+    expect(mocks.disposeCalls).toBe(1);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+      .toThrow(/live process custody/);
+  });
+
+  it.each(['sign', 'runner', 'downgrade', 'unknown-version', 'owner', 'recipient', 'runner-target'] as const)(
+    'fails closed on fresh-owner %s failure without checkpoint or legacy fallback', async fault => {
+      const custody = await retainedOwner();
+      const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        setupSigner() as never, custody,
+      );
+      const packet = await continuation.produce({} as never);
+      if (fault === 'sign') mocks.signFailure = new Error('injected signing failure');
+      if (fault === 'runner') mocks.runnerFailure = new Error('injected runner failure');
+      if (fault === 'downgrade') mocks.runnerVersion = 2;
+      if (fault === 'unknown-version') mocks.runnerVersion = 4;
+      if (fault === 'owner' || fault === 'recipient') {
+        mocks.runnerIdentityFault = fault;
+      }
+      if (fault === 'runner-target') mocks.runnerTargetDrift = true;
+      await expect(continuation.complete(packet, completionInput() as never)).rejects.toThrow(
+        fault === 'sign' ? /injected signing failure/
+          : fault === 'runner' ? /injected runner failure/
+            : fault === 'runner-target' ? /different packet or mint proof/
+              : /V3|version|owner|recipient|signed|binding/i,
+      );
+      expect(mocks.sequence).toEqual([
+        'session', 'packet', 'mint', 'sign', ...(fault === 'sign' ? [] : ['runnerV3']), 'dispose',
+      ]);
+      expect(mocks.runnerV2Calls).toBe(0);
+      expect(mocks.runnerV2Assertions).toBe(0);
+      expect(mocks.runnerV3Calls).toBe(fault === 'sign' ? 0 : 1);
+      expect(mocks.checkpoint).toBeUndefined();
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
+      await expect(continuation.executeApplication(packet, applicationInput() as never))
+        .rejects.toThrow(/exact retained packet/);
+      continuation.dispose();
+      expect(mocks.disposeCalls).toBe(1);
+    },
+  );
+
+  it.each(['runner-plan', 'execution-shape', 'completion-shape'] as const)(
+    'does not sign after fresh-owner %s preflight failure', async fault => {
+      const custody = await retainedOwner();
+      const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        setupSigner() as never, custody,
+      );
+      const packet = await continuation.produce({} as never);
+      if (fault === 'runner-plan') mocks.runnerPreflightFailure = new Error('injected runner preflight failure');
+      const attempt = fault === 'completion-shape'
+        ? continuation.complete(packet, { ...completionInput(), execute: () => undefined } as never)
+        : continuation.executeApplication(packet, {
+          ...applicationInput(), ...(fault === 'execution-shape' ? { execute: () => undefined } : {}),
+        } as never);
+      await expect(attempt).rejects.toThrow(fault === 'runner-plan' ? /injected runner preflight failure/ : /must contain exactly/);
+      expect(mocks.sequence).toEqual(['session', 'packet', 'dispose']);
+      expect(mocks.signArguments).toBeUndefined();
+      expect(mocks.runnerV2Calls + mocks.runnerV3Calls).toBe(0);
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
+    },
+  );
+
+  it('rejects duplicate execution and running disposal without terminating the first signing call', async () => {
+    const custody = await retainedOwner();
+    const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+      setupSigner() as never, custody,
+    );
+    const packet = await continuation.produce({} as never);
+    let release!: () => void;
+    mocks.signGate = new Promise<void>(resolve => { release = resolve; });
+    const started = new Promise<void>(resolve => { mocks.signStarted = resolve; });
+    const first = continuation.executeApplication(packet, applicationInput() as never);
+    try {
+      await started;
+      await expect(continuation.executeApplication(packet, applicationInput() as never))
+        .rejects.toThrow(/exact retained packet/);
+      await expect(continuation.complete(packet, completionInput() as never))
+        .rejects.toThrow(/exact retained packet/);
+      expect(() => continuation.dispose()).toThrow(/is running/);
+      expect(mocks.disposeCalls).toBe(0);
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex)).not.toThrow();
+      expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'sign']);
+    } finally {
+      release();
+      // Always settle the in-flight call, including on an assertion failure.
+      await first;
+      continuation.dispose();
+    }
+    expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'sign', 'runnerV3', 'dispose']);
+    expect(mocks.runnerV3Calls).toBe(1);
+    expect(mocks.runnerV2Calls).toBe(0);
+    expect(mocks.disposeCalls).toBe(1);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+      .toThrow(/live process custody/);
+  });
 
   it('orders one exact packet, mint, application burn and derived checkpoint', async () => {
     const receipt =
@@ -413,6 +733,10 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     ]);
     expect(mocks.runnerInput?.mintSourceProofReceipt)
       .toBe(mocks.innerMintSourceProof);
+    expect(receipt.applicationRunner.version).toBe(2);
+    expect(mocks.runnerV2Calls).toBe(1);
+    expect(mocks.runnerV3Calls).toBe(0);
+    expect(mocks.signArguments).toBeUndefined();
     expect(mocks.runnerPreflightCalls).toBe(2);
     expect(mocks.checkpointInput).toEqual({
       sourceNativeBlockHeight: 7,
@@ -657,6 +981,13 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     expect(mocks.disposeCalls).toBe(1);
   });
 });
+
+function setupSigner() {
+  const signer = Object.freeze({ publicKeyHex: `02${'51'.repeat(32)}` });
+  mocks.setupSigners.add(signer);
+  mocks.setupSigner = signer;
+  return signer;
+}
 
 function rootInput() {
   return {

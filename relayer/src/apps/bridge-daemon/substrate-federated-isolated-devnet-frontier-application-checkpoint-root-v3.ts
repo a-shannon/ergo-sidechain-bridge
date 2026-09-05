@@ -20,12 +20,19 @@ import {
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
+  runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1,
   type RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input,
   type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2,
+  type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3,
 } from '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
+} from '../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import { signFrontierLabProofBoundApplicationV1 } from './frontier-lab-proof-bound-application-signing-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
 } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
@@ -37,6 +44,18 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3';
+
+type ApplicationRunnerReceipt = Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2
+  | SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3
+>;
+
+interface RetainedApplicationOwner {
+  readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+  readonly requestSha256Hex: string;
+  readonly ergoAdmissionSigner: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>;
+  readonly ergoRecipientPublicKeyHex: string;
+}
 
 export type SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3 =
   Readonly<Omit<
@@ -94,8 +113,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRo
   }>;
   readonly mintSourceProof:
     Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
-  readonly applicationRunner:
-    Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2>;
+  readonly applicationRunner: ApplicationRunnerReceipt;
   readonly checkpoint:
     Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3>;
   readonly binding: Readonly<{
@@ -150,8 +168,7 @@ interface RootMaterialV3 {
     Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
   readonly mintSourceProof:
     Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
-  readonly applicationRunner:
-    Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2>;
+  readonly applicationRunner: ApplicationRunnerReceipt;
   readonly checkpoint:
     Readonly<SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3>;
 }
@@ -161,8 +178,7 @@ export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointSt
     Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
   readonly mintSourceProof:
     Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
-  readonly applicationRunner:
-    Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2>;
+  readonly applicationRunner: ApplicationRunnerReceipt;
 }
 
 const RECEIPTS = new WeakMap<object, Readonly<RootMaterialV3>>();
@@ -256,14 +272,28 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
   }
   const continuation = (() => {
     try {
-      return createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+      if (owner !== undefined) {
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(ergoAdmissionSigner);
+      }
+      const session = createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
         ergoAdmissionSigner,
       );
+      if (owner !== undefined
+        && !session.signer.ergoAdmissionPublicKeysHex.includes(ergoAdmissionSigner.publicKeyHex)) {
+        session.dispose();
+        throw new Error('Frontier application recipient differs from the packet Ergo-admission signer');
+      }
+      return session;
     } catch (error) {
       if (owner !== undefined) disposeFrontierLabApplicationOwnerV1(owner);
       throw error;
     }
   })();
+  const retainedOwner: Readonly<RetainedApplicationOwner> | undefined = owner === undefined
+    ? undefined : Object.freeze({
+      owner, requestSha256Hex: requestSha256Hex!, ergoAdmissionSigner,
+      ergoRecipientPublicKeyHex: `0x${ergoAdmissionSigner.publicKeyHex}`,
+    });
   let state:
     | 'fresh'
     | 'packet_running'
@@ -339,7 +369,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
         packet,
         preflightApplicationInput(input),
         completionDeadline,
-        owner === undefined ? undefined : Object.freeze({ owner, requestSha256Hex: requestSha256Hex! }),
+        retainedOwner,
       );
       completedApplication = application;
       state = 'application_ready';
@@ -445,10 +475,7 @@ async function executeApplicationCheckpointContinuation(
     ExecuteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
   >,
   completionDeadline: number | undefined,
-  applicationOwner?: Readonly<{
-    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
-    readonly requestSha256Hex: string;
-  }>,
+  applicationOwner?: Readonly<RetainedApplicationOwner>,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3
 >> {
@@ -469,22 +496,40 @@ async function executeApplicationCheckpointContinuation(
     || mintSourceProof.sourceProof.targetDescriptorDigestHex !== packet.receipt.targetDescriptorDigestHex) {
     throw new Error('Frontier application mint proof differs from the retained packet or target');
   }
+  let applicationRunner: ApplicationRunnerReceipt;
   if (applicationOwner !== undefined) {
-    // This route must not execute the historical Sudo-owner fixture while its
-    // proof-bound signed-call runner is still being integrated.
-    throw new Error('fresh-owner application requires proof-bound signing and the signed-call runner');
-  }
-  const applicationRunner =
-    await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
+    assertApplicationRecipientBinding(applicationOwner);
+    const expectedOwnerAddressHex = applicationOwner.owner.ownerAddressHex;
+    const signedTransactions = await signFrontierLabProofBoundApplicationV1(
+      applicationOwner.owner, applicationOwner.requestSha256Hex,
+      packet, mintSourceProof, applicationOwner.ergoRecipientPublicKeyHex,
+    );
+    // Signing consumes owner custody. Revalidate the remaining campaign proof
+    // and recipient bindings before starting the bounded Rust execution.
+    assertApplicationRecipientBinding(applicationOwner);
+    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+    assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(mintSourceProof);
+    applicationRunner = await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3({
+      ...plan.applicationRunnerInput,
+      mintSourceProofReceipt: mintSourceProof.sourceProof,
+      ergoRecipientPublicKeyHex: applicationOwner.ergoRecipientPublicKeyHex,
+      signedTransactions,
+    }, capApplicationRunnerCompletionDeadline(completionDeadline));
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance(applicationRunner);
+    if (applicationRunner.signedApplication.ownerAddressHex !== expectedOwnerAddressHex
+      || applicationRunner.signedApplication.ergoRecipientPublicKeyHex !== applicationOwner.ergoRecipientPublicKeyHex) {
+      throw new Error('Frontier signed runner differs from the retained owner or campaign recipient');
+    }
+  } else {
+    applicationRunner = await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
       {
         ...plan.applicationRunnerInput,
         mintSourceProofReceipt: mintSourceProof.sourceProof,
       },
       capApplicationRunnerCompletionDeadline(completionDeadline),
     );
-  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
-    applicationRunner,
-  );
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(applicationRunner);
+  }
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     mintSourceProof,
@@ -496,6 +541,23 @@ async function executeApplicationCheckpointContinuation(
     mintSourceProof,
     applicationRunner,
   });
+}
+
+function assertApplicationRecipientBinding(owner: Readonly<RetainedApplicationOwner>): void {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(owner.ergoAdmissionSigner);
+  if (`0x${owner.ergoAdmissionSigner.publicKeyHex}` !== owner.ergoRecipientPublicKeyHex) {
+    throw new Error('Frontier application campaign recipient binding changed');
+  }
+}
+
+function assertApplicationRunnerProvenance(receipt: ApplicationRunnerReceipt): void {
+  if (receipt.version === 3) {
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance(receipt);
+  } else if (receipt.version === 2) {
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(receipt);
+  } else {
+    throw new Error('Frontier application runner version is not supported');
+  }
 }
 
 function capApplicationRunnerCompletionDeadline(
@@ -525,9 +587,7 @@ function attestApplicationCheckpointContinuation(
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     mintSourceProof,
   );
-  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
-    applicationRunner,
-  );
+  assertApplicationRunnerProvenance(applicationRunner);
   assertMintAndRunnerBinding(packet, mintSourceProof, applicationRunner);
 
   const applicationEvidence =
@@ -659,9 +719,7 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     material.mintSourceProof,
   );
-  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(
-    material.applicationRunner,
-  );
+  assertApplicationRunnerProvenance(material.applicationRunner);
   assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(
     material.checkpoint,
   );
@@ -703,9 +761,7 @@ function assertMintAndRunnerBinding(
   mintSourceProof: Readonly<
     SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
   >,
-  applicationRunner: Readonly<
-    SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2
-  >,
+  applicationRunner: ApplicationRunnerReceipt,
 ): void {
   if (
     mintSourceProof.packetReceiptDigestHex
@@ -726,9 +782,7 @@ function assertMintAndRunnerBinding(
 }
 
 function assertApplicationBurnCheckpointBinding(
-  applicationRunner: Readonly<
-    SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2
-  >,
+  applicationRunner: ApplicationRunnerReceipt,
   checkpoint: Readonly<
     SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3
   >,

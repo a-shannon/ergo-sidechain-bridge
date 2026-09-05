@@ -248,6 +248,37 @@ describe('layer import rules', () => {
     );
   });
 
+  it.each([
+    ['../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
+      'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3'],
+    ['../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
+      'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance'],
+    ['../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+      'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance'],
+    ['./frontier-lab-proof-bound-application-signing-v1.js',
+      'signFrontierLabProofBoundApplicationV1'],
+  ])('keeps the signed application capability %s#%s inside reviewed calls', (specifier, binding) => {
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
+    const target = specifier.startsWith('../../')
+      ? specifier.slice(6).replace(/\.js$/, '.ts')
+      : `apps/bridge-daemon/${specifier.slice(2).replace(/\.js$/, '.ts')}`;
+    const sources = { [target]: `export function ${binding}() {}` };
+    const importStatement = `import { ${binding} } from '${specifier}';`;
+    expect(inspect({ ...sources, [root]: `${importStatement} ${binding}();` })).toEqual([]);
+    for (const escape of [`export { ${binding} };`, `export const escaped = ${binding};`]) {
+      expect(inspect({ ...sources, [root]: `${importStatement} ${escape}` })
+        .map(value => value.message)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/restricted capability binding must not (?:be re-exported|escape its reviewed call)/),
+      ]));
+    }
+    expect(inspect({
+      ...sources,
+      [root]: `import { ${binding} as replacement } from '${specifier}'; replacement();`,
+    }).map(value => value.message)).toContain(
+      `${specifier.startsWith('../../') ? 'restricted capability import binding' : 'exclusive authority import'} must not be aliased: ${specifier}#${binding}`,
+    );
+  });
+
   it('reserves isolated signer and mining authority imports to exact owners', () => {
     const signerBinding =
       'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts';

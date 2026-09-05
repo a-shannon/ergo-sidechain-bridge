@@ -112,6 +112,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts',
       'substrate-federated-isolated-devnet-packet-producer-v1.ts',
       'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
+      'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts',
     ]),
   ],
   [
@@ -610,17 +611,26 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.ts',
         new Set([
           'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance',
+          'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance',
           'preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
           'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+          'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1',
           'RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input',
           'SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2',
+          'SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3',
         ]),
       ],
       [
         'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
         new Set([
           'SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2',
+        ]),
+      ],
+      [
+        'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance',
         ]),
       ],
     ]),
@@ -964,9 +974,21 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
         new Set([
           'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance',
+          'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance',
           'preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1',
           'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2',
+          'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3',
         ]),
+      ],
+      [
+        '../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+        new Set([
+          'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance',
+        ]),
+      ],
+      [
+        './frontier-lab-proof-bound-application-signing-v1.js',
+        new Set(['signFrontierLabProofBoundApplicationV1']),
       ],
     ]),
   ],
@@ -1222,6 +1244,14 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [
+    'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+    new Map([
+      ['signFrontierLabProofBoundApplicationV1', new Set([
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+      ])],
+    ]),
+  ],
   [
     'adapters/frontier-lab-application-owner-v1.ts',
     new Map([
