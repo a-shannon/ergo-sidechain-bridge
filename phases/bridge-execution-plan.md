@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the distinct V2 compiler/setup identities and fee-funded candidate into the no-submit operational path, then check against fresh chain-resident boxes before transport | V155 validates the frozen WASM JSON and bytes through pinned node code with synthetic state. Real UTXO membership, operational target/version selection and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the V2 tracker into the dependent settlement-family compiler and no-submit setup path, then check against fresh chain-resident boxes before transport | V156 constructs the tracker from its observed genesis input and genuine V2 compiler, and composes it through the fee-funded candidate. V155 supplies pinned-node synthetic-state checks. Full family/setup identity, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -276,6 +276,34 @@ V1 provenance. Only a fresh selected target with the exact resident boxes can
 close `/transactions/check` acceptance. Canonical confirmation and the complete
 withdrawal remain downstream obligations. The earlier HTTP 400 is still not
 attributed to a specific cause by these synthetic results.
+
+### V2 Genesis Construction
+
+V156 connects the observed genesis funding box to the actual V2 compiler
+receipt and an unsigned tracker issuance. The NFT ID is the consumed funding
+box ID; the issued tracker has the compiled V2 tree, 10,000,000 nanoERG and
+the exact empty 370-byte-value AVL register layout required by the V2 consumer.
+Its 1,100,000-nanoERG issuance fee comes from the funding input, with change
+returned to that input's proposition. This does not reduce tracker value.
+
+The target observation and compiler receipt keep their own identities and
+same-process provenance. Rechecking the observation's JSON/Sigma bytes is not
+a fresh chain read. The operational path must revalidate current UTXOs and
+the selected target before signing or checking a live candidate.
+
+This is tracker-only construction, not a new settlement-family registration,
+greenfield authorization or migration. The V1 issuance primitive is reused
+as a transaction constructor, not as V1 compiler or activation provenance.
+Family compilation and setup orchestration must explicitly bind the V2 tree
+before the full campaign can use it. Existing V1 receipts and runtime profiles
+remain unchanged.
+
+The focused 39-case matrix uses genuine V2 JVM compilation and canonical WASM
+funding boxes observed through two synthetic read-only endpoints. It covers
+exact issuance and downstream fee-funded composition, copied or mismatched
+provenance, a genuine V1 receipt, funding and height boundaries, and caller
+reference replacement across asynchronous construction. Simulated endpoint
+agreement does not establish independent operators or canonical consensus.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
