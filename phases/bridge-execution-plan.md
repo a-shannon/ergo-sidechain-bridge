@@ -52,8 +52,10 @@ establish deployment safety or independent operator custody.
   and actual source proof to runner V3 and overlay 0003. The Ergo recipient is
   the campaign setup signer's exact compressed key, also bound to the packet's
   Ergo-admission keys. Legacy runner V2 remains a separate reference route,
-  never a fallback. No fresh composed campaign has yet established that this
-  join reaches canonical tracker admission.
+  never a fallback. A fresh composed campaign now reaches one local tracker
+  transport attempt. The node returned HTTP 400; the transaction was not found
+  in 85 observations over its 120-second confirmation budget. No acceptance
+  of that submission or canonical tracker admission was established.
 
 ## Critical Path
 
@@ -64,8 +66,8 @@ empty replay root; a migration needs paid-burn import and closure of every
 legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
 
 ```text
-frozen foundations + selected launch mode
-  -> fresh-owner signed application execution and canonical tracker admission
+frozen foundations + selected launch mode + fresh-owner application execution
+  -> exact tracker transport and canonical admission
   -> burn/checkpoint binding + global DUP insertion + external-fee payout
   -> composed two-way recovery and operational integration
   -> exact target/custody activation and operational rehearsal
@@ -77,18 +79,40 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB fresh owner -> application -> tracker | First reproduce the pinned base spec and runtime from raw-verified LF source bytes, without an owner or nodes. Then prepare one fresh owner session, calibrate its genesis and run its exact request through the retained-packet root and signed runner V3 | A Git-equivalent CRLF checkout is not a byte-identical build input. Keep exact runtime pins and source rechecks. Genesis calibration, request creation and signing must use the same retained owner. Confirm the tracker successor or record a bounded terminal outcome; focused tests do not establish canonical tracker admission. Keep unique campaign identity and explicit V2 reference dispatch; reject any V11 fallback |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Reproduce the frozen candidate against unchanged node context and then exactly one prepended header, keeping transaction, UTXOs, checkpoint extension and policy fixed. Separately check actual no-network Axios serialization parity and pinned node decoding/version reparse | V149 reached one local transport attempt but no submission acceptance or confirmation. A fixed header index can select a different header after mining resumes; this is a source-backed hypothesis, not V149's proven cause. Preserve exact bytes, target freshness, one-attempt custody and no-retry handling. A subsequent campaign requires a distinguishing result |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 5 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
 
-The current blocker precedes campaign execution: freshly built runtime bytes
-do not reproduce the frozen reference. Raw source checks reject CRLF drift,
-but a fresh LF checkout also produced a different, internally reproducible
-runtime. LF preparation alone does not close this blocker. Isolate the
-remaining build input before changing runtime pins or creating another owner;
-unchanged custom sections do not prove executable equivalence.
+The build investigation recovered the complete historical base spec from its
+original source root. A different raw-LF root produces a different, internally
+reproducible runtime. The nested build's absolute source-path identity is a
+separate input from remapped source strings. Same-root reproduction is not
+portable reproducibility or semantic equivalence between the two runtimes.
+
+V149 selected the separately reproduced LF profile, with its own spec, runtime,
+genesis and downstream proof identities. Independent review checked that join;
+the campaign passed exact reconstruction and reached tracker transport. It did
+not inherit historical runtime evidence. Keep raw source checks and exact
+selected-profile reproduction. Portable build identity remains an institutional
+delivery obligation, not a reason to repeat the resolved local build diagnosis.
+
+The current blocker is tracker admission: HTTP 400 followed by
+`not_found_at_deadline`. The stdout failure projection retains the response
+digest, not a raw error body; no successful worker-receipt file was produced.
+It does not decide whether request decoding, transaction validation or another
+node policy caused the response. Do not retry V149,
+inspect its terminal mutable state, infer a cause from the status alone, or
+extend the confirmation timeout to turn absence into acceptance.
+
+Source review identified a temporal binding to test: context key `2` selects
+an Ergo header by index, and that header's ID and height enter the AVL insertion
+value. Restart continuity allows a descendant tip. Repeating the same checkpoint
+extension in later blocks does not preserve the selected header identity.
+The reduced differential must identify the failing predicate before choosing a
+context/anchor correction. Do not shift signed context bytes, weaken anchor
+checks or label an old check as fresh node admission.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
@@ -100,10 +124,10 @@ and broadcast retain separate exact-candidate authorizations and revalidation.
 | Batch | Deliverable | State and deciding check |
 |---|---|---|
 | 1. Exact calls | Build mint, bounded approval and peg-out from the canonical reservation statement and Ergo recipient; check canonical signed bytes, fresh signer, chain, nonce, fees, value and complete calldata | Implemented in `substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts`, with focused signed-vector tests; runner V3 uses this pure inspector. The planner itself is not an execution capability |
-| 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Implemented in [overlay 0003](../sources/frontier/0003-federated-lab-signed-application-calls.patch). Four signed-call checks and one fresh-owner execution pass under an ephemeral source-attestation profile; the separate reference-profile regression passes eight tests with the dynamic entry ignored. Independent source review is complete. Runner V3 selects this exact ignored test; a fresh composed execution remains pending |
+| 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Implemented in [overlay 0003](../sources/frontier/0003-federated-lab-signed-application-calls.patch). Four signed-call checks and one fresh-owner execution pass under an ephemeral source-attestation profile; the separate reference-profile regression passes eight tests with the dynamic entry ignored. Independent source review is complete. Runner V3 selects this exact ignored test; V149 traversed this consumer before reaching tracker transport. Execution remains a source-locked TestClient result, not an operational mint route |
 | 3. Request custody and signing | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Canonical request creation, one-shot V11 custody claiming and proof-bound signing are composed into the retained-packet root. Signing checks genuine packet/proof provenance, receipt/target bindings, statement and mint identity, and the retained owner; the existing proof validator checks runtime/profile bindings. It emits one complete, inspected triplet and disposes custody on success or failure. Private key material stays outside runner environment and receipts |
-| 4. Signed runner | Carry the exact proof and signed triplet into Rust; bind the result and restore the temporary source changes before issuing a process receipt | Runner V3 and evidence V2 are implemented with separate identities. Calls, proof environment, exact test and all three patch pins enter the execution digest. Both temporary overlays are restored on success or failure; unexpected source changes are preserved and rejected. Tests exercise the actual orchestration body with explicit I/O doubles, not a new Rust or node acceptance run |
-| 5. Retained-packet composition | Connect batches 3 and 4 through the actual campaign packet, owner and Ergo recipient | Implemented with explicit runner-version provenance, setup-signer revalidation around signing, retained owner/recipient checks and one-use cleanup. Tests cover failures, downgrade rejection and concurrent reuse with explicit proof/runner doubles. Next: one fresh composed campaign; component evidence alone does not close tracker admission |
+| 4. Signed runner | Carry the exact proof and signed triplet into Rust; bind the result and restore the temporary source changes before issuing a process receipt | Runner V3 and evidence V2 are implemented with separate identities. Calls, proof environment, exact test and all three patch pins enter the execution digest. Both temporary overlays are restored on success or failure; unexpected source changes are preserved and rejected. Component tests use explicit I/O doubles; V149 subsequently traversed the real runner before tracker transport, without establishing tracker admission |
+| 5. Retained-packet composition | Connect batches 3 and 4 through the actual campaign packet, owner and Ergo recipient | Implemented with explicit runner-version provenance, setup-signer revalidation around signing, retained owner/recipient checks and one-use cleanup. V149 progressed through this route to tracker transport; HTTP 400 and absent confirmation leave tracker admission open. Preserve component negatives and diagnose that downstream boundary before another complete run |
 
 Batches 1 and 2 close the local signed-call producer/consumer boundary, not the
 composed campaign. The consumer executes the supplied bytes without re-signing
@@ -193,9 +217,9 @@ complete withdrawal still require their own execution evidence.
 2. Select one independently testable producer-to-consumer boundary, normally
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
-3. Use the cheapest decisive check first. For the current application issue,
-   compare accepted producer/consumer domains and exact signed calls before
-   adding diagnostics or starting nodes.
+3. Use the cheapest decisive check first. For the current tracker issue,
+   compare the exact checked and transported request with the pinned node's
+   decoding and admission rules before adding diagnostics or starting nodes.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but

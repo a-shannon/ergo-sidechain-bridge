@@ -394,6 +394,19 @@ The preflight never rewrites a supplied checkout. Reproduce the exact base
 spec and embedded runtime before allocating a campaign owner; do not replace
 runtime pins merely because a differently materialized checkout builds.
 
+Raw source equality alone does not establish build-root independence. The
+pinned nested Cargo build references the original runtime outside its generated
+workspace; absolute path-dependency identity can remain relevant after source
+path remapping. A local control reproduced the full historical base spec at
+its original source root, while another raw-identical root produced a different,
+internally reproducible runtime. This is not a runtime-equivalence result.
+
+A distinct local campaign may select a separately reproduced profile only when
+its exact spec and runtime feed the derived genesis, network and proof-profile
+identities and are rechecked at acceptance. It cannot reuse the old profile's
+runtime evidence. Preserve the locked tools, source checks and fail-closed
+acceptance path; cross-root reproducibility remains a separate delivery task.
+
 Prepare the Ergo source from the locked public base. The cache directory is
 ignored by Git and can be deleted and recreated at any time.
 
