@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import ts from 'typescript';
+import { Wallet } from 'ethers';
 import { describe, expect, it, vi } from 'vitest';
 
 const mintSourceProofProvenance = vi.hoisted(() => ({
@@ -61,6 +62,9 @@ import {
   assertSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitIdentityV1,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV1,
   buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2,
+  buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3,
+  preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3,
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance,
   inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
@@ -69,6 +73,7 @@ import {
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1,
   runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2,
 } from './substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js';
+import { buildFrontierLabApplicationTransactionPlanV1 } from './substrate-federated-isolated-devnet-frontier-application-transactions-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -401,6 +406,75 @@ describe('federated isolated-devnet Frontier peg-out application runner V1/V2', 
           envelopeHex,
         )
       ).toThrow(/lacks the exact dynamic proof marker/u);
+    }
+  });
+
+  it('binds fresh-owner signed calls and the Ergo recipient without weakening V2', async () => {
+    const signed = await signedApplicationInput();
+    const environment = buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3(signed);
+    expect(Object.keys(environment)).toHaveLength(10);
+    expect(Object.isFrozen(environment)).toBe(true);
+    expect(environment).toMatchObject({
+      BRIDGE_LAB_SIGNED_MINT_V1_HEX: signed.signedTransactions.mint,
+      BRIDGE_LAB_SIGNED_APPROVAL_V1_HEX: signed.signedTransactions.approval,
+      BRIDGE_LAB_SIGNED_PEG_OUT_V1_HEX: signed.signedTransactions.pegOut,
+      BRIDGE_LAB_ERGO_RECIPIENT_PUBLIC_KEY_V1_HEX: signed.ergoRecipientPublicKeyHex,
+      BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX: signed.mintSourceProofReceipt.sourceProofEnvelopeScaleHex,
+    });
+    expect(() => buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV2(
+      signed.mintSourceProofReceipt,
+    )).toThrow(/differs from the reviewed LAB/u);
+    expect(() => buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3({
+      ...signed, mintSourceProofReceipt: { ...signed.mintSourceProofReceipt },
+    })).toThrow(/provenance/u);
+    expect(() => assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance({
+      version: 3, status: 'same_process_mint_proof_bound_signed_application_burn_executed',
+    })).toThrow(/provenance/u);
+  });
+
+  it.each(['mint', 'approval', 'pegOut'] as const)('rejects substituted signed %s bytes', async role => {
+    const signed = await signedApplicationInput();
+    expect(() => buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3({
+      ...signed, signedTransactions: { ...signed.signedTransactions, [role]: '0x00' },
+    })).toThrow(/canonical signed bytes/u);
+  });
+
+  it('rejects a changed recipient and cross-request calls', async () => {
+    const signed = await signedApplicationInput();
+    const other = await signedApplicationInput();
+    expect(() => buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3({
+      ...signed, ergoRecipientPublicKeyHex: other.ergoRecipientPublicKeyHex,
+    })).toThrow(/calldata changed/u);
+    expect(() => buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3({
+      ...signed, signedTransactions: other.signedTransactions,
+    })).toThrow(/signer changed|calldata changed/u);
+  });
+
+  it('freezes V3 signed bytes and retains the exact proof during preflight', async () => {
+    const signed = await signedApplicationInput();
+    const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'f6-'));
+    const source = mkdtempSync(path.join(temporaryRoot, 'source-'));
+    prepareCompleteCargoCache(temporaryRoot);
+    stubWindowsMsvcEnvironment();
+    try {
+      const input = {
+        ...syntheticInput(), ...signed,
+        frontierSourceDirectory: source, temporaryDirectoryRoot: temporaryRoot,
+        cargoDependencyCacheDirectory: temporaryRoot,
+        signedTransactions: { ...signed.signedTransactions },
+      };
+      const plan = preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3(input);
+      expect(plan.mintSourceProofReceipt).toBe(signed.mintSourceProofReceipt);
+      expect(plan.signedTransactions).not.toBe(input.signedTransactions);
+      expect(Object.isFrozen(plan.signedTransactions)).toBe(true);
+      input.signedTransactions.mint = '0x00';
+      expect(plan.signedTransactions.mint).toBe(signed.signedTransactions.mint);
+      expect(() => preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3({
+        ...input, stdout: 'test result: ok',
+      } as never)).toThrow(/must contain exactly/u);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
 
@@ -961,6 +1035,27 @@ function syntheticMintSourceProofReceipt(
   >;
   mintSourceProofProvenance.receipts.add(receipt);
   return receipt;
+}
+
+async function signedApplicationInput() {
+  const owner = Wallet.createRandom();
+  const recipient = Wallet.createRandom();
+  const mintSourceProofReceipt = syntheticMintSourceProofReceiptWithIntentMutation(intent => ({
+    ...intent, recipientAddressHex: owner.address.toLowerCase(),
+  }));
+  const ergoRecipientPublicKeyHex = recipient.signingKey.compressedPublicKey;
+  const plan = buildFrontierLabApplicationTransactionPlanV1({
+    mintReservationStatementHex: mintSourceProofReceipt.request.statementHex,
+    ergoRecipientPublicKeyHex,
+  });
+  return {
+    mintSourceProofReceipt, ergoRecipientPublicKeyHex,
+    signedTransactions: {
+      mint: await owner.signTransaction(plan.transactions.mint),
+      approval: await owner.signTransaction(plan.transactions.approval),
+      pegOut: await owner.signTransaction(plan.transactions.pegOut),
+    },
+  };
 }
 
 function integrationMintSourceProofReceipt(): Readonly<
