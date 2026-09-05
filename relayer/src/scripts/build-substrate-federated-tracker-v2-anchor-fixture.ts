@@ -27,6 +27,7 @@ import { buildErgoExtensionMembershipProof } from '../ergo-settlement-core/ergo-
 import { encodeCollByteRegister, encodeIntRegister } from '../ergo-encoding.js';
 import { assertContextExtensionSafe } from '../context-extension-guard.js';
 import { buildWasmSimplifiedUpcomingPreHeaderCarrier } from '../ergo-upcoming-state-context.js';
+import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from '../substrate-federated-tracker-v2-external-fee.js';
 
 const args = process.argv.slice(2);
 if (args.length !== 4 || args[0] !== '--output' || !args[1]
@@ -99,6 +100,19 @@ const wasmContext = await buildObservedAnchorCompilerBoundSubstrateFederatedTrac
   observedHeaderContext: observedHeaders,
   extensionMembershipProofHex: extensionProof.proof.toString('hex'),
 });
+const feeKey = createECDH('secp256k1');
+const feeScalar = Buffer.alloc(32);
+feeScalar.writeUInt32BE(7, 28);
+feeKey.setPrivateKey(feeScalar);
+const feePayerPublicKeyHex = feeKey.getPublicKey('hex', 'compressed');
+const feeBox = syntheticBox({
+  value: '1100000', ergoTree: `0008cd${feePayerPublicKeyHex}`,
+  assets: [], additionalRegisters: {}, creationHeight: currentHeight - 2,
+}, '77'.repeat(32));
+const feeFundedContext = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({
+  trackerContext: wasmContext, trackerInputBox: genesisBox,
+  feeInputBox: feeBox, feePayerPublicKeyHex,
+});
 const fixture = {
   schema: 'e2s.substrate-federated-tracker-v2-anchor-prototype',
   version: 2,
@@ -110,6 +124,7 @@ const fixture = {
   compilerRequest,
   compilerReceipt,
   wasmContext,
+  feeFundedContext,
   // V1 supplies only headers and empty AVL setup, never V2 compiler authority.
   // The serialized V2 receipt is observation data, not same-process provenance.
   baseContext,
@@ -129,13 +144,20 @@ mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, bytes, { flag: 'wx' });
 const fixtureSha256Hex = createHash('sha256').update(bytes).digest('hex');
 console.log(`fixture_sha256=${fixtureSha256Hex}`);
-const signed = signSyntheticWasmTransaction();
+const signed = signSyntheticWasmTransaction(
+  wasmContext.eip12UnsignedTransaction, [genesisBox], wasmContext.unsignedTransactionIdHex, [1, 2],
+);
+const feeSigned = signSyntheticWasmTransaction(
+  feeFundedContext.eip12UnsignedTransaction, [genesisBox, feeBox],
+  feeFundedContext.unsignedTransactionIdHex, [1, 2, 7],
+);
 const signedBytes = Buffer.from(`${JSON.stringify({
   schema: 'e2s.substrate-federated-tracker-v2-synthetic-wasm-signature',
   version: 2,
   fixtureSha256Hex,
   unsignedTransactionIdHex: wasmContext.unsignedTransactionIdHex,
   signedTransactionHex: signed,
+  feeFundedSignedTransactionHex: feeSigned,
   boundaries: { syntheticSigningOnly: true, nodeCheckPerformed: false, broadcastPerformed: false },
 }, null, 2)}\n`, 'ascii');
 const signedOutput = resolve(args[3]);
@@ -144,21 +166,25 @@ writeFileSync(signedOutput, signedBytes, { flag: 'wx' });
 console.log(`signed_fixture_sha256=${createHash('sha256').update(signedBytes).digest('hex')}`);
 
 function syntheticGenesisBox() {
+  return syntheticBox({
+    value: '10000000',
+    ergoTree: compilerReceipt.contract.propositionHex,
+    assets: [{ tokenId: compilerRequest.trackerNftIdHex, amount: '1' }],
+    additionalRegisters: {
+      ...baseContext.trackerTransition.inputRegisters,
+      R4: encodeCollByteRegister(Buffer.from(profile.profileIdHex, 'hex')),
+      R8: encodeIntRegister(0),
+      R9: encodeCollByteRegister(Buffer.from(profile.ergoAdmissionKeySetDigestHex, 'hex')),
+    },
+    creationHeight: currentHeight - 2,
+  }, compilerRequest.trackerNftIdHex);
+}
+
+function syntheticBox(candidateJson: unknown, sourceBoxId: string) {
   const setup = wasm.UnsignedTransaction.from_json(JSON.stringify({
-    inputs: [{ boxId: compilerRequest.trackerNftIdHex, extension: {} }],
+    inputs: [{ boxId: sourceBoxId, extension: {} }],
     dataInputs: [],
-    outputs: [{
-      value: '10000000',
-      ergoTree: compilerReceipt.contract.propositionHex,
-      assets: [{ tokenId: compilerRequest.trackerNftIdHex, amount: '1' }],
-      additionalRegisters: {
-        ...baseContext.trackerTransition.inputRegisters,
-        R4: encodeCollByteRegister(Buffer.from(profile.profileIdHex, 'hex')),
-        R8: encodeIntRegister(0),
-        R9: encodeCollByteRegister(Buffer.from(profile.ergoAdmissionKeySetDigestHex, 'hex')),
-      },
-      creationHeight: currentHeight - 2,
-    }],
+    outputs: [candidateJson],
   }));
   const txId = setup.id();
   const candidates = setup.output_candidates();
@@ -171,9 +197,12 @@ function syntheticGenesisBox() {
   }
 }
 
-function signSyntheticWasmTransaction(): string {
+function signSyntheticWasmTransaction(
+  transaction: unknown, inputBoxes: readonly unknown[], expectedId: string, scalars: readonly number[],
+): string {
   assertContextExtensionSafe(
-    [{ extension: wasmContext.contextExtension.eip12Values }], 'synthetic V2 WASM signing', 3,
+    (transaction as { inputs: Array<{ extension: Record<string, string> }> }).inputs,
+    'synthetic V2 WASM signing', 3,
   );
   const blockHeaders = wasm.BlockHeaders.from_json(headers.headers.map(header => header.raw));
   const carrier = wasm.BlockHeader.from_json(JSON.stringify(
@@ -182,7 +211,7 @@ function signSyntheticWasmTransaction(): string {
   const preHeader = wasm.PreHeader.from_block_header(carrier);
   const state = new wasm.ErgoStateContext(preHeader, blockHeaders, wasm.Parameters.default_parameters());
   const keys = new wasm.SecretKeys();
-  for (const value of [1, 2]) {
+  for (const value of scalars) {
     const scalar = Buffer.alloc(32);
     scalar.writeUInt32BE(value, 28);
     const key = wasm.SecretKey.dlog_from_bytes(scalar);
@@ -190,20 +219,22 @@ function signSyntheticWasmTransaction(): string {
     key.free();
   }
   const wallet = wasm.Wallet.from_secrets(keys);
-  const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify(wasmContext.eip12UnsignedTransaction));
-  const inputs = wasm.ErgoBoxes.from_boxes_json([genesisBox]);
+  const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify(transaction));
+  const inputs = wasm.ErgoBoxes.from_boxes_json([...inputBoxes]);
   const dataInputs = wasm.ErgoBoxes.from_boxes_json([]);
   let signed: InstanceType<typeof wasm.Transaction> | undefined;
   try {
     signed = wallet.sign_transaction(state, unsigned, inputs, dataInputs);
     const id = signed.id();
     try {
-      if (id.to_str() !== wasmContext.unsignedTransactionIdHex) {
+      if (id.to_str() !== expectedId) {
         throw new Error('synthetic V2 WASM signing changed the transaction identity');
       }
     } finally { id.free(); }
-    if (!wasm.verify_tx_input_proof(0, state, signed, inputs, dataInputs)) {
-      throw new Error('synthetic V2 WASM proof did not verify');
+    for (let index = 0; index < inputBoxes.length; index += 1) {
+      if (!wasm.verify_tx_input_proof(index, state, signed, inputs, dataInputs)) {
+        throw new Error(`synthetic V2 WASM proof ${index} did not verify`);
+      }
     }
     return Buffer.from(signed.sigma_serialize_bytes()).toString('hex');
   } finally {

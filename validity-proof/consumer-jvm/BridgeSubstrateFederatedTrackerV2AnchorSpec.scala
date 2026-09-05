@@ -29,8 +29,8 @@ import sigmastate.eval.CPreHeader
 import sigmastate.helpers.{ErgoLikeContextTesting, ErgoLikeTestInterpreter, ErgoLikeTestProvingInterpreter}
 import sigmastate.helpers.TestingHelpers.{copyBox, copyContext}
 
-/** Inactive synthetic input-script proof test, not target-node/mempool acceptance.
-  * The one-input, value-preserving transaction has no miner fee; it is not a V1 receipt.
+/** Inactive synthetic transaction proof test, not target-node/mempool acceptance.
+  * Both fee-free and externally funded cases preserve the tracker value.
   */
 class BridgeSubstrateFederatedTrackerV2AnchorSpec
     extends AnyFunSuite with Matchers with JsonCodecs {
@@ -50,7 +50,7 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
   private val threshold = CTHRESHOLD(2, keys.map(_.publicImage))
   private lazy val fixtureBytes = {
     val bytes = readFile(requiredProperty("context.fixture"))
-    sha256(bytes) shouldBe "8c37caa19fa7f27fd9e6037c313c08c2019bd5f588c84c95f8ca694c6da171bc"
+    sha256(bytes) shouldBe "416300485667d83a62b13826cb6514f0969df0faad4ced9b2cdbadb58aee266b"
     bytes
   }
   private lazy val fixture = json(fixtureBytes).hcursor
@@ -126,6 +126,29 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
   private lazy val canonical = build(statementBytes)
   private lazy val signedPacketBytes = readFile(requiredProperty("signed.fixture"))
   private lazy val signed = loadWasmSigned(signedPacketBytes, requiredProperty("signed.fixture.sha256"))
+  private lazy val feeFunded = fixture.downField("feeFundedContext")
+  private lazy val feeInputBox = inVersion {
+    val values = feeFunded.downField("inputBoxSigmaHex").as[Vector[String]].fold(e => fail(e.getMessage), identity)
+    values.size shouldBe 2
+    values.head shouldBe str(wasmContext, "inputBoxSigmaHex")
+    val bytes = unhex(values(1))
+    val reader = SigmaSerializer.startReader(bytes)
+    val box = ErgoBox.sigmaSerializer.parse(reader)
+    reader.remaining shouldBe 0
+    ErgoBox.sigmaSerializer.toBytes(box) should contain theSameElementsInOrderAs bytes
+    box.value shouldBe 1100000L
+    box.additionalTokens.length shouldBe 0
+    box.additionalRegisters shouldBe empty
+    val publicKey = DLogProverInput(BigInteger.valueOf(7L)).publicImage.value
+    hex(serializer.serializeErgoTree(box.ergoTree)) shouldBe
+      "0008cd" + hex(GroupElementSerializer.toBytes(publicKey))
+    box
+  }
+  private lazy val feeCanonical = new ErgoLikeTransaction(
+    canonical.tx.inputs :+ Input(feeInputBox.id, ProverResult(Array.empty[Byte], ContextExtension(Map.empty))),
+    IndexedSeq.empty,
+    canonical.tx.outputCandidates :+ new ErgoBoxCandidate(1100000L, ErgoTreePredef.feeProposition(), initialHeight))
+  private lazy val feeSigned = loadFeeWasmSigned(signedPacketBytes, requiredProperty("signed.fixture.sha256"))
 
   test("locked compiler V2 bytes match independent JVM compilation under the synthetic profile") {
     statementBytes.length shouldBe 512
@@ -204,6 +227,66 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
     reduce(evicted) shouldBe TrivialProp.FalseProp
     verify(evicted) shouldBe false
     verify(signed) shouldBe true
+  }
+
+  test("external fees preserve tracker value and both actual WASM proofs across descendant windows") {
+    str(feeFunded, "schema") shouldBe "e2s.substrate-federated-v2-tracker-external-fee-transaction"
+    str(feeFunded, "trackerUnsignedTransactionIdHex") shouldBe canonical.tx.id
+    str(feeFunded, "minerFeeNanoErg") shouldBe "1100000"
+    hex(ErgoLikeTransactionSerializer.toBytes(feeCanonical)) shouldBe str(feeFunded, "prooflessTransactionHex")
+    feeCanonical.id shouldBe str(feeFunded, "unsignedTransactionIdHex")
+    feeCanonical.id should not be canonical.tx.id
+    feeCanonical.inputs.size shouldBe 2
+    feeCanonical.dataInputs shouldBe empty
+    feeCanonical.outputCandidates.size shouldBe 2
+    feeCanonical.outputCandidates.head.value shouldBe canonical.self.value
+    canonical.self.value + feeInputBox.value shouldBe feeCanonical.outputCandidates.map(_.value).sum
+    val frozen = ErgoLikeTransactionSerializer.toBytes(feeSigned).clone()
+    var headers = canonical.headers
+    val retainedSteps = headers.length - 1 - anchorIndex
+    (0 to retainedSteps).foreach { descendants =>
+      (0 to 1).foreach { index =>
+        verifyFeeInput(feeSigned, index, headers, initialHeight + descendants) shouldBe true
+      }
+      ErgoLikeTransactionSerializer.toBytes(feeSigned) should contain theSameElementsInOrderAs frozen
+      headers = descend(headers)
+    }
+    verifyFeeInput(feeSigned, 0, headers, initialHeight + retainedSteps + 1) shouldBe false
+    verifyFeeInput(feeSigned, 1, headers, initialHeight + retainedSteps + 1) shouldBe true
+  }
+
+  test("external fee and tracker proofs are independently required on the same frozen transaction") {
+    (0 to 1).foreach { index =>
+      val changedProof = feeSigned.inputs(index).spendingProof.proof.clone()
+      changedProof(0) = (changedProof(0) ^ 1).toByte
+      val inputs = feeSigned.inputs.updated(index, Input(feeSigned.inputs(index).boxId,
+        ProverResult(changedProof, feeSigned.inputs(index).extension)))
+      val changed = new ErgoLikeTransaction(inputs, feeSigned.dataInputs, feeSigned.outputCandidates)
+      changed.messageToSign should contain theSameElementsInOrderAs feeSigned.messageToSign
+      verifyFeeInput(changed, index, canonical.headers, initialHeight) shouldBe false
+      verifyFeeInput(changed, 1 - index, canonical.headers, initialHeight) shouldBe true
+    }
+    val original = feeSigned.outputCandidates.head
+    val reducedTracker = new ErgoBoxCandidate(original.value - 1L, original.ergoTree,
+      original.creationHeight, original.additionalTokens, original.additionalRegisters)
+    val feeOutput = feeSigned.outputCandidates(1)
+    val increasedFee = new ErgoBoxCandidate(feeOutput.value + 1L, feeOutput.ergoTree,
+      feeOutput.creationHeight, feeOutput.additionalTokens, feeOutput.additionalRegisters)
+    val changed = new ErgoLikeTransaction(feeSigned.inputs, feeSigned.dataInputs,
+      feeSigned.outputCandidates.updated(0, reducedTracker).updated(1, increasedFee))
+    changed.outputCandidates.map(_.value).sum shouldBe canonical.self.value + feeInputBox.value
+    new ErgoLikeTestInterpreter().fullReduction(canonical.self.ergoTree,
+      feeContext(changed, 0, canonical.headers, initialHeight)).value shouldBe TrivialProp.FalseProp
+    (0 to 1).foreach(index => verifyFeeInput(feeSigned, index, canonical.headers, initialHeight) shouldBe true)
+  }
+
+  test("fee signed packet rejects a fee-free transaction under a recomputed packet hash") {
+    val altered = json(signedPacketBytes).mapObject(_.add("feeFundedSignedTransactionHex",
+      Json.fromString(hex(ErgoLikeTransactionSerializer.toBytes(signed.tx))))).noSpaces.getBytes(US_ASCII)
+    intercept[org.scalatest.exceptions.TestFailedException] {
+      loadFeeWasmSigned(altered, sha256(altered))
+    }.getMessage should include("fee-funded transaction identity")
+    loadFeeWasmSigned(signedPacketBytes, sha256(signedPacketBytes)).id shouldBe feeCanonical.id
   }
 
   test("V1 with the same synthetic profile signs at baseline but fails after one descendant") {
@@ -564,6 +647,36 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
   private def withProof(s: Scenario, proof: ProverResult): Scenario =
     s.copy(tx = new ErgoLikeTransaction(IndexedSeq(Input(s.self.id, proof)),
       s.tx.dataInputs, s.tx.outputCandidates))
+
+  private def loadFeeWasmSigned(bytes: Array[Byte], expectedSha256: String): ErgoLikeTransaction = {
+    loadWasmSigned(bytes, expectedSha256)
+    val raw = unhex(str(json(bytes).hcursor, "feeFundedSignedTransactionHex"))
+    val tx = parseTransaction(raw)
+    ErgoLikeTransactionSerializer.toBytes(tx) should contain theSameElementsInOrderAs raw
+    withClue("fee-funded transaction identity: ") { tx.id shouldBe feeCanonical.id }
+    tx.inputs.size shouldBe 2
+    tx.inputs.foreach(input => input.spendingProof.proof should not be empty)
+    tx.messageToSign should contain theSameElementsInOrderAs feeCanonical.messageToSign
+    val proofless = new ErgoLikeTransaction(tx.inputs.map(i => Input(i.boxId,
+      ProverResult(Array.empty[Byte], i.extension))), tx.dataInputs, tx.outputCandidates)
+    ErgoLikeTransactionSerializer.toBytes(proofless) should contain theSameElementsInOrderAs
+      ErgoLikeTransactionSerializer.toBytes(feeCanonical)
+    tx
+  }
+  private def feeContext(tx: ErgoLikeTransaction, index: Int, headers: Array[CHeader], height: Int): ErgoLikeContext = {
+    val boxes = IndexedSeq(canonical.self, feeInputBox)
+    val tip = headers.head
+    val preHeader = CPreHeader(tip.version, tip.id, tip.timestamp + 1L, tip.nBits,
+      height, tip.minerPk, Colls.emptyColl[Byte])
+    val ctx = ErgoLikeContextTesting(height, avlData(tip.stateRoot),
+      ErgoLikeContextTesting.dummyPubkey, boxes, tx, boxes(index), 3.toByte, tx.inputs(index).extension)
+    copyContext(ctx)(headers = Colls.fromArray(headers.map(h => h: Header)), preHeader = preHeader)
+  }
+  private def verifyFeeInput(tx: ErgoLikeTransaction, index: Int, headers: Array[CHeader], height: Int): Boolean = {
+    val ctx = feeContext(tx, index, headers, height)
+    new ErgoLikeTestInterpreter().verify(ctx.self.ergoTree, ctx,
+      tx.inputs(index).spendingProof, tx.messageToSign).get._1
+  }
   private def withExtension(s: Scenario, e: ContextExtension): Scenario =
     withProof(s, ProverResult(s.tx.inputs.head.spendingProof.proof.clone(), e))
   private def withHeight(s: Scenario, height: Int): Scenario =

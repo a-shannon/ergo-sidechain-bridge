@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Compose the V2 tracker with an exact external fee input and output, then test the resulting signed transaction through the pinned node's decoding, version reparse and admission rules before transport | V153 connects the genuine V2 compiler receipt to the WASM builder and actual synthetic signature. The independent JVM reconstruction matches the exact bytes and passes ten signed-window and packet-binding tests. Fee-funded composition and target-node admission remain open. Keep V1 bytes and semantics frozen; no campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Test the exact fee-funded V2 transaction through the pinned node's decoding, version reparse and admission rules before transport | V154 composes a separate fee-payer input and canonical miner-fee output without reducing tracker value. The 13-test JVM matrix reconstructs exact bytes, verifies both actual WASM proofs and rejects tracker-funded fees. Target-node admission remains open. Keep V1 bytes and semantics frozen; no campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -155,8 +155,8 @@ isolating that predicate. Same-profile V1 signs at baseline but rejects after
 one descendant.
 
 This checks the input script, not a fee-funded, stateful node transaction.
-V153 verifies the exact WASM/JVM signed bytes below. Fee-funded composition,
-node decoding, version reparse and admission remain due. Do not relabel a V1
+V153 verifies the exact WASM/JVM signed bytes below; V154 adds external fees.
+Node decoding, version reparse and admission remain due. Do not relabel a V1
 receipt or activate V2 through the prototype fixture. Unchanged V1 runtime and
 campaign evidence remain reusable only within their old scopes.
 
@@ -211,11 +211,36 @@ header window moves.
 
 The transaction has one tracker input and successor and includes no miner fee.
 It proves input-script interoperability, not stateful node admission, profile
-activation, independent custody, source finality or funds authority. The next
-batch adds external fee funding without reducing tracker value, then checks
-exact node decoding and version semantics. V152 compiler checks remain reusable;
+activation, independent custody, source finality or funds authority. V154 below
+adds external fee funding without reducing tracker value. V152 compiler checks remain reusable;
 unchanged contracts, Rust/WASM sources, campaign and release evidence are not
 replayed for this builder integration.
+
+### V2 Externally Funded Tracker Transaction
+
+V154 adds a distinct composer that consumes the genuine V2 context and its
+exact tracker input. A separate canonical P2PK box supplies exactly 1,100,000
+nanoERG for the miner. The tracker successor remains unchanged at 10,000,000
+nanoERG; no reserve or tracker value pays the fee. There are exactly two inputs,
+two outputs and no data inputs or change output. The fee payer is bound to an
+exact compressed public key; tokens, registers, aliases, other keys and box
+substitutions reject before construction. A construction result is not signing
+or submission authority.
+
+The focused composer passes 72 tests; TypeScript and import checks pass.
+The JVM matrix retains the fee-free control and independently reconstructs
+the funded transaction using its canonical miner-fee proposition. Thirteen
+tests verify exact bytes, the real WASM tracker and fee-payer proofs, temporal
+stability, isolated proof mutations and packet substitution. Moving value from
+the tracker to the fee output rejects even when total ERG is conserved.
+The same frozen transaction verifies through eight descendant windows; anchor
+eviction rejects the tracker proof while the independent fee-payer proof remains
+valid. This is transaction-script evidence, not node admission or consensus.
+
+Next, compare the exact signed transaction with the pinned node's JSON decoding,
+version reparse, size/cost policies and stateful validation. No full campaign
+retry is needed to investigate those rules. Unchanged V152/V153 source checks
+remain reusable; the JVM matrix was rerun because its transaction shape changed.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
@@ -321,9 +346,8 @@ complete withdrawal still require their own execution evidence.
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
 3. Use the cheapest decisive check first. For the current tracker boundary,
-   compose exact external fee funding, preserve the V2 signed-window checks,
-   then compare the resulting bytes with the pinned node's decoding and
-   admission rules before starting nodes.
+   preserve the verified fee-funded V2 bytes and compare them with the pinned
+   node's decoding, version reparse and admission rules before starting nodes.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but
