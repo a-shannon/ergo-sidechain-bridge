@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path';
 import {
   buildSubstrateFederatedCheckpointProfileV1,
   buildSubstrateFederatedCheckpointStatementV1,
+  encodeSubstrateFederatedCheckpointExtensionValueV1,
   type SubstrateFederatedCheckpointProfileV1Input,
   type SubstrateFederatedCheckpointStatementV1Input,
 } from '../profiles/substrate-federated-v1/checkpoint-statement.js';
@@ -17,10 +18,20 @@ import {
 import {
   compileSubstrateFederatedTrackerWithPinnedJvmV2,
 } from '../substrate-federated-tracker-jvm-compiler-v2.js';
+import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context } from '../substrate-federated-tracker-v2.js';
+import {
+  buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1,
+} from '../bridge-validity-tracker-header-context-v1.js';
+import { buildErgoExtensionMembershipProof } from '../ergo-settlement-core/ergo-extension-membership.js';
+import { encodeCollByteRegister, encodeIntRegister } from '../ergo-encoding.js';
+import { assertContextExtensionSafe } from '../context-extension-guard.js';
+import { buildWasmSimplifiedUpcomingPreHeaderCarrier } from '../ergo-upcoming-state-context.js';
 
 const args = process.argv.slice(2);
-if (args.length !== 2 || args[0] !== '--output' || !args[1]) {
-  throw new Error('usage: --output <new-json-path>');
+if (args.length !== 4 || args[0] !== '--output' || !args[1]
+  || args[2] !== '--signed-output' || !args[3] || resolve(args[1]) === resolve(args[3])) {
+  throw new Error('usage: --output <new-json-path> --signed-output <new-signed-json-path>');
 }
 const vector = JSON.parse(readFileSync(new URL(
   '../../test-vectors/substrate-federated-v1-tracker-admission.json',
@@ -61,6 +72,33 @@ const compilerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
   profile,
 });
 const compilerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(compilerRequest);
+const wasm = await import('ergo-lib-wasm-nodejs').then(module => module.default ?? module);
+const currentHeight = baseContext.trackerTransition.currentErgoHeight;
+const extensionProof = buildErgoExtensionMembershipProof([
+  { key: Buffer.from('0401', 'hex'), value: Buffer.from(
+    encodeSubstrateFederatedCheckpointExtensionValueV1(statement.encodedStatementHex), 'hex',
+  ) },
+], Buffer.from('0401', 'hex'));
+const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+  currentHeight,
+  anchorContextIndex: baseContext.trackerTransition.anchorContextIndex,
+  anchorExtensionRootHex: extensionProof.root.toString('hex'),
+});
+const observedHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+  rawHeaders: headers.headers.map(header => header.raw),
+  anchorContextIndex: headers.anchorContextIndex,
+  expectedAnchorHeaderIdHex: headers.anchorHeader.id,
+  expectedAnchorExtensionRootHex: headers.anchorHeader.extensionRootHex,
+});
+const genesisBox = syntheticGenesisBox();
+const wasmContext = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
+  compilerRequest,
+  compilerReceipt,
+  trackerInputBox: genesisBox,
+  encodedStatementHex: statement.encodedStatementHex,
+  observedHeaderContext: observedHeaders,
+  extensionMembershipProofHex: extensionProof.proof.toString('hex'),
+});
 const fixture = {
   schema: 'e2s.substrate-federated-tracker-v2-anchor-prototype',
   version: 2,
@@ -71,6 +109,7 @@ const fixture = {
   statement,
   compilerRequest,
   compilerReceipt,
+  wasmContext,
   // V1 supplies only headers and empty AVL setup, never V2 compiler authority.
   // The serialized V2 receipt is observation data, not same-process provenance.
   baseContext,
@@ -88,4 +127,87 @@ if (!bytes.length || bytes.includes(13) || bytes.some(byte => byte > 0x7f)) {
 const output = resolve(args[1]);
 mkdirSync(dirname(output), { recursive: true });
 writeFileSync(output, bytes, { flag: 'wx' });
-console.log(`fixture_sha256=${createHash('sha256').update(bytes).digest('hex')}`);
+const fixtureSha256Hex = createHash('sha256').update(bytes).digest('hex');
+console.log(`fixture_sha256=${fixtureSha256Hex}`);
+const signed = signSyntheticWasmTransaction();
+const signedBytes = Buffer.from(`${JSON.stringify({
+  schema: 'e2s.substrate-federated-tracker-v2-synthetic-wasm-signature',
+  version: 2,
+  fixtureSha256Hex,
+  unsignedTransactionIdHex: wasmContext.unsignedTransactionIdHex,
+  signedTransactionHex: signed,
+  boundaries: { syntheticSigningOnly: true, nodeCheckPerformed: false, broadcastPerformed: false },
+}, null, 2)}\n`, 'ascii');
+const signedOutput = resolve(args[3]);
+mkdirSync(dirname(signedOutput), { recursive: true });
+writeFileSync(signedOutput, signedBytes, { flag: 'wx' });
+console.log(`signed_fixture_sha256=${createHash('sha256').update(signedBytes).digest('hex')}`);
+
+function syntheticGenesisBox() {
+  const setup = wasm.UnsignedTransaction.from_json(JSON.stringify({
+    inputs: [{ boxId: compilerRequest.trackerNftIdHex, extension: {} }],
+    dataInputs: [],
+    outputs: [{
+      value: '10000000',
+      ergoTree: compilerReceipt.contract.propositionHex,
+      assets: [{ tokenId: compilerRequest.trackerNftIdHex, amount: '1' }],
+      additionalRegisters: {
+        ...baseContext.trackerTransition.inputRegisters,
+        R4: encodeCollByteRegister(Buffer.from(profile.profileIdHex, 'hex')),
+        R8: encodeIntRegister(0),
+        R9: encodeCollByteRegister(Buffer.from(profile.ergoAdmissionKeySetDigestHex, 'hex')),
+      },
+      creationHeight: currentHeight - 2,
+    }],
+  }));
+  const txId = setup.id();
+  const candidates = setup.output_candidates();
+  const candidate = candidates.get(0);
+  const box = wasm.ErgoBox.from_box_candidate(candidate, txId, 0);
+  try {
+    return box.to_js_eip12();
+  } finally {
+    box.free(); candidate.free(); candidates.free(); txId.free(); setup.free();
+  }
+}
+
+function signSyntheticWasmTransaction(): string {
+  assertContextExtensionSafe(
+    [{ extension: wasmContext.contextExtension.eip12Values }], 'synthetic V2 WASM signing', 3,
+  );
+  const blockHeaders = wasm.BlockHeaders.from_json(headers.headers.map(header => header.raw));
+  const carrier = wasm.BlockHeader.from_json(JSON.stringify(
+    buildWasmSimplifiedUpcomingPreHeaderCarrier(headers.headers[0].raw),
+  ));
+  const preHeader = wasm.PreHeader.from_block_header(carrier);
+  const state = new wasm.ErgoStateContext(preHeader, blockHeaders, wasm.Parameters.default_parameters());
+  const keys = new wasm.SecretKeys();
+  for (const value of [1, 2]) {
+    const scalar = Buffer.alloc(32);
+    scalar.writeUInt32BE(value, 28);
+    const key = wasm.SecretKey.dlog_from_bytes(scalar);
+    keys.add(key);
+    key.free();
+  }
+  const wallet = wasm.Wallet.from_secrets(keys);
+  const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify(wasmContext.eip12UnsignedTransaction));
+  const inputs = wasm.ErgoBoxes.from_boxes_json([genesisBox]);
+  const dataInputs = wasm.ErgoBoxes.from_boxes_json([]);
+  let signed: InstanceType<typeof wasm.Transaction> | undefined;
+  try {
+    signed = wallet.sign_transaction(state, unsigned, inputs, dataInputs);
+    const id = signed.id();
+    try {
+      if (id.to_str() !== wasmContext.unsignedTransactionIdHex) {
+        throw new Error('synthetic V2 WASM signing changed the transaction identity');
+      }
+    } finally { id.free(); }
+    if (!wasm.verify_tx_input_proof(0, state, signed, inputs, dataInputs)) {
+      throw new Error('synthetic V2 WASM proof did not verify');
+    }
+    return Buffer.from(signed.sigma_serialize_bytes()).toString('hex');
+  } finally {
+    signed?.free(); dataInputs.free(); inputs.free(); unsigned.free();
+    wallet.free(); keys.free(); state.free();
+  }
+}

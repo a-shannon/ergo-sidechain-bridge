@@ -50,7 +50,7 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
   private val threshold = CTHRESHOLD(2, keys.map(_.publicImage))
   private lazy val fixtureBytes = {
     val bytes = readFile(requiredProperty("context.fixture"))
-    sha256(bytes) shouldBe "1eafd524364dc496030200ddd06ea3b8edc56509ef6568807cf923858ce92efe"
+    sha256(bytes) shouldBe "8c37caa19fa7f27fd9e6037c313c08c2019bd5f588c84c95f8ca694c6da171bc"
     bytes
   }
   private lazy val fixture = json(fixtureBytes).hcursor
@@ -59,13 +59,22 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
   private lazy val profile = fixture.downField("profile")
   private lazy val statement = fixture.downField("statement")
   private lazy val base = fixture.downField("baseContext")
-  private lazy val transition = base.downField("trackerTransition")
+  private lazy val wasmContext = fixture.downField("wasmContext")
+  private lazy val transition = wasmContext.downField("trackerTransition")
   private lazy val initialHeight = number(transition, "currentErgoHeight").toInt
-  private lazy val anchorIndex = number(transition, "anchorContextIndex").toInt
+  private lazy val anchorIndex = initialHeight - 1 - number(transition, "anchorHeight").toInt
   private lazy val baseBox = inVersion {
     val reader = SigmaSerializer.startReader(unhex(str(base, "inputBoxSigmaHex")))
     val box = ErgoBox.sigmaSerializer.parse(reader)
     reader.remaining shouldBe 0
+    box
+  }
+  private lazy val wasmInputBox = inVersion {
+    val bytes = unhex(str(wasmContext, "inputBoxSigmaHex"))
+    val reader = SigmaSerializer.startReader(bytes)
+    val box = ErgoBox.sigmaSerializer.parse(reader)
+    reader.remaining shouldBe 0
+    ErgoBox.sigmaSerializer.toBytes(box) should contain theSameElementsInOrderAs bytes
     box
   }
   private lazy val baseHeaders = transition.downField("headers").as[Vector[Json]].fold(
@@ -115,7 +124,8 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
     tree
   }
   private lazy val canonical = build(statementBytes)
-  private lazy val signed = sign(canonical, keys.take(2))
+  private lazy val signedPacketBytes = readFile(requiredProperty("signed.fixture"))
+  private lazy val signed = loadWasmSigned(signedPacketBytes, requiredProperty("signed.fixture.sha256"))
 
   test("locked compiler V2 bytes match independent JVM compilation under the synthetic profile") {
     statementBytes.length shouldBe 512
@@ -123,6 +133,14 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
       serializer.serializeErgoTree(compile(resolveSource()))
     hex(serializer.serializeErgoTree(trackerTree)) should not be
       hex(serializer.serializeErgoTree(baseBox.ergoTree))
+    str(wasmContext, "schema") shouldBe "e2s.substrate-federated-v2-tracker-context"
+    hex(ErgoLikeTransactionSerializer.toBytes(canonical.tx)) shouldBe
+      str(wasmContext, "prooflessTransactionHex")
+    canonical.tx.id shouldBe str(wasmContext, "unsignedTransactionIdHex")
+    ErgoBox.sigmaSerializer.toBytes(canonical.self) should contain theSameElementsInOrderAs
+      ErgoBox.sigmaSerializer.toBytes(wasmInputBox)
+    hex(serializer.serializeErgoTree(wasmInputBox.ergoTree)) shouldBe
+      str(fixture.downField("compilerReceipt").downField("contract"), "propositionHex")
     reduce(canonical) shouldBe threshold
     verify(canonical) shouldBe false
     println(s"substrate_federated_tracker_v2_fixture_sha256=${sha256(fixtureBytes)}")
@@ -131,7 +149,28 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
     println(s"substrate_federated_tracker_v2_tree_sha256=${sha256(serializer.serializeErgoTree(trackerTree))}")
   }
 
-  test("fresh 2-of-3 input-script proof verifies unchanged until its anchor leaves ten headers") {
+  test("signed packet rejects isolated digest, fixture and transaction identity substitutions") {
+    val packet = json(signedPacketBytes)
+    def changed(field: String, value: Json): Array[Byte] =
+      packet.mapObject(_.add(field, value)).noSpaces.getBytes(US_ASCII)
+    val wrongHash = "00" * 32
+    withClue("packet digest: ") {
+      intercept[org.scalatest.exceptions.TestFailedException] {
+        loadWasmSigned(signedPacketBytes, wrongHash)
+      }.getMessage should include("signed packet digest")
+    }
+    Seq("fixtureSha256Hex", "unsignedTransactionIdHex").foreach { field =>
+      val bytes = changed(field, Json.fromString(wrongHash))
+      withClue(field + ": ") {
+        intercept[org.scalatest.exceptions.TestFailedException] {
+          loadWasmSigned(bytes, sha256(bytes))
+        }.getMessage should include(field)
+      }
+    }
+    loadWasmSigned(signedPacketBytes, sha256(signedPacketBytes)).tx.id shouldBe canonical.tx.id
+  }
+
+  test("actual WASM 2-of-3 input-script proof verifies unchanged until its anchor leaves ten headers") {
     val frozen = ErgoLikeTransactionSerializer.toBytes(signed.tx).clone()
     val frozenMessage = signed.tx.messageToSign.clone()
     val frozenInput = ErgoBox.sigmaSerializer.toBytes(signed.self).clone()
@@ -452,13 +491,12 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
     avl.performOneOperation(Insert(key.asInstanceOf[ADKey], value.asInstanceOf[ADValue])).get
     val proof = avl.generateProof().clone()
     val next = new AvlTreeData(Colls.fromArray(avl.digest.clone()), AvlTreeFlags.InsertOnly, 32, Some(370))
-    val registers = baseBox.additionalRegisters.toMap
+    val registers = wasmInputBox.additionalRegisters.toMap
       .updated(ErgoBox.R4, ByteArrayConstant(bytes.slice(388, 420)))
       .updated(ErgoBox.R6, ByteArrayConstant(bytes.slice(36, 68)))
       .updated(ErgoBox.R9, ByteArrayConstant(bytes.slice(454, 486)))
-      .updated(ErgoBox.R8, IntConstant(initialHeight - 1))
-    val self = copyBox(baseBox)(ergoTree = trackerTree, additionalRegisters = registers,
-      creationHeight = initialHeight - 2)
+      .updated(ErgoBox.R8, IntConstant(0))
+    val self = copyBox(wasmInputBox)(ergoTree = trackerTree, additionalRegisters = registers)
     hex(self.additionalTokens(0)._1.toArray) shouldBe str(transition, "trackerNftIdHex")
     val out = new ErgoBoxCandidate(self.value, trackerTree, initialHeight, self.additionalTokens,
       registers.updated(ErgoBox.R5, AvlTreeConstant(next))
@@ -498,6 +536,30 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
     signedScenario.tx.messageToSign should contain theSameElementsInOrderAs message
     verify(signedScenario) shouldBe true
     signedScenario
+  }
+  private def loadWasmSigned(bytes: Array[Byte], expectedSha256: String): Scenario = {
+    bytes.length should be > 0
+    bytes.length should be < 131072
+    withClue("signed packet digest: ") { sha256(bytes) shouldBe expectedSha256 }
+    val packet = json(bytes).hcursor
+    str(packet, "schema") shouldBe "e2s.substrate-federated-tracker-v2-synthetic-wasm-signature"
+    number(packet, "version") shouldBe 2L
+    withClue("fixtureSha256Hex: ") { str(packet, "fixtureSha256Hex") shouldBe sha256(fixtureBytes) }
+    withClue("unsignedTransactionIdHex: ") { str(packet, "unsignedTransactionIdHex") shouldBe canonical.tx.id }
+    val raw = unhex(str(packet, "signedTransactionHex"))
+    val tx = parseTransaction(raw)
+    tx.inputs.size shouldBe 1
+    tx.inputs.head.spendingProof.proof should not be empty
+    ErgoLikeTransactionSerializer.toBytes(tx) should contain theSameElementsInOrderAs raw
+    tx.id shouldBe canonical.tx.id
+    tx.messageToSign should contain theSameElementsInOrderAs canonical.tx.messageToSign
+    val scenario = canonical.copy(tx = tx)
+    val proofless = withProof(scenario, ProverResult(Array.empty[Byte], tx.inputs.head.extension))
+    ErgoLikeTransactionSerializer.toBytes(proofless.tx) should contain theSameElementsInOrderAs
+      ErgoLikeTransactionSerializer.toBytes(canonical.tx)
+    reduce(scenario) shouldBe threshold
+    verify(scenario) shouldBe true
+    scenario
   }
   private def withProof(s: Scenario, proof: ProverResult): Scenario =
     s.copy(tx = new ErgoLikeTransaction(IndexedSeq(Input(s.self.id, proof)),

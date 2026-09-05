@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the verified V2 compiler receipt to a distinct absolute-height transaction builder; reproduce the signed-window matrix through actual WASM-produced transaction bytes before target checks and transport | V152 binds the complete V2 template to the locked JVM compiler and independently matches its exact ErgoTree in the nine-test signed JVM matrix. V1/V2 receipt substitution rejects. The WASM builder, node decoding/version reparse and canonical admission remain open. Keep V1 bytes and semantics frozen; no campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Compose the V2 tracker with an exact external fee input and output, then test the resulting signed transaction through the pinned node's decoding, version reparse and admission rules before transport | V153 connects the genuine V2 compiler receipt to the WASM builder and actual synthetic signature. The independent JVM reconstruction matches the exact bytes and passes ten signed-window and packet-binding tests. Fee-funded composition and target-node admission remain open. Keep V1 bytes and semantics frozen; no campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -155,8 +155,8 @@ isolating that predicate. Same-profile V1 signs at baseline but rejects after
 one descendant.
 
 This checks the input script, not a fee-funded, stateful node transaction.
-The absolute-height builder must still prove the exact WASM/JVM signed bytes,
-followed by node decoding, version reparse and admission. Do not relabel a V1
+V153 verifies the exact WASM/JVM signed bytes below. Fee-funded composition,
+node decoding, version reparse and admission remain due. Do not relabel a V1
 receipt or activate V2 through the prototype fixture. Unchanged V1 runtime and
 campaign evidence remain reusable only within their old scopes.
 
@@ -184,6 +184,38 @@ compiler provenance. These results do not establish a V2 WASM transaction,
 target-node acceptance, activated profile, source finality or funds authority.
 The unchanged campaign, Rust/WASM sources and release-evidence closure are not
 replayed for this compiler-only integration.
+
+### V2 WASM Transaction And Signature
+
+V153 connects the genuine V2 compiler receipt to an exact genesis tracker box,
+an observed-header context and the existing checkpoint statement. The builder
+checks the compiled application, exact `0x0401` membership, 32/370 AVL insertion,
+successor registers and three-variable ContextExtension. Context key `2` carries
+the absolute anchor height; the V1 statement and profile formats are unchanged.
+The input snapshot is frozen before awaiting, and the exact-input consumer
+rejects a different valid genesis box as well as malformed substitutions.
+
+The focused builder file passes 40 tests, including isolated box/register,
+application, provenance, membership and admission-horizon negatives. The V1
+builder and shared normalization checks bring the affected closure to 53 tests.
+Normalization now releases its WASM box on success and conversion or identity
+rejection without changing returned bytes. TypeScript and import checks pass.
+The fixture producer uses the real builder and signs
+with two synthetic actors through WASM; its deterministic unsigned fixture and
+separate randomized signature packet are bound by exact hashes. JVM independently
+reconstructs the transaction, compares its complete proofless bytes and ID,
+then verifies the actual WASM signature across ten tests. Packet digest, fixture
+link and transaction-link substitutions reject independently, with outer hashes
+recomputed where needed. No re-signing repairs the frozen transaction as the
+header window moves.
+
+The transaction has one tracker input and successor and includes no miner fee.
+It proves input-script interoperability, not stateful node admission, profile
+activation, independent custody, source finality or funds authority. The next
+batch adds external fee funding without reducing tracker value, then checks
+exact node decoding and version semantics. V152 compiler checks remain reusable;
+unchanged contracts, Rust/WASM sources, campaign and release evidence are not
+replayed for this builder integration.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
@@ -289,9 +321,9 @@ complete withdrawal still require their own execution evidence.
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
 3. Use the cheapest decisive check first. For the current tracker boundary,
-   connect the distinct V2 compiler and builder to the signed-window matrix,
-   then compare exact checked/transported bytes with the pinned node's decoding
-   and admission rules before starting nodes.
+   compose exact external fee funding, preserve the V2 signed-window checks,
+   then compare the resulting bytes with the pinned node's decoding and
+   admission rules before starting nodes.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but

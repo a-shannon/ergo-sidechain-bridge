@@ -18,8 +18,8 @@ $ErrorActionPreference = 'Stop'
 
 $ExpectedSigmaStateCommit = 'f78deadd668f801e7fae3bc884283f79c6f484fa'
 $ExpectedFixtureSha256 =
-    '1eafd524364dc496030200ddd06ea3b8edc56509ef6568807cf923858ce92efe'
-$ExpectedTests = 9
+    '8c37caa19fa7f27fd9e6037c313c08c2019bd5f588c84c95f8ca694c6da171bc'
+$ExpectedTests = 10
 $ExpectedInputs = [ordered]@{
     'contracts/SPVTrackerSubstrateFederatedV1.es' =
         '8ea6c51bd501d59f10ba0c771828881d4fea10dc48d2cba451949a3f573ec852'
@@ -30,13 +30,17 @@ $ExpectedInputs = [ordered]@{
     'contracts/SPVTrackerSubstrateFederatedV2.es' =
         '110b1aa22d59e1202435bb139cadbb49f28a48c8b8a3056d0426e620ee828eec'
     'validity-proof/consumer-jvm/BridgeSubstrateFederatedTrackerV2AnchorSpec.scala' =
-        '09c9f0848b6a2450fb0274ea7949f55432a62a0bab7bf4c8a4d061b9e795ea0b'
+        'a349f8f3560f6920156ca1ca60ea37f7f72985c3f9bde6c17f1421e61ae9b610'
     'relayer/src/scripts/build-substrate-federated-tracker-v2-anchor-fixture.ts' =
-        '7d27dc06dd40be78f765f6db8d5cf2857f664970d97a21eb8e3893eb227cf19f'
+        'fa2b9265fc0bfbef3b560c94b19ad931060d880131fa22e98e40eee046865ba3'
     'relayer/src/substrate-federated-tracker-compiler-v2.ts' =
         'b704576fe9ce776b29869e7f45fc565ce2ac2ee8f0340f6419625272223eba5d'
     'relayer/src/substrate-federated-tracker-jvm-compiler-v2.ts' =
         '55ce2c57707677a76d067eaf4ed1e60983acdb1f714522342ab3e0b0ac797943'
+    'relayer/src/substrate-federated-tracker-v2.ts' =
+        '88fee760a9af6cd6bc40be5a20b279a0d98b271b3f4eef3cc96a7a61d069d65d'
+    'relayer/src/unsigned-ergo-transaction.ts' =
+        '11c7f9e74f6900f2ce4386b03a9237d915dc1661cf5870fade865d70c98ab27b'
     'relayer/src/substrate-federated-tracker-v1.ts' =
         'ad3055e28f5535c41e42f3cab7c2574ef5af094606361f31748020e9f4ba12d8'
     'relayer/src/substrate-federated-tracker-v1-fixture.ts' =
@@ -138,6 +142,7 @@ if (-not $temporaryRoot.StartsWith(
     throw 'temporary fixture directory escaped the system temporary directory'
 }
 $fixturePath = Join-Path $temporaryRoot 'substrate-federated-tracker-v2-anchor-context.json'
+$signedFixturePath = Join-Path $temporaryRoot 'substrate-federated-tracker-v2-wasm-signed.json'
 
 try {
     [IO.Directory]::CreateDirectory($temporaryRoot) | Out-Null
@@ -147,7 +152,7 @@ try {
     $tsx = Resolve-ExactFile (Join-Path $BridgeRoot 'relayer\node_modules\tsx\dist\cli.mjs') 'tsx runtime'
     $fixtureBuilder = Join-Path $BridgeRoot 'relayer\src\scripts\build-substrate-federated-tracker-v2-anchor-fixture.ts'
     $fixtureOutput = Invoke-NativeChecked 'federated tracker fixture builder' {
-        & $NodePath $tsx $fixtureBuilder --output $fixturePath
+        & $NodePath $tsx $fixtureBuilder --output $fixturePath --signed-output $signedFixturePath
     }
     if (-not (Test-Path -LiteralPath $fixturePath)) {
         throw 'federated tracker fixture builder produced no file'
@@ -157,11 +162,17 @@ try {
     if ($fixtureText -notmatch "fixture_sha256=$ExpectedFixtureSha256") {
         throw 'fixture builder did not report the exact expected fixture identity'
     }
+    $signedFixturePath = Resolve-ExactFile $signedFixturePath 'synthetic WASM signed fixture'
+    $signedFixtureHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $signedFixturePath).Hash.ToLowerInvariant()
+    $signedHashes = [regex]::Matches($fixtureText, '(?m)^signed_fixture_sha256=([0-9a-f]{64})\r?$')
+    if ($signedHashes.Count -ne 1 -or $signedHashes[0].Groups[1].Value -cne $signedFixtureHash) {
+        throw 'fixture builder did not report the exact freshly signed fixture identity'
+    }
 
     Push-Location $SigmaStateRoot
     try {
         $sbtOutput = Invoke-NativeChecked 'pinned JVM acceptance' {
-            & $JavaPath -Xmx4G -jar $SbtLauncherPath "-Dbridge.substrate.federated.tracker.v2.root=$BridgeRoot" "-Dbridge.substrate.federated.tracker.v2.context.fixture=$fixturePath" 'scJVM/Test/testOnly sigma.bridge.BridgeSubstrateFederatedTrackerV2AnchorSpec'
+            & $JavaPath -Xmx4G -jar $SbtLauncherPath "-Dbridge.substrate.federated.tracker.v2.root=$BridgeRoot" "-Dbridge.substrate.federated.tracker.v2.context.fixture=$fixturePath" "-Dbridge.substrate.federated.tracker.v2.signed.fixture=$signedFixturePath" "-Dbridge.substrate.federated.tracker.v2.signed.fixture.sha256=$signedFixtureHash" 'scJVM/Test/testOnly sigma.bridge.BridgeSubstrateFederatedTrackerV2AnchorSpec'
         }
     } finally {
         Pop-Location
@@ -180,6 +191,7 @@ try {
     Write-Output "tests=$ExpectedTests"
     Write-Output 'activated_vm_version=3'
     Write-Output 'synthetic_jvm_signing_performed=true'
+    Write-Output 'synthetic_wasm_signing_performed=true'
     Write-Output 'submission_performed=false'
     Write-Output 'broadcast_performed=false'
     Write-Output 'target_node_accepted=false'
