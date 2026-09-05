@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Reproduce the frozen candidate against unchanged node context and then exactly one prepended header, keeping transaction, UTXOs, checkpoint extension and policy fixed. Separately check actual no-network Axios serialization parity and pinned node decoding/version reparse | V149 reached one local transport attempt but no submission acceptance or confirmation. A fixed header index can select a different header after mining resumes; this is a source-backed hypothesis, not V149's proven cause. Preserve exact bytes, target freshness, one-attempt custody and no-retry handling. A subsequent campaign requires a distinguishing result |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Prototype a separately versioned tracker whose anchor reference remains stable across descendant headers: bind an absolute anchor height, derive its current window position, and retain the exact header identity in the AVL value. Prove unchanged signed candidate acceptance across that window before integrating construction and transport | V150's pinned JVM differential demonstrates fixed-index liveness failure despite an unchanged checkpoint commitment; it does not prove V149's HTTP 400 cause. Keep V1 bytes and semantics frozen. Reject missing, replaced, stale or out-of-window anchors. Exact target-node decoding, version reparse and admission remain to be demonstrated; no campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -106,13 +106,28 @@ node policy caused the response. Do not retry V149,
 inspect its terminal mutable state, infer a cause from the status alone, or
 extend the confirmation timeout to turn absence into acceptance.
 
-Source review identified a temporal binding to test: context key `2` selects
-an Ergo header by index, and that header's ID and height enter the AVL insertion
-value. Restart continuity allows a descendant tip. Repeating the same checkpoint
-extension in later blocks does not preserve the selected header identity.
-The reduced differential must identify the failing predicate before choosing a
-context/anchor correction. Do not shift signed context bytes, weaken anchor
-checks or label an old check as fresh node admission.
+V150's reduced JVM matrix reproduces the temporal binding: context key `2`
+selects a header by index, and that header's ID and height enter the AVL value.
+With the transaction and input box unchanged, one descendant header causes
+rejection even when the selected headers carry the same extension root. A
+height-only control passes; reselecting the original anchor in an unsigned
+diagnostic candidate restores reduction to the federation threshold. That
+changes the transaction ID and is not a repair for an already signed candidate.
+The current contract, profile and golden transaction bytes are unchanged.
+
+The no-network test exercises the real check and checked-submit consumers
+through Axios's actual request transforms. The synthetic bodies and headers
+match; isolated body and content-type mutations are detected by the test oracle.
+Signer provenance, authorization and journal operations are explicit doubles.
+This establishes neither actual V149 wire bytes nor target-node acceptance.
+
+The diagnostic checkpoint passes 11 pinned JVM tests and 34 focused TypeScript
+tests plus type checking. Its matrix also corrects shared-header mutation in an
+older negative fixture and distinguishes typed-register failures from Boolean
+rejection. Only the test runner's exact input pins and required LF attributes
+were refreshed; the fixture change is its synthetic provenance field, not
+transaction, input, contract or commitment bytes. Do not shift signed context
+bytes, weaken anchor checks or label an old check as fresh node admission.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
