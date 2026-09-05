@@ -45,11 +45,12 @@ establish deployment safety or independent operator custody.
   its hint does not identify an authoritative root cause. Do not retry or read
   its mutable state. V134 was abandoned; terminal attempts are not
   predecessors that must be replayed.
-- A source-level composition defect now blocks the current campaign: V11
-  requires the recipient to equal a fresh owner distinct from removed Sudo,
-  while application runner V2 and its Rust fixture require that same removed
-  Sudo account. No address satisfies both. This is a liveness defect, not an
-  observed authorization bypass. Preserve the fresh-owner rule.
+- The current campaign still has a source-level composition blocker: V11
+  requires a fresh owner distinct from removed Sudo, but application runner V2
+  selects the legacy Sudo-owner fixture. The new signed-call Rust consumer
+  executes a fresh owner's exact transactions; connecting it to request-owned
+  custody remains pending. Preserve the fresh-owner rule and the separate V1
+  fixture identity. This is a liveness defect, not an observed bypass.
 
 ## Critical Path
 
@@ -73,7 +74,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB fresh owner -> application -> tracker | Close the signed-transaction, Rust execution and request-custody joins below before another full campaign | A fresh owner must pass the actual producer and consumer guards and execute the exact signed calls. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
+| **Now** | FED-6-LAB fresh owner -> application -> tracker | Connect request-owned signing custody to the verified signed-call planner and Rust consumer below; then integrate the runner before another full campaign | The local fresh-owner TestClient execution passes. Request/target/proof binding and the composed runner remain pending. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -89,20 +90,30 @@ and broadcast retain separate exact-candidate authorizations and revalidation.
 | Batch | Deliverable | State and deciding check |
 |---|---|---|
 | 1. Exact calls | Build mint, bounded approval and peg-out from the canonical reservation statement and Ergo recipient; check canonical signed bytes, fresh signer, chain, nonce, fees, value and complete calldata | Implemented in `substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts`, with focused signed-vector tests. This is a pure planner/inspector, not yet wired into runner V2 and not an execution capability |
-| 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Pending. Keep the existing V1 fixture and its evidence identity separate. No storage substitution for mint balances, reservation consumption or successful application execution |
+| 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Implemented in [overlay 0003](../sources/frontier/0003-federated-lab-signed-application-calls.patch). Four signed-call checks and one fresh-owner execution pass under an ephemeral source-attestation profile; the separate reference-profile regression passes eight tests with the dynamic entry ignored. Independent source review is complete. Runner integration remains pending |
 | 3. Request custody | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Pending. Bind the same request, target, statement, proof and runtime; isolate private key material from runner environment and receipts. Missing, disposed, wrong-request or reused capability fails closed |
 
-Batch 1 fixes the transaction byte/signature boundary only. Signatures bind
-their EVM calls, not every field of the source statement, Ergo consensus or
-the execution environment. The composed runner must separately verify the
-exact source-proof object and its request/target/runtime bindings. Calls use
-the reviewed LAB chain ID and gas policy, fresh-owner nonces 0/1/2, zero native
-value and a 15,000,000 nanoERG mint/approval/gross burn. The Rust setup must
-establish that owner prestate before those calls can be used.
+Batches 1 and 2 close the local signed-call producer/consumer boundary, not the
+composed campaign. The consumer executes the supplied bytes without re-signing
+them and checks their transaction hashes, successful receipts, reservation
+consumption, supply change and emitted burn commitment. Its setup transactions
+establish ownership and the fresh owner's gas balance; mint and burn state are
+not substituted in storage.
+
+Signatures bind their EVM calls, not every field of the source statement,
+Ergo consensus or the execution environment. Synthetic source attestations in
+the component test are not source-chain evidence. The composed runner must
+separately verify the exact source-proof object and its request/target/runtime
+bindings. Calls use the reviewed LAB chain ID and gas policy, fresh-owner
+nonces 0/1/2, zero native value and a 15,000,000 nanoERG mint/approval/gross burn.
+The Rust setup establishes that owner prestate before executing those calls.
 
 Do not run another full campaign between these batches. Run focused checks
-while joining the producer and consumer; run the affected Rust matrix once
-the joined source is stable. A static V1 fixture pass cannot close this join.
+while joining the producer and consumer; reuse the affected Rust matrix while
+its source, profile and toolchain closure is unchanged. Reference-profile and
+ephemeral-profile checks are separate configurations. A static V1 fixture pass
+cannot close the fresh-owner join. Request custody, tracker admission and the
+complete withdrawal still require their own execution evidence.
 
 ## Continue Protocol
 
