@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Prototype a separately versioned tracker whose anchor reference remains stable across descendant headers: bind an absolute anchor height, derive its current window position, and retain the exact header identity in the AVL value. Prove unchanged signed candidate acceptance across that window before integrating construction and transport | V150's pinned JVM differential demonstrates fixed-index liveness failure despite an unchanged checkpoint commitment; it does not prove V149's HTTP 400 cause. Keep V1 bytes and semantics frozen. Reject missing, replaced, stale or out-of-window anchors. Exact target-node decoding, version reparse and admission remain to be demonstrated; no campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the inactive V2 stable-anchor contract to a distinct compiler identity and absolute-height transaction builder; reproduce its signed-window matrix through the exact WASM/JVM bytes before integrating target checks and transport | V151 passes nine pinned JVM prototype tests: one signed transaction survives eight descendants, then rejects anchor eviction; same-profile V1 fails after one descendant. This is input-script evidence, not V149's HTTP 400 diagnosis or node admission. Keep V1 bytes and semantics frozen; no V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -128,6 +128,38 @@ rejection. Only the test runner's exact input pins and required LF attributes
 were refreshed; the fixture change is its synthetic provenance field, not
 transaction, input, contract or commitment bytes. Do not shift signed context
 bytes, weaken anchor checks or label an old check as fresh node admission.
+
+### Stable Anchor Contract Prototype
+
+V151 introduces an inactive `SPVTrackerSubstrateFederatedV2.es` candidate.
+Context key `2` means an absolute anchor height only for this new contract;
+V1 retains its indexed selector. Checkpoint statement V1 and the 370-byte AVL
+value keep their existing meanings and domains. A different compiled tree is
+not a V1 compiler receipt, activated profile or migration authorization.
+
+| Invariant / consumer | Deciding prototype check | Limit |
+|---|---|---|
+| Absolute height -> current header -> tracker insertion | One frozen signed transaction across descendant windows; height, range and arithmetic-boundary negatives | Only headers supplied by the JVM context, not source finality |
+| Selected header ID and extension root -> exact AVL successor | Same-height replacement with the same root; changed-root and missing-header cases with coordinated AVL values | Rebuilding an unsigned fixture for a negative is not a repair of signed bytes |
+| Compiled federation -> signing and verification | Actual synthetic 2-of-3 proof, insufficient-witness rejection and message/signature mutations | Source attestations, independent custody and target-node admission remain separate |
+| Admission horizon -> temporal rejection | Expiry and anchor eviction reject the frozen signed transaction | No extension of the validity window or transport retry |
+| Versioned contract -> downstream construction | Distinct compiled identity; V1 comparison under the same synthetic profile | No operational compiler, builder, registry or transport accepts V2 in this batch |
+
+The focused JVM matrix passes nine tests against the pinned Sigma interpreter.
+It compiles the complete candidate, signs with synthetic actors and verifies
+the same signed bytes at baseline and after each of eight descendants. Eviction,
+same-height fork replacement, changed extension root, missing header, extreme
+height, expiry, insufficient quorum and signature/message drift reject. A
+selected-height guard mutant admits the otherwise coordinated negative,
+isolating that predicate. Same-profile V1 signs at baseline but rejects after
+one descendant.
+
+This checks the input script, not a fee-funded, stateful node transaction.
+The next integration must bind a distinct compiler identity and absolute-height
+builder, prove the exact WASM/JVM signed bytes, then test node decoding, version
+reparse and admission. Do not relabel a V1 receipt or activate V2 through the
+prototype fixture. Type checking and import-boundary checks pass; unchanged
+V1 runtime and campaign evidence remain reusable only within their old scopes.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
@@ -232,9 +264,10 @@ complete withdrawal still require their own execution evidence.
 2. Select one independently testable producer-to-consumer boundary, normally
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
-3. Use the cheapest decisive check first. For the current tracker issue,
-   compare the exact checked and transported request with the pinned node's
-   decoding and admission rules before adding diagnostics or starting nodes.
+3. Use the cheapest decisive check first. For the current tracker boundary,
+   connect the distinct V2 compiler and builder to the signed-window matrix,
+   then compare exact checked/transported bytes with the pinned node's decoding
+   and admission rules before starting nodes.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but
