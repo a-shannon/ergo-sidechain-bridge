@@ -1190,6 +1190,17 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
   [
+    'adapters/frontier-lab-application-owner-v1.ts',
+    new Map([
+      ['createFrontierLabApplicationOwnerV1', new Set([
+        'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
+      ])],
+      ['bindFrontierLabApplicationOwnerRequestV1', new Set([
+        'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
+      ])],
+    ]),
+  ],
+  [
     'bridge-repository-layout.ts',
     new Map([
       [

@@ -327,6 +327,37 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('reserves fresh LAB owner creation and request binding to the canonical producer', () => {
+    const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
+    const create = 'createFrontierLabApplicationOwnerV1';
+    const bind = 'bindFrontierLabApplicationOwnerRequestV1';
+    const moduleSource = `export const ${create} = () => {}; export const ${bind} = () => {};`;
+    expect(inspect({
+      [ownerModule]: moduleSource,
+      'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts': `
+        import { ${create}, ${bind} } from '../adapters/frontier-lab-application-owner-v1.js';
+      `,
+    })).toEqual([]);
+    for (const binding of [create, bind]) {
+      expect(inspect({
+        [ownerModule]: moduleSource,
+        'unreviewed-owner.ts': `
+          import { ${binding} as issue } from './adapters/frontier-lab-application-owner-v1.js';
+        `,
+      }).map(violation => violation.message)).toEqual([
+        `exclusive authority import has the wrong owner: ./adapters/frontier-lab-application-owner-v1.js#${binding}`,
+      ]);
+    }
+    expect(inspect({
+      [ownerModule]: moduleSource,
+      'namespace-owner.ts': `
+        import * as custody from './adapters/frontier-lab-application-owner-v1.js';
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'exclusive authority module must use named runtime imports: ./adapters/frontier-lab-application-owner-v1.js',
+    ]);
+  });
+
   it('reserves bootstrap request provenance issuance and claiming to V9 owners', () => {
     const bindingModule =
       'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.ts';

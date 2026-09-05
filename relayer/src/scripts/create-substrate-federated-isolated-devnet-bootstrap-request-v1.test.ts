@@ -6,17 +6,24 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as ownerCustody from '../adapters/frontier-lab-application-owner-v1.js';
+import {
+  assertFrontierLabApplicationOwnerRequestV1,
+  disposeFrontierLabApplicationOwnerV1,
+} from '../adapters/frontier-lab-application-owner-v1.js';
 import {
   resolveBridgeRepositoryRootsFromCheckoutLayout,
 } from '../bridge-repository-layout.js';
 import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
+import * as requestFiles from '../create-only-out-of-repository-artifact.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_OWNER_ADDRESS_V1,
@@ -24,6 +31,7 @@ import {
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1,
+  createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1,
 } from './create-substrate-federated-isolated-devnet-bootstrap-request-v1.js';
 import {
   loadCanonicalBootstrapRequestBoundToSha256,
@@ -44,12 +52,147 @@ const SIGNED_REQUEST_BOUND_OWNER_MINT_TRANSACTION =
   + 'e218f03ddfb28b';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (roots.length > 0) {
     rmSync(roots.pop()!, { recursive: true, force: true });
   }
 });
 
 describe('canonical isolated bootstrap request producer V1', () => {
+  it('creates a canonical LAB request and retains the matching owner in the same process', async () => {
+    const fixture = createFixture();
+    const result = await createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      freshOwnerArguments(fixture),
+    );
+    try {
+      const bytes = readFileSync(fixture.outputPath, 'utf8');
+      const request = JSON.parse(bytes);
+      expect(request.sourceTarget).toMatchObject({
+        expectedChainId: '42',
+        bridgeOwnerAddress: result.owner.ownerAddressHex,
+        signedLegacyOwnerMintTransactionHex: result.owner.signedLegacyOwnerMintTransactionHex,
+      });
+      expect(request.sourceTarget.bridgeOwnerAddress).not.toBe(request.sourceTarget.expectedSudoAddress);
+      expect(result.requestCreation.requestSha256Hex).toBe(createHash('sha256').update(bytes).digest('hex'));
+      assertFrontierLabApplicationOwnerRequestV1(result.owner, result.requestCreation.requestSha256Hex);
+      expect(() => assertFrontierLabApplicationOwnerRequestV1(
+        JSON.parse(JSON.stringify(result.owner)), result.requestCreation.requestSha256Hex,
+      )).toThrow(/live process custody/);
+      expect(bytes).not.toMatch(/mnemonic|privateKey|signingKey|wallet/iu);
+    } finally { disposeFrontierLabApplicationOwnerV1(result.owner); }
+  });
+
+  it.each([
+    ['wrong chain', { expectedChainId: '31337' }],
+    ['wrong application', { bridgeAddress: `0x${'ab'.repeat(20)}` }],
+    ['invalid request', { primaryP2pPort: '65536' }],
+  ] as const)('does not publish a fresh-owner request with %s', async (_label, overrides) => {
+    const fixture = createFixture();
+    await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      freshOwnerArguments(fixture, overrides),
+    )).rejects.toThrow();
+    expect(existsSync(fixture.outputPath)).toBe(false);
+  });
+
+  it('rejects caller-owned identity arguments and preserves an occupied output', async () => {
+    const fixture = createFixture();
+    await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      requestArguments(fixture, { expectedChainId: '42' }),
+    )).rejects.toThrow(/arguments are invalid/);
+    writeFileSync(fixture.outputPath, 'occupied', 'utf8');
+    await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      freshOwnerArguments(fixture),
+    )).rejects.toThrow(/must not already exist/);
+    expect(readFileSync(fixture.outputPath, 'utf8')).toBe('occupied');
+  });
+
+  it('disposes custody on binding failure before publication and allows a fresh retry', async () => {
+    const fixture = createFixture();
+    const bind = vi.spyOn(ownerCustody, 'bindFrontierLabApplicationOwnerRequestV1')
+      .mockImplementationOnce(() => { throw new Error('injected binding failure'); });
+    await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      freshOwnerArguments(fixture),
+    )).rejects.toThrow('injected binding failure');
+    expect(existsSync(fixture.outputPath)).toBe(false);
+    const failedOwner = bind.mock.calls[0]![0];
+    expect(() => assertFrontierLabApplicationOwnerRequestV1(failedOwner, 'aa'.repeat(32)))
+      .toThrow(/live process custody/);
+    const retry = await createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      freshOwnerArguments(fixture),
+    );
+    try {
+      expect(retry.owner.ownerAddressHex).not.toBe(failedOwner.ownerAddressHex);
+      assertFrontierLabApplicationOwnerRequestV1(retry.owner, retry.requestCreation.requestSha256Hex);
+    } finally { disposeFrontierLabApplicationOwnerV1(retry.owner); }
+  });
+
+  it('disposes already-bound custody if another file wins create-only publication', async () => {
+    const fixture = createFixture();
+    const originalBind = ownerCustody.bindFrontierLabApplicationOwnerRequestV1;
+    const bind = vi.spyOn(ownerCustody, 'bindFrontierLabApplicationOwnerRequestV1')
+      .mockImplementationOnce((owner, bytes, digest) => {
+        originalBind(owner, bytes, digest);
+        assertFrontierLabApplicationOwnerRequestV1(owner, digest);
+        writeFileSync(fixture.outputPath, 'concurrent output', { flag: 'wx' });
+      });
+    await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+      freshOwnerArguments(fixture),
+    )).rejects.toThrow(/EEXIST/);
+    expect(readFileSync(fixture.outputPath, 'utf8')).toBe('concurrent output');
+    const [owner, , digest] = bind.mock.calls[0]!;
+    expect(() => assertFrontierLabApplicationOwnerRequestV1(owner, digest))
+      .toThrow(/live process custody/);
+    expect(readdirSync(fixture.root).some(name => name.startsWith('.e2s-bootstrap-request-v1-')))
+      .toBe(false);
+  });
+
+  it.each(['read failure', 'malformed UTF-8', 'replaced output'] as const)(
+    'returns no custody and preserves the final path after post-publication %s', async fault => {
+      const fixture = createFixture();
+      const args = freshOwnerArguments(fixture);
+      args[args.indexOf('--expected-node-name') + 1] = 'bridge-\ufffd-node';
+      const bind = vi.spyOn(ownerCustody, 'bindFrontierLabApplicationOwnerRequestV1');
+      const read = requestFiles.readBoundedRegularFile;
+      let retainedBytes: Buffer | undefined;
+      const spy = vi.spyOn(requestFiles, 'readBoundedRegularFile').mockImplementation((path, label, maximum) => {
+        if (label !== 'published canonical bootstrap request') return read(path, label, maximum);
+        const published = read(path, label, maximum);
+        retainedBytes = Buffer.from(published.bytes);
+        if (fault === 'read failure') throw new Error('injected read failure');
+        if (fault === 'replaced output') {
+          unlinkSync(path);
+          retainedBytes = Buffer.from('replacement');
+          writeFileSync(path, retainedBytes);
+          return read(path, label, maximum);
+        }
+        const offset = retainedBytes.indexOf(Buffer.from('\ufffd'));
+        expect(offset).toBeGreaterThan(0);
+        const malformed = Buffer.concat([
+          retainedBytes.subarray(0, offset), Buffer.from([0xff]), retainedBytes.subarray(offset + 3),
+        ]);
+        expect(malformed.toString('utf8')).toBe(retainedBytes.toString('utf8'));
+        return { ...published, bytes: malformed };
+      });
+      await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(args))
+        .rejects.toThrow(/publication committed but verification failed.*fresh output path/);
+      expect(readFileSync(fixture.outputPath)).toEqual(retainedBytes);
+      const failedOwner = bind.mock.calls[0]![0];
+      expect(() => assertFrontierLabApplicationOwnerRequestV1(failedOwner, bind.mock.calls[0]![2]))
+        .toThrow(/live process custody/);
+      spy.mockRestore();
+      await expect(createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(args))
+        .rejects.toThrow(/must not already exist/);
+      expect(readFileSync(fixture.outputPath)).toEqual(retainedBytes);
+      const retryArgs = [...args];
+      retryArgs[retryArgs.indexOf('--output') + 1] = `${fixture.outputPath}.retry`;
+      const retry = await createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(retryArgs);
+      try {
+        expect(retry.owner.ownerAddressHex).not.toBe(failedOwner.ownerAddressHex);
+        assertFrontierLabApplicationOwnerRequestV1(retry.owner, retry.requestCreation.requestSha256Hex);
+      } finally { disposeFrontierLabApplicationOwnerV1(retry.owner); }
+    },
+  );
+
   it('publishes exact canonical bytes and self-validates the digest-bound request', () => {
     const fixture = createFixture();
     const result =
@@ -277,6 +420,20 @@ function createFixture(): Readonly<Fixture> {
     baseSpec,
     ergoSource,
   });
+}
+
+function freshOwnerArguments(
+  fixture: Readonly<Fixture>,
+  overrides: Parameters<typeof requestArguments>[1] = {},
+): string[] {
+  const args = requestArguments(fixture, { expectedChainId: '42', ...overrides });
+  const result: string[] = [];
+  for (let index = 0; index < args.length; index += 2) {
+    if (args[index] !== '--bridge-owner-address' && args[index] !== '--signed-legacy-owner-mint-transaction') {
+      result.push(args[index]!, args[index + 1]!);
+    }
+  }
+  return result;
 }
 
 function requestArguments(
