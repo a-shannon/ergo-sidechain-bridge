@@ -531,6 +531,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
         bridgeRoot,
         frontierSourcePath,
         requireFrontierCheckout: true,
+        frontierCheckoutBytePolicy: 'raw',
         requireErgoCheckout: false,
         gitExecutablePath,
       });
@@ -722,6 +723,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       bridgeRoot,
       frontierSourcePath,
       requireFrontierCheckout: true,
+      frontierCheckoutBytePolicy: 'raw',
       requireErgoCheckout: false,
       gitExecutablePath,
     });
@@ -1042,6 +1044,7 @@ async function acceptSubstrateFederatedAuthoritySafeDevnetWithActionV1<T>(
       bridgeRoot,
       frontierSourcePath,
       requireFrontierCheckout: true,
+      frontierCheckoutBytePolicy: 'raw',
       requireErgoCheckout: false,
       gitExecutablePath,
     });

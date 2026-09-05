@@ -147,6 +147,10 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
     expect(result.report.nativeBuilds[0]?.binarySha256Hex)
       .not.toBe(result.report.nativeBuilds[1]?.binarySha256Hex);
     expect(buildCalls).toHaveLength(2);
+    expect(mocks.inspectBaseline).toHaveBeenCalledTimes(4);
+    for (const [inspection] of mocks.inspectBaseline.mock.calls) {
+      expect(inspection.frontierCheckoutBytePolicy).toBe('raw');
+    }
     expect(buildCalls[0]?.env?.CARGO_TARGET_DIR)
       .not.toBe(buildCalls[1]?.env?.CARGO_TARGET_DIR);
     expect(buildCalls[0]?.env?.CARGO_HOME)
@@ -232,6 +236,23 @@ describe('Substrate federated authority-safe devnet build pins V1', () => {
     await expect(
       refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1(input()),
     ).rejects.toThrow(/different base chain-spec bytes/);
+  });
+
+  it('rejects raw source drift before any Cargo or tool process starts', async () => {
+    mocks.inspectBaseline.mockImplementation(inspection =>
+      inspection.frontierCheckoutBytePolicy === 'raw'
+        ? {
+          ...passingBaseline(),
+          status: 'BLOCKED',
+          errors: ['raw checkout bytes differ'],
+          checks: { ...passingBaseline().checks, frontierCheckoutValidated: false },
+        }
+        : passingBaseline());
+    await expect(
+      refreshSubstrateFederatedAuthoritySafeDevnetBuildPinsV1(input()),
+    ).rejects.toThrow(/complete source lock before build/);
+    expect(mocks.runProcess).not.toHaveBeenCalled();
+    expect(buildCount).toBe(0);
   });
 
   it('stops before the second build when the source changes during the first build', async () => {

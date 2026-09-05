@@ -77,11 +77,18 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB fresh owner -> application -> tracker | Prepare one fresh owner session, calibrate the owner-dependent genesis, then run its exact request through the retained-packet root and signed runner V3; confirm the tracker successor or record a bounded terminal outcome | Genesis calibration, request creation and later signing must use the same retained owner. The source join carries the actual packet/proof and campaign recipient through execution and checkpoint attestation. Focused tests do not establish a new Rust execution or canonical tracker admission. Keep unique campaign identity and explicit V2 reference dispatch; reject any V11 fallback |
+| **Now** | FED-6-LAB fresh owner -> application -> tracker | First reproduce the pinned base spec and runtime from raw-verified LF source bytes, without an owner or nodes. Then prepare one fresh owner session, calibrate its genesis and run its exact request through the retained-packet root and signed runner V3 | A Git-equivalent CRLF checkout is not a byte-identical build input. Keep exact runtime pins and source rechecks. Genesis calibration, request creation and signing must use the same retained owner. Confirm the tracker successor or record a bounded terminal outcome; focused tests do not establish canonical tracker admission. Keep unique campaign identity and explicit V2 reference dispatch; reject any V11 fallback |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 5 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
+
+The current blocker precedes campaign execution: freshly built runtime bytes
+do not reproduce the frozen reference. Raw source checks reject CRLF drift,
+but a fresh LF checkout also produced a different, internally reproducible
+runtime. LF preparation alone does not close this blocker. Isolate the
+remaining build input before changing runtime pins or creating another owner;
+unchanged custom sections do not prove executable equivalence.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of

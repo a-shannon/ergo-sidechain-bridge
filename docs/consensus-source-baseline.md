@@ -379,10 +379,20 @@ policy are required:
 
 ```bash
 mkdir -p .source-cache
-git -c core.autocrlf=false -C substrate-node worktree add ../.source-cache/frontier-patched 75329a2df49e2cc7981485392c31160929d1bd48
-git -c core.autocrlf=false -C .source-cache/frontier-patched apply --check --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
-git -c core.autocrlf=false -C .source-cache/frontier-patched apply --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
+git -c core.autocrlf=false -c core.eol=lf -C substrate-node worktree add ../.source-cache/frontier-patched 75329a2df49e2cc7981485392c31160929d1bd48
+git -c core.autocrlf=false -c core.eol=lf -C .source-cache/frontier-patched apply --check --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
+git -c core.autocrlf=false -c core.eol=lf -C .source-cache/frontier-patched apply --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
 ```
+
+Git configuration is a preparation input, not proof of the resulting bytes.
+The reproducible Frontier pin producer and authority-safe target acceptance
+select the raw checkout policy before Cargo and at their source rechecks.
+Unmodified files must match their raw HEAD blobs; declared patched and added
+files must match their exact locked result blobs. A CRLF-equivalent checkout
+can pass the general compatibility source check but fails these build checks.
+The preflight never rewrites a supplied checkout. Reproduce the exact base
+spec and embedded runtime before allocating a campaign owner; do not replace
+runtime pins merely because a differently materialized checkout builds.
 
 Prepare the Ergo source from the locked public base. The cache directory is
 ignored by Git and can be deleted and recreated at any time.
