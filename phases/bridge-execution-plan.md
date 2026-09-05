@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the V2 tracker into the dependent settlement-family compiler and no-submit setup path, then check against fresh chain-resident boxes before transport | V156 constructs the tracker from its observed genesis input and genuine V2 compiler, and composes it through the fee-funded candidate. V155 supplies pinned-node synthetic-state checks. Full family/setup identity, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the genuine V2 family and observed genesis identities into the no-submit setup path, then check fresh chain-resident boxes before transport | V157 verifies dependent-family compilation from the genuine V2 tracker; 33 focused tests and independent source review pass. V156 supplies observed tracker construction and V155 pinned-node synthetic-state checks. Full setup identity, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -304,6 +304,36 @@ exact issuance and downstream fee-funded composition, copied or mismatched
 provenance, a genuine V1 receipt, funding and height boundaries, and caller
 reference replacement across asynchronous construction. Simulated endpoint
 agreement does not establish independent operators or canonical consensus.
+
+### V2 Dependent Settlement Family
+
+V157 connects a genuine V2 tracker compiler receipt to the duplicate-prevention,
+source-lock and pooled-reserve compilers. It derives all tracker, application,
+federation and singleton bindings internally. The reserve source binds the
+actual compiled predecessor IDs, and tracker and family must use the same
+pinned compiler lock.
+
+The 596-byte native-ERG family layout already binds the exact tracker tree,
+tracker template hash, application, quorums and dependent templates. Its format
+does not change, but the V2 tracker produces a distinct family ID and distinct
+dependent contract IDs. V1 receipts, golden trees and templates remain unchanged.
+The new compiler request and receipt use V2 domains and explicitly identify
+the absolute-height tracker. Shared compiler wire syntax is not shared receipt
+provenance: neither version's process-owned guard accepts the other's receipt.
+
+The 33-case matrix executes the pinned JVM compiler for V2 and reproduces the
+V1 golden contracts. It checks the complete profile and resolved-source
+bindings, cross-version and copied receipts, singleton and source drift,
+compiler-lock mismatch and caller mutation during compilation. Node24
+TypeScript and import checks pass; independent source review found no
+actionable issue. Unchanged contract and node matrices retain their previous
+scope; this compilation result does not replace a transaction acceptance test.
+
+Compilation establishes source and contract identity, not profile activation,
+genesis funding, target-node acceptance or funds authority. The next consumer
+must bind these exact V2 identities to the observed genesis transactions and
+the no-submit setup path. Signing, current UTXO revalidation, node acceptance
+and transport remain separate obligations.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of

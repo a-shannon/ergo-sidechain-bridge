@@ -1,4 +1,6 @@
 .gitattributes text eol=lf
+relayer/src/substrate-federated-settlement-family-jvm-compiler-v2.ts text eol=lf
+relayer/src/substrate-federated-settlement-family-jvm-compiler-v2.test.ts text eol=lf
 relayer/src/substrate-federated-tracker-v2-genesis.ts text eol=lf
 relayer/src/substrate-federated-tracker-v2-genesis.test.ts text eol=lf
 relayer/src/scripts/export-substrate-federated-tracker-v2-node-fixture.ts text eol=lf
