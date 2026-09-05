@@ -40,12 +40,16 @@ establish deployment safety or independent operator custody.
 - The source-locked foundations, full-transaction VM matrices, layered
   extraction and recovery containment are reusable within their verified
   scopes. Their local completion does not close the composed FED lifecycle.
-- V142 is terminal, with a failure hint at source-node identity validation.
-  The current observation code distinguishes decoding, chain name, node name
-  and node version. The root cause is not established. Do not retry V142,
-  inspect/reuse its mutable journal or calibration, or treat a worker hint as
-  authoritative evidence. V134 was abandoned; older terminal attempts are
-  not predecessors that must be replayed.
+- Source identity and locked offline relayer artifact production have passed
+  their bounded checks. V145 is terminal at the application-checkpoint phase;
+  its hint does not identify an authoritative root cause. Do not retry or read
+  its mutable state. V134 was abandoned; terminal attempts are not
+  predecessors that must be replayed.
+- A source-level composition defect now blocks the current campaign: V11
+  requires the recipient to equal a fresh owner distinct from removed Sudo,
+  while application runner V2 and its Rust fixture require that same removed
+  Sudo account. No address satisfies both. This is a liveness defect, not an
+  observed authorization bypass. Preserve the fresh-owner rule.
 
 ## Critical Path
 
@@ -57,7 +61,7 @@ legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
 
 ```text
 frozen foundations + selected launch mode
-  -> source observation diagnosis and canonical tracker admission
+  -> fresh-owner signed application execution and canonical tracker admission
   -> burn/checkpoint binding + global DUP insertion + external-fee payout
   -> composed two-way recovery and operational integration
   -> exact target/custody activation and operational rehearsal
@@ -69,7 +73,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB source observation -> tracker | Compare the public source/spec identity producers with the expected node identity; resolve the first mismatch with a bounded offline diagnostic before another full campaign | Exact failing field or discriminating hypothesis; unchanged acceptance predicates. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
+| **Now** | FED-6-LAB fresh owner -> application -> tracker | Close the signed-transaction, Rust execution and request-custody joins below before another full campaign | A fresh owner must pass the actual producer and consumer guards and execute the exact signed calls. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -80,6 +84,26 @@ authorize public-network operations, real funds, existing secrets, a bypass of
 ContextExtension guards, or node-wallet signing. Signing, checking, submission
 and broadcast retain separate exact-candidate authorizations and revalidation.
 
+### Fresh-Owner Application Join
+
+| Batch | Deliverable | State and deciding check |
+|---|---|---|
+| 1. Exact calls | Build mint, bounded approval and peg-out from the canonical reservation statement and Ergo recipient; check canonical signed bytes, fresh signer, chain, nonce, fees, value and complete calldata | Implemented in `substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts`, with focused signed-vector tests. This is a pure planner/inspector, not yet wired into runner V2 and not an execution capability |
+| 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Pending. Keep the existing V1 fixture and its evidence identity separate. No storage substitution for mint balances, reservation consumption or successful application execution |
+| 3. Request custody | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Pending. Bind the same request, target, statement, proof and runtime; isolate private key material from runner environment and receipts. Missing, disposed, wrong-request or reused capability fails closed |
+
+Batch 1 fixes the transaction byte/signature boundary only. Signatures bind
+their EVM calls, not every field of the source statement, Ergo consensus or
+the execution environment. The composed runner must separately verify the
+exact source-proof object and its request/target/runtime bindings. Calls use
+the reviewed LAB chain ID and gas policy, fresh-owner nonces 0/1/2, zero native
+value and a 15,000,000 nanoERG mint/approval/gross burn. The Rust setup must
+establish that owner prestate before those calls can be used.
+
+Do not run another full campaign between these batches. Run focused checks
+while joining the producer and consumer; run the affected Rust matrix once
+the joined source is stable. A static V1 fixture pass cannot close this join.
+
 ## Continue Protocol
 
 1. Read this queue, Git status and the current task-owned handoff. Preserve
@@ -87,8 +111,9 @@ and broadcast retain separate exact-candidate authorizations and revalidation.
 2. Select one independently testable producer-to-consumer boundary, normally
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
-3. Use the cheapest decisive check first. For the current node identity issue,
-   compare source/spec bindings before adding diagnostics or starting nodes.
+3. Use the cheapest decisive check first. For the current application issue,
+   compare accepted producer/consumer domains and exact signed calls before
+   adding diagnostics or starting nodes.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but
