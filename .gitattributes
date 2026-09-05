@@ -131,6 +131,8 @@ relayer/src/substrate-federated-burn-settlement-v1-acceptance-fixture.ts text eo
 relayer/src/substrate-federated-burn-settlement-v1-acceptance-fixture.test.ts text eol=lf
 relayer/src/scripts/build-substrate-federated-burn-settlement-v1-jvm-fixture.ts text eol=lf
 relayer/src/substrate-federated-tracker-jvm-compiler-v1*.ts text eol=lf
+relayer/src/substrate-federated-tracker-compiler-v2*.ts text eol=lf
+relayer/src/substrate-federated-tracker-jvm-compiler-v2*.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-jvm-compiler-v1*.ts text eol=lf
 relayer/tools/federated-tracker-compiler/*.java text eol=lf
 scripts/run-substrate-federated-burn-settlement-v1-acceptance.ps1 text eol=lf

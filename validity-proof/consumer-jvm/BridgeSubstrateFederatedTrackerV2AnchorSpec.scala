@@ -50,7 +50,7 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
   private val threshold = CTHRESHOLD(2, keys.map(_.publicImage))
   private lazy val fixtureBytes = {
     val bytes = readFile(requiredProperty("context.fixture"))
-    sha256(bytes) shouldBe "df8a8399273560c97730bc1d82e5e83140aed5ac7d57eb16cd7c8a6da50f8a37"
+    sha256(bytes) shouldBe "1eafd524364dc496030200ddd06ea3b8edc56509ef6568807cf923858ce92efe"
     bytes
   }
   private lazy val fixture = json(fixtureBytes).hcursor
@@ -87,11 +87,37 @@ class BridgeSubstrateFederatedTrackerV2AnchorSpec
     checkIdentity()
     unhex(str(statement, "encodedStatementHex"))
   }
-  private lazy val trackerTree = compile(resolveSource())
+  private lazy val trackerTree = {
+    val tree = compile(resolveSource())
+    val request = fixture.downField("compilerRequest")
+    val receipt = fixture.downField("compilerReceipt")
+    val contract = receipt.downField("contract")
+    str(request, "schema") shouldBe "e2s.substrate-federated-tracker-compiler-request.v2"
+    number(request, "version") shouldBe 2L
+    str(request, "anchorSelector") shouldBe "absolute-ergo-header-height"
+    str(request.downField("template"), "templateSourceSha256Hex") shouldBe sha256(sourceBytes)
+    str(request.downField("template"), "resolvedSourceSha256Hex") shouldBe sha256(ascii(resolveSource()))
+    str(request, "trackerNftIdHex") shouldBe str(transition, "trackerNftIdHex")
+    str(request.downField("profile"), "encodedProfileHex") shouldBe str(profile, "encodedProfileHex")
+    str(receipt, "schema") shouldBe "e2s.substrate-federated-tracker-jvm-compiler-receipt.v2"
+    number(receipt, "version") shouldBe 2L
+    str(receipt, "anchorSelector") shouldBe "absolute-ergo-header-height"
+    str(receipt, "compilerRequestDigestHex") shouldBe str(request, "requestDigestHex")
+    str(receipt.downField("compiler"), "sigmaStateVersion") shouldBe "6.0.2"
+    number(receipt.downField("compiler"), "scriptVersion") shouldBe 3L
+    number(receipt.downField("compiler"), "treeVersion") shouldBe 0L
+    str(contract, "resolvedSourceSha256Hex") shouldBe sha256(ascii(resolveSource()))
+    val compiled = serializer.serializeErgoTree(tree)
+    str(contract, "propositionHex") shouldBe hex(compiled)
+    number(contract, "propositionBytes") shouldBe compiled.length.toLong
+    str(contract, "propositionSha256Hex") shouldBe sha256(compiled)
+    str(contract, "contractIdHex") shouldBe hex(Blake2b256.hash(compiled))
+    tree
+  }
   private lazy val canonical = build(statementBytes)
   private lazy val signed = sign(canonical, keys.take(2))
 
-  test("V2 compiles from the synthetic profile while preserving V1 input identities") {
+  test("locked compiler V2 bytes match independent JVM compilation under the synthetic profile") {
     statementBytes.length shouldBe 512
     serializer.serializeErgoTree(trackerTree) should contain theSameElementsInOrderAs
       serializer.serializeErgoTree(compile(resolveSource()))

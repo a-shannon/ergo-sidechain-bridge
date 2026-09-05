@@ -11,6 +11,12 @@ import {
 import {
   buildSubstrateFederatedTrackerV1AcceptanceFixture,
 } from '../substrate-federated-tracker-v1-fixture.js';
+import {
+  buildSubstrateFederatedTrackerCompilerRequestV2,
+} from '../substrate-federated-tracker-compiler-v2.js';
+import {
+  compileSubstrateFederatedTrackerWithPinnedJvmV2,
+} from '../substrate-federated-tracker-jvm-compiler-v2.js';
 
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== '--output' || !args[1]) {
@@ -44,6 +50,17 @@ const statement = buildSubstrateFederatedCheckpointStatementV1({
   ...statementInput,
   profile,
 });
+const baseContext = await buildSubstrateFederatedTrackerV1AcceptanceFixture();
+const compilerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+  template: {
+    relativePath: 'contracts/SPVTrackerSubstrateFederatedV2.es',
+    source: readFileSync(new URL('../../../contracts/SPVTrackerSubstrateFederatedV2.es', import.meta.url), 'utf8'),
+  },
+  trackerGenesisInputBoxIdHex: baseContext.contract.trackerNftIdHex,
+  application: baseContext.contract.application,
+  profile,
+});
+const compilerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(compilerRequest);
 const fixture = {
   schema: 'e2s.substrate-federated-tracker-v2-anchor-prototype',
   version: 2,
@@ -52,9 +69,11 @@ const fixture = {
   statementInput,
   profile,
   statement,
-  // Headers and empty AVL setup only; the JVM constructs a distinct V2 tree
-  // and transaction. This is not a V2 compiler receipt or a runtime candidate.
-  baseContext: await buildSubstrateFederatedTrackerV1AcceptanceFixture(),
+  compilerRequest,
+  compilerReceipt,
+  // V1 supplies only headers and empty AVL setup, never V2 compiler authority.
+  // The serialized V2 receipt is observation data, not same-process provenance.
+  baseContext,
   boundaries: {
     runtimeProfileActivated: false,
     sourceAttestationsVerified: false,

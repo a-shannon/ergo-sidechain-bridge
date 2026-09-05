@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 $ExpectedSigmaStateCommit = 'f78deadd668f801e7fae3bc884283f79c6f484fa'
 $ExpectedFixtureSha256 =
-    'df8a8399273560c97730bc1d82e5e83140aed5ac7d57eb16cd7c8a6da50f8a37'
+    '1eafd524364dc496030200ddd06ea3b8edc56509ef6568807cf923858ce92efe'
 $ExpectedTests = 9
 $ExpectedInputs = [ordered]@{
     'contracts/SPVTrackerSubstrateFederatedV1.es' =
@@ -30,9 +30,13 @@ $ExpectedInputs = [ordered]@{
     'contracts/SPVTrackerSubstrateFederatedV2.es' =
         '110b1aa22d59e1202435bb139cadbb49f28a48c8b8a3056d0426e620ee828eec'
     'validity-proof/consumer-jvm/BridgeSubstrateFederatedTrackerV2AnchorSpec.scala' =
-        'ab6d454c9ee13f5204ce352c6a47013923f8406fa42e7ffdb48643f6b45a4941'
+        '09c9f0848b6a2450fb0274ea7949f55432a62a0bab7bf4c8a4d061b9e795ea0b'
     'relayer/src/scripts/build-substrate-federated-tracker-v2-anchor-fixture.ts' =
-        '215c391d91b4706ae52f5d5d548cc9a1fef18e604760fee7e6cf4f27701c7bf1'
+        '7d27dc06dd40be78f765f6db8d5cf2857f664970d97a21eb8e3893eb227cf19f'
+    'relayer/src/substrate-federated-tracker-compiler-v2.ts' =
+        'b704576fe9ce776b29869e7f45fc565ce2ac2ee8f0340f6419625272223eba5d'
+    'relayer/src/substrate-federated-tracker-jvm-compiler-v2.ts' =
+        '55ce2c57707677a76d067eaf4ed1e60983acdb1f714522342ab3e0b0ac797943'
     'relayer/src/substrate-federated-tracker-v1.ts' =
         'ad3055e28f5535c41e42f3cab7c2574ef5af094606361f31748020e9f4ba12d8'
     'relayer/src/substrate-federated-tracker-v1-fixture.ts' =

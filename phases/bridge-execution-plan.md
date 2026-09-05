@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the inactive V2 stable-anchor contract to a distinct compiler identity and absolute-height transaction builder; reproduce its signed-window matrix through the exact WASM/JVM bytes before integrating target checks and transport | V151 passes nine pinned JVM prototype tests: one signed transaction survives eight descendants, then rejects anchor eviction; same-profile V1 fails after one descendant. This is input-script evidence, not V149's HTTP 400 diagnosis or node admission. Keep V1 bytes and semantics frozen; no V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the verified V2 compiler receipt to a distinct absolute-height transaction builder; reproduce the signed-window matrix through actual WASM-produced transaction bytes before target checks and transport | V152 binds the complete V2 template to the locked JVM compiler and independently matches its exact ErgoTree in the nine-test signed JVM matrix. V1/V2 receipt substitution rejects. The WASM builder, node decoding/version reparse and canonical admission remain open. Keep V1 bytes and semantics frozen; no campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -143,7 +143,7 @@ not a V1 compiler receipt, activated profile or migration authorization.
 | Selected header ID and extension root -> exact AVL successor | Same-height replacement with the same root; changed-root and missing-header cases with coordinated AVL values | Rebuilding an unsigned fixture for a negative is not a repair of signed bytes |
 | Compiled federation -> signing and verification | Actual synthetic 2-of-3 proof, insufficient-witness rejection and message/signature mutations | Source attestations, independent custody and target-node admission remain separate |
 | Admission horizon -> temporal rejection | Expiry and anchor eviction reject the frozen signed transaction | No extension of the validity window or transport retry |
-| Versioned contract -> downstream construction | Distinct compiled identity; V1 comparison under the same synthetic profile | No operational compiler, builder, registry or transport accepts V2 in this batch |
+| Versioned contract -> downstream construction | Distinct compiled identity; V1 comparison under the same synthetic profile | V151 has no operational compiler or builder; V152 adds only the compiler binding below |
 
 The focused JVM matrix passes nine tests against the pinned Sigma interpreter.
 It compiles the complete candidate, signs with synthetic actors and verifies
@@ -155,11 +155,35 @@ isolating that predicate. Same-profile V1 signs at baseline but rejects after
 one descendant.
 
 This checks the input script, not a fee-funded, stateful node transaction.
-The next integration must bind a distinct compiler identity and absolute-height
-builder, prove the exact WASM/JVM signed bytes, then test node decoding, version
-reparse and admission. Do not relabel a V1 receipt or activate V2 through the
-prototype fixture. Type checking and import-boundary checks pass; unchanged
-V1 runtime and campaign evidence remain reusable only within their old scopes.
+The absolute-height builder must still prove the exact WASM/JVM signed bytes,
+followed by node decoding, version reparse and admission. Do not relabel a V1
+receipt or activate V2 through the prototype fixture. Unchanged V1 runtime and
+campaign evidence remain reusable only within their old scopes.
+
+### V2 Compiler Binding
+
+V152 connects the complete, unchanged V2 contract to a distinct compiler request
+and process-owned receipt. Its request binds the absolute-height selector,
+genesis-derived tracker identity, exact application fields and existing V1
+federation profile. The compiler wire protocol and locked execution engine are
+reused, but no V1 request or receipt is constructed as V2 authority.
+
+| Producer -> consumer | Deciding check | Failure prevented |
+|---|---|---|
+| Template and configuration -> resolved source | Exact LF template hash, canonical profile, all application fields and genesis identity; isolated mutations and frozen caller-independent copies | Compiling a different predicate or binding a different federation/application under one request |
+| Resolved source -> locked JVM compiler -> receipt | Owned process execution, source/request digests, exact runtime and tool pins, recomputed proposition identity and serialization round-trip | Accepting caller-supplied output as an executed compilation |
+| Receipt -> V2 receipt consumer | Same-process provenance, exact request binding; copied, recomputed, wrong-genesis and authentic V1/V2 receipt substitutions reject | Reusing a valid compiler result for a different contract or target |
+| Compiler ErgoTree -> independent JVM interpreter | Sigma 6.0.2 compiler output equals the separately resolved and compiled tree on the pinned interpreter; all nine signed-window tests execute that exact tree | Assuming compatibility between compiler and interpreter versions from labels alone |
+
+The two focused TypeScript files pass 42 tests; type checking and import-boundary
+checks pass. The updated JVM fixture is reproduced by the runner, including an
+actual locked compilation, then passes the nine existing temporal, quorum and
+mutation cases. The V1 control still reproduces its frozen compiled bytes.
+The fixture's serialized receipt is observation data, not restored same-process
+compiler provenance. These results do not establish a V2 WASM transaction,
+target-node acceptance, activated profile, source finality or funds authority.
+The unchanged campaign, Rust/WASM sources and release-evidence closure are not
+replayed for this compiler-only integration.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
