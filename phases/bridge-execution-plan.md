@@ -49,8 +49,11 @@ establish deployment safety or independent operator custody.
   requires a fresh owner distinct from removed Sudo, but application runner V2
   selects the legacy Sudo-owner fixture. The new signed-call Rust consumer
   executes a fresh owner's exact transactions. Same-process request creation
-  now retains that owner's synthetic custody and binds it to the exact request;
-  the proof-bound application continuation and runner do not yet consume it.
+  retains that owner's synthetic custody and binds it to the exact request.
+  V11 now claims that same-process custody before any build and retains it with
+  the actual packet in the application continuation. The fresh-owner route
+  stops before the legacy runner; proof-bound signing and signed-call runner
+  integration remain pending.
   Preserve the fresh-owner rule and the separate V1 fixture identity. This is
   a liveness defect, not an observed bypass.
 
@@ -76,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB fresh owner -> application -> tracker | Bind retained request custody to the exact mint proof, target and runtime; sign the frozen three-call plan once, then integrate the Rust consumer into the runner before another full campaign | Local fresh-owner TestClient execution and canonical request-to-custody binding pass. Proof-bound signing and the composed runner remain pending. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
+| **Now** | FED-6-LAB fresh owner -> application -> tracker | Bind the retained packet/custody pair to the mint statement and exact target/runtime; sign the frozen three-call plan once, then integrate the Rust consumer into the runner before another full campaign | Local fresh-owner TestClient execution, request custody and the same-process packet continuation are implemented. V11 rejects missing custody before builds and cannot fall back to the Sudo fixture. Proof-bound signing and the composed runner remain pending. Then one fresh authorized local attempt must confirm the exact tracker successor or return a bounded terminal outcome |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -93,7 +96,7 @@ and broadcast retain separate exact-candidate authorizations and revalidation.
 |---|---|---|
 | 1. Exact calls | Build mint, bounded approval and peg-out from the canonical reservation statement and Ergo recipient; check canonical signed bytes, fresh signer, chain, nonce, fees, value and complete calldata | Implemented in `substrate-federated-isolated-devnet-frontier-application-transactions-v1.ts`, with focused signed-vector tests. This is a pure planner/inspector, not yet wired into runner V2 and not an execution capability |
 | 2. Rust consumer | Execute those exact signed calls in the pinned TestClient, with fresh owner authority and gas funded by actual setup transactions; derive receipts, burn and commitment from execution | Implemented in [overlay 0003](../sources/frontier/0003-federated-lab-signed-application-calls.patch). Four signed-call checks and one fresh-owner execution pass under an ephemeral source-attestation profile; the separate reference-profile regression passes eight tests with the dynamic entry ignored. Independent source review is complete. Runner integration remains pending |
-| 3. Request custody | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Request creation and exact in-memory binding implemented in `createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1`, with real ephemeral signatures and negative tests. Proof/target/runtime binding, one-use application signing and runner consumption remain pending. Private key material stays outside runner environment and receipts |
+| 3. Request custody | Retain synthetic signing custody from request creation, freeze calls after the exact mint proof exists, and deliver only the scoped signed bytes to the application consumer | Canonical request creation and one-shot V11 custody claiming are implemented. The continuation retains the original owner with its actual packet, rejects proof/packet target and receipt mismatches, and disposes custody on terminal failure. Full mint-statement/target/runtime binding, one-use application signing and runner consumption remain pending. Private key material stays outside runner environment and receipts |
 
 Batches 1 and 2 close the local signed-call producer/consumer boundary, not the
 composed campaign. The consumer executes the supplied bytes without re-signing
@@ -114,12 +117,26 @@ The request producer retains the synthetic key only in process memory; public
 JSON contains the address and a fixed unreserved-mint rejection probe. A copied
 object or reloaded request cannot restore custody. A failed initial binding
 disposes the handle; rejected rebinding preserves its original request. This is
-request provenance, not mint authority. The existing CLI is unchanged; the application continuation
-must retain the same live handle and dispose it on every terminal outcome.
+request provenance, not mint authority. The file-only CLI cannot reconstruct
+that handle. The pending-request registry retains custody until claim or
+explicit disposal; a garbage-collection cycle cannot silently lose the key.
+The creator must dispose abandoned requests. V11 requires the creator and campaign to run in one process,
+claims custody against the verified campaign request digest before building,
+and retains the original handle in the packet continuation. Build, constructor,
+packet and proof failures dispose it. Explicit V10 reference behavior is not
+an error fallback for V11.
 Binding occurs before create-only publication. If the subsequent file check
 fails, no live handle is returned; a public file may remain. Recovery requires
 a fresh owner and output path, not custody reconstruction or deletion of a
 possibly replaced file.
+
+The bootstrap request SHA and source-proof request digest identify different
+objects; they must not be compared as interchangeable identities. Their join
+is the same-process campaign and retained packet, followed by exact proof
+provenance and field checks. Until statement-bound signing and the signed-call
+runner are integrated, the fresh-owner continuation terminates before the old
+runner even with a correctly bound packet proof. This checkpoint establishes
+custody routing and fail-closed cleanup, not successful application execution.
 
 Do not run another full campaign between these batches. Run focused checks
 while joining the producer and consumer; reuse the affected Rust matrix while

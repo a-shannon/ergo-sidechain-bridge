@@ -2,6 +2,11 @@ import {
   sha256CanonicalJson,
 } from '../../ergo-settlement-core/strict-json.js';
 import {
+  assertFrontierLabApplicationOwnerClaimV1,
+  disposeFrontierLabApplicationOwnerV1,
+  type FrontierLabApplicationOwnerV1,
+} from '../../adapters/frontier-lab-application-owner-v1.js';
+import {
   assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
@@ -237,13 +242,28 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
   ergoAdmissionSigner: Readonly<
     SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
   >,
+  applicationOwner?: Readonly<{
+    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+    readonly requestSha256Hex: string;
+  }>,
 ): Readonly<
   SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3
 > {
-  const continuation =
-    createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
-      ergoAdmissionSigner,
-    );
+  const owner = applicationOwner?.owner;
+  const requestSha256Hex = applicationOwner?.requestSha256Hex;
+  if (applicationOwner !== undefined) {
+    assertFrontierLabApplicationOwnerClaimV1(owner!, requestSha256Hex!);
+  }
+  const continuation = (() => {
+    try {
+      return createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
+        ergoAdmissionSigner,
+      );
+    } catch (error) {
+      if (owner !== undefined) disposeFrontierLabApplicationOwnerV1(owner);
+      throw error;
+    }
+  })();
   let state:
     | 'fresh'
     | 'packet_running'
@@ -262,7 +282,8 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     completedPacket = undefined;
     completedApplication = undefined;
     state = 'closed';
-    continuation.dispose();
+    try { continuation.dispose(); }
+    finally { if (owner !== undefined) disposeFrontierLabApplicationOwnerV1(owner); }
   };
   const dispose = (): void => {
     if (
@@ -290,6 +311,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     try {
       const packet = await continuation.produce(input);
       assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+      if (owner !== undefined) assertFrontierLabApplicationOwnerClaimV1(owner, requestSha256Hex!);
       completedPacket = packet;
       state = 'packet_ready';
       return packet;
@@ -317,6 +339,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
         packet,
         preflightApplicationInput(input),
         completionDeadline,
+        owner === undefined ? undefined : Object.freeze({ owner, requestSha256Hex: requestSha256Hex! }),
       );
       completedApplication = application;
       state = 'application_ready';
@@ -422,10 +445,17 @@ async function executeApplicationCheckpointContinuation(
     ExecuteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
   >,
   completionDeadline: number | undefined,
+  applicationOwner?: Readonly<{
+    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+    readonly requestSha256Hex: string;
+  }>,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3
 >> {
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  if (applicationOwner !== undefined) {
+    assertFrontierLabApplicationOwnerClaimV1(applicationOwner.owner, applicationOwner.requestSha256Hex);
+  }
   const mintSourceProof = continuation.produceMintSourceProof(
     packet,
     plan.mintSourceProofInput,
@@ -433,6 +463,17 @@ async function executeApplicationCheckpointContinuation(
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     mintSourceProof,
   );
+  if (mintSourceProof.packetReceiptDigestHex !== packet.receipt.receiptDigestHex
+    || mintSourceProof.targetDescriptorDigestHex !== packet.receipt.targetDescriptorDigestHex
+    || mintSourceProof.sourceProofReceiptDigestHex !== mintSourceProof.sourceProof.receiptDigestHex
+    || mintSourceProof.sourceProof.targetDescriptorDigestHex !== packet.receipt.targetDescriptorDigestHex) {
+    throw new Error('Frontier application mint proof differs from the retained packet or target');
+  }
+  if (applicationOwner !== undefined) {
+    // This route must not execute the historical Sudo-owner fixture while its
+    // proof-bound signed-call runner is still being integrated.
+    throw new Error('fresh-owner application requires proof-bound signing and the signed-call runner');
+  }
   const applicationRunner =
     await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(
       {

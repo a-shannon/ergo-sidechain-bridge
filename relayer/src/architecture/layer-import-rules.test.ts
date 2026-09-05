@@ -402,6 +402,36 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('reserves fresh custody claiming to the campaign root without granting it creation authority', () => {
+    const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
+    const claim = 'claimFrontierLabApplicationOwnerRequestV1';
+    const create = 'createFrontierLabApplicationOwnerV1';
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const source = `export const ${claim} = () => {}; export const ${create} = () => {};`;
+    expect(inspect({
+      [ownerModule]: source,
+      [root]: `import { ${claim} } from '../../adapters/frontier-lab-application-owner-v1.js';`,
+    })).toEqual([]);
+    for (const importer of [
+      'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    ]) {
+      const path = importer.startsWith('apps/') ? '../../' : '../';
+      expect(inspect({
+        [ownerModule]: source,
+        [importer]: `import { ${claim} as take } from '${path}adapters/frontier-lab-application-owner-v1.js';`,
+      }).map(value => value.message)).toContain(
+        `exclusive authority import has the wrong owner: ${path}adapters/frontier-lab-application-owner-v1.js#${claim}`,
+      );
+    }
+    expect(inspect({
+      [ownerModule]: source,
+      [root]: `import { ${create} } from '../../adapters/frontier-lab-application-owner-v1.js';`,
+    }).map(value => value.message)).toContain(
+      `exclusive authority import has the wrong owner: ../../adapters/frontier-lab-application-owner-v1.js#${create}`,
+    );
+  });
+
   it('keeps the tracker attempt journal behind its two reviewed app owners', () => {
     const attempt =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts';

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 import { Transaction } from 'ethers';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -7,8 +8,10 @@ import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import { buildAuthoritySafeLegacyMintProbeV1 } from '../substrate-federated-authority-safe-devnet-observation-v1.js';
 import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1 as BRIDGE } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
+  assertFrontierLabApplicationOwnerClaimV1,
   assertFrontierLabApplicationOwnerRequestV1,
   bindFrontierLabApplicationOwnerRequestV1 as bindOwnerBytes,
+  claimFrontierLabApplicationOwnerRequestV1,
   createFrontierLabApplicationOwnerV1,
   disposeFrontierLabApplicationOwnerV1,
   type FrontierLabApplicationOwnerV1,
@@ -47,6 +50,86 @@ function requestFor(owner: Readonly<FrontierLabApplicationOwnerV1>) {
 }
 
 describe('fresh LAB application owner custody', () => {
+  it('retains pending custody across garbage collection until campaign transfer', () => {
+    const output = execFileSync(process.execPath, [
+      '--expose-gc', '--import', 'tsx', '--input-type=module', '-e', `
+        import { createHash } from 'node:crypto';
+        import { canonicalJson } from './src/ergo-settlement-core/strict-json.ts';
+        import {
+          createFrontierLabApplicationOwnerV1, bindFrontierLabApplicationOwnerRequestV1,
+          claimFrontierLabApplicationOwnerRequestV1, disposeFrontierLabApplicationOwnerV1,
+          assertFrontierLabApplicationOwnerClaimV1,
+        } from './src/adapters/frontier-lab-application-owner-v1.ts';
+        async function register() {
+          const bridgeAddress = ${JSON.stringify(BRIDGE)};
+          const owner = await createFrontierLabApplicationOwnerV1(bridgeAddress);
+          const bytes = Buffer.from(canonicalJson({
+            schema: 'e2s.substrate-federated-isolated-devnet-bootstrap-command-request.v1',
+            version: 1,
+            sourceTarget: {
+              expectedChainId: '42', bridgeAddress, bridgeOwnerAddress: owner.ownerAddressHex,
+              signedLegacyOwnerMintTransactionHex: owner.signedLegacyOwnerMintTransactionHex,
+            },
+          }) + '\\n');
+          const digest = createHash('sha256').update(bytes).digest('hex');
+          bindFrontierLabApplicationOwnerRequestV1(owner, bytes, digest);
+          return digest;
+        }
+        const digest = await register();
+        for (let i = 0; i < 3; i++) {
+          await new Promise(setImmediate);
+          global.gc();
+        }
+        const owner = claimFrontierLabApplicationOwnerRequestV1(digest);
+        assertFrontierLabApplicationOwnerClaimV1(owner, digest);
+        disposeFrontierLabApplicationOwnerV1(owner);
+        let rejected = false;
+        try { claimFrontierLabApplicationOwnerRequestV1(digest); }
+        catch { rejected = true; }
+        if (!rejected) throw new Error('disposed custody was reclaimed');
+        process.stdout.write('custody transferred and disposed');
+      `,
+    ], { cwd: process.cwd(), encoding: 'utf8', timeout: 15_000, stdio: 'pipe' });
+    expect(output).toBe('custody transferred and disposed');
+  });
+
+  it('claims only the original live owner once, without reconstructing it from JSON', async () => {
+    const owner = await freshOwner();
+    const source = `${canonicalJson(requestFor(owner))}\n`;
+    const digest = hash(source);
+    expect(() => claimFrontierLabApplicationOwnerRequestV1(digest)).toThrow(/no unclaimed live/);
+    bindFrontierLabApplicationOwnerRequestV1(owner, source, digest);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(owner, digest)).toThrow(/not claimed/);
+    expect(() => claimFrontierLabApplicationOwnerRequestV1('ff'.repeat(32))).toThrow(/no unclaimed live/);
+    expect(claimFrontierLabApplicationOwnerRequestV1(digest)).toBe(owner);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(owner, digest)).not.toThrow();
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(owner, 'ff'.repeat(32))).toThrow(/exact request/);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(JSON.parse(JSON.stringify(owner)), digest))
+      .toThrow(/live process custody/);
+    expect(() => claimFrontierLabApplicationOwnerRequestV1(digest)).toThrow(/no unclaimed live/);
+    expect(() => bindFrontierLabApplicationOwnerRequestV1(owner, source, digest)).toThrow(/already bound/);
+    disposeFrontierLabApplicationOwnerV1(owner);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(owner, digest)).toThrow(/live process custody/);
+    expect(() => claimFrontierLabApplicationOwnerRequestV1(digest)).toThrow(/no unclaimed live/);
+    expect(() => bindFrontierLabApplicationOwnerRequestV1(owner, source, digest)).toThrow(/live process custody/);
+  });
+
+  it('removes unclaimed custody on disposal without affecting another request', async () => {
+    const owner = await freshOwner();
+    const other = await freshOwner();
+    const source = `${canonicalJson(requestFor(owner))}\n`;
+    const otherSource = `${canonicalJson(requestFor(other))}\n`;
+    bindFrontierLabApplicationOwnerRequestV1(owner, source, hash(source));
+    bindFrontierLabApplicationOwnerRequestV1(other, otherSource, hash(otherSource));
+    disposeFrontierLabApplicationOwnerV1(owner);
+    expect(() => claimFrontierLabApplicationOwnerRequestV1(hash(source))).toThrow(/no unclaimed live/);
+    expect(claimFrontierLabApplicationOwnerRequestV1(hash(otherSource))).toBe(other);
+  });
+
+  it.each(['', 'FF'.repeat(32), '0x' + 'ff'.repeat(32)])('rejects invalid claim digest %s', digest => {
+    expect(() => claimFrontierLabApplicationOwnerRequestV1(digest)).toThrow(/claim digest is invalid/);
+  });
+
   it('creates distinct owners with only a fixed synthetic unreserved mint probe', async () => {
     const owner = await freshOwner();
     const other = await freshOwner();

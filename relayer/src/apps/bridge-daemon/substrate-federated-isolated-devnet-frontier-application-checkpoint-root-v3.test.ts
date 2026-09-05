@@ -1,4 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { canonicalJson } from '../../ergo-settlement-core/strict-json.js';
+import {
+  assertFrontierLabApplicationOwnerClaimV1,
+  bindFrontierLabApplicationOwnerRequestV1,
+  claimFrontierLabApplicationOwnerRequestV1,
+  createFrontierLabApplicationOwnerV1,
+  disposeFrontierLabApplicationOwnerV1,
+  type FrontierLabApplicationOwnerV1,
+} from '../../adapters/frontier-lab-application-owner-v1.js';
 
 const mocks = vi.hoisted(() => ({
   packetReceipts: new WeakSet<object>(),
@@ -8,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   sequence: [] as string[],
   disposeCalls: 0,
   createSessionCalls: 0,
+  sessionFailure: false,
+  disposeFailure: false,
+  packetUnregistered: false,
+  mintFault: '' as '' | 'provenance' | 'packet' | 'target' | 'receipt' | 'inner-target',
   runnerFailure: null as Error | null,
   runnerPreflightFailure: null as Error | null,
   runnerPreflightCalls: 0,
@@ -63,10 +77,12 @@ vi.mock(
       (_signer: unknown) => {
         mocks.createSessionCalls += 1;
         mocks.sequence.push('session');
+        if (mocks.sessionFailure) throw new Error('injected session failure');
         return Object.freeze({
           dispose: () => {
             mocks.disposeCalls += 1;
             mocks.sequence.push('dispose');
+            if (mocks.disposeFailure) throw new Error('injected dispose failure');
           },
           produce: async (_input: unknown) => {
             mocks.sequence.push('packet');
@@ -83,7 +99,7 @@ vi.mock(
               }),
               replay: Object.freeze({ reportDigestHex: 'aa'.repeat(32) }),
             });
-            mocks.packetReceipts.add(packet);
+            if (!mocks.packetUnregistered) mocks.packetReceipts.add(packet);
             mocks.packet = packet;
             return packet;
           },
@@ -98,19 +114,19 @@ vi.mock(
             const innerMintSourceProof = Object.freeze({
               receiptDigestHex: mocks.innerMintReceiptDigestHex,
               targetDescriptorDigestHex:
-                mocks.targetDescriptorDigestHex,
+                mocks.mintFault === 'inner-target' ? 'ff'.repeat(32) : mocks.targetDescriptorDigestHex,
             });
             const mintSourceProof = Object.freeze({
-              packetReceiptDigestHex: mocks.packetReceiptDigestHex,
+              packetReceiptDigestHex: mocks.mintFault === 'packet' ? 'ff'.repeat(32) : mocks.packetReceiptDigestHex,
               targetDescriptorDigestHex:
-                mocks.targetDescriptorDigestHex,
+                mocks.mintFault === 'target' ? 'ff'.repeat(32) : mocks.targetDescriptorDigestHex,
               sourceProofReceiptDigestHex:
-                mocks.innerMintReceiptDigestHex,
+                mocks.mintFault === 'receipt' ? 'ff'.repeat(32) : mocks.innerMintReceiptDigestHex,
               sourceProof: innerMintSourceProof,
               receiptDigestHex: mocks.outerMintReceiptDigestHex,
             });
             mocks.innerMintSourceProof = innerMintSourceProof;
-            mocks.mintReceipts.add(mintSourceProof);
+            if (mocks.mintFault !== 'provenance') mocks.mintReceipts.add(mintSourceProof);
             mocks.mintSourceProof = mintSourceProof;
             return mintSourceProof;
           },
@@ -241,6 +257,29 @@ import {
 } from './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js';
 
 describe('federated isolated-devnet Frontier application/checkpoint root V3', () => {
+  const owners: Readonly<FrontierLabApplicationOwnerV1>[] = [];
+  afterEach(() => {
+    for (const owner of owners.splice(0)) disposeFrontierLabApplicationOwnerV1(owner);
+  });
+
+  async function retainedOwner(claim = true) {
+    const owner = await createFrontierLabApplicationOwnerV1(mocks.bridgeAddressHex);
+    owners.push(owner);
+    const bytes = Buffer.from(`${canonicalJson({
+      schema: 'e2s.substrate-federated-isolated-devnet-bootstrap-command-request.v1',
+      version: 1,
+      sourceTarget: {
+        expectedChainId: '42', bridgeAddress: mocks.bridgeAddressHex,
+        bridgeOwnerAddress: owner.ownerAddressHex,
+        signedLegacyOwnerMintTransactionHex: owner.signedLegacyOwnerMintTransactionHex,
+      },
+    })}\n`);
+    const requestSha256Hex = createHash('sha256').update(bytes).digest('hex');
+    bindFrontierLabApplicationOwnerRequestV1(owner, bytes, requestSha256Hex);
+    if (claim) expect(claimFrontierLabApplicationOwnerRequestV1(requestSha256Hex)).toBe(owner);
+    return Object.freeze({ owner, requestSha256Hex });
+  }
+
   beforeEach(() => {
     mocks.packetReceipts = new WeakSet<object>();
     mocks.mintReceipts = new WeakSet<object>();
@@ -249,6 +288,10 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     mocks.sequence.length = 0;
     mocks.disposeCalls = 0;
     mocks.createSessionCalls = 0;
+    mocks.sessionFailure = false;
+    mocks.disposeFailure = false;
+    mocks.packetUnregistered = false;
+    mocks.mintFault = '';
     mocks.runnerFailure = null;
     mocks.runnerPreflightFailure = null;
     mocks.runnerPreflightCalls = 0;
@@ -264,6 +307,95 @@ describe('federated isolated-devnet Frontier application/checkpoint root V3', ()
     mocks.runnerDeadline = undefined;
     mocks.checkpointInput = undefined;
   });
+
+  it('retains claimed custody with the actual packet and stops before the historical runner', async () => {
+    const custody = await retainedOwner();
+    const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+      {} as never, custody,
+    );
+    const packet = await continuation.produce({} as never);
+    await expect(continuation.executeApplication({ ...packet }, applicationInput() as never))
+      .rejects.toThrow(/exact retained packet/);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex)).not.toThrow();
+    await expect(continuation.executeApplication(packet, applicationInput() as never))
+      .rejects.toThrow(/requires proof-bound signing and the signed-call runner/);
+    expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'dispose']);
+    expect(mocks.runnerInput).toBeUndefined();
+    expect(mocks.checkpoint).toBeUndefined();
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+      .toThrow(/live process custody/);
+    await expect(continuation.executeApplication(packet, applicationInput() as never))
+      .rejects.toThrow(/exact retained packet/);
+    continuation.dispose();
+    expect(mocks.disposeCalls).toBe(1);
+  });
+
+  it.each(['unclaimed', 'clone', 'request', 'disposed'] as const)(
+    'rejects %s custody before creating a packet session', async fault => {
+      const custody = await retainedOwner(fault !== 'unclaimed');
+      if (fault === 'disposed') disposeFrontierLabApplicationOwnerV1(custody.owner);
+      const candidate = {
+        owner: fault === 'clone' ? { ...custody.owner } : custody.owner,
+        requestSha256Hex: fault === 'request' ? 'ff'.repeat(32) : custody.requestSha256Hex,
+      };
+      expect(() => createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        {} as never, candidate,
+      )).toThrow(/not claimed|live process custody|exact request/);
+      expect(mocks.createSessionCalls).toBe(0);
+    },
+  );
+
+  it.each(['session', 'packet', 'dispose', 'revoked-before-packet', 'revoked-before-proof'] as const)(
+    'closes fresh custody after %s failure without an application call', async fault => {
+      const custody = await retainedOwner();
+      if (fault === 'session') {
+        mocks.sessionFailure = true;
+        expect(() => createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+          {} as never, custody,
+        )).toThrow(/injected session failure/);
+      } else {
+        const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+          {} as never, custody,
+        );
+        if (fault === 'dispose') {
+          mocks.disposeFailure = true;
+          expect(() => continuation.dispose()).toThrow(/injected dispose failure/);
+        } else if (fault === 'packet' || fault === 'revoked-before-packet') {
+          if (fault === 'packet') mocks.packetUnregistered = true;
+          else disposeFrontierLabApplicationOwnerV1(custody.owner);
+          await expect(continuation.produce({} as never)).rejects.toThrow(/provenance|live process custody/);
+        } else {
+          const packet = await continuation.produce({} as never);
+          disposeFrontierLabApplicationOwnerV1(custody.owner);
+          await expect(continuation.executeApplication(packet, applicationInput() as never))
+            .rejects.toThrow(/live process custody/);
+        }
+        continuation.dispose();
+        expect(mocks.disposeCalls).toBe(1);
+      }
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
+      expect(mocks.sequence).not.toContain('mint');
+      expect(mocks.runnerInput).toBeUndefined();
+    },
+  );
+
+  it.each(['provenance', 'packet', 'target', 'receipt', 'inner-target'] as const)(
+    'rejects mint proof %s drift before application execution and disposes fresh custody', async fault => {
+      const custody = await retainedOwner();
+      const continuation = createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
+        {} as never, custody,
+      );
+      const packet = await continuation.produce({} as never);
+      mocks.mintFault = fault;
+      await expect(continuation.executeApplication(packet, applicationInput() as never))
+        .rejects.toThrow(fault === 'provenance' ? /lacks process provenance/ : /differs from the retained packet or target/);
+      expect(mocks.sequence).toEqual(['session', 'packet', 'mint', 'dispose']);
+      expect(mocks.runnerInput).toBeUndefined();
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
+    },
+  );
 
   it('orders one exact packet, mint, application burn and derived checkpoint', async () => {
     const receipt =

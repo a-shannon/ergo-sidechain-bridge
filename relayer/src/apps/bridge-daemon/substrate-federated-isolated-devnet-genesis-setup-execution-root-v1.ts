@@ -146,9 +146,15 @@ import {
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
+  projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1,
   type SubstrateFederatedIsolatedDevnetBootstrapRequestBindingV1,
   type SubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
 } from '../../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js';
+import {
+  claimFrontierLabApplicationOwnerRequestV1,
+  disposeFrontierLabApplicationOwnerV1,
+  type FrontierLabApplicationOwnerV1,
+} from '../../adapters/frontier-lab-application-owner-v1.js';
 import {
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
   type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
@@ -4765,6 +4771,13 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10
 >> {
+  return runTrackerTransportCampaignWithOwnerPolicy(input, false);
+}
+
+async function runTrackerTransportCampaignWithOwnerPolicy(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Input>,
+  requireFreshApplicationOwner: boolean,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10>> {
   const trackerTransportJournalRoot =
     normalizeTrackerTransportJournalRootV9(input.trackerTransportJournalRoot);
   const requestCampaignBinding =
@@ -4784,6 +4797,18 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
     temporaryDirectoryRoot: applicationRunner.temporaryDirectoryRoot,
     sharedCargoHomeRoot: applicationRunner.cargoDependencyCacheDirectory,
   });
+  let applicationOwner: Readonly<{
+    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+    readonly requestSha256Hex: string;
+  }> | undefined;
+  if (requireFreshApplicationOwner) {
+    const requestSha256Hex =
+      projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1(requestCampaignBinding);
+    applicationOwner = Object.freeze({
+      owner: claimFrontierLabApplicationOwnerRequestV1(requestSha256Hex),
+      requestSha256Hex,
+    });
+  }
   const execution = await runManagedCampaign(
     input,
     pegInPlan,
@@ -4795,6 +4820,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       requestBinding: requestCampaignBinding,
       journalRoot: trackerTransportJournalRoot,
     }),
+    applicationOwner,
   ).catch(error => {
     if (
       projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
@@ -4808,6 +4834,8 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       'ergo node build',
       error,
     );
+  }).finally(() => {
+    if (applicationOwner !== undefined) disposeFrontierLabApplicationOwnerV1(applicationOwner.owner);
   });
   const material = execution.trackerReservationFreshness;
   if (material === undefined || material.transport === undefined) {
@@ -4948,8 +4976,8 @@ export function assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampa
 }
 
 /**
- * Project the exact V10 execution and its process-local response
- * classification without changing the historical durable outcome or receipt.
+ * Require fresh same-process application custody, then project the exact
+ * transport result without changing the historical durable outcome or receipt.
  */
 export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11(
   input: Readonly<
@@ -4959,8 +4987,8 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11
 >> {
   const legacy =
-    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10(
-      input,
+    await runTrackerTransportCampaignWithOwnerPolicy(
+      input, true,
     );
   assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
     legacy.receipt,
@@ -5176,6 +5204,10 @@ async function runManagedCampaign(
       Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1>;
     readonly journalRoot: string;
   }> | undefined = undefined,
+  applicationOwner: Readonly<{
+    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+    readonly requestSha256Hex: string;
+  }> | undefined = undefined,
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   const applicationCheckpointAction =
     isApplicationCheckpointAction(pegInAction);
@@ -5232,6 +5264,7 @@ async function runManagedCampaign(
     packetSession = applicationCheckpointAction
       ? createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
         setupSession.signer,
+        applicationOwner,
       )
       : pegInAction === 'consume-mint-proof'
         ? createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2(

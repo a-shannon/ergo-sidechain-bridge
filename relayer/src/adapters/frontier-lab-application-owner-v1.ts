@@ -14,9 +14,12 @@ interface OwnerMaterial {
   readonly bridgeAddressHex: string;
   requestSha256Hex: string | undefined;
   bindingAttempted: boolean;
+  requestClaimed: boolean;
 }
 
 const OWNERS = new WeakMap<object, OwnerMaterial>();
+// Pending requests own custody until the campaign claims it or the creator disposes it.
+const REQUEST_OWNERS = new Map<string, Readonly<FrontierLabApplicationOwnerV1>>();
 const mint = new Interface([
   'function mintSERG(address recipient,uint256 amount,bytes32 mintIdentity)',
 ]);
@@ -48,6 +51,7 @@ export async function createFrontierLabApplicationOwnerV1(
     const owner = Object.freeze({ ownerAddressHex, signedLegacyOwnerMintTransactionHex });
     OWNERS.set(owner, {
       wallet, bridgeAddressHex, requestSha256Hex: undefined, bindingAttempted: false,
+      requestClaimed: false,
     });
     return owner;
   } finally {
@@ -92,7 +96,11 @@ export function bindFrontierLabApplicationOwnerRequestV1(
       || source.signedLegacyOwnerMintTransactionHex !== owner.signedLegacyOwnerMintTransactionHex) {
       throw new Error('LAB application request differs from its retained owner and probe');
     }
+    if (REQUEST_OWNERS.has(expectedRequestSha256Hex)) {
+      throw new Error('LAB application request already has retained custody');
+    }
     material.requestSha256Hex = expectedRequestSha256Hex;
+    REQUEST_OWNERS.set(expectedRequestSha256Hex, owner);
   } catch (error) {
     material.wallet = undefined;
     throw error;
@@ -116,6 +124,38 @@ export function disposeFrontierLabApplicationOwnerV1(
   const material = OWNERS.get(owner);
   if (material === undefined) throw new Error('LAB application owner lacks process custody');
   material.wallet = undefined;
+  if (material.requestSha256Hex !== undefined
+    && REQUEST_OWNERS.get(material.requestSha256Hex) === owner) {
+    REQUEST_OWNERS.delete(material.requestSha256Hex);
+  }
+}
+
+/** Claim existing process custody; a request digest cannot recreate a key. */
+export function claimFrontierLabApplicationOwnerRequestV1(
+  requestSha256Hex: string,
+): Readonly<FrontierLabApplicationOwnerV1> {
+  if (typeof requestSha256Hex !== 'string' || !/^[0-9a-f]{64}$/u.test(requestSha256Hex)) {
+    throw new Error('LAB application owner request claim digest is invalid');
+  }
+  const owner = REQUEST_OWNERS.get(requestSha256Hex);
+  if (owner === undefined) {
+    throw new Error('LAB application request has no unclaimed live owner custody');
+  }
+  assertFrontierLabApplicationOwnerRequestV1(owner, requestSha256Hex);
+  const material = requireLiveOwner(owner);
+  if (material.requestClaimed) throw new Error('LAB application request owner is already claimed');
+  material.requestClaimed = true;
+  REQUEST_OWNERS.delete(requestSha256Hex);
+  return owner;
+}
+
+export function assertFrontierLabApplicationOwnerClaimV1(
+  owner: Readonly<FrontierLabApplicationOwnerV1>, requestSha256Hex: string,
+): void {
+  assertFrontierLabApplicationOwnerRequestV1(owner, requestSha256Hex);
+  if (!requireLiveOwner(owner).requestClaimed) {
+    throw new Error('LAB application request owner is not claimed by its campaign');
+  }
 }
 
 function requireLiveOwner(owner: Readonly<FrontierLabApplicationOwnerV1>): OwnerMaterial {

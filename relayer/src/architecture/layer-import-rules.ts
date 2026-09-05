@@ -1198,6 +1198,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ['bindFrontierLabApplicationOwnerRequestV1', new Set([
         'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
       ])],
+      ['claimFrontierLabApplicationOwnerRequestV1', new Set([
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+      ])],
     ]),
   ],
   [
@@ -1256,6 +1259,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1',
         new Set([
           'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts',
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.test.ts',
         ]),
       ],
