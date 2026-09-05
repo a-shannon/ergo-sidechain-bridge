@@ -1,4 +1,7 @@
 .gitattributes text eol=lf
+relayer/src/scripts/export-substrate-federated-tracker-v2-node-fixture.ts text eol=lf
+validity-proof/consumer-jvm/BridgeSubstrateFederatedTrackerV2NodeSpec.scala text eol=lf
+validity-proof/consumer-jvm/run-substrate-federated-tracker-v2-node.ps1 text eol=lf
 LICENSE text eol=lf
 THIRD_PARTY_NOTICES.md text eol=lf
 .github/workflows/*.yml text eol=lf

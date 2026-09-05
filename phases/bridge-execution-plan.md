@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Test the exact fee-funded V2 transaction through the pinned node's decoding, version reparse and admission rules before transport | V154 composes a separate fee-payer input and canonical miner-fee output without reducing tracker value. The 13-test JVM matrix reconstructs exact bytes, verifies both actual WASM proofs and rejects tracker-funded fees. Target-node admission remains open. Keep V1 bytes and semantics frozen; no campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the distinct V2 compiler/setup identities and fee-funded candidate into the no-submit operational path, then check against fresh chain-resident boxes before transport | V155 validates the frozen WASM JSON and bytes through pinned node code with synthetic state. Real UTXO membership, operational target/version selection and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -237,10 +237,45 @@ The same frozen transaction verifies through eight descendant windows; anchor
 eviction rejects the tracker proof while the independent fee-payer proof remains
 valid. This is transaction-script evidence, not node admission or consensus.
 
-Next, compare the exact signed transaction with the pinned node's JSON decoding,
-version reparse, size/cost policies and stateful validation. No full campaign
-retry is needed to investigate those rules. Unchanged V152/V153 source checks
-remain reusable; the JVM matrix was rerun because its transaction shape changed.
+V155 below checks the node-code boundary. Unchanged V152/V153 source checks
+remain reusable; the V154 JVM matrix was rerun because its transaction shape changed.
+
+### V2 Pinned Node Validation
+
+V155 carries the same frozen signed bytes through WASM's JSON exporter and
+Ergo 6.0.2's actual API decoder, transaction serializer and stateless/stateful
+validation. The test supplies exact synthetic input boxes and linked headers,
+uses `simplifiedUpcoming`, and selects block-version 4 / interpreter-version 3
+in its synthetic parameters. That selection is not evidence of target activation.
+
+The 14-test node matrix accepts the 4,342-byte transaction at cost 17,478.
+It compares size, cost and fee against the pinned source defaults: 98,304 bytes,
+1,000,000 cost units and 1,000,000 nanoERG minimum fee. The HTTP route itself
+is not executed. Decoder mutations, either changed spending proof, duplicate or
+missing inputs, ERG or token inflation, insufficient cost and an evicted anchor reject. The frozen
+transaction remains valid through eight synthetic descendant windows.
+
+The node recomputes transaction identity rather than trusting a JSON `id`.
+The fixture consumer therefore binds the supplied identity and complete signed
+and proofless bytes to the frozen WASM candidate. A decoder success alone does
+not establish that join. No signing, submission or broadcast occurs in this
+matrix, and neither synthetic headers nor supplied input boxes prove consensus
+or real UTXO membership.
+
+Each run binds its randomized signed packet by an explicit SHA-256, rather
+than requiring one historical signature. A fresh packet needs its own node
+execution; it cannot inherit the frozen packet's result. The changed-context
+case proves signed-message rejection; V154's reduction matrix separately
+isolates the anchor predicate. The node conservation negatives fail at the
+ERG and asset rules before spending-proof verification.
+
+Next, connect the distinct V2 compiler and genesis/setup identities to the
+fee-funded operational candidate and no-submit checker. Preserve V1 receipts,
+contracts and selected runtime profile; a V2 tree must not be installed under
+V1 provenance. Only a fresh selected target with the exact resident boxes can
+close `/transactions/check` acceptance. Canonical confirmation and the complete
+withdrawal remain downstream obligations. The earlier HTTP 400 is still not
+attributed to a specific cause by these synthetic results.
 
 The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
@@ -346,8 +381,9 @@ complete withdrawal still require their own execution evidence.
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
 3. Use the cheapest decisive check first. For the current tracker boundary,
-   preserve the verified fee-funded V2 bytes and compare them with the pinned
-   node's decoding, version reparse and admission rules before starting nodes.
+   reuse the frozen V2 WASM/JVM/node-code checks while their inputs match. Close
+   the distinct V2 setup/operational identity join before provisioning fresh
+   boxes and checking the exact candidate on the selected node.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but
