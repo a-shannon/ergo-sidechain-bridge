@@ -14,7 +14,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
+import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it as vitestIt, vi } from 'vitest';
 import { Mnemonic } from 'ethers';
 
@@ -3428,9 +3430,9 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     ].map(match => match[1]);
 
     expect(imports).toEqual([
+      '../substrate-federated-isolated-devnet-portable-replay-v1.js',
       '../strict-json.js',
       '../substrate-federated-isolated-devnet-portable-replay-files-v1.js',
-      '../substrate-federated-isolated-devnet-portable-replay-v1.js',
     ]);
     expect(source).not.toMatch(/process\.env|dotenv|node:(?:fs|http|https|net|tls)/);
     expect(source).not.toMatch(
@@ -3439,6 +3441,44 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect(source).toContain(
       "process.stderr.write('isolated portable replay failed\\n')",
     );
+  });
+
+  it('sanitizes replay dependency initialization failures in a fresh process', () => {
+    const source = readFileSync(new URL(
+      './scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts', import.meta.url,
+    ), 'utf8');
+    const faultModule = 'data:text/javascript,' + encodeURIComponent(
+      "export function replaySubstrateFederatedIsolatedDevnetPortableV1() {} "
+      + "process.stdout.write('replay-loader-entered' + String.fromCharCode(10)); "
+      + "throw new Error('synthetic-loader-detail');",
+    );
+    let replacements = 0;
+    const compiled = ts.transpileModule(source, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+      transformers: { before: [context => root => {
+        const visit = (node: ts.Node): ts.VisitResult<ts.Node> => {
+          if (ts.isStringLiteral(node)
+            && node.text === '../substrate-federated-isolated-devnet-portable-replay-v1.js') {
+            replacements += 1;
+            return ts.factory.createStringLiteral(faultModule);
+          }
+          return ts.visitEachChild(node, visit, context);
+        };
+        return ts.visitNode(root, visit) as ts.SourceFile;
+      }] },
+    });
+    expect(replacements).toBe(1);
+    const result = spawnSync(process.execPath, [
+      '--input-type=module', '-e', compiled.outputText, '--', 'synthetic-cli.js',
+      ...portableReplayCliArguments('synthetic-unread-request.json', {
+        expectedTargetDescriptorDigestHex: '11'.repeat(32),
+        expectedSourceAttestationKeySetDigestHex: '22'.repeat(32),
+      }),
+    ], { encoding: 'utf8', env: portableChildEnvironment(), timeout: 3_000, maxBuffer: 4_096 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('replay-loader-entered\n');
+    expect(result.stderr).toBe('isolated portable replay failed\n');
   });
 
   it('rejects isolated replay trust-pin and signed artifact drift', async () => {

@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,7 +18,223 @@ function inspect(files: Record<string, string>) {
   return inspectLayerImports(sourceFiles);
 }
 
+const MANAGED_SETUP_V2 =
+  'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts';
+const TRACKER_V2_CAMPAIGN_ROOT =
+  'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts';
+const GENESIS_SETUP_ROOT =
+  'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+
+function staticAppFixture(file: string, source: string): Record<string, string> {
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2022, true);
+  const files: Record<string, string> = {};
+  // Resolve direct source edges without loading or executing their runtime modules.
+  for (const statement of parsed.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const specifier = statement.moduleSpecifier.text;
+    if (!specifier.startsWith('.')) continue;
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier))
+      .replace(/\.js$/, '.ts');
+    files[target] = 'export {};';
+  }
+  files[file] = source;
+  return files;
+}
+
 describe('layer import rules', () => {
+  it.each([MANAGED_SETUP_V2, TRACKER_V2_CAMPAIGN_ROOT, GENESIS_SETUP_ROOT])(
+    'accepts the actual reviewed app source without executing it: %s', file => {
+      const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+      expect(inspect(staticAppFixture(file, source))).toEqual([]);
+    },
+  );
+
+  it.each([
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/frontier-lab-application-owner-v1', 'claimFrontierLabApplicationOwnerRequestV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/frontier-lab-application-owner-v1', 'disposeFrontierLabApplicationOwnerV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1', 'claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1', 'consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'substrate-federated-isolated-devnet-setup-check-runner-v2', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'substrate-federated-isolated-devnet-mining-credential-v1', 'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    [MANAGED_SETUP_V2, 'substrate-federated-isolated-devnet-portable-replay-v1', 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2'],
+  ])('pins the V2 lifecycle import %s -> %s#%s to its exact owner', (owner, module, binding) => {
+    const specifier = `../../${module}.js`;
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect(staticAppFixture(owner, source))).toEqual([]);
+    const otherOwner = owner === MANAGED_SETUP_V2 ? TRACKER_V2_CAMPAIGN_ROOT : MANAGED_SETUP_V2;
+    expect(inspect(staticAppFixture(otherOwner, source)).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${specifier}#${binding}`,
+    );
+    expect(inspect({
+      [`${module}.ts`]: 'export {};',
+      'unowned-v2-campaign.ts': `import { ${binding} } from './${module}.js'; ${binding}();`,
+    }).map(item => item.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./${module}.js#${binding}`,
+    ]);
+    expect(inspect(staticAppFixture(owner,
+      `import { ${binding} as escaped } from '${specifier}'; escaped();`,
+    )).map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${specifier}#${binding}`,
+    );
+  });
+
+  it.each([
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Check'],
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2'],
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-portable-replay-v1.js', 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1'],
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    [MANAGED_SETUP_V2, './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../adapters/frontier-lab-application-owner-v1.js', 'createFrontierLabApplicationOwnerV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../adapters/frontier-lab-application-owner-v1.js', 'signFrontierLabApplicationCallsOnceV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../substrate-federated-isolated-devnet-mining-credential-v1.js', 'issueSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Transport'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js', 'createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'node:fs', 'readFileSync'],
+  ])('rejects a capability outside the V2 allowlist: %s -> %s#%s', (file, specifier, binding) => {
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect(staticAppFixture(file, source)).map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${specifier}#${binding}`,
+    );
+  });
+
+  it.each([
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-portable-replay-v1.js', 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-managed-setup-v2.js', 'executeSubstrateFederatedIsolatedDevnetManagedSetupV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'finalizeReceipt'],
+  ])('keeps V2 capability values inside direct calls: %s -> %s#%s', (file, specifier, binding) => {
+    const imported = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(file, `${imported} ${binding}();`))).toEqual([]);
+    for (const use of [`const escaped = ${binding};`, `capture(${binding});`, `export { ${binding} };`]) {
+      expect(inspect(staticAppFixture(file, `${imported} ${use}`)).map(item => item.message)).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/restricted capability binding must not (?:escape its reviewed call|be re-exported)/),
+        ]),
+      );
+    }
+    for (const source of [
+      `import * as authority from '${specifier}';`,
+      `await import('${specifier}');`,
+      `require('${specifier}');`,
+      `export * from '${specifier}';`,
+    ]) {
+      expect(inspect(staticAppFixture(file, `${imported} ${source}`)).map(item => item.message)).toEqual(
+        expect.arrayContaining([expect.stringMatching(/must use (?:reviewed named bindings|named runtime imports)/)]),
+      );
+    }
+  });
+
+  it.each([MANAGED_SETUP_V2, TRACKER_V2_CAMPAIGN_ROOT, GENESIS_SETUP_ROOT])(
+    'rejects an additional public export from %s', file => {
+      expect(inspect({ [file]: 'export const unexpectedAuthority = () => {};' }).map(item => item.message))
+        .toEqual(['reviewed app root export is not allowlisted: unexpectedAuthority']);
+    },
+  );
+
+  it.each([
+    [MANAGED_SETUP_V2, './ergo-operational-transaction.js', 'runErgoOperationalTransaction'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-managed-setup-v2.js', 'executeSubstrateFederatedIsolatedDevnetManagedSetupV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../state-tracker.js', 'StateTracker'],
+  ])('allows erased V2 type references but not runtime capability values: %s#%s',
+    (file, specifier, binding) => {
+      const imported = `import { ${binding} } from '${specifier}';`;
+      expect(inspect(staticAppFixture(file,
+        `${imported} type Input = Parameters<typeof ${binding}>; type Instance = ${binding};`,
+      ))).toEqual([]);
+      for (const use of [
+        `const escaped = typeof ${binding};`,
+        `const escaped = ${binding} as unknown as typeof ${binding};`,
+        `const escaped = { authority: ${binding} };`,
+      ]) {
+        expect(inspect(staticAppFixture(file, `${imported} ${use}`)).map(item => item.message))
+          .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+      }
+    },
+  );
+
+  it('allows only the existing replay CLI function through a caught dynamic binding', () => {
+    const file = 'scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts';
+    const target = 'substrate-federated-isolated-devnet-portable-replay-v1.ts';
+    const specifier = `../${target.replace(/\.ts$/, '.js')}`;
+    const binding = 'replaySubstrateFederatedIsolatedDevnetPortableV1';
+    const authority = 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2';
+    const source = `async function main() {
+      const { ${binding} } = await import('${specifier}'); ${binding}();
+    } main().catch(() => {});`;
+    expect(inspect({ [file]: source, [target]: 'export {};' })).toEqual([]);
+    const actual = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    expect(inspect({ [file]: actual, [target]: 'export {};' })).toEqual([]);
+    for (const expression of [
+      `const module = await import('${specifier}');`,
+      `const { ${authority} } = await import('${specifier}');`,
+      `const { ${binding}, ${authority} } = await import('${specifier}');`,
+      `const { ${binding}, ...rest } = await import('${specifier}');`,
+      `const { ${binding}: alias } = await import('${specifier}');`,
+      `const { ${binding} = fallback } = await import('${specifier}');`,
+      `let { ${binding} } = await import('${specifier}');`,
+      `const [{ ${binding} }] = await Promise.all([import('${specifier}')]);`,
+      `const { ${binding} } = await import('.././${target.replace(/\.ts$/, '.js')}');`,
+    ]) {
+      expect(inspect({ [file]: expression, [target]: 'export {};' }).map(item => item.message))
+        .toEqual([expect.stringContaining('exclusive authority module must use named runtime imports')]);
+    }
+    expect(inspect({ 'scripts/unowned-replay.ts': source, [target]: 'export {};' })
+      .map(item => item.message))
+      .toEqual([expect.stringContaining('exclusive authority module must use named runtime imports')]);
+  });
+
+  it('allows exactly the seven extracted genesis helpers and the V2 public entry points', () => {
+    expect(inspect({
+      [GENESIS_SETUP_ROOT]: `
+        export const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS = 1;
+        export function normalizeTrackerTransportJournalRootV9() {}
+        export function assertReservedTrackerTransportJournalRootV9() {}
+        export function normalizePegInCandidatePlan() {}
+        export function normalizeFrontierApplicationRunnerPlan() {}
+        export function waitForCanonicalConfirmation() {}
+        export function finalizeReceipt() {}
+      `,
+      [MANAGED_SETUP_V2]: `
+        export interface ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input {}
+        export function executeSubstrateFederatedIsolatedDevnetManagedSetupV2() {}
+      `,
+      [TRACKER_V2_CAMPAIGN_ROOT]: `
+        export type RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput = unknown;
+        export function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot() {}
+        export type SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt = unknown;
+        export function assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt() {}
+      `,
+    })).toEqual([]);
+  });
+
+  it('permits only the reviewed V2 constant values to leave direct-call positions', () => {
+    const managed = `
+      import { PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION } from '../../peg-in-causal-admission-v2.js';
+      import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2
+      } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+      import { PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+        SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+      } from '../../relayer-core/ergo-operational-transaction-lifecycle.js';
+      capture(PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+        PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+        SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE);
+    `;
+    const root = `
+      import { SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN
+      } from '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
+      import { APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS
+      } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+      capture(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS);
+    `;
+    expect(inspect(staticAppFixture(MANAGED_SETUP_V2, managed))).toEqual([]);
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT, root))).toEqual([]);
+  });
+
   it.each([
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Check', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],

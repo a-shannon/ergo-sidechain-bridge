@@ -32,6 +32,163 @@ const ALLOWED_LAYER_DEPENDENCIES: Readonly<Record<BridgeLayer, ReadonlySet<Bridg
   apps: new Set(BRIDGE_LAYERS),
 };
 
+// Hand-reviewed V2 legacy bindings feed the three existing checks below. This
+// table is static: new source imports never expand the reviewed authority set.
+const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
+  string,
+  ReadonlyMap<string, ReadonlySet<string>>
+> = new Map([
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
+    new Map([
+      ['state-tracker.ts', new Set(['StateTracker'])],
+      ['strict-json.ts', new Set(['sha256CanonicalJson'])],
+      ['peg-in-causal-admission-v2.ts', new Set(['PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION'])],
+      ['substrate-federated-settlement-family-v1.ts', new Set([
+        'decodeSubstrateFederatedSettlementFamilyV1Profile',
+      ])],
+      ['substrate-federated-authority-safe-devnet-history-v1.ts', new Set([
+        'collectSubstrateFederatedAuthoritySafeDevnetHistoryV1',
+      ])],
+      ['substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts', new Set([
+        'collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2',
+      ])],
+      ['substrate-federated-isolated-devnet-reward-input-discovery-v1.ts', new Set([
+        'assertSubstrateFederatedRewardInputDiscoveryV2Provenance',
+        'discoverSubstrateFederatedRewardInputsV2',
+      ])],
+      ['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts', new Set([
+        'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+      ])],
+      ['substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.ts', new Set([
+        'RunSubstrateFederatedIsolatedDevnetBootstrapLifecycleV1Input',
+      ])],
+      ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
+        'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+      ])],
+      ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+        'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+        'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
+      ])],
+      ['substrate-federated-isolated-devnet-packet-producer-v1.ts', new Set([
+        'assertSubstrateFederatedIsolatedDevnetPacketV3Provenance',
+        'ProduceSubstrateFederatedIsolatedDevnetPacketV1Input',
+      ])],
+      ['substrate-federated-isolated-devnet-portable-replay-v1.ts', new Set([
+        'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2',
+      ])],
+      ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set([
+        'assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3',
+        'getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3',
+        'promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1',
+        'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1',
+      ])],
+      ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set([
+        'buildSubstrateFederatedIsolatedDevnetPegInCandidateV2',
+        'assertSubstrateFederatedIsolatedDevnetPegInCandidateV2',
+      ])],
+      ['substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2',
+      ])],
+      ['substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2',
+      ])],
+      ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+        'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1',
+      ])],
+      ['substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts', new Set([
+        'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
+      ])],
+      ['substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.ts', new Set([
+        'createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1',
+      ])],
+      ['substrate-federated-local-devnet-genesis-journal-v1.ts', new Set([
+        'createSubstrateFederatedLocalDevnetGenesisJournalV1',
+      ])],
+      ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+      ])],
+      ['substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.ts', new Set([
+        'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV2',
+        'assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2',
+      ])],
+      ['substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.ts', new Set([
+        'observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV2',
+        'assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2',
+      ])],
+      ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set([
+        'buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2',
+      ])],
+      ['substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts', new Set([
+        'collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2',
+      ])],
+      ['substrate-federated-isolated-devnet-source-attestation-session-v1.ts', new Set([
+        'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2',
+        'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2',
+      ])],
+      ['unsigned-ergo-transaction.ts', new Set([
+        'materializeUnsignedTransaction',
+        'Eip12UnsignedTransaction',
+      ])],
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Map([
+      ['substrate-federated-isolated-devnet-ergo-node-build-v1.ts', new Set([
+        'buildSubstrateFederatedIsolatedDevnetErgoNodeV1',
+      ])],
+      ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
+      ])],
+      ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+        'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
+      ])],
+      ['substrate-federated-isolated-devnet-mining-credential-v1.ts', new Set([
+        'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
+      ])],
+      ['substrate-federated-isolated-devnet-reward-input-discovery-v1.ts', new Set([
+        'SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN',
+        'SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN',
+      ])],
+      ['substrate-federated-isolated-devnet-frontier-lab-application-v1.ts', new Set([
+        'assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1',
+      ])],
+      ['substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.ts', new Set([
+        'observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1',
+        'assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1',
+        'observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2',
+        'assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2',
+      ])],
+      ['bridge-validity-tracker-header-context-v1.ts', new Set([
+        'buildBridgeValidityTrackerObservedHeaderContextV1',
+      ])],
+      ['substrate-federated-tracker-v2.ts', new Set([
+        'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context',
+      ])],
+      ['substrate-federated-tracker-v2-external-fee.ts', new Set([
+        'buildSubstrateFederatedTrackerV2ExternalFeeTransaction',
+      ])],
+      ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts', new Set([
+        'authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+        'reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+        'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+        'confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+      ])],
+      ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
+        'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+        'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+      ])],
+      ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set([
+        'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+      ])],
+      ['state-tracker.ts', new Set(['StateTracker'])],
+    ]),
+  ],
+]);
+
 // Gate 5 may compose these reviewed legacy producers before WP-08A extracts
 // them. The seam is exact by source and target; capability-bearing targets may
 // additionally restrict imported bindings. It grants no general app escape.
@@ -39,6 +196,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  ...[...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS].map(
+    ([file, bindings]) => [file, new Set(bindings.keys())] as const,
+  ),
   [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
     new Set([
@@ -159,6 +319,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  ...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS,
   [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
     new Map([
@@ -709,6 +870,68 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
+    new Map([
+      ...[...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS.get(
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
+      )!].map(([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const),
+      ['./ergo-operational-transaction.js', new Set(['runErgoOperationalTransaction'])],
+      ['../../relayer-core/ergo-operational-transaction-lifecycle.js', new Set([
+        'PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE',
+        'SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE',
+      ])],
+      ['./substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js', new Set([
+        'assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4Provenance',
+        'SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4',
+        'SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3',
+      ])],
+      ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
+        'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3',
+        'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1',
+        'waitForCanonicalConfirmation',
+      ])],
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Map([
+      ...[...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS.get(
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+      )!].map(([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const),
+      ['node:fs', new Set(['mkdirSync'])],
+      ['node:path', new Set(['join'])],
+      ['../../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js', new Set([
+        'claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1',
+        'consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1',
+      ])],
+      ['../../adapters/frontier-lab-application-owner-v1.js', new Set([
+        'claimFrontierLabApplicationOwnerRequestV1',
+        'disposeFrontierLabApplicationOwnerV1',
+      ])],
+      ['../../profiles/substrate-federated-v1/checkpoint-statement.js', new Set([
+        'buildSubstrateFederatedCheckpointProfileV1',
+        'encodeSubstrateFederatedCheckpointExtensionValueV1',
+      ])],
+      ['./substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js', new Set([
+        'createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4',
+        'assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4Provenance',
+      ])],
+      ['./substrate-federated-isolated-devnet-managed-setup-v2.js', new Set([
+        'executeSubstrateFederatedIsolatedDevnetManagedSetupV2',
+      ])],
+      ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
+        'APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS',
+        'normalizeTrackerTransportJournalRootV9',
+        'assertReservedTrackerTransportJournalRootV9',
+        'normalizePegInCandidatePlan',
+        'normalizeFrontierApplicationRunnerPlan',
+        'waitForCanonicalConfirmation',
+        'finalizeReceipt',
+        'RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11Input',
+      ])],
+    ]),
+  ],
+  [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
     new Map([
       ['../../adapters/frontier-lab-application-owner-v1.js', new Set([
@@ -1033,6 +1256,32 @@ const REVIEWED_APP_READ_ONLY_VALUE_BINDINGS: ReadonlyMap<
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
+    new Map([
+      ['../../peg-in-causal-admission-v2.js', new Set(['PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION'])],
+      ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', new Set([
+        'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2',
+        'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2',
+      ])],
+      ['../../relayer-core/ergo-operational-transaction-lifecycle.js', new Set([
+        'PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE',
+        'SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE',
+      ])],
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Map([
+      ['../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js', new Set([
+        'SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN',
+        'SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN',
+      ])],
+      ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
+        'APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS',
+      ])],
+    ]),
+  ],
+  [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Map([
       [
@@ -1095,8 +1344,31 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   ReadonlySet<string>
 > = new Map([
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
+    new Set([
+      'ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input',
+      'executeSubstrateFederatedIsolatedDevnetManagedSetupV2',
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Set([
+      'RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput',
+      'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot',
+      'SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt',
+      'assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt',
+    ]),
+  ],
+  [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Set([
+      'APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS',
+      'normalizeTrackerTransportJournalRootV9',
+      'assertReservedTrackerTransportJournalRootV9',
+      'normalizePegInCandidatePlan',
+      'normalizeFrontierApplicationRunnerPlan',
+      'waitForCanonicalConfirmation',
+      'finalizeReceipt',
       'RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input',
       'RunSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5Input',
@@ -1242,6 +1514,13 @@ const CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS: ReadonlyMap<
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
   [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Map([
+      ['node:fs', new Set(['mkdirSync'])],
+      ['node:path', new Set(['join'])],
+    ]),
+  ],
+  [
     'ergo-settlement-core/strict-json.ts',
     new Map([
       ['node:crypto', new Set(['createHash'])],
@@ -1308,6 +1587,15 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ])],
       ['claimFrontierLabApplicationOwnerRequestV1', new Set([
         'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+      ])],
+      ['disposeFrontierLabApplicationOwnerV1', new Set([
+        'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+        'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
+        'adapters/frontier-lab-application-owner-v1.test.ts',
       ])],
       ['signFrontierLabApplicationCallsOnceV1', new Set([
         'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
@@ -1363,6 +1651,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1',
         new Set([
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.test.ts',
         ]),
       ],
@@ -1378,6 +1667,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1',
         new Set([
           'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-transport-attempt-v1.ts',
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.test.ts',
         ]),
       ],
@@ -1467,6 +1757,14 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts'])])),
   ],
   [
+    'substrate-federated-isolated-devnet-portable-replay-v1.ts',
+    new Map([
+      ['takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2', new Set([
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
+      ])],
+    ]),
+  ],
+  [
     'substrate-federated-isolated-devnet-mining-credential-v1.ts',
     new Map([
       [
@@ -1484,6 +1782,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       [
         'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
         new Set([
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
           'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
           'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
           'substrate-federated-isolated-devnet-setup-check-runner-v2.ts',
@@ -1511,6 +1810,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
         new Set([
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+          'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
         ]),
       ],
     ]),
@@ -1719,7 +2019,22 @@ function collectModuleSpecifiers(sourceFile: ts.SourceFile): CollectedModuleSpec
       addSpecifier(node.argument.literal, 'import-type', [], true);
     } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       if (node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])) {
-        addSpecifier(node.arguments[0], 'dynamic-import');
+        const awaited = node.parent;
+        const declaration = awaited.parent;
+        const bindings = ts.isAwaitExpression(awaited)
+          && ts.isVariableDeclaration(declaration)
+          && declaration.initializer === awaited
+          && ts.isVariableDeclarationList(declaration.parent)
+          && (declaration.parent.flags & ts.NodeFlags.Const) !== 0
+          && ts.isObjectBindingPattern(declaration.name)
+          && declaration.name.elements.every(element => ts.isIdentifier(element.name)
+            && !element.propertyName && !element.dotDotDotToken && !element.initializer)
+          ? declaration.name.elements.map(element => ({
+            imported: (element.name as ts.Identifier).text,
+            local: (element.name as ts.Identifier).text,
+          }))
+          : [];
+        addSpecifier(node.arguments[0], 'dynamic-import', bindings);
       } else {
         const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
         imports.push({
@@ -1823,6 +2138,12 @@ function inspectExclusiveRuntimeAuthorityImport(
   const restrictedBindings =
     EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS.get(resolved);
   if (restrictedBindings === undefined) return [];
+  // Retain caught loader failures without exposing the replay module namespace.
+  if (file === 'scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts'
+    && imported.value === '../substrate-federated-isolated-devnet-portable-replay-v1.js'
+    && imported.form === 'dynamic-import' && imported.bindings.length === 1
+    && imported.bindings[0]!.imported === 'replaySubstrateFederatedIsolatedDevnetPortableV1'
+    && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (imported.form !== 'named-import') {
     return [{
       file,
@@ -2240,12 +2561,17 @@ function collectCapabilityRestrictedLayerViolations(
             .get(file)
             ?.get(restricted.moduleSpecifier)
             ?.has(restricted.binding) === true;
+        const isReviewedErasedTypeReference =
+          REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS.has(file)
+          && ((ts.isTypeQueryNode(node.parent) && node.parent.exprName === node)
+            || (ts.isTypeReferenceNode(node.parent) && node.parent.typeName === node));
         if (
           !isReviewedEcdhCall
           && !isReviewedCryptoFactoryCall
           && !isReviewedDirectCall
           && !isReviewedStateTrackerConstruction
           && !isReviewedReadOnlyValue
+          && !isReviewedErasedTypeReference
         ) {
           addViolation(
             node,
@@ -2555,6 +2881,12 @@ export function inspectLayerImports(
           // Escape analysis tracks canonical specifiers; equivalent spellings must not bypass it.
           if (imported.value !== specifier) {
             violations.push(...inspectRestrictedImportBindings(file, imported, new Set()));
+          } else if (REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS.has(file)) {
+            violations.push(...inspectRestrictedImportBindings(
+              file,
+              imported,
+              restrictedImports!.get(specifier)!,
+            ));
           }
           break;
         }

@@ -446,7 +446,7 @@ const OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT = 11;
 const ACTION_COMPLETION_BUDGET_MS =
   (MAX_CONFIRMATION_WINDOWS * TRANSACTION_CONFIRMATION_BUDGET_MS)
   + NON_CONFIRMATION_ACTION_BUDGET_MS;
-const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS =
+export const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS =
   (
     (MAX_CONFIRMATION_WINDOWS
       + APPLICATION_CHECKPOINT_ADDITIONAL_CONFIRMATION_WINDOWS)
@@ -4406,7 +4406,7 @@ const TRACKER_TRANSPORT_SENSITIVE_PATH_PATTERN =
 const TRACKER_TRANSPORT_ATTEMPT_DIRECTORY =
   'tracker-transport-attempt' as const;
 
-function normalizeTrackerTransportJournalRootV9(value: unknown): string {
+export function normalizeTrackerTransportJournalRootV9(value: unknown): string {
   if (
     typeof value !== 'string'
     || value.length === 0
@@ -4485,7 +4485,7 @@ function normalizeTrackerTransportJournalRootV9(value: unknown): string {
   return assertReservedTrackerTransportJournalRootV9(ownedRoot);
 }
 
-function assertReservedTrackerTransportJournalRootV9(value: string): string {
+export function assertReservedTrackerTransportJournalRootV9(value: string): string {
   const requested = resolve(value);
   const status = lstatSync(requested);
   const canonical = realpathSync(requested);
@@ -8546,7 +8546,7 @@ function projectTrackerTransportCanonicalConfirmationV9(
   });
 }
 
-async function waitForCanonicalConfirmation(
+export async function waitForCanonicalConfirmation(
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   expectedTxId: string,
@@ -9020,7 +9020,7 @@ function assertNoLocalPathValue(value: unknown): void {
   }
 }
 
-function normalizePegInCandidatePlan(
+export function normalizePegInCandidatePlan(
   input:
     Readonly<RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input['pegIn']>,
 ): Readonly<PegInCandidatePlanV1> {
@@ -9064,7 +9064,7 @@ function normalizeFrontierMintProofConsumerPlan(
   );
 }
 
-function normalizeFrontierApplicationRunnerPlan(
+export function normalizeFrontierApplicationRunnerPlan(
   input:
     Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>,
 ): Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3> {
@@ -9114,7 +9114,7 @@ function normalizeFrontierApplicationRunnerPlan(
   );
 }
 
-function finalizeReceipt<T extends object>(
+export function finalizeReceipt<T extends object>(
   body: T,
   digestDomain: string,
 ): Readonly<T & { readonly receiptDigestHex: string }> {

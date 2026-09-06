@@ -6,14 +6,14 @@ interface Arguments {
 
 async function main(): Promise<void> {
   const args = parseArguments(process.argv.slice(2));
+  const { replaySubstrateFederatedIsolatedDevnetPortableV1 } =
+    await import('../substrate-federated-isolated-devnet-portable-replay-v1.js');
   const [
     { canonicalJson },
     { loadSubstrateFederatedIsolatedDevnetPortableReplayInputV1 },
-    { replaySubstrateFederatedIsolatedDevnetPortableV1 },
   ] = await Promise.all([
     import('../strict-json.js'),
     import('../substrate-federated-isolated-devnet-portable-replay-files-v1.js'),
-    import('../substrate-federated-isolated-devnet-portable-replay-v1.js'),
   ]);
   const input = loadSubstrateFederatedIsolatedDevnetPortableReplayInputV1(
     args.requestPath,
