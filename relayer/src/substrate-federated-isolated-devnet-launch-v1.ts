@@ -24,6 +24,15 @@ import {
 import type {
   SubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
+import type { SubstrateFederatedTrackerCompilerRequestV2 } from './substrate-federated-tracker-compiler-v2.js';
+import {
+  assertSubstrateFederatedTrackerJvmCompilerReceiptV2,
+  type SubstrateFederatedTrackerJvmCompilerReceiptV2,
+} from './substrate-federated-tracker-jvm-compiler-v2.js';
+import {
+  assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV2,
+  type SubstrateFederatedSettlementFamilyJvmCompilerReceiptV2,
+} from './substrate-federated-settlement-family-jvm-compiler-v2.js';
 import {
   VALIDITY_APPLICATION_POOLED_RESERVE_LEGACY_ROUTE_REQUIREMENTS_V6,
   type LegacyRouteRetirementRequirementV6,
@@ -423,6 +432,48 @@ export interface SubstrateFederatedIsolatedDevnetLaunchBaselineV1 {
 export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
   input: Readonly<DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input>,
 ): Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1> {
+  const body = {
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA,
+    version: 1 as const,
+    settlementNetworkId: 'ergo-testnet' as const,
+    ...deriveSourceCompilerClosure(input, 1),
+  };
+  const descriptor = deepFreeze({
+    ...body,
+    descriptorDigestHex: sha256CanonicalJson(
+      body,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN,
+    ),
+  });
+  targetDescriptors.add(descriptor);
+  return descriptor;
+}
+
+export interface DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input
+  extends Omit<DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
+    'trackerRequest' | 'trackerReceipt' | 'familyReceipt'> {
+  readonly trackerRequest: Readonly<SubstrateFederatedTrackerCompilerRequestV2>;
+  readonly trackerReceipt: Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV2>;
+  readonly familyReceipt: Readonly<SubstrateFederatedSettlementFamilyJvmCompilerReceiptV2>;
+}
+
+export type SubstrateFederatedIsolatedDevnetSourceCompilerClosureV2 = Omit<
+  SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  'schema' | 'version' | 'descriptorDigestHex' | 'settlementNetworkId'
+>;
+
+/** Source/compiled bytes only; this does not issue a V1 target or launch receipt. */
+export function deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetSourceCompilerClosureV2> {
+  return deriveSourceCompilerClosure(input, 2);
+}
+
+function deriveSourceCompilerClosure(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input
+    | DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>,
+  compilerVersion: 1 | 2,
+): Readonly<SubstrateFederatedIsolatedDevnetSourceCompilerClosureV2> {
   exactRecord(input, [
     'trackerRequest',
     'trackerReceipt',
@@ -442,7 +493,19 @@ export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
     'expectedSourceAttestationKeySetDigestHex',
     'expectedSourceAttestationThreshold',
   ], 'isolated-devnet target trust pins');
-  assertCompilerClosure(input);
+  if (compilerVersion === 1) {
+    assertCompilerClosure(input as DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input);
+  } else {
+    const current = input as DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input;
+    assertSubstrateFederatedTrackerJvmCompilerReceiptV2(current.trackerReceipt, current.trackerRequest);
+    assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV2(current.familyReceipt, {
+      trackerRequest: current.trackerRequest,
+      trackerReceipt: current.trackerReceipt,
+      templates: current.familyTemplates,
+      duplicatePreventionGenesisInputBoxIdHex: current.familyReceipt.profile.duplicatePreventionNftIdHex,
+      pooledReserveGenesisInputBoxIdHex: current.familyReceipt.profile.pooledReserveNftIdHex,
+    });
+  }
   const tracker = input.trackerRequest;
   const family = input.familyReceipt;
   const familyProfile = decodeSubstrateFederatedSettlementFamilyV1Profile(
@@ -479,9 +542,6 @@ export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
     throw new Error('isolated-devnet source-attestation threshold pin differs');
   }
   const body = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA,
-    version: 1 as const,
-    settlementNetworkId: 'ergo-testnet' as const,
     sourceNetworkScope: 'isolated-devnet' as const,
     trustModel: 'federated_non_trustless' as const,
     compiler: {
@@ -532,15 +592,7 @@ export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
     },
     boundaries: falseBoundaries(),
   };
-  const descriptor = deepFreeze({
-    ...body,
-    descriptorDigestHex: sha256CanonicalJson(
-      body,
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN,
-    ),
-  });
-  targetDescriptors.add(descriptor);
-  return descriptor;
+  return deepFreeze(body);
 }
 
 export function inspectSubstrateFederatedAuthoritySafeDevnetHistoryBundleV1(
@@ -1134,7 +1186,8 @@ function assertCompilerClosure(
 }
 
 function assertCompilerSemanticJoin(
-  tracker: Readonly<SubstrateFederatedTrackerCompilerRequestV1>,
+  tracker: Readonly<Pick<SubstrateFederatedTrackerCompilerRequestV1,
+    'trackerNftIdHex' | 'application' | 'profile'>>,
   family: ReturnType<typeof decodeSubstrateFederatedSettlementFamilyV1Profile>,
 ): void {
   const pairs: readonly (readonly [unknown, unknown, string])[] = [

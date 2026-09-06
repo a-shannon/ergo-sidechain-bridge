@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind the genuine V2 family and observed genesis identities into the no-submit setup path, then check fresh chain-resident boxes before transport | V157 verifies dependent-family compilation from the genuine V2 tracker; 33 focused tests and independent source review pass. V156 supplies observed tracker construction and V155 pinned-node synthetic-state checks. Full setup identity, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the V3 local provisioning plan to the no-submit setup request and checker, then check fresh chain-resident boxes before transport | V158 constructs all three unsigned genesis issuances from genuine V2 compiler receipts and observed funding identities; 27 direct and 222 regression tests pass. V155 retains its pinned-node synthetic-state scope. Setup signing/checking, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -339,6 +339,47 @@ The immediate campaign remains isolated and synthetic. This plan does not
 authorize public-network operations, real funds, existing secrets, a bypass of
 ContextExtension guards, or node-wallet signing. Signing, checking, submission
 and broadcast retain separate exact-candidate authorizations and revalidation.
+
+### V2 Family To Local Genesis Transactions
+
+V158 connects the genuine V2 tracker and dependent-family compiler receipts to
+an explicit V3 local settlement target and three unsigned genesis issuances.
+The target binds the source history, application, federation, compiled trees
+and each observed funding-box identity. It does not manufacture a V1 compiler
+receipt or route the V2 tracker through the V1 compatibility target.
+
+The constructor reuses the existing pure register and transaction builders.
+Each issued NFT is bound to its own consumed funding box, with exact compiled
+tree, registers, value, miner fee and change. The V3 issuance height is the
+fresh observed tip plus one, within the signed-Int range. V2 retains its
+existing height rule and accepts only its original V1 compiler path.
+
+| Producer -> consumer | Required evidence | Failure prevented |
+|---|---|---|
+| V2 compiler receipts and source history -> V3 target | Genuine compiler provenance; exact application, quorum, singleton and history bindings | Substituting a different contract family or source under the target identity |
+| V3 target and fresh observation -> unsigned issuances | Revalidated canonical JSON/Sigma funding bytes; exact three roles, values, tokens and registers | Issuing unrelated singleton identities or using stale/mismatched funding |
+| Retained target -> asynchronous construction and reobservation | Frozen references, separate V3 provenance and currentness bounds | Caller replacement during construction or cross-version receipt reuse |
+
+This local lab intent retains empty replay initialization without claiming
+authenticated predecessor non-instantiation. It is not the greenfield or
+migration authorization required for institutional operation. Synthetic
+endpoint agreement also does not establish canonical chain membership.
+
+The direct 27-case matrix uses genuine V1/V2 JVM compiler receipts and canonical
+WASM funding boxes observed through two read-only loopback endpoints. It checks
+the three issuance bodies and round-trips, old V2 identity rules, cross-version
+and copied provenance, source-history pin drift, each funding identity,
+malformed/noncanonical Sigma and JSON/binary mismatch for each input,
+freshness before and after construction, signed-Int limits and caller mutation.
+The three affected regression files pass 222 tests; Node24 TypeScript and layer
+import checks pass. Unchanged contract, Rust/WASM and node matrices retain
+their previous scope. Release evidence and activation claims do not change.
+
+The next consumer is the no-submit setup request and checker. They must accept
+the genuine V3 plan, preserve its exact unsigned transactions, and revalidate
+the selected target before signing and node checks. Current setup-check V2
+remains on its original path; no campaign activation or transport follows from
+this construction result.
 
 ### Fresh-Owner Application Join
 
