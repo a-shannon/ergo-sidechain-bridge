@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -120,7 +120,8 @@ import {
   takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3 as takeCheckV3,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
-import { discoverSubstrateFederatedRewardInputsV1 } from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
+import { discoverSubstrateFederatedRewardInputsV1, discoverSubstrateFederatedRewardInputsV2 }
+  from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
 import type { SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt } from './substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import type { Eip12Box, MaterializedUnsignedTransaction } from './unsigned-ergo-transaction.js';
 
@@ -1591,6 +1592,152 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT !== undefined)(
       finally { session.dispose(); }
     }
   // The owned manager bounds and joins work; Vitest must not detach its cleanup.
+  }, 0,
+);
+
+// A separate opt-in from the read-only node check: local synthetic genesis only.
+it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
+  'confirms three V3 genesis transactions on fresh owned Ergo nodes', async () => {
+    const receiptPath = process.env.BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT;
+    const javaExecutablePath = process.env.BRIDGE_TRACKER_V2_JAVA;
+    const nodeAssemblyJarPath = process.env.BRIDGE_TRACKER_V2_NODE_JAR;
+    if (!receiptPath || !javaExecutablePath || !nodeAssemblyJarPath) {
+      throw new Error('explicit local build receipt, Java and node artifact paths are required');
+    }
+    const build: SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt = JSON.parse(
+      readFileSync(receiptPath, 'utf8'),
+    );
+    const lock = JSON.parse(readFileSync(new URL(
+      '../../sources/substrate-federated-isolated-devnet-node-build-lock-v1.json', import.meta.url,
+    ), 'utf8'));
+    expect(build.status).toBe('exact_locked_patched_node_built');
+    expect(build.source.ergoNodeBaseCommit).toBe(lock.ergoNodeBaseCommit);
+    expect(build.source.ergoPatchSha256Hex).toBe(lock.ergoPatchSha256);
+    expect(build.toolchain.javaHomeSha256Hex).toBe(lock.javaHomeSha256);
+    const session = await createSession();
+    let nodes: ReturnType<typeof ownedTargets.createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2> | undefined;
+    let journalRoot: string | undefined;
+    let state: StateTracker | undefined;
+    let failure: unknown;
+    let result: unknown;
+    try {
+      nodes = ownedTargets.createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2({
+        javaExecutablePath,
+        expectedJavaExecutableSha256Hex: build.toolchain.javaExecutableSha256Hex,
+        nodeAssemblyJarPath,
+        expectedNodeAssemblyJarSha256Hex: build.build.artifactSha256Hex,
+        buildIdentityDigestHex: build.buildIdentityDigestHex,
+      }, {
+        miningTargetPublicKeyHex: session.signer.publicKeyHex,
+        p2pkErgoTreeHex: session.signer.p2pkErgoTreeHex,
+        rewardInputErgoTrees: session.signer.rewardInputErgoTrees,
+        networkPrefix: session.signer.networkPrefix,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, session.miningCredential);
+      await nodes.startMining();
+      const confirmed = await nodes.withMiningActiveExecutionTarget(async target => {
+        ownedTargets.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+        const funding = await discoverSubstrateFederatedRewardInputsV2(session.signer);
+        expect(funding.target.tipHeight).toBeGreaterThanOrEqual(10);
+        const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+          trackerGenesisInputBoxIdHex: funding.genesisBoxIds.tracker,
+          profile, application: compilerV3.trackerRequest.application,
+          template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
+        });
+        if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
+          throw new Error('Vitest parent NODE_OPTIONS is not the reviewed harness value');
+        }
+        const nodeOptions = process.env.NODE_OPTIONS;
+        delete process.env.NODE_OPTIONS;
+        let compiled: CompilerInputV3;
+        try {
+          const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
+          const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
+            trackerRequest, trackerReceipt, templates: compilerV3.familyTemplates,
+            duplicatePreventionGenesisInputBoxIdHex: funding.genesisBoxIds.duplicatePrevention,
+            pooledReserveGenesisInputBoxIdHex: funding.genesisBoxIds.pooledReserve,
+          });
+          // Source history remains synthetic; this run decides Ergo genesis only.
+          compiled = { ...compilerV3, trackerRequest, trackerReceipt, familyReceipt };
+        } finally { process.env.NODE_OPTIONS = nodeOptions; }
+        const root = mkdtempSync(join(tmpdir(), 'e2s-v167-genesis-'));
+        journalRoot = root;
+        const markerDirectory = join(root, 'attempt-markers');
+        mkdirSync(markerDirectory);
+        const journalState = new StateTracker(join(root, 'state-store'));
+        state = journalState;
+        const checks: Record<string, unknown>[] = [];
+        const submissions: Record<string, unknown>[] = [];
+        const post = axios.post.bind(axios);
+        const capture = vi.spyOn(axios, 'post').mockImplementation(async (...args) => {
+          const path = String(args[0]);
+          if (path !== target.primaryNodeOrigin + '/transactions/check'
+            && path !== target.primaryNodeOrigin + '/transactions') {
+            throw new Error('unexpected POST outside owned genesis check/submission');
+          }
+          const body = args[1];
+          if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+            throw new Error('genesis POST body is not an object');
+          }
+          (path.endsWith('/check') ? checks : submissions)
+            .push(structuredClone(body as Record<string, unknown>));
+          return post(...args);
+        });
+        try {
+          const batch = await session.runForExecutionV3({
+            ...rootInput(compiled),
+            expectedSettlementGenesisHeaderIdHex: funding.target.genesisHeaderIdHex,
+          }, target);
+          expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex))
+            .toThrow(/revoked/);
+          const confirmations = await executeGenesisBatchV3({
+            target, batch, state: journalState, markerDirectory,
+          });
+          expect(confirmations.map(value => value.role)).toEqual(roles);
+          expect(confirmations.map(value => value.expectedTxId))
+            .toEqual(batch.orderedTransactions.map(value => value.issuance.unsignedTransactionIdHex));
+          expect(checks).toHaveLength(3);
+          expect(submissions).toEqual(checks);
+          expect(journalState.getActiveErgoOperationalTransactionAttempts(GENESIS_OPERATION_PROFILE)).toHaveLength(0);
+          expect(journalState.getConfirmedErgoOperationalTransactionAttempts(GENESIS_OPERATION_PROFILE)).toHaveLength(3);
+          await expect(executeGenesisBatchV3({ target, batch, state: journalState, markerDirectory }))
+            .rejects.toThrow(/consumed|provenance/);
+          expect(submissions).toHaveLength(3);
+          ownedTargets.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+          return {
+            buildIdentityDigestHex: build.buildIdentityDigestHex,
+            nodeArtifactSha256Hex: build.build.artifactSha256Hex,
+            genesisHeaderIdHex: funding.target.genesisHeaderIdHex,
+            requestDigestHex: batch.request.requestDigestHex,
+            trackerErgoTreeSha256Hex: compiled.trackerReceipt.contract.propositionSha256Hex,
+            confirmations,
+          };
+        } finally { capture.mockRestore(); }
+      });
+      result = confirmed;
+    } catch (error) { failure = error; }
+    const cleanupErrors: unknown[] = [];
+    let chainDestroyed = nodes === undefined;
+    try { await nodes?.stop(); chainDestroyed = true; }
+    catch (error) { cleanupErrors.push(error); }
+    try { state?.close(); }
+    catch (error) { cleanupErrors.push(error); }
+    try { session.dispose(); }
+    catch (error) { cleanupErrors.push(error); }
+    if (chainDestroyed && journalRoot !== undefined) {
+      try { rmSync(journalRoot, { recursive: true, force: false }); }
+      catch (error) { cleanupErrors.push(error); }
+    }
+    if (failure !== undefined || cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [...(failure === undefined ? [] : [failure]), ...cleanupErrors],
+        'owned V3 genesis confirmation failed or cleanup was incomplete',
+      );
+    }
+    expect(result).toBeDefined();
+    console.info('V3_NODE_GENESIS_CONFIRMED', JSON.stringify(result));
+  // The owned manager bounds and joins work before its cleanup; do not detach it.
   }, 0,
 );
 

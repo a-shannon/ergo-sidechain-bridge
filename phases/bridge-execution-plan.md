@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the genesis-only V3 composition to a fresh owned-target callback; establish ordered node confirmations before tracker admission | V161 checks three genesis issuances without submission. V162-V165 retain, revalidate, authorize and transport exact checked candidates. V166 composes those steps with the journal and ordered confirmation observer. The managed V3 caller, fresh-target confirmation and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Extend a fresh owned-target run from confirmed V3 genesis to one externally funded V2 tracker update, preserving distinct signing and mining custody | V161 checks genesis; V162-V166 connect exact checked candidates to ordered execution. V167 confirms all three genesis transactions on fresh owned nodes. The tracker update and operational V3 caller remain open. Retain any needed continuation before its owner closes; do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -654,6 +654,51 @@ proofs, signed shapes and build pins remain unchanged. Prior V161 checks retain
 their original scope; neither Gate 5 nor the complete FED withdrawal closes here.
 
 ### Fresh-Owner Application Join
+
+#### Fresh Owned Genesis Confirmation
+
+The V167 integration case connects V166 directly to the existing process-owned
+`withMiningActiveExecutionTarget` callback. It discovers fresh reward inputs,
+using the existing snapshot-anchored V2 discovery while mining continues,
+compiles the V2 tracker and settlement family for those exact identities,
+creates the retained V3 batch, then uses its unchanged checked bytes through
+the fixed journal, transport and confirmation observer. No custody, node,
+checker, confirmation or compiler response is replaced in this case. Source
+history remains synthetic; the deciding scope is Ergo genesis, not a completed
+sidechain exit or independently authenticated source consensus.
+
+It is disabled in ordinary tests and CI. The existing build-receipt, Java and
+node-JAR integration inputs are required, plus the separate explicit opt-in
+`BRIDGE_TRACKER_V2_EXECUTE_GENESIS=1`. Select only
+`confirms three V3 genesis transactions on fresh owned Ergo nodes` in
+`src/substrate-federated-isolated-devnet-tracker-v2-provisioning.test.ts`.
+The read-only `checks V3 genesis on fresh owned Ergo nodes without submitting`
+case remains separate and unchanged.
+
+The confirmation case permits exactly the local genesis check/submission
+endpoints, compares all three submitted bodies with the checked bodies,
+requires three confirmed and zero active journal entries, and rejects another
+execution of the consumed batch without another POST. It joins managed work
+before teardown and removes the fresh journal only after owned-chain cleanup
+succeeds. A node failure or incomplete cleanup fails the run; elapsed time,
+HTTP acceptance or a local row alone is not confirmation evidence.
+
+The first target run passes on the pinned patched Ergo node: three genesis
+transactions accepted and confirmed, in order, at heights 22, 41 and 60. The
+process starts from the common indexed height 10 and finishes at height 75.
+Both actual node views, the real journal and unchanged checked transaction
+bodies agree. Re-executing the consumed batch rejects without another POST.
+Owned nodes and their journal are stopped and removed after the successful
+run. The initial mining-active discovery error was caught in independent
+review and corrected to V2 before any node launch; its 20 existing tests pass.
+
+V166's unchanged negative matrices, compiler/VM checks and exact build pins are
+reused. V167 adds a real target confirmation result, not another simulated
+confirmation claim. This harness is not an operational CLI or a replacement
+for the retained-peg-in-signer campaign. Next, compose one externally funded V2
+tracker update in a fresh owned-target lifetime, with any required continuation
+claimed before its owner closes. Canonical tracker update, complete withdrawal,
+recovery and the separate Gate 5 upgrade remain open.
 
 | Batch | Deliverable | State and deciding check |
 |---|---|---|
