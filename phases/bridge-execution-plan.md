@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked funding -> tracker transport -> canonical admission | Consume V168's exact checked fee-funding candidate through authorization, journal, transport and confirmation, then admit one externally funded V2 tracker update in the same fresh owned-target campaign | V167 confirms all three V3 genesis transactions on fresh owned nodes. V168 repeats that prerequisite and checks the separate operator-funded fee transaction on the real node without submitting it. Fee-box confirmation, tracker admission and the operational V3 caller remain open. Retain any needed continuation before its owner closes; do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
+| **Now** | FED-6-LAB funded V2 tracker -> exact check -> canonical admission | Connect the external-fee tracker-protocol V2 transaction to the frozen checkpoint checker, then exercise fee funding and tracker admission in one fresh owned-target campaign | V168 checks the operator-funded fee transaction on the real node without submitting it. V169 adds its explicit authorization, durable journal, fixed transport and confirmation consumer, covered by component fixtures. Actual fee-box confirmation, tracker admission and the operational V3 caller remain open. Retain any needed continuation before its owner closes; do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -738,14 +738,49 @@ review covers the six-file change; the live run adds target evidence without
 changing the reviewed runtime sources. Unchanged contracts, formats, VM matrices
 and build identities retain their previous validation.
 
-Next, consume the exact checked funding handle through authorization, journal,
-transport and confirmation, then connect the externally funded V2 tracker to
-the frozen checkpoint checker. Group both joins in the next real-node campaign;
+V169 adds the funding lifecycle below. Next, connect the externally funded V2
+tracker to the frozen checkpoint checker. Group both joins in the next real-node campaign;
 do not rerun genesis or funding-check-only campaigns while their inputs remain
 unchanged. The existing check-kernel V2 names a target
 version, not tracker-protocol V2; it still accepts the V1 one-input shape.
 Keep those formats distinct and retain any required mining credentials before
 setup custody closes. Full withdrawal and Gate 5 remain open.
+
+#### Durable Tracker Fee Funding
+
+V169 connects the retained checked funding transaction to the application root.
+An explicit one-use authorization binds the exact request, owned target,
+signed candidate and node check. A separate operational profile reserves the
+attempt before the fixed transport can consume its checked handle. Source
+observations on both owned nodes and a same-byte node check run immediately
+before transport; the signer is not reopened.
+
+Only the fixed transport's actual, same-attempt result can finalize the journal,
+once. A canonical confirmation must come from the bound observer and match the
+exact fee output on both nodes. Ambiguous transport can be resolved by that
+confirmation, not by resubmitting. Confirmation fields are frozen before I/O;
+durable readback checks every reservation field and its independently derived
+digest. A journal row does not recreate authorization.
+
+The new profile requires a fresh LAB schema with its context constraints and
+active-attempt uniqueness rule. Existing databases keep their previous profile
+behavior but reject this new profile when those constraints are absent; no
+history is migrated or discarded. Previously journaled funding inputs cannot
+be reused, and confirmed funding cannot be reopened after rollback.
+
+The fifteen component scenarios cover valid and ambiguous confirmation, forged
+checks, wrong targets, persistence failure, journal drift, source drift before
+and after the last check, node-check rejection, wrong confirmed fee output,
+concurrent execution, fabricated/copied/reused transport results, asynchronous
+confirmation mutation and seventeen independent reservation-field mutations.
+They exercise real WASM signing and fresh test-owned SQLite through bounded
+HTTP fixtures with explicit process-ownership oracles. They do not establish
+actual node confirmation, tracker admission or a completed withdrawal.
+
+The affected-consumer closure and independent review decide this component
+checkpoint. Contracts, transaction shapes, serialized formats and build pins
+are unchanged. Reuse their existing JVM/build evidence; the next actual-node
+campaign must cover funding confirmation and tracker admission together.
 
 | Batch | Deliverable | State and deciding check |
 |---|---|---|

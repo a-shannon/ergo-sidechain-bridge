@@ -14,6 +14,8 @@ export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE =
   'e2s.substrate-federated-local-devnet-genesis-operation.v1' as const;
 export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE =
   'e2s.substrate-federated-local-devnet-peg-in-source-lock-operation.v1' as const;
+export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE =
+  'e2s.substrate-federated-local-devnet-tracker-fee-funding-operation.v1' as const;
 
 const OPERATION_BINDING_DIGEST_DOMAIN =
   'E2S_ERGO_OPERATIONAL_TRANSACTION_BINDING_V1';
@@ -24,7 +26,8 @@ export type ErgoOperationalTransactionProfile =
   | typeof DUP_HEARTBEAT_OPERATION_PROFILE
   | typeof DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
-  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE;
+  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE;
 
 export interface ErgoOperationalTransactionInput {
   readonly operationProfile: ErgoOperationalTransactionProfile;
@@ -308,6 +311,8 @@ function normalizeOperationContext(input: ErgoOperationalTransactionInput): {
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+    || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
   ) {
     if (
       input.targetSidechainHeight != null

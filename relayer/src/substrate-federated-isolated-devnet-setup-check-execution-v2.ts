@@ -168,6 +168,31 @@ const EXECUTION_BATCHES_V3 = new WeakMap<
     binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
   }>
 >();
+export interface SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1 {
+  readonly transaction: Readonly<MaterializedUnsignedTransaction>;
+  readonly signedCandidate: Readonly<LocalWasmExactBytesSignedCheckCandidate>;
+  readonly checkedAcceptance: Readonly<LocalWasmCheckedSubmissionAcceptanceV1>;
+}
+
+const TRACKER_FEE_CHECKS = new WeakMap<object, Readonly<{
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+}>>();
+const CLAIMED_TRACKER_FEE_CHECKS = new WeakSet<object>();
+
+/** Claim only a genuine retained-signer result; a JSON copy cannot restore it. */
+export function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(
+  check: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  const material = TRACKER_FEE_CHECKS.get(check);
+  if (material === undefined || material.target !== target || CLAIMED_TRACKER_FEE_CHECKS.has(check)) {
+    throw new Error('tracker fee funding check lacks unconsumed exact provenance');
+  }
+  const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(material.batch, target);
+  CLAIMED_TRACKER_FEE_CHECKS.add(check);
+  return Object.freeze({ batch: material.batch, binding });
+}
 const FAMILY_EXECUTION_BATCHES = new WeakMap<
   object,
   Readonly<{
@@ -324,11 +349,7 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
   readonly checkTrackerFeeFundingV3: (
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-  ) => Promise<Readonly<{
-    transaction: Readonly<MaterializedUnsignedTransaction>;
-    signedCandidate: Readonly<LocalWasmExactBytesSignedCheckCandidate>;
-    checkedAcceptance: Readonly<LocalWasmCheckedSubmissionAcceptanceV1>;
-  }>>;
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>>;
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1320,7 +1341,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         await reobserve();
         const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding);
         assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-        return Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
+        const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
+        TRACKER_FEE_CHECKS.set(result, Object.freeze({ batch: continuation.batch, target }));
+        return result;
       }, 'closed'),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,

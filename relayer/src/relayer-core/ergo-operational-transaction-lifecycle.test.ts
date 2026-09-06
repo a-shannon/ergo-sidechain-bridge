@@ -6,6 +6,8 @@ import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   SCS_ORACLE_UPDATE_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
   admitErgoOperationalTransaction,
   executeErgoOperationalTransaction,
   type ErgoOperationalSubmission,
@@ -138,6 +140,52 @@ function fixture(options: FixtureOptions = {}) {
 }
 
 describe('Ergo operational transaction lifecycle', () => {
+  it('binds tracker fee funding to its own profile without acquiring context or authority', () => {
+    expect(SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE)
+      .toBe('e2s.substrate-federated-local-devnet-tracker-fee-funding-operation.v1');
+    const admission = admitErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+    }));
+    expect(admission).toMatchObject({
+      targetSidechainHeight: null,
+      targetSidechainBlockHashHex: null,
+      heartbeatKeyHex: null,
+    });
+    for (const operationProfile of [
+      PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+      DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+      SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+    ]) {
+      expect(admission.bindingDigestHex).not.toBe(
+        admitErgoOperationalTransaction(input({ operationProfile })).bindingDigestHex,
+      );
+    }
+  });
+
+  it.each([
+    { targetSidechainHeight: 1 },
+    { targetSidechainBlockHashHex: hex('21') },
+    { heartbeatKeyHex: HEARTBEAT_KEY },
+  ])('rejects independent tracker fee funding context drift %j before capabilities run', async patch => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+      ...patch,
+    }), flow.ports)).rejects.toThrow(/forbids sidechain and heartbeat context/);
+    expect(flow.events).toEqual([]);
+  });
+
+  it('keeps tracker fee funding in the exact ordered lifecycle', async () => {
+    const flow = fixture();
+    await expect(executeErgoOperationalTransaction(input({
+      operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+    }), flow.ports)).resolves.toMatchObject({ status: 'accepted' });
+    expect(flow.events).toEqual([
+      'sign', 'check', 'revalidate', 'authorize', 'reserve', 'submit', 'finalize:accepted',
+    ]);
+  });
+
   it('orders every stage and records the durable reservation before transport', async () => {
     const flow = fixture();
 

@@ -17,16 +17,27 @@ import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-rew
 import * as fleet from './fleet-signer.js';
 import * as ergoHelpers from './ergo-helpers.js';
 import { StateTracker } from './state-tracker.js';
-import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesisBatchV3 }
+import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesisBatchV3,
+  executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as executeFeeFunding }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
-import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE as GENESIS_OPERATION_PROFILE }
+import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE as GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as FEE_OPERATION_PROFILE }
   from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { createSubstrateFederatedLocalDevnetGenesisJournalV1 as createGenesisJournal }
   from './substrate-federated-local-devnet-genesis-journal-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1 as createTransportV1,
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2 as createTransportV2,
+  submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as submitFeeFunding,
+  finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as finalizeFeeFunding,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as authorizeFeeFunding,
+  reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as reserveFeeFunding,
+  claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1 as claimFeeTransport,
+  requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1 as requireFeeFinalization,
+  confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as confirmFeeFunding,
+} from './substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1 as createAuthorizerV1,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 as createAuthorizerV2,
@@ -1230,6 +1241,159 @@ describe('owned synthetic session -> V3 execution promotion', () => {
 });
 
 describe('owned synthetic session -> V3 no-submit setup root', () => {
+  it.each(['valid', 'ambiguous-response', 'forged-check', 'wrong-target', 'journal-failure',
+    'journal-drift', 'pretransport-source-drift', 'post-check-source-drift',
+    'pretransport-check-rejected', 'wrong-confirmed-fee', 'concurrent-execution',
+    'reservation-field-drift', 'fabricated-transport-result', 'copied-transport-result', 'mutable-confirmation'] as const)(
+    'executes only the exact durably reserved V3 fee funding: %s', async fault => {
+      const fixture = await createRootFixture();
+      const state = new StateTracker(':memory:');
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue(executionBinding);
+      try {
+        await withObservations(async observed => {
+          const target = executionTarget();
+          const batch = await fixture.session.runForExecutionV3RetainingTrackerFeeSigner(fixture.input, target, checkPublicKey);
+          const genesis = wasm.UnsignedTransaction.from_json(JSON.stringify(batch.orderedTransactions[0]!.issuance.unsignedTransactionBody));
+          const id = genesis.id();
+          const outputs = genesis.output_candidates();
+          const output = outputs.get(1);
+          const box = wasm.ErgoBox.from_box_candidate(output, id, 1);
+          let source: Eip12Box;
+          try { source = box.to_js_eip12(); }
+          finally { box.free(); output.free(); outputs.free(); id.free(); genesis.free(); }
+          const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+            currentHeight: source.creationHeight + 12, anchorContextIndex: 1,
+            anchorExtensionRootHex: '25'.repeat(32),
+          }).headers.map(header => header.raw);
+          observed.publishBox(source, headers);
+          const checked = await fixture.session.checkTrackerFeeFundingV3(target);
+          if (['reservation-field-drift', 'fabricated-transport-result', 'copied-transport-result', 'mutable-confirmation'].includes(fault)) {
+            const authorization = await authorizeFeeFunding(checked, target);
+            const attempt = reserveFeeFunding(authorization, state);
+            if (fault === 'reservation-field-drift' || fault === 'fabricated-transport-result') {
+              await claimFeeTransport(attempt, target);
+              if (fault === 'reservation-field-drift') {
+                const get = state.getErgoOperationalTransactionAttempt.bind(state);
+                const row = get(attempt.expectedTxId)!;
+                for (const patch of [
+                  { schema: 'different' }, { operationProfile: GENESIS_OPERATION_PROFILE },
+                  { expectedTxId: 'ef'.repeat(32) }, { sourceBoxId: 'ef'.repeat(32) },
+                  { inputBoxIds: ['ef'.repeat(32)] }, { attemptedAtHeight: row.attemptedAtHeight + 1 },
+                  { targetSidechainHeight: 1 }, { targetSidechainBlockHashHex: 'ef'.repeat(32) },
+                  { heartbeatKeyHex: 'ef'.repeat(32) }, { reconciliationIdentityDigestHex: 'ef'.repeat(32) },
+                  { bindingDigestHex: 'ef'.repeat(32) }, { signedTransactionDigestHex: 'ef'.repeat(32) },
+                  { checkResponseDigestHex: 'ef'.repeat(32) }, { revalidationDigestHex: 'ef'.repeat(32) },
+                  { authorizationDigestHex: 'ef'.repeat(32) }, { fundsReleaseAuthorityEpochHex: 'ef'.repeat(32) },
+                  { durableAttemptDigestHex: 'ef'.repeat(32) },
+                ]) {
+                  const drift = vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...row, ...patch } as typeof row);
+                  try { expect(() => requireFeeFinalization(attempt), Object.keys(patch)[0]).toThrow(/durable journal binding or state differs/); }
+                  finally { drift.mockRestore(); }
+                }
+              }
+              expect(() => finalizeFeeFunding(attempt, { status: 'accepted', submittedTxId: attempt.expectedTxId,
+                responseDigestHex: 'ef'.repeat(32) })).toThrow(/exact completed transport provenance/);
+              expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!.status).toBe('pending');
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            const submission = await submitFeeFunding(target, attempt);
+            expect(() => finalizeFeeFunding(attempt, { ...submission })).toThrow(/exact completed transport provenance/);
+            expect(() => finalizeFeeFunding({ ...attempt }, submission)).toThrow(/exact completed transport provenance/);
+            finalizeFeeFunding(attempt, submission);
+            expect(() => finalizeFeeFunding(attempt, submission)).toThrow(/exact completed transport provenance/);
+            const observer = createConfirmationObserver(target, authorization.genesisHeaderIdHex);
+            const original = (await observer.observe(attempt.expectedTxId, target.primaryNodeOrigin))!;
+            const mutable = { ...original };
+            const originalGet = ergoHelpers.ngetDirect;
+            const mutation = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+              if (fault === 'mutable-confirmation' && args[0] === `/utxo/byId/${checked.transaction.outputs[0]!.boxId}`) {
+                mutable.confirmationHeight = original.confirmationHeight! + 1;
+                mutable.confirmationHeaderIdHex = 'ef'.repeat(32);
+              }
+              return await originalGet(...args);
+            });
+            try {
+              const confirmed = await confirmFeeFunding(attempt, mutable);
+              expect(confirmed.confirmationHeight).toBe(original.confirmationHeight);
+              expect(confirmed.confirmationHeaderId).toBe(original.confirmationHeaderIdHex);
+              if (fault === 'mutable-confirmation') expect(mutable.confirmationHeaderIdHex).not.toBe(original.confirmationHeaderIdHex);
+              expect(observed.submissionBodies).toEqual([observed.checkBodies[3]]);
+            } finally { mutation.mockRestore(); }
+            return;
+          }
+          const originalGet = ergoHelpers.ngetDirect;
+          let sourceReads = 0;
+          const reads = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+            const result = await originalGet(...args);
+            if (args[0] === `/utxo/byId/${source.boxId}`) {
+              sourceReads += 1;
+              if ((fault === 'pretransport-source-drift' && sourceReads >= 3)
+                || (fault === 'post-check-source-drift' && observed.checkBodies.length === 5)) {
+                return checked.transaction.outputs[1];
+              }
+            }
+            if (fault === 'wrong-confirmed-fee' && args[0] === `/utxo/byId/${checked.transaction.outputs[0]!.boxId}`) {
+              return checked.transaction.outputs[1];
+            }
+            return result;
+          });
+          const reserve = state.reserveErgoOperationalTransactionAttempt.bind(state);
+          const get = state.getErgoOperationalTransactionAttempt.bind(state);
+          const reservation = vi.spyOn(state, 'reserveErgoOperationalTransactionAttempt').mockImplementation((...args) => {
+            expect(observed.submissionBodies).toHaveLength(0);
+            if (fault === 'journal-failure') throw new Error('synthetic journal persistence failed');
+            return reserve(...args);
+          });
+          let journalReads = 0;
+          const stored = vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockImplementation((...args) => {
+            const result = get(...args);
+            if (result !== null) journalReads += 1;
+            return fault === 'journal-drift' && journalReads >= 3
+              ? { ...result!, authorizationDigestHex: 'fe'.repeat(32) } : result;
+          });
+          const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+          try {
+            const pending = executeFeeFunding({ state,
+              target: fault === 'wrong-target' ? executionTarget() : target,
+              checked: fault === 'forged-check' ? { ...checked } : checked });
+            if (fault === 'concurrent-execution') {
+              await expect(executeFeeFunding({ state, target, checked })).rejects.toThrow(/unconsumed exact provenance/);
+            }
+            if (['valid', 'ambiguous-response', 'concurrent-execution'].includes(fault)) {
+              const result = await pending;
+              expect(result.expectedTxId).toBe(checked.transaction.txId);
+              expect(result.transportStatus).toBe(fault === 'ambiguous-response' ? 'ambiguous' : 'accepted');
+              expect(result.feeInputBox).toEqual(checked.transaction.outputs[0]);
+              expect(state.getConfirmedErgoOperationalTransactionAttempts(FEE_OPERATION_PROFILE)).toHaveLength(1);
+              expect(state.getActiveErgoOperationalTransactionAttempts(FEE_OPERATION_PROFILE)).toHaveLength(0);
+              expect(observed.submissionBodies).toEqual([observed.checkBodies[3]]);
+              expect(observed.checkBodies[4]).toEqual(observed.checkBodies[3]);
+            } else {
+              const expected = fault === 'journal-failure' ? /synthetic journal persistence failed/
+                : fault === 'journal-drift' ? /durable journal binding or state differs/
+                : fault === 'wrong-confirmed-fee' ? /confirmed tracker fee box differs/
+                : fault === 'pretransport-check-rejected' ? /pretransport node check failed/
+                : fault.endsWith('source-drift') ? /pretransport source differs/ : /unconsumed exact provenance/;
+              await expect(pending).rejects.toThrow(expected);
+              expect(observed.submissionBodies).toHaveLength(fault === 'wrong-confirmed-fee' ? 1 : 0);
+              expect(state.getConfirmedErgoOperationalTransactionAttempts(FEE_OPERATION_PROFILE)).toHaveLength(0);
+            }
+            if (!['forged-check', 'wrong-target'].includes(fault)) {
+              const before = observed.submissionBodies.length;
+              await expect(executeFeeFunding({ state, target, checked })).rejects.toThrow(/unconsumed exact provenance/);
+              expect(observed.submissionBodies).toHaveLength(before);
+            }
+          } finally { errors.mockRestore(); stored.mockRestore(); reservation.mockRestore(); reads.mockRestore(); }
+        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+          confirmSubmittedGenesis: true, publishSubmittedOutputs: true,
+          checkOracle: (body, index) => fault === 'pretransport-check-rejected' && index === 4 ? 'ff'.repeat(32) : signedCheckOracle(body),
+          submissionOracle: body => fault === 'ambiguous-response' ? 'ff'.repeat(32) : signedCheckOracle(body) });
+      } finally { custody.mockRestore(); state.close(); fixture.session.dispose(); }
+    }, 60_000,
+  );
+
   it.each(['valid', 'missing-source', 'source-drift', 'post-check-drift', 'wrong-target', 'check-rejected', 'disposed', 'concurrent-fee-check', 'dispose-while-running'] as const)(
     'limits retained V3 custody to one tracker fee funding check: %s', async fault => {
       const fixture = await createRootFixture();
@@ -1920,6 +2084,7 @@ function checkObservationOptions(): ObservationOptions {
 
 // Only these two bounded loopback origins exist while a test callback is active.
 interface ObservationOptions {
+  readonly publishSubmittedOutputs?: boolean;
   readonly boxes?: Boxes;
   readonly tipHeight?: number;
   readonly genesisHeaderId?: string;
@@ -1984,6 +2149,17 @@ async function withObservations<T>(
             confirmations.set(id, { inclusionHeight, headerId: syntheticHeaderId(inclusionHeight) });
             tipHeight = inclusionHeight + 10;
             tipHeaderId = syntheticHeaderId(tipHeight);
+            if (options.publishSubmittedOutputs) {
+              const transaction = wasm.Transaction.from_json(JSON.stringify(candidate));
+              const outputs = transaction.outputs();
+              try {
+                for (let i = 0; i < outputs.len(); i += 1) {
+                  const output = outputs.get(i);
+                  try { const box = output.to_js_eip12(); json.set(box.boxId, box); sigma.set(box.boxId, sigmaBytes(box)); }
+                  finally { output.free(); }
+                }
+              } finally { outputs.free(); transaction.free(); }
+            }
           }
           response.writeHead(200, { 'Content-Type': 'application/json' });
           response.end(JSON.stringify(body));

@@ -227,6 +227,7 @@ import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1,
   SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
   SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt,
 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
@@ -254,7 +255,15 @@ import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
+  submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  type SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1,
+} from '../../substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
 import {
   submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1,
 } from './substrate-federated-isolated-devnet-tracker-checked-transport-v1.js';
@@ -2429,6 +2438,34 @@ type GenesisExecutionBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecu
   | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
 type GenesisExecutionAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
   | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>;
+
+/** Execute the exact retained fee funding; the caller owns target and journal lifetime. */
+export async function executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  checked: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>;
+  state: SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1;
+}>) {
+  const { target, checked, state } = input;
+  const authorization = await authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(checked, target);
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, authorization.genesisHeaderIdHex);
+  const attempt = reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(authorization, state);
+  const submission = await submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(target, attempt);
+  const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, submission);
+  const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+    performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
+    'tracker-fee-funding');
+  const confirmed = await confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, confirmation);
+  return Object.freeze({
+    expectedTxId: attempt.expectedTxId,
+    durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+    transportStatus: submission.status,
+    journalDigestHex: finalized.journalDigestHex,
+    confirmationDigestHex: confirmation.observationDigestHex,
+    confirmationHeight: confirmed.confirmationHeight,
+    confirmationHeaderIdHex: confirmed.confirmationHeaderId,
+    feeInputBox: checked.transaction.outputs[0]!,
+  });
+}
 
 /** Execute retained V3 genesis only; the caller owns target and journal lifetime. */
 export async function executeSubstrateFederatedIsolatedDevnetGenesisBatchV3(input: Readonly<{

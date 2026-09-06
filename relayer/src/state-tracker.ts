@@ -98,6 +98,7 @@ import {
   SCS_ORACLE_UPDATE_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
   type ErgoOperationalTransactionProfile,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
@@ -1110,6 +1111,35 @@ function normalizeSettlementTxId(txId: string): string {
   return normalizeFixedHex(txId, 32, 'aggregate settlement tx id');
 }
 
+const ERGO_OPERATIONAL_PROFILE_SQL = `operation_profile IN (
+  '${PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE}',
+  '${SCS_ORACLE_UPDATE_OPERATION_PROFILE}',
+  '${DUP_HEARTBEAT_OPERATION_PROFILE}',
+  '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
+  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
+  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}',
+  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}'
+)`;
+const ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL = `
+  operation_profile = '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}'
+  AND target_sidechain_height IS NULL
+  AND target_sidechain_block_hash IS NULL
+  AND heartbeat_key_hex IS NULL
+  AND reconciliation_identity_digest IS NOT NULL
+`;
+const ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL = `
+  CREATE UNIQUE INDEX ergo_operational_active_singleton_profile
+  ON ergo_operational_transaction_attempts(operation_profile)
+  WHERE operation_profile IN (
+    '${SCS_ORACLE_UPDATE_OPERATION_PROFILE}',
+    '${DUP_HEARTBEAT_OPERATION_PROFILE}',
+    '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
+    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
+    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}',
+    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}'
+  ) AND status IN ('pending', 'accepted', 'ambiguous')
+`;
+
 function normalizeErgoOperationalTransactionProfile(
   value: string,
 ): ErgoOperationalTransactionProfile {
@@ -1121,6 +1151,8 @@ function normalizeErgoOperationalTransactionProfile(
     && value !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
     && value
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+    && value
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
   ) {
     throw new Error('unknown Ergo operational transaction profile');
   }
@@ -1206,6 +1238,8 @@ function normalizeErgoOperationalContext(input: {
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+    || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
   ) {
     if (
       input.targetSidechainHeight != null
@@ -1249,6 +1283,8 @@ function normalizeErgoOperationalReconciliationIdentity(
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
     || operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+    || operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
   ) {
     return normalizeFixedHex(
       String(value),
@@ -5263,16 +5299,7 @@ export class StateTracker {
         confirmed_at TEXT,
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         CHECK (schema = '${ERGO_OPERATIONAL_TRANSACTION_SCHEMA}'),
-        CHECK (
-          operation_profile IN (
-            '${PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE}',
-            '${SCS_ORACLE_UPDATE_OPERATION_PROFILE}',
-            '${DUP_HEARTBEAT_OPERATION_PROFILE}',
-            '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
-            '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
-            '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}'
-          )
-        ),
+        CHECK (${ERGO_OPERATIONAL_PROFILE_SQL}),
         CHECK (
           (
             operation_profile = '${PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE}'
@@ -5316,6 +5343,7 @@ export class StateTracker {
             AND heartbeat_key_hex IS NULL
             AND reconciliation_identity_digest IS NOT NULL
           )
+          OR (${ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL})
         ),
         CHECK (
           status IN (
@@ -5370,16 +5398,9 @@ export class StateTracker {
       CREATE UNIQUE INDEX IF NOT EXISTS ergo_operational_active_source
         ON ergo_operational_transaction_attempts(source_box_id)
         WHERE status IN ('pending', 'accepted', 'ambiguous');
-      CREATE UNIQUE INDEX IF NOT EXISTS ergo_operational_active_singleton_profile
-        ON ergo_operational_transaction_attempts(operation_profile)
-        WHERE operation_profile IN (
-          '${SCS_ORACLE_UPDATE_OPERATION_PROFILE}',
-          '${DUP_HEARTBEAT_OPERATION_PROFILE}',
-          '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
-          '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
-          '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}'
-        )
-          AND status IN ('pending', 'accepted', 'ambiguous');
+      ${ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL.replace(
+        'CREATE UNIQUE INDEX', 'CREATE UNIQUE INDEX IF NOT EXISTS',
+      )};
 
       CREATE TABLE IF NOT EXISTS substrate_federated_isolated_devnet_tracker_admission_reservations_v1 (
         schema TEXT NOT NULL,
@@ -15336,6 +15357,34 @@ export class StateTracker {
     return finalize.immediate();
   }
 
+  private assertErgoOperationalProfileSchema(
+    profile: ErgoOperationalTransactionProfile,
+  ): void {
+    if (profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE) {
+      return;
+    }
+    // IF NOT EXISTS does not upgrade old CHECK constraints or partial indexes.
+    // Only fresh LAB schemas support this profile; do not rebuild durable history.
+    const normalizeSql = (sql: string): string => sql.replace(/\s+/g, ' ').trim();
+    const readSql = (type: string, name: string): string => {
+      const row = this.db.prepare(`
+        SELECT sql FROM sqlite_master WHERE type = ? AND name = ?
+      `).get(type, name) as { sql: string } | undefined;
+      return normalizeSql(row?.sql ?? '');
+    };
+    const tableSql = readSql('table', 'ergo_operational_transaction_attempts');
+    const indexSql = readSql('index', 'ergo_operational_active_singleton_profile');
+    if (
+      !tableSql.includes(normalizeSql(`CHECK (${ERGO_OPERATIONAL_PROFILE_SQL})`))
+      || !tableSql.includes(normalizeSql(`OR (${ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL})`))
+      || indexSql !== normalizeSql(ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL)
+    ) {
+      throw new Error(
+        'tracker fee funding operational schema is unsupported; a fresh LAB database is required',
+      );
+    }
+  }
+
   reserveErgoOperationalTransactionAttempt(
     input: ReserveErgoOperationalTransactionAttemptInput,
     expectedFundsReleaseStateDigestHex?: string,
@@ -15437,6 +15486,7 @@ export class StateTracker {
       fundsReleaseAuthorityEpochHex,
     });
     const reserve = this.db.transaction(() => {
+      this.assertErgoOperationalProfileSchema(operationProfile);
       if (expectedFundsReleaseStateDigestHex !== undefined) {
         this.assertFundsReleaseAuthorized(
           expectedFundsReleaseStateDigestHex,
@@ -15455,6 +15505,8 @@ export class StateTracker {
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
           || operationProfile
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+          || operationProfile
+            === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
         )
         && this.getActiveErgoOperationalTransactionAttempts(operationProfile).length !== 0
       ) {
@@ -15462,7 +15514,12 @@ export class StateTracker {
           'an unresolved local devnet operational attempt must be reconciled before replacement',
         );
       }
-      if (operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE) {
+      if (
+        operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
+        || operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+      ) {
+        const boxLabel = operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
+          ? 'reward' : 'tracker fee funding';
         const inputSet = new Set(inputBoxIds);
         const priorRows = this.db.prepare(`
           SELECT input_box_ids_json
@@ -15472,15 +15529,15 @@ export class StateTracker {
         for (const row of priorRows) {
           const parsed = parseStrictJson(
             row.input_box_ids_json,
-            'prior reward consolidation input box IDs',
+            `prior ${boxLabel} input box IDs`,
           );
           if (!Array.isArray(parsed) || parsed.length === 0) {
-            throw new Error('prior reward consolidation input box IDs are invalid');
+            throw new Error(`prior ${boxLabel} input box IDs are invalid`);
           }
           const priorSourceBoxId = normalizeFixedHex(
             String(parsed[0]),
             32,
-            'prior reward consolidation source box ID',
+            `prior ${boxLabel} source box ID`,
           );
           const priorInputBoxIds = normalizeErgoOperationalInputBoxIds(
             parsed,
@@ -15488,7 +15545,7 @@ export class StateTracker {
           );
           if (priorInputBoxIds.some(boxId => inputSet.has(boxId))) {
             throw new Error(
-              'a previously journaled reward box cannot be used by a replacement transaction',
+              `a previously journaled ${boxLabel} box cannot be used by a replacement transaction`,
             );
           }
         }
@@ -15553,6 +15610,11 @@ export class StateTracker {
       SELECT * FROM ergo_operational_transaction_attempts
       WHERE expected_tx_id = ?
     `).get(normalizedTxId) as ErgoOperationalTransactionAttemptRow | undefined;
+    if (row) {
+      this.assertErgoOperationalProfileSchema(
+        normalizeErgoOperationalTransactionProfile(row.operation_profile),
+      );
+    }
     return row ? mapErgoOperationalTransactionAttempt(row) : null;
   }
 
@@ -15560,6 +15622,7 @@ export class StateTracker {
     operationProfile: ErgoOperationalTransactionProfile,
   ): ErgoOperationalTransactionAttempt[] {
     const profile = normalizeErgoOperationalTransactionProfile(operationProfile);
+    this.assertErgoOperationalProfileSchema(profile);
     const rows = this.db.prepare(`
       SELECT * FROM ergo_operational_transaction_attempts
       WHERE operation_profile = ?
@@ -15572,6 +15635,7 @@ export class StateTracker {
     operationProfile: ErgoOperationalTransactionProfile,
   ): ErgoOperationalTransactionAttempt[] {
     const profile = normalizeErgoOperationalTransactionProfile(operationProfile);
+    this.assertErgoOperationalProfileSchema(profile);
     const rows = this.db.prepare(`
       SELECT * FROM ergo_operational_transaction_attempts
       WHERE operation_profile = ?
@@ -15585,6 +15649,7 @@ export class StateTracker {
     operationProfile: ErgoOperationalTransactionProfile,
   ): ErgoOperationalTransactionAttempt[] {
     const profile = normalizeErgoOperationalTransactionProfile(operationProfile);
+    this.assertErgoOperationalProfileSchema(profile);
     const rows = this.db.prepare(`
       SELECT * FROM ergo_operational_transaction_attempts
       WHERE operation_profile = ?
@@ -15598,6 +15663,7 @@ export class StateTracker {
     operationProfile: ErgoOperationalTransactionProfile,
   ): ErgoOperationalTransactionAttempt[] {
     const profile = normalizeErgoOperationalTransactionProfile(operationProfile);
+    this.assertErgoOperationalProfileSchema(profile);
     const rows = this.db.prepare(`
       SELECT * FROM ergo_operational_transaction_attempts
       WHERE operation_profile = ? AND status = 'confirmed'
@@ -15610,6 +15676,7 @@ export class StateTracker {
     operationProfile: ErgoOperationalTransactionProfile,
   ): ErgoOperationalTransactionAttempt[] {
     const profile = normalizeErgoOperationalTransactionProfile(operationProfile);
+    this.assertErgoOperationalProfileSchema(profile);
     const rows = this.db.prepare(`
       SELECT * FROM ergo_operational_transaction_attempts
       WHERE operation_profile = ? AND status = 'quarantined'
@@ -15947,6 +16014,12 @@ export class StateTracker {
       const current = this.getErgoOperationalTransactionAttempt(normalizedTxId);
       if (!current || current.status !== 'confirmed') {
         throw new Error('only a confirmed Ergo operational attempt can be reopened');
+      }
+      if (
+        current.operationProfile
+          === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+      ) {
+        throw new Error('confirmed tracker fee funding cannot be reopened; quarantine on rollback');
       }
       if (
         current.operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE
