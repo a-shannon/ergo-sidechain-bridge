@@ -93,7 +93,9 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Actual campaign caller | Main owner; consumes the component-tested V2 packet and admission lifecycle | Connect PacketV3/SessionV4 and portable replay V2 to the real application root, retaining peg-in/tracker custody on the V3 setup session. The genuine V2 compiler/launch packet and setup-bound V2 deposit constructor are available. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
+| V2 deposit lifecycle and source proof | Main owner; consumes the setup-bound V2 candidate and retained signer checks | Connect the V2 deposit to exact transport authorization and confirmed source-lock/reserve observations, then mint draft/evidence and its source-proof consumer. Existing authorization, observation and draft/evidence consumers still require V1 candidate/setup provenance; checked bytes alone cannot substitute for those bindings. Split at executable consumer boundaries, not individual forwarding functions |
+| Application composition | Can be prepared independently of deposit confirmation; consumes PacketV3/SessionV4 | Add explicit PacketV3 support to the application root and proof-bound signer, preserving the exact owner, recipient, signed triplet and checkpoint bindings. Existing PacketV2 provenance cannot be relabelled |
+| Actual campaign caller | Main owner; consumes the preceding joins and component-tested V2 admission lifecycle | Select PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Replace its V1 tracker projections with genuine V2 construction. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
@@ -122,19 +124,32 @@ The composed positive runs the real JVM compiler pair with synthetic upstream
 observations and archive production. Session lifecycle tests use compiler-family
 mocks. Complete V1 provisioning and replay outputs are byte-identical to the
 preceding commit. No target admission, activation or funds authority is established.
-Next, select this packet route in the actual caller and retain setup custody
-through peg-in and tracker checking; the existing application root is not yet
-connected to it.
+The actual application root and proof-bound signer still consume PacketV2.
+The confirmed-deposit draft and evidence chain still requires V1 candidate and
+setup provenance. Both consumer joins must accept genuine V2 identities before
+the managed campaign selects the new packet route. Shared outer mint-proof and
+checkpoint receipt versions need not change where their semantics are unchanged.
 
 The V3 setup now retains its exact V2 compiler provenance for deposit
 construction. Its caller can construct the source-lock and reserve-transition
 transactions from the setup's own reserve output, with matched family, asset,
 amount, deposit insertion and external fees. V2 deposits have a separate packet
 identity; V1 receipts and packet provenance remain unchanged. Construction does
-not prove canonical consumption or authorize minting. The V3 setup session does
-not yet retain custody through peg-in checking, and the actual campaign caller
-does not yet select the V2 packet route. Both joins must be implemented before
-the fresh campaign.
+not prove canonical consumption or authorize minting. The V3 setup now retains
+one synthetic signer through the V2 source-lock and reserve-transition checks,
+then external-fee funding and tracker checking. The same deposit packet must
+match the setup's compiler lineage and exact reserve predecessor at both checks.
+Idle disposal, concurrent use, failed checks and changed targets close the
+session; each inactive state uses the same idempotent cleanup routine. As on
+the historical route, disposal during a running operation throws without
+invalidating that operation. The composed test
+uses genuine V2 compilers, WASM signing and a bounded loopback check oracle,
+then traverses tracker admission against simulated state. It is not node/JVM
+acceptance or canonical confirmation. Existing generic check-receipt schemas
+remain byte/target/signer-bound checks, not V2 lifecycle or transport authority.
+The actual campaign caller still selects the old packet, deposit authorization,
+observation and tracker paths; those consumers must be connected before a fresh
+campaign.
 
 The V2 admission lifecycle now connects a genuine session-owned two-input check
 to explicit isolated-devnet authorization, durable reservation, revalidation,

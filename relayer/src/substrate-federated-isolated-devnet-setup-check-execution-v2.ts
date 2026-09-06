@@ -37,6 +37,10 @@ import {
 import { assertSubstrateFederatedTrackerV2Context, type SubstrateFederatedTrackerV2Context }
   from './substrate-federated-tracker-v2.js';
 import type { SubstrateFederatedTrackerCompilerRequestV2 } from './substrate-federated-tracker-compiler-v2.js';
+import {
+  assertSubstrateFederatedPooledReserveDepositV2Packet,
+  type SubstrateFederatedPooledReserveDepositV2Packet,
+} from './substrate-federated-pooled-reserve-deposit-v2.js';
 import { assertSubstrateFederatedTrackerV2ExternalFeeTransaction,
   type SubstrateFederatedTrackerV2ExternalFeeTransaction }
   from './substrate-federated-tracker-v2-external-fee.js';
@@ -521,6 +525,18 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
+  readonly runForExecutionV3RetainingPegInAndTrackerSigner: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
+  readonly checkPegInSourceLockV2RetainingSigner: (
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>>;
+  readonly checkPegInCommittedVaultV2RetainingSigner: (
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>>;
   readonly checkTrackerFeeFundingV3: (
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>>;
@@ -1259,10 +1275,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       trackerCompilerRequest: Readonly<SubstrateFederatedTrackerCompilerRequestV2>;
     }> | undefined;
     let retainedTrackerFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1> | undefined;
+    let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let state:
       | 'open'
       | 'running'
       | 'setup-complete'
+      | 'v3-peg-in-ready'
+      | 'v3-source-lock-checked'
       | 'v3-tracker-fee-ready'
       | 'v3-tracker-ready'
       | 'source-lock-check-complete'
@@ -1297,6 +1316,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       frozenTrackerCheck = undefined;
       trackerFeeContinuation = undefined;
       retainedTrackerFeeCheck = undefined;
+      retainedPegInPacket = undefined;
       mnemonic = '';
       state = 'closed';
     };
@@ -1304,6 +1324,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       expectedState:
         | 'open'
         | 'setup-complete'
+        | 'v3-peg-in-ready'
+        | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
         | 'v3-tracker-ready'
         | 'source-lock-check-complete'
@@ -1312,6 +1334,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       operation: (activeMnemonic: string) => Promise<T>,
       successState:
         | 'setup-complete'
+        | 'v3-peg-in-ready'
+        | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
         | 'v3-tracker-ready'
         | 'source-lock-check-complete'
@@ -1351,6 +1375,53 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         close();
         throw error;
       }
+    };
+    const runRetainingTrackerSignerV3 = async (
+      input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      activeMnemonic: string,
+    ): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>> => {
+      const captured = captureInputV3(input);
+      const profile = captured.sourceAndCompilerInput.trackerRequest.profile;
+      if (profile.ergoAdmissionThreshold !== 1 || profile.ergoAdmissionPublicKeysHex.length !== 1
+        || profile.ergoAdmissionPublicKeysHex[0] !== signer.publicKeyHex) {
+        throw new Error('retained tracker V2 route requires the exact synthetic admission signer');
+      }
+      const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
+      const result = await runFixedSetupCheckV3(captured, activeMnemonic);
+      const batch = promoteSetupExecutionBatchV3(result, target, binding);
+      trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
+        trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
+      return batch;
+    };
+    const assertPegInPacketV2 = async (
+      packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ): Promise<void> => {
+      assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
+      const continuation = trackerFeeContinuation;
+      if (continuation?.retainTrackerSigner !== true) {
+        throw new Error('isolated V2 peg-in setup custody is absent');
+      }
+      const compiler = getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3(continuation.batch, target);
+      if (packet.familyIdHex !== compiler.familyReceipt.profile.familyIdHex
+        || canonicalJson(packet.familyCompiler) !== canonicalJson({
+          trackerRequestDigestHex: compiler.familyReceipt.trackerCompilerRequestDigestHex,
+          trackerReceiptDigestHex: compiler.familyReceipt.trackerCompilerReceiptDigestHex,
+          familyRequestDigestHex: compiler.familyReceipt.familyCompilerRequestDigestHex,
+          familyReceiptDigestHex: compiler.familyReceipt.receiptDigestHex,
+          compilerLockDigestHex: compiler.familyReceipt.compilerLockDigestHex,
+        })) {
+        throw new Error('isolated V2 peg-in compiler differs from retained setup');
+      }
+      const reserve = await materializeUnsignedTransaction(
+        structuredClone(continuation.batch.orderedTransactions[2]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+        'retained V3 peg-in reserve',
+      );
+      if (canonicalJson(packet.boxes.reservePredecessor) !== canonicalJson(reserve.outputs[0])) {
+        throw new Error('isolated V2 peg-in reserve differs from retained setup');
+      }
+      assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
     };
     const runForExecution = async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
@@ -1419,17 +1490,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         if (state === 'running') {
           throw new Error('isolated fixed setup-check session is running');
         }
-        if (
-          state === 'open'
-          || state === 'setup-complete'
-          || state === 'v3-tracker-fee-ready'
-          || state === 'v3-tracker-ready'
-          || state === 'source-lock-check-complete'
-          || state === 'committed-vault-check-complete'
-          || state === 'frozen-tracker-check-complete'
-        ) {
-          close();
-        }
+        close();
       },
       run: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
@@ -1480,19 +1541,43 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       runForExecutionV3RetainingTrackerSigner: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-      ) => consume('open', async activeMnemonic => {
-        const captured = captureInputV3(input);
-        const profile = captured.sourceAndCompilerInput.trackerRequest.profile;
-        if (profile.ergoAdmissionThreshold !== 1 || profile.ergoAdmissionPublicKeysHex.length !== 1
-          || profile.ergoAdmissionPublicKeysHex[0] !== signer.publicKeyHex) {
-          throw new Error('retained tracker V2 route requires the exact synthetic admission signer');
+      ) => consume('open', activeMnemonic => runRetainingTrackerSignerV3(input, target, activeMnemonic),
+        'v3-tracker-fee-ready'),
+      runForExecutionV3RetainingPegInAndTrackerSigner: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('open', activeMnemonic => runRetainingTrackerSignerV3(input, target, activeMnemonic),
+        'v3-peg-in-ready'),
+      checkPegInSourceLockV2RetainingSigner: async (
+        packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('v3-peg-in-ready', async activeMnemonic => {
+        await assertPegInPacketV2(packet, target);
+        const checked = await runPegInSourceLockCheck({
+          sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+          unsignedTransaction: packet.transactions.sourceLockCreation,
+        }, target, signer, activeMnemonic);
+        await assertPegInPacketV2(packet, target);
+        retainedPegInPacket = packet;
+        return checked;
+      }, 'v3-source-lock-checked'),
+      checkPegInCommittedVaultV2RetainingSigner: async (
+        packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('v3-source-lock-checked', async activeMnemonic => {
+        if (packet !== retainedPegInPacket) {
+          throw new Error('isolated V2 peg-in packet differs from the checked source lock');
         }
-        const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
-        const result = await runFixedSetupCheckV3(captured, activeMnemonic);
-        const batch = promoteSetupExecutionBatchV3(result, target, binding);
-        trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
-          trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
-        return batch;
+        await assertPegInPacketV2(packet, target);
+        const checked = await runPegInCommittedVaultCheck({
+          reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+          sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+          transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+          unsignedTransaction: packet.transactions.reserveTransition,
+        }, target, signer, activeMnemonic);
+        await assertPegInPacketV2(packet, target);
+        retainedPegInPacket = undefined;
+        return checked;
       }, 'v3-tracker-fee-ready'),
       checkTrackerFeeFundingV3: async (
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,

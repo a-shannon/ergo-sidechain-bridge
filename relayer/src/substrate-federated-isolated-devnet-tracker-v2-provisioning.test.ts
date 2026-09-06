@@ -135,7 +135,15 @@ import {
   buildSubstrateFederatedIsolatedDevnetPegInCandidateV2 as buildPegInV2,
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2 as assertPegInV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
-import { assertSubstrateFederatedPooledReserveDepositV1Packet } from './substrate-federated-pooled-reserve-deposit-v1.js';
+import { assertSubstrateFederatedPooledReserveDepositV1Packet, buildSubstrateFederatedPooledReserveDepositV1 }
+  from './substrate-federated-pooled-reserve-deposit-v1.js';
+import { buildSubstrateFederatedPooledReserveDepositV2, assertSubstrateFederatedPooledReserveDepositV2Packet }
+  from './substrate-federated-pooled-reserve-deposit-v2.js';
+import * as depositPacketsV2 from './substrate-federated-pooled-reserve-deposit-v2.js';
+import { getSubstrateFederatedSettlementFamilyV1FixtureIdentity }
+  from './substrate-federated-burn-settlement-v1-fixture.js';
+import { bindSubstrateFederatedSettlementFamilyCompilerIdentityV1 }
+  from './substrate-federated-settlement-family-compiler-binding-v1.js';
 import { decodeSubstrateFederatedSettlementFamilyV1Profile } from './substrate-federated-settlement-family-v1.js';
 import { getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3 as getSetupCompilerV3 }
   from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
@@ -214,7 +222,7 @@ let checkHeaders: readonly Readonly<Record<string, unknown>>[];
 let application: Parameters<typeof buildSubstrateFederatedTrackerCompilerRequestV2>[0]['application'];
 let common: Pick<CompilerInputV3, 'familyTemplates' | 'historyBundle' | 'trustPins'>;
 type StaticCompiler = 'compilerV3' | 'compilerV2' | 'checkCompiler' | 'checkCompilerV2';
-const preparationMetrics: Partial<Record<StaticCompiler | 'freshSignerV2', { calls: number; milliseconds: number }>> = {};
+const preparationMetrics: Partial<Record<StaticCompiler | 'freshSignerV2' | 'foreignFamilyV2', { calls: number; milliseconds: number }>> = {};
 
 function contractTemplate(relativePath: string) {
   return { relativePath, source: readFileSync(new URL('../../' + relativePath, import.meta.url), 'utf8') };
@@ -273,7 +281,7 @@ afterAll(() => {
   console.info('Compiler preparation (tracker/family pairs):', JSON.stringify(preparationMetrics));
 });
 
-async function prepareCompiler<T>(name: StaticCompiler | 'freshSignerV2', compile: () => Promise<T>): Promise<T> {
+async function prepareCompiler<T>(name: StaticCompiler | 'freshSignerV2' | 'foreignFamilyV2', compile: () => Promise<T>): Promise<T> {
   // The same reviewed compiler harness as V156/V157; every positive receipt is genuine.
   if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
     throw new Error('Vitest parent NODE_OPTIONS is not the reviewed harness value');
@@ -1786,8 +1794,252 @@ describe('owned synthetic session -> V3 admission profile preflight', () => {
 
 });
 
+describe('owned synthetic session -> retained V2 peg-in boundaries', () => {
+  it.each([
+    ['source', 'copied-packet'], ['source', 'cloned-packet'], ['source', 'v1-packet'],
+    ['source', 'foreign-family'], ['source', 'foreign-compiler-guard-fault'], ['source', 'foreign-reserve'],
+    ['source', 'guard-fault-familyIdHex'],
+    ['source', 'guard-fault-trackerRequestDigestHex'], ['source', 'guard-fault-trackerReceiptDigestHex'],
+    ['source', 'guard-fault-familyRequestDigestHex'], ['source', 'guard-fault-familyReceiptDigestHex'],
+    ['source', 'guard-fault-compilerLockDigestHex'], ['source', 'guard-fault-reserve-value'],
+    ['vault', 'substituted-packet'],
+    ['source', 'copied-target'], ['vault', 'copied-target'],
+    ['source', 'process-before'], ['source', 'identity-before'],
+    ['source', 'process-after'], ['source', 'identity-after'],
+    ['source', 'process-outer-after'], ['source', 'identity-outer-after'],
+    ['vault', 'process-before'], ['vault', 'identity-before'],
+    ['vault', 'process-after'], ['vault', 'identity-after'],
+    ['vault', 'process-outer-after'], ['vault', 'identity-outer-after'],
+    ['source', 'vault-before-source'], ['source', 'fee-before-peg-in'], ['vault', 'fee-before-peg-in'],
+    ['source', 'repeated-setup'], ['vault', 'repeated-source'], ['vault', 'repeated-vault'],
+    ['source', 'tracker-only-setup'], ['source', 'legacy-route'], ['vault', 'legacy-route'],
+    ['source', 'disposed'], ['vault', 'disposed'],
+    ['source', 'concurrent'], ['vault', 'concurrent'],
+    ['source', 'check-failure'], ['vault', 'check-failure'],
+  ] as const)('closes custody at %s for %s', async (stage, fault) => {
+    const fixture = await createRootFixture(true);
+    const target = executionTarget();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const faultOrdinal = stage === 'source' ? 3 : 4;
+    const driftField = fault.startsWith('process-') ? 'processBindingDigestHex' : 'executionTargetIdentityDigestHex';
+    let innerPostcheckPassed = false;
+    try {
+      await withObservations(async observed => {
+        const batch = fault === 'tracker-only-setup'
+          ? await fixture.session.runForExecutionV3RetainingTrackerSigner(fixture.input, target)
+          : await fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target);
+        const compiler = getSetupCompilerV3(batch, target);
+        const family = compiler.familyReceipt;
+        const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
+        const height = Math.max(...batch.request.orderedIssuances.map(value => value.predictedStateOutput.creationHeight)) + 1;
+        const input = {
+          batch, target, sourceFundingInput: fundingCandidate('20000000', fixture.session.signer.p2pkErgoTreeHex),
+          sourceIntent: { formatVersion: 2 as const, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+            sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+            tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+            admissionProfileIdHex: family.profile.familyIdHex, sourceAssetIdHex: profile.settlementAssetIdHex,
+            amountNanoErg: '10000000', recipientAddressHex: '61'.repeat(20) },
+          depositorErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex,
+          creationHeights: { currentErgoHeight: height, sourceLockCreation: height, reserveTransition: height },
+        };
+        const candidate = await buildPegInV2(input);
+        const packet = assertPegInV2(candidate, batch, target);
+        const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+          currentHeight: height, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
+        }).headers.map(header => header.raw);
+        for (const box of [packet.boxes.sourceFundingInput, packet.boxes.reservePredecessor,
+          packet.boxes.sourceLock, packet.boxes.transitionFeeFunding]) observed.publishBox(box, headers);
+        let supplied = packet;
+        let provenanceFault: { mockRestore(): void } | undefined;
+        let expected = /continuation|consumed or disposed/;
+        if (fault === 'copied-packet' || fault === 'cloned-packet') {
+          supplied = fault === 'copied-packet' ? { ...packet } : structuredClone(packet);
+          expected = /process provenance/;
+        }
+        if (fault === 'substituted-packet') {
+          const second = await buildPegInV2({ ...input,
+            sourceIntent: { ...input.sourceIntent, recipientAddressHex: '62'.repeat(20) } });
+          supplied = assertPegInV2(second, batch, target);
+          expect(supplied).not.toBe(packet);
+          expect(supplied.familyCompiler).toEqual(packet.familyCompiler);
+          expect(supplied.boxes.reservePredecessor).toEqual(packet.boxes.reservePredecessor);
+          expect(supplied.transactions.sourceLockCreation.txId).not.toBe(packet.transactions.sourceLockCreation.txId);
+          expected = /packet differs from the checked source lock/;
+        }
+        if (fault === 'foreign-reserve' || fault === 'foreign-family' || fault === 'foreign-compiler-guard-fault') {
+          const familyCompilerInput = {
+            trackerRequest: compiler.trackerRequest, trackerReceipt: compiler.trackerReceipt,
+            templates: structuredClone(compiler.familyTemplates),
+            duplicatePreventionGenesisInputBoxIdHex: family.profile.duplicatePreventionNftIdHex,
+            pooledReserveGenesisInputBoxIdHex: family.profile.pooledReserveNftIdHex,
+          };
+          if (fault !== 'foreign-reserve') {
+            familyCompilerInput.templates = { ...familyCompilerInput.templates,
+              sourceLock: { ...familyCompilerInput.templates.sourceLock,
+                source: familyCompilerInput.templates.sourceLock.source + '\n// distinct compiler request\n' } };
+          }
+          const selectedFamily = fault !== 'foreign-reserve'
+            ? await prepareCompiler('foreignFamilyV2', () => compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2(familyCompilerInput)) : family;
+          const predecessor = reidentifyBox({ ...packet.boxes.reservePredecessor,
+            ergoTree: selectedFamily.contracts.pooledReserve.propositionHex,
+            additionalRegisters: { ...packet.boxes.reservePredecessor.additionalRegisters,
+              R4: encodeCollByteRegister(Buffer.from(selectedFamily.profile.familyIdHex, 'hex')) },
+          }, '63'.repeat(32));
+          supplied = await buildSubstrateFederatedPooledReserveDepositV2({
+            familyCompilerInput, familyCompilerReceipt: selectedFamily,
+            sourceFundingInput: input.sourceFundingInput, depositorErgoTreeHex: input.depositorErgoTreeHex,
+            sourceIntent: { ...input.sourceIntent, admissionProfileIdHex: selectedFamily.profile.familyIdHex },
+            creationHeights: input.creationHeights, reserveState: { predecessor, depositHistory: [] },
+          });
+          assertSubstrateFederatedPooledReserveDepositV2Packet(supplied);
+          if (fault === 'foreign-reserve') {
+            expect(supplied.familyCompiler).toEqual(packet.familyCompiler);
+            expect(supplied.familyIdHex).toBe(packet.familyIdHex);
+            expected = /reserve differs from retained setup/;
+          } else {
+            expect(supplied.familyCompiler.familyRequestDigestHex).not.toBe(packet.familyCompiler.familyRequestDigestHex);
+            expect(supplied.familyIdHex).not.toBe(packet.familyIdHex);
+            expected = /compiler differs from retained setup/;
+          }
+          if (fault === 'foreign-compiler-guard-fault') {
+            // Template hashes enter the family ID, so even a comment changes the
+            // genuine foreign family. Inject only its compiler lineage into the
+            // original packet; registration alone is faulted for this corruption case.
+            const foreignCompiler = supplied.familyCompiler;
+            supplied = { ...packet, familyCompiler: foreignCompiler };
+            expect(supplied.familyIdHex).toBe(packet.familyIdHex);
+            expect(supplied.boxes).toBe(packet.boxes);
+            expect(supplied.transactions).toBe(packet.transactions);
+            expect(sigmaBytes(supplied.boxes.reservePredecessor)).toBe(sigmaBytes(packet.boxes.reservePredecessor));
+            expect(() => assertSubstrateFederatedPooledReserveDepositV2Packet(supplied)).toThrow(/process provenance/);
+            provenanceFault = vi.spyOn(depositPacketsV2, 'assertSubstrateFederatedPooledReserveDepositV2Packet')
+              .mockImplementation(value => { expect(value).toBe(supplied); });
+          }
+        }
+        if (fault === 'v1-packet') {
+          const familyBinding = bindSubstrateFederatedSettlementFamilyCompilerIdentityV1(
+            getSubstrateFederatedSettlementFamilyV1FixtureIdentity());
+          const oldProfile = decodeSubstrateFederatedSettlementFamilyV1Profile(familyBinding.profile);
+          const old = await buildSubstrateFederatedPooledReserveDepositV1({
+            familyBinding, sourceFundingInput: input.sourceFundingInput,
+            depositorErgoTreeHex: input.depositorErgoTreeHex, creationHeights: input.creationHeights,
+            sourceIntent: { ...input.sourceIntent, sourceNetworkIdHex: oldProfile.sourceNetworkIdHex,
+              sidechainIdHex: oldProfile.sidechainIdHex, bridgeAddressHex: oldProfile.bridgeAddressHex,
+              tokenAddressHex: oldProfile.tokenAddressHex, settlementProfileIdHex: oldProfile.settlementProfileIdHex,
+              admissionProfileIdHex: familyBinding.profile.familyIdHex, sourceAssetIdHex: oldProfile.settlementAssetIdHex },
+            reserveState: { depositHistory: [], predecessor: reidentifyBox({ ...packet.boxes.reservePredecessor,
+              ergoTree: familyBinding.contracts.pooledReserve.propositionHex,
+              assets: [{ tokenId: familyBinding.profile.pooledReserveNftIdHex, amount: '1' }],
+              additionalRegisters: { ...packet.boxes.reservePredecessor.additionalRegisters,
+                R4: encodeCollByteRegister(Buffer.from(familyBinding.profile.familyIdHex, 'hex')) },
+            }, '64'.repeat(32)) },
+          });
+          assertSubstrateFederatedPooledReserveDepositV1Packet(old);
+          supplied = old as unknown as typeof packet;
+          expected = /process provenance/;
+        }
+        if (fault.startsWith('guard-fault-')) {
+          // Unreachable-corruption obligation: bypass only packet registration, so
+          // each downstream retained-field comparison must reject on its own.
+          const field = fault.slice('guard-fault-'.length);
+          supplied = field === 'familyIdHex' ? { ...packet, familyIdHex: '65'.repeat(32) }
+            : field === 'reserve-value' ? { ...packet, boxes: { ...packet.boxes,
+              reservePredecessor: { ...packet.boxes.reservePredecessor,
+                value: String(BigInt(packet.boxes.reservePredecessor.value) + 1n) } } }
+              : { ...packet, familyCompiler: { ...packet.familyCompiler, [field]: '65'.repeat(32) } };
+          expect(() => assertSubstrateFederatedPooledReserveDepositV2Packet(supplied)).toThrow(/process provenance/);
+          provenanceFault = vi.spyOn(depositPacketsV2, 'assertSubstrateFederatedPooledReserveDepositV2Packet')
+            .mockImplementation(value => { expect(value).toBe(supplied); });
+          expected = field === 'reserve-value' ? /reserve differs from retained setup/ : /compiler differs from retained setup/;
+        }
+        try {
+          if (stage === 'vault') {
+            await fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target);
+            expect(observed.checkBodies).toHaveLength(4);
+          }
+          if (fault === 'repeated-vault') {
+            await fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target);
+          }
+          if (fault === 'disposed') {
+            fixture.session.dispose();
+            expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+          }
+          if (fault.endsWith('-before')) {
+            custody.mockReturnValue({ ...executionBinding, [driftField]: '66'.repeat(32) });
+          }
+          if (fault.endsWith('-before') || fault.endsWith('-after')) expected = /binding changed|target changed during check/;
+          if (fault === 'copied-target') expected = /provenance/;
+          if (fault === 'check-failure') expected = /node check failed/;
+          const selectedTarget = fault === 'copied-target' ? { ...target } : target;
+          const before = observed.checkBodies.length;
+          if (fault.includes('-outer-after')) {
+            custody.mockImplementation(() => {
+              if (observed.checkBodies.length <= faultOrdinal) return executionBinding;
+              // The first read after the node response belongs to the inner checker.
+              // Only the enclosing session's subsequent read sees the changed target.
+              if (!innerPostcheckPassed) {
+                innerPostcheckPassed = true;
+                return executionBinding;
+              }
+              return { ...executionBinding, [driftField]: '66'.repeat(32) };
+            });
+          }
+          const pending = fault === 'fee-before-peg-in' ? fixture.session.checkTrackerFeeFundingV3(target)
+            : fault === 'repeated-setup' ? fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target)
+            : fault === 'vault-before-source' ? fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target)
+            : fault === 'repeated-source' ? fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target)
+            : fault === 'legacy-route' ? (stage === 'source'
+              ? fixture.session.checkPegInSourceLockRetainingSigner({ sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+                unsignedTransaction: packet.transactions.sourceLockCreation }, target)
+              : fixture.session.checkPegInCommittedVaultRetainingSigner({
+                reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+                sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+                transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+                unsignedTransaction: packet.transactions.reserveTransition }, target))
+            : stage === 'source' ? fixture.session.checkPegInSourceLockV2RetainingSigner(supplied, selectedTarget)
+              : fixture.session.checkPegInCommittedVaultV2RetainingSigner(supplied, selectedTarget);
+          const settled = pending.then(receipt => ({ receipt, error: undefined }), error => ({ receipt: undefined, error }));
+          if (fault === 'concurrent') {
+            await expect(stage === 'source' ? fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target)
+              : fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target)).rejects.toThrow(/continuation/);
+            expected = /invalidated by a concurrent transition/;
+          }
+          const outcome = await settled;
+          expect(outcome.receipt).toBeUndefined();
+          expect(outcome.error).toBeInstanceOf(Error);
+          expect((outcome.error as Error).message).toMatch(expected);
+          if (fault.includes('-outer-after')) {
+            expect(innerPostcheckPassed).toBe(true);
+            expect((outcome.error as Error).message).toBe('isolated setup V3 execution batch process binding changed');
+          }
+          expect(observed.checkBodies).toHaveLength(before + (
+            fault === 'concurrent' || fault === 'check-failure' || fault.endsWith('-after') ? 1 : 0));
+          expect(observed.submissionBodies).toHaveLength(0);
+          expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+          custody.mockReturnValue(executionBinding);
+          provenanceFault?.mockRestore();
+          await expect(fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target)).rejects.toThrow(/continuation/);
+          await expect(fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target)).rejects.toThrow(/continuation/);
+          await expect(fixture.session.checkTrackerFeeFundingV3(target)).rejects.toThrow(/continuation/);
+          expect(observed.checkBodies).toHaveLength(before + (
+            fault === 'concurrent' || fault === 'check-failure' || fault.endsWith('-after') ? 1 : 0));
+        } finally { provenanceFault?.mockRestore(); }
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+        checkOracle: (body, ordinal) => {
+          const id = signedCheckOracle(body);
+          if (ordinal === faultOrdinal && fault.endsWith('-after') && !fault.includes('-outer-after')) {
+            custody.mockReturnValue({ ...executionBinding, [driftField]: '66'.repeat(32) });
+          }
+          return ordinal === faultOrdinal && fault === 'check-failure' ? 'ff'.repeat(32) : id;
+        } });
+    } finally { errors.mockRestore(); custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+});
+
 describe('owned synthetic session -> V3 no-submit setup root', () => {
-  it.each(['valid', 'default-closed', 'wrong-input', 'wrong-fee', 'wrong-genesis',
+  it.each(['valid', 'peg-in-v2', 'default-closed', 'wrong-input', 'wrong-fee', 'wrong-genesis',
     'wrong-target', 'copied-context', 'disposed', 'concurrent',
     'admission-input-0-primary', 'admission-input-1-primary',
     'admission-input-0-witness', 'admission-input-1-witness',
@@ -1815,7 +2067,52 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
           const target = executionTarget();
           const batch = fault === 'default-closed'
             ? await fixture.session.runForExecutionV3RetainingTrackerFeeSigner(fixture.input, target, fixture.session.signer.publicKeyHex)
+            : fault === 'peg-in-v2'
+              ? await fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target)
             : await fixture.session.runForExecutionV3RetainingTrackerSigner(fixture.input, target);
+          if (fault === 'peg-in-v2') {
+            assertExecutionV3(batch, target);
+            const family = fixture.input.sourceAndCompilerInput.familyReceipt;
+            const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
+            const height = Math.max(...batch.request.orderedIssuances.map(value => value.predictedStateOutput.creationHeight)) + 1;
+            const candidate = await buildPegInV2({
+              batch, target, sourceFundingInput: fundingCandidate('20000000', fixture.session.signer.p2pkErgoTreeHex),
+              sourceIntent: { formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+                sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+                tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+                admissionProfileIdHex: family.profile.familyIdHex, sourceAssetIdHex: profile.settlementAssetIdHex,
+                amountNanoErg: '10000000', recipientAddressHex: '61'.repeat(20) },
+              depositorErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex,
+              creationHeights: { currentErgoHeight: height, sourceLockCreation: height, reserveTransition: height },
+            });
+            const packet = assertPegInV2(candidate, batch, target);
+            const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+              currentHeight: height, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
+            }).headers.map(header => header.raw);
+            observed.publishBox(packet.boxes.sourceFundingInput, headers);
+            const source = await fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target);
+            expect(source).toMatchObject({ version: 1, status: 'PASS',
+              unsignedTransactionIdHex: packet.transactions.sourceLockCreation.txId,
+              sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+              signer: { publicKeyHex: fixture.session.signer.publicKeyHex } });
+            expect(signedCheckOracle(observed.checkBodies[3]!)).toBe(source.signedTransactionIdHex);
+            expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).not.toThrow();
+            for (const box of [packet.boxes.reservePredecessor, packet.boxes.sourceLock, packet.boxes.transitionFeeFunding]) {
+              observed.publishBox(box, headers);
+            }
+            const vault = await fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target);
+            expect(vault).toMatchObject({ version: 1, status: 'PASS',
+              unsignedTransactionIdHex: packet.transactions.reserveTransition.txId,
+              reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+              sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+              transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+              signer: { publicKeyHex: fixture.session.signer.publicKeyHex } });
+            expect(signedCheckOracle(observed.checkBodies[4]!)).toBe(vault.signedTransactionIdHex);
+            expect((observed.checkBodies[4]!.inputs as { boxId: string }[]).map(value => value.boxId))
+              .toEqual(packet.transactions.reserveTransition.eip12Tx.inputs.map(value => value.boxId));
+            expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).not.toThrow();
+            expect(observed.submissionBodies).toHaveLength(0);
+          }
           const genesis = wasm.UnsignedTransaction.from_json(JSON.stringify(batch.orderedTransactions[0]!.issuance.unsignedTransactionBody));
           const id = genesis.id();
           const outputs = genesis.output_candidates();
@@ -1881,19 +2178,19 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             if (fault === 'concurrent') {
               await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
             }
-            if (fault === 'valid' || fault.startsWith('admission-')) {
+            if (fault === 'valid' || fault === 'peg-in-v2' || fault.startsWith('admission-')) {
               const checked = await pending;
               expect(checked.result.transaction.unsignedTransactionIdHex).toBe(transaction.unsignedTransactionIdHex);
               expect(checked.feeFundingTransactionIdHex).toBe(feeCheck.transaction.txId);
               expect(() => assertTrackerV2Check(checked, frozenTarget)).not.toThrow();
               expect(() => assertTrackerV2Check({ ...checked }, frozenTarget)).toThrow(/session provenance/);
               expect(() => assertTrackerV2Check(checked, { ...frozenTarget })).toThrow(/session provenance/);
-              expect(observed.checkBodies).toHaveLength(5);
-              expect(observed.checkBodies[4]!.inputs).toHaveLength(2);
+              expect(observed.checkBodies).toHaveLength(fault === 'peg-in-v2' ? 7 : 5);
+              expect(observed.checkBodies.at(-1)!.inputs).toHaveLength(2);
               expect(observed.submissionBodies).toHaveLength(0);
               expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
               genesisDrift.mockRestore();
-              await exerciseTrackerV2Admission(fault, checked, frozenTarget, frozenBinding, observed, () => {
+              await exerciseTrackerV2Admission(fault === 'peg-in-v2' ? 'valid' : fault, checked, frozenTarget, frozenBinding, observed, () => {
                 frozenCustody.mockImplementation(() => { throw new Error('synthetic frozen action expired'); });
               });
             } else {
@@ -2729,6 +3026,10 @@ async function exerciseTrackerV2Admission(
   observed: ObservationFixture,
   expireFrozen: () => void,
 ): Promise<void> {
+  const checkedBodies = observed.checkBodies.filter(body =>
+    signedCheckOracle(body) === checked.result.transaction.unsignedTransactionIdHex);
+  expect(checkedBodies).toHaveLength(1);
+  const checkedBodyJson = canonicalJson(checkedBodies[0]);
   const state = new StateTracker(':memory:');
   const spies: Array<{ mockRestore(): void }> = [];
   let phase = 'authorization';
@@ -2862,7 +3163,7 @@ async function exerciseTrackerV2Admission(
     const submitted = await submission;
     expect(submitted.status).toBe(fault === 'admission-ambiguous' ? 'ambiguous' : 'accepted');
     expect(observed.submissionBodies).toHaveLength(1);
-    expect(canonicalJson(observed.submissionBodies[0])).toBe(canonicalJson(observed.checkBodies[4]));
+    expect(canonicalJson(observed.submissionBodies[0])).toBe(checkedBodyJson);
     expect(() => finalizeTrackerV2(attempt, { ...submitted })).toThrow(/provenance/);
     if (fault === 'admission-unfinalized-row') {
       state.finalizeErgoOperationalTransactionAttempt({ expectedTxId: attempt.expectedTxId,
