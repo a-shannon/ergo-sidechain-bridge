@@ -10,27 +10,38 @@ import {
 } from './strict-json.js';
 import {
   buildSubstrateFederatedIsolatedDevnetGenerationV1,
+  buildSubstrateFederatedIsolatedDevnetGenerationV2,
 } from './substrate-federated-isolated-devnet-generation-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetErgoHistoryV1,
   buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1,
+  buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2,
   buildSubstrateFederatedIsolatedDevnetLaunchStatementV1,
+  buildSubstrateFederatedIsolatedDevnetLaunchStatementV2,
   buildSubstrateFederatedIsolatedDevnetRelayerClosureV1,
   deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_V1_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V2_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_CLOSURE_V1_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_DIGEST_DOMAIN,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_SCHEMA,
   type SubstrateFederatedAuthoritySafeDevnetHistoryBundleV1,
   type DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
+  type DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
   type SubstrateFederatedIsolatedDevnetLaunchSignatureV1,
   type SubstrateFederatedIsolatedDevnetLaunchStatementV1,
+  type SubstrateFederatedIsolatedDevnetLaunchStatementV2,
   type SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  type SubstrateFederatedIsolatedDevnetTargetDescriptorV2,
   type SubstrateFederatedIsolatedDevnetTargetPinsV1,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetProvisioningV1,
+  buildSubstrateFederatedIsolatedDevnetProvisioningV2,
   type SubstrateFederatedIsolatedDevnetGenesisInputsV1,
   type SubstrateFederatedIsolatedDevnetProvisioningIdentityV1,
 } from './substrate-federated-isolated-devnet-provisioning-v1.js';
@@ -46,16 +57,28 @@ import {
 import {
   buildSubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
+import { compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2 }
+  from './substrate-federated-settlement-family-jvm-compiler-v2.js';
+import { compileSubstrateFederatedTrackerWithPinnedJvmV2 }
+  from './substrate-federated-tracker-jvm-compiler-v2.js';
+import { buildSubstrateFederatedTrackerCompilerRequestV2 }
+  from './substrate-federated-tracker-compiler-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-attestation-packet.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-attestation-packet.v2' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_UTXO_HISTORY_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-ergo-utxo-history.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-portable-replay.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-portable-replay.v2' as const;
 
 const REPORT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V1';
+const REPORT_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V2';
 const TRUST_PIN_SET_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_TRUST_PIN_SET_V1';
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
@@ -65,6 +88,8 @@ const replayContinuations = new WeakMap<
   object,
   Readonly<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1>
 >();
+const replayContinuationsV2 = new WeakMap<object,
+  Readonly<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV2>>();
 
 const ARTIFACT_KEYS = Object.freeze([
   'trackerTemplate',
@@ -112,6 +137,27 @@ export interface ReplaySubstrateFederatedIsolatedDevnetPortableV1Input {
     Readonly<SubstrateFederatedIsolatedDevnetPortableArtifactsV1>;
   readonly trustPins:
     Readonly<SubstrateFederatedIsolatedDevnetPortableTrustPinsV1>;
+}
+
+export type ReplaySubstrateFederatedIsolatedDevnetPortableV2Input =
+  ReplaySubstrateFederatedIsolatedDevnetPortableV1Input;
+
+export interface SubstrateFederatedIsolatedDevnetAttestationPacketV2
+  extends Omit<SubstrateFederatedIsolatedDevnetAttestationPacketV1, 'schema' | 'version' | 'statement'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA;
+  readonly version: 2;
+  readonly statement: Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV2>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPortableReplayV2
+  extends Omit<SubstrateFederatedIsolatedDevnetPortableReplayV1, 'schema' | 'version'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V2_SCHEMA;
+  readonly version: 2;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPortableReplayContinuationV2
+  extends Omit<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1, 'sourceAndCompilerInput'> {
+  readonly sourceAndCompilerInput: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1 {
@@ -232,6 +278,16 @@ export interface SubstrateFederatedIsolatedDevnetPortableReplayV1 {
 export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
   input: Readonly<ReplaySubstrateFederatedIsolatedDevnetPortableV1Input>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV1>> {
+  return replayPortable(input, 1) as Promise<Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV1>>;
+}
+
+export async function replaySubstrateFederatedIsolatedDevnetPortableV2(
+  input: Readonly<ReplaySubstrateFederatedIsolatedDevnetPortableV2Input>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV2>> {
+  return replayPortable(input, 2) as Promise<Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV2>>;
+}
+
+async function replayPortable(input: Readonly<ReplaySubstrateFederatedIsolatedDevnetPortableV1Input>, version: 1 | 2) {
   const capturedInput = exactDataRecord(
     input,
     ['artifacts', 'trustPins'],
@@ -239,7 +295,7 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
   );
   const artifacts = snapshotArtifacts(capturedInput.artifacts);
   const trustPins = normalizeTrustPins(capturedInput.trustPins);
-  const packet = parseAttestationPacket(artifacts.attestationPacket);
+  const packet = parseAttestationPacket(artifacts.attestationPacket, version);
   const externalStatement = packet.statement;
   const externalTarget = externalStatement.target;
   const profile = buildSubstrateFederatedCheckpointProfileV1({
@@ -254,10 +310,10 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
     ergoAdmissionPublicKeysHex:
       [...externalTarget.federation.ergoAdmissionPublicKeysHex],
   });
-  assertExternalTargetPreflight(externalTarget, trustPins, profile);
-  const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
+  assertExternalTargetPreflight(externalTarget, trustPins, profile, version);
+  const trackerInput = {
     template: contractTemplate(
-      'contracts/SPVTrackerSubstrateFederatedV1.es',
+      version === 1 ? 'contracts/SPVTrackerSubstrateFederatedV1.es' : 'contracts/SPVTrackerSubstrateFederatedV2.es',
       artifacts.trackerTemplate,
     ),
     trackerGenesisInputBoxIdHex:
@@ -283,9 +339,14 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
       runtimeProfileIdHex: externalTarget.sourceRuntime.runtimeProfileIdHex,
       settlementProfileIdHex: externalTarget.profile.settlementProfileIdHex,
     },
-  });
-  const trackerReceipt =
-    await compileSubstrateFederatedTrackerWithPinnedJvmV1(trackerRequest);
+  };
+  const trackerRequest = version === 1 ? buildSubstrateFederatedTrackerCompilerRequestV1(trackerInput)
+    : buildSubstrateFederatedTrackerCompilerRequestV2(trackerInput);
+  const trackerReceipt = version === 1
+    ? await compileSubstrateFederatedTrackerWithPinnedJvmV1(
+      trackerRequest as Parameters<typeof compileSubstrateFederatedTrackerWithPinnedJvmV1>[0])
+    : await compileSubstrateFederatedTrackerWithPinnedJvmV2(
+      trackerRequest as Parameters<typeof compileSubstrateFederatedTrackerWithPinnedJvmV2>[0]);
   const familyTemplates = {
     duplicatePrevention: contractTemplate(
       'contracts/DoubleUnlockPreventionSubstrateFederatedV1.es',
@@ -300,8 +361,7 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
       artifacts.pooledReserveTemplate,
     ),
   };
-  const familyReceipt =
-    await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
+  const familyInput = {
       trackerRequest,
       trackerReceipt,
       templates: familyTemplates,
@@ -309,17 +369,27 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
         externalTarget.lineages.duplicatePrevention.genesisInputBoxIdHex,
       pooledReserveGenesisInputBoxIdHex:
         externalTarget.lineages.pooledReserve.genesisInputBoxIdHex,
-    });
+    };
+  const familyReceipt = version === 1
+    ? await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1(
+      familyInput as Parameters<typeof compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1>[0])
+    : await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2(
+      familyInput as Parameters<typeof compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2>[0]);
   const historyBundle = sourceHistoryBundle(artifacts);
   const targetPins = targetPinsFromExternalTarget(externalTarget);
-  const target = deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1({
+  const sourceAndCompilerInput = {
     trackerRequest,
     trackerReceipt,
     familyTemplates,
     familyReceipt,
     historyBundle,
     trustPins: targetPins,
-  });
+  };
+  const target = version === 1
+    ? deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
+      sourceAndCompilerInput as DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input)
+    : deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(
+      sourceAndCompilerInput as DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input);
   assertTargetMatchesTrustPins(target, trustPins);
 
   const externalErgo = externalStatement.histories.ergo;
@@ -342,42 +412,46 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
     runtimeEntrypointsManifest: artifacts.relayerRuntimeEntrypointsManifest,
     buildArtifact: artifacts.relayerBuildArtifact,
   });
-  const statement = buildSubstrateFederatedIsolatedDevnetLaunchStatementV1({
+  const statementInput = {
     activationGenerationIdHex: externalStatement.activationGenerationIdHex,
     target,
     ergoHistory,
     relayerClosure,
-  });
+  };
+  const statement = version === 1
+    ? buildSubstrateFederatedIsolatedDevnetLaunchStatementV1(
+      statementInput as Parameters<typeof buildSubstrateFederatedIsolatedDevnetLaunchStatementV1>[0])
+    : buildSubstrateFederatedIsolatedDevnetLaunchStatementV2(
+      statementInput as Parameters<typeof buildSubstrateFederatedIsolatedDevnetLaunchStatementV2>[0]);
   if (canonicalJson(statement) !== canonicalJson(externalStatement)) {
     throw new Error(
       'isolated portable statement does not match the exact rebuilt artifact closure',
     );
   }
-  const baseline = buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1({
-    statement,
-    signatures: packet.signatures,
-  });
-  const generation = buildSubstrateFederatedIsolatedDevnetGenerationV1({
-    launchBaseline: baseline,
-    trackerRequest,
-    trackerReceipt,
-    familyTemplates,
-    familyReceipt,
-    historyBundle,
-    trustPins: targetPins,
-  });
+  const baseline = version === 1
+    ? buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1({
+      statement: statement as SubstrateFederatedIsolatedDevnetLaunchStatementV1, signatures: packet.signatures })
+    : buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2({
+      statement: statement as SubstrateFederatedIsolatedDevnetLaunchStatementV2, signatures: packet.signatures });
+  const generationInput = { ...sourceAndCompilerInput, launchBaseline: baseline };
+  const generation = version === 1
+    ? buildSubstrateFederatedIsolatedDevnetGenerationV1(
+      generationInput as Parameters<typeof buildSubstrateFederatedIsolatedDevnetGenerationV1>[0])
+    : buildSubstrateFederatedIsolatedDevnetGenerationV2(
+      generationInput as Parameters<typeof buildSubstrateFederatedIsolatedDevnetGenerationV2>[0]);
   const genesisInputs = parseHistoricalGenesisInputs(
     artifacts.ergoUtxoTransitionsManifest,
   );
-  const provisioning =
-    await buildSubstrateFederatedIsolatedDevnetProvisioningV1({
-      generation,
-      genesisInputs,
-    });
+  const provisioning = version === 1
+    ? await buildSubstrateFederatedIsolatedDevnetProvisioningV1(
+      { generation, genesisInputs } as Parameters<typeof buildSubstrateFederatedIsolatedDevnetProvisioningV1>[0])
+    : await buildSubstrateFederatedIsolatedDevnetProvisioningV2(
+      { generation, genesisInputs } as Parameters<typeof buildSubstrateFederatedIsolatedDevnetProvisioningV2>[0]);
   const capturedSource = target.capturedSourceHistory;
   const reportBinding = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V1_SCHEMA,
-    version: 1 as const,
+    schema: version === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V1_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_REPLAY_V2_SCHEMA,
+    version,
     status: 'portable_authenticated_non_authorizing_replay' as const,
     compiler: {
       trackerRequestDigestHex: trackerRequest.requestDigestHex,
@@ -484,18 +558,11 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
     ...reportBinding,
     reportDigestHex: sha256CanonicalJson(
       reportBinding,
-      REPORT_DIGEST_DOMAIN,
+      version === 1 ? REPORT_DIGEST_DOMAIN : REPORT_V2_DIGEST_DOMAIN,
     ),
   });
-  replayContinuations.set(report, deepFreeze({
-    sourceAndCompilerInput: {
-      trackerRequest,
-      trackerReceipt,
-      familyTemplates,
-      familyReceipt,
-      historyBundle,
-      trustPins: targetPins,
-    },
+  const continuation = deepFreeze({
+    sourceAndCompilerInput,
     expectedSettlementGenesisHeaderIdHex:
       externalErgo.genesis.headerIdHex,
     genesisBoxIds: {
@@ -504,7 +571,10 @@ export async function replaySubstrateFederatedIsolatedDevnetPortableV1(
         target.lineages.duplicatePrevention.genesisInputBoxIdHex,
       pooledReserve: target.lineages.pooledReserve.genesisInputBoxIdHex,
     },
-  }));
+  });
+  if (version === 1) replayContinuations.set(report,
+    continuation as SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1);
+  else replayContinuationsV2.set(report, continuation as SubstrateFederatedIsolatedDevnetPortableReplayContinuationV2);
   return report;
 }
 
@@ -526,6 +596,18 @@ export function takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1
   return continuation;
 }
 
+export function takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(
+  report: unknown,
+): Readonly<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV2> {
+  if (report === null || typeof report !== 'object') {
+    throw new Error('isolated portable V2 replay continuation is unavailable');
+  }
+  const continuation = replayContinuationsV2.get(report);
+  if (continuation === undefined) throw new Error('isolated portable V2 replay continuation is unavailable');
+  replayContinuationsV2.delete(report);
+  return continuation;
+}
+
 function sourceHistoryBundle(
   artifacts: Readonly<Record<ArtifactKey, Buffer>>,
 ): Readonly<SubstrateFederatedAuthoritySafeDevnetHistoryBundleV1> {
@@ -539,7 +621,7 @@ function sourceHistoryBundle(
 }
 
 function targetPinsFromExternalTarget(
-  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1 | SubstrateFederatedIsolatedDevnetTargetDescriptorV2>,
 ): Readonly<SubstrateFederatedIsolatedDevnetTargetPinsV1> {
   const captured = target.capturedSourceHistory;
   return deepFreeze({
@@ -568,7 +650,8 @@ function targetPinsFromExternalTarget(
 
 function parseAttestationPacket(
   bytes: Uint8Array,
-): Readonly<SubstrateFederatedIsolatedDevnetAttestationPacketV1> {
+  version: 1 | 2,
+): Readonly<SubstrateFederatedIsolatedDevnetAttestationPacketV1 | SubstrateFederatedIsolatedDevnetAttestationPacketV2> {
   const value = parseCanonicalJson(bytes, 'isolated portable attestation packet');
   const record = exactDataRecord(value, [
     'schema',
@@ -578,22 +661,29 @@ function parseAttestationPacket(
   ], 'isolated portable attestation packet');
   if (
     record.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA
-    || record.version !== 1
+      !== (version === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA
+        : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA)
+    || record.version !== version
   ) {
     throw new Error('isolated portable attestation packet schema is unsupported');
   }
   const statement = plainRecord(record.statement, 'isolated portable statement');
   if (
     statement.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V1_SCHEMA
-    || statement.version !== 1
+      !== (version === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V1_SCHEMA
+        : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V2_SCHEMA)
+    || statement.version !== version
   ) {
     throw new Error('isolated portable launch statement schema is unsupported');
   }
   const target = plainRecord(statement.target, 'isolated portable target');
-  if (target.schema !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA) {
+  if (target.schema !== (version === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA
+    : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_SCHEMA)) {
     throw new Error('isolated portable target descriptor schema is unsupported');
+  }
+  if (version === 2 && (target.version !== 2 || target.settlementNetworkId !== 'ergo-local-devnet'
+    || target.compilerProfile !== 'absolute-height-tracker-v2' || statement.settlementNetworkId !== 'ergo-local-devnet')) {
+    throw new Error('isolated portable V2 target profile is unsupported');
   }
   const histories = plainRecord(
     statement.histories,
@@ -626,13 +716,13 @@ function parseAttestationPacket(
       signatureHex: fields.signatureHex,
     };
   });
+  if (version === 1) return deepFreeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA, version: 1 as const,
+    statement: record.statement as SubstrateFederatedIsolatedDevnetLaunchStatementV1, signatures,
+  });
   return deepFreeze({
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA,
-    version: 1 as const,
-    statement: record.statement as Readonly<
-      SubstrateFederatedIsolatedDevnetLaunchStatementV1
-    >,
-    signatures,
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA, version: 2 as const,
+    statement: record.statement as SubstrateFederatedIsolatedDevnetLaunchStatementV2, signatures,
   });
 }
 
@@ -741,14 +831,16 @@ function assertTargetMatchesTrustPins(
 }
 
 function assertExternalTargetPreflight(
-  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1 | SubstrateFederatedIsolatedDevnetTargetDescriptorV2>,
   trustPins: Readonly<SubstrateFederatedIsolatedDevnetPortableReplayV1['trustPins']>,
   profile: ReturnType<typeof buildSubstrateFederatedCheckpointProfileV1>,
+  version: 1 | 2,
 ): void {
   const { descriptorDigestHex, ...body } = target;
   const recomputedDescriptorDigestHex = sha256CanonicalJson(
     body,
-    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN,
+    version === 1 ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_DIGEST_DOMAIN,
   );
   if (
     descriptorDigestHex !== recomputedDescriptorDigestHex

@@ -15,7 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { beforeAll, describe, expect, it as vitestIt, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it as vitestIt, vi } from 'vitest';
 import { Mnemonic } from 'ethers';
 
 interface IsolatedDevnetLaunchTestShard {
@@ -123,6 +123,7 @@ const mocks = vi.hoisted(() => ({
   familyReceipt: undefined as any,
   trackerCompileWait: undefined as Promise<void> | undefined,
   useActualCompilers: false,
+  useActualFamilyDecoder: false,
   settlementTargetProfile: undefined as any,
   settlementObservation: undefined as any,
   acceptedSettlementObservations: new Set<unknown>(),
@@ -159,7 +160,10 @@ vi.mock(
     return {
       ...actual,
       decodeSubstrateFederatedSettlementFamilyV1Profile: vi.fn(
-        () => mocks.familyProfile,
+        (value: Parameters<typeof actual.decodeSubstrateFederatedSettlementFamilyV1Profile>[0]) =>
+          mocks.useActualFamilyDecoder
+            ? actual.decodeSubstrateFederatedSettlementFamilyV1Profile(value)
+            : mocks.familyProfile,
       ),
     };
   },
@@ -367,6 +371,17 @@ import {
 import {
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
+import * as packetProducer from './substrate-federated-isolated-devnet-packet-producer-v1.js';
+import * as portableReplay from './substrate-federated-isolated-devnet-portable-replay-v1.js';
+import * as isolatedLaunch from './substrate-federated-isolated-devnet-launch-v1.js';
+import * as isolatedGeneration from './substrate-federated-isolated-devnet-generation-v1.js';
+import * as isolatedProvisioning from './substrate-federated-isolated-devnet-provisioning-v1.js';
+import * as sourceHistoryProducer from './substrate-federated-authority-safe-devnet-history-v1.js';
+import * as ergoHistoryProducer from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
+import * as relayerArtifactProducer from './substrate-federated-isolated-devnet-relayer-artifacts-v1.js';
+import * as setupSignerBindings from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import * as trackerCompilerV2 from './substrate-federated-tracker-jvm-compiler-v2.js';
+import * as familyCompilerV2 from './substrate-federated-settlement-family-jvm-compiler-v2.js';
 import {
   buildSubstrateFederatedGreenfieldErgoHistoryV1,
   buildSubstrateFederatedGreenfieldLaunchBaselineV1,
@@ -3622,6 +3637,272 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     })).toThrow(/isolated-devnet launch baseline was not built in this process/);
   });
 });
+
+describe('genuine V2 portable packet and provisioning join', () => {
+  let fixture: Awaited<ReturnType<typeof buildGenuineV2PacketFixture>>;
+  beforeAll(async () => {
+    fixture = await buildGenuineV2PacketFixture();
+  }, 60_000);
+  afterAll(() => fixture?.dispose());
+
+  it('rebuilds the genuine packet into the exact three unsigned genesis transactions', async () => {
+    const { packet, genesisInputs } = fixture;
+    packetProducer.assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet);
+    expect(packet.receipt.version).toBe(3);
+    expect(packet.replay.version).toBe(2);
+    const external = JSON.parse(Buffer.from(packet.portableReplayInput.artifacts.attestationPacket).toString('utf8'));
+    expect(external.statement.target).toMatchObject({
+      version: 2, settlementNetworkId: 'ergo-local-devnet',
+      compilerProfile: 'absolute-height-tracker-v2',
+    });
+    expect(packet.portableReplayInput.artifacts.trackerTemplate).toEqual(readFileSync(new URL(
+      '../../contracts/SPVTrackerSubstrateFederatedV2.es', import.meta.url,
+    )));
+    expect(() => portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1(
+      packet.replay as never,
+    )).toThrow(/continuation is unavailable/);
+    expect(() => portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(
+      structuredClone(packet.replay),
+    )).toThrow(/continuation is unavailable/);
+    const continuation = fixture.continuation;
+    const target = isolatedLaunch.deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(
+      continuation.sourceAndCompilerInput,
+    );
+    expect(target).toEqual(external.statement.target);
+    const artifacts = packet.portableReplayInput.artifacts;
+    const statement = isolatedLaunch.buildSubstrateFederatedIsolatedDevnetLaunchStatementV2({
+      target,
+      activationGenerationIdHex: external.statement.activationGenerationIdHex,
+      ergoHistory: buildSubstrateFederatedIsolatedDevnetErgoHistoryV1({
+        target, genesisHeaderIdHex: '71'.repeat(32), genesisHeight: 1,
+        setupAnchorHeaderIdHex: '72'.repeat(32), setupAnchorHeight: 120,
+        greatestWorkHeadersManifest: artifacts.ergoGreatestWorkHeadersManifest,
+        transactionsManifest: artifacts.ergoTransactionsManifest,
+        utxoTransitionsManifest: artifacts.ergoUtxoTransitionsManifest,
+      }),
+      relayerClosure: buildSubstrateFederatedIsolatedDevnetRelayerClosureV1({
+        target, gitCommitSha1Hex: '73'.repeat(20),
+        sourceArchive: artifacts.relayerSourceArchive,
+        packageLock: artifacts.relayerPackageLock,
+        runtimeEntrypointsManifest: artifacts.relayerRuntimeEntrypointsManifest,
+        buildArtifact: artifacts.relayerBuildArtifact,
+      }),
+    });
+    expect(statement).toEqual(external.statement);
+    const baseline = isolatedLaunch.buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2({
+      statement, signatures: external.signatures,
+    });
+    const generation = isolatedGeneration.buildSubstrateFederatedIsolatedDevnetGenerationV2({
+      ...continuation.sourceAndCompilerInput, launchBaseline: baseline,
+    });
+    const provisioning = await isolatedProvisioning.buildSubstrateFederatedIsolatedDevnetProvisioningV2({
+      generation, genesisInputs,
+    });
+    isolatedProvisioning.assertSubstrateFederatedIsolatedDevnetProvisioningV2Provenance(provisioning);
+    expect(packet.replay.launch.generationManifestDigestHex).toBe(generation.manifestDigestHex);
+    expect(packet.replay.provisioning).toEqual({
+      planDigestHex: provisioning.planDigestHex,
+      identitySetDigestHex: provisioning.provisioning.identitySetDigestHex,
+      tracker: provisioning.provisioning.tracker.identity,
+      duplicatePrevention: provisioning.provisioning.duplicatePrevention.identity,
+      pooledReserve: provisioning.provisioning.pooledReserve.identity,
+    });
+    expect(packet.replay.boundaries).toMatchObject({
+      targetNodeAcceptanceEstablished: false, fundsAuthorityEstablished: false,
+      sourceConsensusIndependentlyVerified: false, gate5Closed: false,
+    });
+    expect(() => isolatedProvisioning.assertSubstrateFederatedIsolatedDevnetProvisioningV1Provenance(
+      provisioning,
+    )).toThrow(/provenance/);
+    expect(() => isolatedProvisioning.assertSubstrateFederatedIsolatedDevnetProvisioningV2Provenance(
+      structuredClone(provisioning),
+    )).toThrow(/provenance/);
+    await expect(buildSubstrateFederatedIsolatedDevnetProvisioningV1({
+      generation: generation as never, genesisInputs,
+    })).rejects.toThrow(/generation.*process/);
+    await expect(isolatedProvisioning.buildSubstrateFederatedIsolatedDevnetProvisioningV2({
+      generation: structuredClone(generation), genesisInputs,
+    })).rejects.toThrow(/generation.*process/);
+    expect(() => portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(
+      packet.replay,
+    )).toThrow(/continuation is unavailable/);
+  });
+
+  it('does not allow the V1 replay to relabel a V2 packet', async () => {
+    await expect(replaySubstrateFederatedIsolatedDevnetPortableV1(
+      fixture.packet.portableReplayInput,
+    )).rejects.toThrow(/packet schema is unsupported/);
+  });
+
+  it.each(['expectedTargetDescriptorDigestHex', 'expectedSourceAttestationKeySetDigestHex'] as const)(
+    'rejects the wrong explicit %s before compilation', async key => {
+      const input = fixture.packet.portableReplayInput;
+      await expect(portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+        artifacts: input.artifacts, trustPins: { ...input.trustPins, [key]: 'ff'.repeat(32) },
+      })).rejects.toThrow(/pin|key.set/i);
+    },
+  );
+
+  it.each([
+    ['packet schema', (packet: any) => { packet.schema = SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA; }, /packet schema/],
+    ['packet version', (packet: any) => { packet.version = 1; }, /packet schema/],
+    ['statement', (packet: any) => { packet.statement.schema = 'e2s.substrate-federated-isolated-devnet-launch-statement.v1'; }, /statement schema/],
+    ['statement version', (packet: any) => { packet.statement.version = 1; }, /statement schema/],
+    ['target', (packet: any) => { packet.statement.target.schema = 'e2s.substrate-federated-isolated-devnet-target-descriptor.v1'; }, /target descriptor schema/],
+    ['target version', (packet: any) => { packet.statement.target.version = 1; }, /V2 target profile/],
+    ['target network', (packet: any) => { packet.statement.target.settlementNetworkId = 'ergo-testnet'; }, /V2 target profile/],
+    ['compiler profile', (packet: any) => { packet.statement.target.compilerProfile = 'legacy'; }, /V2 target profile/],
+    ['statement network', (packet: any) => { packet.statement.settlementNetworkId = 'ergo-testnet'; }, /V2 target profile/],
+  ] as const)('rejects a cross-version %s', async (_label, mutate, error) => {
+    const input = fixture.packet.portableReplayInput;
+    const packet = JSON.parse(Buffer.from(input.artifacts.attestationPacket).toString('utf8'));
+    mutate(packet);
+    await expect(portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+      trustPins: input.trustPins,
+      artifacts: { ...input.artifacts, attestationPacket: jsonBytes(packet) },
+    })).rejects.toThrow(error);
+  });
+
+  it.each([
+    'trackerTemplate', 'duplicatePreventionTemplate', 'sourceLockTemplate',
+    'pooledReserveTemplate', 'sourceAcceptanceReport', 'sourceReportedFinalizedBlocks',
+    'sourceRuntimeHistory', 'sourceApplicationHistory', 'sourceHistoryReceipt',
+    'ergoGreatestWorkHeadersManifest', 'ergoTransactionsManifest', 'ergoUtxoTransitionsManifest',
+    'relayerSourceArchive', 'relayerPackageLock', 'relayerRuntimeEntrypointsManifest', 'relayerBuildArtifact',
+  ] as const)('rejects exact-byte drift in %s', async key => {
+    const input = fixture.packet.portableReplayInput;
+    await expect(fixture.withFrozenCompilers(() => portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+      trustPins: input.trustPins,
+      artifacts: { ...input.artifacts, [key]: Buffer.concat([input.artifacts[key], Buffer.from('\n')]) },
+    }))).rejects.toThrow(/digest|bytes|artifact|template|canonical|compiler (request|binding)/i);
+  });
+
+  it('revalidates the source quorum after rebuilding the V2 statement', async () => {
+    const input = fixture.packet.portableReplayInput;
+    const packet = JSON.parse(Buffer.from(input.artifacts.attestationPacket).toString('utf8'));
+    packet.signatures[0].signatureHex = '00'.repeat(64);
+    await expect(withoutNodeOptions(() => portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+      trustPins: input.trustPins,
+      artifacts: { ...input.artifacts, attestationPacket: jsonBytes(packet) },
+    }))).rejects.toThrow(/signature|threshold/);
+  }, 60_000);
+});
+
+async function buildGenuineV2PacketFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'e2s-v2-packet-join-'));
+  const history = historyFixture();
+  const sourceHistory = {
+    receipt: JSON.parse(Buffer.from(history.bundle.historyReceipt).toString('utf8')),
+    artifacts: {
+      acceptanceReport: history.bundle.acceptanceReport,
+      reportedFinalizedBlocksManifest: history.bundle.reportedFinalizedBlocks,
+      runtimeHistoryManifest: history.bundle.runtimeHistory,
+      applicationHistoryManifest: history.bundle.applicationHistory,
+    },
+  };
+  const publicIdentity = await deriveLocalWasmRootSignerPublicIdentity(Mnemonic.fromEntropy(
+    new Uint8Array(32).fill(37),
+  ).phrase);
+  const publicKeyHex = publicIdentity.publicKeyHex;
+  const signer = Object.freeze({
+    publicKeyHex, p2pkErgoTreeHex: `0008cd${publicKeyHex}`, networkPrefix: 16 as const,
+    rewardInputErgoTrees: {
+      delay1: deriveDevnetRewardErgoTreeHexForDelay(publicKeyHex, 1),
+      delay720: deriveDevnetRewardErgoTreeHexForDelay(publicKeyHex, 720),
+    },
+  });
+  const genesisInputs = await isolatedGenesisInputs(signer.rewardInputErgoTrees.delay1);
+  const ergoHistory = {
+    receipt: {
+      schema: 'e2s.substrate-federated-isolated-devnet-ergo-history-artifacts.v2',
+      target: { genesisHeaderIdHex: '71'.repeat(32), genesisHeight: 1,
+        setupAnchorHeaderIdHex: '72'.repeat(32), setupAnchorHeight: 120 },
+      genesisBoxIds: Object.fromEntries(Object.entries(genesisInputs).map(([role, box]) => [role, box.boxId])),
+    },
+    artifacts: {
+      greatestWorkHeadersManifest: 'synthetic-header-history',
+      transactionsManifest: 'synthetic-transaction-history',
+      utxoTransitionsManifest: `${canonicalJson({
+        schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_UTXO_HISTORY_V1_SCHEMA,
+        version: 1, genesisInputs,
+      })}\n`,
+    },
+  };
+  // Only upstream observation/custody and archive production are simulated.
+  // The collector, V2 compiler pair, source signing and replay are real.
+  const spies = [
+    vi.spyOn(sourceHistoryProducer, 'assertSubstrateFederatedAuthoritySafeDevnetHistoryV1Provenance')
+      .mockImplementation(value => { expect(value).toBe(sourceHistory); }),
+    vi.spyOn(ergoHistoryProducer, 'assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance')
+      .mockImplementation(value => { expect(value).toBe(ergoHistory); }),
+    vi.spyOn(setupSignerBindings, 'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance')
+      .mockImplementation(value => { expect(value).toBe(signer); }),
+    vi.spyOn(relayerArtifactProducer, 'produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1')
+      .mockImplementation(async input => {
+        mkdirSync(input.destinationDirectory);
+        const artifacts = Object.fromEntries(Object.entries(
+          relayerArtifactProducer.SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_ARTIFACT_FILES_V1,
+        ).map(([role, file]) => {
+          const bytes = Buffer.from(`synthetic-${role}`);
+          writeFileSync(join(input.destinationDirectory, file), bytes);
+          return [role, { file, sizeBytes: bytes.length, sha256Hex: sha256(bytes) }];
+        }));
+        return {
+          schema: 'e2s.substrate-federated-isolated-devnet-relayer-artifacts.v1', version: 1,
+          headCommitSha1Hex: input.expectedHeadCommitSha1Hex,
+          artifactSetDigestHex: sha256(Buffer.from(canonicalJson(artifacts))), artifacts, boundaries: {},
+        } as Awaited<ReturnType<typeof relayerArtifactProducer.produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1>>;
+      }),
+  ];
+  const oldDecoder = mocks.useActualFamilyDecoder;
+  mocks.useActualFamilyDecoder = true;
+  const session = packetProducer.createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4(signer);
+  const dispose = () => {
+    session.dispose();
+    spies.forEach(spy => spy.mockRestore());
+    mocks.useActualFamilyDecoder = oldDecoder;
+    rmSync(root, { recursive: true, force: true });
+  };
+  try {
+    const profile = buildSubstrateFederatedCheckpointProfileV1({
+      federationEpoch: '1', maxAdmissionValidityBlocks: '64', ...session.signer,
+    });
+    const packet = await withoutNodeOptions(() => session.produce({
+      sourceHistory: sourceHistory as unknown as sourceHistoryProducer.SubstrateFederatedAuthoritySafeDevnetHistoryV1,
+      ergoHistory: ergoHistory as unknown as ergoHistoryProducer.SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
+      expectedProfilePins: {
+        federationProfileIdHex: profile.profileIdHex,
+        sourceAttestationKeySetDigestHex: profile.sourceAttestationKeySetDigestHex,
+        ergoAdmissionKeySetDigestHex: profile.ergoAdmissionKeySetDigestHex,
+      },
+      relayerArtifacts: {
+        bridgeRoot: dirname(dirname(process.cwd())), gitExecutable: 'git', wasmPackExecutable: 'wasm-pack',
+        expectedHeadCommitSha1Hex: '73'.repeat(20), destinationDirectory: join(root, 'artifacts'),
+      },
+    }));
+    const continuation = portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(packet.replay);
+    const withFrozenCompilers = async <T>(operation: () => Promise<T>): Promise<T> => {
+      const { trackerReceipt, familyReceipt } = continuation.sourceAndCompilerInput;
+      // Reuse only the exact immutable compiler inputs. Never cache session or replay authority.
+      const trackerSpy = vi.spyOn(trackerCompilerV2, 'compileSubstrateFederatedTrackerWithPinnedJvmV2')
+        .mockImplementation(async request => {
+          trackerCompilerV2.assertSubstrateFederatedTrackerJvmCompilerReceiptV2(trackerReceipt, request);
+          return trackerReceipt;
+        });
+      const familySpy = vi.spyOn(familyCompilerV2, 'compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2')
+        .mockImplementation(async input => {
+          familyCompilerV2.assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV2(familyReceipt, input);
+          return familyReceipt;
+        });
+      try { return await operation(); }
+      finally { familySpy.mockRestore(); trackerSpy.mockRestore(); }
+    };
+    return { packet, genesisInputs, session, continuation, withFrozenCompilers, dispose };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+}
 
 type MutableTargetInput = {
   trackerRequest: any;

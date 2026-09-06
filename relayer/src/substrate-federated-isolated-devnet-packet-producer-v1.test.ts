@@ -46,6 +46,13 @@ const mocks = vi.hoisted(() => ({
   statementInputs: [] as any[],
   baselineInputs: [] as any[],
   replayInputs: [] as any[],
+  v2Calls: [] as string[],
+  v2TrackerReceipts: new WeakMap<object, object>(),
+  v2FamilyReceipts: new WeakMap<object, any>(),
+  v2Targets: new WeakSet<object>(),
+  v2LaunchStatements: new WeakSet<object>(),
+  v2ReceiptMutation: undefined as 'tracker-copy' | 'family-copy' | undefined,
+  sourceSessions: [] as any[],
   trackerCompileEntered: undefined as (() => void) | undefined,
   trackerCompileWait: undefined as Promise<void> | undefined,
   packetFailure: undefined as Error | undefined,
@@ -184,6 +191,24 @@ vi.mock(
 );
 
 vi.mock(
+  './substrate-federated-isolated-devnet-source-attestation-session-v1.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-source-attestation-session-v1.js')
+    >();
+    return {
+      ...actual,
+      createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2:
+        vi.fn((...args: Parameters<typeof actual.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>) => {
+          const session = actual.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2(...args);
+          mocks.sourceSessions.push(session);
+          return session;
+        }),
+    };
+  },
+);
+
+vi.mock(
   './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
   () => ({
     assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance:
@@ -310,15 +335,132 @@ vi.mock(
 );
 
 vi.mock(
+  './substrate-federated-tracker-compiler-v2.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-tracker-compiler-v2.js')
+    >();
+    return {
+      ...actual,
+      buildSubstrateFederatedTrackerCompilerRequestV2: vi.fn((input: any) => {
+        mocks.v2Calls.push('tracker-request');
+        if (mocks.packetFailurePhase === 'packet input and contract binding') {
+          throw mocks.packetFailure;
+        }
+        mocks.trackerInputs.push(input);
+        return actual.buildSubstrateFederatedTrackerCompilerRequestV2(input);
+      }),
+    };
+  },
+);
+
+vi.mock(
+  './substrate-federated-tracker-jvm-compiler-v2.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-tracker-jvm-compiler-v2.js')
+    >();
+    return {
+      ...actual,
+      compileSubstrateFederatedTrackerWithPinnedJvmV2:
+        vi.fn(async (input: any) => {
+          mocks.v2Calls.push('tracker-compiler');
+          if (mocks.packetFailurePhase === 'packet tracker compilation') {
+            throw mocks.packetFailure;
+          }
+          mocks.trackerCompilerInputs.push(input);
+          mocks.trackerCompileEntered?.();
+          await mocks.trackerCompileWait;
+          expect(input.version).toBe(2);
+          expect(input.anchorSelector).toBe('absolute-ergo-header-height');
+          const receipt = Object.freeze({
+            schema: 'e2s.substrate-federated-tracker-jvm-compiler-receipt.v2',
+            version: 2,
+            receiptDigestHex: 'a7'.repeat(32),
+            contract: Object.freeze({ contractIdHex: 'a8'.repeat(32) }),
+          });
+          mocks.v2TrackerReceipts.set(receipt, input);
+          return mocks.v2ReceiptMutation === 'tracker-copy'
+            ? structuredClone(receipt) : receipt;
+        }),
+    };
+  },
+);
+
+vi.mock(
+  './substrate-federated-settlement-family-jvm-compiler-v2.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-settlement-family-jvm-compiler-v2.js')
+    >();
+    return {
+      ...actual,
+      compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2:
+        vi.fn(async (input: any) => {
+          mocks.v2Calls.push('family-compiler');
+          if (mocks.packetFailurePhase === 'packet settlement compilation') {
+            throw mocks.packetFailure;
+          }
+          if (mocks.v2TrackerReceipts.get(input.trackerReceipt) !== input.trackerRequest) {
+            throw new Error('mock V2 tracker receipt lacks exact request provenance');
+          }
+          mocks.familyCompilerInputs.push(input);
+          const { application, profile } = input.trackerRequest;
+          const request = buildSubstrateFederatedSettlementFamilyV1CompilerRequest({
+            templates: input.templates,
+            duplicatePreventionGenesisInputBoxIdHex:
+              input.duplicatePreventionGenesisInputBoxIdHex,
+            pooledReserveGenesisInputBoxIdHex: input.pooledReserveGenesisInputBoxIdHex,
+            tracker: {
+              contractIdHex: input.trackerReceipt.contract.contractIdHex,
+              templateSourceSha256Hex: input.trackerRequest.template.templateSourceSha256Hex,
+              trackerNftIdHex: input.trackerRequest.trackerNftIdHex,
+              sourceNetworkIdHex: application.sourceNetworkIdHex,
+              sidechainIdHex: application.sidechainIdHex,
+              bridgeAddressHex: application.bridgeAddressHex,
+              tokenAddressHex: application.tokenAddressHex,
+              runtimeProfileIdHex: application.runtimeProfileIdHex,
+              settlementProfileIdHex: application.settlementProfileIdHex,
+              federationProfileIdHex: profile.profileIdHex,
+              sourceAttestationKeySetDigestHex: profile.sourceAttestationKeySetDigestHex,
+              sourceAttestationThreshold: profile.sourceAttestationThreshold,
+              ergoAdmissionKeySetDigestHex: profile.ergoAdmissionKeySetDigestHex,
+              ergoAdmissionThreshold: profile.ergoAdmissionThreshold,
+              federationEpoch: profile.federationEpoch,
+            },
+          });
+          const receipt = Object.freeze({
+            schema: 'e2s.substrate-federated-settlement-family-jvm-compiler-receipt.v2',
+            version: 2,
+            receiptDigestHex: 'a9'.repeat(32),
+            profile: request.profile,
+          });
+          mocks.v2FamilyReceipts.set(receipt, input);
+          return mocks.v2ReceiptMutation === 'family-copy'
+            ? structuredClone(receipt) : receipt;
+        }),
+    };
+  },
+);
+
+vi.mock(
   './substrate-federated-isolated-devnet-launch-v1.js',
   async importOriginal => {
     const actual: typeof import('./substrate-federated-isolated-devnet-launch-v1.js') = await importOriginal<
       typeof import('./substrate-federated-isolated-devnet-launch-v1.js')
     >();
-    return {
-      ...actual,
-      deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1:
-        vi.fn((input: any) => {
+    const deriveTarget = (version: 1 | 2) => vi.fn((input: any) => {
+          if (version === 2) {
+            mocks.v2Calls.push('target');
+            const familyInput = mocks.v2FamilyReceipts.get(input.familyReceipt);
+            if (familyInput === undefined
+              || familyInput.trackerRequest !== input.trackerRequest
+              || familyInput.trackerReceipt !== input.trackerReceipt
+              || familyInput.templates !== input.familyTemplates
+              || mocks.v2TrackerReceipts.get(input.trackerReceipt) !== input.trackerRequest) {
+              throw new Error('mock V2 family receipt lacks exact compiler provenance');
+            }
+          }
           if (mocks.postSettlementBindingFailure !== undefined) {
             throw mocks.postSettlementBindingFailure;
           }
@@ -380,8 +522,40 @@ vi.mock(
             }),
           });
           mocks.targetDescriptor = descriptor;
+          if (version === 2) mocks.v2Targets.add(descriptor);
           return descriptor;
+        });
+    const buildStatement = (version: 1 | 2) => vi.fn((input: any) => {
+      if (version === 2) {
+        mocks.v2Calls.push('statement');
+        if (!mocks.v2Targets.has(input.target)) {
+          throw new Error('mock V2 launch target lacks process provenance');
+        }
+      }
+      mocks.statementInputs.push(input);
+      const statementDigestHex = (version === 1 ? 'b4' : 'c4').repeat(32);
+      const deriveDigest = version === 1
+        ? actual.deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1
+        : actual.deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV2;
+      const statement = Object.freeze({
+        schema: `e2s.substrate-federated-isolated-devnet-launch-statement.v${version}`,
+        version,
+        target: input.target,
+        activationGenerationIdHex: input.activationGenerationIdHex,
+        statementDigestHex,
+        attestationDigestHex: deriveDigest({
+          statementDigestHex,
+          sourceAttestationKeySetDigestHex: input.target.federation.sourceAttestationKeySetDigestHex,
+          sourceAttestationThreshold: input.target.federation.sourceAttestationThreshold,
         }),
+      });
+      (version === 1 ? mocks.launchStatements : mocks.v2LaunchStatements).add(statement);
+      return statement;
+    });
+    return {
+      ...actual,
+      deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1: deriveTarget(1),
+      deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2: deriveTarget(2),
       buildSubstrateFederatedIsolatedDevnetErgoHistoryV1:
         vi.fn((input: any) => {
           mocks.ergoHistoryInputs.push(input);
@@ -392,29 +566,8 @@ vi.mock(
           mocks.relayerClosureInputs.push(input);
           return Object.freeze({ closureDigestHex: 'b3'.repeat(32) });
         }),
-      buildSubstrateFederatedIsolatedDevnetLaunchStatementV1:
-        vi.fn((input: any) => {
-          mocks.statementInputs.push(input);
-          const statementDigestHex = 'b4'.repeat(32);
-          const statement = Object.freeze({
-            schema:
-              'e2s.substrate-federated-isolated-devnet-launch-statement.v1',
-            version: 1,
-            target: input.target,
-            activationGenerationIdHex: input.activationGenerationIdHex,
-            statementDigestHex,
-            attestationDigestHex:
-              actual.deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
-                statementDigestHex,
-                sourceAttestationKeySetDigestHex:
-                  input.target.federation.sourceAttestationKeySetDigestHex,
-                sourceAttestationThreshold:
-                  input.target.federation.sourceAttestationThreshold,
-              }),
-          });
-          mocks.launchStatements.add(statement);
-          return statement;
-        }),
+      buildSubstrateFederatedIsolatedDevnetLaunchStatementV1: buildStatement(1),
+      buildSubstrateFederatedIsolatedDevnetLaunchStatementV2: buildStatement(2),
       assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance:
         vi.fn((value: unknown) => {
           if (
@@ -430,7 +583,7 @@ vi.mock(
       assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance:
         vi.fn((value: unknown) => {
           if (value === null || typeof value !== 'object'
-            || !mocks.launchStatements.has(value)) {
+            || !(mocks.launchStatements.has(value) || mocks.v2LaunchStatements.has(value))) {
             actual.assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(value);
           }
         }),
@@ -439,6 +592,16 @@ vi.mock(
           mocks.baselineInputs.push(input);
           assertSignatures(input.statement.attestationDigestHex, input.signatures);
           return Object.freeze({ baselineDigestHex: 'b6'.repeat(32) });
+        }),
+      buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2:
+        vi.fn((input: any) => {
+          mocks.v2Calls.push('baseline');
+          if (!mocks.v2LaunchStatements.has(input.statement)) {
+            throw new Error('mock V2 launch statement lacks process provenance');
+          }
+          mocks.baselineInputs.push(input);
+          assertSignatures(input.statement.attestationDigestHex, input.signatures);
+          return Object.freeze({ baselineDigestHex: 'c6'.repeat(32) });
         }),
     };
   },
@@ -509,10 +672,8 @@ vi.mock(
     const actual = await importOriginal<
       typeof import('./substrate-federated-isolated-devnet-portable-replay-v1.js')
     >();
-    return {
-      ...actual,
-      replaySubstrateFederatedIsolatedDevnetPortableV1:
-        vi.fn(async (input: any) => {
+    const replay = (version: 1 | 2) => vi.fn(async (input: any) => {
+          if (version === 2) mocks.v2Calls.push('replay');
           if (
             mocks.packetFailurePhase === 'packet launch and portable replay'
           ) {
@@ -522,19 +683,29 @@ vi.mock(
           const packet = JSON.parse(
             Buffer.from(input.artifacts.attestationPacket).toString('utf8'),
           );
+          expect(packet.version).toBe(version);
+          expect(packet.statement.version).toBe(version);
+          expect(packet.schema).toBe(version === 1
+            ? actual.SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA
+            : actual.SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V2_SCHEMA);
+          assertSignatures(packet.statement.attestationDigestHex, packet.signatures);
           return Object.freeze({
-            reportDigestHex: 'b8'.repeat(32),
+            reportDigestHex: (version === 1 ? 'b8' : 'c8').repeat(32),
             launch: Object.freeze({
               targetDescriptorDigestHex:
                 input.trustPins.expectedTargetDescriptorDigestHex,
               statementDigestHex: packet.statement.statementDigestHex,
               attestationDigestHex: packet.statement.attestationDigestHex,
-              baselineDigestHex: 'b6'.repeat(32),
+              baselineDigestHex: (version === 1 ? 'b6' : 'c6').repeat(32),
               activationGenerationIdHex:
                 packet.statement.activationGenerationIdHex,
             }),
           });
-        }),
+        });
+    return {
+      ...actual,
+      replaySubstrateFederatedIsolatedDevnetPortableV1: replay(1),
+      replaySubstrateFederatedIsolatedDevnetPortableV2: replay(2),
     };
   },
 );
@@ -545,13 +716,17 @@ import {
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV1Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetPacketV3Provenance,
   claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1,
+  claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV2,
   consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1,
   createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
+  createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4,
   createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2,
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_CHECKPOINT_ATTESTATION_V3_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V3_SCHEMA,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetPacketProductionFailureV1,
@@ -577,6 +752,7 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 
 const temporaryRoots: string[] = [];
@@ -674,6 +850,9 @@ beforeEach(() => {
   mocks.statementInputs = [];
   mocks.baselineInputs = [];
   mocks.replayInputs = [];
+  mocks.v2Calls = [];
+  mocks.v2ReceiptMutation = undefined;
+  mocks.sourceSessions = [];
   mocks.trackerCompileEntered = undefined;
   mocks.trackerCompileWait = undefined;
   mocks.packetFailure = undefined;
@@ -2029,6 +2208,267 @@ describe('isolated-devnet portable packet producer', () => {
     expect(source).not.toMatch(/\bfetch\s*\(|\bprocess\.env\b|\/transactions\/check/u);
   });
 });
+
+describe('SessionV4 PacketV3 continuation with V2 compiler-family mocks', () => {
+  it.each([1, 2] as const)('selects only V2 components with Ergo history V%s', async version => {
+    mocks.ergoHistory = ergoHistory(version);
+    const session = packetCheckpointContinuationSessionV4();
+    const packet = await session.produce(packetInput());
+    expect(mocks.v2Calls).toEqual([
+      'tracker-request', 'tracker-compiler', 'family-compiler',
+      'target', 'statement', 'baseline', 'replay',
+    ]);
+    expect(mocks.trackerCompilerInputs).toHaveLength(1);
+    expect(mocks.familyCompilerInputs).toHaveLength(1);
+    expect(mocks.replayInputs).toEqual([packet.portableReplayInput]);
+    expect(mocks.trackerInputs[0].template.relativePath).toBe(
+      'contracts/SPVTrackerSubstrateFederatedV2.es',
+    );
+    expect(mocks.trackerCompilerInputs[0]).toMatchObject({
+      version: 2, anchorSelector: 'absolute-ergo-header-height',
+    });
+    expect(mocks.familyCompilerInputs[0].trackerRequest).toBe(mocks.trackerCompilerInputs[0]);
+    expect(packet.receipt).toMatchObject({
+      schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCER_V3_SCHEMA,
+      version: 3,
+      boundaries: { sourceAttestationPrivateKeysRetainedAfterPacket: true },
+    });
+    assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet))
+      .toThrow(/V2 lacks process provenance/u);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketV1Provenance(packet))
+      .toThrow(/lacks process provenance/u);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(structuredClone(packet)))
+      .toThrow(/V3 lacks process provenance/u);
+    session.dispose();
+    assertSourceDisposed(mocks.sourceSessions[0]);
+  });
+
+  it('keeps historical SessionV3 on tracker V1 and rejects cross-version lineage claims', async () => {
+    const historical = await checkpointReadySession();
+    expect(mocks.v2Calls).toEqual([]);
+    expect(historical.packet.receipt.version).toBe(2);
+    expect(mocks.trackerInputs[0].template.relativePath).toBe(
+      'contracts/SPVTrackerSubstrateFederatedV1.es',
+    );
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(historical.packet))
+      .toThrow(/V3 lacks process provenance/u);
+    expect(() => claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV2(historical.packet as never))
+      .toThrow(/V3 lacks process provenance/u);
+    const current = await checkpointReadySessionV4();
+    expect(() => claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(current.packet as never))
+      .toThrow(/V2 lacks process provenance/u);
+    expect(() => claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV2(structuredClone(current.packet)))
+      .toThrow(/V3 lacks process provenance/u);
+    const lineage = claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV2(current.packet);
+    assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage);
+    expect(lineage.packetReceiptDigestHex).toBe(current.packet.receipt.receiptDigestHex);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(structuredClone(lineage)))
+      .toThrow(/provenance/u);
+    expect(() => claimSubstrateFederatedIsolatedDevnetPacketRelayerLineageV2(current.packet))
+      .toThrow(/already claimed/u);
+    expect(consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage)).toBe(lineage);
+    expect(() => consumeSubstrateFederatedIsolatedDevnetPacketRelayerLineageV1(lineage))
+      .toThrow(/already consumed/u);
+    historical.session.dispose();
+    current.session.dispose();
+  });
+
+  it('retains the same real source custody through launch and mint, then disposes after checkpoint', async () => {
+    const session = packetCheckpointContinuationSessionV4();
+    const source = mocks.sourceSessions[0];
+    assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(source);
+    expect(() => session.produceMintSourceProof({} as never, {} as never))
+      .toThrow(/requires one completed packet/u);
+    const packet = await session.produce(packetInput());
+    expect(() => session.produceCheckpointAttestation(packet, {} as never, checkpointInput()))
+      .toThrow(/requires one completed mint source-proof/u);
+    const mint = session.produceMintSourceProof(packet, mintInputForCurrentTarget());
+    assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(mint);
+    assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(mint.sourceProof);
+    expect(() => session.produceMintSourceProof(packet, {} as never))
+      .toThrow(/requires one completed packet/u);
+    const checkpoint = session.produceCheckpointAttestation(packet, mint, checkpointInput());
+    expect(mocks.sourceSessions).toEqual([source]);
+    expect(checkpoint).toMatchObject({
+      packetReceiptDigestHex: packet.receipt.receiptDigestHex,
+      mintSourceProofReceiptDigestHex: mint.receiptDigestHex,
+      targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
+      checks: { exactPacketObjectBound: true, exactMintSourceProofReceiptObjectBound: true },
+      boundary: { packetMintBeforeCheckpointLifecycleEstablished: true, trackerAdmissionEstablished: false },
+    });
+    const attestation = checkpoint.checkpointAttestation;
+    assertSignatures(attestation.attestationDigestHex, attestation.signatures);
+    expect(attestation.signatures.map(value => value.signerPublicKeyHex))
+      .toEqual(session.signer.sourceAttestationPublicKeysHex.slice(0, 2));
+    expect(mint.sourceProof.signatureVerification.signatures.map(value => normalized(value.signerPublicKeyHex)))
+      .toEqual(attestation.signatures.map(value => value.signerPublicKeyHex));
+    assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(checkpoint);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(structuredClone(checkpoint)))
+      .toThrow(/lacks process provenance/u);
+    expect(() => session.produceCheckpointAttestation(packet, mint, checkpointInput()))
+      .toThrow(/requires one completed mint source-proof/u);
+    await expect(session.produce(packetInput())).rejects.toThrow(/already consumed or disposed/u);
+    assertSourceDisposed(source);
+  });
+
+  it.each(['tracker-copy', 'family-copy'] as const)('rejects %s compiler provenance', async mutation => {
+    mocks.v2ReceiptMutation = mutation;
+    const session = packetCheckpointContinuationSessionV4();
+    await expect(session.produce(packetInput())).rejects.toThrow(/lacks exact .* provenance/u);
+    expect(mocks.statementInputs).toHaveLength(0);
+    expect(mocks.replayInputs).toHaveLength(0);
+    assertSourceDisposed(mocks.sourceSessions[0]);
+  });
+
+  it.each(['copy', 'foreign', 'historical'] as const)('rejects a %s packet at mint and closes custody', async kind => {
+    const owner = await checkpointReadySession();
+    const foreign = await checkpointReadySessionV4();
+    const session = packetCheckpointContinuationSessionV4();
+    const source = mocks.sourceSessions.at(-1);
+    const packet = await session.produce(packetInput());
+    const supplied = kind === 'copy' ? structuredClone(packet)
+      : kind === 'foreign' ? foreign.packet : owner.packet;
+    expect(() => session.produceMintSourceProof(supplied as never, mintInputForCurrentTarget()))
+      .toThrow(/different completed packet/u);
+    expect(() => session.produceMintSourceProof(packet, {} as never))
+      .toThrow(/requires one completed packet/u);
+    assertSourceDisposed(source);
+    owner.session.dispose();
+    foreign.session.dispose();
+  });
+
+  it.each(['packet-copy', 'mint-copy', 'foreign-packet', 'foreign-mint', 'historical-packet', 'historical-mint'] as const)(
+    'rejects %s at checkpoint and consumes the attempt', async kind => {
+      const other = kind.startsWith('historical')
+        ? await checkpointReadySession() : await checkpointReadySessionV4();
+      const current = await checkpointReadySessionV4();
+      const source = mocks.sourceSessions.at(-1);
+      const packet = kind === 'packet-copy' ? structuredClone(current.packet)
+        : kind.endsWith('-packet') ? other.packet : current.packet;
+      const mint = kind === 'mint-copy' ? structuredClone(current.mintSourceProof)
+        : kind.endsWith('-mint') ? other.mintSourceProof : current.mintSourceProof;
+      expect(() => current.session.produceCheckpointAttestation(packet as never, mint, checkpointInput()))
+        .toThrow(/different packet or mint source-proof/u);
+      expect(() => current.session.produceCheckpointAttestation(current.packet, current.mintSourceProof, checkpointInput()))
+        .toThrow(/requires one completed mint source-proof/u);
+      assertSourceDisposed(source);
+      other.session.dispose();
+    },
+  );
+
+  it.each(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PACKET_PRODUCTION_PHASES_V1)(
+    'disposes V4 source custody when %s fails', async phase => {
+      mocks.packetFailurePhase = phase;
+      mocks.packetFailure = new Error(`synthetic ${phase} failure`);
+      const session = packetCheckpointContinuationSessionV4();
+      await expect(session.produce(packetInput())).rejects.toBe(mocks.packetFailure);
+      expect(projectSubstrateFederatedIsolatedDevnetPacketProductionFailureV1(mocks.packetFailure)).toBe(phase);
+      assertSourceDisposed(mocks.sourceSessions[0]);
+      await expect(session.produce(packetInput())).rejects.toThrow(/already consumed or disposed/u);
+    },
+  );
+
+  it.each(['mint', 'checkpoint'] as const)('revalidates artifact bytes before %s and disposes on drift', async boundary => {
+    const session = packetCheckpointContinuationSessionV4();
+    const packet = await session.produce(packetInput());
+    const input = mintInputForCurrentTarget();
+    const mint = boundary === 'checkpoint' ? session.produceMintSourceProof(packet, input) : undefined;
+    const bytes = packet.portableReplayInput.artifacts.sourceAcceptanceReport as Buffer;
+    bytes[0] ^= 0xff;
+    expect(() => assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet)).toThrow(/content drifted/u);
+    expect(() => boundary === 'mint' ? session.produceMintSourceProof(packet, input)
+      : session.produceCheckpointAttestation(packet, mint!, checkpointInput())).toThrow(/content drifted/u);
+    assertSourceDisposed(mocks.sourceSessions[0]);
+  });
+
+  it.each(['mint', 'checkpoint'] as const)('disposes after invalid %s input', async boundary => {
+    const session = packetCheckpointContinuationSessionV4();
+    const packet = await session.produce(packetInput());
+    if (boundary === 'mint') {
+      const input = mintInputForCurrentTarget();
+      expect(() => session.produceMintSourceProof(packet, {
+        ...input, evidenceReceipt: structuredClone(input.evidenceReceipt),
+      })).toThrow(/evidence receipt lacks process provenance/u);
+    } else {
+      const mint = session.produceMintSourceProof(packet, mintInputForCurrentTarget());
+      expect(() => session.produceCheckpointAttestation(packet, mint, {
+        ...checkpointInput(), burnLeafCount: 0,
+      })).toThrow(/burn leaf count must be a positive uint32/u);
+    }
+    assertSourceDisposed(mocks.sourceSessions[0]);
+    expect(() => session.produceMintSourceProof(packet, {} as never))
+      .toThrow(/requires one completed packet/u);
+    expect(() => session.produceCheckpointAttestation(packet, {} as never, checkpointInput()))
+      .toThrow(/requires one completed mint source-proof/u);
+  });
+
+  it.each(['fresh', 'packet', 'mint'] as const)('disposes explicitly at the %s boundary', async boundary => {
+    const session = packetCheckpointContinuationSessionV4();
+    if (boundary !== 'fresh') {
+      const packet = await session.produce(packetInput());
+      if (boundary === 'mint') session.produceMintSourceProof(packet, mintInputForCurrentTarget());
+    }
+    session.dispose();
+    session.dispose();
+    assertSourceDisposed(mocks.sourceSessions[0]);
+    await expect(session.produce(packetInput())).rejects.toThrow(/already consumed or disposed/u);
+  });
+
+  it('rejects concurrent production and disposal without destroying the in-flight owner', async () => {
+    let release!: () => void;
+    let entered!: () => void;
+    const compiling = new Promise<void>(resolve => { entered = resolve; });
+    mocks.trackerCompileEntered = entered;
+    mocks.trackerCompileWait = new Promise<void>(resolve => { release = resolve; });
+    const session = packetCheckpointContinuationSessionV4();
+    const producing = session.produce(packetInput());
+    try {
+      await compiling;
+      await expect(session.produce(packetInput())).rejects.toThrow(/already consumed or disposed/u);
+      expect(() => session.dispose()).toThrow(/session is running/u);
+      expect(() => session.produceMintSourceProof({} as never, {} as never))
+        .toThrow(/requires one completed packet/u);
+      expect(() => session.produceCheckpointAttestation({} as never, {} as never, checkpointInput()))
+        .toThrow(/requires one completed mint source-proof/u);
+    } finally {
+      release();
+    }
+    const packet = await producing;
+    const mint = session.produceMintSourceProof(packet, mintInputForCurrentTarget());
+    const checkpoint = session.produceCheckpointAttestation(packet, mint, checkpointInput());
+    assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance(checkpoint);
+    expect(mocks.trackerCompilerInputs).toHaveLength(1);
+    expect(mocks.sourceSessions).toHaveLength(1);
+    assertSourceDisposed(mocks.sourceSessions[0]);
+  });
+});
+
+function assertSourceDisposed(source: any) {
+  expect(() => source.signLaunchStatement({})).toThrow(/source-attestation session is disposed/u);
+}
+
+function packetCheckpointContinuationSessionV4() {
+  const session = createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4(mocks.ergoAdmissionSigner);
+  mocks.packetSignerBinding = session.signer;
+  return session;
+}
+
+function mintInputForCurrentTarget() {
+  return {
+    draft: mintDraftForTarget(requiredTargetDescriptor()),
+    evidenceReceipt: MINT_EVIDENCE_RECEIPT,
+    issuedAtNativeHeight: '4',
+    expiresAtNativeHeight: '36',
+  };
+}
+
+async function checkpointReadySessionV4() {
+  const session = packetCheckpointContinuationSessionV4();
+  const packet = await session.produce(packetInput());
+  const mintSourceProof = session.produceMintSourceProof(packet, mintInputForCurrentTarget());
+  return { session, packet, mintSourceProof };
+}
 
 function requiredTargetDescriptor(): any {
   if (mocks.targetDescriptor === undefined) {
