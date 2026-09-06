@@ -529,6 +529,48 @@ describe('pinned local native verifier build conformance', () => {
     expect(result.stderrBytes).toEqual(Buffer.alloc(0));
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
+  it.each(['stdout', 'stderr'] as const)(
+    'retains every byte of multi-megabyte %s writes across pipe buffers',
+    async channel => {
+      const size = 3_952_928;
+      const expected = Buffer.alloc(size);
+      for (let index = 0; index < size; index += 1) {
+        expected[index] = 32 + (index * 31) % 95;
+      }
+      const expectedDigest = createHash('sha256').update(expected).digest('hex');
+      const descriptor = channel === 'stdout' ? 1 : 2;
+      const producer = [
+        "const fs = require('fs');",
+        `const bytes = Buffer.alloc(${size});`,
+        'for (let i = 0; i < bytes.length; i++) bytes[i] = 32 + (i * 31) % 95;',
+        'let offset = 0;',
+        'while (offset < bytes.length) {',
+        `  const written = fs.writeSync(${descriptor}, bytes, offset,`,
+        '    Math.min(131072, bytes.length - offset));',
+        "  if (written <= 0) throw new Error('output did not progress');",
+        '  offset += written;',
+        '}',
+      ].join('\n');
+      for (let repetition = 0; repetition < 4; repetition += 1) {
+        const result = await runBoundedProcess({
+          executablePath: process.execPath,
+          args: ['-e', producer],
+          cwd: bridgeRoot,
+          env: minimalTestProcessEnvironment(),
+          timeoutMs: 5_000,
+          maxOutputBytes: size,
+          label: `test exact ${channel} forwarding`,
+        });
+        const actual = channel === 'stdout' ? result.stdoutBytes : result.stderrBytes;
+        const other = channel === 'stdout' ? result.stderrBytes : result.stdoutBytes;
+        expect(actual.length).toBe(size);
+        expect(createHash('sha256').update(actual).digest('hex')).toBe(expectedDigest);
+        expect(other.length).toBe(0);
+      }
+    },
+    PROCESS_LIFECYCLE_TEST_TIMEOUT_MS,
+  );
+
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {
     const workspace = createPinnedLocalNativeBuildWorkspace();
     const markerRoot = mkdtempSync(join(tmpdir(), 'e2s-build-timeout-marker-'));

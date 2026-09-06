@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -60,6 +60,16 @@ establish deployment safety or independent operator custody.
   transport attempt. The node returned HTTP 400; the transaction was not found
   in 85 observations over its 120-second confirmation budget. No acceptance
   of that submission or canonical tracker admission was established.
+- A later fresh campaign stopped earlier because generated and node-accepted
+  chain specs differed. An offline reproduction isolated a lost 81,920-byte
+  output block to the Windows process wrapper, without Frontier execution or
+  JSON parsing. Direct inherited output handles remove that intermediate
+  forwarding step while preserving process containment and output limits.
+  The exact-file replay passed 24 transfers and the retained Frontier binary
+  passed 38 semantic chain-spec comparisons. This repairs a local execution
+  prerequisite, not tracker admission. The next fresh campaign must regenerate
+  the request and node-build identities against the updated runner pin; old
+  campaign custody and receipts remain terminal.
 
 ## Critical Path
 
