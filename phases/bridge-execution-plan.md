@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the V3 execution batch to version-bound genesis revalidation and explicit broadcast authorization, then the ordered transport/confirmation consumer on a fresh local target | V161 verifies the three genesis issuances on the pinned local node without submission. V162 retains exact same-process checked candidates and Fleet handles, closes signer custody and keeps V2 execution guards separate. V3 transport and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Bind explicit broadcast authorization to the V3 batch and its V2 revalidator, then connect ordered transport/confirmation on a fresh local target | V161 verifies the three genesis issuances on the pinned local node without submission. V162 retains exact checked candidates and Fleet handles; V163 revalidates their source inputs with version-bound artifacts. Signing custody closes. V3 transport and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -521,6 +521,37 @@ legacy session-provenance matrix and Fleet's prepared-signing/handle tests,
 plus TypeScript and layer-import checks. Contracts, transaction construction,
 ContextExtension, compiler/build pins and release claims are unchanged; their
 existing VM/node results remain scoped to the bytes they checked.
+
+### Version-Bound Genesis Revalidation
+
+V163 connects the checked V3 batch to a V2 genesis revalidator. Its public
+factory fixes the V3 provenance guard and a distinct schema/digest domain.
+The V1 factory retains its V2 batch guard and existing digest projection.
+Both use the same private source-observation and candidate checks; no caller
+can inject a profile, guard or network adapter through the factory.
+
+| Producer -> consumer | Deciding check | Failure prevented |
+|---|---|---|
+| Batch -> fixed-version revalidator | Genuine V2/V3 inverse-factory negatives and distinct schema/domain projection | Reading V3 evidence through a legacy consumer |
+| Checked role -> primary/witness observations | Exact signed input JSON/Sigma bytes, genesis, tip and process identity; disagreement and post-await replacement reject | Revalidating a different box or node view than the one being spent |
+| Handle and phase -> retained artifact | Reserve before awaiting; reject repetition across revalidator instances and after failed observation | Issuing multiple approvals from one phase reservation |
+| Artifact -> versioned guard | Original checked object and revalidator; exact role, phase, transaction, source and observation fields; current handle provenance | Accepting copied evidence or an artifact whose handle was consumed during observation |
+
+The composed test uses the actual V3 compiler/signing/check path and the real
+bounded HTTP reader for all three roles and both phases. It consumes each
+earlier handle through a non-network callback before processing the next role.
+Unit tests separately remove earlier source boxes, inject JSON/binary
+disagreement, replace each process digest and consume a handle during
+observation. Process custody is a test double; endpoint agreement does not
+prove chain consensus.
+
+An observation result is not authorization. Its matching artifact guard must
+run at consumption; a handle used while observation was in flight is rejected
+there. The new revalidator performs only bounded reads. Broadcast authorization,
+transport, confirmation and the complete withdrawal remain downstream.
+Unchanged V161 real-node checks and contract/VM matrices are not replayed for
+this adapter change. The affected closure includes both revalidator versions,
+the genuine V3 join and the existing genesis-authorizer/execution-root consumers.
 
 ### Fresh-Owner Application Join
 

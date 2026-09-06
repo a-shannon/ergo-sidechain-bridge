@@ -31,15 +31,27 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-genesis-revalidator.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-genesis-revalidator.v2' as const;
 
-const REVALIDATION_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATION_V1';
+const REVALIDATION_PROFILES = Object.freeze({
+  1: Object.freeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATION_V1',
+  }),
+  2: Object.freeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V2_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATION_V2',
+  }),
+});
 const BOX_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATED_BOX_V1';
 const OBSERVATION_ATTEMPTS = 40;
@@ -53,6 +65,16 @@ extends RevalidatorPort {
   readonly schema:
     typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA;
 }
+
+export interface SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 extends RevalidatorPort {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V2_SCHEMA;
+}
+
+type Revalidator = Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1
+  | SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2>;
+type SetupBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2
+  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+type RevalidatorVersion = keyof typeof REVALIDATION_PROFILES;
 
 export interface SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1 {
   readonly checkedCandidate:
@@ -70,12 +92,12 @@ export interface SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpe
 }
 
 interface RevalidatorMaterialV1 {
+  readonly version: RevalidatorVersion;
   readonly target:
     Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   readonly binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
-  readonly batch:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>;
+  readonly batch: SetupBatch;
   readonly primarySource: SubstrateFederatedGenesisNodeSource;
   readonly witnessSource: SubstrateFederatedGenesisNodeSource;
   readonly transactions: ReadonlyMap<
@@ -85,8 +107,7 @@ interface RevalidatorMaterialV1 {
 }
 
 interface ArtifactMaterialV1 {
-  readonly revalidator:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>;
+  readonly revalidator: Revalidator;
   readonly checked: SubstrateFederatedLocalDevnetGenesisCheckedCandidate;
   readonly role: SubstrateFederatedLocalDevnetGenesisRole;
   readonly phase: SubstrateFederatedLocalDevnetGenesisRevalidationPhase;
@@ -124,8 +145,33 @@ export function createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
   batch:
     Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
 ): Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1> {
-  const binding =
-    assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(batch, target);
+  return createRevalidator(target, batch, 1) as Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>;
+}
+
+export function createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>,
+): Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2> {
+  return createRevalidator(target, batch, 2) as Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2>;
+}
+
+// The public factories fix the version; callers cannot select a guard or digest domain.
+function assertSetupBatch(target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: SetupBatch, version: RevalidatorVersion) {
+  return version === 1
+    ? assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+      batch as Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>, target)
+    : assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(
+      batch as Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>, target);
+}
+
+function createRevalidator(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: SetupBatch,
+  version: RevalidatorVersion,
+): Revalidator {
+  const binding = assertSetupBatch(target, batch, version);
+  const profile = REVALIDATION_PROFILES[version];
   if (
     target.primaryNodeOrigin
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
@@ -159,10 +205,9 @@ export function createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
     throw new Error('isolated genesis revalidator requires distinct node sources');
   }
 
-  let revalidator!:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>;
+  let revalidator!: Revalidator;
   revalidator = Object.freeze({
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA,
+    schema: profile.schema,
     revalidate: async (
       checked: SubstrateFederatedLocalDevnetGenesisCheckedCandidate,
       phase: SubstrateFederatedLocalDevnetGenesisRevalidationPhase,
@@ -225,8 +270,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
       const sourceBoxSigmaSerializedSha256Hex =
         observation.box.sigmaSerializedSha256Hex;
       const observationDigestHex = sha256CanonicalJson({
-        schema:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA,
+        schema: profile.schema,
         processBindingDigestHex: current.processBindingDigestHex,
         executionTargetIdentityDigestHex:
           current.executionTargetIdentityDigestHex,
@@ -245,10 +289,9 @@ export function createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
           sourceBoxSigmaSerializedSha256Hex,
         primarySourceIdHex: batch.request.target.primary.sourceIdHex,
         witnessSourceIdHex: batch.request.target.witness.sourceIdHex,
-      }, REVALIDATION_DIGEST_DOMAIN);
+      }, profile.domain);
       const revalidationArtifact = Object.freeze({
-        schema:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA,
+        schema: profile.schema,
         role: checked.signed.admission.role,
         phase: exactPhase,
         observationDigestHex,
@@ -281,6 +324,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
     },
   });
   REVALIDATORS.set(revalidator, Object.freeze({
+    version,
     target,
     binding,
     batch,
@@ -298,7 +342,24 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifac
   expectation:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1>,
 ): void {
-  assertRevalidator(revalidator);
+  assertArtifact(revalidator, artifact, expectation, 1);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2(
+  revalidator: Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2>,
+  artifact: object,
+  expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1>,
+): void {
+  assertArtifact(revalidator, artifact, expectation, 2);
+}
+
+function assertArtifact(revalidator: Revalidator, artifact: object,
+  expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactExpectationV1>,
+  version: RevalidatorVersion,
+): void {
+  if (assertRevalidator(revalidator).version !== version) {
+    throw new Error('isolated genesis revalidation artifact version differs');
+  }
   const material = ARTIFACTS.get(artifact);
   if (
     material === undefined
@@ -353,14 +414,13 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifac
 }
 
 function assertRevalidator(
-  revalidator:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>,
+  revalidator: Revalidator,
 ): RevalidatorMaterialV1 {
   const material = REVALIDATORS.get(revalidator);
   if (
     material === undefined
     || revalidator.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATOR_V1_SCHEMA
+      !== REVALIDATION_PROFILES[material.version].schema
   ) {
     throw new Error('isolated genesis revalidator lacks process provenance');
   }
@@ -368,9 +428,10 @@ function assertRevalidator(
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
       material.target,
     );
-  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
-    material.batch,
+  assertSetupBatch(
     material.target,
+    material.batch,
+    material.version,
   );
   if (
     current.processBindingDigestHex
@@ -385,7 +446,7 @@ function assertRevalidator(
 
 function assertCheckedCandidate(
   checked: SubstrateFederatedLocalDevnetGenesisCheckedCandidate,
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  batch: SetupBatch,
   binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
   transactions: ReadonlyMap<
@@ -443,8 +504,7 @@ function assertCheckedCandidate(
 }
 
 async function observeMatchingSourcesWithRetry(
-  revalidator:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>,
+  revalidator: Revalidator,
   material: RevalidatorMaterialV1,
   transaction:
     Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2>,

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   assertHandleProvenance: vi.fn(),
   assertTarget: vi.fn(),
   assertBatch: vi.fn(),
+  assertBatchV3: vi.fn(),
   validateBoxPair: vi.fn(),
 }));
 
@@ -28,6 +29,8 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2:
     mocks.assertBatch,
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3:
+    mocks.assertBatchV3,
 }));
 
 vi.mock('./substrate-federated-genesis-observation-v1.js', () => ({
@@ -35,9 +38,12 @@ vi.mock('./substrate-federated-genesis-observation-v1.js', () => ({
 }));
 
 import {
-  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1,
-  createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1 as assertArtifactV1,
+  createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1 as createRevalidatorV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2 as assertArtifactV2,
+  createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 as createRevalidatorV2,
 } from './substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
+import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
   deriveSubstrateFederatedLocalDevnetGenesisAdmissionDigestV1,
@@ -225,12 +231,18 @@ function configureSources(
   return { primary, witness };
 }
 
-describe('isolated devnet genesis revalidator V1', () => {
+describe.each([1, 2] as const)('isolated devnet genesis revalidator V%s', version => {
+  const createRevalidator = (target: typeof TARGET, setupBatch: ReturnType<typeof batch>) =>
+    Reflect.apply(version === 1 ? createRevalidatorV1 : createRevalidatorV2, undefined, [target, setupBatch]) as
+      ReturnType<typeof createRevalidatorV1> | ReturnType<typeof createRevalidatorV2>;
+  const assertArtifact = (...args: unknown[]) => Reflect.apply(
+    version === 1 ? assertArtifactV1 : assertArtifactV2, undefined, args);
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.assertTarget.mockReturnValue(BINDING);
     mocks.assertBatch.mockReturnValue(BINDING);
+    mocks.assertBatchV3.mockReturnValue(BINDING);
     mocks.validateBoxPair.mockImplementation(async (
       rawBox: Readonly<Record<string, unknown>>,
       bytes: string,
@@ -263,7 +275,7 @@ describe('isolated devnet genesis revalidator V1', () => {
     }
     configureSources(boxMap);
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -291,15 +303,37 @@ describe('isolated devnet genesis revalidator V1', () => {
         postCheck.sourceBoxSigmaSerializedSha256Hex,
       observationDigestHex: postCheck.observationDigestHex,
     });
+    const schema = `e2s.substrate-federated-isolated-devnet-genesis-revalidator.v${version}`;
+    expect(revalidator.schema).toBe(schema);
+    expect(postCheck.revalidationArtifact).toMatchObject({ schema });
+    expect(postCheck.observationDigestHex).toBe(sha256CanonicalJson({
+      schema, processBindingDigestHex: PROCESS_BINDING,
+      executionTargetIdentityDigestHex: EXECUTION_IDENTITY,
+      requestDigestHex: REQUEST_DIGEST, role: 'tracker', phase: 'post-check',
+      expectedTxId: hex('61'), admissionDigestHex: checked.signed.admission.admissionDigestHex,
+      checkResponseDigestHex: CHECK_DIGEST, sourceBoxId: hex('51'),
+      targetGenesisHeaderIdHex: GENESIS_HEADER_ID, observedAtHeight: 120,
+      tipHeaderIdHex: TIP_HEADER_ID, sourceBoxDigestHex: postCheck.sourceBoxDigestHex,
+      sigmaSerializedSha256Hex: hex('81'), primarySourceIdHex: hex('71'), witnessSourceIdHex: hex('72'),
+    }, `E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_REVALIDATION_V${version}`));
+    const oppositeGuard = version === 1 ? assertArtifactV2 : assertArtifactV1;
+    expect(() => Reflect.apply(oppositeGuard, undefined, [revalidator, postCheck.revalidationArtifact, artifactExpectation]))
+      .toThrow(/version differs/);
+    expect(() => assertArtifact({ ...revalidator }, postCheck.revalidationArtifact, artifactExpectation))
+      .toThrow(/process provenance/);
+    const another = createRevalidator(TARGET, setupBatch);
+    expect(() => assertArtifact(another, postCheck.revalidationArtifact, artifactExpectation))
+      .toThrow(/exact process provenance/);
+    await expect(another.revalidate(checked, 'post-check')).rejects.toThrow(/already issued/);
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+      assertArtifact(
         revalidator,
         postCheck.revalidationArtifact,
         artifactExpectation,
       )
     ).not.toThrow();
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+      assertArtifact(
         revalidator,
         structuredClone(postCheck.revalidationArtifact),
         artifactExpectation,
@@ -311,9 +345,12 @@ describe('isolated devnet genesis revalidator V1', () => {
       { sourceBoxSigmaSerializedSha256Hex: hex('a3') },
       { observationDigestHex: hex('a4') },
       { checkedCandidate: checkedCandidate(setupBatch) },
+      { role: 'pooledReserve' as const }, { phase: 'pre-transport' as const },
+      { sourceBoxId: hex('a5') }, { targetGenesisHeaderIdHex: hex('a6') },
+      { expectedTxId: hex('a7') },
     ]) {
       expect(() =>
-        assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+        assertArtifact(
           revalidator,
           postCheck.revalidationArtifact,
           { ...artifactExpectation, ...mutation },
@@ -321,7 +358,7 @@ describe('isolated devnet genesis revalidator V1', () => {
       ).toThrow(/lacks exact process provenance/);
     }
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+      assertArtifact(
         revalidator,
         postCheck.revalidationArtifact,
         {
@@ -347,7 +384,7 @@ describe('isolated devnet genesis revalidator V1', () => {
       throw new Error('local WASM checked submission handle is already consumed');
     });
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+      assertArtifact(
         revalidator,
         postCheck.revalidationArtifact,
         artifactExpectation,
@@ -358,14 +395,50 @@ describe('isolated devnet genesis revalidator V1', () => {
       executionTargetIdentityDigestHex: EXECUTION_IDENTITY,
     }));
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+      assertArtifact(
         revalidator,
         postCheck.revalidationArtifact,
         artifactExpectation,
       )
     ).toThrow(/process binding changed/);
-    expect(mocks.createSource).toHaveBeenCalledTimes(2);
+    expect(mocks.createSource).toHaveBeenCalledTimes(4);
     expect(mocks.assertHandleBinding).toHaveBeenCalled();
+    expect(version === 1 ? mocks.assertBatch : mocks.assertBatchV3).toHaveBeenCalled();
+    expect(version === 1 ? mocks.assertBatchV3 : mocks.assertBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects the wrong batch guard before constructing any network source', () => {
+    (version === 1 ? mocks.assertBatch : mocks.assertBatchV3).mockImplementation(() => {
+      throw new Error('wrong batch version');
+    });
+    expect(() => createRevalidator(TARGET, batch())).toThrow('wrong batch version');
+    expect(mocks.createSource).not.toHaveBeenCalled();
+    expect(version === 1 ? mocks.assertBatchV3 : mocks.assertBatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects an artifact when its handle was consumed during observation', async () => {
+    const setupBatch = batch();
+    const tx = setupBatch.orderedTransactions[0];
+    const expected = nodeBox(tx.issuance.unsignedTransactionBody.inputs[0]);
+    let consumed = false;
+    configureSources(new Map([[tx.issuance.genesisInputBoxIdHex, expected]]), undefined, () => { consumed = true; });
+    const original = mocks.assertHandleProvenance.getMockImplementation();
+    mocks.assertHandleProvenance.mockImplementation(() => {
+      if (consumed) throw new Error('handle consumed during observation');
+    });
+    try {
+      const revalidator = createRevalidator(TARGET, setupBatch);
+      const checked = checkedCandidate(setupBatch);
+      const result = await revalidator.revalidate(checked, 'post-check');
+      expect(() => assertArtifact(revalidator, result.revalidationArtifact, {
+        checkedCandidate: checked, role: 'tracker', phase: 'post-check',
+        sourceBoxId: result.sourceBoxId, targetGenesisHeaderIdHex: result.targetGenesisHeaderIdHex,
+        expectedTxId: tx.issuance.unsignedTransactionIdHex, observedAtHeight: result.observedAtHeight,
+        observedTipHeaderIdHex: result.observedTipHeaderIdHex, sourceBoxDigestHex: result.sourceBoxDigestHex,
+        sourceBoxSigmaSerializedSha256Hex: result.sourceBoxSigmaSerializedSha256Hex,
+        observationDigestHex: result.observationDigestHex,
+      })).toThrow('handle consumed during observation');
+    } finally { mocks.assertHandleProvenance.mockImplementation(original ?? (() => {})); }
   });
 
   it('rejects a checked candidate that is not the promoted setup material', async () => {
@@ -381,7 +454,7 @@ describe('isolated devnet genesis revalidator V1', () => {
       sourceBox,
     ]]));
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -412,7 +485,7 @@ describe('isolated devnet genesis revalidator V1', () => {
     );
     configureSources(new Map([[sourceBoxId, expected]]));
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -445,7 +518,7 @@ describe('isolated devnet genesis revalidator V1', () => {
       new Map([[sourceBoxId, changed]]),
     );
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -479,7 +552,7 @@ describe('isolated devnet genesis revalidator V1', () => {
     sources.witness.getBoxBinaryByIdOrNull
       .mockResolvedValue({ bytes: '01' });
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -507,7 +580,7 @@ describe('isolated devnet genesis revalidator V1', () => {
     );
     const sources = configureSources(new Map([[sourceBoxId, expected]]));
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -539,7 +612,7 @@ describe('isolated devnet genesis revalidator V1', () => {
     const witnessBoxes = new Map(primaryBoxes);
     configureSources(primaryBoxes, witnessBoxes);
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );
@@ -557,7 +630,8 @@ describe('isolated devnet genesis revalidator V1', () => {
     }
   });
 
-  it('rejects process replacement during source observation', async () => {
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'rejects %s replacement during source observation', async field => {
     const setupBatch = batch();
     const expected = nodeBox(
       setupBatch.orderedTransactions[0]
@@ -573,12 +647,12 @@ describe('isolated devnet genesis revalidator V1', () => {
     });
     mocks.assertTarget.mockImplementation(() => drifted
       ? Object.freeze({
-          processBindingDigestHex: hex('ff'),
-          executionTargetIdentityDigestHex: EXECUTION_IDENTITY,
+          ...BINDING,
+          [field]: hex('ff'),
         })
       : BINDING);
     const revalidator =
-      createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1(
+      createRevalidator(
         TARGET,
         setupBatch,
       );

@@ -13,6 +13,16 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as fleet from './fleet-signer.js';
+import {
+  createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1 as createRevalidatorV1,
+  createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 as createRevalidatorV2,
+  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1 as assertRevalidationV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2 as assertRevalidationV2,
+} from './substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
+import {
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA as GENESIS_EXECUTION_SCHEMA,
+  deriveSubstrateFederatedLocalDevnetGenesisAdmissionDigestV1 as admissionDigest,
+} from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import * as ownedTargets from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 as createSession,
@@ -687,6 +697,7 @@ describe('V3 genesis plan -> no-submit request and check', () => {
           expectedTargetBinding: executionBinding }]);
         expect(Reflect.apply(assertExecutionV2, undefined, [batch, target])).toEqual(executionBinding);
         expect(() => Reflect.apply(assertExecutionV3, undefined, [batch, target])).toThrow(/process provenance/);
+        expect(() => Reflect.apply(createRevalidatorV2, undefined, [target, batch])).toThrow(/process provenance/);
       } finally { custody.mockRestore(); }
     }, checkObservationOptions());
   });
@@ -771,6 +782,66 @@ function executionTarget() {
 }
 
 describe('owned synthetic session -> V3 execution promotion', () => {
+  it('revalidates every genuine V3 genesis handle through the V2 read-only consumer', async () => {
+    const fixture = await createRootFixture();
+    const target = executionTarget();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    try {
+      await withObservations(async observed => {
+        const batch = await fixture.session.runForExecutionV3(fixture.input, target);
+        expect(() => Reflect.apply(createRevalidatorV1, undefined, [target, batch])).toThrow(/process provenance/);
+        expect(() => createRevalidatorV2(target, { ...batch })).toThrow(/process provenance/);
+        const revalidator = createRevalidatorV2(target, batch);
+        for (const [ordinal, transaction] of batch.orderedTransactions.entries()) {
+          const { issuance, signedCandidate, checkedAcceptance } = transaction;
+          const binding = Object.freeze({
+            role: roles[ordinal]!, planDigestHex: batch.request.requestDigestHex,
+            targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+            expectedTxId: issuance.unsignedTransactionIdHex, sourceBoxId: issuance.genesisInputBoxIdHex,
+            inputBoxIds: Object.freeze([issuance.genesisInputBoxIdHex]),
+            attemptedAtHeight: batch.request.target.preSetupAnchor.height,
+            nodeOrigin: target.primaryNodeOrigin,
+          });
+          const checked = Object.freeze({
+            signed: Object.freeze({
+              admission: Object.freeze({ schema: GENESIS_EXECUTION_SCHEMA, ...binding,
+                admissionDigestHex: admissionDigest(binding), unsignedTransaction: issuance.unsignedTransactionBody }),
+              signedTransactionDigestHex: signedCandidate.signedTransactionDigestHex, signerArtifact: signedCandidate,
+            }),
+            checkResponseDigestHex: checkedAcceptance.submissionHandle.checkResponseDigestHex,
+            checkerArtifact: checkedAcceptance.submissionHandle,
+          });
+          for (const phase of ['post-check', 'pre-transport'] as const) {
+            const result = await revalidator.revalidate(checked, phase);
+            expect(result.sourceBoxUnspent).toBe(true);
+            expect(result.sourceBoxId).toBe(issuance.genesisInputBoxIdHex);
+            expect(result.observedAtHeight).toBe(batch.request.target.preSetupAnchor.height);
+            const expectation = Object.freeze({
+              checkedCandidate: checked, role: binding.role, phase,
+              sourceBoxId: result.sourceBoxId, targetGenesisHeaderIdHex: result.targetGenesisHeaderIdHex,
+              expectedTxId: issuance.unsignedTransactionIdHex, observedAtHeight: result.observedAtHeight,
+              observedTipHeaderIdHex: result.observedTipHeaderIdHex, sourceBoxDigestHex: result.sourceBoxDigestHex,
+              sourceBoxSigmaSerializedSha256Hex: result.sourceBoxSigmaSerializedSha256Hex,
+              observationDigestHex: result.observationDigestHex,
+            });
+            assertRevalidationV2(revalidator, result.revalidationArtifact, expectation);
+            expect(() => assertRevalidationV2(revalidator, structuredClone(result.revalidationArtifact), expectation))
+              .toThrow(/exact process provenance/);
+            expect(() => Reflect.apply(assertRevalidationV1, undefined, [revalidator, result.revalidationArtifact, expectation]))
+              .toThrow(/version differs/);
+            await expect(revalidator.revalidate(checked, phase)).rejects.toThrow(/already issued/);
+          }
+          await fleet.consumeLocalWasmCheckedSubmissionHandleV1(checkedAcceptance.submissionHandle,
+            signedCandidate, async body => {
+              expect(signedCheckOracle(body)).toBe(issuance.unsignedTransactionIdHex);
+            });
+        }
+        expect(observed.checkBodies).toHaveLength(3);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+
   it('promotes genuine checks to exact one-use Fleet handles without retaining the key', async () => {
     const fixture = await createRootFixture();
     const target = executionTarget();
