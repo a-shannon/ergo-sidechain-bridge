@@ -122,11 +122,16 @@ one static import allowlist failed. The corrected isolated guard passed in
 2.97 seconds. This supports running cheap capability checks before the heavy
 closure; it does not make the rest of that closure redundant.
 
-The provisioning global hook prepares four tracker/family compiler pairs even
-for focused selections. The first performance batch will remove unused eager
-preparation, keep process-owned provenance and fresh signer-bound fixtures, and
-measure the change. Compiler caching, blanket parallelism and reduced hosted
-CI are separate decisions, not assumed improvements.
+The provisioning suite now prepares static tracker/family compiler pairs only
+inside the groups that use them. A selected fresh-custody V2 positive prepares
+no static pair and one fresh signer-bound pair. Matched single runs took 62.70
+seconds before and 16.29 seconds after this change; this is not a repeated-run
+percentage benchmark. All 114 ordinary cases pass, with the two existing
+optional-node cases unexecuted. The full file still prepares its four required
+static pairs once and all 53 fresh signer-bound pairs separately. Test bodies,
+negative cases and timeouts are preserved; static reuse remains suite-scoped,
+not per-case. Compiler caching, blanket parallelism and reduced hosted CI are
+separate decisions, not assumed improvements.
 
 The delivery audit also identifies two missing joins: V2 checker to admission
 authority, and the actual V3 campaign caller to that lifecycle. Withdrawal

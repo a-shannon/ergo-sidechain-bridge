@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import blakejs from 'blakejs';
 import axios from 'axios';
 import { Mnemonic } from 'ethers';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1,
@@ -181,6 +181,10 @@ let checkCompilerV2: CompilerInputV2;
 let checkMnemonic: string;
 let checkPublicKey: string;
 let checkHeaders: readonly Readonly<Record<string, unknown>>[];
+let application: Parameters<typeof buildSubstrateFederatedTrackerCompilerRequestV2>[0]['application'];
+let common: Pick<CompilerInputV3, 'familyTemplates' | 'historyBundle' | 'trustPins'>;
+type StaticCompiler = 'compilerV3' | 'compilerV2' | 'checkCompiler' | 'checkCompilerV2';
+const preparationMetrics: Partial<Record<StaticCompiler | 'freshSignerV2', { calls: number; milliseconds: number }>> = {};
 
 function contractTemplate(relativePath: string) {
   return { relativePath, source: readFileSync(new URL('../../' + relativePath, import.meta.url), 'utf8') };
@@ -206,7 +210,7 @@ beforeAll(async () => {
   checkHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
     currentHeight: TIP_HEIGHT + 1, anchorContextIndex: 0, anchorExtensionRootHex: '94'.repeat(32),
   }).headers.map(header => header.raw);
-  const application = {
+  application = {
     sourceNetworkIdHex: '41'.repeat(32), sidechainIdHex: '42'.repeat(32),
     bridgeAddressHex: BRIDGE_ADDRESS, tokenAddressHex: TOKEN_ADDRESS,
     bridgeRuntimeCodeSha256Hex: BRIDGE_RUNTIME_DIGEST, bridgeRuntimeCodeBytes: 4_104,
@@ -221,7 +225,7 @@ beforeAll(async () => {
   };
   const history = historyFixture();
   inspectSubstrateFederatedAuthoritySafeDevnetHistoryBundleV1(history.bundle, history.pins);
-  const common = {
+  common = {
     familyTemplates, historyBundle: history.bundle,
     trustPins: {
       ...history.pins,
@@ -233,64 +237,73 @@ beforeAll(async () => {
       expectedSourceAttestationThreshold: profile.sourceAttestationThreshold,
     },
   };
-  const familyInputs = {
-    templates: familyTemplates,
-    duplicatePreventionGenesisInputBoxIdHex: boxes.duplicatePrevention.boxId,
-    pooledReserveGenesisInputBoxIdHex: boxes.pooledReserve.boxId,
-  };
+});
+
+afterAll(() => {
+  console.info('Compiler preparation (tracker/family pairs):', JSON.stringify(preparationMetrics));
+});
+
+async function prepareCompiler<T>(name: StaticCompiler | 'freshSignerV2', compile: () => Promise<T>): Promise<T> {
   // The same reviewed compiler harness as V156/V157; every positive receipt is genuine.
   if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
     throw new Error('Vitest parent NODE_OPTIONS is not the reviewed harness value');
   }
   const testNodeOptions = process.env.NODE_OPTIONS;
   delete process.env.NODE_OPTIONS;
+  const metric = preparationMetrics[name] ??= { calls: 0, milliseconds: 0 };
+  metric.calls++;
+  const started = performance.now();
   try {
-    const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
-      trackerGenesisInputBoxIdHex: boxes.tracker.boxId, profile, application,
-      template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
-    });
-    const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
-    const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
-      ...familyInputs, trackerRequest, trackerReceipt,
-    });
-    compilerV3 = { ...common, trackerRequest, trackerReceipt, familyReceipt };
-    const requestV1 = buildSubstrateFederatedTrackerCompilerRequestV1({
-      trackerGenesisInputBoxIdHex: boxes.tracker.boxId, profile, application,
-      template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV1.es'),
-    });
-    const receiptV1 = await compileSubstrateFederatedTrackerWithPinnedJvmV1(requestV1);
-    const familyV1 = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
-      ...familyInputs, trackerRequest: requestV1, trackerReceipt: receiptV1,
-    });
-    compilerV2 = { ...common, trackerRequest: requestV1, trackerReceipt: receiptV1, familyReceipt: familyV1 };
-    const checkRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
-      trackerGenesisInputBoxIdHex: checkBoxes.tracker.boxId, profile, application,
-      template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
-    });
-    const checkReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(checkRequest);
-    const checkFamily = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
-      templates: familyTemplates, trackerRequest: checkRequest, trackerReceipt: checkReceipt,
-      duplicatePreventionGenesisInputBoxIdHex: checkBoxes.duplicatePrevention.boxId,
-      pooledReserveGenesisInputBoxIdHex: checkBoxes.pooledReserve.boxId,
-    });
-    checkCompiler = { ...common, trackerRequest: checkRequest, trackerReceipt: checkReceipt, familyReceipt: checkFamily };
-    const oldCheckRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
-      trackerGenesisInputBoxIdHex: checkBoxes.tracker.boxId, profile, application,
-      template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV1.es'),
-    });
-    const oldCheckReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV1(oldCheckRequest);
-    const oldCheckFamily = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
-      templates: familyTemplates, trackerRequest: oldCheckRequest, trackerReceipt: oldCheckReceipt,
-      duplicatePreventionGenesisInputBoxIdHex: checkBoxes.duplicatePrevention.boxId,
-      pooledReserveGenesisInputBoxIdHex: checkBoxes.pooledReserve.boxId,
-    });
-    checkCompilerV2 = { ...common, trackerRequest: oldCheckRequest, trackerReceipt: oldCheckReceipt, familyReceipt: oldCheckFamily };
+    return await compile();
   } finally {
+    metric.milliseconds += Math.round(performance.now() - started);
     process.env.NODE_OPTIONS = testNodeOptions;
   }
-}, 120_000);
+}
+
+async function compileV3(funding: Boxes): Promise<CompilerInputV3> {
+  const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+    trackerGenesisInputBoxIdHex: funding.tracker.boxId, profile, application,
+    template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
+  });
+  const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
+  const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
+    templates: common.familyTemplates, trackerRequest, trackerReceipt,
+    duplicatePreventionGenesisInputBoxIdHex: funding.duplicatePrevention.boxId,
+    pooledReserveGenesisInputBoxIdHex: funding.pooledReserve.boxId,
+  });
+  return { ...common, trackerRequest, trackerReceipt, familyReceipt };
+}
+
+async function compileV2(funding: Boxes): Promise<CompilerInputV2> {
+  const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
+    trackerGenesisInputBoxIdHex: funding.tracker.boxId, profile, application,
+    template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV1.es'),
+  });
+  const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV1(trackerRequest);
+  const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
+    templates: common.familyTemplates, trackerRequest, trackerReceipt,
+    duplicatePreventionGenesisInputBoxIdHex: funding.duplicatePrevention.boxId,
+    pooledReserveGenesisInputBoxIdHex: funding.pooledReserve.boxId,
+  });
+  return { ...common, trackerRequest, trackerReceipt, familyReceipt };
+}
+
+function useStaticCompilers(...names: StaticCompiler[]): void {
+  beforeAll(async () => {
+    for (const name of names) {
+      switch (name) {
+        case 'compilerV3': compilerV3 ??= await prepareCompiler(name, () => compileV3(boxes)); break;
+        case 'compilerV2': compilerV2 ??= await prepareCompiler(name, () => compileV2(boxes)); break;
+        case 'checkCompiler': checkCompiler ??= await prepareCompiler(name, () => compileV3(checkBoxes)); break;
+        case 'checkCompilerV2': checkCompilerV2 ??= await prepareCompiler(name, () => compileV2(checkBoxes)); break;
+      }
+    }
+  }, 120_000);
+}
 
 describe('genuine V2 tracker and family -> local provisioning V3', () => {
+  useStaticCompilers('compilerV3', 'compilerV2');
   it('materializes all three exact unsigned issuances without launch or funds authority', async () => {
     await withObservations(async observed => {
       const input = await provisioningInput(observed);
@@ -605,6 +618,7 @@ describe('genuine V2 tracker and family -> local provisioning V3', () => {
 });
 
 describe('V3 genesis plan -> no-submit request and check', () => {
+  useStaticCompilers('compilerV3', 'checkCompiler', 'checkCompilerV2');
   it('preserves each exact unsigned identity through request creation and rejects copied or cross-version provenance', async () => {
     await withObservations(async observed => {
       const plan = await buildV3(await provisioningInput(observed));
@@ -1096,6 +1110,11 @@ describe('owned synthetic session -> V3 execution promotion', () => {
     } finally { custody.mockRestore(); fixture.session.dispose(); }
   }, 60_000);
 
+});
+
+describe('owned synthetic session -> V3 execution target preflight', () => {
+  useStaticCompilers('checkCompiler');
+
   it.each([
     { primaryNodeOrigin: 'http://127.0.0.1:19051' },
     { witnessNodeOrigin: 'http://127.0.0.1:19052' },
@@ -1123,6 +1142,9 @@ describe('owned synthetic session -> V3 execution promotion', () => {
     } finally { observe.mockRestore(); session.dispose(); }
   });
 
+});
+
+describe('owned synthetic session -> V3 asynchronous execution promotion', () => {
   it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex', 'target-ended'] as const)(
     'rejects %s drift during the async checks before promotion', async fault => {
       const fixture = await createRootFixture();
@@ -1247,7 +1269,9 @@ describe('owned synthetic session -> V3 execution promotion', () => {
   }, 60_000);
 });
 
-describe('owned synthetic session -> V3 no-submit setup root', () => {
+describe('owned synthetic session -> V3 admission profile preflight', () => {
+  useStaticCompilers('checkCompiler');
+
   it('rejects a different compiled admission profile before retaining the V3 tracker signer', async () => {
     const session = await createSession();
     try {
@@ -1259,6 +1283,9 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     } finally { session.dispose(); }
   });
 
+});
+
+describe('owned synthetic session -> V3 no-submit setup root', () => {
   it.each(['valid', 'default-closed', 'wrong-input', 'wrong-fee', 'wrong-genesis',
     'wrong-target', 'copied-context', 'disposed', 'concurrent'] as const)(
     'retains exact V3 custody through funding into the protocol V2 checker: %s', async fault => {
@@ -1704,6 +1731,11 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     } finally { fixture.session.dispose(); }
   }, 60_000);
 
+});
+
+describe('owned synthetic session -> V3 compiler input preflight', () => {
+  useStaticCompilers('checkCompiler', 'compilerV2');
+
   it.each(['primaryNodeOrigin', 'witnessNodeOrigin'] as const)('rejects another %s before observation and closes custody', async field => {
     const session = await createSession();
     const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
@@ -1830,6 +1862,9 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     } finally { observe.mockRestore(); session.dispose(); }
   });
 
+});
+
+describe('owned synthetic session -> V3 caller input capture', () => {
   it.each(['templates', 'history', 'pins'] as const)('captures caller %s before asynchronous observation', async surface => {
     const fixture = await createRootFixture();
     const originalSource = fixture.input.sourceAndCompilerInput;
@@ -1916,7 +1951,7 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT !== undefined)(
         expect(funding.target.tipHeight).toBeGreaterThanOrEqual(10);
         const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
           trackerGenesisInputBoxIdHex: funding.genesisBoxIds.tracker,
-          profile, application: compilerV3.trackerRequest.application,
+          profile, application,
           template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
         });
         if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
@@ -1928,12 +1963,12 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT !== undefined)(
         try {
           const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
           const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
-            trackerRequest, trackerReceipt, templates: compilerV3.familyTemplates,
+            trackerRequest, trackerReceipt, templates: common.familyTemplates,
             duplicatePreventionGenesisInputBoxIdHex: funding.genesisBoxIds.duplicatePrevention,
             pooledReserveGenesisInputBoxIdHex: funding.genesisBoxIds.pooledReserve,
           });
           // Synthetic source history tests only the Ergo setup consumer, not source consensus.
-          compiled = { ...compilerV3, trackerRequest, trackerReceipt, familyReceipt };
+          compiled = { ...common, trackerRequest, trackerReceipt, familyReceipt };
         } finally { process.env.NODE_OPTIONS = nodeOptions; }
         const bodies: Record<string, any>[] = [];
         const post = axios.post.bind(axios);
@@ -2044,7 +2079,7 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
         expect(funding.target.tipHeight).toBeGreaterThanOrEqual(10);
         const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
           trackerGenesisInputBoxIdHex: funding.genesisBoxIds.tracker,
-          profile, application: compilerV3.trackerRequest.application,
+          profile, application,
           template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
         });
         if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
@@ -2056,12 +2091,12 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
         try {
           const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
           const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
-            trackerRequest, trackerReceipt, templates: compilerV3.familyTemplates,
+            trackerRequest, trackerReceipt, templates: common.familyTemplates,
             duplicatePreventionGenesisInputBoxIdHex: funding.genesisBoxIds.duplicatePrevention,
             pooledReserveGenesisInputBoxIdHex: funding.genesisBoxIds.pooledReserve,
           });
           // Source history remains synthetic; this run decides Ergo genesis only.
-          compiled = { ...compilerV3, trackerRequest, trackerReceipt, familyReceipt };
+          compiled = { ...common, trackerRequest, trackerReceipt, familyReceipt };
         } finally { process.env.NODE_OPTIONS = nodeOptions; }
         const root = mkdtempSync(join(tmpdir(), 'e2s-v167-genesis-'));
         journalRoot = root;
@@ -2191,29 +2226,24 @@ async function createRootFixture(retainTrackerSigner = false) {
       duplicatePrevention: fundingCandidate('100000000', session.signer.rewardInputErgoTrees.delay1),
       pooledReserve: fundingCandidate('150000000', session.signer.rewardInputErgoTrees.delay1),
     };
-    if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
-      throw new Error('Vitest parent NODE_OPTIONS is not the reviewed harness value');
-    }
-    const nodeOptions = process.env.NODE_OPTIONS;
-    delete process.env.NODE_OPTIONS;
-    try {
+    return await prepareCompiler('freshSignerV2', async () => {
       const selectedProfile = retainTrackerSigner ? buildSubstrateFederatedCheckpointProfileV1({
         ...vector.input.profile, ergoAdmissionThreshold: 1,
         ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex],
       }) : profile;
       const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
         trackerGenesisInputBoxIdHex: funding.tracker.boxId,
-        profile: selectedProfile, application: compilerV3.trackerRequest.application,
+        profile: selectedProfile, application,
         template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
       });
       const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
       const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
-        trackerRequest, trackerReceipt, templates: compilerV3.familyTemplates,
+        trackerRequest, trackerReceipt, templates: common.familyTemplates,
         duplicatePreventionGenesisInputBoxIdHex: funding.duplicatePrevention.boxId,
         pooledReserveGenesisInputBoxIdHex: funding.pooledReserve.boxId,
       });
-      return { session, boxes: funding, input: rootInput({ ...compilerV3, trackerRequest, trackerReceipt, familyReceipt }) };
-    } finally { process.env.NODE_OPTIONS = nodeOptions; }
+      return { session, boxes: funding, input: rootInput({ ...common, trackerRequest, trackerReceipt, familyReceipt }) };
+    });
   } catch (error) { session.dispose(); throw error; }
 }
 

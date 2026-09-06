@@ -93,7 +93,6 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Preparation efficiency | One bounded test-only worker, before repeated expensive iterations; no runtime dependency | Replace unused eager compiler setup with required-profile preparation. Preserve every case, assertion and fresh signer; demonstrate zero unused profile preparation and measure matched runs. No compiler-authority cache or blanket concurrency |
 | V2 admission lifecycle | Main owner; consumes the V170 session-owned check | Exact two-input candidate, checkpoint, target and successor -> explicit authorization -> durable reservation -> fixed transport -> canonical/ambiguous outcome handling. Implement this join together; preserve each separate capability. No V1/V7 receipt relabelling |
 | Actual campaign caller | Main owner; depends on the admission lifecycle | Select the retained V3 route in the real application root. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal construction | Disjoint worker may start alongside admission | Connect the genuine V2 family compiler receipt to the full burn/DUP/reserve/payout planner with external fees and isolated negatives. Stop at a checked synthetic candidate; actual acceptance waits for canonical inputs |
@@ -105,6 +104,13 @@ withdrawal construction is not a completed exit. Do not omit either consumer
 from the final delivery contract.
 
 ## Reference Checkpoints
+
+Scoped test preparation is complete. The selected fresh-custody V2 positive
+uses no unrelated static compiler pair; all 114 ordinary provisioning cases
+pass with unchanged case bodies, negative tables and timeouts. The two optional
+node cases were not re-executed. Fresh signer-bound compilation remains fresh;
+see the [measured preparation scope](../docs/development-process.md#september-2026-audit-baseline).
+This improves focused iteration, not the bridge's runtime acceptance status.
 
 V150-V170 specifications and validation limits are retained in the
 [checkpoint archive](bridge-execution-checkpoints-2026-09-06.md). Consult the
