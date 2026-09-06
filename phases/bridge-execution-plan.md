@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the V3 local provisioning plan to the no-submit setup request and checker, then check fresh chain-resident boxes before transport | V158 constructs all three unsigned genesis issuances from genuine V2 compiler receipts and observed funding identities; 27 direct and 222 regression tests pass. V155 retains its pinned-node synthetic-state scope. Setup signing/checking, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Wire the genuine V2 compiler family and V3 setup-check route into the operational setup root, then check fresh chain-resident boxes before transport | V159 connects the three V158 genesis issuances to real WASM signing, exact no-submit checks and a separate V3 receipt. The direct 41-case matrix uses a bounded HTTP parsing oracle, not target-node acceptance. V155 retains its pinned-node synthetic-state scope. Operational composition, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -375,11 +375,43 @@ The three affected regression files pass 222 tests; Node24 TypeScript and layer
 import checks pass. Unchanged contract, Rust/WASM and node matrices retain
 their previous scope. Release evidence and activation claims do not change.
 
-The next consumer is the no-submit setup request and checker. They must accept
-the genuine V3 plan, preserve its exact unsigned transactions, and revalidate
-the selected target before signing and node checks. Current setup-check V2
-remains on its original path; no campaign activation or transport follows from
-this construction result.
+V159 supplies the no-submit request and checker below. Setup-check V2 remains
+on its original path; neither construction nor a local check receipt activates
+a campaign or authorizes transport.
+
+### V2 Genesis To No-Submit Setup Checks
+
+V159 connects the genuine V3 provisioning plan to a distinct V3 request and
+checker. The request preserves each unsigned transaction, its full serialized
+identity and predicted singleton output. It binds the absolute-height V2
+compiler profile without manufacturing a V1 compatibility receipt. Pure
+transaction and observation digests retain their meanings; request, receipt
+and process-provenance domains remain separate from setup-check V2.
+
+| Producer -> consumer | Deciding check | Failure prevented |
+|---|---|---|
+| Genuine provisioning plan -> V3 request | Re-derive all issuance bindings; compare copied data without restoring runtime provenance; reject recomputed unsigned-body mutations for each role | Passing a self-consistent but unrelated transaction to the signer |
+| Request and fresh observations -> WASM signer | Revalidate exact funding and header context; verify signer control, proofless bytes and transaction IDs | Signing against replaced inputs, a stale request or an unrelated tip |
+| Signed candidates -> no-submit HTTP checks | Send the actual signed JSON to the selected origin and require its exact transaction ID for each of the three checks | Accepting another transaction's result or continuing after a failed check |
+| Post-check observation -> retained receipt | Reobserve funding and continuity before issuing the receipt; reject input replacement for each role | Retaining usable check material after the observed input set changed |
+| Receipt -> guarded execution-material take | Exact same-process request/receipt pair, selected owned target and one-shot retrieval; reject copies and cross-version use | Turning serialized evidence or a V2 receipt into V3 execution material |
+
+The 41-case direct matrix uses genuine JVM compiler receipts, synthetic funding
+boxes and real WASM signatures. Two bounded loopback endpoints supply the
+observations. The check endpoint parses the signed bytes with WASM and returns
+their computed ID; it does not execute ErgoScript or establish node acceptance.
+The one-shot retrieval test explicitly substitutes the owned-process assertion
+after checking that an unowned target is rejected. That test covers retained
+material identity, not node custody. Rejected target substitutions and inverse
+V2/V3 receipt use preserve the correct one-shot retrieval. A data-validation
+return cannot restore runtime provenance or bind a request to another genuine
+plan. No transaction is submitted.
+
+The existing V2 setup route remains a separate compatibility path. The next
+change belongs in the operational setup root: select genuine V2 compilation
+and V3 provisioning/request/checking end to end, without a V1 fallback. Then
+obtain fresh chain-resident funding and exact target-node checks. Canonical
+admission, source finality and funds authority remain outside this local result.
 
 ### Fresh-Owner Application Join
 

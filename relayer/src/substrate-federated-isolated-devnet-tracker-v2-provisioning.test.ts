@@ -4,9 +4,14 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import blakejs from 'blakejs';
+import { Mnemonic } from 'ethers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
+import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
+import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
+import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
+import * as ownedTargets from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister,
   MINER_FEE_TREE,
@@ -56,6 +61,21 @@ import { buildSubstrateFederatedTrackerCompilerRequestV2 } from './substrate-fed
 import { compileSubstrateFederatedTrackerWithPinnedJvmV1 } from './substrate-federated-tracker-jvm-compiler-v1.js';
 import { compileSubstrateFederatedTrackerWithPinnedJvmV2 } from './substrate-federated-tracker-jvm-compiler-v2.js';
 import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
+import {
+  buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV2 as requestV2,
+  buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV3 as requestV3,
+  validateSubstrateFederatedIsolatedDevnetSetupCheckRequestV3 as validateRequestV3,
+  assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3Provenance as assertRequestV3Plan,
+  assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3RuntimeProvenance as assertRequestV3,
+} from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
+import {
+  runSubstrateFederatedIsolatedDevnetSetupCheckV2 as runCheckV2,
+  runSubstrateFederatedIsolatedDevnetSetupCheckV3 as runCheckV3,
+  validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2 as validateCheckV2,
+  validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3 as validateCheckV3,
+  takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2 as takeCheckV2,
+  takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3 as takeCheckV3,
+} from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import type { Eip12Box, MaterializedUnsignedTransaction } from './unsigned-ergo-transaction.js';
 
@@ -90,6 +110,12 @@ let wasm: any;
 let boxes: Boxes;
 let compilerV3: CompilerInputV3;
 let compilerV2: CompilerInputV2;
+let checkBoxes: Boxes;
+let checkCompiler: CompilerInputV3;
+let checkCompilerV2: CompilerInputV2;
+let checkMnemonic: string;
+let checkPublicKey: string;
+let checkHeaders: readonly Readonly<Record<string, unknown>>[];
 
 function contractTemplate(relativePath: string) {
   return { relativePath, source: readFileSync(new URL('../../' + relativePath, import.meta.url), 'utf8') };
@@ -103,6 +129,18 @@ beforeAll(async () => {
     duplicatePrevention: fundingCandidate('100000000'),
     pooledReserve: fundingCandidate('150000000'),
   };
+  checkMnemonic = Mnemonic.fromEntropy(`0x${'58'.repeat(32)}`).phrase;
+  const checkSigner = await deriveLocalWasmRootSignerPublicIdentity(checkMnemonic);
+  checkPublicKey = checkSigner.publicKeyHex;
+  const rewardTree = deriveDevnetRewardErgoTreeHexForDelay(checkPublicKey, 1);
+  checkBoxes = {
+    tracker: fundingCandidate('50000000', rewardTree),
+    duplicatePrevention: fundingCandidate('100000000', rewardTree),
+    pooledReserve: fundingCandidate('150000000', rewardTree),
+  };
+  checkHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+    currentHeight: TIP_HEIGHT + 1, anchorContextIndex: 0, anchorExtensionRootHex: '94'.repeat(32),
+  }).headers.map(header => header.raw);
   const application = {
     sourceNetworkIdHex: '41'.repeat(32), sidechainIdHex: '42'.repeat(32),
     bridgeAddressHex: BRIDGE_ADDRESS, tokenAddressHex: TOKEN_ADDRESS,
@@ -160,6 +198,28 @@ beforeAll(async () => {
       ...familyInputs, trackerRequest: requestV1, trackerReceipt: receiptV1,
     });
     compilerV2 = { ...common, trackerRequest: requestV1, trackerReceipt: receiptV1, familyReceipt: familyV1 };
+    const checkRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+      trackerGenesisInputBoxIdHex: checkBoxes.tracker.boxId, profile, application,
+      template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
+    });
+    const checkReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(checkRequest);
+    const checkFamily = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
+      templates: familyTemplates, trackerRequest: checkRequest, trackerReceipt: checkReceipt,
+      duplicatePreventionGenesisInputBoxIdHex: checkBoxes.duplicatePrevention.boxId,
+      pooledReserveGenesisInputBoxIdHex: checkBoxes.pooledReserve.boxId,
+    });
+    checkCompiler = { ...common, trackerRequest: checkRequest, trackerReceipt: checkReceipt, familyReceipt: checkFamily };
+    const oldCheckRequest = buildSubstrateFederatedTrackerCompilerRequestV1({
+      trackerGenesisInputBoxIdHex: checkBoxes.tracker.boxId, profile, application,
+      template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV1.es'),
+    });
+    const oldCheckReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV1(oldCheckRequest);
+    const oldCheckFamily = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV1({
+      templates: familyTemplates, trackerRequest: oldCheckRequest, trackerReceipt: oldCheckReceipt,
+      duplicatePreventionGenesisInputBoxIdHex: checkBoxes.duplicatePrevention.boxId,
+      pooledReserveGenesisInputBoxIdHex: checkBoxes.pooledReserve.boxId,
+    });
+    checkCompilerV2 = { ...common, trackerRequest: oldCheckRequest, trackerReceipt: oldCheckReceipt, familyReceipt: oldCheckFamily };
   } finally {
     process.env.NODE_OPTIONS = testNodeOptions;
   }
@@ -256,6 +316,11 @@ describe('genuine V2 tracker and family -> local provisioning V3', () => {
       const input2 = { ...input, settlementTarget };
       const plan2 = await buildV2(input2);
       assertV2(plan2);
+      const oldRequest = await requestV2(plan2);
+      expect(oldRequest.version).toBe(2);
+      expect(oldRequest.sourceBindings.compatibilityTargetV1AuditDigestHex).toBe(settlementTarget.compatibilityTargetV1AuditDigestHex);
+      await expect(Reflect.apply(requestV3, undefined, [plan2])).rejects.toThrow(/not built in this process/);
+      await expect(assertRequestV3(oldRequest)).rejects.toThrow(/process/);
       const generation = buildSubstrateFederatedIsolatedDevnetGenerationTargetV1(settlementTarget, getDupTreeDigest([]));
       const core = await materializeSubstrateFederatedIsolatedDevnetProvisioningCoreV1({
         genesisInputs: boxes, lineages: generation.lineages, genesisPayloads: generation.genesisPayloads,
@@ -474,33 +539,278 @@ describe('genuine V2 tracker and family -> local provisioning V3', () => {
   );
 });
 
+describe('V3 genesis plan -> no-submit request and check', () => {
+  it('preserves each exact unsigned identity through request creation and rejects copied or cross-version provenance', async () => {
+    await withObservations(async observed => {
+      const plan = await buildV3(await provisioningInput(observed));
+      const request = await requestV3(plan);
+      await assertRequestV3(request);
+      expect(request.schema).toBe('e2s.substrate-federated-isolated-devnet-setup-check-request.v3');
+      expect(request.sourceBindings.compilerProfile).toBe('absolute-height-tracker-v2');
+      expect(request.sourceBindings).not.toHaveProperty('compatibilityTargetV1AuditDigestHex');
+      expect(request.sourceBindings.provisioningPlanDigestHex).toBe(plan.planDigestHex);
+      for (const [ordinal, role] of roles.entries()) {
+        const issuance = request.orderedIssuances[ordinal]!;
+        const entry = plan.provisioning[role];
+        expect(issuance.unsignedTransactionBody).toEqual(entry.transaction.eip12Tx);
+        expect(issuance.unsignedTransactionIdHex).toBe(entry.transaction.txId);
+        expect(issuance.genesisInputBoxIdHex).toBe(boxes[role].boxId);
+        expect(issuance.predictedStateOutput).toMatchObject({
+          boxIdHex: entry.transaction.outputs[0]!.boxId, transactionIdHex: entry.transaction.txId,
+          index: 0, creationHeight: TIP_HEIGHT + 1,
+        });
+        expect(Buffer.from(blakejs.blake2b(Buffer.from(issuance.bytesToSignHex, 'hex'), undefined, 32)).toString('hex'))
+          .toBe(entry.transaction.txId);
+      }
+      expect(request.stages).toMatchObject({ signedBytes: 'absent', nodeCheck: 'not-performed', broadcast: 'not-authorized' });
+      const copy = structuredClone(request);
+      const validated = await validateRequestV3(copy, plan);
+      expect(validated).toEqual(request);
+      await expect(assertRequestV3(validated)).rejects.toThrow(/not built in this process/);
+      await expect(assertRequestV3(copy)).rejects.toThrow(/process/);
+      const otherPlan = await buildV3(await provisioningInput(observed));
+      assertV3(otherPlan);
+      await expect(assertRequestV3Plan(request, otherPlan)).rejects.toThrow(/belongs to another provisioning plan/);
+      await assertRequestV3Plan(request, plan);
+      await expect(Reflect.apply(requestV2, undefined, [plan])).rejects.toThrow(/not built in this process/);
+      await expect(Reflect.apply(runCheckV2, undefined, [request, checkMnemonic])).rejects.toThrow(/process/);
+      expect(observed.checkBodies).toEqual([]);
+      expectDeepFrozen(request);
+    });
+  });
+
+  it('root-signs the real three genesis transactions and sends only their exact bytes to a bounded check oracle', async () => {
+    await withObservations(async observed => {
+      const plan = await buildV3(await provisioningInput(observed, checkCompiler));
+      const request = await requestV3(plan);
+      const receipt = await runCheckV3(request, checkMnemonic);
+      expect(receipt.schema).toBe('e2s.substrate-federated-isolated-devnet-setup-check-receipt.v3');
+      expect(receipt.sourceBindings).toEqual(request.sourceBindings);
+      expect(receipt.signer.publicKeyHex).toBe(checkPublicKey);
+      expect(receipt.signer.rewardDelayBlocks).toBe(1);
+      expect(receipt.orderedChecks).toHaveLength(3);
+      expect(observed.checkBodies).toHaveLength(3);
+      for (const [ordinal, body] of observed.checkBodies.entries()) {
+        const parsed = wasm.Transaction.from_json(JSON.stringify(body));
+        const id = parsed.id();
+        try {
+          const check = receipt.orderedChecks[ordinal]!;
+          expect(id.to_str()).toBe(request.orderedIssuances[ordinal]!.unsignedTransactionIdHex);
+          expect(check.signedTransactionIdHex).toBe(id.to_str());
+          expect(check.signedTransactionBytesSha256Hex).toBe(sha256(Buffer.from(parsed.sigma_serialize_bytes())));
+          expect(check.signedTransactionCanonicalJsonSha256Hex).toBe(sha256(Buffer.from(canonicalJson(body))));
+          expect((body.inputs as any[])[0].spendingProof.proofBytes.length).toBeGreaterThan(0);
+          expect((body.inputs as any[])[0].spendingProof.extension).toEqual({});
+          expect((body.outputs as any[])[0].assets[0].tokenId).toBe(checkBoxes[roles[ordinal]!].boxId);
+        } finally { id.free(); parsed.free(); }
+      }
+      expect(validateCheckV3(structuredClone(receipt), request)).toEqual(receipt);
+      expect(() => Reflect.apply(validateCheckV2, undefined, [structuredClone(receipt), request])).toThrow(/exact request/);
+      expect(receipt.boundaries).toMatchObject({
+        containsBroadcastCapability: false, containsSubmissionCapability: false,
+        canonicalLineagesEstablished: false, profileActivated: false, fundsAuthorityEstablished: false,
+      });
+      expect(JSON.stringify(receipt)).not.toContain(checkMnemonic);
+      const target = {
+        primaryNodeOrigin: request.target.primary.nodeOrigin,
+        witnessNodeOrigin: request.target.witness.nodeOrigin,
+        primaryMining: true, witnessReadOnly: true,
+      };
+      expect(() => Reflect.apply(takeCheckV3, undefined, [receipt, request, target]))
+        .toThrow(/process|owned/);
+      // Only the process-custody predicate is doubled here. The request,
+      // signed candidates and check receipt above have genuine provenance.
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue({ processBindingDigestHex: '31'.repeat(32), executionTargetIdentityDigestHex: '32'.repeat(32) });
+      try {
+        for (const mutation of [
+          { primaryNodeOrigin: target.witnessNodeOrigin },
+          { witnessNodeOrigin: target.primaryNodeOrigin },
+          { primaryMining: false },
+          { witnessReadOnly: false },
+        ]) {
+          expect(() => Reflect.apply(takeCheckV3, undefined, [receipt, request, { ...target, ...mutation }]))
+            .toThrow(/execution target differs from its request/);
+        }
+        expect(() => Reflect.apply(takeCheckV3, undefined, [structuredClone(receipt), request, target]))
+          .toThrow(/process provenance/);
+        expect(() => Reflect.apply(takeCheckV3, undefined, [receipt, structuredClone(request), target]))
+          .toThrow(/process provenance/);
+        expect(() => Reflect.apply(takeCheckV2, undefined, [receipt, request, target]))
+          .toThrow(/process provenance/);
+        const material = Reflect.apply(takeCheckV3, undefined, [receipt, request, target]);
+        expect(material.request).toBe(request);
+        expect(material.orderedTransactions.map((entry: any) => entry.checked.txId))
+          .toEqual(request.orderedIssuances.map(issuance => issuance.unsignedTransactionIdHex));
+        expect(() => Reflect.apply(takeCheckV3, undefined, [receipt, request, target]))
+          .toThrow(/process provenance/);
+      } finally { custody.mockRestore(); }
+    }, checkObservationOptions());
+  });
+
+  it('rejects genuine V2 execution material through V3 without consuming the V2 receipt', async () => {
+    await withObservations(async observed => {
+      const plan = await buildV2({
+        settlementTarget: targetV2({
+          ...checkCompilerV2, settlementTargetProfile: observed.profile, settlementObservation: observed.retained,
+        }),
+        settlementTargetProfile: observed.profile,
+        freshSettlementObservation: await observed.observeAt(new Date(Date.now() - 1_000).toISOString()),
+      });
+      const request = await requestV2(plan);
+      const receipt = await runCheckV2(request, checkMnemonic);
+      expect(receipt.version).toBe(2);
+      expect(observed.checkBodies).toHaveLength(3);
+      const target = {
+        primaryNodeOrigin: request.target.primary.nodeOrigin,
+        witnessNodeOrigin: request.target.witness.nodeOrigin,
+        primaryMining: true, witnessReadOnly: true,
+      };
+      // As above, only owned-process custody is doubled, not V2 provenance.
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue({ processBindingDigestHex: '31'.repeat(32), executionTargetIdentityDigestHex: '32'.repeat(32) });
+      try {
+        expect(() => Reflect.apply(takeCheckV3, undefined, [receipt, request, target]))
+          .toThrow(/process provenance/);
+        expect(Reflect.apply(takeCheckV2, undefined, [receipt, request, target]).request).toBe(request);
+      } finally { custody.mockRestore(); }
+    }, checkObservationOptions());
+  });
+
+  it.each(roles)('rejects a re-digested request with mutated %s bytes against the genuine plan', async role => {
+    await withObservations(async observed => {
+      const plan = await buildV3(await provisioningInput(observed));
+      const request = await requestV3(plan);
+      const altered = structuredClone(request) as any;
+      const issuance = altered.orderedIssuances[roles.indexOf(role)];
+      issuance.unsignedTransactionBody.outputs[0].value = '9999999';
+      const { requestDigestHex: _digest, ...body } = altered;
+      altered.requestDigestHex = sha256CanonicalJson(body, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V3');
+      await expect(validateRequestV3(altered, plan)).rejects.toThrow(/does not match the provisioning plan/);
+      expect(observed.checkBodies).toEqual([]);
+    });
+  });
+
+  it.each([0, 1, 2])('stops at check ordinal %s when the endpoint returns a different transaction ID', async failedOrdinal => {
+    await withObservations(async observed => {
+      const request = await requestV3(await buildV3(await provisioningInput(observed, checkCompiler)));
+      const errorOutput = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try { await expect(runCheckV3(request, checkMnemonic)).rejects.toThrow(/JVM node check failed/); }
+      finally { errorOutput.mockRestore(); }
+      expect(observed.checkBodies).toHaveLength(failedOrdinal + 1);
+    }, { ...checkObservationOptions(), checkOracle: (body, ordinal) =>
+      ordinal === failedOrdinal ? 'ff'.repeat(32) : signedCheckOracle(body) });
+  });
+
+  it.each(roles)('does not issue a receipt when %s funding changes after all three checks', async role => {
+    await withObservations(async observed => {
+      const request = await requestV3(await buildV3(await provisioningInput(observed, checkCompiler)));
+      await expect(runCheckV3(request, checkMnemonic)).rejects.toThrow(/genesis box does not match the requested box ID/);
+      expect(observed.checkBodies).toHaveLength(3);
+    }, { ...checkObservationOptions(), postCheckReplacementRole: role });
+  });
+
+  it('rejects an absent observed tip in the signing headers before any node check', async () => {
+    await withObservations(async observed => {
+      const request = await requestV3(await buildV3(await provisioningInput(observed, checkCompiler)));
+      await expect(runCheckV3(request, checkMnemonic)).rejects.toThrow(/observation tip is absent from signer headers/);
+      expect(observed.checkBodies).toEqual([]);
+    }, { ...checkObservationOptions(), tipHeaderId: TIP_HEADER_ID });
+  });
+
+  it('rejects a request that ages out during serialization without granting runtime provenance', async () => {
+    await withObservations(async observed => {
+      const plan = await buildV3(await provisioningInput(observed));
+      const now = Date.parse(plan.freshObservation.observedAt) + 1_000;
+      const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(now).mockReturnValue(now + 60_001);
+      try { await expect(requestV3(plan)).rejects.toThrow(/fixed freshness window/); }
+      finally { clock.mockRestore(); }
+      expect(observed.checkBodies).toEqual([]);
+    });
+  });
+});
+
+// This parses received signed bytes; it is deliberately not an Ergo node/JVM oracle.
+function signedCheckOracle(body: Record<string, unknown>): string {
+  const parsed = wasm.Transaction.from_json(JSON.stringify(body));
+  const id = parsed.id();
+  try { return id.to_str(); }
+  finally { id.free(); parsed.free(); }
+}
+
+function checkObservationOptions(): ObservationOptions {
+  return { boxes: checkBoxes, headers: checkHeaders, tipHeaderId: String(checkHeaders[0]!.id), checkOracle: signedCheckOracle };
+}
+
 // Only these two bounded loopback origins exist while a test callback is active.
+interface ObservationOptions {
+  readonly boxes?: Boxes;
+  readonly tipHeight?: number;
+  readonly genesisHeaderId?: string;
+  readonly tipHeaderId?: string;
+  readonly headers?: readonly Readonly<Record<string, unknown>>[];
+  readonly checkOracle?: (body: Record<string, unknown>, ordinal: number) => unknown;
+  readonly postCheckReplacementRole?: Role;
+}
+
 async function withObservations<T>(
   run: (observed: ObservationFixture) => Promise<T>,
-  options: { boxes?: Boxes; tipHeight?: number; genesisHeaderId?: string } = {},
+  options: ObservationOptions = {},
 ): Promise<T> {
   const funding = options.boxes ?? boxes;
   const tipHeight = options.tipHeight ?? TIP_HEIGHT;
   const genesisHeaderId = options.genesisHeaderId ?? GENESIS_HEADER_ID;
+  const tipHeaderId = options.tipHeaderId ?? TIP_HEADER_ID;
   const json = new Map(roles.map(role => [funding[role].boxId, funding[role]]));
   const sigma = new Map(roles.map(role => [funding[role].boxId, sigmaBytes(funding[role])]));
   const servers: Server[] = [];
   const methods: string[] = [];
   const unexpected: string[] = [];
+  const checkBodies: Record<string, unknown>[] = [];
   const start = async () => {
-    const server = createServer((request, response) => {
+    const primary = servers.length === 0;
+    const server = createServer(async (request, response) => {
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
       methods.push(request.method ?? '');
       let body: unknown;
+      if (primary && options.checkOracle && request.method === 'POST' && path === '/transactions/check') {
+        try {
+          const chunks: Buffer[] = [];
+          let length = 0;
+          for await (const chunk of request) {
+            const bytes = Buffer.from(chunk);
+            length += bytes.length;
+            if (length > 1_048_576) throw new Error('synthetic check body exceeds fixture bound');
+            chunks.push(bytes);
+          }
+          const candidate = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+          checkBodies.push(candidate);
+          body = options.checkOracle(candidate, checkBodies.length - 1);
+          response.writeHead(200, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify(body));
+        } catch {
+          unexpected.push('synthetic check oracle failed');
+          response.writeHead(500, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ error: 'synthetic check oracle failed' }));
+        }
+        return;
+      }
       if (request.method === 'GET') {
         if (path === '/info') body = { network: 'devnet', fullHeight: tipHeight };
-        else if (path === '/blocks/lastHeaders/1') body = [{ id: TIP_HEADER_ID, height: tipHeight }];
+        else if (path === '/blocks/lastHeaders/1') body = [{ id: tipHeaderId, height: tipHeight }];
+        else if (path === '/blocks/lastHeaders/10' && options.headers) body = options.headers;
         else if (path === '/blocks/at/1') body = [genesisHeaderId];
         else {
           const binary = path.match(/^\/utxo\/byIdBinary\/([0-9a-f]{64})$/);
           const byId = path.match(/^\/utxo\/byId\/([0-9a-f]{64})$/);
           if (binary && sigma.has(binary[1]!)) body = { bytes: sigma.get(binary[1]!) };
           else if (byId) body = json.get(byId[1]!);
+          const changedRole = options.postCheckReplacementRole;
+          if (changedRole && checkBodies.length === 3
+            && (byId?.[1] === funding[changedRole].boxId || binary?.[1] === funding[changedRole].boxId)) {
+            const replacement = fundingCandidate('51000000', funding[changedRole].ergoTree);
+            body = binary ? { bytes: sigmaBytes(replacement) } : replacement;
+          }
         }
       }
       if (body === undefined) unexpected.push(request.method + ' ' + path);
@@ -530,7 +840,7 @@ async function withObservations<T>(
     });
     const observeAt = (at: string) => observeSubstrateFederatedGenesisV1(targetProfile, { now: () => new Date(at) });
     const retained = await observeAt(new Date(Date.now() - 2_000).toISOString());
-    return await run({ profile: targetProfile, retained, observeAt });
+    return await run({ profile: targetProfile, retained, observeAt, checkBodies });
   } finally {
     for (const server of servers) {
       if (!server.listening) continue;
@@ -540,7 +850,7 @@ async function withObservations<T>(
       });
     }
     expect(methods.length).toBeGreaterThan(0);
-    expect(new Set(methods)).toEqual(new Set(['GET']));
+    expect(new Set(methods)).toEqual(new Set(checkBodies.length ? ['GET', 'POST'] : ['GET']));
     expect(unexpected).toEqual([]);
   }
 }
@@ -549,22 +859,23 @@ interface ObservationFixture {
   readonly profile: ReturnType<typeof buildSubstrateFederatedGenesisTargetProfileV1>;
   readonly retained: Awaited<ReturnType<typeof observeSubstrateFederatedGenesisV1>>;
   readonly observeAt: (at: string) => Promise<Awaited<ReturnType<typeof observeSubstrateFederatedGenesisV1>>>;
+  readonly checkBodies: readonly Record<string, unknown>[];
 }
 
-async function provisioningInput(observed: ObservationFixture): Promise<BuildInputV3> {
+async function provisioningInput(observed: ObservationFixture, compiler = compilerV3): Promise<BuildInputV3> {
   return {
     settlementTarget: targetV3({
-      ...compilerV3, settlementTargetProfile: observed.profile, settlementObservation: observed.retained,
+      ...compiler, settlementTargetProfile: observed.profile, settlementObservation: observed.retained,
     }),
     settlementTargetProfile: observed.profile,
     freshSettlementObservation: await observed.observeAt(new Date(Date.now() - 1_000).toISOString()),
   };
 }
 
-function fundingCandidate(value: string): Eip12Box {
+function fundingCandidate(value: string, ergoTree = FUNDING_TREE): Eip12Box {
   const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
     inputs: [{ boxId: '67'.repeat(32), extension: {} }], dataInputs: [],
-    outputs: [{ value, ergoTree: FUNDING_TREE, assets: [], additionalRegisters: {}, creationHeight: 110 }],
+    outputs: [{ value, ergoTree, assets: [], additionalRegisters: {}, creationHeight: 110 }],
   }));
   const id = unsigned.id();
   const candidates = unsigned.output_candidates();

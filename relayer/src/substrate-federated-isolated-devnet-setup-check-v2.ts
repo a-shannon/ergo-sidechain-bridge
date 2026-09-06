@@ -26,16 +26,24 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV2RuntimeProvenance,
+  assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3RuntimeProvenance,
   reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
   type SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-setup-check-receipt.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-setup-check-receipt.v3' as const;
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2';
+const RECEIPT_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3';
+// These data-only digests retain their existing semantics under either envelope.
 const OBSERVED_INPUT_SET_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_OBSERVED_INPUT_SET_V2';
 const OBSERVED_INPUT_BODY_DIGEST_DOMAIN =
@@ -138,6 +146,122 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2 {
   }>;
 }
 
+export type SubstrateFederatedIsolatedDevnetSetupCheckExecutionTransactionV3 =
+  SubstrateFederatedIsolatedDevnetSetupCheckExecutionTransactionV2;
+
+export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3
+  extends Omit<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2, 'request'> {
+  readonly request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3 extends Omit<
+  SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
+  'schema' | 'version' | 'sourceBindings'
+> {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3_SCHEMA;
+  readonly version: 3;
+  readonly sourceBindings:
+    SubstrateFederatedIsolatedDevnetSetupCheckRequestV3['sourceBindings'];
+}
+
+const SETUP_CHECK_EXECUTION_MATERIAL_V3 = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3>
+>();
+
+type SetupRequestCommonData = Omit<
+  SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  'schema' | 'version' | 'sourceBindings'
+> & {
+  readonly sourceBindings:
+    | SubstrateFederatedIsolatedDevnetSetupCheckRequestV2['sourceBindings']
+    | SubstrateFederatedIsolatedDevnetSetupCheckRequestV3['sourceBindings'];
+};
+type SetupReceiptBody = Omit<
+  SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
+  'schema' | 'version' | 'sourceBindings' | 'receiptDigestHex'
+>;
+type SetupReceiptCommonData = SetupReceiptBody & {
+  readonly schema: string;
+  readonly version: number;
+  readonly receiptDigestHex: string;
+  readonly sourceBindings: SetupRequestCommonData['sourceBindings'];
+};
+interface SetupExecutionMaterial<R extends SetupRequestCommonData> {
+  readonly request: Readonly<R>;
+  readonly orderedTransactions:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2['orderedTransactions'];
+}
+
+interface SetupCheckBinding<
+  R extends SetupRequestCommonData,
+  C extends SetupReceiptCommonData,
+> {
+  readonly schema: C['schema'];
+  readonly version: C['version'];
+  readonly receiptDomain: string;
+  readonly assertProvenance: (value: unknown) => Promise<void>;
+  readonly reobserve: (value: unknown) => Promise<Readonly<SubstrateFederatedGenesisObservationV1>>;
+  readonly finish: (body: SetupReceiptBody, request: Readonly<R>) => Readonly<C>;
+  readonly validateReceipt: (value: unknown, request: Readonly<R>) => Readonly<C>;
+  readonly material: WeakMap<object, Readonly<SetupExecutionMaterial<R>>>;
+}
+
+const setupCheckV2Binding: Readonly<SetupCheckBinding<
+  SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2
+>> = Object.freeze({
+  schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2_SCHEMA,
+  version: 2 as const,
+  receiptDomain: RECEIPT_DIGEST_DOMAIN,
+  assertProvenance: assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV2RuntimeProvenance,
+  reobserve: reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  finish: (body: SetupReceiptBody, request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>) => {
+    const { status, requestDigestHex, ...remaining } = body;
+    return digestReceipt({
+      schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2_SCHEMA,
+      version: 2 as const,
+      status,
+      requestDigestHex,
+      sourceBindings: request.sourceBindings,
+      ...remaining,
+    }, RECEIPT_DIGEST_DOMAIN);
+  },
+  validateReceipt: validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
+  material: SETUP_CHECK_EXECUTION_MATERIAL,
+});
+
+const setupCheckV3Binding: Readonly<SetupCheckBinding<
+  SubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
+  SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3
+>> = Object.freeze({
+  schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3_SCHEMA,
+  version: 3 as const,
+  receiptDomain: RECEIPT_V3_DIGEST_DOMAIN,
+  assertProvenance: assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3RuntimeProvenance,
+  reobserve: reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
+  finish: (body: SetupReceiptBody, request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>) => {
+    const { status, requestDigestHex, ...remaining } = body;
+    return digestReceipt({
+      schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3_SCHEMA,
+      version: 3 as const,
+      status,
+      requestDigestHex,
+      sourceBindings: request.sourceBindings,
+      ...remaining,
+    }, RECEIPT_V3_DIGEST_DOMAIN);
+  },
+  validateReceipt: validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3,
+  material: SETUP_CHECK_EXECUTION_MATERIAL_V3,
+});
+
+function digestReceipt<T extends object>(body: T, domain: string): Readonly<T & {
+  receiptDigestHex: string;
+}> {
+  return deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, domain) });
+}
+
 interface SetupObservationReceipt {
   readonly reportDigestHex: string;
   readonly observedAt: string;
@@ -172,14 +296,30 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
   request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
   syntheticMnemonic: string,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>> {
+  return runSetupCheck(request, syntheticMnemonic, setupCheckV2Binding);
+}
+
+export async function runSubstrateFederatedIsolatedDevnetSetupCheckV3(
+  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>,
+  syntheticMnemonic: string,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>> {
+  return runSetupCheck(request, syntheticMnemonic, setupCheckV3Binding);
+}
+
+async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupReceiptCommonData>(
+  request: Readonly<R>,
+  syntheticMnemonic: string,
+  binding: Readonly<SetupCheckBinding<R, C>>,
+): Promise<Readonly<C>> {
   const mnemonic = syntheticMnemonic.trim();
   if (!mnemonic) {
     throw new Error('isolated local setup-check synthetic mnemonic is empty');
   }
-  await assertRuntimeRequest(request);
+  await assertRuntimeRequest(request, binding);
   const preSignObservation = await reobserveAndBind(
     request,
     'pre-sign',
+    binding,
   );
   assertRuntimeFresh(request);
 
@@ -236,6 +376,7 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
   const preCheckObservation = await reobserveAndBind(
     request,
     'pre-check',
+    binding,
   );
   assertObservationProgression(
     preSignObservation,
@@ -325,23 +466,20 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
   const postCheckObservation = await reobserveAndBind(
     request,
     'post-check',
+    binding,
   );
   assertObservationProgression(
     preCheckObservation,
     postCheckObservation,
     'post-check',
   );
-  await assertRuntimeRequest(request);
+  await assertRuntimeRequest(request, binding);
 
   const controlledInputErgoTreeHex =
     request.orderedIssuances[0]!.requiredInputErgoTreeHex;
   const body = deepFreeze({
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2_SCHEMA,
-    version: 2 as const,
     status: 'PASS' as const,
     requestDigestHex: request.requestDigestHex,
-    sourceBindings: request.sourceBindings,
     target: request.target,
     signer: {
       derivation: 'wasm-root' as const,
@@ -365,15 +503,12 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV2(
     stages: fixedStages(),
     boundaries: fixedBoundaries(),
   });
-  const receipt = deepFreeze({
-    ...body,
-    receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
-  });
-  const validated = validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
+  const receipt = binding.finish(body, request);
+  const validated = binding.validateReceipt(
     receipt,
     request,
   );
-  SETUP_CHECK_EXECUTION_MATERIAL.set(validated, Object.freeze({
+  binding.material.set(validated, Object.freeze({
     request,
     orderedTransactions: Object.freeze(executionTransactions),
   }));
@@ -390,6 +525,26 @@ export function takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV
   request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2> {
+  return takeSetupCheckExecutionMaterial(receipt, request, target, setupCheckV2Binding);
+}
+
+export function takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3(
+  receipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>,
+  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3> {
+  return takeSetupCheckExecutionMaterial(receipt, request, target, setupCheckV3Binding);
+}
+
+function takeSetupCheckExecutionMaterial<
+  R extends SetupRequestCommonData,
+  C extends SetupReceiptCommonData,
+>(
+  receipt: Readonly<C>,
+  request: Readonly<R>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  binding: Readonly<SetupCheckBinding<R, C>>,
+): Readonly<SetupExecutionMaterial<R>> {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (
     target.primaryNodeOrigin !== request.target.primary.nodeOrigin
@@ -399,7 +554,7 @@ export function takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV
   ) {
     throw new Error('isolated setup-check execution target differs from its request');
   }
-  const material = SETUP_CHECK_EXECUTION_MATERIAL.get(receipt);
+  const material = binding.material.get(receipt);
   if (material === undefined || material.request !== request) {
     throw new Error(
       'isolated setup-check execution material lacks exact process provenance',
@@ -423,7 +578,7 @@ export function takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV
   ) {
     throw new Error('isolated setup-check execution material binding is invalid');
   }
-  SETUP_CHECK_EXECUTION_MATERIAL.delete(receipt);
+  binding.material.delete(receipt);
   return material;
 }
 
@@ -431,10 +586,25 @@ export function validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
   value: unknown,
   request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
 ): Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2> {
+  return validateSetupCheckReceipt(value, request, setupCheckV2Binding);
+}
+
+export function validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3(
+  value: unknown,
+  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>,
+): Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3> {
+  return validateSetupCheckReceipt(value, request, setupCheckV3Binding);
+}
+
+function validateSetupCheckReceipt<R extends SetupRequestCommonData, C extends SetupReceiptCommonData>(
+  value: unknown,
+  request: Readonly<R>,
+  binding: Readonly<SetupCheckBinding<R, C>>,
+): Readonly<C> {
   const candidate = snapshotStrictData(
     value,
     'isolated local setup-check receipt',
-  ) as unknown as SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2;
+  ) as unknown as C;
   exactKeys(candidate as unknown as Record<string, unknown>, [
     'schema', 'version', 'status', 'receiptDigestHex', 'requestDigestHex',
     'sourceBindings', 'target', 'signer', 'preSignObservation',
@@ -444,11 +614,11 @@ export function validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
   const { receiptDigestHex, ...body } = candidate;
   if (
     candidate.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2_SCHEMA
-    || candidate.version !== 2
+      !== binding.schema
+    || candidate.version !== binding.version
     || candidate.status !== 'PASS'
     || fixedHex(receiptDigestHex, 32, 'setup-check receipt digest')
-      !== sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN)
+      !== sha256CanonicalJson(body, binding.receiptDomain)
     || candidate.requestDigestHex !== request.requestDigestHex
     || canonicalJson(candidate.sourceBindings)
       !== canonicalJson(request.sourceBindings)
@@ -489,10 +659,11 @@ export function validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
   return deepFreeze(candidate);
 }
 
-async function assertRuntimeRequest(
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+async function assertRuntimeRequest<R extends SetupRequestCommonData, C extends SetupReceiptCommonData>(
+  request: Readonly<R>,
+  binding: Readonly<SetupCheckBinding<R, C>>,
 ): Promise<void> {
-  await assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV2RuntimeProvenance(
+  await binding.assertProvenance(
     request,
   );
   if (
@@ -514,7 +685,7 @@ async function assertRuntimeRequest(
 }
 
 function assertRuntimeFresh(
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  request: Readonly<SetupRequestCommonData>,
 ): void {
   const ageMs = Date.now() - Date.parse(request.target.observedAt);
   if (
@@ -526,17 +697,18 @@ function assertRuntimeFresh(
   }
 }
 
-async function reobserveAndBind(
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+async function reobserveAndBind<R extends SetupRequestCommonData, C extends SetupReceiptCommonData>(
+  request: Readonly<R>,
   label: string,
+  binding: Readonly<SetupCheckBinding<R, C>>,
 ): Promise<Readonly<SetupObservationReceipt>> {
   const observation =
-    await reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV2(request);
+    await binding.reobserve(request);
   return bindObservation(request, observation, label);
 }
 
 function bindObservation(
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  request: Readonly<SetupRequestCommonData>,
   observation: Readonly<SubstrateFederatedGenesisObservationV1>,
   label: string,
 ): Readonly<SetupObservationReceipt> {
@@ -718,7 +890,7 @@ function assertSignerContext(
     stateContextTipHeight: number;
     stateContextTipIdHex: string;
   }>,
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  request: Readonly<SetupRequestCommonData>,
   headerTip: Readonly<{ height: number; idHex: string }>,
 ): void {
   if (
@@ -779,7 +951,7 @@ function assertPreparedCandidates(
     expectedTxId: string;
     signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
   }>[],
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  request: Readonly<SetupRequestCommonData>,
 ): void {
   if (candidates.length !== REQUIRED_ROLES.length) {
     throw new Error('isolated local setup-check signed candidate count drifted');
@@ -838,7 +1010,7 @@ function assertObservationProgression(
 
 function validateSignerReceipt(
   value: unknown,
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  request: Readonly<SetupRequestCommonData>,
   checks: readonly SetupCheckReceipt[],
 ): void {
   const signer = exactRecord(value, [
@@ -948,7 +1120,7 @@ function assertSignerObservationBinding(
 
 function validateChecks(
   value: unknown,
-  request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>,
+  request: Readonly<SetupRequestCommonData>,
 ): void {
   if (!Array.isArray(value) || value.length !== REQUIRED_ROLES.length) {
     throw new Error('isolated local setup-check receipt must contain three checks');
