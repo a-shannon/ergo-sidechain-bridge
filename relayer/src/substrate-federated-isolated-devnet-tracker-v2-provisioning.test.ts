@@ -12,6 +12,8 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as ownedTargets from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import { createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 as createSession } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import { assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister,
   MINER_FEE_TREE,
@@ -730,6 +732,281 @@ describe('V3 genesis plan -> no-submit request and check', () => {
   });
 });
 
+describe('owned synthetic session -> V3 no-submit setup root', () => {
+  it('uses its own signer with the genuine V2 family and closes custody after the three checks', async () => {
+    const fixture = await createRootFixture();
+    try {
+      await withObservations(async observed => {
+        assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex);
+        const receipt = await fixture.session.runV3(fixture.input);
+        expect(receipt.version).toBe(3);
+        expect(receipt.sourceBindings.compilerProfile).toBe('absolute-height-tracker-v2');
+        expect(receipt.sourceBindings).not.toHaveProperty('compatibilityTargetV1AuditDigestHex');
+        expect(receipt.signer.publicKeyHex).toBe(fixture.session.signer.publicKeyHex);
+        expect(receipt.orderedChecks).toHaveLength(3);
+        expect(observed.checkBodies).toHaveLength(3);
+        for (const [ordinal, body] of observed.checkBodies.entries()) {
+          expect(signedCheckOracle(body)).toBe(receipt.orderedChecks[ordinal]!.signedTransactionIdHex);
+          expect((body.outputs as any[])[0].assets[0].tokenId).toBe(fixture.boxes[roles[ordinal]!].boxId);
+        }
+        expect(receipt.boundaries).toMatchObject({
+          containsSubmissionCapability: false, containsBroadcastCapability: false,
+          profileActivated: false, fundsAuthorityEstablished: false,
+        });
+        expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+          .toThrow(/revoked/);
+        expect(() => fixture.session.claimCheckpointMiningCredential()).toThrow(/absent/);
+        await expect(fixture.session.runV3(fixture.input)).rejects.toThrow(/consumed or disposed/);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { fixture.session.dispose(); }
+  }, 60_000);
+
+  it('revokes custody after a real signed check is rejected without falling back to V2', async () => {
+    const fixture = await createRootFixture();
+    try {
+      await withObservations(async observed => {
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try { await expect(fixture.session.runV3(fixture.input)).rejects.toThrow(/JVM node check failed/); }
+        finally { errors.mockRestore(); }
+        expect(observed.checkBodies).toHaveLength(1);
+        expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+          .toThrow(/revoked/);
+        await expect(fixture.session.runV3(fixture.input)).rejects.toThrow(/consumed or disposed/);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true, checkOracle: () => 'ff'.repeat(32) });
+    } finally { fixture.session.dispose(); }
+  }, 60_000);
+
+  it('invalidates an in-flight V3 run on concurrent session use and releases no receipt', async () => {
+    const fixture = await createRootFixture();
+    try {
+      await withObservations(async observed => {
+        const original = observations.observeSubstrateFederatedGenesisV1;
+        let announce!: () => void;
+        let release!: () => void;
+        const entered = new Promise<void>(resolve => { announce = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const firstObservation = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1')
+          .mockImplementationOnce(async (...args) => {
+            const result = await original(...args);
+            announce();
+            await gate;
+            return result;
+          });
+        const pending = fixture.session.runV3(fixture.input);
+        const rejected = expect(pending).rejects.toThrow(/invalidated by a concurrent transition/);
+        try {
+          await Promise.race([entered, pending.then(() => { throw new Error('session ended before the observation gate'); })]);
+          await expect(fixture.session.runV3(fixture.input)).rejects.toThrow(/consumed or disposed/);
+          release();
+          await rejected;
+          expect(observed.checkBodies).toHaveLength(3);
+          expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+            .toThrow(/revoked/);
+        } finally { release(); firstObservation.mockRestore(); await pending.catch(() => undefined); }
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { fixture.session.dispose(); }
+  }, 60_000);
+
+  it.each(['primaryNodeOrigin', 'witnessNodeOrigin'] as const)('rejects another %s before observation and closes custody', async field => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(session.runV3({ ...rootInput(checkCompiler), [field]: 'http://127.0.0.1:19051' }))
+        .rejects.toThrow(/origin must be exactly/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it('rejects V1 compiler provenance before observation', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(Reflect.apply(session.runV3, undefined, [rootInput(compilerV2 as unknown as CompilerInputV3)]))
+        .rejects.toThrow(/process|V2/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it('rejects a copied compiler receipt before observation', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(session.runV3(rootInput({ ...checkCompiler, trackerReceipt: structuredClone(checkCompiler.trackerReceipt) })))
+        .rejects.toThrow(/process|V2/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it('rejects accessor input without evaluating it', async () => {
+    const session = await createSession();
+    const getter = vi.fn(() => checkCompiler);
+    const input = rootInput(checkCompiler);
+    Object.defineProperty(input, 'sourceAndCompilerInput', { enumerable: true, get: getter });
+    try {
+      await expect(session.runV3(input)).rejects.toThrow(/enumerable data property|data property/);
+      expect(getter).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { session.dispose(); }
+  });
+
+  it('rejects an extra input field rather than selecting an implicit route', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(Reflect.apply(session.runV3, undefined, [{ ...rootInput(checkCompiler), portableReplayInput: {} }]))
+        .rejects.toThrow(/fields/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it('does not reopen disposed custody for a V3 request', async () => {
+    const session = await createSession();
+    session.dispose();
+    await expect(session.runV3(rootInput(checkCompiler))).rejects.toThrow(/consumed or disposed/);
+    expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+  });
+
+  it('rejects shared history byte storage before observation', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    const original = checkCompiler.historyBundle.acceptanceReport;
+    const shared = new Uint8Array(new SharedArrayBuffer(original.byteLength));
+    shared.set(original);
+    try {
+      await expect(session.runV3(rootInput({ ...checkCompiler,
+        historyBundle: { ...checkCompiler.historyBundle, acceptanceReport: shared },
+      }))).rejects.toThrow(/history requires unshared byte arrays/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it.each(['templates', 'pins'] as const)('rejects nested %s accessor without evaluating it', async surface => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    const source = { ...checkCompiler,
+      familyTemplates: structuredClone(checkCompiler.familyTemplates),
+      trustPins: structuredClone(checkCompiler.trustPins),
+    };
+    const getter = vi.fn(() => surface === 'templates'
+      ? checkCompiler.familyTemplates.sourceLock.source : checkCompiler.trustPins.expectedHistoryDigestHex);
+    Object.defineProperty(surface === 'templates' ? source.familyTemplates.sourceLock : source.trustPins,
+      surface === 'templates' ? 'source' : 'expectedHistoryDigestHex', { enumerable: true, get: getter });
+    try {
+      await expect(session.runV3(rootInput(source))).rejects.toThrow(/data propert/);
+      expect(getter).not.toHaveBeenCalled();
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it('rejects nested template prototype before observation', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(session.runV3(rootInput({ ...checkCompiler,
+        familyTemplates: { ...checkCompiler.familyTemplates,
+          sourceLock: Object.create(checkCompiler.familyTemplates.sourceLock),
+        },
+      }))).rejects.toThrow(/custom object prototype/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it('rejects history typed-array subclass before observation', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    class DerivedBytes extends Uint8Array {}
+    try {
+      await expect(session.runV3(rootInput({ ...checkCompiler,
+        historyBundle: { ...checkCompiler.historyBundle,
+          acceptanceReport: new DerivedBytes(checkCompiler.historyBundle.acceptanceReport),
+        },
+      }))).rejects.toThrow(/history requires byte arrays/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it.each(['templates', 'history', 'pins'] as const)('captures caller %s before asynchronous observation', async surface => {
+    const fixture = await createRootFixture();
+    const originalSource = fixture.input.sourceAndCompilerInput;
+    const callerSource = {
+      ...originalSource,
+      familyTemplates: structuredClone(originalSource.familyTemplates),
+      historyBundle: structuredClone(originalSource.historyBundle),
+      trustPins: structuredClone(originalSource.trustPins),
+    };
+    fixture.input.sourceAndCompilerInput = callerSource;
+    try {
+      await withObservations(async observed => {
+        const original = observations.observeSubstrateFederatedGenesisV1;
+        const first = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1').mockImplementationOnce(async (...args) => {
+          const observation = await original(...args);
+          if (surface === 'templates') {
+            Reflect.set(callerSource.familyTemplates.sourceLock, 'source', callerSource.familyTemplates.sourceLock.source + '\n');
+          } else if (surface === 'history') {
+            callerSource.historyBundle.acceptanceReport[0] = callerSource.historyBundle.acceptanceReport[0]! ^ 1;
+          } else {
+            Reflect.set(callerSource.trustPins, 'expectedSourceNetworkIdHex', 'ff'.repeat(32));
+          }
+          return observation;
+        });
+        try {
+          const receipt = await fixture.session.runV3(fixture.input);
+          expect(first).toHaveBeenCalled();
+          expect(receipt.sourceBindings.compilerProfile).toBe('absolute-height-tracker-v2');
+          expect(receipt.signer.publicKeyHex).toBe(fixture.session.signer.publicKeyHex);
+          expect(observed.checkBodies).toHaveLength(3);
+          for (const [ordinal, body] of observed.checkBodies.entries()) {
+            expect((body.outputs as any[])[0].assets[0].tokenId).toBe(fixture.boxes[roles[ordinal]!].boxId);
+          }
+        } finally { first.mockRestore(); }
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { fixture.session.dispose(); }
+  }, 60_000);
+});
+
+function rootInput(sourceAndCompilerInput: CompilerInputV3) {
+  return { sourceAndCompilerInput, expectedSettlementGenesisHeaderIdHex: GENESIS_HEADER_ID,
+    primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052' };
+}
+
+async function createRootFixture() {
+  const session = await createSession();
+  try {
+    const funding = {
+      tracker: fundingCandidate('50000000', session.signer.rewardInputErgoTrees.delay1),
+      duplicatePrevention: fundingCandidate('100000000', session.signer.rewardInputErgoTrees.delay1),
+      pooledReserve: fundingCandidate('150000000', session.signer.rewardInputErgoTrees.delay1),
+    };
+    if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
+      throw new Error('Vitest parent NODE_OPTIONS is not the reviewed harness value');
+    }
+    const nodeOptions = process.env.NODE_OPTIONS;
+    delete process.env.NODE_OPTIONS;
+    try {
+      const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+        trackerGenesisInputBoxIdHex: funding.tracker.boxId,
+        profile, application: compilerV3.trackerRequest.application,
+        template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
+      });
+      const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
+      const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
+        trackerRequest, trackerReceipt, templates: compilerV3.familyTemplates,
+        duplicatePreventionGenesisInputBoxIdHex: funding.duplicatePrevention.boxId,
+        pooledReserveGenesisInputBoxIdHex: funding.pooledReserve.boxId,
+      });
+      return { session, boxes: funding, input: rootInput({ ...compilerV3, trackerRequest, trackerReceipt, familyReceipt }) };
+    } finally { process.env.NODE_OPTIONS = nodeOptions; }
+  } catch (error) { session.dispose(); throw error; }
+}
+
 // This parses received signed bytes; it is deliberately not an Ergo node/JVM oracle.
 function signedCheckOracle(body: Record<string, unknown>): string {
   const parsed = wasm.Transaction.from_json(JSON.stringify(body));
@@ -751,6 +1028,7 @@ interface ObservationOptions {
   readonly headers?: readonly Readonly<Record<string, unknown>>[];
   readonly checkOracle?: (body: Record<string, unknown>, ordinal: number) => unknown;
   readonly postCheckReplacementRole?: Role;
+  readonly fixedSetupPorts?: boolean;
 }
 
 async function withObservations<T>(
@@ -820,7 +1098,7 @@ async function withObservations<T>(
     servers.push(server);
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
+      server.listen(options.fixedSetupPorts ? (primary ? 9051 : 9052) : 0, '127.0.0.1', resolve);
     });
     return 'http://127.0.0.1:' + (server.address() as AddressInfo).port;
   };

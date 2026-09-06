@@ -2457,6 +2457,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
       './substrate-federated-genesis-observation-v1.js',
       './substrate-federated-isolated-devnet-local-provisioning-v2.js',
+      './substrate-federated-isolated-devnet-launch-v1.js',
       './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-portable-replay-v1.js',
       './substrate-federated-isolated-devnet-settlement-target-v2.js',

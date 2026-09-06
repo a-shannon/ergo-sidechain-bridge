@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Wire the genuine V2 compiler family and V3 setup-check route into the operational setup root, then check fresh chain-resident boxes before transport | V159 connects the three V158 genesis issuances to real WASM signing, exact no-submit checks and a separate V3 receipt. The direct 41-case matrix uses a bounded HTTP parsing oracle, not target-node acceptance. V155 retains its pinned-node synthetic-state scope. Operational composition, real UTXO membership and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Exercise the V3 no-submit session with fresh chain-resident genesis funding; then connect exact V2-family execution promotion before transport | V160 connects genuine V2 compiler provenance to the synthetic-custody session and V3 checks. Its direct matrix uses a bounded HTTP parsing oracle, not target-node acceptance. V155 retains its pinned-node synthetic-state scope. Real UTXO membership, V3 execution promotion and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -407,11 +407,41 @@ V2/V3 receipt use preserve the correct one-shot retrieval. A data-validation
 return cannot restore runtime provenance or bind a request to another genuine
 plan. No transaction is submitted.
 
-The existing V2 setup route remains a separate compatibility path. The next
-change belongs in the operational setup root: select genuine V2 compilation
-and V3 provisioning/request/checking end to end, without a V1 fallback. Then
-obtain fresh chain-resident funding and exact target-node checks. Canonical
-admission, source finality and funds authority remain outside this local result.
+The existing V2 setup route remains a separate compatibility path. V160 adds
+the no-submit session root below. Canonical admission, source finality and funds
+authority remain outside this local result.
+
+### V3 No-Submit Session Root
+
+V160 adds an explicit `runV3` operation to the synthetic setup session. It takes
+genuine V2 tracker/family compiler objects, the source-history bytes and pins,
+and the selected Ergo genesis identity. It observes the exact funding inputs,
+constructs the V3 target and transactions, and invokes the V3 signer/checker
+with the session's own key. The fixed local primary and witness endpoints
+remain unchanged. No portable V1 report or attestation is reinterpreted.
+
+| Producer -> consumer | Deciding check | Failure prevented |
+|---|---|---|
+| Source/compiler input -> session capture | Exact data fields; genuine V2 compiler guards; separate source-bound target-profile domain | Selecting an implicit legacy route or presenting copied compiler output as execution provenance |
+| Captured input -> asynchronous observations | Copy history bytes, templates and pins before awaiting; retain original compiler objects and recheck the captured closure | Caller mutation changing the source or contracts between validation and signing |
+| Session custody -> V3 checks | Compile the family for funding controlled by a genuinely new session, then sign and check all three transactions | Passing an unrelated signer or merely simulated signatures through the composed root |
+| Success, failure or concurrent use -> session close | Revoke retained mining credentials and reject subsequent use; invalidate an in-flight result on competing transitions | Returning a usable receipt from an invalidated session or reopening disposed custody |
+
+The direct matrix includes the preceding construction/check cases and
+the new session path. Its positive session tests use fresh in-memory identities,
+real pinned JVM compilation and real WASM signatures. The loopback check oracle
+still only parses signed transactions. Concurrent invalidation can occur while
+checks are in flight; the session then rejects the result and closes custody.
+This is not a promise to cancel an already-started check.
+
+`runV3` returns a validated data receipt, not retained execution material or a
+broadcast capability. It closes the no-submit session. It does not retain the
+peg-in signer, promote a V3 batch through V2 guards or enable the old campaign.
+The next deciding result is an exact check against fresh chain-resident inputs
+on the selected local node. Subsequent genesis transport needs a separately
+bound V3 execution continuation and authorization; a prior no-submit receipt
+cannot supply either. Source finality, institutional launch-history approval
+and canonical tracker admission remain open.
 
 ### Fresh-Owner Application Join
 

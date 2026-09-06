@@ -52,7 +52,12 @@ import {
 } from './substrate-federated-genesis-observation-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2,
+  buildSubstrateFederatedIsolatedDevnetLocalProvisioningV3,
 } from './substrate-federated-isolated-devnet-local-provisioning-v2.js';
+import {
+  deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2,
+  type DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
+} from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
@@ -77,17 +82,22 @@ import {
 } from './substrate-federated-isolated-devnet-portable-replay-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetSettlementTargetV2,
+  buildSubstrateFederatedIsolatedDevnetSettlementTargetV3,
 } from './substrate-federated-isolated-devnet-settlement-target-v2.js';
 import {
   buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
   type SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 import {
   runSubstrateFederatedIsolatedDevnetSetupCheckV2,
+  runSubstrateFederatedIsolatedDevnetSetupCheckV3,
   takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
+  validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3,
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import { sha256CanonicalJson } from './strict-json.js';
 import {
@@ -101,6 +111,12 @@ const PROFILE_ID_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FIXED_SETUP_CHECK_PROFILE_V2';
 const DECLARED_IDENTITY_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FIXED_SETUP_CHECK_DECLARATION_V2';
+const PROFILE_V3_ID_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FIXED_SETUP_CHECK_PROFILE_V3';
+const DECLARED_IDENTITY_V3_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FIXED_SETUP_CHECK_DECLARATION_V3';
+const SOURCE_AND_COMPILER_CLOSURE_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SOURCE_AND_COMPILER_CLOSURE_V3';
 const OBSERVATION_ATTEMPTS = 40;
 const OBSERVATION_RETRY_MS = 250;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_CHECK_V1_SCHEMA =
@@ -247,6 +263,14 @@ export interface RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input {
   readonly witnessNodeOrigin: string;
 }
 
+export interface RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input {
+  readonly sourceAndCompilerInput:
+    Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>;
+  readonly expectedSettlementGenesisHeaderIdHex: string;
+  readonly primaryNodeOrigin: string;
+  readonly witnessNodeOrigin: string;
+}
+
 export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSignerV2 {
   readonly publicKeyHex: string;
   readonly p2pkErgoTreeHex: string;
@@ -272,6 +296,9 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>>;
+  readonly runV3: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>>;
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1150,6 +1177,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         'open',
         async activeMnemonic =>
           (await runFixedSetupCheck(input, activeMnemonic)).receipt,
+        'closed',
+      ),
+      runV3: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+      ) => consume(
+        'open',
+        activeMnemonic => runFixedSetupCheckV3(input, activeMnemonic),
         'closed',
       ),
       runForExecution: async (
@@ -2152,6 +2186,77 @@ async function runFixedSetupCheck(
   });
 }
 
+/** Genuine V2 compiler closure to local V3 checks, without execution promotion. */
+async function runFixedSetupCheckV3(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+  mnemonic: string,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>> {
+  const captured = captureInputV3(input);
+  const sourceAndCompilerInput = captured.sourceAndCompilerInput;
+  const sourceClosure =
+    deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2(
+      sourceAndCompilerInput,
+    );
+  const sourceAndCompilerClosureDigestHex = sha256CanonicalJson(
+    sourceClosure,
+    SOURCE_AND_COMPILER_CLOSURE_V3_DIGEST_DOMAIN,
+  );
+  const genesisBoxIds = Object.freeze({
+    tracker: sourceClosure.lineages.tracker.genesisInputBoxIdHex,
+    duplicatePrevention:
+      sourceClosure.lineages.duplicatePrevention.genesisInputBoxIdHex,
+    pooledReserve: sourceClosure.lineages.pooledReserve.genesisInputBoxIdHex,
+  });
+  const profile = buildTargetProfileV3(
+    sourceAndCompilerClosureDigestHex,
+    captured.expectedSettlementGenesisHeaderIdHex,
+    genesisBoxIds,
+    captured.primaryNodeOrigin,
+    captured.witnessNodeOrigin,
+  );
+  const assertCapturedClosure = (): void => {
+    const current =
+      deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2(
+        sourceAndCompilerInput,
+      );
+    if (sha256CanonicalJson(current, SOURCE_AND_COMPILER_CLOSURE_V3_DIGEST_DOMAIN)
+      !== sourceAndCompilerClosureDigestHex) {
+      throw new Error('isolated fixed setup-check V3 source/compiler closure drifted');
+    }
+  };
+
+  const retainedObservation = await observeWithRetry(profile);
+  assertCapturedClosure();
+  const settlementTarget =
+    buildSubstrateFederatedIsolatedDevnetSettlementTargetV3({
+      ...sourceAndCompilerInput,
+      settlementTargetProfile: profile,
+      settlementObservation: retainedObservation,
+    });
+  if (settlementTarget.sourceAndCompilerClosureDigestHex
+    !== sourceAndCompilerClosureDigestHex) {
+    throw new Error('isolated fixed setup-check V3 target source closure differs');
+  }
+  const freshObservation = await observeWithRetry(profile);
+  const provisioning =
+    await buildSubstrateFederatedIsolatedDevnetLocalProvisioningV3({
+      settlementTarget,
+      settlementTargetProfile: profile,
+      freshSettlementObservation: freshObservation,
+    });
+  const request =
+    await buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV3(provisioning);
+  assertCapturedClosure();
+  const executionReceipt = await runSubstrateFederatedIsolatedDevnetSetupCheckV3(
+    request,
+    mnemonic,
+  );
+  return validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3(
+    structuredClone(executionReceipt),
+    request,
+  );
+}
+
 function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
   batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
   familyCompilerBinding:
@@ -2230,6 +2335,52 @@ function buildTargetProfile(
     trackerGenesisBoxIdHex: genesisBoxIds.tracker,
     duplicatePreventionGenesisBoxIdHex:
       genesisBoxIds.duplicatePrevention,
+    pooledReserveGenesisBoxIdHex: genesisBoxIds.pooledReserve,
+  });
+}
+
+function buildTargetProfileV3(
+  sourceAndCompilerClosureDigestHex: string,
+  expectedGenesisHeaderIdHex: string,
+  genesisBoxIds: Readonly<{
+    readonly tracker: string;
+    readonly duplicatePrevention: string;
+    readonly pooledReserve: string;
+  }>,
+  primaryNodeOrigin: string,
+  witnessNodeOrigin: string,
+): SubstrateFederatedGenesisTargetProfileV1 {
+  const profileIdHex = sha256CanonicalJson({
+    sourceAndCompilerClosureDigestHex,
+    expectedGenesisHeaderIdHex,
+    genesisBoxIds,
+    primaryNodeOrigin,
+    witnessNodeOrigin,
+  }, PROFILE_V3_ID_DOMAIN);
+  const identity = (role: string, nodeOrigin: string): string =>
+    sha256CanonicalJson({ role, nodeOrigin, profileIdHex },
+      DECLARED_IDENTITY_V3_DOMAIN);
+  return buildSubstrateFederatedGenesisTargetProfileV1({
+    profileIdHex,
+    environment: 'patched-devnet',
+    expectedNetwork: 'devnet',
+    expectedGenesisHeaderIdHex,
+    primaryNodeOrigin,
+    primaryNodeIdentityDigestHex: identity(
+      'primary-node-process', primaryNodeOrigin,
+    ),
+    primaryAdministrationIdentityDigestHex: identity(
+      'primary-synthetic-custody', primaryNodeOrigin,
+    ),
+    witnessNodeOrigin,
+    witnessNodeIdentityDigestHex: identity(
+      'witness-node-process', witnessNodeOrigin,
+    ),
+    witnessAdministrationIdentityDigestHex: identity(
+      'witness-observation-role', witnessNodeOrigin,
+    ),
+    trackerGenesisBoxIdHex: genesisBoxIds.tracker,
+    duplicatePreventionGenesisBoxIdHex: genesisBoxIds.duplicatePrevention,
     pooledReserveGenesisBoxIdHex: genesisBoxIds.pooledReserve,
   });
 }
@@ -2313,6 +2464,86 @@ function captureInput(
     primaryNodeOrigin: descriptors.primaryNodeOrigin!.value,
     witnessNodeOrigin: descriptors.witnessNodeOrigin!.value,
   }) as RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input;
+}
+
+function captureInputV3(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+): Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input> {
+  assertExactDataRecordV3(input, [
+    'expectedSettlementGenesisHeaderIdHex',
+    'primaryNodeOrigin',
+    'sourceAndCompilerInput',
+    'witnessNodeOrigin',
+  ], 'isolated fixed setup-check V3 input');
+  const source = input.sourceAndCompilerInput;
+  assertExactDataRecordV3(source, [
+    'familyReceipt', 'familyTemplates', 'historyBundle',
+    'trackerReceipt', 'trackerRequest', 'trustPins',
+  ], 'isolated fixed setup-check V3 source/compiler input');
+  for (const key of [
+    'trackerRequest', 'trackerReceipt', 'familyReceipt', 'familyTemplates', 'trustPins',
+  ] as const) {
+    assertPlainData(source[key], `isolated fixed setup-check V3 ${key}`);
+  }
+  const historyBundle = source.historyBundle;
+  assertExactDataRecordV3(historyBundle, [
+    'acceptanceReport', 'applicationHistory', 'historyReceipt',
+    'reportedFinalizedBlocks', 'runtimeHistory',
+  ], 'isolated fixed setup-check V3 history bundle');
+  for (const artifact of Object.values(historyBundle)) {
+    if (!(artifact instanceof Uint8Array)
+      || (Object.getPrototypeOf(artifact) !== Uint8Array.prototype
+        && Object.getPrototypeOf(artifact) !== Buffer.prototype)) {
+      throw new Error('isolated fixed setup-check V3 history requires byte arrays');
+    }
+  }
+  // Clone native byte storage without reading caller-defined buffer accessors.
+  const capturedHistoryBundle = structuredClone(historyBundle);
+  for (const artifact of Object.values(capturedHistoryBundle)) {
+    if (!(artifact.buffer instanceof ArrayBuffer)) {
+      throw new Error('isolated fixed setup-check V3 history requires unshared byte arrays');
+    }
+  }
+  return Object.freeze({
+    sourceAndCompilerInput: Object.freeze({
+      // Compiler authority remains on the original process-issued objects.
+      trackerRequest: source.trackerRequest,
+      trackerReceipt: source.trackerReceipt,
+      familyReceipt: source.familyReceipt,
+      familyTemplates: structuredClone(source.familyTemplates),
+      historyBundle: capturedHistoryBundle,
+      trustPins: structuredClone(source.trustPins),
+    }),
+    expectedSettlementGenesisHeaderIdHex: fixedHex(
+      input.expectedSettlementGenesisHeaderIdHex,
+      32,
+      'isolated fixed setup-check V3 settlement genesis header ID',
+    ),
+    primaryNodeOrigin: exactOrigin(input.primaryNodeOrigin, PRIMARY_NODE_ORIGIN, 'primary'),
+    witnessNodeOrigin: exactOrigin(input.witnessNodeOrigin, WITNESS_NODE_ORIGIN, 'witness'),
+  });
+}
+
+function assertExactDataRecordV3(
+  value: unknown,
+  expectedKeys: readonly string[],
+  label: string,
+): void {
+  if (value === null || typeof value !== 'object'
+    || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw new Error(`${label} must be a plain object`);
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== expectedKeys.length
+    || keys.some(key => typeof key !== 'string' || !expectedKeys.includes(key))) {
+    throw new Error(`${label} fields are invalid`);
+  }
+  for (const key of expectedKeys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !('value' in descriptor)) {
+      throw new Error(`${label}.${key} must be an enumerable data property`);
+    }
+  }
 }
 
 function capturePegInSourceLockCheckInput(

@@ -1,4 +1,6 @@
 .gitattributes text eol=lf
+relayer/src/substrate-federated-isolated-devnet-setup-check-execution-v2.ts text eol=lf
+relayer/src/substrate-federated-isolated-devnet-launch-v1.test.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-setup-check-request-v2.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-setup-check-v2.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-launch-v1.ts text eol=lf
