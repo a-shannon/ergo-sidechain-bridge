@@ -14,6 +14,14 @@ import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signe
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as fleet from './fleet-signer.js';
 import {
+  createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1 as createAuthorizerV1,
+  createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 as createAuthorizerV2,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1 as assertAuthorizationV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2 as assertAuthorizationV2,
+} from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
+import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 as createConfirmationObserver }
+  from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import {
   createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1 as createRevalidatorV1,
   createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2 as createRevalidatorV2,
   assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1 as assertRevalidationV1,
@@ -22,6 +30,7 @@ import {
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA as GENESIS_EXECUTION_SCHEMA,
   deriveSubstrateFederatedLocalDevnetGenesisAdmissionDigestV1 as admissionDigest,
+  type SubstrateFederatedLocalDevnetGenesisRevalidation,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import * as ownedTargets from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
@@ -698,6 +707,8 @@ describe('V3 genesis plan -> no-submit request and check', () => {
         expect(Reflect.apply(assertExecutionV2, undefined, [batch, target])).toEqual(executionBinding);
         expect(() => Reflect.apply(assertExecutionV3, undefined, [batch, target])).toThrow(/process provenance/);
         expect(() => Reflect.apply(createRevalidatorV2, undefined, [target, batch])).toThrow(/process provenance/);
+        expect(() => Reflect.apply(createAuthorizerV2, undefined, [target, batch, null, null]))
+          .toThrow(/process provenance/);
       } finally { custody.mockRestore(); }
     }, checkObservationOptions());
   });
@@ -782,7 +793,7 @@ function executionTarget() {
 }
 
 describe('owned synthetic session -> V3 execution promotion', () => {
-  it('revalidates every genuine V3 genesis handle through the V2 read-only consumer', async () => {
+  it('revalidates genuine V3 genesis handles and binds ordered V2 authorization', async () => {
     const fixture = await createRootFixture();
     const target = executionTarget();
     const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
@@ -793,6 +804,10 @@ describe('owned synthetic session -> V3 execution promotion', () => {
         expect(() => Reflect.apply(createRevalidatorV1, undefined, [target, batch])).toThrow(/process provenance/);
         expect(() => createRevalidatorV2(target, { ...batch })).toThrow(/process provenance/);
         const revalidator = createRevalidatorV2(target, batch);
+        const observer = createConfirmationObserver(target, batch.request.target.genesisHeaderIdHex);
+        expect(() => Reflect.apply(createAuthorizerV1, undefined, [target, batch, revalidator, observer]))
+          .toThrow(/process provenance/);
+        const authorizer = createAuthorizerV2(target, batch, revalidator, observer);
         for (const [ordinal, transaction] of batch.orderedTransactions.entries()) {
           const { issuance, signedCandidate, checkedAcceptance } = transaction;
           const binding = Object.freeze({
@@ -812,8 +827,10 @@ describe('owned synthetic session -> V3 execution promotion', () => {
             checkResponseDigestHex: checkedAcceptance.submissionHandle.checkResponseDigestHex,
             checkerArtifact: checkedAcceptance.submissionHandle,
           });
+          const observations = new Map<string, SubstrateFederatedLocalDevnetGenesisRevalidation>();
           for (const phase of ['post-check', 'pre-transport'] as const) {
             const result = await revalidator.revalidate(checked, phase);
+            observations.set(phase, result);
             expect(result.sourceBoxUnspent).toBe(true);
             expect(result.sourceBoxId).toBe(issuance.genesisInputBoxIdHex);
             expect(result.observedAtHeight).toBe(batch.request.target.preSetupAnchor.height);
@@ -832,10 +849,34 @@ describe('owned synthetic session -> V3 execution promotion', () => {
               .toThrow(/version differs/);
             await expect(revalidator.revalidate(checked, phase)).rejects.toThrow(/already issued/);
           }
+          const revalidated = Object.freeze({ checked, postCheckEvidence: observations.get('post-check')! });
+          const preTransportEvidence = observations.get('pre-transport')!;
+          let assertAfterConsumption: (() => void) | undefined;
+          if (ordinal === 0) {
+            const authorization = authorizer.authorize(revalidated, preTransportEvidence);
+            const expectation = { revalidated, preTransportEvidence,
+              authorizationDigestHex: authorization.authorizationDigestHex };
+            const { authorizationArtifact } = authorization;
+            assertAuthorizationV2(authorizer, authorizationArtifact, expectation);
+            expect(() => assertAuthorizationV2(authorizer, { ...authorizationArtifact }, expectation))
+              .toThrow(/exact process provenance/);
+            expect(() => Reflect.apply(assertAuthorizationV1, undefined,
+              [authorizer, authorizationArtifact, expectation])).toThrow(/version differs/);
+            const second = createAuthorizerV2(target, batch, revalidator, observer);
+            expect(() => second.authorize(revalidated, preTransportEvidence)).toThrow(/already authorized/);
+            assertAfterConsumption = () => assertAuthorizationV2(authorizer, authorizationArtifact, expectation);
+          } else {
+            // No confirmation is fabricated: later authorizations must remain blocked.
+            expect(() => authorizer.authorize(revalidated, preTransportEvidence))
+              .toThrow(/predecessor confirmation is required/);
+          }
           await fleet.consumeLocalWasmCheckedSubmissionHandleV1(checkedAcceptance.submissionHandle,
             signedCandidate, async body => {
               expect(signedCheckOracle(body)).toBe(issuance.unsignedTransactionIdHex);
             });
+          if (assertAfterConsumption !== undefined) {
+            expect(assertAfterConsumption).toThrow(/consumed|provenance/);
+          }
         }
         expect(observed.checkBodies).toHaveLength(3);
       }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });

@@ -24,7 +24,9 @@ import {
 } from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2,
   type SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1,
+  type SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2,
 } from './substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
@@ -33,18 +35,30 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v2' as const;
 
 const WITNESS_ORIGIN = 'http://127.0.0.1:9052' as const;
 const AUTHORIZATION_SCOPE =
   'fed-6-lab-local-synthetic-genesis-setup-only' as const;
-const AUTHORIZATION_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZATION_V1';
+const AUTHORIZATION_PROFILES = Object.freeze({
+  1: Object.freeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZATION_V1',
+  }),
+  2: Object.freeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V2_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZATION_V2',
+  }),
+});
 const ROLE_ORDER = Object.freeze([
   'tracker',
   'duplicatePrevention',
@@ -75,6 +89,27 @@ export interface SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationAr
   readonly authorizationDigestHex: string;
 }
 
+export interface SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2
+extends Omit<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1, 'schema'> {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V2_SCHEMA;
+}
+
+export interface SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2
+extends Omit<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1, 'schema' | 'version'> {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V2_SCHEMA;
+  readonly version: 2;
+}
+
+type AuthorizerVersion = keyof typeof AUTHORIZATION_PROFILES;
+type Authorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
+  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>;
+type SetupBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2
+  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+type Revalidator = Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1
+  | SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2>;
+
 export interface SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1 {
   readonly revalidated:
     SubstrateFederatedLocalDevnetGenesisRevalidatedCandidate;
@@ -84,14 +119,13 @@ export interface SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationEx
 }
 
 interface AuthorizerMaterialV1 {
+  readonly version: AuthorizerVersion;
   readonly target:
     Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   readonly binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
-  readonly batch:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>;
-  readonly revalidator:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>;
+  readonly batch: SetupBatch;
+  readonly revalidator: Revalidator;
   readonly confirmationObserver:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>;
   readonly transactions: ReadonlyMap<
@@ -107,8 +141,7 @@ interface AuthorizerMaterialV1 {
 }
 
 interface AuthorizationMaterialV1 {
-  readonly authorizer:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>;
+  readonly authorizer: Authorizer;
   readonly revalidated:
     SubstrateFederatedLocalDevnetGenesisRevalidatedCandidate;
   readonly preTransportEvidence:
@@ -144,8 +177,41 @@ export function createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizer
   confirmationObserver:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1> {
-  const binding =
-    assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(batch, target);
+  return createAuthorizer(target, batch, revalidator, confirmationObserver, 1) as
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>;
+}
+
+export function createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>,
+  revalidator: Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2>,
+  confirmationObserver: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2> {
+  return createAuthorizer(target, batch, revalidator, confirmationObserver, 2) as
+    Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>;
+}
+
+// Public factories select the reviewed provenance profile, never a caller callback.
+function assertSetupBatch(batch: SetupBatch,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  version: AuthorizerVersion,
+) {
+  return version === 1
+    ? assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+      batch as Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>, target)
+    : assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(
+      batch as Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>, target);
+}
+
+function createAuthorizer(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: SetupBatch,
+  revalidator: Revalidator,
+  confirmationObserver: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  version: AuthorizerVersion,
+): Authorizer {
+  const binding = assertSetupBatch(batch, target, version);
+  const profile = AUTHORIZATION_PROFILES[version];
   const targetBinding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (
@@ -193,11 +259,9 @@ export function createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizer
     throw new Error('isolated genesis authorizer requires canonical setup order');
   }
 
-  let authorizer!:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>;
+  let authorizer!: Authorizer;
   authorizer = Object.freeze({
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA,
+    schema: profile.schema,
     authorize: (
       revalidated:
         SubstrateFederatedLocalDevnetGenesisRevalidatedCandidate,
@@ -224,8 +288,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizer
 
       const admission = validated.checked.signed.admission;
       const authorizationDigestHex = sha256CanonicalJson({
-        schema:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA,
+        schema: profile.schema,
         authorizationScope: AUTHORIZATION_SCOPE,
         processBindingDigestHex: material.binding.processBindingDigestHex,
         executionTargetIdentityDigestHex:
@@ -242,12 +305,11 @@ export function createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizer
         checkResponseDigestHex: validated.checked.checkResponseDigestHex,
         postCheck: evidenceDigestInput(revalidated.postCheckEvidence),
         preTransport: evidenceDigestInput(preTransportEvidence),
-      }, AUTHORIZATION_DIGEST_DOMAIN);
+      }, profile.domain);
       const ordinal = validated.ordinal;
       const authorizationArtifact = Object.freeze({
-        schema:
-          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA,
-        version: 1 as const,
+        schema: profile.schema,
+        version,
         authorizationScope: AUTHORIZATION_SCOPE,
         role: validated.role,
         ordinal,
@@ -309,6 +371,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizer
     },
   });
   AUTHORIZERS.set(authorizer, {
+    version,
     target,
     binding,
     batch,
@@ -326,7 +389,21 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
     Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): void {
-  const material = assertAuthorizer(authorizer, target);
+  assertSetupConfirmed(authorizer, target, 1);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2(
+  authorizer: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  assertSetupConfirmed(authorizer, target, 2);
+}
+
+function assertSetupConfirmed(authorizer: Authorizer,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  version: AuthorizerVersion,
+): void {
+  const material = assertAuthorizerVersion(authorizer, version, target);
   if (material.nextOrdinal !== ROLE_ORDER.length || material.pending !== null) {
     throw new Error('isolated genesis setup is not canonically confirmed');
   }
@@ -337,7 +414,14 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizer
     Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): void {
-  assertAuthorizer(authorizer, target);
+  assertAuthorizerVersion(authorizer, 1, target);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2(
+  authorizer: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  assertAuthorizerVersion(authorizer, 2, target);
 }
 
 export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
@@ -347,7 +431,22 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizat
   expectation:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1>,
 ): void {
-  const material = assertAuthorizer(authorizer);
+  assertAuthorizationArtifact(authorizer, artifact, expectation, 1);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2(
+  authorizer: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>,
+  artifact: object,
+  expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1>,
+): void {
+  assertAuthorizationArtifact(authorizer, artifact, expectation, 2);
+}
+
+function assertAuthorizationArtifact(authorizer: Authorizer, artifact: object,
+  expectation: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationExpectationV1>,
+  version: AuthorizerVersion,
+): void {
+  const material = assertAuthorizerVersion(authorizer, version);
   const authorization = AUTHORIZATIONS.get(artifact);
   const authorizationDigestHex = fixedHex32(
     expectation.authorizationDigestHex,
@@ -367,11 +466,11 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizat
   }
   const exact = artifact as Partial<
     SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1
+    | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2
   >;
   if (
-    exact.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA
-    || exact.version !== 1
+    exact.schema !== AUTHORIZATION_PROFILES[version].schema
+    || exact.version !== version
     || exact.authorizationScope !== AUTHORIZATION_SCOPE
     || exact.role !== authorization.role
     || exact.ordinal !== authorization.ordinal
@@ -389,17 +488,25 @@ export function assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizat
   );
 }
 
+function assertAuthorizerVersion(authorizer: Authorizer, version: AuthorizerVersion,
+  target?: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): AuthorizerMaterialV1 {
+  const material = assertAuthorizer(authorizer, target);
+  if (material.version !== version) {
+    throw new Error('isolated genesis broadcast authorizer version differs');
+  }
+  return material;
+}
+
 function assertAuthorizer(
-  authorizer:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
+  authorizer: Authorizer,
   expectedTarget?:
     Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): AuthorizerMaterialV1 {
   const material = AUTHORIZERS.get(authorizer);
   if (
     material === undefined
-    || authorizer.schema
-      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZER_V1_SCHEMA
+    || authorizer.schema !== AUTHORIZATION_PROFILES[material.version].schema
     || (expectedTarget !== undefined && material.target !== expectedTarget)
   ) {
     throw new Error('isolated genesis broadcast authorizer lacks provenance');
@@ -409,9 +516,10 @@ function assertAuthorizer(
       material.target,
     );
   const batchBinding =
-    assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+    assertSetupBatch(
       material.batch,
       material.target,
+      material.version,
     );
   if (
     current.processBindingDigestHex
@@ -485,14 +593,14 @@ function validateAuthorizationInput(
     material.binding,
   );
   assertRevalidationEvidence(
-    material.revalidator,
+    material,
     checked,
     role,
     'post-check',
     revalidated.postCheckEvidence,
   );
   assertRevalidationEvidence(
-    material.revalidator,
+    material,
     checked,
     role,
     'pre-transport',
@@ -522,31 +630,35 @@ function validateAuthorizationInput(
 }
 
 function assertRevalidationEvidence(
-  revalidator:
-    Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>,
+  material: AuthorizerMaterialV1,
   checked: SubstrateFederatedLocalDevnetGenesisCheckedCandidate,
   role: SubstrateFederatedLocalDevnetGenesisRole,
   phase: 'post-check' | 'pre-transport',
   evidence: SubstrateFederatedLocalDevnetGenesisRevalidation,
 ): void {
-  assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
-    revalidator,
-    evidence.revalidationArtifact,
-    {
-      checkedCandidate: checked,
-      role,
-      phase,
-      sourceBoxId: evidence.sourceBoxId,
-      targetGenesisHeaderIdHex: evidence.targetGenesisHeaderIdHex,
-      expectedTxId: checked.signed.admission.expectedTxId,
-      observedAtHeight: evidence.observedAtHeight,
-      observedTipHeaderIdHex: evidence.observedTipHeaderIdHex,
-      sourceBoxDigestHex: evidence.sourceBoxDigestHex,
-      sourceBoxSigmaSerializedSha256Hex:
-        evidence.sourceBoxSigmaSerializedSha256Hex,
-      observationDigestHex: evidence.observationDigestHex,
-    },
-  );
+  const expectation = {
+    checkedCandidate: checked,
+    role,
+    phase,
+    sourceBoxId: evidence.sourceBoxId,
+    targetGenesisHeaderIdHex: evidence.targetGenesisHeaderIdHex,
+    expectedTxId: checked.signed.admission.expectedTxId,
+    observedAtHeight: evidence.observedAtHeight,
+    observedTipHeaderIdHex: evidence.observedTipHeaderIdHex,
+    sourceBoxDigestHex: evidence.sourceBoxDigestHex,
+    sourceBoxSigmaSerializedSha256Hex:
+      evidence.sourceBoxSigmaSerializedSha256Hex,
+    observationDigestHex: evidence.observationDigestHex,
+  };
+  if (material.version === 1) {
+    assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1(
+      material.revalidator as Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV1>,
+      evidence.revalidationArtifact, expectation);
+  } else {
+    assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2(
+      material.revalidator as Readonly<SubstrateFederatedIsolatedDevnetGenesisRevalidatorV2>,
+      evidence.revalidationArtifact, expectation);
+  }
 }
 
 function evidenceDigestInput(

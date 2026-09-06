@@ -1,12 +1,15 @@
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertBatch: vi.fn(),
+  assertBatchV3: vi.fn(),
   assertConfirmationArtifact: vi.fn(),
   assertConfirmationObserver: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandleProvenance: vi.fn(),
   assertRevalidationArtifact: vi.fn(),
+  assertRevalidationArtifactV2: vi.fn(),
   assertTarget: vi.fn(),
 }));
 
@@ -32,6 +35,8 @@ vi.mock(
   () => ({
     assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV1:
       mocks.assertRevalidationArtifact,
+    assertSubstrateFederatedIsolatedDevnetGenesisRevalidationArtifactV2:
+      mocks.assertRevalidationArtifactV2,
   }),
 );
 
@@ -43,6 +48,8 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 vi.mock('./substrate-federated-isolated-devnet-setup-check-execution-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2:
     mocks.assertBatch,
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3:
+    mocks.assertBatchV3,
 }));
 
 import {
@@ -50,6 +57,10 @@ import {
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
   assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
+  assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2,
+  createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
 } from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA,
@@ -76,8 +87,13 @@ const TARGET = Object.freeze({
   primaryMining: true as const,
   witnessReadOnly: true as const,
 });
-const REVALIDATOR = Object.freeze({
-  schema: 'e2s.substrate-federated-isolated-devnet-genesis-revalidator.v1',
+const REVALIDATORS = Object.freeze({
+  1: Object.freeze({
+    schema: 'e2s.substrate-federated-isolated-devnet-genesis-revalidator.v1',
+  }),
+  2: Object.freeze({
+    schema: 'e2s.substrate-federated-isolated-devnet-genesis-revalidator.v2',
+  }),
 });
 const CONFIRMATION_OBSERVER = Object.freeze({
   schema:
@@ -87,16 +103,40 @@ const CONFIRMATION_OBSERVER = Object.freeze({
 
 type CoreRole = 'tracker' | 'duplicatePrevention' | 'pooledReserve';
 type SetupRole = 'tracker' | 'duplicate-prevention' | 'pooled-reserve';
+type Version = 1 | 2;
+
+const APIS = {
+  1: {
+    create: createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+    assertAuthorizer: assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+    assertArtifact: assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1,
+    assertConfirmed: assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1,
+    assertBatch: mocks.assertBatch,
+    assertRevalidationArtifact: mocks.assertRevalidationArtifact,
+  },
+  2: {
+    create: createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
+    assertAuthorizer: assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
+    assertArtifact: assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2,
+    assertConfirmed: assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2,
+    assertBatch: mocks.assertBatchV3,
+    assertRevalidationArtifact: mocks.assertRevalidationArtifactV2,
+  },
+} as const;
 
 interface EvidenceRecord {
+  readonly version: Version;
   readonly checked: object;
   readonly phase: 'post-check' | 'pre-transport';
   readonly evidence: Readonly<Record<string, unknown>>;
 }
 
-let activeBatch: object;
+let batches = new WeakMap<object, Version>();
+let checkedVersions = new WeakMap<object, Version>();
 let currentProcessBinding = PROCESS_BINDING;
 let currentExecutionIdentity = EXECUTION_IDENTITY;
+let currentBatchProcessBinding = PROCESS_BINDING;
+let currentBatchExecutionIdentity = EXECUTION_IDENTITY;
 let handles = new WeakSet<object>();
 let consumedHandles = new WeakSet<object>();
 let evidenceRecords = new WeakMap<object, EvidenceRecord>();
@@ -107,8 +147,12 @@ let confirmationRecords = new WeakMap<object, Readonly<{
 
 beforeEach(() => {
   vi.clearAllMocks();
+  batches = new WeakMap<object, Version>();
+  checkedVersions = new WeakMap<object, Version>();
   currentProcessBinding = PROCESS_BINDING;
   currentExecutionIdentity = EXECUTION_IDENTITY;
+  currentBatchProcessBinding = PROCESS_BINDING;
+  currentBatchExecutionIdentity = EXECUTION_IDENTITY;
   handles = new WeakSet<object>();
   consumedHandles = new WeakSet<object>();
   evidenceRecords = new WeakMap<object, EvidenceRecord>();
@@ -122,15 +166,17 @@ beforeEach(() => {
       executionTargetIdentityDigestHex: currentExecutionIdentity,
     });
   });
-  mocks.assertBatch.mockImplementation((value: unknown, target: unknown) => {
-    if (value !== activeBatch || target !== TARGET) {
-      throw new Error('synthetic setup batch provenance is missing');
-    }
-    return Object.freeze({
-      processBindingDigestHex: currentProcessBinding,
-      executionTargetIdentityDigestHex: currentExecutionIdentity,
+  for (const version of [1, 2] as const) {
+    APIS[version].assertBatch.mockImplementation((value: object, target: unknown) => {
+      if (batches.get(value) !== version || target !== TARGET) {
+        throw new Error('synthetic setup batch provenance is missing');
+      }
+      return Object.freeze({
+        processBindingDigestHex: currentBatchProcessBinding,
+        executionTargetIdentityDigestHex: currentBatchExecutionIdentity,
+      });
     });
-  });
+  }
   mocks.assertConfirmationObserver.mockImplementation((
     value: unknown,
     reconciliationIdentityDigestHex: string,
@@ -196,35 +242,40 @@ beforeEach(() => {
       throw new Error('synthetic checked handle execution binding changed');
     }
   });
-  mocks.assertRevalidationArtifact.mockImplementation((
-    revalidator: unknown,
-    artifact: object,
-    expectation: Readonly<Record<string, unknown>>,
-  ) => {
-    const record = evidenceRecords.get(artifact);
-    const evidence = record?.evidence;
-    if (
-      revalidator !== REVALIDATOR
-      || record === undefined
-      || record.checked !== expectation.checkedCandidate
-      || record.phase !== expectation.phase
-      || evidence?.sourceBoxId !== expectation.sourceBoxId
-      || evidence?.targetGenesisHeaderIdHex
-        !== expectation.targetGenesisHeaderIdHex
-      || evidence?.observedAtHeight !== expectation.observedAtHeight
-      || evidence?.observedTipHeaderIdHex
-        !== expectation.observedTipHeaderIdHex
-      || evidence?.sourceBoxDigestHex !== expectation.sourceBoxDigestHex
-      || evidence?.sourceBoxSigmaSerializedSha256Hex
-        !== expectation.sourceBoxSigmaSerializedSha256Hex
-      || evidence?.observationDigestHex !== expectation.observationDigestHex
-    ) {
-      throw new Error('synthetic revalidation artifact is not exact');
-    }
-  });
+  for (const version of [1, 2] as const) {
+    APIS[version].assertRevalidationArtifact.mockImplementation((
+      revalidator: unknown,
+      artifact: object,
+      expectation: Readonly<Record<string, unknown>>,
+    ) => {
+      const record = evidenceRecords.get(artifact);
+      const evidence = record?.evidence;
+      if (
+        revalidator !== REVALIDATORS[version]
+        || record === undefined
+        || record.version !== version
+        || record.checked !== expectation.checkedCandidate
+        || record.phase !== expectation.phase
+        || (record.checked as any).signed.admission.role !== expectation.role
+        || (record.checked as any).signed.admission.expectedTxId !== expectation.expectedTxId
+        || evidence?.sourceBoxId !== expectation.sourceBoxId
+        || evidence?.targetGenesisHeaderIdHex
+          !== expectation.targetGenesisHeaderIdHex
+        || evidence?.observedAtHeight !== expectation.observedAtHeight
+        || evidence?.observedTipHeaderIdHex
+          !== expectation.observedTipHeaderIdHex
+        || evidence?.sourceBoxDigestHex !== expectation.sourceBoxDigestHex
+        || evidence?.sourceBoxSigmaSerializedSha256Hex
+          !== expectation.sourceBoxSigmaSerializedSha256Hex
+        || evidence?.observationDigestHex !== expectation.observationDigestHex
+      ) {
+        throw new Error('synthetic revalidation artifact is not exact');
+      }
+    });
+  }
 });
 
-function harness() {
+function harness(version: Version) {
   const specs = [
     ['tracker', 'tracker', '21', '31', '41', '51'],
     ['duplicatePrevention', 'duplicate-prevention', '22', '32', '42', '52'],
@@ -289,6 +340,7 @@ function harness() {
       checkerArtifact: submissionHandle,
     });
     checkedByRole.set(coreRole, checked);
+    checkedVersions.set(checked, version);
     return Object.freeze({
       issuance: Object.freeze({
         ordinal: ordinal as 0 | 1 | 2,
@@ -323,14 +375,13 @@ function harness() {
     targetBinding: BINDING,
     orderedTransactions: Object.freeze(transactions),
   });
-  activeBatch = batch;
-  const authorizer =
-    createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
-      TARGET as any,
-      batch as any,
-      REVALIDATOR as any,
-      CONFIRMATION_OBSERVER as any,
-    );
+  batches.set(batch, version);
+  const authorizer = APIS[version].create(
+    TARGET as any,
+    batch as any,
+    REVALIDATORS[version] as any,
+    CONFIRMATION_OBSERVER as any,
+  );
   return { authorizer, batch, checkedByRole };
 }
 
@@ -375,6 +426,7 @@ function evidence(
     ...overrides,
   });
   evidenceRecords.set(artifact, Object.freeze({
+    version: checkedVersions.get(checked)!,
     checked,
     phase,
     evidence: value,
@@ -391,13 +443,63 @@ function authorizationInput(checked: any) {
   };
 }
 
-describe('isolated devnet genesis broadcast authorizer V1', () => {
+function expectedDigest(
+  version: Version,
+  input: ReturnType<typeof authorizationInput>,
+  ordinal: number,
+): string {
+  const checked = input.revalidated.checked;
+  const admission = checked.signed.admission;
+  const projectEvidence = (value: Readonly<Record<string, unknown>>) => ({
+    observedAtHeight: value.observedAtHeight,
+    observedTipHeaderIdHex: value.observedTipHeaderIdHex,
+    sourceBoxDigestHex: value.sourceBoxDigestHex,
+    sourceBoxSigmaSerializedSha256Hex: value.sourceBoxSigmaSerializedSha256Hex,
+    observationDigestHex: value.observationDigestHex,
+  });
+  const projection = {
+    schema: `e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v${version}`,
+    authorizationScope: 'fed-6-lab-local-synthetic-genesis-setup-only',
+    processBindingDigestHex: PROCESS_BINDING,
+    executionTargetIdentityDigestHex: EXECUTION_IDENTITY,
+    requestDigestHex: REQUEST_DIGEST,
+    role: admission.role,
+    ordinal,
+    targetGenesisHeaderIdHex: admission.targetGenesisHeaderIdHex,
+    expectedTxId: admission.expectedTxId,
+    admissionDigestHex: admission.admissionDigestHex,
+    sourceBoxId: admission.sourceBoxId,
+    signedTransactionDigestHex: checked.signed.signedTransactionDigestHex,
+    checkResponseDigestHex: checked.checkResponseDigestHex,
+    postCheck: projectEvidence(input.revalidated.postCheckEvidence),
+    preTransport: projectEvidence(input.preTransportEvidence),
+  };
+  // Independent encoding and hashing; do not call the production digest helper.
+  const canonical = JSON.stringify(projection, (_key, value) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]]))
+      : value);
+  return createHash('sha256')
+    .update(`E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_BROADCAST_AUTHORIZATION_V${version}`, 'ascii')
+    .update('\0', 'ascii')
+    .update(canonical, 'utf8')
+    .digest('hex');
+}
+
+describe.each([1, 2] as const)('isolated devnet genesis broadcast authorizer V%i', (version) => {
+  const api = APIS[version];
+  const oppositeVersion = version === 1 ? 2 : 1;
+  const opposite = APIS[oppositeVersion];
+  const setup = () => harness(version);
+
   it('issues and reasserts one exact authorization for each canonical role', () => {
-    const { authorizer, checkedByRole } = harness();
-    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
-      authorizer,
+    const { authorizer, checkedByRole } = setup();
+    api.assertAuthorizer(
+      authorizer as any,
       TARGET as any,
     );
+    expect(() => api.assertConfirmed(authorizer as any, TARGET as any))
+      .toThrow('isolated genesis setup is not canonically confirmed');
     const digests = new Set<string>();
     for (const role of [
       'tracker',
@@ -410,30 +512,233 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
         input.preTransportEvidence,
       );
       expect(result.authorizationDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+      expect(authorizer.schema).toBe(
+        `e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v${version}`,
+      );
+      expect(result.authorizationArtifact).toEqual({
+        schema: authorizer.schema,
+        version,
+        authorizationScope: 'fed-6-lab-local-synthetic-genesis-setup-only',
+        role,
+        ordinal: digests.size,
+        expectedTxId: input.revalidated.checked.signed.admission.expectedTxId,
+        authorizationDigestHex: expectedDigest(version, input, digests.size),
+      });
+      expect(result.authorizationDigestHex).toBe(expectedDigest(version, input, digests.size));
+      expect(Object.isFrozen(result.authorizationArtifact)).toBe(true);
       digests.add(result.authorizationDigestHex);
-      assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
-        authorizer,
+      api.assertArtifact(
+        authorizer as any,
         result.authorizationArtifact,
         {
           ...input,
           authorizationDigestHex: result.authorizationDigestHex,
         },
       );
+      expect(() => api.assertConfirmed(authorizer as any, TARGET as any))
+        .toThrow('isolated genesis setup is not canonically confirmed');
       authorizer.acknowledgeCanonicalConfirmation(
         role,
         confirmation(checkedByRole.get(role)),
       );
     }
     expect(digests.size).toBe(3);
-    expect(mocks.assertRevalidationArtifact).toHaveBeenCalledTimes(12);
-    assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
-      authorizer,
+    expect(api.assertRevalidationArtifact).toHaveBeenCalledTimes(12);
+    expect(opposite.assertRevalidationArtifact).not.toHaveBeenCalled();
+    api.assertConfirmed(
+      authorizer as any,
       TARGET as any,
     );
+    expect(() => opposite.assertConfirmed(authorizer as any, TARGET as any))
+      .toThrow('isolated genesis broadcast authorizer version differs');
+  });
+
+  it('rejects the opposite batch factory and authorizer guard', () => {
+    const { authorizer, batch } = setup();
+    expect(() => opposite.create(
+      TARGET as any,
+      batch as any,
+      REVALIDATORS[oppositeVersion] as any,
+      CONFIRMATION_OBSERVER as any,
+    )).toThrow('synthetic setup batch provenance is missing');
+    expect(() => opposite.assertAuthorizer(authorizer as any, TARGET as any))
+      .toThrow('isolated genesis broadcast authorizer version differs');
+    expect(() => api.assertAuthorizer(authorizer as any, TARGET as any)).not.toThrow();
+  });
+
+  it('rejects the opposite artifact guard for an otherwise exact authorization', () => {
+    const { authorizer, checkedByRole } = setup();
+    const input = authorizationInput(checkedByRole.get('tracker'));
+    const result = authorizer.authorize(input.revalidated, input.preTransportEvidence);
+    const expectation = { ...input, authorizationDigestHex: result.authorizationDigestHex };
+    expect(() => api.assertArtifact(authorizer as any, result.authorizationArtifact, expectation))
+      .not.toThrow();
+    expect(() => opposite.assertArtifact(authorizer as any, result.authorizationArtifact, expectation))
+      .toThrow('isolated genesis broadcast authorizer version differs');
+  });
+
+  it('rejects a wrong revalidator version through the exact artifact guard on authorize', () => {
+    const { batch, checkedByRole } = setup();
+    const wrong = api.create(
+      TARGET as any,
+      batch as any,
+      REVALIDATORS[oppositeVersion] as any,
+      CONFIRMATION_OBSERVER as any,
+    );
+    const input = authorizationInput(checkedByRole.get('tracker'));
+    expect(() => wrong.authorize(input.revalidated, input.preTransportEvidence))
+      .toThrow('synthetic revalidation artifact is not exact');
+    expect(api.assertRevalidationArtifact).toHaveBeenCalledWith(
+      REVALIDATORS[oppositeVersion],
+      input.revalidated.postCheckEvidence.revalidationArtifact,
+      expect.objectContaining({ checkedCandidate: input.revalidated.checked, phase: 'post-check' }),
+    );
+    expect(opposite.assertRevalidationArtifact).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2] as const)('prevents another V%i instance from authorizing the same handle', (otherVersion) => {
+    const { authorizer, batch, checkedByRole } = setup();
+    const otherBatch = Object.freeze({ ...batch });
+    batches.set(otherBatch, otherVersion);
+    const other = APIS[otherVersion].create(
+      TARGET as any,
+      otherBatch as any,
+      REVALIDATORS[otherVersion] as any,
+      CONFIRMATION_OBSERVER as any,
+    );
+    const checked = checkedByRole.get('tracker');
+    const input = authorizationInput(checked);
+    authorizer.authorize(input.revalidated, input.preTransportEvidence);
+    checkedVersions.set(checked, otherVersion);
+    const otherInput = authorizationInput(checked);
+    expect(() => other.authorize(otherInput.revalidated, otherInput.preTransportEvidence))
+      .toThrow('checked handle is already authorized');
+  });
+
+  it.each([1, 2] as const)('rejects an artifact presented to a different V%i instance', (otherVersion) => {
+    const { authorizer, batch, checkedByRole } = setup();
+    const otherBatch = Object.freeze({ ...batch });
+    batches.set(otherBatch, otherVersion);
+    const other = APIS[otherVersion].create(
+      TARGET as any,
+      otherBatch as any,
+      REVALIDATORS[otherVersion] as any,
+      CONFIRMATION_OBSERVER as any,
+    );
+    const input = authorizationInput(checkedByRole.get('tracker'));
+    const result = authorizer.authorize(input.revalidated, input.preTransportEvidence);
+    expect(() => APIS[otherVersion].assertArtifact(other as any, result.authorizationArtifact, {
+      ...input,
+      authorizationDigestHex: result.authorizationDigestHex,
+    })).toThrow('lacks exact process provenance');
+  });
+
+  it.each(['revalidated', 'preTransportEvidence', 'authorizationDigestHex'] as const)(
+    'rejects an isolated %s expectation substitution', (field) => {
+      const { authorizer, checkedByRole } = setup();
+      const input = authorizationInput(checkedByRole.get('tracker'));
+      const result = authorizer.authorize(input.revalidated, input.preTransportEvidence);
+      const expectation = { ...input, authorizationDigestHex: result.authorizationDigestHex };
+      const replacement = field === 'authorizationDigestHex'
+        ? hex('90') : Object.freeze({ ...expectation[field] });
+      expect(() => api.assertArtifact(authorizer as any, result.authorizationArtifact, {
+        ...expectation,
+        [field]: replacement,
+      })).toThrow('lacks exact process provenance');
+      expect(() => api.assertArtifact(authorizer as any, result.authorizationArtifact, expectation))
+        .not.toThrow();
+    },
+  );
+
+  it('invalidates an existing authorization when its handle is consumed', () => {
+    const { authorizer, checkedByRole } = setup();
+    const checked = checkedByRole.get('tracker');
+    const input = authorizationInput(checked);
+    const result = authorizer.authorize(input.revalidated, input.preTransportEvidence);
+    const expectation = { ...input, authorizationDigestHex: result.authorizationDigestHex };
+    api.assertArtifact(authorizer as any, result.authorizationArtifact, expectation);
+    consumedHandles.add(checked.checkerArtifact);
+    expect(() => api.assertArtifact(authorizer as any, result.authorizationArtifact, expectation))
+      .toThrow('checked handle provenance is missing');
+  });
+
+  it.each([
+    ['target', 'processBindingDigestHex'],
+    ['target', 'executionTargetIdentityDigestHex'],
+    ['batch', 'processBindingDigestHex'],
+    ['batch', 'executionTargetIdentityDigestHex'],
+  ] as const)(
+    'rejects isolated %s %s replacement before authorization and at artifact consumption', (owner, field) => {
+      const { authorizer, checkedByRole } = setup();
+      const input = authorizationInput(checkedByRole.get('tracker'));
+      const replace = (changed: boolean) => {
+        if (owner === 'batch' && field === 'processBindingDigestHex') {
+          currentBatchProcessBinding = changed ? hex('91') : PROCESS_BINDING;
+        } else if (owner === 'batch') {
+          currentBatchExecutionIdentity = changed ? hex('92') : EXECUTION_IDENTITY;
+        } else if (field === 'processBindingDigestHex') {
+          currentProcessBinding = changed ? hex('91') : PROCESS_BINDING;
+        } else {
+          currentExecutionIdentity = changed ? hex('92') : EXECUTION_IDENTITY;
+        }
+      };
+      replace(true);
+      expect(() => authorizer.authorize(input.revalidated, input.preTransportEvidence))
+        .toThrow('broadcast authorizer process changed');
+      replace(false);
+      const result = authorizer.authorize(input.revalidated, input.preTransportEvidence);
+      replace(true);
+      expect(() => api.assertArtifact(authorizer as any, result.authorizationArtifact, {
+        ...input,
+        authorizationDigestHex: result.authorizationDigestHex,
+      })).toThrow('broadcast authorizer process changed');
+    },
+  );
+
+  describe.each(['post-check', 'pre-transport'] as const)('%s exact evidence', (phase) => {
+    it.each([
+      ['sourceBoxId', hex('93')],
+      ['targetGenesisHeaderIdHex', hex('94')],
+      ['observedAtHeight', 122],
+      ['observedTipHeaderIdHex', hex('95')],
+      ['sourceBoxDigestHex', hex('96')],
+      ['sourceBoxSigmaSerializedSha256Hex', hex('97')],
+      ['observationDigestHex', hex('98')],
+      ['revalidationArtifact', Object.freeze({ copied: true })],
+    ] as const)('rejects isolated %s substitution without reserving the handle', (field, value) => {
+      const { authorizer, checkedByRole } = setup();
+      const input = authorizationInput(checkedByRole.get('tracker'));
+      const postCheckEvidence = phase === 'post-check'
+        ? Object.freeze({ ...input.revalidated.postCheckEvidence, [field]: value })
+        : input.revalidated.postCheckEvidence;
+      const preTransportEvidence = phase === 'pre-transport'
+        ? Object.freeze({ ...input.preTransportEvidence, [field]: value })
+        : input.preTransportEvidence;
+      expect(() => authorizer.authorize(
+        Object.freeze({ checked: input.revalidated.checked, postCheckEvidence }),
+        preTransportEvidence,
+      )).toThrow('synthetic revalidation artifact is not exact');
+      expect(() => authorizer.authorize(input.revalidated, input.preTransportEvidence)).not.toThrow();
+    });
+
+    it('rechecks retained evidence provenance through the matching version guard', () => {
+      const { authorizer, checkedByRole } = setup();
+      const input = authorizationInput(checkedByRole.get('tracker'));
+      const result = authorizer.authorize(input.revalidated, input.preTransportEvidence);
+      const artifact = phase === 'post-check'
+        ? input.revalidated.postCheckEvidence.revalidationArtifact
+        : input.preTransportEvidence.revalidationArtifact;
+      const record = evidenceRecords.get(artifact)!;
+      evidenceRecords.set(artifact, Object.freeze({ ...record, version: oppositeVersion }));
+      expect(() => api.assertArtifact(authorizer as any, result.authorizationArtifact, {
+        ...input,
+        authorizationDigestHex: result.authorizationDigestHex,
+      })).toThrow('synthetic revalidation artifact is not exact');
+    });
   });
 
   it('rejects setup authorization outside the canonical dependency order', () => {
-    const { authorizer, checkedByRole } = harness();
+    const { authorizer, checkedByRole } = setup();
     const input = authorizationInput(checkedByRole.get('duplicatePrevention'));
     expect(() => authorizer.authorize(
       input.revalidated,
@@ -442,7 +747,7 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
   });
 
   it('rejects one checked handle reused across setup roles', () => {
-    const { batch } = harness();
+    const { batch } = setup();
     const duplicateBatch = Object.freeze({
       ...batch,
       orderedTransactions: Object.freeze([
@@ -458,18 +763,18 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
         batch.orderedTransactions[2],
       ]),
     });
-    activeBatch = duplicateBatch;
+    batches.set(duplicateBatch, version);
     expect(() =>
-      createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
+      api.create(
         TARGET as any,
         duplicateBatch as any,
-        REVALIDATOR as any,
+        REVALIDATORS[version] as any,
         CONFIRMATION_OBSERVER as any,
       )).toThrow('role or handle is duplicated');
   });
 
   it('requires exact predecessor confirmation before the next role', () => {
-    const { authorizer, checkedByRole } = harness();
+    const { authorizer, checkedByRole } = setup();
     const tracker = checkedByRole.get('tracker');
     const trackerInput = authorizationInput(tracker);
     authorizer.authorize(
@@ -495,13 +800,21 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
         observerArtifact: Object.freeze({ forged: true }),
       }),
     )).toThrow('confirmation artifact is not exact');
+    for (const [field, value, error] of [
+      ['observedAtHeight', 140, 'genesis confirmation lacks consistent final depth'],
+      ['confirmationHeight', 130, 'genesis confirmation lacks consistent final depth'],
+      ['confirmations', 11, 'genesis confirmation lacks consistent final depth'],
+      ['observationDigestHex', hex('80'), 'confirmation artifact is not exact'],
+      ['confirmationHeaderIdHex', hex('81'), 'confirmation artifact is not exact'],
+    ] as const) {
+      expect(() => authorizer.acknowledgeCanonicalConfirmation(
+        'tracker',
+        Object.freeze({ ...trackerConfirmation, [field]: value }),
+      ), field).toThrow(error);
+    }
     expect(() => authorizer.acknowledgeCanonicalConfirmation(
       'tracker',
-      Object.freeze({
-        ...trackerConfirmation,
-        observedAtHeight: 140,
-        confirmationHeight: 130,
-      }),
+      Object.freeze({ ...trackerConfirmation, observedAtHeight: 140, confirmationHeight: 130 }),
     )).toThrow('confirmation artifact is not exact');
     authorizer.acknowledgeCanonicalConfirmation(
       'tracker',
@@ -514,7 +827,7 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
   });
 
   it('rejects phase substitution and copied authorization artifacts', () => {
-    const { authorizer, checkedByRole } = harness();
+    const { authorizer, checkedByRole } = setup();
     const input = authorizationInput(checkedByRole.get('tracker'));
     const swappedPost = Object.freeze({
       ...input.revalidated.postCheckEvidence,
@@ -534,8 +847,8 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
       input.preTransportEvidence,
     );
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
-        authorizer,
+      api.assertArtifact(
+        authorizer as any,
         structuredClone(exact.authorizationArtifact),
         {
           ...input,
@@ -544,21 +857,23 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
       )).toThrow('lacks exact process provenance');
   });
 
-  it('rejects source-byte drift between post-check and pre-transport', () => {
-    const { authorizer, checkedByRole } = harness();
-    const checked = checkedByRole.get('tracker');
-    const postCheckEvidence = evidence(checked, 'post-check');
-    const preTransportEvidence = evidence(checked, 'pre-transport', {
-      sourceBoxDigestHex: hex('75'),
-    });
-    expect(() => authorizer.authorize(
-      Object.freeze({ checked, postCheckEvidence }),
-      preTransportEvidence,
-    )).toThrow('revalidation continuity changed');
-  });
+  it.each(['sourceBoxDigestHex', 'sourceBoxSigmaSerializedSha256Hex'] as const)(
+    'rejects isolated %s drift between post-check and pre-transport', (field) => {
+      const { authorizer, checkedByRole } = setup();
+      const checked = checkedByRole.get('tracker');
+      const postCheckEvidence = evidence(checked, 'post-check');
+      const preTransportEvidence = evidence(checked, 'pre-transport', {
+        [field]: hex('75'),
+      });
+      expect(() => authorizer.authorize(
+        Object.freeze({ checked, postCheckEvidence }),
+        preTransportEvidence,
+      )).toThrow('revalidation continuity changed');
+    },
+  );
 
   it('rejects a regressing pre-transport observation height', () => {
-    const { authorizer, checkedByRole } = harness();
+    const { authorizer, checkedByRole } = setup();
     const checked = checkedByRole.get('tracker');
     const postCheckEvidence = evidence(checked, 'post-check');
     const preTransportEvidence = evidence(checked, 'pre-transport', {
@@ -571,7 +886,7 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
   });
 
   it('rejects consumed handles and process replacement before authorization', () => {
-    const { authorizer, checkedByRole } = harness();
+    const { authorizer, checkedByRole } = setup();
     const checked = checkedByRole.get('tracker');
     const handle = checked.checkerArtifact as object;
     consumedHandles.add(handle);
@@ -591,15 +906,15 @@ describe('isolated devnet genesis broadcast authorizer V1', () => {
   });
 
   it('rejects a copied authorizer and a different target', () => {
-    const { authorizer } = harness();
+    const { authorizer } = setup();
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
+      api.assertAuthorizer(
         Object.freeze({ ...authorizer }) as any,
         TARGET as any,
       )).toThrow('lacks provenance');
     expect(() =>
-      assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
-        authorizer,
+      api.assertAuthorizer(
+        authorizer as any,
         Object.freeze({ ...TARGET }) as any,
       )).toThrow('lacks provenance');
   });
