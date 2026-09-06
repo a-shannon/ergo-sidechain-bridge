@@ -4,6 +4,7 @@ import { Mnemonic } from 'ethers';
 
 import {
   checkSignedTransaction,
+  selectLatestHeader,
   prepareLocalWasmRootCheckCandidates,
   prepareLocalWasmRootCheckCandidatesFromNode,
   promoteLocalWasmCheckedTransactionForSubmissionV1,
@@ -101,9 +102,13 @@ import {
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
-import { sha256CanonicalJson } from './strict-json.js';
+import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
+import { ngetDirect } from './ergo-helpers.js';
+import { buildSubstrateFederatedTrackerV2FeeFunding } from './substrate-federated-tracker-v2-external-fee.js';
 import {
+  materializeUnsignedTransaction,
   normalizeEip12Box,
+  type Eip12UnsignedTransaction,
   type MaterializedUnsignedTransaction,
 } from './unsigned-ergo-transaction.js';
 
@@ -312,6 +317,18 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
+  readonly runForExecutionV3RetainingTrackerFeeSigner: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    feePayerPublicKeyHex: string,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
+  readonly checkTrackerFeeFundingV3: (
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<{
+    transaction: Readonly<MaterializedUnsignedTransaction>;
+    signedCandidate: Readonly<LocalWasmExactBytesSignedCheckCandidate>;
+    checkedAcceptance: Readonly<LocalWasmCheckedSubmissionAcceptanceV1>;
+  }>>;
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1035,10 +1052,15 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let frozenTrackerCheck:
       Readonly<SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2Receipt>
       | undefined;
+    let trackerFeeContinuation: Readonly<{
+      batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+      feePayerPublicKeyHex: string;
+    }> | undefined;
     let state:
       | 'open'
       | 'running'
       | 'setup-complete'
+      | 'v3-tracker-fee-ready'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
       | 'frozen-tracker-check-complete'
@@ -1069,6 +1091,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         trackerConfirmationMiningCredential = undefined;
       }
       frozenTrackerCheck = undefined;
+      trackerFeeContinuation = undefined;
       mnemonic = '';
       state = 'closed';
     };
@@ -1076,12 +1099,14 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       expectedState:
         | 'open'
         | 'setup-complete'
+        | 'v3-tracker-fee-ready'
         | 'source-lock-check-complete'
         | 'committed-vault-check-complete'
         | 'frozen-tracker-check-complete',
       operation: (activeMnemonic: string) => Promise<T>,
       successState:
         | 'setup-complete'
+        | 'v3-tracker-fee-ready'
         | 'source-lock-check-complete'
         | 'committed-vault-check-complete'
         | 'frozen-tracker-check-complete'
@@ -1190,6 +1215,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         if (
           state === 'open'
           || state === 'setup-complete'
+          || state === 'v3-tracker-fee-ready'
           || state === 'source-lock-check-complete'
           || state === 'committed-vault-check-complete'
           || state === 'frozen-tracker-check-complete'
@@ -1227,6 +1253,75 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         },
         'closed',
       ),
+      runForExecutionV3RetainingTrackerFeeSigner: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+        feePayerPublicKeyHex: string,
+      ) => consume('open', async activeMnemonic => {
+        if (typeof feePayerPublicKeyHex !== 'string' || !/^(02|03)[0-9a-f]{64}$/.test(feePayerPublicKeyHex)) {
+          throw new Error('tracker fee recipient must be a canonical compressed public key');
+        }
+        const captured = captureInputV3(input);
+        const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
+        const result = await runFixedSetupCheckV3(captured, activeMnemonic);
+        const batch = promoteSetupExecutionBatchV3(result, target, binding);
+        trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex });
+        return batch;
+      }, 'v3-tracker-fee-ready'),
+      checkTrackerFeeFundingV3: async (
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('v3-tracker-fee-ready', async activeMnemonic => {
+        const continuation = trackerFeeContinuation;
+        if (continuation === undefined) throw new Error('tracker fee continuation is absent');
+        const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
+        const issuance = continuation.batch.orderedTransactions[0]!.issuance;
+        const genesis = await materializeUnsignedTransaction(
+          structuredClone(issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+          'retained V3 tracker genesis',
+        );
+        const source = genesis.outputs[1];
+        if (genesis.txId !== issuance.unsignedTransactionIdHex || genesis.outputs.length !== 3
+          || source === undefined || source.assets.length !== 0
+          || ![signer.p2pkErgoTreeHex, signer.rewardInputErgoTrees.delay1, signer.rewardInputErgoTrees.delay720]
+            .includes(source.ergoTree)) {
+          throw new Error('retained V3 tracker genesis has no exact operator change');
+        }
+        const reobserve = async (): Promise<void> => {
+          assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
+          for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+            const current = await ngetDirect(`/utxo/byId/${source.boxId}`, origin);
+            const exact = await normalizeEip12Box(current, 'tracker fee funding live source');
+            if (canonicalJson(exact) !== canonicalJson(source)) {
+              throw new Error('tracker fee funding live source differs from retained genesis change');
+            }
+          }
+        };
+        await reobserve();
+        const headers: unknown = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
+        if (!Array.isArray(headers) || headers.length !== 10) {
+          throw new Error('tracker fee funding requires ten signing headers');
+        }
+        const tip = selectLatestHeader(headers);
+        const transaction = await buildSubstrateFederatedTrackerV2FeeFunding({
+          sourceBox: source, fundingPublicKeyHex: signer.publicKeyHex,
+          feePayerPublicKeyHex: continuation.feePayerPublicKeyHex, currentHeight: tip.header.height + 1,
+        });
+        const prepared = await prepareLocalWasmRootCheckCandidates({
+          mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
+          candidates: [{ role: 'tracker-v2-fee-funding', eip12Tx: transaction.eip12Tx, expectedTxId: transaction.txId }],
+        });
+        if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
+          || prepared.candidates.length !== 1 || prepared.candidates[0]!.expectedTxId !== transaction.txId) {
+          throw new Error('tracker fee funding signer binding differs');
+        }
+        const candidate = prepared.candidates[0]!.signedCandidate;
+        const checked = await checkSignedTransaction(candidate, 'isolated tracker V2 fee funding', target.primaryNodeOrigin);
+        if (checked === null) throw new Error('tracker fee funding JVM node check failed');
+        await reobserve();
+        const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding);
+        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
+        return Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
+      }, 'closed'),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,

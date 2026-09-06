@@ -2,6 +2,8 @@ import blakejs from 'blakejs';
 
 import { assertContextExtensionSafe } from './context-extension-guard.js';
 import { canonicalJson } from './strict-json.js';
+import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
+import { materializeUnsignedTransaction, normalizeEip12Box } from './unsigned-ergo-transaction.js';
 import {
   assertExactSubstrateFederatedTrackerV2InputBox,
   assertSubstrateFederatedTrackerV2Context,
@@ -9,6 +11,7 @@ import {
 } from './substrate-federated-tracker-v2.js';
 import type {
   Eip12Box, Eip12OutputCandidate, Eip12UnsignedInput,
+  MaterializedUnsignedTransaction,
 } from './unsigned-ergo-transaction.js';
 
 export const SUBSTRATE_FEDERATED_TRACKER_V2_EXTERNAL_FEE_TRANSACTION_SCHEMA =
@@ -50,6 +53,69 @@ export interface SubstrateFederatedTrackerV2ExternalFeeTransaction {
 
 const TRANSACTIONS = new WeakSet<object>();
 let wasmPromise: Promise<any> | undefined;
+
+/** Build the separate fee box from synthetic operator funds, never a singleton. */
+export async function buildSubstrateFederatedTrackerV2FeeFunding(input: Readonly<{
+  sourceBox: unknown;
+  fundingPublicKeyHex: string;
+  feePayerPublicKeyHex: string;
+  currentHeight: number;
+}>): Promise<Readonly<MaterializedUnsignedTransaction>> {
+  const sourceSnapshot = structuredClone(input.sourceBox);
+  const fundingKey = input.fundingPublicKeyHex;
+  const feeKey = input.feePayerPublicKeyHex;
+  const height = input.currentHeight;
+  if (!Number.isSafeInteger(height) || height < 1 || height > 0x7fffffff) {
+    throw new Error('tracker fee funding height must fit a positive signed Int');
+  }
+  const wasm = await (wasmPromise ??= import('ergo-lib-wasm-nodejs')
+    .then(module => module.default ?? module));
+  const fundingTree = canonicalP2pkTree(wasm, fundingKey);
+  const feeTree = canonicalP2pkTree(wasm, feeKey);
+  const source = await normalizeEip12Box(sourceSnapshot, 'tracker fee funding source');
+  if (canonicalJson(source) !== canonicalJson(sourceSnapshot)
+    || source.assets.length !== 0 || Object.keys(source.additionalRegisters).length !== 0) {
+    throw new Error('tracker fee funding source must be exact canonical pure ERG');
+  }
+  const reward1 = deriveDevnetRewardErgoTreeHexForDelay(fundingKey, 1);
+  const reward720 = deriveDevnetRewardErgoTreeHexForDelay(fundingKey, 720);
+  const delay = source.ergoTree === fundingTree ? 0
+    : source.ergoTree === reward1 ? 1 : source.ergoTree === reward720 ? 720 : undefined;
+  if (delay === undefined || source.creationHeight >= height
+    || source.creationHeight + delay > height) {
+    throw new Error('tracker fee funding source is not a mature operator-owned box');
+  }
+  const change = BigInt(source.value) - 2n * BigInt(MINER_FEE_NANO_ERG);
+  if (change < 1_000_000n) throw new Error('tracker fee funding requires non-dust operator change');
+  return deepFreeze(await materializeUnsignedTransaction({
+    inputs: [{ ...source, extension: {} }], dataInputs: [],
+    outputs: [
+      { value: MINER_FEE_NANO_ERG, ergoTree: feeTree, creationHeight: height,
+        assets: [], additionalRegisters: {} },
+      { value: change.toString(), ergoTree: fundingTree, creationHeight: height,
+        assets: [], additionalRegisters: {} },
+      { value: MINER_FEE_NANO_ERG, ergoTree: MINER_FEE_TREE, creationHeight: height,
+        assets: [], additionalRegisters: {} },
+    ],
+  }, 'tracker V2 external fee funding'));
+}
+
+function canonicalP2pkTree(wasm: any, key: string): string {
+  if (typeof key !== 'string' || !/^(02|03)[0-9a-f]{64}$/.test(key)) {
+    throw new Error('tracker fee funding key must be a canonical compressed point');
+  }
+  let address: any;
+  let tree: any;
+  try {
+    address = wasm.Address.p2pk_from_pk_bytes(Buffer.from(key, 'hex'));
+    tree = address.to_ergo_tree();
+    if (Buffer.from(address.content_bytes()).toString('hex') !== key
+      || tree.to_base16_bytes() !== `0008cd${key}`) {
+      throw new Error('tracker fee funding key does not round-trip');
+    }
+    return tree.to_base16_bytes();
+  } finally { tree?.free?.(); address?.free?.(); }
+}
 
 export function assertSubstrateFederatedTrackerV2ExternalFeeTransaction(
   value: unknown,

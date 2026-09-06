@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Extend a fresh owned-target run from confirmed V3 genesis to one externally funded V2 tracker update, preserving distinct signing and mining custody | V161 checks genesis; V162-V166 connect exact checked candidates to ordered execution. V167 confirms all three genesis transactions on fresh owned nodes. The tracker update and operational V3 caller remain open. Retain any needed continuation before its owner closes; do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
+| **Now** | FED-6-LAB checked funding -> tracker transport -> canonical admission | Consume V168's exact checked fee-funding candidate through authorization, journal, transport and confirmation, then admit one externally funded V2 tracker update in the same fresh owned-target campaign | V167 confirms all three V3 genesis transactions on fresh owned nodes. V168 repeats that prerequisite and checks the separate operator-funded fee transaction on the real node without submitting it. Fee-box confirmation, tracker admission and the operational V3 caller remain open. Retain any needed continuation before its owner closes; do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -699,6 +699,53 @@ for the retained-peg-in-signer campaign. Next, compose one externally funded V2
 tracker update in a fresh owned-target lifetime, with any required continuation
 claimed before its owner closes. Canonical tracker update, complete withdrawal,
 recovery and the separate Gate 5 upgrade remain open.
+
+#### External Tracker Fee Funding
+
+V168 supplies a prerequisite for the V2 tracker update: an exact 1100000 nanoERG
+P2PK fee input. Genesis returns operator change to its original reward script;
+that change is not an eligible input to the two-input tracker transaction.
+The funding transaction spends only the retained tracker-genesis change,
+creates the exact fee box, returns the remainder to the operator's P2PK script,
+and pays its own separate 1100000 nanoERG miner fee. It cannot consume a state
+singleton, token, reserve or refundable deposit.
+
+`runForExecutionV3RetainingTrackerFeeSigner` freezes the fee recipient before
+setup. Its only continuation, `checkTrackerFeeFundingV3`, reconstructs the
+exact genesis change, reobserves it through both owned nodes, signs the fixed
+funding transaction, checks it on the same origin and reobserves the source
+before returning an opaque checked handle. Successful completion, failure or
+disposal closes the signer. Concurrent use invalidates the result. The default
+`runForExecutionV3` still closes immediately; neither route reopens custody or
+selects the legacy peg-in continuation.
+
+Focused matrices cover funding conservation, reward maturity, wrong ownership,
+tokens, registers, dust, invalid heights/keys, source drift, check rejection,
+wrong targets, disposal and concurrent use. The real-node variant uses the
+existing genesis command with `BRIDGE_TRACKER_V2_CHECK_FEE_FUNDING=1`: three
+genesis transactions must be confirmed, then the funding transaction is checked
+without submission. This run passes on the same pinned patched Ergo build:
+genesis confirms at heights 22, 41 and 60; the funding signature passes the
+same-origin node's JVM transaction check. Four checks and only three submissions
+are observed. Both nodes finish at height 76 and are stopped and removed with
+the fresh journal. This does not establish fee-box confirmation or tracker
+admission.
+
+The affected 18-file closure passes after its exact import whitelist is updated;
+the nine retained-custody/source-drift cases are replayed after fixing canonical
+replacement-box fixtures. TypeScript and architecture checks pass. Independent
+review covers the six-file change; the live run adds target evidence without
+changing the reviewed runtime sources. Unchanged contracts, formats, VM matrices
+and build identities retain their previous validation.
+
+Next, consume the exact checked funding handle through authorization, journal,
+transport and confirmation, then connect the externally funded V2 tracker to
+the frozen checkpoint checker. Group both joins in the next real-node campaign;
+do not rerun genesis or funding-check-only campaigns while their inputs remain
+unchanged. The existing check-kernel V2 names a target
+version, not tracker-protocol V2; it still accepts the V1 one-input shape.
+Keep those formats distinct and retain any required mining credentials before
+setup custody closes. Full withdrawal and Gate 5 remain open.
 
 | Batch | Deliverable | State and deciding check |
 |---|---|---|

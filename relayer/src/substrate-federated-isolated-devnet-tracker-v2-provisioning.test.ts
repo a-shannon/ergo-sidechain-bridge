@@ -15,6 +15,7 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as fleet from './fleet-signer.js';
+import * as ergoHelpers from './ergo-helpers.js';
 import { StateTracker } from './state-tracker.js';
 import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesisBatchV3 }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -1229,6 +1230,112 @@ describe('owned synthetic session -> V3 execution promotion', () => {
 });
 
 describe('owned synthetic session -> V3 no-submit setup root', () => {
+  it.each(['valid', 'missing-source', 'source-drift', 'post-check-drift', 'wrong-target', 'check-rejected', 'disposed', 'concurrent-fee-check', 'dispose-while-running'] as const)(
+    'limits retained V3 custody to one tracker fee funding check: %s', async fault => {
+      const fixture = await createRootFixture();
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue(executionBinding);
+      try {
+        await withObservations(async observed => {
+          const target = executionTarget();
+          const batch = await fixture.session.runForExecutionV3RetainingTrackerFeeSigner(
+            fixture.input, target, checkPublicKey,
+          );
+          const genesis = wasm.UnsignedTransaction.from_json(JSON.stringify(batch.orderedTransactions[0]!.issuance.unsignedTransactionBody));
+          const id = genesis.id();
+          const outputs = genesis.output_candidates();
+          const output = outputs.get(1);
+          const box = wasm.ErgoBox.from_box_candidate(output, id, 1);
+          let source: Eip12Box;
+          try { source = box.to_js_eip12(); }
+          finally { box.free(); output.free(); outputs.free(); id.free(); genesis.free(); }
+          const driftUnsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
+            inputs: [{ boxId: '67'.repeat(32), extension: {} }], dataInputs: [],
+            outputs: [{ ...candidateFromBox(source), value: (BigInt(source.value) + 1n).toString() }],
+          }));
+          const driftCandidates = driftUnsigned.output_candidates();
+          const driftCandidate = driftCandidates.get(0);
+          const sourceTransactionId = wasm.TxId.from_str(source.transactionId);
+          const driftBox = wasm.ErgoBox.from_box_candidate(driftCandidate, sourceTransactionId, source.index);
+          let replacement: Eip12Box;
+          try { replacement = driftBox.to_js_eip12(); }
+          finally { driftBox.free(); sourceTransactionId.free(); driftCandidate.free(); driftCandidates.free(); driftUnsigned.free(); }
+          expect(replacement.boxId).not.toBe(source.boxId);
+          const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+            currentHeight: source.creationHeight + 12, anchorContextIndex: 1,
+            anchorExtensionRootHex: '25'.repeat(32),
+          }).headers.map(header => header.raw);
+          observed.publishBox(source, headers);
+          const originalGet = ergoHelpers.ngetDirect;
+          let concurrentAttempted = false;
+          const reads = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+            const result = await originalGet(...args);
+            if (args[0] === `/utxo/byId/${source.boxId}`) {
+              if (!concurrentAttempted) {
+                concurrentAttempted = true;
+                if (fault === 'concurrent-fee-check') {
+                  await expect(fixture.session.checkTrackerFeeFundingV3(target)).rejects.toThrow(/absent|consumed|disposed/);
+                } else if (fault === 'dispose-while-running') {
+                  expect(() => fixture.session.dispose()).toThrow(/running/);
+                }
+              }
+              if (fault === 'missing-source') return undefined;
+              if (fault === 'source-drift' || (fault === 'post-check-drift' && observed.checkBodies.length > 3)) {
+                return replacement;
+              }
+            }
+            return result;
+          });
+          const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+          try {
+            if (fault === 'disposed') fixture.session.dispose();
+            const pending = fixture.session.checkTrackerFeeFundingV3(fault === 'wrong-target' ? executionTarget() : target);
+            if (fault === 'valid' || fault === 'dispose-while-running') {
+              const result = await pending;
+              expect(result.transaction.outputs[0]).toMatchObject({ value: '1100000', ergoTree: `0008cd${checkPublicKey}` });
+              expect(result.transaction.eip12Tx.inputs[0]!.boxId).toBe(source.boxId);
+              expect(result.checkedAcceptance.submissionHandle.txId).toBe(result.transaction.txId);
+              expect(result.checkedAcceptance.checked.signedTransactionBytesSha256Hex)
+                .toBe(result.signedCandidate.signedTransactionBytesSha256Hex);
+              expect(observed.checkBodies).toHaveLength(4);
+            } else await expect(pending).rejects.toThrow(
+              fault === 'source-drift' || fault === 'post-check-drift'
+                ? /live source differs from retained genesis change/
+                : fault === 'concurrent-fee-check' ? /invalidated by a concurrent transition/ : undefined,
+            );
+            if (fault === 'concurrent-fee-check') {
+              expect(concurrentAttempted).toBe(true);
+              expect(observed.checkBodies).toHaveLength(4);
+            }
+            expect(observed.submissionBodies).toHaveLength(0);
+            expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+              .toThrow(/revoked/);
+            await expect(fixture.session.checkTrackerFeeFundingV3(target)).rejects.toThrow(/absent|consumed|disposed/);
+            await expect(fixture.session.runForExecutionV3(fixture.input, target)).rejects.toThrow(/consumed|disposed/);
+            if (['missing-source', 'source-drift', 'wrong-target', 'disposed'].includes(fault)) {
+              expect(observed.checkBodies).toHaveLength(3);
+            }
+          } finally { reads.mockRestore(); errors.mockRestore(); }
+        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+          checkOracle: (body, index) => fault === 'check-rejected' && index === 3 ? 'ff'.repeat(32) : signedCheckOracle(body) });
+      } finally { custody.mockRestore(); fixture.session.dispose(); }
+    }, 60_000,
+  );
+
+  it('does not expose the fee continuation on the default closing V3 route', async () => {
+    const fixture = await createRootFixture();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    try {
+      await withObservations(async observed => {
+        const target = executionTarget();
+        await fixture.session.runForExecutionV3(fixture.input, target);
+        await expect(fixture.session.checkTrackerFeeFundingV3(target)).rejects.toThrow(/absent|consumed|disposed/);
+        expect(observed.checkBodies).toHaveLength(3);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+
   it('uses its own signer with the genuine V2 family and closes custody after the three checks', async () => {
     const fixture = await createRootFixture();
     try {
@@ -1598,6 +1705,7 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT !== undefined)(
 // A separate opt-in from the read-only node check: local synthetic genesis only.
 it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
   'confirms three V3 genesis transactions on fresh owned Ergo nodes', async () => {
+    const checkFeeFunding = process.env.BRIDGE_TRACKER_V2_CHECK_FEE_FUNDING === '1';
     const receiptPath = process.env.BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT;
     const javaExecutablePath = process.env.BRIDGE_TRACKER_V2_JAVA;
     const nodeAssemblyJarPath = process.env.BRIDGE_TRACKER_V2_NODE_JAR;
@@ -1685,12 +1793,17 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
           return post(...args);
         });
         try {
-          const batch = await session.runForExecutionV3({
+          const setupInput = {
             ...rootInput(compiled),
             expectedSettlementGenesisHeaderIdHex: funding.target.genesisHeaderIdHex,
-          }, target);
-          expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex))
-            .toThrow(/revoked/);
+          };
+          const batch = checkFeeFunding
+            ? await session.runForExecutionV3RetainingTrackerFeeSigner(setupInput, target, checkPublicKey)
+            : await session.runForExecutionV3(setupInput, target);
+          if (!checkFeeFunding) {
+            expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex))
+              .toThrow(/revoked/);
+          }
           const confirmations = await executeGenesisBatchV3({
             target, batch, state: journalState, markerDirectory,
           });
@@ -1704,6 +1817,27 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
           await expect(executeGenesisBatchV3({ target, batch, state: journalState, markerDirectory }))
             .rejects.toThrow(/consumed|provenance/);
           expect(submissions).toHaveLength(3);
+          let feeFundingCheck;
+          if (checkFeeFunding) {
+            const checked = await session.checkTrackerFeeFundingV3(target);
+            expect(checks).toHaveLength(4);
+            expect(submissions).toHaveLength(3);
+            expect(submissions).toEqual(checks.slice(0, 3));
+            expect(checked.transaction.outputs[0]).toMatchObject({
+              value: '1100000', ergoTree: `0008cd${checkPublicKey}`,
+            });
+            expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex))
+              .toThrow(/revoked/);
+            await expect(session.checkTrackerFeeFundingV3(target)).rejects.toThrow(/absent|consumed|disposed/);
+            feeFundingCheck = {
+              unsignedTransactionIdHex: checked.transaction.txId,
+              feeInputBoxIdHex: checked.transaction.outputs[0]!.boxId,
+              signedTransactionBytesSha256Hex: checked.signedCandidate.signedTransactionBytesSha256Hex,
+              checkResponseDigestHex: checked.checkedAcceptance.submissionHandle.checkResponseDigestHex,
+              fundingTransactionSubmitted: false,
+              trackerUpdateChecked: false,
+            };
+          }
           ownedTargets.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
           return {
             buildIdentityDigestHex: build.buildIdentityDigestHex,
@@ -1712,6 +1846,7 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
             requestDigestHex: batch.request.requestDigestHex,
             trackerErgoTreeSha256Hex: compiled.trackerReceipt.contract.propositionSha256Hex,
             confirmations,
+            ...(feeFundingCheck === undefined ? {} : { feeFundingCheck }),
           };
         } finally { capture.mockRestore(); }
       });
@@ -1736,7 +1871,7 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
       );
     }
     expect(result).toBeDefined();
-    console.info('V3_NODE_GENESIS_CONFIRMED', JSON.stringify(result));
+    console.info(checkFeeFunding ? 'V3_NODE_GENESIS_AND_FEE_FUNDING_CHECKED' : 'V3_NODE_GENESIS_CONFIRMED', JSON.stringify(result));
   // The owned manager bounds and joins work before its cleanup; do not detach it.
   }, 0,
 );
@@ -1802,6 +1937,7 @@ async function withObservations<T>(
   options: ObservationOptions = {},
 ): Promise<T> {
   const funding = options.boxes ?? boxes;
+  let signingHeaders = options.headers;
   let tipHeight = options.tipHeight ?? TIP_HEIGHT;
   const genesisHeaderId = options.genesisHeaderId ?? GENESIS_HEADER_ID;
   let tipHeaderId = options.tipHeaderId ?? TIP_HEADER_ID;
@@ -1861,7 +1997,7 @@ async function withObservations<T>(
       if (request.method === 'GET') {
         if (path === '/info') body = { network: 'devnet', fullHeight: tipHeight };
         else if (path === '/blocks/lastHeaders/1') body = [{ id: tipHeaderId, height: tipHeight }];
-        else if (path === '/blocks/lastHeaders/10' && options.headers) body = options.headers;
+        else if (path === '/blocks/lastHeaders/10' && signingHeaders) body = signingHeaders;
         else if (path === '/blocks/at/1') body = [genesisHeaderId];
         else if (options.confirmSubmittedGenesis && path.startsWith('/blockchain/transaction/byId/')) {
           const id = path.slice('/blockchain/transaction/byId/'.length);
@@ -1915,7 +2051,14 @@ async function withObservations<T>(
     });
     const observeAt = (at: string) => observeSubstrateFederatedGenesisV1(targetProfile, { now: () => new Date(at) });
     const retained = await observeAt(new Date(Date.now() - 2_000).toISOString());
-    return await run({ profile: targetProfile, retained, observeAt, checkBodies, submissionBodies });
+    return await run({ profile: targetProfile, retained, observeAt, checkBodies, submissionBodies,
+      publishBox: (box, headers) => {
+        json.set(box.boxId, structuredClone(box)); sigma.set(box.boxId, sigmaBytes(box));
+        signingHeaders = headers;
+        const tip = fleet.selectLatestHeader([...headers] as Array<{ height: number; [key: string]: unknown }>).header;
+        tipHeight = tip.height; tipHeaderId = tip.id as string;
+      },
+    });
   } finally {
     for (const server of servers) {
       if (!server.listening) continue;
@@ -1936,6 +2079,7 @@ interface ObservationFixture {
   readonly observeAt: (at: string) => Promise<Awaited<ReturnType<typeof observeSubstrateFederatedGenesisV1>>>;
   readonly checkBodies: readonly Record<string, unknown>[];
   readonly submissionBodies: readonly Record<string, unknown>[];
+  readonly publishBox: (box: Eip12Box, headers: readonly Readonly<Record<string, unknown>>[]) => void;
 }
 
 async function provisioningInput(observed: ObservationFixture, compiler = compilerV3): Promise<BuildInputV3> {

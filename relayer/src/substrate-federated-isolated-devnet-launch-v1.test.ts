@@ -2464,8 +2464,14 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
       './substrate-federated-isolated-devnet-setup-check-v2.js',
       './strict-json.js',
+      './ergo-helpers.js',
+      './substrate-federated-tracker-v2-external-fee.js',
       './unsigned-ergo-transaction.js',
     ]);
+    expect(execution.match(/import\s*\{([^}]+)\}\s*from\s*'\.\/ergo-helpers\.js'/u)?.[1]?.trim())
+      .toBe('ngetDirect');
+    expect(execution.match(/import\s*\{([^}]+)\}\s*from\s*'\.\/substrate-federated-tracker-v2-external-fee\.js'/u)?.[1]?.trim())
+      .toBe('buildSubstrateFederatedTrackerV2FeeFunding');
     expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}`).not.toMatch(
       /process\.env|node:(?:fs|http|https|net|tls|child_process)|profile-registry|state-tracker/iu,
     );

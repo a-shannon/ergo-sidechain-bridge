@@ -25,11 +25,13 @@ import {
 import {
   assertSubstrateFederatedTrackerV2ExternalFeeTransaction as assertTransaction,
   buildSubstrateFederatedTrackerV2ExternalFeeTransaction as build,
+  buildSubstrateFederatedTrackerV2FeeFunding as buildFunding,
   type BuildSubstrateFederatedTrackerV2ExternalFeeTransactionInput as BuildInput,
   type SubstrateFederatedTrackerV2ExternalFeeTransaction,
 } from './substrate-federated-tracker-v2-external-fee.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import type { Eip12Box } from './unsigned-ergo-transaction.js';
+import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 
 const vector = JSON.parse(readFileSync(new URL(
   '../test-vectors/substrate-federated-v1-tracker-admission.json', import.meta.url,
@@ -142,6 +144,50 @@ describe('bounded V2 tracker external fee composition', () => {
     expect(await build(input)).toEqual(transaction);
     expectDeepFrozen(transaction);
     expect(() => assertTransaction(transaction)).not.toThrow();
+  });
+
+  it.each([0, 1, 720] as const)('funds the exact tracker fee from mature operator change (delay %s)', async delay => {
+    const source = boxFromCandidate({ value: '38900000',
+      ergoTree: delay === 0 ? `0008cd${OTHER_PUBLIC_KEY}`
+        : deriveDevnetRewardErgoTreeHexForDelay(OTHER_PUBLIC_KEY, delay),
+      creationHeight: 100, assets: [], additionalRegisters: {} });
+    const funded = await buildFunding({ sourceBox: source, fundingPublicKeyHex: OTHER_PUBLIC_KEY,
+      feePayerPublicKeyHex: PUBLIC_KEY, currentHeight: CURRENT_HEIGHT - 1 });
+    expect(funded.outputs.map(box => box.value)).toEqual(['1100000', '36700000', '1100000']);
+    expect(funded.outputs.map(box => box.ergoTree))
+      .toEqual([`0008cd${PUBLIC_KEY}`, `0008cd${OTHER_PUBLIC_KEY}`, MINER_FEE_TREE]);
+    expect(funded.outputs.reduce((sum, box) => sum + BigInt(box.value), 0n)).toBe(BigInt(source.value));
+    expect(Object.isFrozen(funded.eip12Tx.inputs[0])).toBe(true);
+    const update = await build({ ...input, feeInputBox: funded.outputs[0] });
+    expect(update.inputBoxes[1].boxId).toBe(funded.outputs[0]!.boxId);
+    expect(update.eip12UnsignedTransaction.outputs[0].value).toBe(trackerInputBox.value);
+    expect(update.eip12UnsignedTransaction.outputs[0].assets).toEqual(trackerInputBox.assets);
+  });
+
+  it.each([
+    ['token-bearing', { assets: [{ tokenId: 'ab'.repeat(32), amount: '1' }] }, /pure ERG/],
+    ['register-bearing', { additionalRegisters: { R4: '0400' } }, /pure ERG/],
+    ['wrong owner', { ergoTree: `0008cd${OTHER_PUBLIC_KEY}` }, /operator-owned/],
+    ['tracker script', { ergoTree: '10010100d17300' }, /operator-owned/],
+    ['underfunded', { value: '3199999' }, /non-dust/],
+    ['immature', { ergoTree: deriveDevnetRewardErgoTreeHexForDelay(PUBLIC_KEY, 720), creationHeight: 400 }, /mature/],
+    ['future height', { creationHeight: CURRENT_HEIGHT }, /mature/],
+  ] as const)('rejects %s fee funding without relaxing the tracker fee shape', async (_label, patch, error) => {
+    const source = boxFromCandidate({ value: '38900000', ergoTree: `0008cd${PUBLIC_KEY}`,
+      creationHeight: 100, assets: [], additionalRegisters: {}, ...structuredClone(patch) as Partial<Candidate> });
+    await expect(buildFunding({ sourceBox: source, fundingPublicKeyHex: PUBLIC_KEY,
+      feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight: CURRENT_HEIGHT })).rejects.toThrow(error);
+  });
+
+  it.each([0, -1, 1.5, 0x80000000, NaN])('rejects invalid fee funding height %s', async currentHeight => {
+    await expect(buildFunding({ sourceBox: feeInputBox, fundingPublicKeyHex: PUBLIC_KEY,
+      feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight })).rejects.toThrow(/signed Int/);
+  });
+
+  it.each(['fundingPublicKeyHex', 'feePayerPublicKeyHex'] as const)('rejects invalid %s', async field => {
+    await expect(buildFunding({ sourceBox: feeInputBox, fundingPublicKeyHex: PUBLIC_KEY,
+      feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight: CURRENT_HEIGHT,
+      [field]: `02${'ff'.repeat(32)}` })).rejects.toThrow();
   });
 
   it('matches independent exact WASM EIP-12, both box Sigma bytes, proofless bytes and ID', () => {
