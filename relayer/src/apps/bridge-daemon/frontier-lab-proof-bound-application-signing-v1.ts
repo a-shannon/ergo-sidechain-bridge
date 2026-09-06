@@ -10,8 +10,10 @@ import {
 } from '../../substrate-federated-isolated-devnet-frontier-application-transactions-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetPacketV3Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   type SubstrateFederatedIsolatedDevnetPacketV2,
+  type SubstrateFederatedIsolatedDevnetPacketV3,
   type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 
@@ -25,12 +27,34 @@ export async function signFrontierLabProofBoundApplicationV1(
   proof: Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>,
   ergoRecipientPublicKeyHex: string,
 ): Promise<Readonly<Record<'mint' | 'approval' | 'pegOut', string>>> {
+  return signProofBoundApplication(owner, requestSha256Hex, packet, proof, ergoRecipientPublicKeyHex, 2);
+}
+
+export async function signFrontierLabProofBoundApplicationV2(
+  owner: Readonly<FrontierLabApplicationOwnerV1>,
+  requestSha256Hex: string,
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>,
+  proof: Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>,
+  ergoRecipientPublicKeyHex: string,
+): Promise<Readonly<Record<'mint' | 'approval' | 'pegOut', string>>> {
+  return signProofBoundApplication(owner, requestSha256Hex, packet, proof, ergoRecipientPublicKeyHex, 3);
+}
+
+async function signProofBoundApplication(
+  owner: Readonly<FrontierLabApplicationOwnerV1>,
+  requestSha256Hex: string,
+  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2 | SubstrateFederatedIsolatedDevnetPacketV3>,
+  proof: Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>,
+  ergoRecipientPublicKeyHex: string,
+  packetVersion: 2 | 3,
+): Promise<Readonly<Record<'mint' | 'approval' | 'pegOut', string>>> {
   // Check custody before accepting ownership of cleanup for this call.
   assertFrontierLabApplicationOwnerClaimV1(owner, requestSha256Hex);
   if (SIGNING_OWNERS.has(owner)) throw new Error('LAB application signing composition is already consumed');
   SIGNING_OWNERS.add(owner);
   try {
-    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+    if (packetVersion === 3) assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet);
+    else assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
     // Also validates the genuine inner receipt, runtime/profile and proof envelope.
     assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(proof);
     if (proof.packetReceiptDigestHex !== packet.receipt.receiptDigestHex

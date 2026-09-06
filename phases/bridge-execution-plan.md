@@ -93,8 +93,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Application composition | Can be prepared independently of deposit confirmation; consumes PacketV3/SessionV4 | Add explicit PacketV3 support to the application root and proof-bound signer, preserving the exact owner, recipient, signed triplet and checkpoint bindings. Existing PacketV2 provenance cannot be relabelled |
-| Actual campaign caller | Main owner; consumes the preceding joins and component-tested V2 admission lifecycle | Select PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Replace its V1 tracker projections with genuine V2 construction. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
+| Actual campaign caller | Main owner; consumes application continuation V4 and the component-tested V2 admission lifecycle | Select the fresh-owner application continuation V4 with PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Replace its V1 tracker projections with genuine V2 construction. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
@@ -123,7 +122,17 @@ The composed positive runs the real JVM compiler pair with synthetic upstream
 observations and archive production. Session lifecycle tests use compiler-family
 mocks. Complete V1 provisioning and replay outputs are byte-identical to the
 preceding commit. No target admission, activation or funds authority is established.
-The actual application root and proof-bound signer still consume PacketV2.
+Application continuation V4 now selects PacketV3/SessionV4 and requires fresh
+application-owner custody. The proof-bound signer V2 preserves the exact
+packet, source proof, mint identity, owner and Ergo recipient through the three
+signed calls. Runner V3 receives those inspected calls and the same source
+proof; its burn supplies the checkpoint fields. The root receipt has a separate
+V4 schema, digest domain and process provenance. The old V3 root and V1 signer
+remain the PacketV2 route; there is no automatic fallback. Component tests
+exercise both routes, real synthetic application signing and lifecycle
+rejection. Packet/compiler/runner observations in the root tests are bounded
+fixtures, not a Rust execution or target-node campaign. The managed caller
+still needs to select the new route.
 The confirmed-deposit chain now has a V2 mint draft with all five compiler
 bindings, derived from the exact setup-bound candidate and reserve observation.
 Its collector retains that draft, candidate, observation, target and deposit
@@ -135,8 +144,8 @@ wire formats are unchanged. The new draft
 has its own schema and digest domain; generic evidence and outer mint-proof
 receipts keep their existing byte-collection and attestation semantics. These
 receipts do not activate a runtime profile, authorize an operational mint or
-prove Ergo consensus. The application join and managed caller still need to
-select the new route before a fresh campaign.
+prove Ergo consensus. The managed caller still needs to select the new route
+before a fresh campaign.
 
 The V3 setup now retains its exact V2 compiler provenance for deposit
 construction. Its caller can construct the source-lock and reserve-transition

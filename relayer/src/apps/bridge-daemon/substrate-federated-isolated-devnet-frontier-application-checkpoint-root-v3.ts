@@ -10,13 +10,16 @@ import {
   assertSubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance,
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetPacketV3Provenance,
   createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3,
+  createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4,
   type ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input,
   type ProduceSubstrateFederatedIsolatedDevnetPacketV1Input,
   type SubstrateFederatedIsolatedDevnetPacketCheckpointAttestationReceiptV3,
   type SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2,
   type SubstrateFederatedIsolatedDevnetPacketSignerBindingV1,
   type SubstrateFederatedIsolatedDevnetPacketV2,
+  type SubstrateFederatedIsolatedDevnetPacketV3,
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance,
@@ -32,18 +35,29 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
 } from '../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
-import { signFrontierLabProofBoundApplicationV1 } from './frontier-lab-proof-bound-application-signing-v1.js';
+import {
+  signFrontierLabProofBoundApplicationV1,
+  signFrontierLabProofBoundApplicationV2,
+} from './frontier-lab-proof-bound-application-signing-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
 } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-frontier-application-checkpoint-root.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V4_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-frontier-application-checkpoint-root.v4' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_EXECUTION_BUDGET_MS_V3 =
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_RUNNER_COMPLETION_BUDGET_MS_V1;
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3';
+const RECEIPT_V4_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V4';
+
+type ApplicationPacket = Readonly<
+  SubstrateFederatedIsolatedDevnetPacketV2 | SubstrateFederatedIsolatedDevnetPacketV3
+>;
 
 type ApplicationRunnerReceipt = Readonly<
   SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2
@@ -163,9 +177,23 @@ export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRo
   readonly receiptDigestHex: string;
 }
 
-interface RootMaterialV3 {
+export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4
+  extends Omit<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3,
+    'schema' | 'version' | 'packet'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V4_SCHEMA;
+  readonly version: 4;
+  readonly packet: Readonly<{ readonly receipt: Readonly<SubstrateFederatedIsolatedDevnetPacketV3['receipt']> }>;
+}
+
+type RootReceipt = Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
+  | SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4
+>;
+
+interface RootMaterial {
+  readonly version: 3 | 4;
   readonly packet:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketV2>;
+    ApplicationPacket;
   readonly mintSourceProof:
     Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>;
   readonly applicationRunner: ApplicationRunnerReceipt;
@@ -181,7 +209,17 @@ export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointSt
   readonly applicationRunner: ApplicationRunnerReceipt;
 }
 
-const RECEIPTS = new WeakMap<object, Readonly<RootMaterialV3>>();
+export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV4
+  extends Omit<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3, 'packet'> {
+  readonly packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>;
+}
+
+type ApplicationStage = Readonly<
+  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3
+  | SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV4
+>;
+
+const RECEIPTS = new WeakMap<object, Readonly<RootMaterial>>();
 
 interface CheckpointAttestationInputV3 {
   readonly sourceNativeBlockHeight: string | number | bigint;
@@ -193,14 +231,14 @@ interface CheckpointAttestationInputV3 {
   readonly admissionExpiresAtErgoHeight: string | number | bigint;
 }
 
-interface PacketCheckpointContinuationV3 {
+interface PacketCheckpointContinuation<Packet extends ApplicationPacket = ApplicationPacket> {
   readonly signer:
     Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
   readonly produce: (
     input: Readonly<ProduceSubstrateFederatedIsolatedDevnetPacketV1Input>,
-  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>;
+  ) => Promise<Packet>;
   readonly produceMintSourceProof: (
-    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    packet: Packet,
     input: Readonly<
       ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
     >,
@@ -208,7 +246,7 @@ interface PacketCheckpointContinuationV3 {
     SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
   >;
   readonly produceCheckpointAttestation: (
-    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    packet: Packet,
     mintSourceProof: Readonly<
       SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
     >,
@@ -222,7 +260,7 @@ interface PacketCheckpointContinuationV3 {
 export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3 {
   readonly signer:
     Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
-  readonly produce: PacketCheckpointContinuationV3['produce'];
+  readonly produce: PacketCheckpointContinuation<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>['produce'];
   readonly executeApplication: (
     packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
     input: Readonly<
@@ -254,36 +292,80 @@ export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointCo
   readonly dispose: () => void;
 }
 
+export interface SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4 {
+  readonly signer: Readonly<SubstrateFederatedIsolatedDevnetPacketSignerBindingV1>;
+  readonly produce: PacketCheckpointContinuation<Readonly<SubstrateFederatedIsolatedDevnetPacketV3>>['produce'];
+  readonly executeApplication: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>,
+    input: Readonly<ExecuteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input>,
+    completionDeadline?: number,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV4>>;
+  readonly attestCheckpoint: (
+    application: Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV4>,
+    checkpointAdmission: Readonly<SubstrateFederatedIsolatedDevnetFrontierCheckpointAdmissionV3>,
+  ) => Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4>;
+  readonly complete: (
+    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV3>,
+    input: Readonly<CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input>,
+    completionDeadline?: number,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4>>;
+  readonly dispose: () => void;
+}
+
+type ApplicationOwnerInput = Readonly<{
+  readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+  readonly requestSha256Hex: string;
+}>;
+
 export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
   ergoAdmissionSigner: Readonly<
     SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
   >,
-  applicationOwner?: Readonly<{
-    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
-    readonly requestSha256Hex: string;
-  }>,
+  applicationOwner?: ApplicationOwnerInput,
 ): Readonly<
   SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3
 > {
+  return createApplicationCheckpointContinuation(ergoAdmissionSigner, applicationOwner, 3) as
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3>;
+}
+
+export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4(
+  ergoAdmissionSigner: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
+  applicationOwner: ApplicationOwnerInput,
+): Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4> {
+  if (applicationOwner === undefined) {
+    throw new Error('Frontier V4 application requires fresh owner custody');
+  }
+  return createApplicationCheckpointContinuation(ergoAdmissionSigner, applicationOwner, 4) as
+    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4>;
+}
+
+function createApplicationCheckpointContinuation(
+  ergoAdmissionSigner: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
+  applicationOwner: ApplicationOwnerInput | undefined,
+  version: 3 | 4,
+) {
   const owner = applicationOwner?.owner;
   const requestSha256Hex = applicationOwner?.requestSha256Hex;
   if (applicationOwner !== undefined) {
     assertFrontierLabApplicationOwnerClaimV1(owner!, requestSha256Hex!);
   }
-  const continuation = (() => {
+  const continuation = ((): Readonly<PacketCheckpointContinuation> => {
     try {
       if (owner !== undefined) {
         assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(ergoAdmissionSigner);
       }
-      const session = createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(
-        ergoAdmissionSigner,
-      );
+      const session = version === 4
+        ? createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4(ergoAdmissionSigner)
+        : createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(ergoAdmissionSigner);
       if (owner !== undefined
         && !session.signer.ergoAdmissionPublicKeysHex.includes(ergoAdmissionSigner.publicKeyHex)) {
         session.dispose();
         throw new Error('Frontier application recipient differs from the packet Ergo-admission signer');
       }
-      return session;
+      // Only the matching private producer is selected; packet guards below
+      // and inside that session retain the narrower version at every use.
+      return session as Readonly<PacketCheckpointContinuation>;
     } catch (error) {
       if (owner !== undefined) disposeFrontierLabApplicationOwnerV1(owner);
       throw error;
@@ -303,10 +385,9 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     | 'checkpoint_running'
     | 'closed' = 'fresh';
   let completedPacket:
-    Readonly<SubstrateFederatedIsolatedDevnetPacketV2> | undefined;
+    ApplicationPacket | undefined;
   let completedApplication:
-    Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3>
-    | undefined;
+    ApplicationStage | undefined;
 
   const close = (): void => {
     completedPacket = undefined;
@@ -340,7 +421,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     state = 'packet_running';
     try {
       const packet = await continuation.produce(input);
-      assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+      assertPacketVersion(packet, version);
       if (owner !== undefined) assertFrontierLabApplicationOwnerClaimV1(owner, requestSha256Hex!);
       completedPacket = packet;
       state = 'packet_ready';
@@ -351,7 +432,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     }
   };
   const executeApplication = async (
-    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    packet: ApplicationPacket,
     input: Readonly<
       ExecuteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
     >,
@@ -369,6 +450,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
         packet,
         preflightApplicationInput(input),
         completionDeadline,
+        version,
         retainedOwner,
       );
       completedApplication = application;
@@ -380,9 +462,7 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     }
   };
   const attestCheckpoint = (
-    application: Readonly<
-      SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3
-    >,
+    application: ApplicationStage,
     checkpointAdmission: Readonly<
       SubstrateFederatedIsolatedDevnetFrontierCheckpointAdmissionV3
     >,
@@ -401,13 +481,14 @@ export function createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
         continuation,
         application,
         preflightCheckpointAdmission(checkpointAdmission),
+        version,
       );
     } finally {
       close();
     }
   };
   const complete = async (
-    packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+    packet: ApplicationPacket,
     input: Readonly<
       CompleteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
     >,
@@ -469,17 +550,16 @@ export async function runSubstrateFederatedIsolatedDevnetFrontierApplicationChec
 }
 
 async function executeApplicationCheckpointContinuation(
-  continuation: Readonly<PacketCheckpointContinuationV3>,
-  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+  continuation: Readonly<PacketCheckpointContinuation>,
+  packet: ApplicationPacket,
   plan: Readonly<
     ExecuteSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3Input
   >,
   completionDeadline: number | undefined,
+  version: 3 | 4,
   applicationOwner?: Readonly<RetainedApplicationOwner>,
-): Promise<Readonly<
-  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3
->> {
-  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+): Promise<ApplicationStage> {
+  assertPacketVersion(packet, version);
   if (applicationOwner !== undefined) {
     assertFrontierLabApplicationOwnerClaimV1(applicationOwner.owner, applicationOwner.requestSha256Hex);
   }
@@ -500,14 +580,13 @@ async function executeApplicationCheckpointContinuation(
   if (applicationOwner !== undefined) {
     assertApplicationRecipientBinding(applicationOwner);
     const expectedOwnerAddressHex = applicationOwner.owner.ownerAddressHex;
-    const signedTransactions = await signFrontierLabProofBoundApplicationV1(
-      applicationOwner.owner, applicationOwner.requestSha256Hex,
-      packet, mintSourceProof, applicationOwner.ergoRecipientPublicKeyHex,
-    );
+    const signedTransactions = version === 4
+      ? await signApplicationV4(packet, mintSourceProof, applicationOwner)
+      : await signApplicationV3(packet, mintSourceProof, applicationOwner);
     // Signing consumes owner custody. Revalidate the remaining campaign proof
     // and recipient bindings before starting the bounded Rust execution.
     assertApplicationRecipientBinding(applicationOwner);
-    assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+    assertPacketVersion(packet, version);
     assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(mintSourceProof);
     applicationRunner = await runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3({
       ...plan.applicationRunnerInput,
@@ -530,7 +609,7 @@ async function executeApplicationCheckpointContinuation(
     );
     assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2Provenance(applicationRunner);
   }
-  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  assertPacketVersion(packet, version);
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     mintSourceProof,
   );
@@ -540,7 +619,32 @@ async function executeApplicationCheckpointContinuation(
     packet,
     mintSourceProof,
     applicationRunner,
-  });
+  }) as ApplicationStage;
+}
+
+function signApplicationV3(
+  packet: ApplicationPacket,
+  proof: Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>,
+  owner: Readonly<RetainedApplicationOwner>,
+) {
+  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  return signFrontierLabProofBoundApplicationV1(owner.owner, owner.requestSha256Hex,
+    packet, proof, owner.ergoRecipientPublicKeyHex);
+}
+
+function signApplicationV4(
+  packet: ApplicationPacket,
+  proof: Readonly<SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2>,
+  owner: Readonly<RetainedApplicationOwner>,
+) {
+  assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet);
+  return signFrontierLabProofBoundApplicationV2(owner.owner, owner.requestSha256Hex,
+    packet, proof, owner.ergoRecipientPublicKeyHex);
+}
+
+function assertPacketVersion(value: unknown, version: 3 | 4): asserts value is ApplicationPacket {
+  if (version === 4) assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(value);
+  else assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(value);
 }
 
 function assertApplicationRecipientBinding(owner: Readonly<RetainedApplicationOwner>): void {
@@ -572,18 +676,15 @@ function capApplicationRunnerCompletionDeadline(
 }
 
 function attestApplicationCheckpointContinuation(
-  continuation: Readonly<PacketCheckpointContinuationV3>,
-  application: Readonly<
-    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointStageV3
-  >,
+  continuation: Readonly<PacketCheckpointContinuation>,
+  application: ApplicationStage,
   checkpointAdmission: Readonly<
     SubstrateFederatedIsolatedDevnetFrontierCheckpointAdmissionV3
   >,
-): Readonly<
-  SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
-> {
+  version: 3 | 4,
+): RootReceipt {
   const { packet, mintSourceProof, applicationRunner } = application;
-  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(packet);
+  assertPacketVersion(packet, version);
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     mintSourceProof,
   );
@@ -613,9 +714,10 @@ function attestApplicationCheckpointContinuation(
   assertApplicationBurnCheckpointBinding(applicationRunner, checkpoint);
 
   const body = deepFreeze({
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA,
-    version: 3 as const,
+    schema: version === 4
+      ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V4_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_APPLICATION_CHECKPOINT_ROOT_V3_SCHEMA,
+    version,
     status:
       'packet_mint_application_burn_checkpoint_composed' as const,
     packet: {
@@ -677,9 +779,10 @@ function attestApplicationCheckpointContinuation(
   });
   const receipt = deepFreeze({
     ...body,
-    receiptDigestHex: sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN),
-  });
+    receiptDigestHex: sha256CanonicalJson(body, version === 4 ? RECEIPT_V4_DIGEST_DOMAIN : RECEIPT_DIGEST_DOMAIN),
+  }) as RootReceipt;
   RECEIPTS.set(receipt, Object.freeze({
+    version,
     packet,
     mintSourceProof,
     applicationRunner,
@@ -693,20 +796,28 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
 ): asserts value is Readonly<
   SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
 > {
+  assertRootReceiptVersion(value, 3);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV4> {
+  assertRootReceiptVersion(value, 4);
+}
+
+function assertRootReceiptVersion(value: unknown, version: 3 | 4): asserts value is RootReceipt {
   if (value === null || typeof value !== 'object') {
     throw new Error(
       'Frontier application-checkpoint root receipt lacks process provenance',
     );
   }
   const material = RECEIPTS.get(value);
-  if (material === undefined) {
+  if (material === undefined || material.version !== version) {
     throw new Error(
       'Frontier application-checkpoint root receipt lacks process provenance',
     );
   }
-  const receipt = value as Readonly<
-    SubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointRootReceiptV3
-  >;
+  const receipt = value as RootReceipt;
   if (
     receipt.packet.receipt !== material.packet.receipt
     || receipt.mintSourceProof !== material.mintSourceProof
@@ -715,7 +826,7 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
   ) {
     throw new Error('Frontier application-checkpoint root binding changed');
   }
-  assertSubstrateFederatedIsolatedDevnetPacketV2Provenance(material.packet);
+  assertPacketVersion(material.packet, version);
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance(
     material.mintSourceProof,
   );
@@ -751,13 +862,13 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpo
     throw new Error('Frontier application-checkpoint root digest binding changed');
   }
   const { receiptDigestHex, ...body } = receipt;
-  if (sha256CanonicalJson(body, RECEIPT_DIGEST_DOMAIN) !== receiptDigestHex) {
+  if (sha256CanonicalJson(body, version === 4 ? RECEIPT_V4_DIGEST_DOMAIN : RECEIPT_DIGEST_DOMAIN) !== receiptDigestHex) {
     throw new Error('Frontier application-checkpoint root receipt changed');
   }
 }
 
 function assertMintAndRunnerBinding(
-  packet: Readonly<SubstrateFederatedIsolatedDevnetPacketV2>,
+  packet: ApplicationPacket,
   mintSourceProof: Readonly<
     SubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2
   >,

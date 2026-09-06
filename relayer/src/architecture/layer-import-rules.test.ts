@@ -275,6 +275,12 @@ describe('layer import rules', () => {
       'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance'],
     ['./frontier-lab-proof-bound-application-signing-v1.js',
       'signFrontierLabProofBoundApplicationV1'],
+    ['./frontier-lab-proof-bound-application-signing-v1.js',
+      'signFrontierLabProofBoundApplicationV2'],
+    ['../../substrate-federated-isolated-devnet-packet-producer-v1.js',
+      'createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4'],
+    ['../../substrate-federated-isolated-devnet-packet-producer-v1.js',
+      'assertSubstrateFederatedIsolatedDevnetPacketV3Provenance'],
   ])('keeps the signed application capability %s#%s inside reviewed calls', (specifier, binding) => {
     const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
     const target = specifier.startsWith('../../')
@@ -481,11 +487,11 @@ describe('layer import rules', () => {
     );
   });
 
-  it('reserves scoped LAB signing to proof composition and that composition to the retained-packet root', () => {
+  it.each(['signFrontierLabProofBoundApplicationV1', 'signFrontierLabProofBoundApplicationV2'])(
+    'reserves scoped LAB signing %s to the retained-packet root', compose => {
     const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
     const sign = 'signFrontierLabApplicationCallsOnceV1';
     const composition = 'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts';
-    const compose = 'signFrontierLabProofBoundApplicationV1';
     const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
     const sources = {
       [ownerModule]: `export const ${sign} = () => {};`,

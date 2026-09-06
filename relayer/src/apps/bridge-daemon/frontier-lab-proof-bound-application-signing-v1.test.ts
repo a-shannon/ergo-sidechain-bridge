@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { HDNodeWallet, Interface, Transaction, Wallet } from 'ethers';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { canonicalJson } from '../../ergo-settlement-core/strict-json.js';
 import {
   assertFrontierLabApplicationOwnerClaimV1, bindFrontierLabApplicationOwnerRequestV1,
@@ -22,16 +22,27 @@ import {
   buildFrontierLabApplicationTransactionPlanV1, inspectFrontierLabApplicationSignedTransactionsV1,
 } from '../../substrate-federated-isolated-devnet-frontier-application-transactions-v1.js';
 
-const provenance = vi.hoisted(() => ({ packets: new WeakSet<object>(), proofs: new WeakSet<object>() }));
+// Upstream packet/proof provenance is scoped here; owner custody and signing are real.
+const provenance = vi.hoisted(() => ({
+  packets: { 2: new WeakSet<object>(), 3: new WeakSet<object>() }, proofs: new WeakSet<object>(),
+}));
 vi.mock('../../substrate-federated-isolated-devnet-packet-producer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPacketV2Provenance: (value: object) => {
-    if (!provenance.packets.has(value)) throw new Error('packet lacks process provenance');
+    if (!provenance.packets[2].has(value)) throw new Error('PacketV2 lacks process provenance');
+  },
+  assertSubstrateFederatedIsolatedDevnetPacketV3Provenance: (value: object) => {
+    if (!provenance.packets[3].has(value)) throw new Error('PacketV3 lacks process provenance');
   },
   assertSubstrateFederatedIsolatedDevnetPacketMintSourceProofReceiptV2Provenance: (value: object) => {
     if (!provenance.proofs.has(value)) throw new Error('proof lacks process provenance');
   },
 }));
-import { signFrontierLabProofBoundApplicationV1 } from './frontier-lab-proof-bound-application-signing-v1.js';
+import {
+  signFrontierLabProofBoundApplicationV1, signFrontierLabProofBoundApplicationV2,
+} from './frontier-lab-proof-bound-application-signing-v1.js';
+import type {
+  SubstrateFederatedIsolatedDevnetPacketV2, SubstrateFederatedIsolatedDevnetPacketV3,
+} from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 
 const owners: Readonly<FrontierLabApplicationOwnerV1>[] = [];
 const recipient = Wallet.createRandom().signingKey.compressedPublicKey;
@@ -43,7 +54,7 @@ afterEach(() => {
   for (const owner of owners.splice(0)) disposeFrontierLabApplicationOwnerV1(owner);
 });
 
-async function fixture(tokenAddress: string | null = originalIntent.tokenAddressHex) {
+async function fixture(tokenAddress: string | null = originalIntent.tokenAddressHex, packetVersion: 2 | 3 = 2) {
   const owner = await createFrontierLabApplicationOwnerV1(originalIntent.bridgeAddressHex);
   owners.push(owner);
   const request = Buffer.from(`${canonicalJson({
@@ -66,7 +77,7 @@ async function fixture(tokenAddress: string | null = originalIntent.tokenAddress
     ergoRecipientPublicKeyHex: recipient,
   };
   const plan = buildFrontierLabApplicationTransactionPlanV1(input);
-  const packet = { receipt: { receiptDigestHex: '11'.repeat(32), targetDescriptorDigestHex: '22'.repeat(32) } };
+  const packet = { receipt: { version: packetVersion, receiptDigestHex: '11'.repeat(32), targetDescriptorDigestHex: '22'.repeat(32) } };
   const proof = {
     packetReceiptDigestHex: packet.receipt.receiptDigestHex,
     targetDescriptorDigestHex: packet.receipt.targetDescriptorDigestHex,
@@ -77,19 +88,30 @@ async function fixture(tokenAddress: string | null = originalIntent.tokenAddress
       mintReservationStatementIdHex: plan.mintReservationStatementIdHex, mintIdentityHex: plan.mintIdentityHex,
     },
   };
-  provenance.packets.add(packet);
+  provenance.packets[packetVersion].add(packet);
   provenance.proofs.add(proof);
   return { owner, requestSha256Hex, packet, proof, input, plan };
 }
 
-describe('proof-bound LAB application signing composition', () => {
+it('keeps explicit signing entry points typed to PacketV2 and PacketV3 respectively', () => {
+  expectTypeOf<Parameters<typeof signFrontierLabProofBoundApplicationV1>[2]>()
+    .toEqualTypeOf<Readonly<SubstrateFederatedIsolatedDevnetPacketV2>>();
+  expectTypeOf<Parameters<typeof signFrontierLabProofBoundApplicationV2>[2]>()
+    .toEqualTypeOf<Readonly<SubstrateFederatedIsolatedDevnetPacketV3>>();
+});
+
+describe.each([
+  { version: 1, packetVersion: 2 as const, sign: signFrontierLabProofBoundApplicationV1 },
+  { version: 2, packetVersion: 3 as const, sign: signFrontierLabProofBoundApplicationV2 },
+])('proof-bound LAB application signing V$version / PacketV$packetVersion', ({ packetVersion, sign }) => {
+  const compositionFixture = () => fixture(originalIntent.tokenAddressHex, packetVersion);
   it('rejects concurrent composition without disposing the first signing attempt', async () => {
-    const f = await fixture();
-    const sign = () => signFrontierLabProofBoundApplicationV1(
+    const f = await compositionFixture();
+    const attempt = () => sign(
       f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient,
     );
-    const first = sign().then(signed => ({ signed }), error => ({ error }));
-    await expect(sign()).rejects.toThrow(/already consumed/);
+    const first = attempt().then(signed => ({ signed }), error => ({ error }));
+    await expect(attempt()).rejects.toThrow(/already consumed/);
     const outcome = await first;
     expect(outcome).toHaveProperty('signed');
     if ('signed' in outcome) {
@@ -98,8 +120,8 @@ describe('proof-bound LAB application signing composition', () => {
   });
 
   it('signs the real canonical triplet once and returns only independently inspectable bytes', async () => {
-    const f = await fixture();
-    const signed = await signFrontierLabProofBoundApplicationV1(
+    const f = await compositionFixture();
+    const signed = await sign(
       f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient,
     );
     const inspected = inspectFrontierLabApplicationSignedTransactionsV1(f.input, signed);
@@ -110,13 +132,13 @@ describe('proof-bound LAB application signing composition', () => {
       expect(Transaction.from(signed[role]).from?.toLowerCase()).toBe(f.owner.ownerAddressHex);
     }
     expect(() => assertFrontierLabApplicationOwnerClaimV1(f.owner, f.requestSha256Hex)).toThrow(/live process custody/);
-    await expect(signFrontierLabProofBoundApplicationV1(f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient))
+    await expect(sign(f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient))
       .rejects.toThrow(/live process custody/);
   });
 
   it.each(['packet-clone', 'proof-clone', 'packet', 'target', 'inner-target', 'receipt', 'statement-id', 'mint-id', 'statement', 'recipient', 'owner'] as const)(
     'rejects %s mismatch before signing and disposes the claimed owner', async fault => {
-      const f = await fixture();
+      const f = await compositionFixture();
       if (fault === 'packet-clone') f.packet = { ...f.packet };
       if (fault === 'proof-clone') f.proof = { ...f.proof };
       if (fault === 'packet') f.proof.packetReceiptDigestHex = 'ff'.repeat(32);
@@ -127,18 +149,70 @@ describe('proof-bound LAB application signing composition', () => {
       if (fault === 'mint-id') f.proof.sourceProof.mintIdentityHex = `0x${'ff'.repeat(32)}`;
       if (fault === 'statement') f.proof.sourceProof.request.statementHex = '0x01';
       if (fault === 'owner') {
-        const other = await fixture();
+        const other = await compositionFixture();
         f.proof.sourceProof.request = other.proof.sourceProof.request;
         f.proof.sourceProof.mintReservationStatementIdHex = other.proof.sourceProof.mintReservationStatementIdHex;
+        f.proof.sourceProof.mintIdentityHex = other.proof.sourceProof.mintIdentityHex;
       }
       const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
-      await expect(signFrontierLabProofBoundApplicationV1(
+      await expect(sign(
         f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, fault === 'recipient' ? '0x01' : recipient,
       )).rejects.toThrow();
       expect(signer).not.toHaveBeenCalled();
       expect(() => assertFrontierLabApplicationOwnerClaimV1(f.owner, f.requestSha256Hex)).toThrow(/live process custody/);
     },
   );
+
+  it('rejects a genuinely registered packet of the other version without fallback', async () => {
+    const otherVersion = packetVersion === 2 ? 3 : 2;
+    const f = await fixture(originalIntent.tokenAddressHex, otherVersion);
+    expect(provenance.packets[otherVersion].has(f.packet)).toBe(true);
+    expect(provenance.packets[packetVersion].has(f.packet)).toBe(false);
+    const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
+    await expect(sign(f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient))
+      .rejects.toThrow(`PacketV${packetVersion} lacks process provenance`);
+    expect(signer).not.toHaveBeenCalled();
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(f.owner, f.requestSha256Hex))
+      .toThrow(/live process custody/);
+  });
+
+  it.each([1, 2, 3])('settles a concurrent failed composition at signing call %s without retry or partial bytes', async failureAt => {
+    const f = await compositionFixture();
+    const original = HDNodeWallet.prototype.signTransaction;
+    let count = 0;
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const signingStarted = new Promise<void>(resolve => { started = resolve; });
+    const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(async function (this: HDNodeWallet, tx) {
+      if (++count === failureAt) {
+        started();
+        await gate;
+        throw new Error('synthetic composition signing failure');
+      }
+      return original.call(this, tx);
+    });
+    const attempt = () => sign(f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient);
+    const first = attempt().then(signed => ({ signed }), error => ({ error }));
+    try {
+      await signingStarted;
+      await expect(attempt()).rejects.toThrow(/already consumed/);
+      const otherSign = packetVersion === 2 ? signFrontierLabProofBoundApplicationV2 : signFrontierLabProofBoundApplicationV1;
+      await expect(otherSign(f.owner, f.requestSha256Hex, f.packet as never, f.proof as never, recipient))
+        .rejects.toThrow(/already consumed/);
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(f.owner, f.requestSha256Hex)).not.toThrow();
+    } finally {
+      release();
+      await first;
+    }
+    const outcome = await first;
+    expect(outcome).not.toHaveProperty('signed');
+    expect(outcome).toHaveProperty('error', new Error('synthetic composition signing failure'));
+    expect(signer).toHaveBeenCalledTimes(failureAt);
+    expect(() => assertFrontierLabApplicationOwnerClaimV1(f.owner, f.requestSha256Hex)).toThrow(/live process custody/);
+    await expect(attempt()).rejects.toThrow(/live process custody/);
+    expect(signer).toHaveBeenCalledTimes(failureAt);
+  });
 });
 
 describe('one-use scoped LAB signer adapter', () => {
