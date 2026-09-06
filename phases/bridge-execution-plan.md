@@ -83,7 +83,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB funded V2 tracker -> canonical admission | Connect the session-owned external-fee V2 check to exact reservation, authorization, fixed transport and confirmation; exercise funding and admission in one fresh owned-target campaign | V168 checks fee funding on the real node without submission. V169 supplies its component-tested transport lifecycle. V170 connects the genuine tracker-protocol V2 transaction to the retained signer and frozen-target checker. Actual fee-box confirmation, tracker admission and the operational V3 caller remain open. Do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
+| **Now** | FED-6-LAB funded V2 tracker -> canonical admission | Connect the actual V3 campaign caller to the component-tested admission lifecycle; confirm fee funding before freezing the anchor, then exercise admission in one fresh owned-target campaign | Session-owned checking, explicit authorization, durable reservation, phase-bound revalidation, fixed transport and confirmation handling are connected at component level. Actual fee-box confirmation, tracker admission and the operational V3 caller remain open. Do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -93,8 +93,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| V2 admission lifecycle | Main owner; consumes the V170 session-owned check | Exact two-input candidate, checkpoint, target and successor -> explicit authorization -> durable reservation -> fixed transport -> canonical/ambiguous outcome handling. Implement this join together; preserve each separate capability. No V1/V7 receipt relabelling |
-| Actual campaign caller | Main owner; depends on the admission lifecycle | Select the retained V3 route in the real application root. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
+| Actual campaign caller | Main owner; consumes the component-tested V2 admission lifecycle | Select the retained V3 route in the real application root. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction is available; it neither proves canonical input history nor authorizes signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
@@ -104,6 +103,17 @@ withdrawal construction is not a completed exit. Do not omit either consumer
 from the final delivery contract.
 
 ## Reference Checkpoints
+
+The V2 admission lifecycle now connects a genuine session-owned two-input check
+to explicit isolated-devnet authorization, durable reservation, revalidation,
+fixed transport and confirmation. Private process lineage binds each phase to
+its predecessor. The journal cannot recreate authorization or a transport
+outcome; confirmation rechecks exact successor bytes and fresh canonical
+inclusion/depth after observation. Component tests use real WASM signing and
+SQLite with bounded loopback HTTP fixtures. A separate fresh-node test covers
+managed process lineage, without submitting the tracker transaction. These
+results do not establish canonical tracker admission; the real V3 campaign
+caller is the next consumer.
 
 Scoped test preparation is complete. The selected fresh-custody V2 positive
 uses no unrelated static compiler pair; all 114 ordinary provisioning cases

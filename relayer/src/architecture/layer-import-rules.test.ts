@@ -15,6 +15,24 @@ function inspect(files: Record<string, string>) {
 }
 
 describe('layer import rules', () => {
+  it.each([
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Check', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'checkSubstrateFederatedIsolatedDevnetTrackerV2Transport', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Transport', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'assertSubstrateFederatedIsolatedDevnetTrackerV2TransportReady', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+  ])('keeps the V2 admission capability %s#%s in its concrete owner', (module, symbol, owner) => {
+    const source = `import { ${symbol} } from './${module}.js'; ${symbol}();`;
+    const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
+    expect(inspect({ ...producer, [`${owner}.ts`]: source })).toEqual([]);
+    expect(inspect({ ...producer, 'other-admission-caller.ts': source }).map(item => item.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
+    ]);
+  });
+
   it('classifies only physical architecture layers', () => {
     expect(classifyBridgeLayer('ergo-settlement-core/codec.ts')).toBe('ergo-settlement-core');
     expect(classifyBridgeLayer('profiles/substrate-grandpa-v1/statement.ts')).toBe('profiles');

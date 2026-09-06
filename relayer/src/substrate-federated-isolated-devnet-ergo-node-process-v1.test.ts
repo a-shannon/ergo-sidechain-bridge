@@ -27,6 +27,8 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2,
   assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
@@ -1019,6 +1021,14 @@ describe.skipIf(process.platform !== 'win32')(
                   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
                     target,
                   );
+                expect(assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, resumed.value)).toEqual(binding);
+                expect(() => assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2({ ...target }, resumed.value))
+                  .toThrow(/not owned/);
+                for (const key of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+                  expect(() => assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, {
+                    ...resumed.value, [key]: 'ff'.repeat(32),
+                  })).toThrow(/does not descend/);
+                }
                 freshnessCompletion =
                   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
                     target,
@@ -1151,14 +1161,31 @@ describe.skipIf(process.platform !== 'win32')(
             async () => 'never',
           )).rejects.toThrow(/requires one completed checkpoint observation/);
           const confirmationTransactionIdHex = 'ac'.repeat(32);
+          let confirmationTarget: typeof ownedTarget;
           const confirmation = await session
             .withTrackerTransportConfirmationMiningTarget(
               confirmationTransactionIdHex,
-              async target =>
-                assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
-                  target,
-                ),
+              async target => {
+                confirmationTarget = target;
+                const binding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+                expect(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport.value, confirmationTransactionIdHex))
+                  .toEqual(binding);
+                expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2({ ...target }, transport.value, confirmationTransactionIdHex))
+                  .toThrow(/not owned/);
+                expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport.value, 'ff'.repeat(32)))
+                  .toThrow(/does not descend/);
+                for (const key of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+                  expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, {
+                    ...transport.value, [key]: 'ff'.repeat(32),
+                  }, confirmationTransactionIdHex)).toThrow(/does not descend/);
+                }
+                return binding;
+              },
             );
+          expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(confirmationTarget!, transport.value, confirmationTransactionIdHex))
+            .toThrow(/not owned/);
+          expect(() => assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(freshnessTarget!, resumed.value))
+            .toThrow(/not owned/);
           expect(confirmation.receipt.schema).toBe(
             SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V2_SCHEMA,
           );

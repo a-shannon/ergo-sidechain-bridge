@@ -1435,6 +1435,22 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ]),
   ],
   [
+    'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+    new Map([
+      'claimSubstrateFederatedIsolatedDevnetTrackerV2Check',
+      'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation',
+      'checkSubstrateFederatedIsolatedDevnetTrackerV2Transport',
+    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts'])])),
+  ],
+  [
+    'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts',
+    new Map([
+      'claimSubstrateFederatedIsolatedDevnetTrackerV2Transport',
+      'assertSubstrateFederatedIsolatedDevnetTrackerV2TransportReady',
+      'finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal',
+    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts'])])),
+  ],
+  [
     'substrate-federated-isolated-devnet-mining-credential-v1.ts',
     new Map([
       [
@@ -1486,6 +1502,16 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [
     'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
     new Map([
+      ['assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', new Set([
+        'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.test.ts',
+        'substrate-federated-isolated-devnet-tracker-v2-provisioning.test.ts',
+      ])],
+      ['assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', new Set([
+        'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts',
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.test.ts',
+        'substrate-federated-isolated-devnet-tracker-v2-provisioning.test.ts',
+      ])],
       [
         'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
         new Set([

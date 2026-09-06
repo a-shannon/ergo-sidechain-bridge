@@ -99,6 +99,7 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE,
   type ErgoOperationalTransactionProfile,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
@@ -1118,10 +1119,18 @@ const ERGO_OPERATIONAL_PROFILE_SQL = `operation_profile IN (
   '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
   '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
   '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}',
-  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}'
+  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}',
+  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'
 )`;
 const ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL = `
   operation_profile = '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}'
+  AND target_sidechain_height IS NULL
+  AND target_sidechain_block_hash IS NULL
+  AND heartbeat_key_hex IS NULL
+  AND reconciliation_identity_digest IS NOT NULL
+`;
+const ERGO_OPERATIONAL_TRACKER_ADMISSION_CONTEXT_SQL = `
+  operation_profile = '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'
   AND target_sidechain_height IS NULL
   AND target_sidechain_block_hash IS NULL
   AND heartbeat_key_hex IS NULL
@@ -1136,7 +1145,8 @@ const ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL = `
     '${DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE}',
     '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
     '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}',
-    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}'
+    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}',
+    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'
   ) AND status IN ('pending', 'accepted', 'ambiguous')
 `;
 
@@ -1153,6 +1163,8 @@ function normalizeErgoOperationalTransactionProfile(
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     && value
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+    && value
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {
     throw new Error('unknown Ergo operational transaction profile');
   }
@@ -1240,6 +1252,8 @@ function normalizeErgoOperationalContext(input: {
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+    || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {
     if (
       input.targetSidechainHeight != null
@@ -1285,6 +1299,8 @@ function normalizeErgoOperationalReconciliationIdentity(
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     || operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+    || operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {
     return normalizeFixedHex(
       String(value),
@@ -5344,6 +5360,7 @@ export class StateTracker {
             AND reconciliation_identity_digest IS NOT NULL
           )
           OR (${ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL})
+          OR (${ERGO_OPERATIONAL_TRACKER_ADMISSION_CONTEXT_SQL})
         ),
         CHECK (
           status IN (
@@ -15360,7 +15377,8 @@ export class StateTracker {
   private assertErgoOperationalProfileSchema(
     profile: ErgoOperationalTransactionProfile,
   ): void {
-    if (profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE) {
+    if (profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+      && profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE) {
       return;
     }
     // IF NOT EXISTS does not upgrade old CHECK constraints or partial indexes.
@@ -15374,13 +15392,26 @@ export class StateTracker {
     };
     const tableSql = readSql('table', 'ergo_operational_transaction_attempts');
     const indexSql = readSql('index', 'ergo_operational_active_singleton_profile');
+    const isAdmission = profile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE;
+    const contextSql = isAdmission ? ERGO_OPERATIONAL_TRACKER_ADMISSION_CONTEXT_SQL
+      : ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL;
+    // Adding V2 must not retire a previously supported fee-funding database.
+    // Recognize its exact old allowlists, but never migrate them into V2 authority.
+    const legacyProfiles = ERGO_OPERATIONAL_PROFILE_SQL.replace(
+      `,\n  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'`, '');
+    const legacyIndex = ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL.replace(
+      `,\n    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'`, '');
+    const currentShape = tableSql.includes(normalizeSql(`CHECK (${ERGO_OPERATIONAL_PROFILE_SQL})`))
+      && indexSql === normalizeSql(ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL);
+    const supportedLegacyFeeShape = !isAdmission
+      && tableSql.includes(normalizeSql(`CHECK (${legacyProfiles})`))
+      && indexSql === normalizeSql(legacyIndex);
     if (
-      !tableSql.includes(normalizeSql(`CHECK (${ERGO_OPERATIONAL_PROFILE_SQL})`))
-      || !tableSql.includes(normalizeSql(`OR (${ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL})`))
-      || indexSql !== normalizeSql(ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL)
+      (!currentShape && !supportedLegacyFeeShape)
+      || !tableSql.includes(normalizeSql(`OR (${contextSql})`))
     ) {
       throw new Error(
-        'tracker fee funding operational schema is unsupported; a fresh LAB database is required',
+        `${isAdmission ? 'tracker V2 admission' : 'tracker fee funding'} operational schema is unsupported; a fresh LAB database is required`,
       );
     }
   }
@@ -15507,6 +15538,8 @@ export class StateTracker {
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
           || operationProfile
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+          || operationProfile
+            === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
         )
         && this.getActiveErgoOperationalTransactionAttempts(operationProfile).length !== 0
       ) {
@@ -15517,9 +15550,11 @@ export class StateTracker {
       if (
         operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
         || operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+        || operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
       ) {
         const boxLabel = operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
-          ? 'reward' : 'tracker fee funding';
+          ? 'reward' : operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
+            ? 'tracker V2 admission' : 'tracker fee funding';
         const inputSet = new Set(inputBoxIds);
         const priorRows = this.db.prepare(`
           SELECT input_box_ids_json
@@ -16018,8 +16053,10 @@ export class StateTracker {
       if (
         current.operationProfile
           === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+        || current.operationProfile
+          === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
       ) {
-        throw new Error('confirmed tracker fee funding cannot be reopened; quarantine on rollback');
+        throw new Error('confirmed tracker admission or fee funding cannot be reopened; quarantine on rollback');
       }
       if (
         current.operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE

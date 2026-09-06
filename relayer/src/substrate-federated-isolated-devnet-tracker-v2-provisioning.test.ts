@@ -21,6 +21,12 @@ import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-rew
 import * as fleet from './fleet-signer.js';
 import * as ergoHelpers from './ergo-helpers.js';
 import { StateTracker } from './state-tracker.js';
+import {
+  authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission as authorizeTrackerV2,
+  reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission as reserveTrackerV2,
+  revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission as revalidateTrackerV2,
+  confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission as confirmTrackerV2,
+} from './substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js';
 import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesisBatchV3,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as executeFeeFunding }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -34,6 +40,8 @@ import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2 as createTransportV2,
   submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as submitFeeFunding,
   finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as finalizeFeeFunding,
+  submitSubstrateFederatedIsolatedDevnetTrackerV2Admission as submitTrackerV2,
+  finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission as finalizeTrackerV2,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as authorizeFeeFunding,
@@ -1287,7 +1295,16 @@ describe('owned synthetic session -> V3 admission profile preflight', () => {
 
 describe('owned synthetic session -> V3 no-submit setup root', () => {
   it.each(['valid', 'default-closed', 'wrong-input', 'wrong-fee', 'wrong-genesis',
-    'wrong-target', 'copied-context', 'disposed', 'concurrent'] as const)(
+    'wrong-target', 'copied-context', 'disposed', 'concurrent',
+    'admission-input-0-primary', 'admission-input-1-primary',
+    'admission-input-0-witness', 'admission-input-1-witness',
+    'admission-genesis', 'admission-headers', 'admission-expired',
+    'admission-journal-failure', 'admission-journal-drift',
+    'admission-freshness-parent', 'admission-freshness-check', 'admission-freshness-input',
+    'admission-transport-parent', 'admission-transport-check', 'admission-stale-anchor',
+    'admission-transport-journal-drift', 'admission-ambiguous',
+    'admission-confirmation-parent', 'admission-successor-drift',
+    'admission-confirmation-reincluded', 'admission-confirmation-depth', 'admission-unfinalized-row'] as const)(
     'retains exact V3 custody through funding into the protocol V2 checker: %s', async fault => {
       const fixture = await createRootFixture(true);
       const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
@@ -1371,7 +1388,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             if (fault === 'concurrent') {
               await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
             }
-            if (fault === 'valid') {
+            if (fault === 'valid' || fault.startsWith('admission-')) {
               const checked = await pending;
               expect(checked.result.transaction.unsignedTransactionIdHex).toBe(transaction.unsignedTransactionIdHex);
               expect(checked.feeFundingTransactionIdHex).toBe(feeCheck.transaction.txId);
@@ -1382,6 +1399,10 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
               expect(observed.checkBodies[4]!.inputs).toHaveLength(2);
               expect(observed.submissionBodies).toHaveLength(0);
               expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+              genesisDrift.mockRestore();
+              await exerciseTrackerV2Admission(fault, checked, frozenTarget, frozenBinding, observed, () => {
+                frozenCustody.mockImplementation(() => { throw new Error('synthetic frozen action expired'); });
+              });
             } else {
               const expected = fault === 'wrong-input' || fault === 'wrong-fee' ? /inputs differ from retained/
                 : fault === 'wrong-genesis' ? /frozen target genesis differs/
@@ -1393,7 +1414,9 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             }
             await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
           } finally { genesisDrift.mockRestore(); }
-        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+          submissionOracle: body => fault === 'admission-ambiguous' ? { unavailable: true } : signedCheckOracle(body),
+          confirmSubmittedGenesis: true, publishSubmittedOutputs: true });
       } finally { errors.mockRestore(); frozenCustody.mockRestore(); custody.mockRestore(); fixture.session.dispose(); }
     }, 60_000,
   );
@@ -2205,6 +2228,194 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
   }, 0,
 );
 
+async function exerciseTrackerV2Admission(
+  fault: string,
+  checked: Parameters<typeof authorizeTrackerV2>[0],
+  frozenTarget: Parameters<typeof authorizeTrackerV2>[1],
+  frozenBinding: Readonly<{ processBindingDigestHex: string; executionTargetIdentityDigestHex: string }>,
+  observed: ObservationFixture,
+  expireFrozen: () => void,
+): Promise<void> {
+  const state = new StateTracker(':memory:');
+  const spies: Array<{ mockRestore(): void }> = [];
+  let phase = 'authorization';
+  const freshnessBinding = Object.freeze({ processBindingDigestHex: '71'.repeat(32), executionTargetIdentityDigestHex: '72'.repeat(32) });
+  const freshnessTarget = Object.freeze({ ...frozenTarget, reservationFreshnessRevalidation: true as const });
+  const transportTarget = Object.freeze({ primaryNodeOrigin: frozenTarget.primaryNodeOrigin,
+    witnessNodeOrigin: frozenTarget.witnessNodeOrigin, primaryMining: true as const, witnessReadOnly: true as const,
+    checkpointBound: true as const, reservationFreshnessCheckBound: true as const,
+    trackerTransport: true as const, sameProcessCanonicalConfirmation: true as const });
+  const transportBinding = Object.freeze({ processBindingDigestHex: '81'.repeat(32), executionTargetIdentityDigestHex: '82'.repeat(32),
+    reservationFreshnessProcessBindingDigestHex: freshnessBinding.processBindingDigestHex,
+    reservationFreshnessExecutionTargetIdentityDigestHex: freshnessBinding.executionTargetIdentityDigestHex });
+  const confirmationTarget = executionTarget();
+  // Only managed-process custody is doubled; compiler, signing, check, journal,
+  // transport and confirmation provenance are their concrete implementations.
+  spies.push(vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2')
+    .mockImplementation((target, parent) => {
+      expect(target).toBe(freshnessTarget);
+      expect(parent).toEqual(frozenBinding);
+      if (phase !== 'freshness' || fault === 'admission-freshness-parent') throw new Error('synthetic freshness lineage differs');
+      return freshnessBinding;
+    }));
+  spies.push(vi.spyOn(ownedTargets, 'issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1')
+    .mockImplementation(target => {
+      expect(target).toBe(freshnessTarget);
+      return Object.freeze({ schema: 'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1', version: 1 });
+    }));
+  spies.push(vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2')
+    .mockImplementation(target => {
+      expect(target).toBe(transportTarget);
+      if (phase !== 'transport') throw new Error('synthetic transport action expired');
+      return fault === 'admission-transport-parent'
+        ? { ...transportBinding, reservationFreshnessProcessBindingDigestHex: 'ff'.repeat(32) } : transportBinding;
+    }));
+  spies.push(vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2')
+    .mockImplementation((target, parent, txId) => {
+      expect(target).toBe(confirmationTarget);
+      expect(parent).toEqual(transportBinding);
+      expect(txId).toBe(checked.result.transaction.unsignedTransactionIdHex);
+      if (phase !== 'confirmation' || fault === 'admission-confirmation-parent') throw new Error('synthetic confirmation lineage differs');
+      return executionBinding;
+    }));
+  const originalGet = ergoHelpers.ngetDirect;
+  spies.push(vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+    const value = await originalGet(...args);
+    const [path, origin] = args;
+    if (phase === 'authorization') {
+      if (fault === 'admission-genesis' && path === '/blocks/at/1') return ['ff'.repeat(32)];
+      if (fault === 'admission-headers' && path === '/blocks/lastHeaders/10') {
+        return [...value].reverse();
+      }
+      const match = /^admission-input-([01])-(primary|witness)$/.exec(fault);
+      if (match && origin === (match[2] === 'primary' ? frozenTarget.primaryNodeOrigin : frozenTarget.witnessNodeOrigin)
+        && path === `/utxo/byId/${checked.result.transaction.inputBoxes[Number(match[1])]!.boxId}`) {
+        return reidentifyBox(value, 'fa'.repeat(32));
+      }
+    }
+    if (phase === 'freshness' && fault === 'admission-freshness-input'
+      && path === `/utxo/byId/${checked.result.transaction.inputBoxes[1].boxId}`) return reidentifyBox(value, 'fb'.repeat(32));
+    if (phase === 'transport' && fault === 'admission-stale-anchor' && path === '/blocks/lastHeaders/10') {
+      return value.map((header: Record<string, unknown>) => ({ ...header, height: Number(header.height) + 10 }));
+    }
+    if (phase === 'confirmation' && fault === 'admission-successor-drift' && path.startsWith('/utxo/byId/')) {
+      return reidentifyBox(value, 'fc'.repeat(32));
+    }
+    return value;
+  }));
+  try {
+    await expect(authorizeTrackerV2({ ...checked }, frozenTarget)).rejects.toThrow(/session provenance/);
+    await expect(authorizeTrackerV2(checked, { ...frozenTarget })).rejects.toThrow(/session provenance/);
+    if (fault === 'admission-expired') expireFrozen();
+    const pendingAuthorization = authorizeTrackerV2(checked, frozenTarget);
+    if (fault === 'admission-expired' || fault === 'admission-genesis' || fault === 'admission-headers' || fault.startsWith('admission-input-')) {
+      await expect(pendingAuthorization).rejects.toThrow(fault === 'admission-headers'
+        ? 'observed header 0 parent lineage is broken' : /changed|expired/);
+      expect(state.getErgoOperationalTransactionAttempt(checked.result.transaction.unsignedTransactionIdHex)).toBeNull();
+      expect(observed.submissionBodies).toHaveLength(0);
+      return;
+    }
+    await expect(authorizeTrackerV2(checked, frozenTarget)).rejects.toThrow(/already claimed/);
+    const authorization = await pendingAuthorization;
+    expect(() => reserveTrackerV2({ ...authorization }, state)).toThrow(/absent/);
+    if (fault === 'admission-journal-failure') {
+      spies.push(vi.spyOn(state, 'reserveErgoOperationalTransactionAttempt').mockImplementation(() => { throw new Error('synthetic journal failure'); }));
+      expect(() => reserveTrackerV2(authorization, state)).toThrow(/synthetic journal failure/);
+      expect(() => reserveTrackerV2(authorization, state)).toThrow(/consumed/);
+      expect(observed.submissionBodies).toHaveLength(0);
+      return;
+    }
+    const attempt = reserveTrackerV2(authorization, state);
+    const stored = state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!;
+    expect(stored.operationProfile).toBe('e2s.substrate-federated-local-devnet-tracker-admission-operation.v2');
+    expect(stored.inputBoxIds).toEqual(checked.result.transaction.inputBoxes.map(box => box.boxId));
+    expect(stored.checkResponseDigestHex).toBe(checked.result.checkDigestHex);
+    expect(stored.status).toBe('pending');
+    expect(() => reserveTrackerV2(authorization, state)).toThrow(/consumed/);
+    expireFrozen();
+    await expect(revalidateTrackerV2({ ...attempt }, freshnessTarget)).rejects.toThrow(/provenance/);
+    await expect(submitTrackerV2(transportTarget, attempt)).rejects.toThrow(/no exact freshness/);
+    if (fault === 'admission-journal-drift') {
+      spies.push(vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...stored, signedTransactionDigestHex: 'fe'.repeat(32) }));
+    }
+    phase = 'freshness';
+    if (fault === 'admission-freshness-check') spies.push(vi.spyOn(fleet, 'checkSignedTransaction').mockResolvedValue(null));
+    const fresh = revalidateTrackerV2(attempt, freshnessTarget);
+    if (fault === 'admission-journal-drift' || fault.startsWith('admission-freshness-')) {
+      await expect(fresh).rejects.toThrow(/journal|lineage|node check failed|input changed/);
+      await expect(revalidateTrackerV2(attempt, freshnessTarget)).rejects.toThrow(/consumed/);
+      expect(observed.submissionBodies).toHaveLength(0);
+      return;
+    }
+    await expect(fresh).resolves.toMatchObject({ version: 1 });
+    await expect(revalidateTrackerV2(attempt, freshnessTarget)).rejects.toThrow(/consumed/);
+    phase = 'transport';
+    if (fault === 'admission-transport-check') spies.push(vi.spyOn(fleet, 'checkSignedTransaction').mockResolvedValue(null));
+    if (fault === 'admission-transport-journal-drift') {
+      const originalCheck = fleet.checkSignedTransaction;
+      spies.push(vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
+        const result = await originalCheck(...args);
+        spies.push(vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...stored, authorizationDigestHex: 'fe'.repeat(32) }));
+        return result;
+      }));
+    }
+    const submission = submitTrackerV2(transportTarget, attempt);
+    if (fault.startsWith('admission-transport-') || fault === 'admission-stale-anchor') {
+      await expect(submission).rejects.toThrow(/descend|node check failed|stale|journal/);
+      await expect(submitTrackerV2(transportTarget, attempt)).rejects.toThrow(/consumed/);
+      expect(observed.submissionBodies).toHaveLength(0);
+      return;
+    }
+    const submitted = await submission;
+    expect(submitted.status).toBe(fault === 'admission-ambiguous' ? 'ambiguous' : 'accepted');
+    expect(observed.submissionBodies).toHaveLength(1);
+    expect(canonicalJson(observed.submissionBodies[0])).toBe(canonicalJson(observed.checkBodies[4]));
+    expect(() => finalizeTrackerV2(attempt, { ...submitted })).toThrow(/provenance/);
+    if (fault === 'admission-unfinalized-row') {
+      state.finalizeErgoOperationalTransactionAttempt({ expectedTxId: attempt.expectedTxId,
+        durableAttemptDigestHex: attempt.durableAttemptDigestHex, disposition: submitted.status,
+        submittedTxId: submitted.submittedTxId, responseDigestHex: submitted.responseDigestHex });
+    } else {
+      finalizeTrackerV2(attempt, submitted);
+      expect(() => finalizeTrackerV2(attempt, submitted)).toThrow(/provenance/);
+    }
+    await expect(submitTrackerV2(transportTarget, attempt)).rejects.toThrow(/consumed/);
+    phase = 'confirmation';
+    const observer = createConfirmationObserver(confirmationTarget, authorization.genesisHeaderIdHex);
+    const confirmation = await observer.observe(attempt.expectedTxId, frozenTarget.primaryNodeOrigin);
+    expect(confirmation!.status).toBe('confirmed');
+    if (fault === 'valid') {
+      const finalized = state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!;
+      for (const patch of [{ responseDigestHex: 'fb'.repeat(32) }, { submittedTxId: 'fc'.repeat(32) },
+        { submissionDisposition: 'ambiguous' as const }, { status: 'ambiguous' as const }]) {
+        const drift = vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...finalized, ...patch });
+        try {
+          await expect(confirmTrackerV2(attempt, confirmationTarget, confirmation!)).rejects.toThrow(/retained transport finalization/);
+        } finally { drift.mockRestore(); }
+        expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)).toEqual(finalized);
+      }
+    }
+    if (fault === 'admission-confirmation-reincluded') {
+      observed.reincludeSubmitted(attempt.expectedTxId, 10);
+    } else if (fault === 'admission-confirmation-depth') {
+      observed.setSubmittedDepth(attempt.expectedTxId, 1);
+    }
+    const beforeConfirmation = state.getErgoOperationalTransactionAttempt(attempt.expectedTxId);
+    const confirmed = confirmTrackerV2(attempt, confirmationTarget, confirmation!);
+    if (fault === 'admission-confirmation-parent' || fault === 'admission-successor-drift'
+      || fault === 'admission-confirmation-reincluded' || fault === 'admission-confirmation-depth' || fault === 'admission-unfinalized-row') {
+      await expect(confirmed).rejects.toThrow(/lineage|successor differs|confirmation changed|retained transport finalization/);
+      expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)).toEqual(beforeConfirmation);
+    } else {
+      await expect(confirmed).resolves.toMatchObject({ expectedTxId: attempt.expectedTxId, status: 'confirmed' });
+    }
+    expect(observed.submissionBodies).toHaveLength(1);
+  } finally {
+    for (const spy of spies.reverse()) spy.mockRestore();
+    state.close();
+  }
+}
+
 function reidentifyBox(box: Eip12Box, transactionId: string): Eip12Box {
   const { boxId: _boxId, transactionId: _transactionId, index, ...output } = box;
   const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
@@ -2405,6 +2616,20 @@ async function withObservations<T>(
     const observeAt = (at: string) => observeSubstrateFederatedGenesisV1(targetProfile, { now: () => new Date(at) });
     const retained = await observeAt(new Date(Date.now() - 2_000).toISOString());
     return await run({ profile: targetProfile, retained, observeAt, checkBodies, submissionBodies,
+      reincludeSubmitted: (txId, depth) => {
+        const prior = confirmations.get(txId);
+        if (prior === undefined) throw new Error('synthetic re-inclusion requires a prior submission');
+        const inclusionHeight = prior.inclusionHeight + 1;
+        confirmations.set(txId, { inclusionHeight, headerId: syntheticHeaderId(inclusionHeight) });
+        tipHeight = inclusionHeight + depth;
+        tipHeaderId = syntheticHeaderId(tipHeight);
+      },
+      setSubmittedDepth: (txId, depth) => {
+        const prior = confirmations.get(txId);
+        if (prior === undefined) throw new Error('synthetic depth update requires a prior submission');
+        tipHeight = prior.inclusionHeight + depth;
+        tipHeaderId = syntheticHeaderId(tipHeight);
+      },
       publishBox: (box, headers) => {
         json.set(box.boxId, structuredClone(box)); sigma.set(box.boxId, sigmaBytes(box));
         signingHeaders = headers;
@@ -2432,6 +2657,8 @@ interface ObservationFixture {
   readonly observeAt: (at: string) => Promise<Awaited<ReturnType<typeof observeSubstrateFederatedGenesisV1>>>;
   readonly checkBodies: readonly Record<string, unknown>[];
   readonly submissionBodies: readonly Record<string, unknown>[];
+  readonly reincludeSubmitted: (txId: string, depth: number) => void;
+  readonly setSubmittedDepth: (txId: string, depth: number) => void;
   readonly publishBox: (box: Eip12Box, headers: readonly Readonly<Record<string, unknown>>[]) => void;
 }
 

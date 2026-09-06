@@ -14,6 +14,7 @@ import {
 } from './fleet-signer.js';
 import {
   assertBridgeValidityTrackerObservedHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1,
   type BridgeValidityTrackerObservedHeaderContextV1,
 } from './bridge-validity-tracker-header-context-v1.js';
 import { deriveUnsignedTransactionId } from './ergo-unsigned-transaction.js';
@@ -74,6 +75,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
+  assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
@@ -192,6 +194,13 @@ const CLAIMED_TRACKER_FEE_CHECKS = new WeakSet<object>();
 const TRACKER_PROTOCOL_V2_CHECKS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>;
   result: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result>;
+  genesisHeaderIdHex: string;
+}>>();
+const CLAIMED_TRACKER_V2_CHECKS = new WeakSet<object>();
+const REVALIDATED_TRACKER_V2_CHECKS = new WeakSet<object>();
+const TRACKER_V2_FRESHNESS = new WeakMap<object, Readonly<{
+  check: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>;
+  binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
 }>>();
 
 export interface SubstrateFederatedIsolatedDevnetTrackerV2CheckInput {
@@ -218,6 +227,126 @@ export function assertSubstrateFederatedIsolatedDevnetTrackerV2Check(
   if (canonicalJson(current) !== canonicalJson(value.result.targetBinding)) {
     throw new Error('isolated tracker protocol V2 check target binding changed');
   }
+}
+
+/** Claim while the original frozen action is live; persistence cannot recreate it. */
+export async function claimSubstrateFederatedIsolatedDevnetTrackerV2Check(
+  check: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+) {
+  assertSubstrateFederatedIsolatedDevnetTrackerV2Check(check, target);
+  if (CLAIMED_TRACKER_V2_CHECKS.has(check)) throw new Error('tracker V2 check is already claimed');
+  CLAIMED_TRACKER_V2_CHECKS.add(check);
+  const revalidationDigestHex = await reobserveTrackerV2(check, target, () => {
+    assertSubstrateFederatedIsolatedDevnetTrackerV2Check(check, target);
+  }, true);
+  return Object.freeze({ binding: check.result.targetBinding, revalidationDigestHex,
+    genesisHeaderIdHex: TRACKER_PROTOCOL_V2_CHECKS.get(check)!.genesisHeaderIdHex });
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerV2Freshness {
+  readonly completion: Readonly<SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1>;
+  readonly binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+}
+
+export async function revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation(
+  check: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Freshness>> {
+  if (!TRACKER_PROTOCOL_V2_CHECKS.has(check) || !CLAIMED_TRACKER_V2_CHECKS.has(check)
+    || REVALIDATED_TRACKER_V2_CHECKS.has(check)) {
+    throw new Error('tracker V2 reservation revalidation lacks an unconsumed claimed check');
+  }
+  REVALIDATED_TRACKER_V2_CHECKS.add(check);
+  const binding = assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, check.result.targetBinding);
+  const assertActive = () => {
+    const current = assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, check.result.targetBinding);
+    if (canonicalJson(current) !== canonicalJson(binding)) throw new Error('tracker V2 freshness binding changed');
+  };
+  await reobserveTrackerV2(check, target, assertActive, true);
+  const checked = await checkSignedTransaction(check.result.signedCandidate, 'isolated tracker V2 reservation', PRIMARY_NODE_ORIGIN);
+  if (checked === null) throw new Error('tracker V2 reservation node check failed');
+  await reobserveTrackerV2(check, target, assertActive, true);
+  const freshness = Object.freeze({ binding,
+    completion: issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(target) });
+  TRACKER_V2_FRESHNESS.set(freshness, Object.freeze({ check, binding }));
+  return freshness;
+}
+
+export async function checkSubstrateFederatedIsolatedDevnetTrackerV2Transport(
+  check: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>,
+  freshness: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Freshness>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>,
+) {
+  const retained = TRACKER_V2_FRESHNESS.get(freshness);
+  if (retained === undefined || retained.check !== check) throw new Error('tracker V2 transport lacks exact freshness provenance');
+  // Consume before I/O, including a failed check. The same signed candidate is never retried.
+  TRACKER_V2_FRESHNESS.delete(freshness);
+  const binding = assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
+  const assertActive = () => {
+    const current = assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
+    if (canonicalJson(current) !== canonicalJson(binding)
+      || current.reservationFreshnessProcessBindingDigestHex !== retained.binding.processBindingDigestHex
+      || current.reservationFreshnessExecutionTargetIdentityDigestHex !== retained.binding.executionTargetIdentityDigestHex) {
+      throw new Error('tracker V2 transport does not descend from its reservation freshness');
+    }
+  };
+  await reobserveTrackerV2(check, target, assertActive, false);
+  const checked = await checkSignedTransaction(check.result.signedCandidate, 'isolated tracker V2 pretransport', PRIMARY_NODE_ORIGIN);
+  if (checked === null) throw new Error('tracker V2 pretransport node check failed');
+  await reobserveTrackerV2(check, target, assertActive, false);
+  const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(check.result.signedCandidate, checked, {
+    processBindingDigestHex: binding.processBindingDigestHex,
+    executionTargetIdentityDigestHex: binding.executionTargetIdentityDigestHex,
+  });
+  return Object.freeze({ binding, checkedAcceptance });
+}
+
+async function reobserveTrackerV2(
+  check: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>,
+  target: Readonly<{ primaryNodeOrigin: string; witnessNodeOrigin: string }>,
+  assertActive: () => void,
+  frozen: boolean,
+): Promise<string> {
+  const material = TRACKER_PROTOCOL_V2_CHECKS.get(check);
+  if (material === undefined) throw new Error('tracker V2 observation lacks session provenance');
+  assertActive();
+  if (target.primaryNodeOrigin !== PRIMARY_NODE_ORIGIN || target.witnessNodeOrigin !== WITNESS_NODE_ORIGIN) {
+    throw new Error('tracker V2 observation origins differ from the isolated target');
+  }
+  const expectedHeaders = check.result.observedHeaderContext.headers;
+  const importedWasm = await import('ergo-lib-wasm-nodejs');
+  const wasm = importedWasm.default ?? importedWasm;
+  const observations = [];
+  for (const origin of [PRIMARY_NODE_ORIGIN, WITNESS_NODE_ORIGIN]) {
+    const genesis = await ngetDirect('/blocks/at/1', origin);
+    if (canonicalJson(genesis) !== canonicalJson([material.genesisHeaderIdHex])) {
+      throw new Error('tracker V2 admission genesis changed');
+    }
+    const headers = await ngetDirect('/blocks/lastHeaders/10', origin);
+    if (!Array.isArray(headers) || headers.length !== 10) throw new Error('tracker V2 admission headers unavailable');
+    const anchor = check.result.observedHeaderContext.anchorHeader;
+    const anchorIndex = headers.findIndex(header => header.height === anchor.height);
+    if (anchorIndex < 0) throw new Error('tracker V2 transport anchor is stale or replaced');
+    const currentHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders: headers, anchorContextIndex: anchorIndex,
+      expectedAnchorHeaderIdHex: anchor.id, expectedAnchorExtensionRootHex: anchor.extensionRootHex,
+    });
+    if ((frozen && canonicalJson(currentHeaders.headers.map(header => header.serializedHex))
+      !== canonicalJson(expectedHeaders.map(header => header.serializedHex)))
+      || currentHeaders.currentHeight < check.result.observedHeaderContext.currentHeight) {
+      throw new Error('tracker V2 frozen header context changed or regressed');
+    }
+    const inputs = [];
+    for (const expected of check.result.transaction.inputBoxes) {
+      const current = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${expected.boxId}`, origin), 'tracker V2 admission input');
+      if (canonicalJson(current) !== canonicalJson(expected)) throw new Error('tracker V2 admission input changed');
+      inputs.push(current);
+    }
+    observations.push({ origin, genesis, headers: currentHeaders.headers.map(header => header.serializedHex), inputs });
+    assertActive();
+  }
+  return sha256CanonicalJson({ checkDigestHex: check.result.checkDigestHex, observations }, 'E2S_ISOLATED_TRACKER_V2_ADMISSION_REVALIDATION');
 }
 
 /** Claim only a genuine retained-signer result; a JSON copy cannot restore it. */
@@ -1467,7 +1596,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         });
         const check = Object.freeze({ result, setupRequestDigestHex: continuation.batch.request.requestDigestHex,
           feeFundingTransactionIdHex: feeCheck.transaction.txId });
-        TRACKER_PROTOCOL_V2_CHECKS.set(check, Object.freeze({ target, result }));
+        TRACKER_PROTOCOL_V2_CHECKS.set(check, Object.freeze({ target, result,
+          genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex }));
         return check;
       }, 'closed'),
       runForExecution: async (

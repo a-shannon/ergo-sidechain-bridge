@@ -10,7 +10,8 @@ import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
-  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as FEE_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE as ADMISSION_PROFILE,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
   StateTracker,
@@ -18,6 +19,7 @@ import {
   type ReserveErgoOperationalTransactionAttemptInput,
 } from './state-tracker.js';
 
+describe.each([FEE_PROFILE, ADMISSION_PROFILE])('isolated tracker journal %s', PROFILE => {
 const hex = (byte: string): string => byte.repeat(32);
 const TX_ID = hex('11');
 const SOURCE_ID = hex('12');
@@ -215,7 +217,7 @@ describe('tracker fee funding StateTracker journal', () => {
         { inputBoxIds: [hex('32'), oldInput] },
       ]) {
         expect(() => state.reserveErgoOperationalTransactionAttempt(replacement(patch)))
-          .toThrow(/must be reconciled before replacement|previously journaled tracker fee funding box/);
+          .toThrow(/must be reconciled before replacement|previously journaled tracker (fee funding|V2 admission) box/);
       }
     }
     expect(state.getErgoOperationalTransactionAttempts(PROFILE)).toHaveLength(1);
@@ -270,7 +272,7 @@ describe('tracker fee funding StateTracker journal', () => {
       .toThrow(/quarantine conflicts/);
     expect(() => state.reserveErgoOperationalTransactionAttempt(replacement({
       inputBoxIds: [hex('32'), SOURCE_ID],
-    }))).toThrow(/previously journaled tracker fee funding box/);
+    }))).toThrow(/previously journaled tracker (fee funding|V2 admission) box/);
     expect(state.getErgoOperationalTransactionAttempt(TX_ID)).toEqual(quarantined);
   });
 
@@ -290,6 +292,7 @@ describe('tracker fee funding StateTracker journal', () => {
     DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
     SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
     SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+    ...(PROFILE === ADMISSION_PROFILE ? [FEE_PROFILE] : [ADMISSION_PROFILE]),
   ])('does not reuse another profile or change its singleton scope: %s', operationProfile => {
     state.reserveErgoOperationalTransactionAttempt(input());
     const other = state.reserveErgoOperationalTransactionAttempt(replacement({ operationProfile }));
@@ -342,6 +345,12 @@ describe('tracker fee funding SQLite schema compatibility', () => {
     expect(withDb(db => ({ table: schemaSql(db, TABLE), index: schemaSql(db, INDEX) }))).toEqual(before);
     expect(state.getErgoOperationalTransactionAttempts(DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE))
       .toEqual([prior]);
+    if (PROFILE === ADMISSION_PROFILE) {
+      const fee = state.reserveErgoOperationalTransactionAttempt(replacement({ operationProfile: FEE_PROFILE }));
+      restart();
+      expect(state.getErgoOperationalTransactionAttempts(FEE_PROFILE)).toEqual([fee]);
+      expect(() => state.getErgoOperationalTransactionAttempts(ADMISSION_PROFILE)).toThrow(/schema is unsupported/);
+    }
   });
 
   it.each([
@@ -394,4 +403,5 @@ describe('tracker fee funding SQLite schema compatibility', () => {
     })).toThrow(/UNIQUE constraint failed: ergo_operational_transaction_attempts.operation_profile/);
     expect(state.getErgoOperationalTransactionAttempts(PROFILE)).toHaveLength(1);
   });
+});
 });

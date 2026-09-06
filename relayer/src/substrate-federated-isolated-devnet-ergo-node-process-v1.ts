@@ -127,7 +127,15 @@ const OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS =
 const ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS =
   new WeakSet<object>();
 const OWNED_TRACKER_RESERVATION_FRESHNESS_TARGET_BINDINGS =
-  new WeakMap<object, OwnedTargetBinding>();
+  new WeakMap<object, OwnedTargetBinding & {
+    readonly trackerCheckProcessBindingDigestHex: string;
+    readonly trackerCheckExecutionTargetIdentityDigestHex: string;
+  }>();
+const OWNED_TRACKER_CONFIRMATION_TARGET_PARENTS = new WeakMap<object, Readonly<{
+  trackerTransportProcessBindingDigestHex: string;
+  trackerTransportExecutionTargetIdentityDigestHex: string;
+  expectedTransactionIdHex: string;
+}>>();
 const ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS =
   new WeakSet<object>();
 const OWNED_TRACKER_TRANSPORT_TARGET_BINDINGS =
@@ -869,6 +877,35 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFre
     executionTargetIdentityDigestHex:
       binding.executionTargetIdentityDigestHex,
   });
+}
+
+/** V2 admission must descend from the exact check, not merely another frozen node action. */
+export function assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(
+  target: Readonly<SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1>,
+  expected: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const current = assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(target);
+  const parent = OWNED_TRACKER_RESERVATION_FRESHNESS_TARGET_BINDINGS.get(target)!;
+  if (parent.trackerCheckProcessBindingDigestHex !== expected.processBindingDigestHex
+    || parent.trackerCheckExecutionTargetIdentityDigestHex !== expected.executionTargetIdentityDigestHex) {
+    throw new Error('tracker V2 freshness target does not descend from the checked target');
+  }
+  return current;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  expectedTransport: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
+  expectedTransactionIdHex: string,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const parent = OWNED_TRACKER_CONFIRMATION_TARGET_PARENTS.get(target);
+  if (parent === undefined || parent.expectedTransactionIdHex !== expectedTransactionIdHex
+    || parent.trackerTransportProcessBindingDigestHex !== expectedTransport.processBindingDigestHex
+    || parent.trackerTransportExecutionTargetIdentityDigestHex !== expectedTransport.executionTargetIdentityDigestHex) {
+    throw new Error('tracker V2 confirmation target does not descend from the exact transport');
+  }
+  return current;
 }
 
 function assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTarget(
@@ -2234,6 +2271,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           Object.freeze({
             processBindingDigestHex,
             executionTargetIdentityDigestHex,
+            trackerCheckProcessBindingDigestHex: continuation.processBindingDigestHex,
+            trackerCheckExecutionTargetIdentityDigestHex: continuation.executionTargetIdentityDigestHex,
             assertActiveProcesses,
           }),
         );
@@ -2704,6 +2743,11 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           processBindingDigestHex,
           executionTargetIdentityDigestHex,
           assertActiveProcesses,
+        }));
+        OWNED_TRACKER_CONFIRMATION_TARGET_PARENTS.set(target, Object.freeze({
+          trackerTransportProcessBindingDigestHex: continuation.trackerTransportProcessBindingDigestHex,
+          trackerTransportExecutionTargetIdentityDigestHex: continuation.trackerTransportExecutionTargetIdentityDigestHex,
+          expectedTransactionIdHex: confirmedTransactionIdHex,
         }));
         state = 'action';
         ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
