@@ -167,6 +167,21 @@ import * as launch from './substrate-federated-isolated-devnet-launch-v1.js';
 import * as generation from './substrate-federated-isolated-devnet-generation-v1.js';
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 import * as committedVaultObserver from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
+import * as sourceLockObserver from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
+import * as sourceLockAuthorizer from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+import * as vaultAuthorizer from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
+import * as confirmationArtifacts from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import * as ownedRewardDiscovery from './substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+import { AuthenticatedSpvTrackerReadOnlyNodeClient } from './authenticated-spv-tracker-read-only-node-client.js';
+import {
+  promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1 as promoteSourceLockCheck,
+  promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1 as promoteVaultCheck,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  admitErgoOperationalTransaction,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE as SOURCE_LOCK_OPERATION_PROFILE,
+  PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE as VAULT_OPERATION_PROFILE,
+} from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1 as buildMintDraft }
   from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import { collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1 as collectMintEvidence }
@@ -2035,6 +2050,183 @@ describe('owned synthetic session -> retained V2 peg-in boundaries', () => {
           return ordinal === faultOrdinal && fault === 'check-failure' ? 'ff'.repeat(32) : id;
         } });
     } finally { errors.mockRestore(); custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+});
+
+describe('genuine V2 deposit -> authorization and candidate-bound observations', () => {
+  it('composes fresh V3 custody and real V2 guards without deposit transport', async () => {
+    const fixture = await createRootFixture(true);
+    const target = executionTarget();
+    const spies: Array<{ mockRestore(): void }> = [];
+    spies.push(vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockImplementation(value => {
+        if (value !== target) throw new Error('synthetic target identity differs');
+        return executionBinding;
+      }));
+    try {
+      await withObservations(async observed => {
+        const batch = await fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target);
+        const family = fixture.input.sourceAndCompilerInput.familyReceipt;
+        const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
+        const height = Math.max(...batch.request.orderedIssuances.map(value => value.predictedStateOutput.creationHeight)) + 1;
+        const candidateInput = {
+          batch, target, sourceFundingInput: fundingCandidate('20000000', fixture.session.signer.p2pkErgoTreeHex),
+          sourceIntent: { formatVersion: 2 as const, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+            sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+            tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+            admissionProfileIdHex: family.profile.familyIdHex, sourceAssetIdHex: profile.settlementAssetIdHex,
+            amountNanoErg: '10000000', recipientAddressHex: '61'.repeat(20) },
+          depositorErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex,
+          creationHeights: { currentErgoHeight: height, sourceLockCreation: height, reserveTransition: height },
+        };
+        const candidate = await buildPegInV2(candidateInput);
+        const packet = assertPegInV2(candidate, batch, target);
+        const otherCandidate = await buildPegInV2(candidateInput);
+        expect(otherCandidate).not.toBe(candidate);
+        expect(otherCandidate.depositPacket).toEqual(packet);
+        const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+          currentHeight: height, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
+        }).headers.map(header => header.raw);
+        observed.publishBox(packet.boxes.sourceFundingInput, headers);
+        const sourceCheck = promoteSourceLockCheck(
+          await fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target), target,
+        );
+
+        // Only target ownership, reward discovery and chain views are synthetic.
+        // Compiler/candidate/check provenance, signing and both authorizers are real.
+        const reward = (digest: string) => Object.freeze({ observation: Object.freeze({
+          reportDigestHex: digest.repeat(32), sources: {
+            primaryNodeOrigin: target.primaryNodeOrigin, witnessNodeOrigin: target.witnessNodeOrigin },
+          target: { network: 'devnet', tipHeight: height, tipHeaderIdHex: headers[0]!.id },
+          genesisInputs: { tracker: packet.boxes.sourceFundingInput },
+          boundary: { fixedDualLoopbackOrigins: true, targetBinaryRevalidationRequired: true },
+        }) });
+        const postCheck = reward('71');
+        const preTransport = reward('72');
+        spies.push(vi.spyOn(ownedRewardDiscovery, 'assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1')
+          .mockImplementation((value, suppliedTarget) => {
+            if ((value !== postCheck && value !== preTransport) || suppliedTarget !== target) {
+              throw new Error('synthetic reward observation identity differs');
+            }
+            return value.observation as never;
+          }));
+        const sourceInput = { batch, candidate, target, executionCheck: sourceCheck,
+          postCheck: postCheck as never, preTransport: preTransport as never };
+        expect(() => sourceLockAuthorizer.createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(sourceInput as never))
+          .toThrow(/candidate.*provenance/);
+        const sourceAuthority = sourceLockAuthorizer.createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2(sourceInput);
+        const checked = (
+          check: typeof sourceCheck | ReturnType<typeof promoteVaultCheck>,
+          transaction: typeof packet.transactions.sourceLockCreation,
+          operationProfile: typeof SOURCE_LOCK_OPERATION_PROFILE | typeof VAULT_OPERATION_PROFILE,
+        ) => ({
+          signed: {
+            admission: admitErgoOperationalTransaction({ operationProfile, expectedTxId: transaction.txId,
+              sourceBoxId: transaction.eip12Tx.inputs[0]!.boxId,
+              inputBoxIds: transaction.eip12Tx.inputs.map(value => value.boxId),
+              attemptedAtHeight: height, unsignedTransaction: transaction.eip12Tx }),
+            nodeOrigin: target.primaryNodeOrigin, signerArtifact: check.signedCandidate,
+            signedTransactionDigestHex: check.signedCandidate.signedTransactionDigestHex,
+          },
+          checkerArtifact: check.checkedAcceptance.submissionHandle,
+          checkResponseDigestHex: check.checkedAcceptance.submissionHandle.checkResponseDigestHex,
+        });
+        const sourceRevalidated = { checked: checked(sourceCheck, packet.transactions.sourceLockCreation, SOURCE_LOCK_OPERATION_PROFILE),
+          revalidationDigestHex: sourceAuthority.revalidationDigestHex };
+        const sourceEvidence = sourceAuthority.authorize(sourceRevalidated);
+        expect(() => sourceLockAuthorizer.assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+          sourceAuthority, { revalidated: sourceRevalidated, ...sourceEvidence },
+        )).not.toThrow();
+
+        const visible = new Map<string, Eip12Box>();
+        for (const box of [packet.boxes.reservePredecessor, packet.boxes.sourceLock, packet.boxes.transitionFeeFunding]) {
+          observed.publishBox(box, headers);
+          visible.set(box.boxId, box);
+        }
+        spies.push(vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBoxByIdOrNull')
+          .mockImplementation(async boxId => visible.get(boxId) ?? null));
+        const headerId = (at: number) => createHash('sha256').update(`V2 deposit observation ${at}`).digest('hex');
+        const observedHeight = height + 10;
+        spies.push(vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBestHeader')
+          .mockImplementation(async () => ({ height: observedHeight, id: headerId(observedHeight) })));
+        const chain = new Map(Array.from({ length: 11 }, (_, index) => {
+          const at = height + index;
+          return [headerId(at), { height: at, id: headerId(at), parentId: headerId(at - 1) }] as const;
+        }));
+        spies.push(vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBlockHeaderById')
+          .mockImplementation(async id => chain.get(id) ?? null));
+        const confirmation = (expectedTxId: string) => Object.freeze({
+          status: 'confirmed' as const, expectedTxId, observedTxId: expectedTxId,
+          confirmations: 10, confirmationHeight: height, observedAtHeight: height + 10,
+          confirmationHeaderIdHex: headerId(height), observationDigestHex: '73'.repeat(32),
+          observerArtifact: Object.freeze({ expectedTxId }),
+        });
+        const sourceConfirmation = confirmation(packet.transactions.sourceLockCreation.txId);
+        const vaultConfirmation = confirmation(packet.transactions.reserveTransition.txId);
+        spies.push(vi.spyOn(confirmationArtifacts, 'assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1')
+          .mockImplementation((artifact, identity, genesis, txId) => {
+            expect(identity).toBe(executionBinding.executionTargetIdentityDigestHex);
+            expect(genesis).toBe(batch.request.target.genesisHeaderIdHex);
+            const expected = txId === sourceConfirmation.expectedTxId ? sourceConfirmation : vaultConfirmation;
+            expect(txId).toBe(expected.expectedTxId);
+            expect(artifact).toBe(expected.observerArtifact);
+          }));
+        spies.push(vi.spyOn(confirmationArtifacts, 'reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1')
+          .mockImplementation(async input => {
+            const expected = input.expectedTxId === sourceConfirmation.expectedTxId ? sourceConfirmation : vaultConfirmation;
+            expect(input.artifact).toBe(expected.observerArtifact);
+            expect(input.priorConfirmation.observerArtifact).toBe(expected.observerArtifact);
+            expect(input.expectedTxId).toBe(expected.expectedTxId);
+            expect(input.expectedReconciliationIdentityDigestHex).toBe(executionBinding.executionTargetIdentityDigestHex);
+            expect(input.expectedTargetGenesisHeaderIdHex).toBe(batch.request.target.genesisHeaderIdHex);
+            return expected;
+          }));
+        const sourceObservationInput = { batch, candidate, target, confirmation: sourceConfirmation };
+        await expect(sourceLockObserver.observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1(sourceObservationInput as never))
+          .rejects.toThrow(/candidate.*provenance/);
+        const sourceObservation = await sourceLockObserver.observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV2(sourceObservationInput);
+        const otherObservation = await sourceLockObserver.observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV2({
+          ...sourceObservationInput, candidate: otherCandidate,
+        });
+        expect(otherObservation).toEqual(sourceObservation);
+        sourceLockObserver.assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(otherObservation, target);
+        const vaultCheck = promoteVaultCheck(
+          await fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target), target,
+        );
+        const vaultInput = { batch, candidate, target, executionCheck: vaultCheck, sourceLockObservation: sourceObservation };
+        expect(() => vaultAuthorizer.createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(vaultInput as never))
+          .toThrow(/candidate.*provenance/);
+        expect(() => vaultAuthorizer.createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2({
+          ...vaultInput, sourceLockObservation: otherObservation,
+        })).toThrow(/candidate|provenance/);
+        const vaultSession = vaultAuthorizer.createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2(vaultInput);
+        const vaultChecked = checked(vaultCheck, packet.transactions.reserveTransition, VAULT_OPERATION_PROFILE);
+        const revalidation = await vaultSession.revalidator.revalidate(vaultChecked);
+        const revalidated = { checked: vaultChecked, revalidationDigestHex: revalidation.revalidationDigestHex };
+        const evidence = vaultSession.broadcastAuthorizer.authorize(revalidated);
+        vaultAuthorizer.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+          vaultSession.broadcastAuthorizer, { revalidated, ...evidence },
+        );
+        expect(vaultSession.takePreTransportObservation().observedTipHeight).toBe(observedHeight);
+        visible.clear();
+        visible.set(packet.boxes.reserveSuccessor.boxId, packet.boxes.reserveSuccessor);
+        const vaultObservationInput = { batch, candidate, target, confirmation: vaultConfirmation };
+        await expect(committedVaultObserver.observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1(vaultObservationInput as never))
+          .rejects.toThrow(/candidate.*provenance/);
+        const vaultObservation = await committedVaultObserver.observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV2(vaultObservationInput);
+        committedVaultObserver.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2(
+          vaultObservation, batch, candidate, target,
+        );
+        expect(vaultObservation).toMatchObject({ version: 1, reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
+          boundaries: { mintAuthorized: false, fundsAuthorityEstablished: false } });
+        expect(observed.checkBodies).toHaveLength(6);
+        expect(observed.checkBodies[5]).toEqual(observed.checkBodies[4]);
+        expect(observed.submissionBodies).toHaveLength(0);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally {
+      for (const spy of spies.reverse()) spy.mockRestore();
+      fixture.session.dispose();
+    }
   }, 60_000);
 });
 

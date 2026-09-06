@@ -93,7 +93,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| V2 deposit lifecycle and source proof | Main owner; consumes the setup-bound V2 candidate and retained signer checks | Connect the V2 deposit to exact transport authorization and confirmed source-lock/reserve observations, then mint draft/evidence and its source-proof consumer. Existing authorization, observation and draft/evidence consumers still require V1 candidate/setup provenance; checked bytes alone cannot substitute for those bindings. Split at executable consumer boundaries, not individual forwarding functions |
+| V2 committed deposit -> mint source proof | Main owner; consumes the setup-bound V2 candidate and its exact committed-reserve observation | Connect the V2 observation to mint draft/evidence and its source-proof consumer, retaining all five V2 compiler bindings and the exact source intent, reserve transition, successor and depth policy. The current draft/evidence consumers still require V1 candidate/setup provenance; generic observations cannot substitute for those bindings. Authorization and observation now have explicit V2 entrypoints; the managed caller still needs to select them |
 | Application composition | Can be prepared independently of deposit confirmation; consumes PacketV3/SessionV4 | Add explicit PacketV3 support to the application root and proof-bound signer, preserving the exact owner, recipient, signed triplet and checkpoint bindings. Existing PacketV2 provenance cannot be relabelled |
 | Actual campaign caller | Main owner; consumes the preceding joins and component-tested V2 admission lifecycle | Select PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Replace its V1 tracker projections with genuine V2 construction. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
@@ -150,6 +150,22 @@ remain byte/target/signer-bound checks, not V2 lifecycle or transport authority.
 The actual campaign caller still selects the old packet, deposit authorization,
 observation and tracker paths; those consumers must be connected before a fresh
 campaign.
+
+The deposit authorization and output observers now accept genuine V2 candidates
+through explicit V2 entrypoints. Source-lock creation retains its exact checked
+bytes and funding observations. Its output observer refreshes confirmation
+before and after box reads and requires one unchanged dual-node tip; re-inclusion
+during the read or a moving/replaced tip rejects without issuing an observation.
+Reserve transition additionally requires the
+same candidate/setup/packet as the source-lock observation, fresh signed-byte
+checking and exact unspent inputs. After confirmation, the observer requires
+spent transition inputs, the exact reserve successor and the existing ancestry
+depth policy. Private provenance and target bindings are rechecked after async
+operations. Generic observation, authorization and journal formats retain their
+existing transaction-bound semantics; they do not become V2 mint authority.
+The V1 candidate entrypoints remain separate. Component fixtures exercise these
+joins with synthetic custody and bounded node oracles, not a canonical campaign
+or independently verified Ergo consensus.
 
 The V2 admission lifecycle now connects a genuine session-owned two-input check
 to explicit isolated-devnet authorization, durable reservation, revalidation,

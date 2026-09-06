@@ -14,13 +14,19 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
+  reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
 } from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   normalizeEip12Box,
@@ -68,8 +74,14 @@ const OBSERVATIONS = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+    batch: object;
+    candidate: object;
+    packet: DepositPacket;
   }>
 >();
+
+type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
 
 export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1(
   input: Readonly<{
@@ -82,13 +94,40 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutp
       Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
   }>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target } = retained;
+  return observeOutputs(retained, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(candidate, batch, target));
+}
+
+export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV2(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target } = retained;
+  return observeOutputs(retained, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target));
+}
+
+async function observeOutputs(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+      | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1
+      | SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+  assertCandidate: () => DepositPacket,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
-  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
-    input.candidate,
-    input.batch,
-    input.target,
-  );
+  const packet = assertCandidate();
   const expectedTxId = packet.transactions.sourceLockCreation.txId;
   const confirmation =
     normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
@@ -114,6 +153,28 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutp
   const witness = new AuthenticatedSpvTrackerReadOnlyNodeClient(
     input.target.witnessNodeOrigin,
   );
+  const refreshConfirmation = async (
+    prior: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>,
+  ) => {
+    const refreshed = await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
+      artifact: prior.observerArtifact,
+      expectedReconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
+      expectedTargetGenesisHeaderIdHex: input.batch.request.target.genesisHeaderIdHex,
+      expectedTxId,
+      priorConfirmation: prior,
+    });
+    if (refreshed.status !== 'confirmed' || refreshed.confirmationHeight === null
+      || refreshed.confirmationHeaderIdHex === null) {
+      throw new Error('isolated source-lock output observation requires refreshed canonical confirmation');
+    }
+    return Object.freeze({ ...refreshed,
+      confirmationHeight: refreshed.confirmationHeight,
+      confirmationHeaderIdHex: refreshed.confirmationHeaderIdHex,
+    });
+  };
+  const initialConfirmation = await refreshConfirmation(confirmation);
+  const primaryTipBefore = await readTip(primary);
+  const witnessTipBefore = await readTip(witness);
   const primaryState = await observeNodeState(
     primary,
     packet.boxes.sourceFundingInput.boxId,
@@ -131,12 +192,30 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutp
   if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
     throw new Error('isolated source-lock output observations disagree');
   }
+  const latestConfirmation = await refreshConfirmation(initialConfirmation);
+  if (latestConfirmation.confirmationHeight !== initialConfirmation.confirmationHeight
+    || latestConfirmation.confirmationHeaderIdHex !== initialConfirmation.confirmationHeaderIdHex) {
+    throw new Error('isolated source-lock canonical inclusion changed during observation');
+  }
+  const primaryTipAfter = await readTip(primary);
+  const witnessTipAfter = await readTip(witness);
+  if ([witnessTipBefore, primaryTipAfter, witnessTipAfter].some(
+    tip => canonicalJson(tip) !== canonicalJson(primaryTipBefore),
+  )) {
+    throw new Error('isolated source-lock observation requires one stable dual-node tip');
+  }
+  if (initialConfirmation.observedAtHeight > primaryTipBefore.height
+    || latestConfirmation.observedAtHeight !== primaryTipBefore.height
+    || latestConfirmation.confirmationHeight > primaryTipBefore.height) {
+    throw new Error('isolated source-lock confirmation snapshots differ from the stable output tip');
+  }
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
   if (
     current.processBindingDigestHex !== binding.processBindingDigestHex
     || current.executionTargetIdentityDigestHex
       !== binding.executionTargetIdentityDigestHex
+    || assertCandidate() !== packet
   ) {
     throw new Error('isolated source-lock output target changed during observation');
   }
@@ -149,9 +228,9 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutp
     sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
     sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
     transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
-    confirmationHeight: confirmation.confirmationHeight,
-    confirmationHeaderIdHex: confirmation.confirmationHeaderIdHex,
-    confirmationObservationDigestHex: confirmation.observationDigestHex,
+    confirmationHeight: latestConfirmation.confirmationHeight,
+    confirmationHeaderIdHex: latestConfirmation.confirmationHeaderIdHex,
+    confirmationObservationDigestHex: latestConfirmation.observationDigestHex,
     processBindingDigestHex: current.processBindingDigestHex,
     executionTargetIdentityDigestHex:
       current.executionTargetIdentityDigestHex,
@@ -175,8 +254,26 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutp
       OBSERVATION_DIGEST_DOMAIN,
     ),
   });
-  OBSERVATIONS.set(observation, Object.freeze({ target: input.target, binding }));
+  OBSERVATIONS.set(observation, Object.freeze({
+    target: input.target, binding, batch: input.batch, candidate: input.candidate, packet,
+  }));
   return observation;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2(
+  observation: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>,
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>,
+  candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2> {
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, target);
+  const material = OBSERVATIONS.get(observation);
+  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target);
+  if (material === undefined || material.batch !== batch
+    || material.candidate !== candidate || material.packet !== packet) {
+    throw new Error('isolated source-lock output observation does not bind the exact V2 candidate');
+  }
+  return packet;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
@@ -251,4 +348,17 @@ async function observeNodeState(
     ...body,
     digestHex: sha256CanonicalJson(body, OBSERVATION_DIGEST_DOMAIN),
   });
+}
+
+async function readTip(
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+): Promise<Readonly<{ height: number; idHex: string }>> {
+  const header = await client.getBestHeader();
+  if (header === null || typeof header !== 'object' || Array.isArray(header)
+    || !('height' in header) || !('id' in header)
+    || typeof header.height !== 'number' || !Number.isSafeInteger(header.height) || header.height <= 0
+    || typeof header.id !== 'string' || !/^[0-9a-f]{64}$/u.test(header.id)) {
+    throw new Error('isolated source-lock observation requires a canonical positive-height tip');
+  }
+  return Object.freeze({ height: header.height, idHex: header.id });
 }

@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
+  assertCandidateV2: vi.fn(),
   assertExecutionCheck: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
   assertSigned: vi.fn(),
   assertSourceLockObservation: vi.fn(),
+  assertSourceLockObservationV2: vi.fn(),
   assertTarget: vi.fn(),
   checkSignedTransaction: vi.fn(),
   normalizeEip12Box: vi.fn(),
@@ -60,11 +62,16 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV1:
     mocks.assertCandidate,
 }));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
+}));
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js',
   () => ({
     assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1:
       mocks.assertSourceLockObservation,
+    assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2:
+      mocks.assertSourceLockObservationV2,
   }),
 );
 vi.mock(
@@ -87,6 +94,7 @@ vi.mock('./unsigned-ergo-transaction.js', () => ({
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1,
+  createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
@@ -305,6 +313,137 @@ beforeEach(() => {
     if (binding !== BINDING) throw new Error('execution binding changed');
   });
   mocks.normalizeEip12Box.mockImplementation(async value => value);
+});
+
+describe('isolated committed-vault V2 authorization boundary (mocked provenance and node fields)', () => {
+  const create = createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2;
+  function fixtureV2() {
+    const f = fixture();
+    const candidate = Object.freeze({ ...f.input.candidate, version: 2 });
+    const batch = Object.freeze({ ...f.input.batch, version: 3 });
+    const input = { ...f.input, candidate, batch };
+    mocks.assertCandidateV2.mockImplementation((value, valueBatch, target) => {
+      if (value !== candidate || valueBatch !== batch || target !== TARGET) {
+        throw new Error('V2 candidate provenance missing');
+      }
+      return candidate.depositPacket;
+    });
+    mocks.assertSourceLockObservationV2.mockImplementation((value, valueBatch, valueCandidate, target) => {
+      if (value !== input.sourceLockObservation || valueBatch !== batch
+        || valueCandidate !== candidate || target !== TARGET) {
+        throw new Error('V2 source observation candidate binding missing');
+      }
+    });
+    return { ...f, input };
+  }
+
+  it('binds V2 source evidence to one fresh recheck and one generic V1 authorization', async () => {
+    const f = fixtureV2();
+    const session = create(f.input as never);
+    const revalidation = await session.revalidator.revalidate(f.checked as never);
+    const revalidated = { checked: f.checked, revalidationDigestHex: revalidation.revalidationDigestHex };
+    const evidence = session.broadcastAuthorizer.authorize(revalidated as never);
+    expect(evidence.authorizationArtifact).toMatchObject({ version: 1 });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+      session.broadcastAuthorizer, { revalidated, ...evidence } as never,
+    )).not.toThrow();
+    expect(session.takePreTransportObservation()).toMatchObject({ observedTipHeight: 101 });
+    expect(() => session.takePreTransportObservation()).toThrow(/consumed/);
+    expect(mocks.assertCandidate).not.toHaveBeenCalled();
+    expect(mocks.assertSourceLockObservation).not.toHaveBeenCalled();
+    expect(mocks.assertSourceLockObservationV2).toHaveBeenCalledWith(
+      f.input.sourceLockObservation, f.input.batch, f.input.candidate, TARGET,
+    );
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+  });
+
+  it.each(['V1 candidate', 'copied candidate', 'V1 setup', 'copied target', 'copied observation'] as const)(
+    'rejects %s before async revalidation', fault => {
+      const f = fixtureV2();
+      const supplied = { ...f.input };
+      if (fault === 'V1 candidate') supplied.candidate = { ...f.input.candidate, version: 1 } as never;
+      if (fault === 'copied candidate') supplied.candidate = { ...f.input.candidate };
+      if (fault === 'V1 setup') supplied.batch = { ...f.input.batch, version: 2 } as never;
+      if (fault === 'copied target') supplied.target = { ...TARGET };
+      if (fault === 'copied observation') supplied.sourceLockObservation = { ...f.input.sourceLockObservation };
+      expect(() => create(supplied as never)).toThrow(/provenance|binding/);
+      expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['candidate', 'batch'] as const)(
+    'rejects another valid %s with identical source-output bytes', field => {
+      const f = fixtureV2();
+      // Only the upstream candidate guard accepts the separate identity. The
+      // source-observation guard must still receive the exact retained tuple.
+      mocks.assertCandidateV2.mockReturnValue(f.input.candidate.depositPacket);
+      const supplied = { ...f.input, [field]: { ...f.input[field] } };
+      expect(() => create(supplied as never)).toThrow(/source observation candidate binding/);
+      expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the old entrypoint strictly V1', () => {
+    const f = fixtureV2();
+    expect(() => createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(f.input as never))
+      .toThrow(/candidate provenance/);
+    expect(mocks.assertCandidateV2).not.toHaveBeenCalled();
+  });
+
+  it('reads getter-backed candidate and target slots once through async revalidation', async () => {
+    const f = fixtureV2();
+    let candidateReads = 0;
+    let targetReads = 0;
+    const supplied = {
+      ...f.input,
+      get candidate() { return ++candidateReads === 1 ? f.input.candidate : { ...f.input.candidate }; },
+      get target() { return ++targetReads === 1 ? TARGET : { ...TARGET }; },
+    };
+    const session = create(supplied as never);
+    const revalidation = await session.revalidator.revalidate(f.checked as never);
+    expect(() => session.broadcastAuthorizer.authorize({
+      checked: f.checked, revalidationDigestHex: revalidation.revalidationDigestHex,
+    } as never)).not.toThrow();
+    expect(candidateReads).toBe(1);
+    expect(targetReads).toBe(1);
+  });
+
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'rejects %s drift after the asynchronous signed-byte recheck', async field => {
+      const f = fixtureV2();
+      const session = create(f.input as never);
+      mocks.checkSignedTransaction.mockImplementationOnce(async () => {
+        mocks.assertTarget.mockReturnValue({ ...BINDING, [field]: hex('ee') });
+        return f.freshCheck;
+      });
+      await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(/binding changed|target changed/);
+      expect(() => session.takePreTransportObservation()).toThrow();
+    },
+  );
+
+  it.each(['candidate', 'source observation'] as const)(
+    'rechecks retained %s provenance after the asynchronous signed-byte recheck', async boundary => {
+      const f = fixtureV2();
+      const session = create(f.input as never);
+      mocks.checkSignedTransaction.mockImplementationOnce(async () => {
+        const guard = boundary === 'candidate' ? mocks.assertCandidateV2 : mocks.assertSourceLockObservationV2;
+        guard.mockImplementation(() => { throw new Error('V2 retained provenance revoked'); });
+        return f.freshCheck;
+      });
+      await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(/V2 retained provenance revoked/);
+      expect(() => session.takePreTransportObservation()).toThrow();
+    },
+  );
+
+  it('rejects an input disappearing after the fresh check on the V2 route', async () => {
+    const f = fixtureV2();
+    const session = create(f.input as never);
+    mocks.checkSignedTransaction.mockImplementationOnce(async () => {
+      mocks.boxes.delete(f.input.candidate.depositPacket.boxes.sourceLock.boxId);
+      return f.freshCheck;
+    });
+    await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(/input is unavailable/);
+  });
 });
 
 describe('isolated committed-vault broadcast authorizer V1', () => {
