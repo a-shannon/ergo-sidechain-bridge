@@ -17,9 +17,13 @@ import {
 } from './substrate-federated-burn-settlement-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetLaunchBaselineV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetLaunchBaselineV2Provenance,
   deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2,
   type DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
+  type DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
   type SubstrateFederatedIsolatedDevnetLaunchBaselineV1,
+  type SubstrateFederatedIsolatedDevnetLaunchBaselineV2,
   type SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
@@ -28,9 +32,13 @@ import {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-generation.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-generation.v2' as const;
 
 const GENERATION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V1';
+const GENERATION_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V2';
 const COMPILER_CLOSURE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_COMPILER_CLOSURE_V1';
 const GENESIS_PAYLOAD_DIGEST_DOMAIN =
@@ -40,6 +48,7 @@ const GENESIS_PAYLOAD_SET_DIGEST_DOMAIN =
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SINGLETON_VALUE_NANOERG =
   '10000000' as const;
 const generations = new WeakSet<object>();
+const generationsV2 = new WeakSet<object>();
 
 export interface SubstrateFederatedIsolatedDevnetGenesisPayloadV1 {
   readonly role: 'tracker' | 'duplicate-prevention' | 'pooled-reserve';
@@ -191,24 +200,60 @@ export interface BuildSubstrateFederatedIsolatedDevnetGenerationV1Input
     Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV1>;
 }
 
+export interface BuildSubstrateFederatedIsolatedDevnetGenerationV2Input
+  extends DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input {
+  readonly launchBaseline: Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV2>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetGenerationV2
+  extends Omit<SubstrateFederatedIsolatedDevnetGenerationV1, 'schema' | 'version' | 'generation'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V2_SCHEMA;
+  readonly version: 2;
+  readonly generation: Readonly<Omit<SubstrateFederatedIsolatedDevnetGenerationV1['generation'],
+    'label' | 'settlementNetworkId'> & {
+    readonly label: 'substrate-federated-isolated-devnet-v2';
+    readonly settlementNetworkId: 'ergo-local-devnet';
+  }>;
+}
+
 export function buildSubstrateFederatedIsolatedDevnetGenerationV1(
   input: Readonly<BuildSubstrateFederatedIsolatedDevnetGenerationV1Input>,
 ): Readonly<SubstrateFederatedIsolatedDevnetGenerationV1> {
+  return buildGeneration(input, 1) as Readonly<SubstrateFederatedIsolatedDevnetGenerationV1>;
+}
+
+export function buildSubstrateFederatedIsolatedDevnetGenerationV2(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetGenerationV2Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetGenerationV2> {
+  return buildGeneration(input, 2) as Readonly<SubstrateFederatedIsolatedDevnetGenerationV2>;
+}
+
+function buildGeneration(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetGenerationV1Input
+    | BuildSubstrateFederatedIsolatedDevnetGenerationV2Input>,
+  version: 1 | 2,
+) {
   exactRecord(input, [
     'launchBaseline', 'trackerRequest', 'trackerReceipt', 'familyTemplates',
     'familyReceipt', 'historyBundle', 'trustPins',
   ], 'isolated-devnet generation input');
-  assertSubstrateFederatedIsolatedDevnetLaunchBaselineV1Provenance(
-    input.launchBaseline,
-  );
-  const target = deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1({
+  if (version === 1) assertSubstrateFederatedIsolatedDevnetLaunchBaselineV1Provenance(input.launchBaseline);
+  else assertSubstrateFederatedIsolatedDevnetLaunchBaselineV2Provenance(input.launchBaseline);
+  const sourceInput = {
     trackerRequest: input.trackerRequest,
     trackerReceipt: input.trackerReceipt,
     familyTemplates: input.familyTemplates,
     familyReceipt: input.familyReceipt,
     historyBundle: input.historyBundle,
     trustPins: input.trustPins,
-  });
+  };
+  const target = version === 1
+    ? deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
+      sourceInput as DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
+    )
+    : deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(
+      sourceInput as DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
+    );
   if (canonicalJson(target) !== canonicalJson(input.launchBaseline.statement.target)) {
     throw new Error(
       'isolated-devnet launch baseline target differs from the exact compiler and history closure',
@@ -241,13 +286,17 @@ export function buildSubstrateFederatedIsolatedDevnetGenerationV1(
     'federated-funds-authority-is-not-established',
   ] as const);
   const binding = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V1_SCHEMA,
-    version: 1 as const,
+    schema: version === 1
+      ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V1_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENERATION_V2_SCHEMA,
+    version,
     status: 'authenticated_non_authorizing_isolated_devnet_generation' as const,
     generation: {
-      label: 'substrate-federated-isolated-devnet-v1' as const,
+      label: version === 1
+        ? 'substrate-federated-isolated-devnet-v1' as const
+        : 'substrate-federated-isolated-devnet-v2' as const,
       generationIdHex: statement.activationGenerationIdHex,
-      settlementNetworkId: 'ergo-testnet' as const,
+      settlementNetworkId: target.settlementNetworkId,
       sourceNetworkScope: 'isolated-devnet' as const,
       trustModel: 'federated_non_trustless' as const,
     },
@@ -320,9 +369,11 @@ export function buildSubstrateFederatedIsolatedDevnetGenerationV1(
   };
   const generation = deepFreeze({
     ...binding,
-    manifestDigestHex: sha256CanonicalJson(binding, GENERATION_DIGEST_DOMAIN),
+    manifestDigestHex: sha256CanonicalJson(
+      binding, version === 1 ? GENERATION_DIGEST_DOMAIN : GENERATION_V2_DIGEST_DOMAIN,
+    ),
   });
-  generations.add(generation);
+  (version === 1 ? generations : generationsV2).add(generation);
   return generation;
 }
 
@@ -331,6 +382,14 @@ export function assertSubstrateFederatedIsolatedDevnetGenerationV1Provenance(
 ): asserts value is Readonly<SubstrateFederatedIsolatedDevnetGenerationV1> {
   if (value === null || typeof value !== 'object' || !generations.has(value)) {
     throw new Error('isolated-devnet generation lacks process provenance');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetGenerationV2Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetGenerationV2> {
+  if (value === null || typeof value !== 'object' || !generationsV2.has(value)) {
+    throw new Error('isolated-devnet V2 generation lacks process provenance');
   }
 }
 

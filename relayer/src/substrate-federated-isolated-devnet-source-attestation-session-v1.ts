@@ -55,10 +55,14 @@ import {
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance,
   deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1,
+  deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV2,
   type SubstrateFederatedIsolatedDevnetLaunchStatementV1,
+  type SubstrateFederatedIsolatedDevnetLaunchStatementV2,
   type SubstrateFederatedIsolatedDevnetLaunchSignatureV1,
   type SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  type SubstrateFederatedIsolatedDevnetTargetDescriptorV2,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
   SUBSTRATE_FEDERATED_SETTLEMENT_FAMILY_V1_SCHEMA,
@@ -182,6 +186,7 @@ export interface SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 {
   readonly signLaunchStatement: (
     statement: Readonly<
       SubstrateFederatedIsolatedDevnetLaunchStatementV1
+      | SubstrateFederatedIsolatedDevnetLaunchStatementV2
     >,
   ) => readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
   readonly produceSettlementFamilyMintSourceProof: (
@@ -789,7 +794,8 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   let state: 'open' | 'disposed' = 'open';
   let launchSigningStarted = false;
   let signedTarget:
-    Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1> | undefined;
+    Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+      | SubstrateFederatedIsolatedDevnetTargetDescriptorV2> | undefined;
   let mintProofProduced = false;
   let checkpointAttestationProduced = false;
   const session = Object.freeze({
@@ -797,15 +803,17 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     signLaunchStatement: (
       statement: Readonly<
         SubstrateFederatedIsolatedDevnetLaunchStatementV1
+        | SubstrateFederatedIsolatedDevnetLaunchStatementV2
       >,
     ) => {
       assertOpen(state);
       if (launchSigningStarted) {
         throw new Error('isolated-devnet launch attestation is already signed');
       }
-      assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance(
-        statement,
-      );
+      assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(statement);
+      const deriveDigest = statement.version === 2
+        ? deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV2
+        : deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1;
       const federation = statement.target.federation;
       if (
         federation.sourceAttestationKeySetDigestHex
@@ -822,7 +830,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         throw new Error('isolated-devnet launch statement targets a different profile');
       }
       const digestHex =
-        deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
+        deriveDigest({
           statementDigestHex: statement.statementDigestHex,
           sourceAttestationKeySetDigestHex:
             federation.sourceAttestationKeySetDigestHex,
@@ -1710,7 +1718,8 @@ function deriveRuntimeProfileForDraft(
 }
 
 function deriveRuntimeProfileForSettlementFamily(
-  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+    | SubstrateFederatedIsolatedDevnetTargetDescriptorV2>,
   draft: Readonly<
     SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
   >,

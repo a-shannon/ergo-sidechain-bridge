@@ -104,6 +104,19 @@ from the final delivery contract.
 
 ## Reference Checkpoints
 
+The V2 launch join has passed its affected checks and independent review.
+Genuine V2 compiler receipts and source history produce an explicit
+`ergo-local-devnet` descriptor, a separately domain-separated launch statement,
+one source-session quorum signature, its verified baseline and the three genesis
+payloads. The retained target binds local mint-proof and checkpoint signatures;
+foreign-family and copied evidence reject. These tests simulate upstream node
+observations, not a canonical campaign. The session remains one-shot across
+launch versions. Six complete historical V1 artifacts remain byte-identical.
+The packet/replay producer has
+not yet selected this V2 family; no target admission, profile activation or funds
+authority follows from the local launch receipt. Next, connect the V2 contract
+artifacts and launch family to the campaign packet and portable replay.
+
 The V3 setup now retains its exact V2 compiler provenance for deposit
 construction. Its caller can construct the source-lock and reserve-transition
 transactions from the setup's own reserve output, with matched family, asset,

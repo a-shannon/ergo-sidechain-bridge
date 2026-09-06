@@ -312,7 +312,7 @@ vi.mock(
 vi.mock(
   './substrate-federated-isolated-devnet-launch-v1.js',
   async importOriginal => {
-    const actual = await importOriginal<
+    const actual: typeof import('./substrate-federated-isolated-devnet-launch-v1.js') = await importOriginal<
       typeof import('./substrate-federated-isolated-devnet-launch-v1.js')
     >();
     return {
@@ -425,6 +425,13 @@ vi.mock(
             throw new Error(
               'isolated-devnet launch statement lacks process provenance',
             );
+          }
+        }),
+      assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance:
+        vi.fn((value: unknown) => {
+          if (value === null || typeof value !== 'object'
+            || !mocks.launchStatements.has(value)) {
+            actual.assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(value);
           }
         }),
       buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1:
