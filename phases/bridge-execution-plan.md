@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the checked V3 genesis batch to a separately bound V3 execution continuation, then authorize exact genesis transport on a fresh local target | V161 verifies all three genesis issuances against real chain-resident inputs on the pinned local node, with signature rejection and unchanged funding. These outputs were not submitted or spent. V3 execution promotion and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the V3 execution batch to version-bound genesis revalidation and explicit broadcast authorization, then the ordered transport/confirmation consumer on a fresh local target | V161 verifies the three genesis issuances on the pinned local node without submission. V162 retains exact same-process checked candidates and Fleet handles, closes signer custody and keeps V2 execution guards separate. V3 transport and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -482,8 +482,45 @@ npm.cmd test -- --run src/substrate-federated-isolated-devnet-tracker-v2-provisi
 This is genesis-issuance acceptance, not tracker-spend or withdrawal acceptance.
 Source history remains synthetic test input. The check establishes neither
 source finality, approved launch history, independent custody nor profile
-activation. The next batch must retain exact V3 execution provenance and target
-binding without turning this data-only receipt into broadcast authority.
+activation. V162 retains execution material through a separate session method;
+this data-only receipt cannot reconstruct it.
+
+### V3 Checked Execution Batch
+
+V162 adds `runForExecutionV3` to the synthetic setup session. It captures the
+owned target identity before checking and promotes the original V3 results
+through Fleet's existing exact-candidate consumer. The returned batch retains
+three ordered signed candidates and one-use submission handles bound to that
+target. Promotion is private to the session: callers cannot supply a replacement
+pre-check binding or turn a serialized receipt into execution provenance.
+
+| Producer -> consumer | Deciding check | Failure prevented |
+|---|---|---|
+| Owned target -> async checks -> promotion | Exact primary/witness origins, mining/read-only roles and both process identity digests before and after checking and promotion | Moving checked transactions to a substituted or ended process |
+| Original V3 request/result -> Fleet | One-shot material retrieval, exact ordered issuance/candidate pairing and real Fleet promotion | Promoting copied results, another transaction's check or a V2 receipt |
+| Retained batch -> execution guard | Separate V3 object/target provenance; copied batches and inverse V2/V3 use reject | Reopening old transport consumers with a relabelled batch |
+| Fleet handle -> consumer | Exact candidate and execution binding, one use per role; consuming one role preserves the remaining batch | Swapping signed transactions or submitting one handle twice |
+| Session -> result or failure | Close key custody on success/failure; reject the result after a competing run; refuse disposal while an operation owns the session | Retaining a peg-in signer or exposing a partial batch after failure |
+
+The direct tests use pinned JVM compilation, actual WASM signatures and Fleet
+handles. Bounded loopback endpoints parse the signed transactions; they do not
+execute ErgoScript. The owned-process assertion is an explicit test double.
+V161 remains the separate real-node genesis-check evidence. No new target-node
+acceptance or canonical confirmation is established by this promotion matrix.
+
+`runV3` still returns only a data receipt and closes custody. The new method
+also closes its key and does not retain a peg-in continuation. Its Fleet
+handles can release signed bytes to a consumer; they are submission
+capabilities, not proof that broadcast is impossible or authorized. Fresh
+revalidation, explicit broadcast authorization and ordered transport must be
+composed under the V3 identity before a new local execution. Existing V2
+revalidators and authorizers continue to reject this batch.
+
+The affected validation closure is the V3 provisioning/session matrix, the
+legacy session-provenance matrix and Fleet's prepared-signing/handle tests,
+plus TypeScript and layer-import checks. Contracts, transaction construction,
+ContextExtension, compiler/build pins and release claims are unchanged; their
+existing VM/node results remain scoped to the bytes they checked.
 
 ### Fresh-Owner Application Join
 

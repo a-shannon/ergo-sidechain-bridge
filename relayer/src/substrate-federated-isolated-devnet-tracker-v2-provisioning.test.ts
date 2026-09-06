@@ -12,8 +12,14 @@ import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
+import * as fleet from './fleet-signer.js';
 import * as ownedTargets from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
-import { createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 as createSession } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 as createSession,
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 as assertExecutionV2,
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 as assertExecutionV3,
+  promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 as promoteExecutionV2,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister,
@@ -677,7 +683,10 @@ describe('V3 genesis plan -> no-submit request and check', () => {
       try {
         expect(() => Reflect.apply(takeCheckV3, undefined, [receipt, request, target]))
           .toThrow(/process provenance/);
-        expect(Reflect.apply(takeCheckV2, undefined, [receipt, request, target]).request).toBe(request);
+        const batch = Reflect.apply(promoteExecutionV2, undefined, [{ executionReceipt: receipt, request, target,
+          expectedTargetBinding: executionBinding }]);
+        expect(Reflect.apply(assertExecutionV2, undefined, [batch, target])).toEqual(executionBinding);
+        expect(() => Reflect.apply(assertExecutionV3, undefined, [batch, target])).toThrow(/process provenance/);
       } finally { custody.mockRestore(); }
     }, checkObservationOptions());
   });
@@ -751,6 +760,238 @@ describe('V3 genesis plan -> no-submit request and check', () => {
       expect(observed.checkBodies).toEqual([]);
     });
   });
+});
+
+const executionBinding = Object.freeze({
+  processBindingDigestHex: '31'.repeat(32), executionTargetIdentityDigestHex: '32'.repeat(32),
+});
+function executionTarget() {
+  return Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051',
+    witnessNodeOrigin: 'http://127.0.0.1:9052', primaryMining: true, witnessReadOnly: true });
+}
+
+describe('owned synthetic session -> V3 execution promotion', () => {
+  it('promotes genuine checks to exact one-use Fleet handles without retaining the key', async () => {
+    const fixture = await createRootFixture();
+    const target = executionTarget();
+    // Only process ownership is doubled; compilation, signatures, checks and Fleet handles are genuine.
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    try {
+      await withObservations(async observed => {
+        const batch = await fixture.session.runForExecutionV3(fixture.input, target);
+        expect(assertExecutionV3(batch, target)).toEqual(executionBinding);
+        expect(Object.isFrozen(batch)).toBe(true);
+        expect(Object.isFrozen(batch.orderedTransactions)).toBe(true);
+        expect(batch.receipt.version).toBe(3);
+        expect(batch.request.version).toBe(3);
+        expect(observed.checkBodies).toHaveLength(3);
+        expect(batch.orderedTransactions.map(entry => entry.issuance.role))
+          .toEqual(['tracker', 'duplicate-prevention', 'pooled-reserve']);
+        for (const [ordinal, transaction] of batch.orderedTransactions.entries()) {
+          expect(Object.isFrozen(transaction)).toBe(true);
+          const { signedCandidate, checkedAcceptance, issuance } = transaction;
+          const handle = checkedAcceptance.submissionHandle;
+          const check = batch.receipt.orderedChecks[ordinal]!;
+          expect(signedCandidate.txId).toBe(issuance.unsignedTransactionIdHex);
+          expect(signedCandidate.txId).toBe(signedCheckOracle(observed.checkBodies[ordinal]!));
+          expect(handle.txId).toBe(check.signedTransactionIdHex);
+          expect(handle.signedTransactionBytesSha256Hex).toBe(check.signedTransactionBytesSha256Hex);
+          fleet.assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(handle, executionBinding);
+          expect(() => fleet.assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+            structuredClone(handle), executionBinding)).toThrow(/provenance/);
+          for (const field of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+            expect(() => fleet.assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+              handle, { ...executionBinding, [field]: 'ff'.repeat(32) })).toThrow(/binding changed/);
+          }
+        }
+        for (const copy of [{ ...batch }, structuredClone(batch)]) {
+          expect(() => assertExecutionV3(copy, target)).toThrow(/process provenance/);
+        }
+        expect(() => assertExecutionV3(batch, { ...target })).toThrow(/process provenance/);
+        expect(() => Reflect.apply(assertExecutionV2, undefined, [batch, target])).toThrow(/process provenance/);
+        expect(() => takeCheckV3(batch.receipt, batch.request, target)).toThrow(/process provenance/);
+        const first = batch.orderedTransactions[0]!;
+        const callback = vi.fn(async (body: Readonly<Record<string, unknown>>) => signedCheckOracle(body));
+        await expect(fleet.consumeLocalWasmCheckedSubmissionHandleV1(
+          first.checkedAcceptance.submissionHandle, batch.orderedTransactions[1]!.signedCandidate, callback))
+          .rejects.toThrow(/differs from its signed candidate/);
+        expect(callback).not.toHaveBeenCalled();
+        await expect(fleet.consumeLocalWasmCheckedSubmissionHandleV1(
+          first.checkedAcceptance.submissionHandle, first.signedCandidate, callback)).resolves.toBe(first.signedCandidate.txId);
+        await expect(fleet.consumeLocalWasmCheckedSubmissionHandleV1(
+          first.checkedAcceptance.submissionHandle, first.signedCandidate, callback)).rejects.toThrow(/consumed/);
+        expect(callback).toHaveBeenCalledTimes(1);
+        // Per-role consumption must not invalidate the two remaining genesis capabilities.
+        expect(assertExecutionV3(batch, target)).toEqual(executionBinding);
+        for (const transaction of batch.orderedTransactions.slice(1)) {
+          fleet.assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(transaction.checkedAcceptance.submissionHandle, executionBinding);
+        }
+        for (const field of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+          custody.mockReturnValue({ ...executionBinding, [field]: 'ff'.repeat(32) });
+          expect(() => assertExecutionV3(batch, target)).toThrow(/process binding changed/);
+        }
+        custody.mockReturnValue(executionBinding);
+        expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+          .toThrow(/revoked/);
+        expect(() => fixture.session.claimCheckpointMiningCredential()).toThrow(/absent/);
+        await expect(fixture.session.runForExecutionV3(fixture.input, target)).rejects.toThrow(/consumed or disposed/);
+        await expect(Reflect.apply(fixture.session.checkPegInSourceLock, undefined, [{}, target]))
+          .rejects.toThrow(/continuation is absent/);
+        expect(observed.checkBodies).toHaveLength(3);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+
+  it.each([
+    { primaryNodeOrigin: 'http://127.0.0.1:19051' },
+    { witnessNodeOrigin: 'http://127.0.0.1:19052' },
+    { primaryMining: false }, { witnessReadOnly: false },
+  ])('rejects mismatched target %j before observation', async mutation => {
+    const session = await createSession();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(Reflect.apply(session.runForExecutionV3, undefined, [rootInput(checkCompiler), { ...executionTarget(), ...mutation }]))
+        .rejects.toThrow(/execution target differs/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { custody.mockRestore(); observe.mockRestore(); session.dispose(); }
+  });
+
+  it('rejects an unowned execution target before observation', async () => {
+    const session = await createSession();
+    const observe = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1');
+    try {
+      await expect(session.runForExecutionV3(rootInput(checkCompiler), executionTarget())).rejects.toThrow(/owned|process/);
+      expect(observe).not.toHaveBeenCalled();
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { observe.mockRestore(); session.dispose(); }
+  });
+
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex', 'target-ended'] as const)(
+    'rejects %s drift during the async checks before promotion', async fault => {
+      const fixture = await createRootFixture();
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue(executionBinding);
+      const promotion = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1');
+      try {
+        await withObservations(async observed => {
+          await expect(fixture.session.runForExecutionV3(fixture.input, executionTarget()))
+            .rejects.toThrow(/process binding changed|target ended/);
+          expect(observed.checkBodies).toHaveLength(3);
+          expect(promotion).not.toHaveBeenCalled();
+          expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+            .toThrow(/revoked/);
+          await expect(fixture.session.runV3(fixture.input)).rejects.toThrow(/consumed or disposed/);
+        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+          checkOracle: (body, ordinal) => {
+            if (ordinal === 2) {
+              if (fault === 'target-ended') custody.mockImplementation(() => { throw new Error('target ended'); });
+              else custody.mockReturnValue({ ...executionBinding, [fault]: 'ff'.repeat(32) });
+            }
+            return signedCheckOracle(body);
+          } });
+      } finally { custody.mockRestore(); promotion.mockRestore(); fixture.session.dispose(); }
+    }, 60_000,
+  );
+
+  it.each([0, 1, 2])('closes custody without returning a partial batch when promotion %s fails', async failedOrdinal => {
+    const fixture = await createRootFixture();
+    const target = executionTarget();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    const original = fleet.promoteLocalWasmCheckedTransactionForSubmissionV1;
+    let calls = 0;
+    const promotion = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1')
+      .mockImplementation((...args) => {
+        if (calls++ === failedOrdinal) throw new Error('promotion failed');
+        return original(...args);
+      });
+    try {
+      await withObservations(async observed => {
+        await expect(fixture.session.runForExecutionV3(fixture.input, target)).rejects.toThrow('promotion failed');
+        expect(observed.checkBodies).toHaveLength(3);
+        expect(calls).toBe(failedOrdinal + 1);
+        expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+          .toThrow(/revoked/);
+        await expect(fixture.session.runForExecutionV3(fixture.input, target)).rejects.toThrow(/consumed or disposed/);
+        expect(calls).toBe(failedOrdinal + 1);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); promotion.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+
+  it('rejects target drift after all handles are promoted without returning the batch', async () => {
+    const fixture = await createRootFixture();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    const original = fleet.promoteLocalWasmCheckedTransactionForSubmissionV1;
+    let calls = 0;
+    const promotion = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1')
+      .mockImplementation((...args) => {
+        const result = original(...args);
+        if (++calls === 3) custody.mockReturnValue({ ...executionBinding, processBindingDigestHex: 'ff'.repeat(32) });
+        return result;
+      });
+    try {
+      await withObservations(async observed => {
+        await expect(fixture.session.runForExecutionV3(fixture.input, executionTarget()))
+          .rejects.toThrow(/process binding changed/);
+        expect(calls).toBe(3);
+        expect(observed.checkBodies).toHaveLength(3);
+        expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+          .toThrow(/revoked/);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); promotion.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+
+  it.each(['concurrent-run', 'dispose'] as const)('preserves exclusive session custody on %s during checks', async fault => {
+    const fixture = await createRootFixture();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    try {
+      await withObservations(async observed => {
+        const original = observations.observeSubstrateFederatedGenesisV1;
+        let announce!: () => void;
+        let release!: () => void;
+        const entered = new Promise<void>(resolve => { announce = resolve; });
+        const gate = new Promise<void>(resolve => { release = resolve; });
+        const firstObservation = vi.spyOn(observations, 'observeSubstrateFederatedGenesisV1')
+          .mockImplementationOnce(async (...args) => {
+            const result = await original(...args);
+            announce();
+            await gate;
+            return result;
+          });
+        const target = executionTarget();
+        const pending = fixture.session.runForExecutionV3(fixture.input, target);
+        const settled = pending.then(
+          batch => ({ batch, error: undefined }),
+          (error: unknown) => ({ batch: undefined, error }),
+        );
+        try {
+          await Promise.race([entered, pending.then(() => { throw new Error('session ended before the observation gate'); })]);
+          if (fault === 'dispose') expect(() => fixture.session.dispose()).toThrow(/session is running/);
+          else await expect(fixture.session.runV3(fixture.input)).rejects.toThrow(/consumed or disposed/);
+          release();
+          const outcome = await settled;
+          if (fault === 'dispose') {
+            expect(outcome.error).toBeUndefined();
+            expect(outcome.batch).toBeDefined();
+            expect(assertExecutionV3(outcome.batch!, target)).toEqual(executionBinding);
+          } else {
+            expect(outcome.batch).toBeUndefined();
+            expect(outcome.error).toBeInstanceOf(Error);
+            expect((outcome.error as Error).message).toMatch(/invalidated by a concurrent transition/);
+          }
+          expect(observed.checkBodies).toHaveLength(3);
+          expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex))
+            .toThrow(/revoked/);
+        } finally { release(); firstObservation.mockRestore(); await pending.catch(() => undefined); }
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
 });
 
 describe('owned synthetic session -> V3 no-submit setup root', () => {

@@ -89,11 +89,13 @@ import {
   buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
   type SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 import {
   runSubstrateFederatedIsolatedDevnetSetupCheckV2,
   runSubstrateFederatedIsolatedDevnetSetupCheckV3,
   takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2,
+  takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3,
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
@@ -148,6 +150,13 @@ const OBSERVED_ANCHOR_TRACKER_CHECK_V2_DIGEST_DOMAIN =
 const TRACKER_RESERVATION_FRESHNESS_CHECK_V1_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_CHECK_V1';
 const EXECUTION_BATCHES = new WeakMap<
+  object,
+  Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  }>
+>();
+const EXECUTION_BATCHES_V3 = new WeakMap<
   object,
   Readonly<{
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
@@ -299,6 +308,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly runV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>>;
+  readonly runForExecutionV3: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -921,6 +934,19 @@ export interface SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
     Readonly<SubstrateFederatedTrackerCompilerBindingV1>;
 }
 
+export interface SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 extends Omit<
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2, 'receipt' | 'request'
+> {
+  readonly receipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
+  readonly request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>;
+}
+
+interface FixedSetupCheckRunV3 {
+  readonly receipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
+  readonly executionReceipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
+  readonly request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>;
+}
+
 export interface SubstrateFederatedTrackerCompilerBindingV1 {
   readonly request:
     Readonly<SubstrateFederatedIsolatedDevnetPortableReplayContinuationV1['sourceAndCompilerInput']['trackerRequest']>;
@@ -1183,7 +1209,22 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
       ) => consume(
         'open',
-        activeMnemonic => runFixedSetupCheckV3(input, activeMnemonic),
+        async activeMnemonic => (await runFixedSetupCheckV3(input, activeMnemonic)).receipt,
+        'closed',
+      ),
+      runForExecutionV3: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume(
+        'open',
+        async activeMnemonic => {
+          const captured = captureInputV3(input);
+          const expectedTargetBinding = Object.freeze({
+            ...assertExecutionTargetMatchesOrigins(target, captured),
+          });
+          const result = await runFixedSetupCheckV3(captured, activeMnemonic);
+          return promoteSetupExecutionBatchV3(result, target, expectedTargetBinding);
+        },
         'closed',
       ),
       runForExecution: async (
@@ -1458,6 +1499,75 @@ export function assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV
     material.familyCompilerBinding,
   );
   return material.familyCompilerBinding;
+}
+
+// Only the session can pair a pre-check process binding with its own result.
+function promoteSetupExecutionBatchV3(
+  result: Readonly<FixedSetupCheckRunV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  expectedBinding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3> {
+  const assertCurrentTarget = () => {
+    const current = assertExecutionTargetMatchesOrigins(target, {
+      primaryNodeOrigin: result.request.target.primary.nodeOrigin,
+      witnessNodeOrigin: result.request.target.witness.nodeOrigin,
+    });
+    if (current.processBindingDigestHex !== expectedBinding.processBindingDigestHex
+      || current.executionTargetIdentityDigestHex !== expectedBinding.executionTargetIdentityDigestHex) {
+      throw new Error('isolated setup V3 execution process binding changed');
+    }
+    return current;
+  };
+  assertCurrentTarget();
+  const material = takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3(
+    result.executionReceipt, result.request, target,
+  );
+  const binding = Object.freeze({ ...assertCurrentTarget() });
+  const orderedTransactions = material.orderedTransactions.map((transaction, index) => {
+    const issuance = result.request.orderedIssuances[index];
+    if (issuance === undefined || issuance.ordinal !== transaction.ordinal
+      || issuance.role !== transaction.role) {
+      throw new Error('isolated setup V3 execution issuance order changed');
+    }
+    return Object.freeze({
+      issuance,
+      signedCandidate: transaction.signedCandidate,
+      checkedAcceptance: promoteLocalWasmCheckedTransactionForSubmissionV1(
+        transaction.signedCandidate, transaction.checked, binding,
+      ),
+    });
+  });
+  assertCurrentTarget();
+  const batch = Object.freeze({
+    receipt: result.receipt,
+    request: result.request,
+    targetBinding: binding,
+    orderedTransactions: Object.freeze(orderedTransactions),
+  });
+  EXECUTION_BATCHES_V3.set(batch, Object.freeze({ target, binding }));
+  return batch;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const material = EXECUTION_BATCHES_V3.get(batch);
+  if (material === undefined || material.target !== target) {
+    throw new Error('isolated setup V3 execution batch lacks exact process provenance');
+  }
+  const current = assertExecutionTargetMatchesOrigins(target, {
+    primaryNodeOrigin: batch.request.target.primary.nodeOrigin,
+    witnessNodeOrigin: batch.request.target.witness.nodeOrigin,
+  });
+  if (current.processBindingDigestHex !== material.binding.processBindingDigestHex
+    || current.executionTargetIdentityDigestHex !== material.binding.executionTargetIdentityDigestHex
+    || batch.targetBinding !== material.binding
+    || batch.receipt.version !== 3 || batch.request.version !== 3
+    || batch.orderedTransactions.length !== 3) {
+    throw new Error('isolated setup V3 execution batch process binding changed');
+  }
+  return current;
 }
 
 function assertExecutionTargetMatchesOrigins(
@@ -2186,11 +2296,11 @@ async function runFixedSetupCheck(
   });
 }
 
-/** Genuine V2 compiler closure to local V3 checks, without execution promotion. */
+/** Genuine V2 compiler closure to local V3 checks; retain material only internally. */
 async function runFixedSetupCheckV3(
   input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
   mnemonic: string,
-): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>> {
+): Promise<Readonly<FixedSetupCheckRunV3>> {
   const captured = captureInputV3(input);
   const sourceAndCompilerInput = captured.sourceAndCompilerInput;
   const sourceClosure =
@@ -2251,10 +2361,11 @@ async function runFixedSetupCheckV3(
     request,
     mnemonic,
   );
-  return validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3(
+  const receipt = validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV3(
     structuredClone(executionReceipt),
     request,
   );
+  return Object.freeze({ receipt, executionReceipt, request });
 }
 
 function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
