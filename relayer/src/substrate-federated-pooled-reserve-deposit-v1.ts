@@ -157,16 +157,54 @@ export interface SubstrateFederatedPooledReserveDepositV1Packet {
 export async function buildSubstrateFederatedPooledReserveDepositV1(
   rawInput: Readonly<BuildSubstrateFederatedPooledReserveDepositV1Input>,
 ): Promise<Readonly<SubstrateFederatedPooledReserveDepositV1Packet>> {
-  assertExactKeys(rawInput, [
-    'familyBinding',
-    'sourceFundingInput',
-    'reserveState',
-    'sourceIntent',
-    'depositorErgoTreeHex',
-    'creationHeights',
-  ], 'substrate federated pooled-reserve deposit input', ['fees']);
+  assertSubstrateFederatedPooledReserveDepositInputShape(rawInput, ['familyBinding']);
   const family = rawInput.familyBinding;
   assertSubstrateFederatedSettlementFamilyCompilerBindingV1(family);
+  const candidate = await buildSubstrateFederatedPooledReserveDepositCandidate({
+    sourceFundingInput: rawInput.sourceFundingInput,
+    reserveState: rawInput.reserveState,
+    sourceIntent: rawInput.sourceIntent,
+    depositorErgoTreeHex: rawInput.depositorErgoTreeHex,
+    creationHeights: rawInput.creationHeights,
+    fees: rawInput.fees,
+  }, family);
+  const { trustModel, familyIdHex, ...rest } = candidate;
+  const packet = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_POOLED_RESERVE_DEPOSIT_V1_SCHEMA,
+    version: 1 as const,
+    trustModel,
+    familyIdHex,
+    familyCompiler: {
+      bindingDigestHex: family.bindingDigestHex,
+      provenanceKind: family.provenance.kind,
+      provenanceDigestHex: family.provenance.digestHex,
+    },
+    ...rest,
+    invariants: { ...candidate.invariants, exactFederatedFamilyBound: true as const },
+  });
+  packets.add(packet);
+  return packet;
+}
+
+type DepositConstructionInput = Omit<BuildSubstrateFederatedPooledReserveDepositV1Input, 'familyBinding'>;
+type DepositConstructionFamily = Pick<SubstrateFederatedSettlementFamilyCompilerBindingV1, 'profile' | 'contracts'>;
+
+export function assertSubstrateFederatedPooledReserveDepositInputShape(
+  input: object,
+  familyKeys: readonly string[],
+): void {
+  assertExactKeys(input, [...familyKeys, 'sourceFundingInput', 'reserveState',
+    'sourceIntent', 'depositorErgoTreeHex', 'creationHeights'],
+  'substrate federated pooled-reserve deposit input', ['fees']);
+}
+
+/** Shared equations only. The versioned entry points authenticate compiler provenance. */
+export async function buildSubstrateFederatedPooledReserveDepositCandidate(
+  rawInput: Readonly<DepositConstructionInput>,
+  rawFamily: Readonly<DepositConstructionFamily>,
+) {
+  assertSubstrateFederatedPooledReserveDepositInputShape(rawInput, []);
+  const family = structuredClone(rawFamily);
   const snapshot = {
     sourceFundingInput: structuredClone(rawInput.sourceFundingInput),
     reserveState: structuredClone(rawInput.reserveState),
@@ -346,15 +384,8 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
   });
 
   const result = deepFreeze({
-    schema: SUBSTRATE_FEDERATED_POOLED_RESERVE_DEPOSIT_V1_SCHEMA,
-    version: 1 as const,
     trustModel: 'federated_non_trustless' as const,
     familyIdHex: family.profile.familyIdHex,
-    familyCompiler: {
-      bindingDigestHex: family.bindingDigestHex,
-      provenanceKind: family.provenance.kind,
-      provenanceDigestHex: family.provenance.digestHex,
-    },
     sourceIntentHex,
     depositCommitmentHex,
     depositInsertProofHex: insertion.insert_proof_hex,
@@ -381,7 +412,7 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
       reserveSuccessor: reserveTransition.outputs[0],
     },
     invariants: {
-      exactFederatedFamilyBound: true as const,
+      exactFederatedFamilyBound: false as const,
       exactSourceIntentBound: true as const,
       sourceLockCreatedBeforeRefundTimeout: true as const,
       transitionConsumesExactSourceAndReserve: true as const,
@@ -413,7 +444,6 @@ export async function buildSubstrateFederatedPooledReserveDepositV1(
       productionReadinessEstablished: false as const,
     },
   });
-  packets.add(result);
   return result;
 }
 
@@ -516,7 +546,7 @@ function normalizeReserveState(
 
 function assertReservePredecessor(input: {
   reserve: Eip12Box;
-  family: Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  family: Readonly<DepositConstructionFamily>;
   depositHistory: readonly SubstrateFederatedDepositHistoryEntryV1[];
 }): {
   inputDigestHex: string;
@@ -662,7 +692,7 @@ async function buildSourceLockCreation(input: {
 }
 
 function assertExactSourceLockCreation(input: {
-  family: Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  family: Readonly<DepositConstructionFamily>;
   sourceFunding: Eip12Box;
   sourceLockCreation: MaterializedUnsignedTransaction;
   sourceIntentHex: string;
@@ -734,7 +764,7 @@ function assertExactSourceLockCreation(input: {
 }
 
 function assertExactReserveTransition(input: {
-  family: Readonly<SubstrateFederatedSettlementFamilyCompilerBindingV1>;
+  family: Readonly<DepositConstructionFamily>;
   reservePredecessor: Eip12Box;
   sourceLock: Eip12Box;
   transitionFeeFunding: Eip12Box;

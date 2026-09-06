@@ -132,6 +132,14 @@ import { compileSubstrateFederatedTrackerWithPinnedJvmV1 } from './substrate-fed
 import { compileSubstrateFederatedTrackerWithPinnedJvmV2 } from './substrate-federated-tracker-jvm-compiler-v2.js';
 import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
 import {
+  buildSubstrateFederatedIsolatedDevnetPegInCandidateV2 as buildPegInV2,
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2 as assertPegInV2,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import { assertSubstrateFederatedPooledReserveDepositV1Packet } from './substrate-federated-pooled-reserve-deposit-v1.js';
+import { decodeSubstrateFederatedSettlementFamilyV1Profile } from './substrate-federated-settlement-family-v1.js';
+import { getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3 as getSetupCompilerV3 }
+  from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
   buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV2 as requestV2,
   buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV3 as requestV3,
   validateSubstrateFederatedIsolatedDevnetSetupCheckRequestV3 as validateRequestV3,
@@ -850,6 +858,98 @@ function executionTarget() {
 }
 
 describe('owned synthetic session -> V3 execution promotion', () => {
+  it('constructs the complete V2 deposit from only the exact V3 setup and target', async () => {
+    const fixture = await createRootFixture();
+    const target = executionTarget();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    try {
+      await withObservations(async observed => {
+        const batch = await fixture.session.runForExecutionV3(fixture.input, target);
+        const retained = getSetupCompilerV3(batch, target);
+        expect(retained.familyReceipt).toBe(fixture.input.sourceAndCompilerInput.familyReceipt);
+        expect(retained.trackerReceipt).toBe(fixture.input.sourceAndCompilerInput.trackerReceipt);
+        expect(retained).not.toHaveProperty('historyBundle');
+        Object.assign(retained.familyTemplates.sourceLock, {
+          source: retained.familyTemplates.sourceLock.source + '\n// caller copy\n',
+        });
+        expect(getSetupCompilerV3(batch, target).familyTemplates)
+          .toEqual(fixture.input.sourceAndCompilerInput.familyTemplates);
+        const family = fixture.input.sourceAndCompilerInput.familyReceipt;
+        const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
+        const height = Math.max(...batch.request.orderedIssuances.map(value => value.predictedStateOutput.creationHeight)) + 1;
+        const input = {
+          batch, target, sourceFundingInput: fundingCandidate('20000000', fixture.session.signer.p2pkErgoTreeHex),
+          sourceIntent: { formatVersion: 2 as const, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+            sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+            tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+            admissionProfileIdHex: family.profile.familyIdHex, sourceAssetIdHex: profile.settlementAssetIdHex,
+            amountNanoErg: '10000000', recipientAddressHex: '61'.repeat(20) },
+          depositorErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex,
+          creationHeights: { currentErgoHeight: height, sourceLockCreation: height, reserveTransition: height },
+        };
+        const candidate = await buildPegInV2(input);
+        const packet = assertPegInV2(candidate, batch, target);
+        expect(await buildPegInV2(input)).toEqual(candidate);
+        expect(candidate.setupRequestDigestHex).toBe(batch.request.requestDigestHex);
+        expect(candidate.setupCheckReceiptDigestHex).toBe(batch.receipt.receiptDigestHex);
+        expect(packet.boxes.reservePredecessor.boxId).toBe(batch.orderedTransactions[2]!.issuance.predictedStateOutput.boxIdHex);
+        expect(packet.familyCompiler.familyReceiptDigestHex).toBe(family.receiptDigestHex);
+        expect(packet.transactions.reserveTransition.eip12Tx.inputs.map(value => value.boxId)).toEqual([
+          packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId, packet.boxes.transitionFeeFunding.boxId,
+        ]);
+        expect(BigInt(packet.reserve.outputValueNanoErg) - BigInt(packet.reserve.inputValueNanoErg)).toBe(10_000_000n);
+        expect(BigInt(packet.reserve.outputLiabilityNanoErg) - BigInt(packet.reserve.inputLiabilityNanoErg)).toBe(10_000_000n);
+        expect(packet.boundaries.sourceLockConsumptionEstablished).toBe(false);
+        expect(packet.boundaries.fundsAuthorityEstablished).toBe(false);
+        expect(() => assertSubstrateFederatedPooledReserveDepositV1Packet(packet)).toThrow(/provenance/);
+        for (const copy of [{ ...candidate }, structuredClone(candidate)]) {
+          expect(() => assertPegInV2(copy, batch, target)).toThrow(/provenance/);
+        }
+        for (const copy of [{ ...batch }, structuredClone(batch)]) {
+          await expect(buildPegInV2({ ...input, batch: copy })).rejects.toThrow(/provenance/);
+          expect(() => assertPegInV2(candidate, copy, target)).toThrow(/provenance/);
+        }
+        await expect(buildPegInV2({ ...input, target: { ...target } })).rejects.toThrow(/provenance/);
+        expect(() => assertPegInV2(candidate, batch, { ...target })).toThrow(/provenance/);
+        await expect(buildPegInV2({ ...input, reserveState: {} } as typeof input)).rejects.toThrow(/exact construction inputs/);
+        await expect(buildPegInV2({ ...input, familyCompilerReceipt: family } as typeof input)).rejects.toThrow(/exact construction inputs/);
+        await expect(buildPegInV2({ ...input, sourceIntent: { ...input.sourceIntent, admissionProfileIdHex: '62'.repeat(32) } }))
+          .rejects.toThrow(/federated family/);
+        for (const field of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+          custody.mockReturnValue({ ...executionBinding, [field]: '63'.repeat(32) });
+          await expect(buildPegInV2(input)).rejects.toThrow(/binding changed/);
+          expect(() => assertPegInV2(candidate, batch, target)).toThrow(/binding changed/);
+        }
+        custody.mockReturnValue(executionBinding);
+        for (const field of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+          const pending = buildPegInV2(input);
+          custody.mockReturnValue({ ...executionBinding, [field]: '64'.repeat(32) });
+          await expect(pending).rejects.toThrow(/binding changed/);
+          custody.mockReturnValue(executionBinding);
+        }
+        for (const field of ['funding', 'intent', 'height', 'batch', 'target'] as const) {
+          const changed = { ...input, sourceFundingInput: structuredClone(input.sourceFundingInput),
+            sourceIntent: { ...input.sourceIntent }, creationHeights: { ...input.creationHeights } };
+          const pending = buildPegInV2(changed);
+          if (field === 'funding') changed.sourceFundingInput.value = '1';
+          if (field === 'intent') changed.sourceIntent.admissionProfileIdHex = '65'.repeat(32);
+          if (field === 'height') changed.creationHeights.reserveTransition = 0;
+          if (field === 'batch') changed.batch = { ...batch };
+          if (field === 'target') changed.target = { ...target };
+          expect(await pending).toEqual(candidate);
+          await expect(buildPegInV2(changed)).rejects.toThrow();
+        }
+        expect(assertPegInV2(candidate, batch, target)).toBe(packet);
+        // Construction does not reopen the disposed setup signer or perform a new check.
+        await expect(Reflect.apply(fixture.session.checkPegInSourceLock, undefined, [{}, target]))
+          .rejects.toThrow(/continuation is absent/);
+        expect(observed.checkBodies).toHaveLength(3);
+        expect(observed.submissionBodies).toHaveLength(0);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+    } finally { custody.mockRestore(); fixture.session.dispose(); }
+  }, 60_000);
+
   it('composes all three genuine V3 genesis transactions with ordered observed confirmations', async () => {
     const fixture = await createRootFixture();
     const target = executionTarget();

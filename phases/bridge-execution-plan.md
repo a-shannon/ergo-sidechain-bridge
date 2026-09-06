@@ -93,7 +93,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Actual campaign caller | Main owner; consumes the component-tested V2 admission lifecycle | Select the retained V3 route in the real application root. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
+| Actual campaign caller | Main owner; consumes the component-tested V2 admission lifecycle | Produce a genuine V2 compiler closure in the packet/replay producer, retain peg-in/tracker custody on the V3 session, and select that route in the real application root. The setup-bound V2 deposit constructor is available. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
@@ -103,6 +103,15 @@ withdrawal construction is not a completed exit. Do not omit either consumer
 from the final delivery contract.
 
 ## Reference Checkpoints
+
+The V3 setup now retains its exact V2 compiler provenance for deposit
+construction. Its caller can construct the source-lock and reserve-transition
+transactions from the setup's own reserve output, with matched family, asset,
+amount, deposit insertion and external fees. V2 deposits have a separate packet
+identity; V1 receipts and packet provenance remain unchanged. Construction does
+not prove canonical consumption or authorize minting. The campaign packet/replay
+producer still compiles V1, and the V3 session does not yet retain custody through
+peg-in checking. Both joins must be implemented before the fresh campaign.
 
 The V2 admission lifecycle now connects a genuine session-owned two-input check
 to explicit isolated-devnet authorization, durable reservation, revalidation,

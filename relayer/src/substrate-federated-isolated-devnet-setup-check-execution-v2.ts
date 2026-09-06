@@ -178,6 +178,7 @@ const EXECUTION_BATCHES_V3 = new WeakMap<
   Readonly<{
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+    sourceAndCompilerInput: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>;
   }>
 >();
 export interface SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1 {
@@ -1160,6 +1161,7 @@ interface FixedSetupCheckRunV3 {
   readonly receipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
   readonly executionReceipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
   readonly request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>;
+  readonly sourceAndCompilerInput: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>;
 }
 
 export interface SubstrateFederatedTrackerCompilerBindingV1 {
@@ -1917,7 +1919,8 @@ function promoteSetupExecutionBatchV3(
     targetBinding: binding,
     orderedTransactions: Object.freeze(orderedTransactions),
   });
-  EXECUTION_BATCHES_V3.set(batch, Object.freeze({ target, binding }));
+  EXECUTION_BATCHES_V3.set(batch, Object.freeze({ target, binding,
+    sourceAndCompilerInput: result.sourceAndCompilerInput }));
   return batch;
 }
 
@@ -1941,6 +1944,22 @@ export function assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(
     throw new Error('isolated setup V3 execution batch process binding changed');
   }
   return current;
+}
+
+/** Original compiler receipts plus a template snapshot; no mutable history escapes. */
+export function getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3(
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<Pick<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
+  'trackerRequest' | 'trackerReceipt' | 'familyReceipt' | 'familyTemplates'>> {
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(batch, target);
+  const retained = EXECUTION_BATCHES_V3.get(batch)!.sourceAndCompilerInput;
+  return Object.freeze({
+    trackerRequest: retained.trackerRequest,
+    trackerReceipt: retained.trackerReceipt,
+    familyReceipt: retained.familyReceipt,
+    familyTemplates: structuredClone(retained.familyTemplates),
+  });
 }
 
 function assertExecutionTargetMatchesOrigins(
@@ -2738,7 +2757,7 @@ async function runFixedSetupCheckV3(
     structuredClone(executionReceipt),
     request,
   );
-  return Object.freeze({ receipt, executionReceipt, request });
+  return Object.freeze({ receipt, executionReceipt, request, sourceAndCompilerInput });
 }
 
 function attachSubstrateFederatedSettlementFamilyCompilerBindingV2(
