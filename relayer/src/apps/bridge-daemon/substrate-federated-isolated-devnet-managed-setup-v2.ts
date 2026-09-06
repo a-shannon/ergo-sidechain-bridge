@@ -1,3 +1,4 @@
+import { isNativeError, isProxy } from 'node:util/types';
 import type { StateTracker } from '../../state-tracker.js';
 import { sha256CanonicalJson } from '../../strict-json.js';
 import { PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION } from '../../peg-in-causal-admission-v2.js';
@@ -36,6 +37,7 @@ import { createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationS
 import {
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import { createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1 } from '../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js';
 import { createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1 } from '../../substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js';
@@ -70,6 +72,7 @@ import {
   executeSubstrateFederatedIsolatedDevnetGenesisBatchV3,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   waitForCanonicalConfirmation,
+  projectTrackerCanonicalConfirmationFailureDiagnosticV1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
 export interface ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input {
@@ -102,6 +105,40 @@ const GENESIS_ROLES = [
   { issuance: 'duplicate-prevention', receipt: 'duplicatePrevention' },
   { issuance: 'pooled-reserve', receipt: 'pooledReserve' },
 ] as const;
+
+type SubmissionDiagnostic = Readonly<{
+  callOutcome: 'returned' | 'threw';
+  response: ReturnType<typeof projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic>;
+}>;
+type CheckedOperationDiagnostic = Readonly<{
+  status: 'accepted' | 'ambiguous';
+  expectedTxId: string;
+  durableAttemptDigestHex: string;
+  journalDigestHex: string;
+  submission: SubmissionDiagnostic;
+}>;
+const CONFIRMATION_FAILURES = new WeakMap<object, Readonly<{
+  stage: 'source-lock' | 'committed-vault';
+  operation: CheckedOperationDiagnostic;
+  confirmation: ReturnType<typeof projectTrackerCanonicalConfirmationFailureDiagnosticV1>;
+}>>();
+
+/** Read only the primary failure, never a cleanup error or caller-supplied fields. */
+export function projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2(value: unknown) {
+  let current = value;
+  for (let depth = 0; depth < 4; depth += 1) {
+    if (current === null || typeof current !== 'object') return null;
+    const diagnostic = CONFIRMATION_FAILURES.get(current);
+    if (diagnostic !== undefined) return diagnostic;
+    if (!isNativeError(current) || isProxy(current)) return null;
+    const errors = Object.getOwnPropertyDescriptor(current, 'errors');
+    if (!errors || !('value' in errors) || isProxy(errors.value) || !Array.isArray(errors.value)) return null;
+    const primary = Object.getOwnPropertyDescriptor(errors.value, '0');
+    if (!primary || !('value' in primary)) return null;
+    current = primary.value;
+  }
+  return null;
+}
 
 /** Runs within caller-owned mining, custody and storage lifetimes; does not admit a tracker. */
 export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(input: Input) {
@@ -199,7 +236,7 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
   if (!Number.isSafeInteger(sourceHeight) || Number(sourceHeight) < 0) {
     throw new Error('managed V2 source lock creation height is invalid');
   }
-  await executeCheckedOperation(operation(
+  const sourceExecution = await executeCheckedOperation(operation(
     SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
     sourceTransaction, [sourceFundingInput.boxId], Number(sourceHeight),
   ), sourceCheck, input, {
@@ -209,7 +246,7 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
     finalize: value => sourceJournal.journal.finalize(value),
     submit: value => sourceTransport.submit(value),
   });
-  const sourceConfirmation = await waitForCanonicalConfirmation(observer, sourceTransaction.txId, completionDeadline, 'source-lock');
+  const sourceConfirmation = await confirmCheckedOperation(observer, sourceExecution, completionDeadline, 'source-lock');
   if (await sourceJournal.reconcileActive(observer) !== 'confirmed'
     || await sourceJournal.revalidateConfirmed(observer) !== 1) {
     throw new Error('managed V2 source lock durable confirmation changed');
@@ -243,7 +280,7 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
     throw new Error('managed V2 committed vault has a prior attempt');
   }
   const vaultTransport = createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(target, vaultAuthorization.broadcastAuthorizer);
-  await executeCheckedOperation(operation(PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+  const vaultExecution = await executeCheckedOperation(operation(PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
     reserveTransaction, reserveInputIds, vaultCheckReceipt.signer.stateContextTipHeight), vaultCheck, input, {
     revalidate: value => vaultAuthorization.revalidator.revalidate(value),
     authorize: value => vaultAuthorization.broadcastAuthorizer.authorize(value),
@@ -252,7 +289,7 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
     submit: value => vaultTransport.submit(value),
   });
   vaultAuthorization.takePreTransportObservation();
-  await waitForCanonicalConfirmation(observer, reserveTransaction.txId, completionDeadline, 'committed-vault');
+  await confirmCheckedOperation(observer, vaultExecution, completionDeadline, 'committed-vault');
   if (await vaultJournal.reconcileActive(observer) !== 'confirmed') {
     throw new Error('managed V2 committed vault durable reconciliation failed');
   }
@@ -394,9 +431,10 @@ function operation(operationProfile: Operation['operationProfile'],
 }
 
 async function executeCheckedOperation(expected: Operation, check: ExecutionCheck, input: Input,
-  ports: Pick<Ports, 'revalidate' | 'authorize' | 'reserve' | 'finalize' | 'submit'>): Promise<void> {
+  ports: Pick<Ports, 'revalidate' | 'authorize' | 'reserve' | 'finalize' | 'submit'>): Promise<CheckedOperationDiagnostic> {
   requireTime(input.completionDeadline, CONFIRMATION_BUDGET_MS);
   let preTransportFailure: unknown;
+  let submission: SubmissionDiagnostic = Object.freeze({ callOutcome: 'threw', response: null });
   const execution = await runErgoOperationalTransaction(expected, {
     ...ports,
     sign: async admission => {
@@ -422,14 +460,19 @@ async function executeCheckedOperation(expected: Operation, check: ExecutionChec
       return Object.freeze({ checkResponseDigestHex: check.checkedAcceptance.submissionHandle.checkResponseDigestHex,
         checkerArtifact: check.checkedAcceptance.submissionHandle });
     },
-    submit: attempt => {
+    submit: async attempt => {
       try {
         requireTime(input.completionDeadline, CONFIRMATION_BUDGET_MS);
       } catch (error) {
         preTransportFailure = error;
         throw error;
       }
-      return ports.submit(attempt);
+      const response = await ports.submit(attempt);
+      const diagnostic = projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic(response);
+      submission = Object.freeze({ callOutcome: 'returned', response: diagnostic !== null
+        && diagnostic.expectedTxId === expected.expectedTxId
+        && diagnostic.durableAttemptDigestHex === attempt.durableAttemptDigestHex ? diagnostic : null });
+      return response;
     },
   });
   // The operational lifecycle journals thrown submissions as ambiguous. A local
@@ -438,6 +481,24 @@ async function executeCheckedOperation(expected: Operation, check: ExecutionChec
   if ((execution.status !== 'accepted' && execution.status !== 'ambiguous')
     || execution.expectedTxId !== expected.expectedTxId || execution.durableAttemptRecorded !== true) {
     throw new Error('managed V2 transaction was not durably transported');
+  }
+  return Object.freeze({ status: execution.status, expectedTxId: execution.expectedTxId,
+    durableAttemptDigestHex: execution.durableAttemptDigestHex, journalDigestHex: execution.journalDigestHex,
+    submission });
+}
+
+async function confirmCheckedOperation(observer: Observer, operation: CheckedOperationDiagnostic,
+  deadline: number, stage: 'source-lock' | 'committed-vault') {
+  try {
+    return await waitForCanonicalConfirmation(observer, operation.expectedTxId, deadline, stage);
+  } catch (cause) {
+    const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(cause);
+    const failure = new Error(`managed V2 ${stage} confirmation failed`, { cause });
+    CONFIRMATION_FAILURES.set(failure, Object.freeze({ stage, operation,
+      confirmation: confirmation?.expectedTransactionIdHex === operation.expectedTxId
+        && confirmation.executionTargetIdentityDigestHex === observer.reconciliationIdentityDigestHex
+        ? confirmation : null }));
+    throw failure;
   }
 }
 

@@ -327,6 +327,7 @@ import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic as projectDiagnostic,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1,
@@ -790,6 +791,11 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
         submittedTxId: boundary.expectedTxId,
         responseDigestHex: expectedResponseDigest('accepted', 200, boundary.expectedTxId),
       });
+      expect(projectDiagnostic(result)).toEqual({ outcome: 'accepted', httpStatus: 200,
+        expectedTxId: boundary.expectedTxId, durableAttemptDigestHex: ATTEMPT_DIGEST,
+        responseDigestHex: expectedResponseDigest('accepted', 200, boundary.expectedTxId) });
+      expect(Object.isFrozen(projectDiagnostic(result))).toBe(true);
+      expect(projectDiagnostic({ ...result })).toBeNull();
       expect(authorizerGuard).toHaveBeenCalledExactlyOnceWith(
         authorizer, processBoundary.target,
       );
@@ -985,11 +991,17 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
           : { isAxiosError: true, response: { status } };
       });
       const { transport, attempt } = await genesisAttempt(version);
-      await expect(transport.submit(attempt)).resolves.toEqual({
+      const result = await transport.submit(attempt);
+      expect(result).toEqual({
         status: 'ambiguous',
         submittedTxId: null,
         responseDigestHex: expectedResponseDigest(outcome, status, observedTxId),
       });
+      expect(projectDiagnostic(result)).toEqual({ outcome, httpStatus: status,
+        expectedTxId: boundary.expectedTxId, durableAttemptDigestHex: ATTEMPT_DIGEST,
+        responseDigestHex: expectedResponseDigest(outcome, status, observedTxId) });
+      expect(Object.isFrozen(projectDiagnostic(result))).toBe(true);
+      expect(projectDiagnostic({ ...result })).toBeNull();
       expect(genesisBoundary.events.slice(-2)).toEqual(['consume', 'post']);
       await expect(transport.submit(attempt)).rejects.toThrow(/checked handle provenance/u);
       expect(boundary.consume).toHaveBeenCalledTimes(1);

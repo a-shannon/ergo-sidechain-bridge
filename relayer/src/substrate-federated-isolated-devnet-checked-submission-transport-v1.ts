@@ -96,6 +96,19 @@ type AcceptedOrAmbiguousSubmission = Exclude<
 >;
 const FEE_FUNDING_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>>();
 const TRACKER_V2_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Attempt>>();
+const SUBMISSION_DIAGNOSTICS = new WeakMap<object, Readonly<{
+  outcome: SubmissionDigestInput['outcome'];
+  httpStatus: number | null;
+  expectedTxId: string;
+  durableAttemptDigestHex: string;
+  responseDigestHex: string;
+}>>();
+
+/** Diagnostic only; copied responses cannot acquire transport provenance. */
+export function projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic(value: unknown) {
+  return value !== null && typeof value === 'object'
+    ? SUBMISSION_DIAGNOSTICS.get(value) ?? null : null;
+}
 
 export async function submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(
   target: Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>,
@@ -529,20 +542,21 @@ async function submitExactTransaction(
         binding,
       }, version);
     }
-    return Object.freeze({
+    const digestInput: SubmissionDigestInput = {
+      outcome: 'accepted',
+      httpStatus: finiteHttpStatus(response.status),
+      observedTxId: submittedTxId,
+      expectedTxId,
+      durableAttemptDigestHex,
+      authorizationDigestHex,
+      handle,
+      binding,
+    };
+    return retainSubmissionDiagnostic(Object.freeze({
       status: 'accepted' as const,
       submittedTxId,
-      responseDigestHex: responseDigest({
-        outcome: 'accepted',
-        httpStatus: finiteHttpStatus(response.status),
-        observedTxId: submittedTxId,
-        expectedTxId,
-        durableAttemptDigestHex,
-        authorizationDigestHex,
-        handle,
-        binding,
-      }, version),
-    });
+      responseDigestHex: responseDigest(digestInput, version),
+    }), digestInput);
   } catch (error) {
     const httpStatus = axios.isAxiosError(error)
       ? finiteHttpStatus(error.response?.status)
@@ -566,11 +580,24 @@ function ambiguousResponse(
   input: SubmissionDigestInput,
   version: TransportVersion = 1,
 ): AcceptedOrAmbiguousSubmission {
-  return Object.freeze({
+  return retainSubmissionDiagnostic(Object.freeze({
     status: 'ambiguous' as const,
     submittedTxId: null,
     responseDigestHex: responseDigest(input, version),
-  });
+  }), input);
+}
+
+function retainSubmissionDiagnostic<T extends AcceptedOrAmbiguousSubmission & { readonly responseDigestHex: string }>(
+  response: T, input: SubmissionDigestInput,
+): T {
+  SUBMISSION_DIAGNOSTICS.set(response, Object.freeze({
+    outcome: input.outcome,
+    httpStatus: input.httpStatus,
+    expectedTxId: input.expectedTxId,
+    durableAttemptDigestHex: input.durableAttemptDigestHex,
+    responseDigestHex: response.responseDigestHex,
+  }));
+  return response;
 }
 
 interface SubmissionDigestInput {

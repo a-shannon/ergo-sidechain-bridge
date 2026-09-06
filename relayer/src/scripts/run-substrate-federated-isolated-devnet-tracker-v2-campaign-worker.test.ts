@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const io = vi.hoisted(() => ({
   preflight: vi.fn(), load: vi.fn(), run: vi.fn(), assertReceipt: vi.fn(),
+  diagnostic: vi.fn(),
+}));
+vi.mock('../apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.js', () => ({
+  projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2: io.diagnostic,
 }));
 vi.mock('./preflight-substrate-federated-isolated-devnet-campaign-v1.js', () => ({
   preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1: io.preflight,
@@ -18,9 +22,11 @@ vi.mock('../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-ca
   assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt: io.assertReceipt,
 }));
 
-import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments }
+import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments,
+  formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure }
   from './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js';
-import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments }
+import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments,
+  readSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure }
   from './run-substrate-federated-isolated-devnet-tracker-v2-campaign.js';
 
 const digest = '12'.repeat(32);
@@ -42,6 +48,7 @@ let args: string[];
 
 beforeEach(() => {
   vi.resetAllMocks();
+  io.diagnostic.mockReturnValue(null);
   root = mkdtempSync(join(tmpdir(), 'e2s-tracker-v2-worker-'));
   build = Object.freeze({ exactBuildInput: true, ergoSourcePath: join(root, 'ergo-source') });
   lifecycle = lifecycleFixture(root);
@@ -75,6 +82,20 @@ afterEach(() => {
 });
 
 describe('fixed in-process tracker V2 campaign worker', () => {
+  it('formats only the producer diagnostic and binds it to the original failed command', async () => {
+    const failure = new Error('synthetic-private-detail');
+    const diagnostic = Object.freeze({ stage: 'source-lock', operation: { status: 'ambiguous' } });
+    io.run.mockRejectedValue(failure);
+    io.diagnostic.mockImplementation(value => value === failure ? diagnostic : null);
+    await expect(runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments(args)).rejects.toBe(failure);
+    const text = readSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure(failure)!;
+    expect(JSON.parse(text)).toEqual({ status: 'isolated_tracker_v2_campaign_not_confirmed', diagnostic });
+    expect(text).not.toContain('synthetic-private-detail');
+    expect(formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure({ diagnostic })).toBeNull();
+    expect(readSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure(new Error(failure.message))).toBeNull();
+    expect(io.run).toHaveBeenCalledOnce();
+    expect(io.assertReceipt).not.toHaveBeenCalled();
+  });
   it('preflights the exact request and returns the original V2 receipt without a legacy envelope', async () => {
     await expect(runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments(args)).resolves.toBe(receipt);
     expect(io.preflight).toHaveBeenCalledExactlyOnceWith([

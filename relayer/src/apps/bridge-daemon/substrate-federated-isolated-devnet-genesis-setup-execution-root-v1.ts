@@ -4760,7 +4760,7 @@ function assertTrackerTransportResponseClassificationBindingV11(
   }
 }
 
-function projectTrackerCanonicalConfirmationFailureDiagnosticV1(
+export function projectTrackerCanonicalConfirmationFailureDiagnosticV1(
   value: unknown,
 ): Readonly<
   SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationFailureDiagnosticV1
@@ -4822,8 +4822,8 @@ function projectDirectOrPrimaryAggregateFailureV1<T>(
     if (
       errorsDescriptor === undefined
       || !('value' in errorsDescriptor)
-      || !Array.isArray(errorsDescriptor.value)
       || isProxy(errorsDescriptor.value)
+      || !Array.isArray(errorsDescriptor.value)
     ) {
       return null;
     }

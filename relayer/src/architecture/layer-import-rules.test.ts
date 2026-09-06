@@ -85,6 +85,9 @@ describe('layer import rules', () => {
     const specifier = './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js';
     const source = `const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments } = await import('${specifier}');`;
     expect(inspect({ [worker]: 'export {};', [command]: source })).toEqual([]);
+    const diagnosticSource = source.replace('WorkerFromArguments }',
+      'WorkerFromArguments, formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure }');
+    expect(inspect({ [worker]: 'export {};', [command]: diagnosticSource })).toEqual([]);
     expect(inspect({ [worker]: 'export {};', 'scripts/unregistered.ts': source }).map(item => item.message)).toContain(
       `exclusive runtime module import has the wrong owner: ${specifier}`,
     );
@@ -106,6 +109,8 @@ describe('layer import rules', () => {
     'const worker = await import(SPECIFIER);',
     'const worker = await import(SPECIFIER_LITERAL);',
     'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments: run } = await import(SPECIFIER_LITERAL);',
+    'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments, formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure: format } = await import(SPECIFIER_LITERAL);',
+    'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments, unknownCapability } = await import(SPECIFIER_LITERAL);',
   ])('rejects a non-canonical dynamic command binding: %s', declaration => {
     const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
     const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';

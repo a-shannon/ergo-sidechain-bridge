@@ -6,7 +6,7 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 describe('tracker V2 command process boundary', () => {
-  it.each(['initialization', 'execution', 'success'] as const)(
+  it.each(['initialization', 'execution', 'diagnostic', 'projection-failure', 'success'] as const)(
     'contains %s in the fixed command error boundary', mode => {
       const directory = mkdtempSync(join(tmpdir(), 'e2s-tracker-v2-cli-'));
       try {
@@ -17,6 +17,9 @@ describe('tracker V2 command process boundary', () => {
         const worker = 'data:text/javascript,' + encodeURIComponent(
           'export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments(){'
           + workerBody + '}'
+          + 'export function formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure(){'
+          + (mode === 'diagnostic' ? 'return JSON.stringify({status:"not_confirmed",diagnostic:{stage:"source-lock"}});'
+            : mode === 'projection-failure' ? 'throw new Error("synthetic-private-projection");' : 'return null;') + '}'
           + (mode === 'initialization'
             ? 'process.stdout.write("synthetic-loader-entered\\n");throw new Error("synthetic-private-diagnostic");'
             : ''),
@@ -53,7 +56,8 @@ describe('tracker V2 command process boundary', () => {
         expect(result.stdout).toBe(mode === 'success' ? '{"status":"synthetic-command-result"}\n'
           : mode === 'initialization' ? 'synthetic-loader-entered\n' : '');
         expect(result.stderr).toBe(mode === 'success' ? ''
-          : 'isolated tracker V2 campaign failed; no successful receipt\n');
+          : 'isolated tracker V2 campaign failed; no successful receipt\n'
+            + (mode === 'diagnostic' ? '{"status":"not_confirmed","diagnostic":{"stage":"source-lock"}}\n' : ''));
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }

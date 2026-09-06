@@ -1,5 +1,8 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { canonicalJson } from '../ergo-settlement-core/strict-json.js';
+import { projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2 }
+  from '../apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.js';
 
 import {
   runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot,
@@ -21,6 +24,13 @@ const FLAGS = [
   '--frontier-cargo-cache', '--tracker-transport-journal-root',
   '--relayer-cargo-cache',
 ] as const;
+
+export function formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure(value: unknown): string | null {
+  const diagnostic = projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2(value);
+  return diagnostic === null ? null : canonicalJson({
+    status: 'isolated_tracker_v2_campaign_not_confirmed', diagnostic,
+  });
+}
 
 /** The request creator must retain its fresh owner in this same process. */
 export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments(

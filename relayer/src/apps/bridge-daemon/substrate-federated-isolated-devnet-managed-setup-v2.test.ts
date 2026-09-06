@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => {
     'sourcePromote', 'vaultPromote', 'sourceAuthorizer', 'vaultAuthorization',
     'sourceTransport', 'vaultTransport', 'sourceJournal', 'vaultJournal', 'genesisJournal',
     'observer', 'sourceObserve', 'sourceGuard', 'vaultObserve', 'vaultGuard', 'draft',
-    'evidence', 'checkpointGuard', 'genesis', 'fees', 'wait', 'materialize', 'profile'] as const;
+    'evidence', 'checkpointGuard', 'genesis', 'fees', 'wait', 'materialize', 'profile',
+    'submissionDiagnostic', 'confirmationDiagnostic'] as const;
   return Object.fromEntries(names.map(name => [name, vi.fn()])) as Record<typeof names[number], ReturnType<typeof vi.fn>>;
 });
 vi.mock('../../substrate-federated-authority-safe-devnet-history-v1.js', () => ({ collectSubstrateFederatedAuthoritySafeDevnetHistoryV1: mocks.sourceHistory }));
@@ -37,6 +38,7 @@ vi.mock('../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadc
 vi.mock('../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1: mocks.sourceTransport,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1: mocks.vaultTransport,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic: mocks.submissionDiagnostic,
 }));
 vi.mock('../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js', () => ({ createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1: mocks.sourceJournal }));
 vi.mock('../../substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js', () => ({ createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1: mocks.vaultJournal }));
@@ -63,10 +65,12 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
   executeSubstrateFederatedIsolatedDevnetGenesisBatchV3: mocks.genesis,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1: mocks.fees,
   waitForCanonicalConfirmation: mocks.wait,
+  projectTrackerCanonicalConfirmationFailureDiagnosticV1: mocks.confirmationDiagnostic,
 }));
 
 import {
   executeSubstrateFederatedIsolatedDevnetManagedSetupV2 as execute,
+  projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2 as projectFailure,
   type ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input as Input,
 } from './substrate-federated-isolated-devnet-managed-setup-v2.js';
 import type { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 }
@@ -147,7 +151,7 @@ function fixture() {
     expectedProfilePins: {}, target, pegIn: { amountNanoErg: '10000000', recipientAddressHex: '11'.repeat(20) },
     applicationRunner: { temporaryDirectoryRoot: 'test-source-build', cargoDependencyCacheDirectory: 'test-cargo-cache' },
     markerDirectory: 'test-attempt-markers', state, completionDeadline: 10_000_000 };
-  const sourceHistory = {}, rewards = {}, ergoHistory = {}, observer = {};
+  const sourceHistory = {}, rewards = {}, ergoHistory = {}, observer = { reconciliationIdentityDigestHex: hex(48) };
   const family = { familyIdHex: hex(80) };
   mocks.profile.mockReturnValue({ sourceNetworkIdHex: hex(81), sidechainIdHex: hex(82), bridgeAddressHex: '22'.repeat(20),
     tokenAddressHex: '33'.repeat(20), settlementProfileIdHex: hex(83), settlementAssetIdHex: hex(84) });
@@ -185,8 +189,8 @@ function fixture() {
     takePreTransportObservation: record('vault-pre-transport-observation', {}) };
   mocks.sourceAuthorizer.mockReturnValue(sourceAuthorizer);
   mocks.vaultAuthorization.mockReturnValue(vaultAuthorization);
-  const sourceTransport = { submit: record('source-submit', { status: 'accepted', submittedTxId: sourceTx.txId, responseDigestHex: hex(91) }) };
-  const vaultTransport = { submit: record('vault-submit', { status: 'accepted', submittedTxId: vaultTx.txId, responseDigestHex: hex(92) }) };
+  const sourceTransport = { submit: record('source-submit', { status: 'accepted', submittedTxId: sourceTx.txId as string | null, responseDigestHex: hex(91) }) };
+  const vaultTransport = { submit: record('vault-submit', { status: 'accepted', submittedTxId: vaultTx.txId as string | null, responseDigestHex: hex(92) }) };
   mocks.sourceTransport.mockReturnValue(sourceTransport);
   mocks.vaultTransport.mockReturnValue(vaultTransport);
   mocks.wait.mockImplementation((_observer, _txId, _deadline, stage: string) => { events.push(`confirm:${stage}`); return confirmation; });
@@ -211,6 +215,8 @@ describe('managed setup V2 composition', () => {
     vi.resetAllMocks();
     vi.spyOn(performance, 'now').mockReturnValue(1_000);
     f = fixture();
+    mocks.submissionDiagnostic.mockReturnValue(null);
+    mocks.confirmationDiagnostic.mockReturnValue(null);
   });
   afterEach(() => vi.restoreAllMocks());
 
@@ -359,6 +365,97 @@ describe('managed setup V2 composition', () => {
       if (stage === 'source-lock') expect(mocks.sourceObserve).not.toHaveBeenCalled();
       if (stage === 'committed-vault') expect(mocks.vaultObserve).not.toHaveBeenCalled();
     });
+
+  it.each(['source', 'vault'] as const)('retains %s durable ambiguity when the submitter throws, without a retry or mint', async kind => {
+    f[`${kind}Transport`].submit.mockRejectedValue(new Error('synthetic-private-transport-detail'));
+    const cause = new Error('synthetic-private-observer-detail');
+    mocks.wait.mockImplementation((_observer, _tx, _deadline, stage) => {
+      if (stage === (kind === 'source' ? 'source-lock' : 'committed-vault')) throw cause;
+      return f.confirmation;
+    });
+    const failure = await run().catch(error => error);
+    const diagnostic = projectFailure(failure)!;
+    expect(failure.cause).toBe(cause);
+    expect(diagnostic.stage).toBe(kind === 'source' ? 'source-lock' : 'committed-vault');
+    expect(diagnostic.operation).toEqual({ status: 'ambiguous', expectedTxId: hex(kind === 'source' ? 60 : 61),
+      durableAttemptDigestHex: hex(85), journalDigestHex: hex(86),
+      submission: { callOutcome: 'threw', response: null } });
+    expect(f[`${kind}Journal`].journal.finalize.mock.calls[0]![0].submission.status).toBe('ambiguous');
+    expect(f[`${kind}Transport`].submit).toHaveBeenCalledOnce();
+    expect(f[`${kind}Journal`].reconcileActive).toHaveBeenCalledOnce();
+    expect(f.input.continuation.executeApplication).not.toHaveBeenCalled();
+    expect(JSON.stringify(diagnostic)).not.toContain('synthetic-private');
+    expect(Object.isFrozen(diagnostic)).toBe(true);
+    expect(Object.isFrozen(diagnostic.operation)).toBe(true);
+    expect(projectFailure(structuredClone(diagnostic))).toBeNull();
+    expect(projectFailure(new AggregateError([failure, new Error('cleanup')]))).toBe(diagnostic);
+    expect(projectFailure(new AggregateError([new Error('primary'), failure]))).toBeNull();
+  });
+
+  it.each([
+    ['accepted', 'accepted', 200, 'pending_at_deadline'],
+    ['ambiguous', 'ambiguous_http_response', 400, 'not_found_at_deadline'],
+    ['ambiguous', 'ambiguous_no_response', null, 'observer_failure'],
+    ['ambiguous', 'ambiguous_success_response', 200, 'pending_at_deadline'],
+  ] as const)('retains %s / %s through %s confirmation diagnostics', async (status, outcome, httpStatus, category) => {
+    const response = Object.freeze({ status, submittedTxId: status === 'accepted' ? hex(60) : null, responseDigestHex: hex(91) });
+    const transportDiagnostic = Object.freeze({ outcome, httpStatus, expectedTxId: hex(60),
+      durableAttemptDigestHex: hex(85), responseDigestHex: hex(91) });
+    const cause = new Error('synthetic-private-observer-detail');
+    const confirmation = Object.freeze({ category, expectedTransactionIdHex: hex(60),
+      executionTargetIdentityDigestHex: hex(48), observationCount: 2, lastObservation: null });
+    f.sourceTransport.submit.mockResolvedValue(response);
+    mocks.submissionDiagnostic.mockImplementation(value => value === response ? transportDiagnostic : null);
+    mocks.confirmationDiagnostic.mockImplementation(value => value === cause ? confirmation : null);
+    mocks.wait.mockRejectedValue(cause);
+    const diagnostic = projectFailure(await run().catch(error => error))!;
+    expect(diagnostic.operation.status).toBe(status);
+    expect(diagnostic.operation.submission).toEqual({ callOutcome: 'returned', response: transportDiagnostic });
+    expect(diagnostic.confirmation).toBe(confirmation);
+    expect(f.sourceTransport.submit).toHaveBeenCalledOnce();
+    expect(mocks.vaultObserve).not.toHaveBeenCalled();
+    expect(f.input.continuation.executeApplication).not.toHaveBeenCalled();
+  });
+
+  it.each(['expectedTxId', 'durableAttemptDigestHex'])('omits a diagnostic for another submission %s', async field => {
+    mocks.submissionDiagnostic.mockReturnValue({ outcome: 'accepted', httpStatus: 200,
+      expectedTxId: hex(60), durableAttemptDigestHex: hex(85), responseDigestHex: hex(91), [field]: hex(999) });
+    mocks.wait.mockRejectedValue(new Error('confirmation failed'));
+    const diagnostic = projectFailure(await run().catch(error => error))!;
+    expect(diagnostic.operation.submission).toEqual({ callOutcome: 'returned', response: null });
+    expect(diagnostic.operation.status).toBe('accepted');
+  });
+
+  it.each(['expectedTransactionIdHex', 'executionTargetIdentityDigestHex'])('omits a confirmation diagnostic for another %s', async field => {
+    mocks.confirmationDiagnostic.mockReturnValue({ expectedTransactionIdHex: hex(60),
+      executionTargetIdentityDigestHex: hex(48), [field]: hex(999) });
+    mocks.wait.mockRejectedValue(new Error('confirmation failed'));
+    expect(projectFailure(await run().catch(error => error))!.confirmation).toBeNull();
+  });
+
+  it('keeps canonical reconciliation decisive after ambiguous submission', async () => {
+    f.sourceTransport.submit.mockResolvedValue({ status: 'ambiguous', submittedTxId: null, responseDigestHex: hex(91) });
+    await run();
+    expect(f.sourceJournal.reconcileActive).toHaveBeenCalledTimes(2);
+    expect(f.sourceJournal.revalidateConfirmed).toHaveBeenCalledOnce();
+    expect(f.sourceTransport.submit).toHaveBeenCalledOnce();
+    expect(f.input.continuation.executeApplication).toHaveBeenCalledOnce();
+  });
+
+  it('does not read caller-supplied error accessors or proxy traps', () => {
+    const trap = vi.fn(() => { throw new Error('must not run'); });
+    const accessor = new AggregateError([], 'synthetic');
+    Object.defineProperty(accessor, 'errors', { get: trap });
+    const proxied = new Proxy({}, { get: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap });
+    const revoked = Proxy.revocable([], {});
+    revoked.revoke();
+    expect(projectFailure(accessor)).toBeNull();
+    expect(projectFailure(proxied)).toBeNull();
+    const revokedFailure = new AggregateError([], 'synthetic');
+    Object.defineProperty(revokedFailure, 'errors', { value: revoked.proxy });
+    expect(projectFailure(revokedFailure)).toBeNull();
+    expect(trap).not.toHaveBeenCalled();
+  });
 
   it.each(['confirmationHeight', 'confirmationHeaderIdHex'] as const)(
     'rejects changed reserve %s after fees without attesting', async field => {

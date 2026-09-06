@@ -96,6 +96,7 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
       ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
         'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
         'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1',
+        'projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic',
       ])],
       ['substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts', new Set([
         'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
@@ -876,6 +877,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
       )!].map(([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const),
       ['./ergo-operational-transaction.js', new Set(['runErgoOperationalTransaction'])],
+      ['node:util/types', new Set(['isNativeError', 'isProxy'])],
       ['../../relayer-core/ergo-operational-transaction-lifecycle.js', new Set([
         'PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE',
         'SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE',
@@ -889,6 +891,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3',
         'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1',
         'waitForCanonicalConfirmation',
+        'projectTrackerCanonicalConfirmationFailureDiagnosticV1',
       ])],
     ]),
   ],
@@ -1348,6 +1351,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
     new Set([
       'ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input',
       'executeSubstrateFederatedIsolatedDevnetManagedSetupV2',
+      'projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2',
     ]),
   ],
   [
@@ -1364,6 +1368,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
     new Set([
       'APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS',
       'normalizeTrackerTransportJournalRootV9',
+      'projectTrackerCanonicalConfirmationFailureDiagnosticV1',
       'assertReservedTrackerTransportJournalRootV9',
       'normalizePegInCandidatePlan',
       'normalizeFrontierApplicationRunnerPlan',
@@ -2175,7 +2180,10 @@ function inspectExclusiveRuntimeAuthorityImport(
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (file === 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts'
     && imported.value === './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js'
-    && imported.form === 'dynamic-import' && imported.bindings.length === 1
+    && imported.form === 'dynamic-import'
+    && (imported.bindings.length === 1 || (imported.bindings.length === 2
+      && imported.bindings[1]!.imported === 'formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure'
+      && imported.bindings[1]!.local === imported.bindings[1]!.imported))
     && imported.bindings[0]!.imported === 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (imported.form !== 'named-import') {
@@ -2336,9 +2344,11 @@ function collectReviewedAppExportViolations(
 
 const FIXED_CAMPAIGN_SCRIPT_EXPORTS = new Map([
   ['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
-    'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments'],
+    new Set(['runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments',
+      'formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure'])],
   ['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts',
-    'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments'],
+    new Set(['runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments',
+      'readSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure'])],
 ]);
 
 function collectFixedCampaignScriptViolations(
@@ -2347,7 +2357,7 @@ function collectFixedCampaignScriptViolations(
 ): LayerImportViolation[] {
   const entry = FIXED_CAMPAIGN_SCRIPT_EXPORTS.get(file);
   if (entry === undefined) return [];
-  const violations = collectReviewedAppExportViolations(file, parsed, new Set([entry]));
+  const violations = collectReviewedAppExportViolations(file, parsed, entry);
   const protectedNames = new Set<string>();
   for (const imported of imports) {
     if (imported.value === null || imported.typeOnly) continue;
