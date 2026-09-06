@@ -94,7 +94,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
 | Actual campaign caller | Main owner; consumes the component-tested V2 admission lifecycle | Select the retained V3 route in the real application root. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
-| V2 withdrawal acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction is available; it neither proves canonical input history nor authorizes signing or transport |
+| V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
 both directions through recovery, and finish target/custody rehearsal and FED-7.
@@ -128,8 +128,28 @@ reserve value and liability decrease by the burn amount; a separate input pays
 the miner fee. Isolated negatives cover compiler provenance, source/profile
 bindings, payout substitution, replay and conservation. The V1 golden fixture
 and transaction identity are unchanged. These checks establish synthetic
-construction, not canonical tracker admission, full-transaction V2 VM/node
-acceptance, signing authority or a completed exit.
+construction, not canonical tracker admission, operational signing authority
+or a completed exit.
+
+The separate offline V2 JVM matrix verifies the reserve, DUP and synthetic
+fee signature against the same full transaction. Its positive and seven
+isolated negatives cover payout substitution, replay, liability drift, fee
+redirection, missing context and absent/stale fee proofs. The fixture consumes
+genuine V2 compiler receipts and pins its serialized bytes and JVM dependencies.
+This is synthetic VM acceptance, not canonical state or target-node acceptance.
+
+The ordinary fixture tests run without a JVM. To reproduce the opt-in matrix,
+use Node 24.14.0, set `JAVA_HOME` to the pinned Microsoft JDK 17.0.19+10 and
+`BRIDGE_V2_JVM_SCALA_COMPILER` to an existing Scala 2.12.20 compiler JAR, then
+run from `relayer`:
+
+```powershell
+$env:BRIDGE_V2_WITHDRAWAL_JVM = '1'
+npm.cmd test -- --run src/substrate-federated-burn-settlement-v2-acceptance-fixture.test.ts
+```
+
+The test rejects mismatched executable/compiler/dependency hashes. The opt-in
+matrix is not part of default CI coverage; no resolver or node is started.
 
 V150-V170 specifications and validation limits are retained in the
 [checkpoint archive](bridge-execution-checkpoints-2026-09-06.md). Consult the
