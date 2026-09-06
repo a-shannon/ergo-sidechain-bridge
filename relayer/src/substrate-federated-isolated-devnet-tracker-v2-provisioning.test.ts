@@ -16,6 +16,8 @@ import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signe
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as fleet from './fleet-signer.js';
 import { StateTracker } from './state-tracker.js';
+import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesisBatchV3 }
+  from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE as GENESIS_OPERATION_PROFILE }
   from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { createSubstrateFederatedLocalDevnetGenesisJournalV1 as createGenesisJournal }
@@ -806,6 +808,44 @@ function executionTarget() {
 }
 
 describe('owned synthetic session -> V3 execution promotion', () => {
+  it('composes all three genuine V3 genesis transactions with ordered observed confirmations', async () => {
+    const fixture = await createRootFixture();
+    const target = executionTarget();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    let markerDirectory: string | undefined;
+    let state: StateTracker | undefined;
+    try {
+      const directory = mkdtempSync(join(tmpdir(), 'e2s-v166-genesis-'));
+      markerDirectory = directory;
+      const journalState = new StateTracker(':memory:');
+      state = journalState;
+      await withObservations(async observed => {
+        const batch = await fixture.session.runForExecutionV3(fixture.input, target);
+        const confirmations = await executeGenesisBatchV3({
+          target, batch, state: journalState, markerDirectory: directory,
+        });
+        expect(confirmations.map(value => value.role)).toEqual(roles);
+        expect(confirmations.map(value => value.expectedTxId))
+          .toEqual(batch.orderedTransactions.map(value => value.issuance.unsignedTransactionIdHex));
+        expect(confirmations.map(value => value.confirmationHeight))
+          .toEqual([TIP_HEIGHT + 1, TIP_HEIGHT + 12, TIP_HEIGHT + 23]);
+        expect(observed.submissionBodies).toEqual(observed.checkBodies);
+        expect(observed.submissionBodies).toHaveLength(3);
+        expect(journalState.getActiveErgoOperationalTransactionAttempts(GENESIS_OPERATION_PROFILE)).toHaveLength(0);
+        expect(journalState.getConfirmedErgoOperationalTransactionAttempts(GENESIS_OPERATION_PROFILE)).toHaveLength(3);
+        await expect(executeGenesisBatchV3({ target, batch, state: journalState, markerDirectory: directory }))
+          .rejects.toThrow(/consumed|provenance/);
+        expect(observed.submissionBodies).toHaveLength(3);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+        submissionOracle: signedCheckOracle, confirmSubmittedGenesis: true });
+    } finally {
+      state?.close();
+      if (markerDirectory !== undefined) rmSync(markerDirectory, { recursive: true, force: true });
+      custody.mockRestore(); fixture.session.dispose();
+    }
+  }, 90_000);
+
   it('executes a genuine V3 genesis handle through the journal and V2 transport once', async () => {
     const fixture = await createRootFixture();
     const target = executionTarget();
@@ -1605,6 +1645,7 @@ interface ObservationOptions {
   readonly headers?: readonly Readonly<Record<string, unknown>>[];
   readonly checkOracle?: (body: Record<string, unknown>, ordinal: number) => unknown;
   readonly submissionOracle?: (body: Record<string, unknown>, ordinal: number) => unknown;
+  readonly confirmSubmittedGenesis?: boolean;
   readonly postCheckReplacementRole?: Role;
   readonly fixedSetupPorts?: boolean;
 }
@@ -1614,9 +1655,9 @@ async function withObservations<T>(
   options: ObservationOptions = {},
 ): Promise<T> {
   const funding = options.boxes ?? boxes;
-  const tipHeight = options.tipHeight ?? TIP_HEIGHT;
+  let tipHeight = options.tipHeight ?? TIP_HEIGHT;
   const genesisHeaderId = options.genesisHeaderId ?? GENESIS_HEADER_ID;
-  const tipHeaderId = options.tipHeaderId ?? TIP_HEADER_ID;
+  let tipHeaderId = options.tipHeaderId ?? TIP_HEADER_ID;
   const json = new Map(roles.map(role => [funding[role].boxId, funding[role]]));
   const sigma = new Map(roles.map(role => [funding[role].boxId, sigmaBytes(funding[role])]));
   const servers: Server[] = [];
@@ -1624,6 +1665,10 @@ async function withObservations<T>(
   const unexpected: string[] = [];
   const checkBodies: Record<string, unknown>[] = [];
   const submissionBodies: Record<string, unknown>[] = [];
+  const confirmations = new Map<string, { inclusionHeight: number; headerId: string }>();
+  const confirmationReads = new Map<string, Set<string>>();
+  const syntheticHeaderId = (height: number) => createHash('sha256')
+    .update(`V166 synthetic confirmation header ${height}`).digest('hex');
   const start = async () => {
     const primary = servers.length === 0;
     const server = createServer(async (request, response) => {
@@ -1646,6 +1691,17 @@ async function withObservations<T>(
           const bodies = path === '/transactions/check' ? checkBodies : submissionBodies;
           bodies.push(candidate);
           body = oracle(candidate, bodies.length - 1);
+          if (path === '/transactions' && options.confirmSubmittedGenesis) {
+            const previousId = [...confirmations.keys()].at(-1);
+            if (previousId !== undefined) {
+              expect(confirmationReads.get(previousId)).toEqual(new Set(['primary', 'witness']));
+            }
+            const id = signedCheckOracle(candidate);
+            const inclusionHeight = tipHeight + 1;
+            confirmations.set(id, { inclusionHeight, headerId: syntheticHeaderId(inclusionHeight) });
+            tipHeight = inclusionHeight + 10;
+            tipHeaderId = syntheticHeaderId(tipHeight);
+          }
           response.writeHead(200, { 'Content-Type': 'application/json' });
           response.end(JSON.stringify(body));
         } catch {
@@ -1660,6 +1716,18 @@ async function withObservations<T>(
         else if (path === '/blocks/lastHeaders/1') body = [{ id: tipHeaderId, height: tipHeight }];
         else if (path === '/blocks/lastHeaders/10' && options.headers) body = options.headers;
         else if (path === '/blocks/at/1') body = [genesisHeaderId];
+        else if (options.confirmSubmittedGenesis && path.startsWith('/blockchain/transaction/byId/')) {
+          const id = path.slice('/blockchain/transaction/byId/'.length);
+          const confirmation = confirmations.get(id);
+          if (confirmation !== undefined) {
+            const readers = confirmationReads.get(id) ?? new Set<string>();
+            readers.add(primary ? 'primary' : 'witness');
+            confirmationReads.set(id, readers);
+            body = { id, ...confirmation, numConfirmations: tipHeight - confirmation.inclusionHeight };
+          }
+        } else if (options.confirmSubmittedGenesis && /^\/blocks\/at\/[1-9][0-9]*$/.test(path)) {
+          body = [syntheticHeaderId(Number(path.slice('/blocks/at/'.length)))];
+        }
         else {
           const binary = path.match(/^\/utxo\/byIdBinary\/([0-9a-f]{64})$/);
           const byId = path.match(/^\/utxo\/byId\/([0-9a-f]{64})$/);

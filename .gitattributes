@@ -140,6 +140,10 @@ relayer/src/substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.
 relayer/src/substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.test.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-checked-submission-transport-v1.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-checked-submission-transport-v1.test.ts text eol=lf
+relayer/src/apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts text eol=lf
+relayer/src/apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-batch-v3.test.ts text eol=lf
+relayer/src/architecture/layer-import-rules.ts text eol=lf
+relayer/src/architecture/layer-import-rules.test.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-v1.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-v1-fixture.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-v1.test.ts text eol=lf

@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Compose the V3 genesis batch with its fixed revalidator, authorizer and transport; require ordered canonical confirmations before a fresh-target run | V161 verifies the three genesis issuances on the pinned local node without submission. V162 retains checked candidates; V163 revalidates inputs; V164 binds authorization; V165 connects it to one-shot exact-byte transport. Signing custody closes. V3 runtime composition and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the genesis-only V3 composition to a fresh owned-target callback; establish ordered node confirmations before tracker admission | V161 checks three genesis issuances without submission. V162-V165 retain, revalidate, authorize and transport exact checked candidates. V166 composes those steps with the journal and ordered confirmation observer. The managed V3 caller, fresh-target confirmation and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -607,16 +607,51 @@ received object with the checked transaction, rejects repeated/copied attempts
 and leaves one active, zero confirmed journal entries. Process custody and the
 HTTP endpoint are test doubles; confirmation is unavailable, not synthesized.
 
-The new transport factory has no runtime caller. The next batch must connect
-the V3 path to ordered genesis execution and the existing confirmation observer.
-Keep that first composition genesis-only: the broader legacy campaign retains
-a peg-in signer, whereas `runForExecutionV3` closes signing custody.
+At the V165 boundary the new transport factory had no runtime caller. V166
+connects it only through the genesis composition below. The broader legacy
+campaign retains a peg-in signer, whereas `runForExecutionV3` closes signing
+custody; it is not replaced by this genesis-only entry.
 
 Validation covers both transport profiles and their direct consumers, the
 genuine V3 join, genesis journal/core, existing execution root, Fleet handles,
 broadcast surface and import rules. Contracts, transaction shape, signer and
 runtime pins are unchanged; V161 remains the real-node genesis-check result,
 not evidence of submission or confirmation for the new transport path.
+
+### Ordered V3 Genesis Composition
+
+V166 connects the retained V3 batch to the fixed V2 revalidator, authorizer and
+transport, plus the existing genesis journal and confirmation observer. The
+caller must already hold an owned execution target and owns persistence and
+process lifetime. There is no public parameter for a signer, checker,
+authorization callback, transport, observer, clock or retry policy.
+
+| Producer -> consumer | Deciding invariant | Failure prevented |
+|---|---|---|
+| V3 provisioning -> lifecycle admission | Exact next-block output creation height (`observed tip + 1`), but attempt height equals the already observed tip | Rejecting valid next-block issuance or treating an unobserved height as current |
+| Retained batch -> signer/checker ports | Exact request, role, source, target, original transaction object and retained signed/check artifacts | Resigning, rechecking different bytes or substituting a candidate |
+| Transport -> next genesis role | Durable result, canonical observer confirmation, journal reconciliation and acknowledgement in role order | Advancing after HTTP acceptance alone or replacing an uncertain attempt |
+| Last role -> returned summaries | All three journal entries revalidated, then all canonical confirmations refreshed | Returning completion after an earlier inclusion disappeared |
+| App root -> adapters | Named import/export allowlists and no leaked factories or returned capabilities | Runtime selection of a different authority path |
+
+The V1 action and V3 entry share the existing ordered loop, deadline checks and
+reconciliation rules. V1 retains its creation-height convention and adapters.
+V3 returns confirmation summaries only, not a receipt relabelled from V1 or a
+capability for later value release. The fixed loopback observer is operational
+confirmation evidence; two endpoints do not establish independent operators or
+sidechain consensus.
+
+Direct tests isolate orchestration failures. A separate fixture composes real
+V3 compilation, signed candidates, Fleet handles, journal, adapters and observer
+against synthetic process custody and bounded loopback confirmation responses.
+It does not establish node acceptance, mining or canonical inclusion on a real
+target. The next consumer is a fresh owned-target callback, not the legacy
+peg-in campaign. No CLI or managed campaign calls the V3 entry yet.
+
+Validation covers the changed root, height policy, capability allowlists,
+ordered lifecycle/journal and fixed-adapter closure once stable. Contracts,
+proofs, signed shapes and build pins remain unchanged. Prior V161 checks retain
+their original scope; neither Gate 5 nor the complete FED withdrawal closes here.
 
 ### Fresh-Owner Application Join
 

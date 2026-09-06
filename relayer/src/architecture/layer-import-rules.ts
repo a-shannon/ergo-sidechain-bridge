@@ -467,8 +467,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1',
           'SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2',
           'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2',
+          'SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3',
           'SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2',
           'SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt',
+          'assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3',
           'assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1',
           'assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2',
           'assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
@@ -494,6 +496,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
         new Set([
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+          'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
           'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1',
           'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
         ]),
@@ -531,7 +534,11 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts',
         new Set([
           'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
+          'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2',
           'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+          'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
+          'SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+          'SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
         ]),
       ],
       [
@@ -544,13 +551,15 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
-        new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1']),
+        new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1',
+          'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2']),
       ],
       [
         'substrate-federated-local-devnet-genesis-journal-v1.ts',
         new Set([
           'createSubstrateFederatedLocalDevnetGenesisJournalV1',
           'SubstrateFederatedLocalDevnetGenesisJournalV1',
+          'SubstrateFederatedLocalDevnetGenesisJournalStateV1',
         ]),
       ],
       [
@@ -825,6 +834,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       [
         '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js',
         new Set([
+          'assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3',
           'assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1',
           'assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1',
           'claimSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1',
@@ -841,6 +851,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js',
         new Set([
           'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1',
+          'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
           'createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1',
           'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
         ]),
@@ -881,7 +892,9 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
         new Set([
           'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1',
+          'assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2',
           'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
+          'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
         ]),
       ],
       [
@@ -893,7 +906,8 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       ],
       [
         '../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js',
-        new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1']),
+        new Set(['createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1',
+          'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2']),
       ],
       [
         '../../substrate-federated-local-devnet-genesis-journal-v1.js',
@@ -1140,6 +1154,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_ROOT_V4_SCHEMA',
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
+      'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3',
       'runSubstrateFederatedIsolatedDevnetPegInApplicationCheckpointCampaignRootV3',
       'runSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1',
       'runSubstrateFederatedIsolatedDevnetPegInCheckpointAnchorCampaignRootV5',

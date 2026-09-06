@@ -448,11 +448,11 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
-    )).toEqual([]);
+    )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(
       sources,
       'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
-    )).toEqual([transportFile]);
+    )).toEqual([executionRoot, transportFile]);
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
@@ -472,11 +472,15 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
-    )).toEqual([]);
+    )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
-    )).toEqual([authorizerFile]);
+    )).toEqual([executionRoot, authorizerFile]);
+    expect(filesImporting(sources, 'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3'))
+      .toEqual([]);
+    expect(filesContainingIdentifier(sources, 'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3'))
+      .toEqual([executionRoot]);
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',

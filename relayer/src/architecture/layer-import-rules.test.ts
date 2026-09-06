@@ -685,6 +685,32 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it.each([
+    ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2'],
+    ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2'],
+    ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2'],
+  ] as const)('keeps V3 genesis capability %s#%s inside the fixed root', (module, factory) => {
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const target = `${module}.ts`;
+    const specifier = `../../${module}.js`;
+    expect(inspect({
+      [root]: `import { ${factory} } from '${specifier}'; ${factory}();`,
+      [target]: `export function ${factory}() {}`,
+    })).toEqual([]);
+    expect(inspect({
+      [root]: `import { ${factory} } from '${specifier}'; export const escaped = ${factory};`,
+      [target]: `export function ${factory}() {}`,
+    }).map(value => value.message)).toContain(
+      `restricted capability binding must not escape its reviewed call: ${specifier}#${factory}`,
+    );
+    expect(inspect({
+      'apps/bridge-daemon/unreviewed-genesis-root.ts': `import { ${factory} } from '${specifier}'; ${factory}();`,
+      [target]: `export function ${factory}() {}`,
+    }).map(value => value.message)).toContain(
+      `apps must not import an unclassified legacy module: ${target}`,
+    );
+  });
+
   it('limits the isolated-devnet execution root to its reviewed broadcast bindings', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
