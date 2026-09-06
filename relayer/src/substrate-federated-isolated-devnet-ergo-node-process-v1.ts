@@ -89,7 +89,8 @@ const OWNED_PORTS = [
   PRIMARY_P2P_PORT,
   WITNESS_P2P_PORT,
 ] as const;
-const MINIMUM_MINED_HEIGHT = 8;
+// The setup signer requires a complete /blocks/lastHeaders/10 context.
+const MINIMUM_MINED_HEIGHT = 10;
 const STARTUP_TIMEOUT_MS = 120_000;
 const MINING_TIMEOUT_MS = 120_000;
 const SHUTDOWN_TIMEOUT_MS = 20_000;
@@ -3252,10 +3253,7 @@ async function waitForMinimumIndexedSnapshot(
 ): Promise<Readonly<TargetSnapshot>> {
   return await retryNode(node, MINING_TIMEOUT_MS, async () => {
     const snapshot = await readTargetSnapshot(node);
-    if (
-      snapshot.fullHeight < MINIMUM_MINED_HEIGHT
-      || snapshot.indexedHeight !== snapshot.fullHeight
-    ) {
+    if (!isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(snapshot)) {
       throw new Error(`${node.role} has not observed and indexed enough signer rewards`);
     }
     return snapshot;
@@ -3273,9 +3271,8 @@ async function waitForCommonIndexedSnapshot(
       readTargetSnapshot(witness),
     ]);
     if (
-      primarySnapshot.fullHeight < MINIMUM_MINED_HEIGHT
-      || primarySnapshot.indexedHeight !== primarySnapshot.fullHeight
-      || witnessSnapshot.indexedHeight !== witnessSnapshot.fullHeight
+      !isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(primarySnapshot)
+      || !isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(witnessSnapshot)
       || primarySnapshot.fullHeight !== witnessSnapshot.fullHeight
       || primarySnapshot.headerIdHex !== witnessSnapshot.headerIdHex
     ) {
@@ -3283,6 +3280,13 @@ async function waitForCommonIndexedSnapshot(
     }
     return primarySnapshot;
   });
+}
+
+export function isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(
+  snapshot: Readonly<{ fullHeight: number; indexedHeight: number }>,
+): boolean {
+  return snapshot.fullHeight >= MINIMUM_MINED_HEIGHT
+    && snapshot.indexedHeight === snapshot.fullHeight;
 }
 
 async function waitForCommonIndexedSnapshotAfterHeight(

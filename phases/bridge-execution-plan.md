@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Exercise the V3 no-submit session with fresh chain-resident genesis funding; then connect exact V2-family execution promotion before transport | V160 connects genuine V2 compiler provenance to the synthetic-custody session and V3 checks. Its direct matrix uses a bounded HTTP parsing oracle, not target-node acceptance. V155 retains its pinned-node synthetic-state scope. Real UTXO membership, V3 execution promotion and canonical admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the checked V3 genesis batch to a separately bound V3 execution continuation, then authorize exact genesis transport on a fresh local target | V161 verifies all three genesis issuances against real chain-resident inputs on the pinned local node, with signature rejection and unchanged funding. These outputs were not submitted or spent. V3 execution promotion and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -437,11 +437,53 @@ This is not a promise to cancel an already-started check.
 `runV3` returns a validated data receipt, not retained execution material or a
 broadcast capability. It closes the no-submit session. It does not retain the
 peg-in signer, promote a V3 batch through V2 guards or enable the old campaign.
-The next deciding result is an exact check against fresh chain-resident inputs
-on the selected local node. Subsequent genesis transport needs a separately
-bound V3 execution continuation and authorization; a prior no-submit receipt
+V161 supplies the exact check against fresh chain-resident inputs below.
+Subsequent genesis transport needs a separately bound V3 execution continuation
+and authorization; a prior no-submit receipt
 cannot supply either. Source finality, institutional launch-history approval
 and canonical tracker admission remain open.
+
+### Fresh-Node Genesis Acceptance
+
+V161 runs the V3 session against two fresh, owned local Ergo nodes. At their
+common indexed height 10, three mature reward inputs fund the tracker, DUP and
+reserve genesis transactions. The session compiles the V2 family for those
+exact input IDs, signs with its synthetic key and receives matching transaction
+IDs from three real `/transactions/check` calls. No transaction is submitted.
+
+The real-node test exposed a preparation mismatch: the manager could stop mining at
+height 8, but the signer requires ten headers. The shared readiness floor is
+now 10 with indexing agreement. Pair identity, contiguous-header checks,
+timeouts and joined process cleanup remain unchanged. Heights 8/9, indexing
+lag, nine otherwise-valid headers and one broken parent link have separate
+negative tests; incomplete signing contexts stop before any transaction POST.
+
+A one-byte signature mutation preserves the transaction ID and receives HTTP
+400 from the same node. Re-observation confirms the same funding inputs and
+tip after the checks. The owned nodes stop and release all four loopback ports
+on success; the failed short-context run also completed cleanup.
+
+The locked node was rebuilt from Ergo base
+`2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` plus the existing extension patch.
+Its assembly SHA-256 is
+`b248676172f197ccb4d33e64bf1a16e005f22829eaf637963f0a7acdcc3fb3b1`.
+The affected closure passes 87 focused tests and one opt-in real-node test,
+with TypeScript and independent source review. Unchanged contract, WASM/JVM,
+proof-format and build-lock checks retain their earlier scopes.
+
+To run the opt-in test, supply the local build receipt, Java executable and
+assembly through `BRIDGE_TRACKER_V2_NODE_BUILD_RECEIPT`,
+`BRIDGE_TRACKER_V2_JAVA` and `BRIDGE_TRACKER_V2_NODE_JAR`. From `relayer`:
+
+```powershell
+npm.cmd test -- --run src/substrate-federated-isolated-devnet-tracker-v2-provisioning.test.ts -t "checks V3 genesis on fresh owned Ergo nodes without submitting"
+```
+
+This is genesis-issuance acceptance, not tracker-spend or withdrawal acceptance.
+Source history remains synthetic test input. The check establishes neither
+source finality, approved launch history, independent custody nor profile
+activation. The next batch must retain exact V3 execution provenance and target
+binding without turning this data-only receipt into broadcast authority.
 
 ### Fresh-Owner Application Join
 

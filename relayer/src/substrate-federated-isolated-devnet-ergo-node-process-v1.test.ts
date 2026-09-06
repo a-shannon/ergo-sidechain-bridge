@@ -34,6 +34,7 @@ import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
+  isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
@@ -70,6 +71,15 @@ const temporaryDirectories: string[] = [];
 describe.skipIf(process.platform !== 'win32')(
   'isolated devnet Ergo owned process V1',
   () => {
+    it.each([
+      [8, 8, false], [9, 9, false], [10, 9, false],
+      [10, 10, true], [11, 10, false], [11, 11, true],
+    ])('setup readiness at full height %i and indexed height %i is %s', (fullHeight, indexedHeight, ready) => {
+      expect(isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1({
+        fullHeight, indexedHeight,
+      })).toBe(ready);
+    });
+
     afterEach(() => {
       for (const path of temporaryDirectories.splice(0)) {
         rmSync(path, { recursive: true, force: true, maxRetries: 3 });
@@ -795,7 +805,7 @@ describe.skipIf(process.platform !== 'win32')(
           expect(result.value.discovery.signer.publicKeyHex)
             .toBe(setup.signer.publicKeyHex);
           expect(result.value.history.receipt.target.headerCount)
-            .toBeGreaterThanOrEqual(8);
+            .toBeGreaterThanOrEqual(10);
           const headerManifest = JSON.parse(
             result.value.history.artifacts.greatestWorkHeadersManifest,
           ) as { headers: Array<{ version: number }> };
