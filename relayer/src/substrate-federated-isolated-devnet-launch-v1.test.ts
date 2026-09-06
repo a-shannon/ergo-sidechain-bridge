@@ -2416,6 +2416,21 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       ),
       'utf8',
     );
+    const trackerV2Kernel = readFileSync(new URL(
+      './substrate-federated-isolated-devnet-tracker-v2-check-kernel-v1.ts', import.meta.url,
+    ), 'utf8');
+    expect([...trackerV2Kernel.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu)].map(match => match[1])).toEqual([
+      './bridge-validity-tracker-header-context-v1.js',
+      './ergo-check-profiles.js',
+      './fleet-signer.js',
+      './strict-json.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+      './substrate-federated-tracker-compiler-v2.js',
+      './substrate-federated-tracker-v2.js',
+      './substrate-federated-tracker-v2-external-fee.js',
+      './unsigned-ergo-transaction.js',
+    ]);
+    expect(trackerV2Kernel).not.toMatch(/\bimport\s*\(/u);
     const runnerImports = [
       ...runner.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
     ].map(match => match[1]);
@@ -2451,6 +2466,10 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './ergo-unsigned-transaction.js',
       './substrate-federated-tracker-v1.js',
       './substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js',
+      './substrate-federated-isolated-devnet-tracker-v2-check-kernel-v1.js',
+      './substrate-federated-tracker-v2.js',
+      './substrate-federated-tracker-compiler-v2.js',
+      './substrate-federated-tracker-v2-external-fee.js',
       './substrate-federated-settlement-family-compiler-binding-v1.js',
       './local-wasm-root-signer-public-identity.js',
       './relayer-core/devnet-reward-consolidation.js',
@@ -2470,12 +2489,15 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     ]);
     expect(execution.match(/import\s*\{([^}]+)\}\s*from\s*'\.\/ergo-helpers\.js'/u)?.[1]?.trim())
       .toBe('ngetDirect');
-    expect(execution.match(/import\s*\{([^}]+)\}\s*from\s*'\.\/substrate-federated-tracker-v2-external-fee\.js'/u)?.[1]?.trim())
-      .toBe('buildSubstrateFederatedTrackerV2FeeFunding');
-    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}`).not.toMatch(
+    expect([...execution.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/substrate-federated-tracker-v2-external-fee\.js'/gu)]
+      .map(match => match[1]!.replace(/\s+/gu, ' ').trim())).toEqual([
+      'assertSubstrateFederatedTrackerV2ExternalFeeTransaction, type SubstrateFederatedTrackerV2ExternalFeeTransaction',
+      'buildSubstrateFederatedTrackerV2FeeFunding',
+    ]);
+    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}\n${trackerV2Kernel}`).not.toMatch(
       /process\.env|node:(?:fs|http|https|net|tls|child_process)|profile-registry|state-tracker/iu,
     );
-    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}`).not.toMatch(
+    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}\n${trackerV2Kernel}`).not.toMatch(
       /\b(?:signTransactionForSubmission|submitSigned|npost|broadcastTransaction|getSignerKeys|fetch\s*\()/u,
     );
     expect(signerIdentity.match(/\bimport\s*\(/gu) ?? []).toHaveLength(1);

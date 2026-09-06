@@ -11,7 +11,11 @@ import { Mnemonic } from 'ethers';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
-import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
+import { buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
+import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
+import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context } from './substrate-federated-tracker-v2.js';
+import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substrate-federated-tracker-v2-external-fee.js';
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as fleet from './fleet-signer.js';
@@ -65,6 +69,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 as assertExecutionV2,
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 as assertExecutionV3,
   promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 as promoteExecutionV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerV2Check as assertTrackerV2Check,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
@@ -73,6 +78,8 @@ import {
 } from './ergo-encoding.js';
 import {
   buildSubstrateFederatedCheckpointProfileV1,
+  buildSubstrateFederatedCheckpointStatementV1,
+  encodeSubstrateFederatedCheckpointExtensionValueV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
 import * as observations from './substrate-federated-genesis-observation-v1.js';
@@ -1241,6 +1248,129 @@ describe('owned synthetic session -> V3 execution promotion', () => {
 });
 
 describe('owned synthetic session -> V3 no-submit setup root', () => {
+  it('rejects a different compiled admission profile before retaining the V3 tracker signer', async () => {
+    const session = await createSession();
+    try {
+      await expect(session.runForExecutionV3RetainingTrackerSigner(rootInput(checkCompiler), executionTarget()))
+        .rejects.toThrow(/exact synthetic admission signer/);
+      await expect(session.runForExecutionV3RetainingTrackerSigner(rootInput(checkCompiler), executionTarget()))
+        .rejects.toThrow(/consumed or disposed/);
+      expect(() => assertMiningCredential(session.miningCredential, session.signer.publicKeyHex)).toThrow(/revoked/);
+    } finally { session.dispose(); }
+  });
+
+  it.each(['valid', 'default-closed', 'wrong-input', 'wrong-fee', 'wrong-genesis',
+    'wrong-target', 'copied-context', 'disposed', 'concurrent'] as const)(
+    'retains exact V3 custody through funding into the protocol V2 checker: %s', async fault => {
+      const fixture = await createRootFixture(true);
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue(executionBinding);
+      const frozenBinding = Object.freeze({ processBindingDigestHex: '51'.repeat(32),
+        executionTargetIdentityDigestHex: '52'.repeat(32) });
+      const frozenCustody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2')
+        .mockImplementation(() => {
+          if (fault === 'wrong-target') throw new Error('synthetic frozen target ownership mismatch');
+          return frozenBinding;
+        });
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await withObservations(async observed => {
+          const target = executionTarget();
+          const batch = fault === 'default-closed'
+            ? await fixture.session.runForExecutionV3RetainingTrackerFeeSigner(fixture.input, target, fixture.session.signer.publicKeyHex)
+            : await fixture.session.runForExecutionV3RetainingTrackerSigner(fixture.input, target);
+          const genesis = wasm.UnsignedTransaction.from_json(JSON.stringify(batch.orderedTransactions[0]!.issuance.unsignedTransactionBody));
+          const id = genesis.id();
+          const outputs = genesis.output_candidates();
+          const boxes: Eip12Box[] = [];
+          try {
+            for (let i = 0; i < 2; i++) {
+              const candidate = outputs.get(i);
+              const box = wasm.ErgoBox.from_box_candidate(candidate, id, i);
+              try { boxes.push(box.to_js_eip12()); }
+              finally { box.free(); candidate.free(); }
+            }
+          } finally { outputs.free(); id.free(); genesis.free(); }
+          const fundingHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+            currentHeight: 1012, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
+          }).headers.map(header => header.raw);
+          observed.publishBox(boxes[1]!, fundingHeaders);
+          const feeCheck = await fixture.session.checkTrackerFeeFundingV3(target);
+          const { trackerRequest, trackerReceipt } = fixture.input.sourceAndCompilerInput;
+          const statement = buildSubstrateFederatedCheckpointStatementV1({
+            ...vector.input.statement, ...trackerRequest.application, profile: trackerRequest.profile,
+          });
+          const membership = buildErgoExtensionMembershipProof([
+            { key: Buffer.from('0401', 'hex'), value: Buffer.from(
+              encodeSubstrateFederatedCheckpointExtensionValueV1(statement.encodedStatementHex), 'hex') },
+          ], Buffer.from('0401', 'hex'));
+          const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+            currentHeight: 1030, anchorContextIndex: 1, anchorExtensionRootHex: membership.root.toString('hex'),
+          }).headers.map(header => header.raw);
+          const observedHeaderContext = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+            rawHeaders: headers, anchorContextIndex: 1,
+            expectedAnchorHeaderIdHex: String(headers[1]!.id), expectedAnchorExtensionRootHex: membership.root.toString('hex'),
+          });
+          let trackerBox = boxes[0]!;
+          let feeBox = feeCheck.transaction.outputs[0]!;
+          if (fault === 'wrong-input') {
+            trackerBox = reidentifyBox(trackerBox, '61'.repeat(32));
+          }
+          if (fault === 'wrong-fee') {
+            feeBox = reidentifyBox(feeBox, '62'.repeat(32));
+          }
+          observed.publishBox(trackerBox, headers);
+          observed.publishBox(feeBox, headers);
+          const context = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
+            compilerRequest: trackerRequest, compilerReceipt: trackerReceipt, trackerInputBox: trackerBox,
+            observedHeaderContext, encodedStatementHex: statement.encodedStatementHex,
+            extensionMembershipProofHex: membership.proof.toString('hex'),
+          });
+          const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({
+            trackerContext: context, trackerInputBox: trackerBox, feeInputBox: feeBox,
+            feePayerPublicKeyHex: fixture.session.signer.publicKeyHex,
+          });
+          const frozenTarget = Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+            witnessNodeOrigin: 'http://127.0.0.1:9052' as const, primaryMining: false as const,
+            primaryReadOnly: true as const, witnessReadOnly: true as const,
+            miningStopped: true as const, checkpointBound: true as const });
+          const originalGet = ergoHelpers.ngetDirect;
+          const genesisDrift = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) =>
+            fault === 'wrong-genesis' && args[0] === '/blocks/at/1' ? ['ef'.repeat(32)] : await originalGet(...args));
+          try {
+            if (fault === 'disposed') fixture.session.dispose();
+            const input = { context: fault === 'copied-context' ? { ...context } : context, transaction, observedHeaderContext };
+            const pending = fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget);
+            if (fault === 'concurrent') {
+              await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
+            }
+            if (fault === 'valid') {
+              const checked = await pending;
+              expect(checked.result.transaction.unsignedTransactionIdHex).toBe(transaction.unsignedTransactionIdHex);
+              expect(checked.feeFundingTransactionIdHex).toBe(feeCheck.transaction.txId);
+              expect(() => assertTrackerV2Check(checked, frozenTarget)).not.toThrow();
+              expect(() => assertTrackerV2Check({ ...checked }, frozenTarget)).toThrow(/session provenance/);
+              expect(() => assertTrackerV2Check(checked, { ...frozenTarget })).toThrow(/session provenance/);
+              expect(observed.checkBodies).toHaveLength(5);
+              expect(observed.checkBodies[4]!.inputs).toHaveLength(2);
+              expect(observed.submissionBodies).toHaveLength(0);
+              expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+            } else {
+              const expected = fault === 'wrong-input' || fault === 'wrong-fee' ? /inputs differ from retained/
+                : fault === 'wrong-genesis' ? /frozen target genesis differs/
+                : fault === 'wrong-target' ? /synthetic frozen target ownership mismatch/
+                : fault === 'copied-context' ? /context provenance is missing/
+                : fault === 'concurrent' ? /invalidated by a concurrent transition/ : /continuation/;
+              await expect(pending).rejects.toThrow(expected);
+              expect(observed.submissionBodies).toHaveLength(0);
+            }
+            await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
+          } finally { genesisDrift.mockRestore(); }
+        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
+      } finally { errors.mockRestore(); frozenCustody.mockRestore(); custody.mockRestore(); fixture.session.dispose(); }
+    }, 60_000,
+  );
+
   it.each(['valid', 'ambiguous-response', 'forged-check', 'wrong-target', 'journal-failure',
     'journal-drift', 'pretransport-source-drift', 'post-check-source-drift',
     'pretransport-check-rejected', 'wrong-confirmed-fee', 'concurrent-execution',
@@ -2040,7 +2170,20 @@ it.runIf(process.env.BRIDGE_TRACKER_V2_EXECUTE_GENESIS === '1')(
   }, 0,
 );
 
-async function createRootFixture() {
+function reidentifyBox(box: Eip12Box, transactionId: string): Eip12Box {
+  const { boxId: _boxId, transactionId: _transactionId, index, ...output } = box;
+  const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
+    inputs: [{ boxId: 'ef'.repeat(32), extension: {} }], dataInputs: [], outputs: [output],
+  }));
+  const candidates = unsigned.output_candidates();
+  const candidate = candidates.get(0);
+  const id = wasm.TxId.from_str(transactionId);
+  const changed = wasm.ErgoBox.from_box_candidate(candidate, id, index);
+  try { return changed.to_js_eip12(); }
+  finally { changed.free(); id.free(); candidate.free(); candidates.free(); unsigned.free(); }
+}
+
+async function createRootFixture(retainTrackerSigner = false) {
   const session = await createSession();
   try {
     const funding = {
@@ -2054,9 +2197,13 @@ async function createRootFixture() {
     const nodeOptions = process.env.NODE_OPTIONS;
     delete process.env.NODE_OPTIONS;
     try {
+      const selectedProfile = retainTrackerSigner ? buildSubstrateFederatedCheckpointProfileV1({
+        ...vector.input.profile, ergoAdmissionThreshold: 1,
+        ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex],
+      }) : profile;
       const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
         trackerGenesisInputBoxIdHex: funding.tracker.boxId,
-        profile, application: compilerV3.trackerRequest.application,
+        profile: selectedProfile, application: compilerV3.trackerRequest.application,
         template: contractTemplate('contracts/SPVTrackerSubstrateFederatedV2.es'),
       });
       const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);

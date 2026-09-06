@@ -30,6 +30,16 @@ import {
   type ObservedAnchorTrackerReservationFreshnessCheckKernelV1Result,
 } from './substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js';
 import {
+  executeSubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1,
+  type SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result,
+} from './substrate-federated-isolated-devnet-tracker-v2-check-kernel-v1.js';
+import { assertSubstrateFederatedTrackerV2Context, type SubstrateFederatedTrackerV2Context }
+  from './substrate-federated-tracker-v2.js';
+import type { SubstrateFederatedTrackerCompilerRequestV2 } from './substrate-federated-tracker-compiler-v2.js';
+import { assertSubstrateFederatedTrackerV2ExternalFeeTransaction,
+  type SubstrateFederatedTrackerV2ExternalFeeTransaction }
+  from './substrate-federated-tracker-v2-external-fee.js';
+import {
   assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
   bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
   type SubstrateFederatedSettlementFamilyCompilerBindingV1,
@@ -179,6 +189,36 @@ const TRACKER_FEE_CHECKS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
 }>>();
 const CLAIMED_TRACKER_FEE_CHECKS = new WeakSet<object>();
+const TRACKER_PROTOCOL_V2_CHECKS = new WeakMap<object, Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>;
+  result: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result>;
+}>>();
+
+export interface SubstrateFederatedIsolatedDevnetTrackerV2CheckInput {
+  readonly context: Readonly<SubstrateFederatedTrackerV2Context>;
+  readonly transaction: Readonly<SubstrateFederatedTrackerV2ExternalFeeTransaction>;
+  readonly observedHeaderContext: Readonly<BridgeValidityTrackerObservedHeaderContextV1>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetTrackerV2Check {
+  readonly result: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result>;
+  readonly setupRequestDigestHex: string;
+  readonly feeFundingTransactionIdHex: string;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetTrackerV2Check(
+  value: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+): void {
+  const material = TRACKER_PROTOCOL_V2_CHECKS.get(value);
+  if (material === undefined || material.target !== target || material.result !== value.result) {
+    throw new Error('isolated tracker protocol V2 check lacks exact session provenance');
+  }
+  const current = assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+  if (canonicalJson(current) !== canonicalJson(value.result.targetBinding)) {
+    throw new Error('isolated tracker protocol V2 check target binding changed');
+  }
+}
 
 /** Claim only a genuine retained-signer result; a JSON copy cannot restore it. */
 export function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(
@@ -347,9 +387,17 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
     feePayerPublicKeyHex: string,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
+  readonly runForExecutionV3RetainingTrackerSigner: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>>;
   readonly checkTrackerFeeFundingV3: (
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>>;
+  readonly checkFrozenTrackerV2Candidate: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>>;
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1076,12 +1124,16 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let trackerFeeContinuation: Readonly<{
       batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
       feePayerPublicKeyHex: string;
+      retainTrackerSigner: boolean;
+      trackerCompilerRequest: Readonly<SubstrateFederatedTrackerCompilerRequestV2>;
     }> | undefined;
+    let retainedTrackerFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1> | undefined;
     let state:
       | 'open'
       | 'running'
       | 'setup-complete'
       | 'v3-tracker-fee-ready'
+      | 'v3-tracker-ready'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
       | 'frozen-tracker-check-complete'
@@ -1113,6 +1165,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       }
       frozenTrackerCheck = undefined;
       trackerFeeContinuation = undefined;
+      retainedTrackerFeeCheck = undefined;
       mnemonic = '';
       state = 'closed';
     };
@@ -1121,6 +1174,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'open'
         | 'setup-complete'
         | 'v3-tracker-fee-ready'
+        | 'v3-tracker-ready'
         | 'source-lock-check-complete'
         | 'committed-vault-check-complete'
         | 'frozen-tracker-check-complete',
@@ -1128,6 +1182,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       successState:
         | 'setup-complete'
         | 'v3-tracker-fee-ready'
+        | 'v3-tracker-ready'
         | 'source-lock-check-complete'
         | 'committed-vault-check-complete'
         | 'frozen-tracker-check-complete'
@@ -1237,6 +1292,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           state === 'open'
           || state === 'setup-complete'
           || state === 'v3-tracker-fee-ready'
+          || state === 'v3-tracker-ready'
           || state === 'source-lock-check-complete'
           || state === 'committed-vault-check-complete'
           || state === 'frozen-tracker-check-complete'
@@ -1286,7 +1342,25 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
         const result = await runFixedSetupCheckV3(captured, activeMnemonic);
         const batch = promoteSetupExecutionBatchV3(result, target, binding);
-        trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex });
+        trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex, retainTrackerSigner: false,
+          trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
+        return batch;
+      }, 'v3-tracker-fee-ready'),
+      runForExecutionV3RetainingTrackerSigner: async (
+        input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('open', async activeMnemonic => {
+        const captured = captureInputV3(input);
+        const profile = captured.sourceAndCompilerInput.trackerRequest.profile;
+        if (profile.ergoAdmissionThreshold !== 1 || profile.ergoAdmissionPublicKeysHex.length !== 1
+          || profile.ergoAdmissionPublicKeysHex[0] !== signer.publicKeyHex) {
+          throw new Error('retained tracker V2 route requires the exact synthetic admission signer');
+        }
+        const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
+        const result = await runFixedSetupCheckV3(captured, activeMnemonic);
+        const batch = promoteSetupExecutionBatchV3(result, target, binding);
+        trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
+          trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
         return batch;
       }, 'v3-tracker-fee-ready'),
       checkTrackerFeeFundingV3: async (
@@ -1343,7 +1417,58 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
         const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
         TRACKER_FEE_CHECKS.set(result, Object.freeze({ batch: continuation.batch, target }));
+        if (continuation.retainTrackerSigner) retainedTrackerFeeCheck = result;
         return result;
+      }, trackerFeeContinuation?.retainTrackerSigner === true ? 'v3-tracker-ready' : 'closed'),
+      checkFrozenTrackerV2Candidate: async (
+        inputValue: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+      ) => consume('v3-tracker-ready', async activeMnemonic => {
+        const continuation = trackerFeeContinuation;
+        const feeCheck = retainedTrackerFeeCheck;
+        const context = inputValue.context;
+        const transaction = inputValue.transaction;
+        const observedHeaderContext = inputValue.observedHeaderContext;
+        if (continuation?.retainTrackerSigner !== true || feeCheck === undefined) {
+          throw new Error('retained tracker V2 signer or fee funding is absent');
+        }
+        assertSubstrateFederatedTrackerV2Context(context);
+        assertSubstrateFederatedTrackerV2ExternalFeeTransaction(transaction);
+        assertBridgeValidityTrackerObservedHeaderContextV1(observedHeaderContext);
+        const genesis = await materializeUnsignedTransaction(
+          structuredClone(continuation.batch.orderedTransactions[0]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+          'retained V3 tracker input',
+        );
+        if (canonicalJson(transaction.inputBoxes[0]) !== canonicalJson(genesis.outputs[0])
+          || canonicalJson(transaction.inputBoxes[1]) !== canonicalJson(feeCheck.transaction.outputs[0])) {
+          throw new Error('tracker V2 inputs differ from retained genesis and fee funding');
+        }
+        assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+        for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+          if (canonicalJson(await ngetDirect('/blocks/at/1', origin))
+            !== canonicalJson([continuation.batch.request.target.genesisHeaderIdHex])) {
+            throw new Error('tracker V2 frozen target genesis differs from setup');
+          }
+        }
+        const result = await executeSubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1({
+          compilerRequest: continuation.trackerCompilerRequest,
+          context, transaction, observedHeaderContext, target,
+          expectedSigner: { publicKeyHex: signer.publicKeyHex, p2pkErgoTreeHex: signer.p2pkErgoTreeHex, networkPrefix: signer.networkPrefix },
+          operations: {
+            captureTargetBinding: () => assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target),
+            observeInputBox: (boxId, origin) => ngetDirect(`/utxo/byId/${boxId}`, origin),
+            prepareCandidate: input => prepareLocalWasmRootCheckCandidates({
+              mnemonic: activeMnemonic, networkPrefix: input.networkPrefix, nodeOrigin: input.nodeOrigin,
+              headers: input.headers,
+              candidates: [{ role: input.role, eip12Tx: input.eip12Tx, expectedTxId: input.expectedTxId }],
+            }),
+            checkCandidate: (candidate, origin) => checkSignedTransaction(candidate, 'isolated tracker protocol V2 check', origin),
+          },
+        });
+        const check = Object.freeze({ result, setupRequestDigestHex: continuation.batch.request.requestDigestHex,
+          feeFundingTransactionIdHex: feeCheck.transaction.txId });
+        TRACKER_PROTOCOL_V2_CHECKS.set(check, Object.freeze({ target, result }));
+        return check;
       }, 'closed'),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,

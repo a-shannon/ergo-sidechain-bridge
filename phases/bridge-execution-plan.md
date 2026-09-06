@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB funded V2 tracker -> exact check -> canonical admission | Connect the external-fee tracker-protocol V2 transaction to the frozen checkpoint checker, then exercise fee funding and tracker admission in one fresh owned-target campaign | V168 checks the operator-funded fee transaction on the real node without submitting it. V169 adds its explicit authorization, durable journal, fixed transport and confirmation consumer, covered by component fixtures. Actual fee-box confirmation, tracker admission and the operational V3 caller remain open. Retain any needed continuation before its owner closes; do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
+| **Now** | FED-6-LAB funded V2 tracker -> canonical admission | Connect the session-owned external-fee V2 check to exact reservation, authorization, fixed transport and confirmation; exercise funding and admission in one fresh owned-target campaign | V168 checks fee funding on the real node without submission. V169 supplies its component-tested transport lifecycle. V170 connects the genuine tracker-protocol V2 transaction to the retained signer and frozen-target checker. Actual fee-box confirmation, tracker admission and the operational V3 caller remain open. Do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -738,8 +738,9 @@ review covers the six-file change; the live run adds target evidence without
 changing the reviewed runtime sources. Unchanged contracts, formats, VM matrices
 and build identities retain their previous validation.
 
-V169 adds the funding lifecycle below. Next, connect the externally funded V2
-tracker to the frozen checkpoint checker. Group both joins in the next real-node campaign;
+V169 adds the funding lifecycle below; V170 adds the distinct tracker-protocol
+V2 checker. Connect that check to admission, then group funding and tracker
+confirmation in the next real-node campaign;
 do not rerun genesis or funding-check-only campaigns while their inputs remain
 unchanged. The existing check-kernel V2 names a target
 version, not tracker-protocol V2; it still accepts the V1 one-input shape.
@@ -781,6 +782,41 @@ The affected-consumer closure and independent review decide this component
 checkpoint. Contracts, transaction shapes, serialized formats and build pins
 are unchanged. Reuse their existing JVM/build evidence; the next actual-node
 campaign must cover funding confirmation and tracker admission together.
+
+#### Retained Signer To Tracker V2 Check
+
+V170 adds an explicitly selected synthetic V3 session path. It retains the
+original compiler request and signer through the fee-funding check, then signs
+and checks the complete external-fee tracker V2 transaction. This LAB path
+requires its exact signer as the compiled 1-of-1 Ergo-admission key; it does
+not establish independent operator custody or change the target federation.
+The existing fee-only path still closes after checking funding.
+
+| Producer -> consumer | Required binding and negative cases | Failure prevented |
+|---|---|---|
+| Original setup and funding check -> tracker candidate | Exact genesis tracker output and retained fee output; distinct genuine inputs and copied context reject | Signing against unrelated tracker state or operator funds |
+| Compiler, V2 context and external-fee composer -> signer | Genuine request/context/body, exact admission signer, complete transaction ID and absolute anchor height; V1 substitutions, different compiler, fee owner and observed headers reject | Treating a tracker-only ID or an indexed V1 selector as the V2 transaction |
+| Owned frozen target -> signer/checker | Setup genesis at height 1; exact current target binding and both inputs observed on both nodes before signing and after checking; genesis, input, origin and binding drift reject | Returning a check for another chain, changed input or replaced target |
+| Signed bytes -> session-owned result | Exact signer/checker metadata and digests, immutable opaque handles and private session provenance; copied results and wrong target objects reject | Promoting structurally similar caller data as an executed check |
+| Retained session -> completion | Explicit route selection, one-use order, disposal on failure/success and concurrent-call invalidation | Reopening closed custody or inheriting the new continuation through the fee-only route |
+
+Managed checkpoint restarts may change process identity. The check therefore
+requires the current owned frozen target, original setup genesis and exact
+retained inputs; it does not assert that the mining and frozen processes share
+one identity. A subsequent transport must revalidate its own exact target and
+state immediately before use.
+
+The kernel matrix uses explicit observation/signing/checking doubles. Session
+integration uses real WASM signing and bounded HTTP fixtures; neither is an
+actual node admission. The component returns a check, not an authorization,
+broadcast capability, canonical confirmation or reconstructed custody.
+No contract, statement, golden vector, transaction format or build pin changes.
+
+Next, bind this session-owned result to the V2 reservation and admission path.
+Reuse the funding lifecycle without relabelling its profile, and do not pass
+the V2 transaction through the old V1 tracker execution profile. The first
+fresh-node replay must compose confirmed fee funding and tracker admission,
+not repeat the setup or checker in isolation. Full withdrawal remains next.
 
 | Batch | Deliverable | State and deciding check |
 |---|---|---|
