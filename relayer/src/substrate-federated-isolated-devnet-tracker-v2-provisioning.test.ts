@@ -79,7 +79,16 @@ import {
   promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2 as promoteExecutionV2,
   assertSubstrateFederatedIsolatedDevnetTrackerV2Check as assertTrackerV2Check,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
-import { assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 as createManagedSession,
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2 as claimManagedMiningCredentials,
+} from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertManagedSigner }
+  from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential,
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1 as revokeMiningCredential,
+} from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister,
   MINER_FEE_TREE,
@@ -2339,7 +2348,14 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     'admission-confirmation-parent', 'admission-successor-drift',
     'admission-confirmation-reincluded', 'admission-confirmation-depth', 'admission-unfinalized-row'] as const)(
     'retains exact V3 custody through funding into the protocol V2 checker: %s', async fault => {
-      const fixture = await createRootFixture(true);
+      const selected = fault === 'peg-in-v2'
+        ? { kind: 'managed' as const, fixture: await prepareRootFixture(await createManagedSession(), true) }
+        : { kind: 'execution' as const, fixture: await createRootFixture(true) };
+      const fixture = selected.fixture;
+      const managed = selected.kind === 'managed' ? selected.fixture.session : undefined;
+      const credentials = managed === undefined ? undefined : claimManagedMiningCredentials(managed);
+      const miningCredential = 'miningCredential' in fixture.session
+        ? fixture.session.miningCredential : credentials!.miningCredential;
       const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
         .mockReturnValue(executionBinding);
       const frozenBinding = Object.freeze({ processBindingDigestHex: '51'.repeat(32),
@@ -2353,11 +2369,19 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
       try {
         await withObservations(async observed => {
           const target = executionTarget();
-          const batch = fault === 'default-closed'
-            ? await fixture.session.runForExecutionV3RetainingTrackerFeeSigner(fixture.input, target, fixture.session.signer.publicKeyHex)
-            : fault === 'peg-in-v2'
-              ? await fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target)
-            : await fixture.session.runForExecutionV3RetainingTrackerSigner(fixture.input, target);
+          let batch: Awaited<ReturnType<typeof fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner>>;
+          if (managed !== undefined) {
+            expect(fixture.session).toBe(managed);
+            expect(() => assertManagedSigner(managed.signer)).not.toThrow();
+            batch = await managed.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target);
+          } else {
+            if (selected.kind !== 'execution') {
+              throw new Error('component case requires the execution session');
+            }
+            batch = fault === 'default-closed'
+              ? await selected.fixture.session.runForExecutionV3RetainingTrackerFeeSigner(fixture.input, target, fixture.session.signer.publicKeyHex)
+              : await selected.fixture.session.runForExecutionV3RetainingTrackerSigner(fixture.input, target);
+          }
           if (fault === 'peg-in-v2') {
             assertExecutionV3(batch, target);
             const family = fixture.input.sourceAndCompilerInput.familyReceipt;
@@ -2384,7 +2408,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
               sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
               signer: { publicKeyHex: fixture.session.signer.publicKeyHex } });
             expect(signedCheckOracle(observed.checkBodies[3]!)).toBe(source.signedTransactionIdHex);
-            expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).not.toThrow();
+            expect(() => assertMiningCredential(miningCredential, fixture.session.signer.publicKeyHex)).not.toThrow();
             for (const box of [packet.boxes.reservePredecessor, packet.boxes.sourceLock, packet.boxes.transitionFeeFunding]) {
               observed.publishBox(box, headers);
             }
@@ -2398,7 +2422,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             expect(signedCheckOracle(observed.checkBodies[4]!)).toBe(vault.signedTransactionIdHex);
             expect((observed.checkBodies[4]!.inputs as { boxId: string }[]).map(value => value.boxId))
               .toEqual(packet.transactions.reserveTransition.eip12Tx.inputs.map(value => value.boxId));
-            expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).not.toThrow();
+            expect(() => assertMiningCredential(miningCredential, fixture.session.signer.publicKeyHex)).not.toThrow();
             expect(observed.submissionBodies).toHaveLength(0);
           }
           const genesis = wasm.UnsignedTransaction.from_json(JSON.stringify(batch.orderedTransactions[0]!.issuance.unsignedTransactionBody));
@@ -2476,7 +2500,15 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
               expect(observed.checkBodies).toHaveLength(fault === 'peg-in-v2' ? 7 : 5);
               expect(observed.checkBodies.at(-1)!.inputs).toHaveLength(2);
               expect(observed.submissionBodies).toHaveLength(0);
-              expect(() => assertMiningCredential(fixture.session.miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+              expect(() => assertMiningCredential(miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+              if (managed !== undefined) {
+                expect(() => assertManagedSigner(managed.signer)).toThrow(/active process provenance/);
+                expect(() => claimManagedMiningCredentials(managed)).toThrow(/absent, partially claimed, or disposed/);
+                for (const credential of [credentials!.checkpointMiningCredential,
+                  credentials!.trackerAdmissionMiningCredential, credentials!.trackerConfirmationMiningCredential]) {
+                  expect(() => assertMiningCredential(credential, managed.signer.publicKeyHex)).not.toThrow();
+                }
+              }
               genesisDrift.mockRestore();
               await exerciseTrackerV2Admission(fault === 'peg-in-v2' ? 'valid' : fault, checked, frozenTarget, frozenBinding, observed, () => {
                 frozenCustody.mockImplementation(() => { throw new Error('synthetic frozen action expired'); });
@@ -2495,7 +2527,12 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
         }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
           submissionOracle: body => fault === 'admission-ambiguous' ? { unavailable: true } : signedCheckOracle(body),
           confirmSubmittedGenesis: true, publishSubmittedOutputs: true });
-      } finally { errors.mockRestore(); frozenCustody.mockRestore(); custody.mockRestore(); fixture.session.dispose(); }
+      } finally {
+        errors.mockRestore(); frozenCustody.mockRestore(); custody.mockRestore(); fixture.session.dispose();
+        if (credentials !== undefined) {
+          for (const credential of Object.values(credentials)) revokeMiningCredential(credential);
+        }
+      }
     }, 60_000,
   );
 
@@ -3512,7 +3549,12 @@ function reidentifyBox(box: Eip12Box, transactionId: string): Eip12Box {
 }
 
 async function createRootFixture(retainTrackerSigner = false, freshSourceSession = false) {
-  const session = await createSession();
+  return await prepareRootFixture(await createSession(), retainTrackerSigner, freshSourceSession);
+}
+
+async function prepareRootFixture<T extends Pick<Awaited<ReturnType<typeof createSession>>, 'signer' | 'dispose'>>(
+  session: T, retainTrackerSigner = false, freshSourceSession = false,
+) {
   let sourceSession: ReturnType<typeof createSourceSessionV2> | undefined;
   try {
     if (freshSourceSession) {

@@ -93,7 +93,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Actual campaign caller | Main owner; consumes application continuation V4 and the component-tested V2 admission lifecycle | Select the fresh-owner application continuation V4 with PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Replace its V1 tracker projections with genuine V2 construction. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
+| Actual campaign caller | Main owner; consumes application continuation V4, the managed V3 setup session and the component-tested V2 admission lifecycle | Select the fresh-owner application continuation V4 with PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Use the managed session's V3 setup -> V2 source lock -> V2 reserve -> fee funding -> tracker V2 check sequence. Replace the old V1 tracker projections and reservation adapter with the genuine V2 admission lifecycle. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
@@ -167,6 +167,15 @@ remain byte/target/signer-bound checks, not V2 lifecycle or transport authority.
 The actual campaign caller still selects the old packet, deposit authorization,
 observation and tracker paths; those consumers must be connected before a fresh
 campaign.
+
+The managed setup session now exposes that V3/V2 execution sequence through
+its existing signer and mining-credential ownership boundary. Separate phase
+states prevent old and new checks from being interleaved. The wrapper retains
+the exact arguments and results through deposit and external-fee checking,
+then closes signer custody after the tracker V2 check. Disposal or a failed
+transition revokes unclaimed capabilities; already claimed node credentials
+keep their existing process-owned lifetime. This session connection does not
+switch the campaign root, confirm fee funding or admit a tracker by itself.
 
 The deposit authorization and output observers now accept genuine V2 candidates
 through explicit V2 entrypoints. Source-lock creation retains its exact checked

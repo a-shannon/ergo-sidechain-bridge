@@ -6,6 +6,7 @@ import type {
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import {
   createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2,
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input,
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt,
   SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input,
@@ -64,6 +65,16 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   readonly signer:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>;
   readonly dispose: () => void;
+  readonly runForExecutionV3RetainingPegInAndTrackerSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
+  readonly checkPegInSourceLockV2RetainingSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInSourceLockV2RetainingSigner'];
+  readonly checkPegInCommittedVaultV2RetainingSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInCommittedVaultV2RetainingSigner'];
+  readonly checkTrackerFeeFundingV3:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3'];
+  readonly checkFrozenTrackerV2Candidate:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2Candidate'];
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>>;
@@ -196,6 +207,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'committed-vault-check-complete'
     | 'check-complete'
     | 'frozen-tracker-check-complete'
+    | 'v3-setup-complete'
+    | 'v2-source-lock-check-complete'
+    | 'v2-committed-vault-check-complete'
+    | 'v3-tracker-fee-check-complete'
     | 'closed' = 'open';
   let terminalInvalidationRequested = false;
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
@@ -240,7 +255,11 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'setup-complete'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
-      | 'frozen-tracker-check-complete',
+      | 'frozen-tracker-check-complete'
+      | 'v3-setup-complete'
+      | 'v2-source-lock-check-complete'
+      | 'v2-committed-vault-check-complete'
+      | 'v3-tracker-fee-check-complete',
     operation: () => Promise<T>,
     successState:
       | 'setup-complete'
@@ -248,6 +267,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'committed-vault-check-complete'
       | 'check-complete'
       | 'frozen-tracker-check-complete'
+      | 'v3-setup-complete'
+      | 'v2-source-lock-check-complete'
+      | 'v2-committed-vault-check-complete'
+      | 'v3-tracker-fee-check-complete'
       | 'closed',
   ): Promise<T> => {
     if (state !== expectedState) {
@@ -297,6 +320,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'committed-vault-check-complete'
           || state === 'check-complete'
           || state === 'frozen-tracker-check-complete'
+          || state === 'v3-setup-complete'
+          || state === 'v2-source-lock-check-complete'
+          || state === 'v2-committed-vault-check-complete'
+          || state === 'v3-tracker-fee-check-complete'
       ) {
         close();
       }
@@ -304,6 +331,41 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     run: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     ) => consume('open', () => execution.run(input), 'closed'),
+    runForExecutionV3RetainingPegInAndTrackerSigner: async (
+      ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
+    ) => consume(
+      'open',
+      () => execution.runForExecutionV3RetainingPegInAndTrackerSigner(input, target),
+      'v3-setup-complete',
+    ),
+    checkPegInSourceLockV2RetainingSigner: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInSourceLockV2RetainingSigner']>
+    ) => consume(
+      'v3-setup-complete',
+      () => execution.checkPegInSourceLockV2RetainingSigner(packet, target),
+      'v2-source-lock-check-complete',
+    ),
+    checkPegInCommittedVaultV2RetainingSigner: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInCommittedVaultV2RetainingSigner']>
+    ) => consume(
+      'v2-source-lock-check-complete',
+      () => execution.checkPegInCommittedVaultV2RetainingSigner(packet, target),
+      'v2-committed-vault-check-complete',
+    ),
+    checkTrackerFeeFundingV3: async (
+      ...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>
+    ) => consume(
+      'v2-committed-vault-check-complete',
+      () => execution.checkTrackerFeeFundingV3(target),
+      'v3-tracker-fee-check-complete',
+    ),
+    checkFrozenTrackerV2Candidate: async (
+      ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2Candidate']>
+    ) => consume(
+      'v3-tracker-fee-check-complete',
+      () => execution.checkFrozenTrackerV2Candidate(input, target),
+      'closed',
+    ),
     runForExecution: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
       target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
