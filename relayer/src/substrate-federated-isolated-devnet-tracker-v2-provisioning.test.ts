@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import blakejs from 'blakejs';
 import axios from 'axios';
@@ -13,6 +15,15 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import * as fleet from './fleet-signer.js';
+import { StateTracker } from './state-tracker.js';
+import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE as GENESIS_OPERATION_PROFILE }
+  from './relayer-core/ergo-operational-transaction-lifecycle.js';
+import { createSubstrateFederatedLocalDevnetGenesisJournalV1 as createGenesisJournal }
+  from './substrate-federated-local-devnet-genesis-journal-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1 as createTransportV1,
+  createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2 as createTransportV2,
+} from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1 as createAuthorizerV1,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2 as createAuthorizerV2,
@@ -31,6 +42,8 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_EXECUTION_V1_SCHEMA as GENESIS_EXECUTION_SCHEMA,
   deriveSubstrateFederatedLocalDevnetGenesisAdmissionDigestV1 as admissionDigest,
   type SubstrateFederatedLocalDevnetGenesisRevalidation,
+  type SubstrateFederatedLocalDevnetGenesisDurableAttempt,
+  executeSubstrateFederatedLocalDevnetGenesisV1 as executeGenesis,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import * as ownedTargets from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
@@ -793,6 +806,74 @@ function executionTarget() {
 }
 
 describe('owned synthetic session -> V3 execution promotion', () => {
+  it('executes a genuine V3 genesis handle through the journal and V2 transport once', async () => {
+    const fixture = await createRootFixture();
+    const target = executionTarget();
+    const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+      .mockReturnValue(executionBinding);
+    let markerDirectory: string | undefined;
+    let state: StateTracker | undefined;
+    try {
+      const directory = mkdtempSync(join(tmpdir(), 'e2s-v165-genesis-'));
+      markerDirectory = directory;
+      const journalState = new StateTracker(':memory:');
+      state = journalState;
+      await withObservations(async observed => {
+        const batch = await fixture.session.runForExecutionV3(fixture.input, target);
+        const revalidator = createRevalidatorV2(target, batch);
+        const observer = createConfirmationObserver(target, batch.request.target.genesisHeaderIdHex);
+        const authorizer = createAuthorizerV2(target, batch, revalidator, observer);
+        expect(() => Reflect.apply(createTransportV1, undefined, [target, authorizer]))
+          .toThrow(/version differs/);
+        const transport = createTransportV2(target, authorizer);
+        const { journal } = createGenesisJournal({ state: journalState, markerDirectory: directory,
+          reconciliationIdentityDigestHex: executionBinding.executionTargetIdentityDigestHex });
+        const transaction = batch.orderedTransactions[0]!;
+        const { issuance, signedCandidate, checkedAcceptance } = transaction;
+        let attempt: SubstrateFederatedLocalDevnetGenesisDurableAttempt | undefined;
+        const result = await executeGenesis({
+          role: 'tracker', planDigestHex: batch.request.requestDigestHex,
+          targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+          expectedTxId: issuance.unsignedTransactionIdHex, sourceBoxId: issuance.genesisInputBoxIdHex,
+          inputBoxIds: [issuance.genesisInputBoxIdHex],
+          attemptedAtHeight: batch.request.target.preSetupAnchor.height,
+          nodeOrigin: target.primaryNodeOrigin, unsignedTransaction: issuance.unsignedTransactionBody,
+        }, {
+          signer: { sign: async () => ({
+            signedTransactionDigestHex: signedCandidate.signedTransactionDigestHex,
+            signerArtifact: signedCandidate,
+          }) },
+          checker: { check: async () => ({
+            checkResponseDigestHex: checkedAcceptance.submissionHandle.checkResponseDigestHex,
+            checkerArtifact: checkedAcceptance.submissionHandle,
+          }) },
+          revalidator, broadcastAuthorizer: authorizer, transport,
+          journal: { ...journal, finalize: input => {
+            attempt = input.attempt;
+            return journal.finalize(input);
+          } },
+          // Transport acceptance is not confirmation; no chain state is fabricated.
+          confirmationObserver: { observe: async () => null },
+        });
+        expect(result).toMatchObject({ status: 'accepted', confirmationStatus: 'unavailable',
+          submittedTxId: issuance.unsignedTransactionIdHex, durableAttemptRecorded: true });
+        expect(observed.submissionBodies).toEqual([observed.checkBodies[0]]);
+        expect(signedCheckOracle(observed.submissionBodies[0]!)).toBe(issuance.unsignedTransactionIdHex);
+        expect(journalState.getActiveErgoOperationalTransactionAttempts(GENESIS_OPERATION_PROFILE)).toHaveLength(1);
+        expect(journalState.getConfirmedErgoOperationalTransactionAttempts(GENESIS_OPERATION_PROFILE)).toHaveLength(0);
+        expect(attempt).toBeDefined();
+        await expect(transport.submit({ ...attempt! })).rejects.toThrow(/provenance/);
+        await expect(transport.submit(attempt!)).rejects.toThrow(/consumed|provenance/);
+        expect(observed.submissionBodies).toHaveLength(1);
+      }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+        submissionOracle: signedCheckOracle });
+    } finally {
+      state?.close();
+      if (markerDirectory !== undefined) rmSync(markerDirectory, { recursive: true, force: true });
+      custody.mockRestore(); fixture.session.dispose();
+    }
+  }, 60_000);
+
   it('revalidates genuine V3 genesis handles and binds ordered V2 authorization', async () => {
     const fixture = await createRootFixture();
     const target = executionTarget();
@@ -1523,6 +1604,7 @@ interface ObservationOptions {
   readonly tipHeaderId?: string;
   readonly headers?: readonly Readonly<Record<string, unknown>>[];
   readonly checkOracle?: (body: Record<string, unknown>, ordinal: number) => unknown;
+  readonly submissionOracle?: (body: Record<string, unknown>, ordinal: number) => unknown;
   readonly postCheckReplacementRole?: Role;
   readonly fixedSetupPorts?: boolean;
 }
@@ -1541,13 +1623,16 @@ async function withObservations<T>(
   const methods: string[] = [];
   const unexpected: string[] = [];
   const checkBodies: Record<string, unknown>[] = [];
+  const submissionBodies: Record<string, unknown>[] = [];
   const start = async () => {
     const primary = servers.length === 0;
     const server = createServer(async (request, response) => {
       const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
       methods.push(request.method ?? '');
       let body: unknown;
-      if (primary && options.checkOracle && request.method === 'POST' && path === '/transactions/check') {
+      const oracle = path === '/transactions/check' ? options.checkOracle
+        : path === '/transactions' ? options.submissionOracle : undefined;
+      if (primary && oracle && request.method === 'POST') {
         try {
           const chunks: Buffer[] = [];
           let length = 0;
@@ -1558,8 +1643,9 @@ async function withObservations<T>(
             chunks.push(bytes);
           }
           const candidate = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
-          checkBodies.push(candidate);
-          body = options.checkOracle(candidate, checkBodies.length - 1);
+          const bodies = path === '/transactions/check' ? checkBodies : submissionBodies;
+          bodies.push(candidate);
+          body = oracle(candidate, bodies.length - 1);
           response.writeHead(200, { 'Content-Type': 'application/json' });
           response.end(JSON.stringify(body));
         } catch {
@@ -1614,7 +1700,7 @@ async function withObservations<T>(
     });
     const observeAt = (at: string) => observeSubstrateFederatedGenesisV1(targetProfile, { now: () => new Date(at) });
     const retained = await observeAt(new Date(Date.now() - 2_000).toISOString());
-    return await run({ profile: targetProfile, retained, observeAt, checkBodies });
+    return await run({ profile: targetProfile, retained, observeAt, checkBodies, submissionBodies });
   } finally {
     for (const server of servers) {
       if (!server.listening) continue;
@@ -1634,6 +1720,7 @@ interface ObservationFixture {
   readonly retained: Awaited<ReturnType<typeof observeSubstrateFederatedGenesisV1>>;
   readonly observeAt: (at: string) => Promise<Awaited<ReturnType<typeof observeSubstrateFederatedGenesisV1>>>;
   readonly checkBodies: readonly Record<string, unknown>[];
+  readonly submissionBodies: readonly Record<string, unknown>[];
 }
 
 async function provisioningInput(observed: ObservationFixture, compiler = compilerV3): Promise<BuildInputV3> {

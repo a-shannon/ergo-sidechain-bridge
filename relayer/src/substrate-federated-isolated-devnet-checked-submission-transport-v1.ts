@@ -20,8 +20,11 @@ import {
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2,
   assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
   type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+  type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
 } from './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1,
@@ -44,11 +47,24 @@ import {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-checked-submission-transport.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-checked-submission-transport.v2' as const;
 
 const SUBMISSION_PATH = '/transactions' as const;
 const SUBMISSION_TIMEOUT_MS = 30_000;
-const SUBMISSION_RESPONSE_DIGEST_DOMAIN =
-  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V1';
+const TRANSPORT_PROFILES = Object.freeze({
+  1: Object.freeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V1',
+  }),
+  2: Object.freeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V2_SCHEMA,
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V2',
+  }),
+});
+type TransportVersion = keyof typeof TRANSPORT_PROFILES;
+type GenesisAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
+  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>;
 
 type Transport =
   SubstrateFederatedLocalDevnetGenesisExecutionPorts['transport'];
@@ -68,12 +84,31 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
 ): Readonly<Transport> {
+  return createGenesisTransport(target, authorizer, 1);
+}
+
+export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  authorizer: Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>,
+): Readonly<Transport> {
+  return createGenesisTransport(target, authorizer, 2);
+}
+
+// The factory fixes the authority profile; callers cannot inject its guards.
+function createGenesisTransport(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  authorizer: GenesisAuthorizer,
+  version: TransportVersion,
+): Readonly<Transport> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
-  assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
-    authorizer,
-    target,
-  );
+  if (version === 1) {
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1(
+      authorizer as Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>, target);
+  } else {
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2(
+      authorizer as Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>, target);
+  }
   if (
     target.primaryNodeOrigin
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
@@ -98,17 +133,23 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
       }
       const checked =
         attempt.candidate.authorization.revalidated.checked;
-      assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
-        authorizer,
-        attempt.candidate.authorization.authorizationArtifact,
-        {
-          revalidated: attempt.candidate.authorization.revalidated,
-          preTransportEvidence:
-            attempt.candidate.authorization.preTransportEvidence,
-          authorizationDigestHex:
-            attempt.candidate.authorization.authorizationDigestHex,
-        },
-      );
+      const expectation = {
+        revalidated: attempt.candidate.authorization.revalidated,
+        preTransportEvidence:
+          attempt.candidate.authorization.preTransportEvidence,
+        authorizationDigestHex:
+          attempt.candidate.authorization.authorizationDigestHex,
+      };
+      const artifact = attempt.candidate.authorization.authorizationArtifact;
+      if (version === 1) {
+        assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1(
+          authorizer as Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>,
+          artifact, expectation);
+      } else {
+        assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2(
+          authorizer as Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>,
+          artifact, expectation);
+      }
       const admission = checked.signed.admission;
       if (
         admission.nodeOrigin
@@ -155,6 +196,7 @@ export function createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransport
           attempt.candidate.authorization.authorizationDigestHex,
           exactHandle,
           binding,
+          version,
         ),
       );
     },
@@ -375,6 +417,7 @@ async function submitExactTransaction(
   handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
   binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
+  version: TransportVersion = 1,
 ): Promise<AcceptedOrAmbiguousSubmission> {
   try {
     const response = await axios.post(
@@ -399,7 +442,7 @@ async function submitExactTransaction(
         authorizationDigestHex,
         handle,
         binding,
-      });
+      }, version);
     }
     return Object.freeze({
       status: 'accepted' as const,
@@ -413,7 +456,7 @@ async function submitExactTransaction(
         authorizationDigestHex,
         handle,
         binding,
-      }),
+      }, version),
     });
   } catch (error) {
     const httpStatus = axios.isAxiosError(error)
@@ -430,17 +473,18 @@ async function submitExactTransaction(
       authorizationDigestHex,
       handle,
       binding,
-    });
+    }, version);
   }
 }
 
 function ambiguousResponse(
   input: SubmissionDigestInput,
+  version: TransportVersion = 1,
 ): AcceptedOrAmbiguousSubmission {
   return Object.freeze({
     status: 'ambiguous' as const,
     submittedTxId: null,
-    responseDigestHex: responseDigest(input),
+    responseDigestHex: responseDigest(input, version),
   });
 }
 
@@ -460,10 +504,9 @@ interface SubmissionDigestInput {
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
 }
 
-function responseDigest(input: SubmissionDigestInput): string {
+function responseDigest(input: SubmissionDigestInput, version: TransportVersion = 1): string {
   return sha256CanonicalJson({
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA,
+    schema: TRANSPORT_PROFILES[version].schema,
     outcome: input.outcome,
     nodeOrigin: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
     path: SUBMISSION_PATH,
@@ -481,7 +524,7 @@ function responseDigest(input: SubmissionDigestInput): string {
       input.handle.signedTransactionBytesSha256Hex,
     signedTransactionBytesLength: input.handle.signedTransactionBytesLength,
     checkResponseDigestHex: input.handle.checkResponseDigestHex,
-  }, SUBMISSION_RESPONSE_DIGEST_DOMAIN);
+  }, TRANSPORT_PROFILES[version].domain);
 }
 
 function canonicalTxId(value: unknown): string | null {

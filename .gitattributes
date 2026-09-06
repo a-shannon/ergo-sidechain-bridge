@@ -138,6 +138,8 @@ relayer/src/substrate-federated-isolated-devnet-genesis-revalidator-v1.ts text e
 relayer/src/substrate-federated-isolated-devnet-genesis-revalidator-v1.test.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.ts text eol=lf
 relayer/src/substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.test.ts text eol=lf
+relayer/src/substrate-federated-isolated-devnet-checked-submission-transport-v1.ts text eol=lf
+relayer/src/substrate-federated-isolated-devnet-checked-submission-transport-v1.test.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-v1.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-v1-fixture.ts text eol=lf
 relayer/src/substrate-federated-settlement-family-v1.test.ts text eol=lf

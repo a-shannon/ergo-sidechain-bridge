@@ -447,6 +447,14 @@ describe('broadcast surface isolation', () => {
     )).toEqual([executionRoot, transportFile]);
     expect(filesImporting(
       sources,
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
+    )).toEqual([]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
+    )).toEqual([transportFile]);
+    expect(filesImporting(
+      sources,
       'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
     )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(

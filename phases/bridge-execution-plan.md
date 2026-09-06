@@ -79,7 +79,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Connect the V3 batch, V2 revalidator and V2 authorizer to ordered transport/confirmation, then validate on a fresh local target | V161 verifies the three genesis issuances on the pinned local node without submission. V162 retains exact checked candidates and Fleet handles; V163 revalidates source inputs; V164 binds local authorization to those exact artifacts. Signing custody closes. V3 transport and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
+| **Now** | FED-6-LAB checked tracker -> transport -> canonical admission | Compose the V3 genesis batch with its fixed revalidator, authorizer and transport; require ordered canonical confirmations before a fresh-target run | V161 verifies the three genesis issuances on the pinned local node without submission. V162 retains checked candidates; V163 revalidates inputs; V164 binds authorization; V165 connects it to one-shot exact-byte transport. Signing custody closes. V3 runtime composition and canonical tracker admission remain open. No V1 receipt relabelling, campaign retry or signed-byte mutation |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -585,6 +585,38 @@ and existing genesis execution-root consumers, plus TypeScript and layer-import
 checks. Unchanged contracts, signed transaction shape, ContextExtension and
 runtime pins keep their prior VM and V161 genesis-check evidence; no new
 target-runtime or release claim follows from these adapter tests.
+
+### Version-Bound Genesis Transport
+
+V165 adds a fixed V2 transport for V2 genesis authorization. Both public
+factories share the existing exact-byte transport, but select their own
+authorizer/artifact guards and response schema/domain. Legacy genesis, peg-in
+and tracker transport retain their V1 response projection.
+
+| Producer -> consumer | Deciding check | Failure prevented |
+|---|---|---|
+| Durable attempt -> transport | Core-issued attempt, exact authorizer version, target/process and retained authorization | Posting a copied attempt, wrong profile or replaced process |
+| Checked handle -> POST | Original signed candidate, transaction ID, signed-byte hash/length, check response and one-shot consumption | Changing signed bytes or sending the same handle twice |
+| Endpoint -> lifecycle result | Fixed credential-free loopback endpoint; no redirect/proxy/retry; ambiguous result on failure or wrong transaction ID | Treating uncertain delivery as safe to retry |
+| Submission -> journal | Acceptance remains active until separately confirmed | Relabelling HTTP acceptance as canonical inclusion |
+
+The composed test traverses the actual genesis lifecycle, V3 execution material,
+V2 revalidation and authorization, real journal with fresh in-memory SQLite,
+Fleet handle consumption and bounded HTTP transport. It compares the complete
+received object with the checked transaction, rejects repeated/copied attempts
+and leaves one active, zero confirmed journal entries. Process custody and the
+HTTP endpoint are test doubles; confirmation is unavailable, not synthesized.
+
+The new transport factory has no runtime caller. The next batch must connect
+the V3 path to ordered genesis execution and the existing confirmation observer.
+Keep that first composition genesis-only: the broader legacy campaign retains
+a peg-in signer, whereas `runForExecutionV3` closes signing custody.
+
+Validation covers both transport profiles and their direct consumers, the
+genuine V3 join, genesis journal/core, existing execution root, Fleet handles,
+broadcast surface and import rules. Contracts, transaction shape, signer and
+runtime pins are unchanged; V161 remains the real-node genesis-check result,
+not evidence of submission or confirmation for the new transport path.
 
 ### Fresh-Owner Application Join
 
