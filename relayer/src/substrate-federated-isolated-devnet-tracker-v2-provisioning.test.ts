@@ -182,9 +182,13 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE as SOURCE_LOCK_OPERATION_PROFILE,
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE as VAULT_OPERATION_PROFILE,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
-import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1 as buildMintDraft }
+import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1 as buildMintDraft,
+  buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildMintDraftV2 }
   from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
-import { collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1 as collectMintEvidence }
+import { collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1 as collectMintEvidence,
+  collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2 as collectMintEvidenceV2,
+  consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1 as consumeMintEvidence,
+  consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2 as consumeMintEvidenceV2 }
   from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1 as createSourceSessionV1,
@@ -391,7 +395,7 @@ describe('genuine V2 compiler -> signed local launch -> generation', () => {
 
   function withMintEvidence(value: typeof target, check: (input: Parameters<
     typeof session.produceSettlementFamilyMintSourceProof
-  >[0]) => void): void {
+  >[0]) => void, compilerOverrides: Readonly<Record<string, string>> = {}): void {
     const h = (byte: string) => byte.repeat(32);
     const batch = Object.freeze({ role: 'synthetic-batch' });
     const executionTarget = Object.freeze({ role: 'synthetic-execution-target' });
@@ -403,7 +407,15 @@ describe('genuine V2 compiler -> signed local launch -> generation', () => {
     const reserveSuccessor = { boxId: h('14') };
     const packet = {
       familyIdHex: value.profile.familyIdHex,
-      familyCompiler: { bindingDigestHex: h('33') },
+      version: 2,
+      familyCompiler: {
+        trackerRequestDigestHex: value.compiler.trackerRequestDigestHex,
+        trackerReceiptDigestHex: value.compiler.trackerReceiptDigestHex,
+        familyRequestDigestHex: value.compiler.familyRequestDigestHex,
+        familyReceiptDigestHex: value.compiler.familyReceiptDigestHex,
+        compilerLockDigestHex: value.compiler.familyCompilerLockDigestHex,
+        ...compilerOverrides,
+      },
       sourceIntentHex: encodePegInSourceIntentV2Hex({
         formatVersion: 2,
         sourceNetworkIdHex: value.sourceRuntime.sourceNetworkIdHex,
@@ -433,7 +445,7 @@ describe('genuine V2 compiler -> signed local launch -> generation', () => {
     });
     // Only the upstream node observation is synthetic; draft, collector and signer provenance stay real.
     const observer = vi.spyOn(committedVaultObserver,
-      'assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1')
+      'assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2')
       .mockImplementation((observed, suppliedBatch, suppliedCandidate, suppliedTarget) => {
         if (!Object.is(observed, observation) || !Object.is(suppliedBatch, batch)
           || !Object.is(suppliedCandidate, candidate) || !Object.is(suppliedTarget, executionTarget)) {
@@ -444,8 +456,8 @@ describe('genuine V2 compiler -> signed local launch -> generation', () => {
     try {
       const observedInput = { batch: batch as never, target: executionTarget as never,
         candidate: candidate as never, committedVaultObservation: observation as never };
-      const draft = buildMintDraft(observedInput);
-      const evidenceReceipt = collectMintEvidence({ ...observedInput, draft });
+      const draft = buildMintDraftV2(observedInput);
+      const evidenceReceipt = collectMintEvidenceV2({ ...observedInput, draft });
       check({ draft, evidenceReceipt, issuedAtNativeHeight: '4', expiresAtNativeHeight: '36' });
     } finally { observer.mockRestore(); }
   }
@@ -650,10 +662,33 @@ describe('genuine V2 compiler -> signed local launch -> generation', () => {
 
   it('rejects a real mint draft and evidence for a different V2 settlement family', () => {
     const otherTarget = launch.deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(compilerV3);
+    // Hold compiler bindings constant so this case still reaches the independent family-ID guard.
     withMintEvidence(otherTarget, input => {
       expect(() => session.produceSettlementFamilyMintSourceProof(input))
         .toThrow('isolated-devnet settlement-family settlement-family ID differs');
+    }, {
+      trackerRequestDigestHex: target.compiler.trackerRequestDigestHex,
+      trackerReceiptDigestHex: target.compiler.trackerReceiptDigestHex,
+      familyRequestDigestHex: target.compiler.familyRequestDigestHex,
+      familyReceiptDigestHex: target.compiler.familyReceiptDigestHex,
+      compilerLockDigestHex: target.compiler.familyCompilerLockDigestHex,
     });
+  });
+
+  it.each([
+    ['trackerRequestDigestHex', 'tracker request'],
+    ['trackerReceiptDigestHex', 'tracker receipt'],
+    ['familyRequestDigestHex', 'family request'],
+    ['familyReceiptDigestHex', 'family receipt'],
+    ['compilerLockDigestHex', 'family compiler lock'],
+  ] as const)('rejects only the %s compiler misbinding against the genuine signed V2 target', (field, label) => {
+    withMintEvidence(target, input => {
+      expect(input.draft.statement.lineageProfileIdHex).toBe(`0x${target.profile.familyIdHex}`);
+      expect(() => session.produceSettlementFamilyMintSourceProof(input))
+        .toThrow(`isolated-devnet mint source-proof ${label} compiler binding differs from signed target`);
+      expect(consumeMintEvidenceV2(input.evidenceReceipt, input.draft as Parameters<typeof consumeMintEvidenceV2>[1]))
+        .toBe(input.evidenceReceipt.evidence);
+    }, { [field]: 'ff'.repeat(32) });
   });
 
   it.each(['draft', 'evidenceReceipt'] as const)('rejects copied %s with the genuine V2 launch retained', field => {
@@ -2055,7 +2090,8 @@ describe('owned synthetic session -> retained V2 peg-in boundaries', () => {
 
 describe('genuine V2 deposit -> authorization and candidate-bound observations', () => {
   it('composes fresh V3 custody and real V2 guards without deposit transport', async () => {
-    const fixture = await createRootFixture(true);
+    const preparationCalls = preparationMetrics.freshSignerV2?.calls ?? 0;
+    const fixture = await createRootFixture(true, true);
     const target = executionTarget();
     const spies: Array<{ mockRestore(): void }> = [];
     spies.push(vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
@@ -2219,12 +2255,72 @@ describe('genuine V2 deposit -> authorization and candidate-bound observations',
         );
         expect(vaultObservation).toMatchObject({ version: 1, reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
           boundaries: { mintAuthorized: false, fundsAuthorityEstablished: false } });
+        const mintInput = { batch, candidate, target, committedVaultObservation: vaultObservation };
+        expect(() => buildMintDraft(mintInput as never)).toThrow(/candidate.*provenance/);
+        const draft = buildMintDraftV2(mintInput);
+        expect(draft).toMatchObject({ version: 2,
+          provenance: { familyCompiler: packet.familyCompiler, candidateDigestHex: candidate.candidateDigestHex,
+            committedVaultObservationDigestHex: vaultObservation.observationDigestHex },
+          boundary: { sourceAttestationEstablished: false, runtimeReservationWritten: false,
+            mintExecuted: false, submissionAuthorized: false, fundsAuthorityEstablished: false },
+        });
+        expect(draft.provenance.familyCompiler).toEqual(packet.familyCompiler);
+        expect(() => collectMintEvidence({ ...mintInput, draft } as never)).toThrow(/provenance|version/);
+        const mintEvidence = collectMintEvidenceV2({ ...mintInput, draft });
+        expect(mintEvidence).toMatchObject({ version: 1, mintReservationDraftDigestHex: draft.draftDigestHex,
+          boundaries: { mintAuthorized: false, fundsAuthorityEstablished: false } });
+        expect(() => consumeMintEvidence(mintEvidence, draft as never)).toThrow(/provenance|version/);
+        const evidenceBytes = mintEvidence.evidence;
+        expect(JSON.parse(Buffer.from(evidenceBytes.successorReserveBoxCanonicalHex.slice(2), 'hex').toString('utf8')).box)
+          .toEqual(packet.boxes.reserveSuccessor);
+        const signedTarget = launch.deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(fixture.input.sourceAndCompilerInput);
+        const statement = launch.buildSubstrateFederatedIsolatedDevnetLaunchStatementV2({
+          target: signedTarget, activationGenerationIdHex: 'a1'.repeat(32),
+          ergoHistory: launch.buildSubstrateFederatedIsolatedDevnetErgoHistoryV1({
+            target: signedTarget, genesisHeaderIdHex: GENESIS_HEADER_ID, genesisHeight: 1,
+            setupAnchorHeaderIdHex: TIP_HEADER_ID, setupAnchorHeight: TIP_HEIGHT,
+            greatestWorkHeadersManifest: Buffer.from('synthetic-header-history'),
+            transactionsManifest: Buffer.from('synthetic-transaction-history'),
+            utxoTransitionsManifest: Buffer.from('synthetic-utxo-history'),
+          }),
+          relayerClosure: launch.buildSubstrateFederatedIsolatedDevnetRelayerClosureV1({
+            target: signedTarget, gitCommitSha1Hex: 'a2'.repeat(20),
+            sourceArchive: Buffer.from('synthetic-relayer-source'), packageLock: Buffer.from('synthetic-relayer-lock'),
+            runtimeEntrypointsManifest: Buffer.from('synthetic-relayer-entrypoints'),
+            buildArtifact: Buffer.from('synthetic-relayer-build'),
+          }),
+        });
+        const sourceSession = fixture.sourceSession!;
+        const baseline = launch.buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2({
+          statement, signatures: sourceSession.signLaunchStatement(statement),
+        });
+        launch.assertSubstrateFederatedIsolatedDevnetLaunchBaselineV2Provenance(baseline);
+        expect(draft.provenance.familyCompiler).toEqual({
+          trackerRequestDigestHex: signedTarget.compiler.trackerRequestDigestHex,
+          trackerReceiptDigestHex: signedTarget.compiler.trackerReceiptDigestHex,
+          familyRequestDigestHex: signedTarget.compiler.familyRequestDigestHex,
+          familyReceiptDigestHex: signedTarget.compiler.familyReceiptDigestHex,
+          compilerLockDigestHex: signedTarget.compiler.familyCompilerLockDigestHex,
+        });
+        const proofInput = { draft, evidenceReceipt: mintEvidence, issuedAtNativeHeight: '4', expiresAtNativeHeight: '36' };
+        const mintProof = sourceSession.produceSettlementFamilyMintSourceProof(proofInput);
+        assertMintReceipt(mintProof);
+        expect(mintProof.targetDescriptorDigestHex).toBe(signedTarget.descriptorDigestHex);
+        expect(mintProof.mintIdentityHex).toBe(draft.reservationKeyHex);
+        expect(mintProof.sourceEvidenceReceiptDigestHex).toBe(mintEvidence.receiptDigestHex);
+        expect(mintProof.signatureVerification.signatures).toHaveLength(sourceSession.binding.sourceAttestationThreshold);
+        expect(mintProof.boundary).toMatchObject({ runtimeReservationWritten: false, mintExecuted: false,
+          fundsAuthorityEstablished: false });
+        expect(() => consumeMintEvidenceV2(mintEvidence, draft)).toThrow(/already consumed/);
+        expect(() => sourceSession.produceSettlementFamilyMintSourceProof(proofInput)).toThrow(/already consumed/);
+        expect(preparationMetrics.freshSignerV2?.calls).toBe(preparationCalls + 1);
         expect(observed.checkBodies).toHaveLength(6);
         expect(observed.checkBodies[5]).toEqual(observed.checkBodies[4]);
         expect(observed.submissionBodies).toHaveLength(0);
       }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true });
     } finally {
       for (const spy of spies.reverse()) spy.mockRestore();
+      fixture.sourceSession?.dispose();
       fixture.session.dispose();
     }
   }, 60_000);
@@ -3415,16 +3511,29 @@ function reidentifyBox(box: Eip12Box, transactionId: string): Eip12Box {
   finally { changed.free(); id.free(); candidate.free(); candidates.free(); unsigned.free(); }
 }
 
-async function createRootFixture(retainTrackerSigner = false) {
+async function createRootFixture(retainTrackerSigner = false, freshSourceSession = false) {
   const session = await createSession();
+  let sourceSession: ReturnType<typeof createSourceSessionV2> | undefined;
   try {
+    if (freshSourceSession) {
+      sourceSession = createSourceSessionV2({
+        ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex], ergoAdmissionThreshold: 1,
+      });
+    }
     const funding = {
       tracker: fundingCandidate('50000000', session.signer.rewardInputErgoTrees.delay1),
       duplicatePrevention: fundingCandidate('100000000', session.signer.rewardInputErgoTrees.delay1),
       pooledReserve: fundingCandidate('150000000', session.signer.rewardInputErgoTrees.delay1),
     };
     return await prepareCompiler('freshSignerV2', async () => {
-      const selectedProfile = retainTrackerSigner ? buildSubstrateFederatedCheckpointProfileV1({
+      const binding = sourceSession?.binding;
+      const selectedProfile = binding ? buildSubstrateFederatedCheckpointProfileV1({
+        federationEpoch: binding.federatedMintProfile.federationEpoch,
+        maxAdmissionValidityBlocks: binding.federatedMintProfile.maxValidityBlocks,
+        sourceAttestationPublicKeysHex: binding.sourceAttestationPublicKeysHex,
+        sourceAttestationThreshold: binding.sourceAttestationThreshold,
+        ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex],
+      }) : retainTrackerSigner ? buildSubstrateFederatedCheckpointProfileV1({
         ...vector.input.profile, ergoAdmissionThreshold: 1,
         ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex],
       }) : profile;
@@ -3439,9 +3548,15 @@ async function createRootFixture(retainTrackerSigner = false) {
         duplicatePreventionGenesisInputBoxIdHex: funding.duplicatePrevention.boxId,
         pooledReserveGenesisInputBoxIdHex: funding.pooledReserve.boxId,
       });
-      return { session, boxes: funding, input: rootInput({ ...common, trackerRequest, trackerReceipt, familyReceipt }) };
+      const source = { ...common, trackerRequest, trackerReceipt, familyReceipt,
+        ...(binding === undefined ? {} : { trustPins: { ...common.trustPins,
+          expectedSourceAttestationKeySetDigestHex: binding.checkpointSourceAttestationKeySetDigestHex,
+          expectedSourceAttestationThreshold: binding.sourceAttestationThreshold,
+        } }),
+      };
+      return { session, sourceSession, boxes: funding, input: rootInput(source) };
     });
-  } catch (error) { session.dispose(); throw error; }
+  } catch (error) { sourceSession?.dispose(); session.dispose(); throw error; }
 }
 
 // This parses received signed bytes; it is deliberately not an Ergo node/JVM oracle.

@@ -118,6 +118,14 @@ vi.mock(
   './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js',
   () => ({
     SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1: 10,
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
+      vi.fn((observation, batch, candidate, target) => {
+        if (mocks.committedPacket?.version !== 2 || observation !== MINT_OBSERVATION
+          || batch !== MINT_BATCH || candidate !== MINT_CANDIDATE_V2 || target !== MINT_ERGO_TARGET) {
+          throw new Error('committed-vault V2 candidate provenance missing');
+        }
+        return mocks.committedPacket;
+      }),
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1:
       vi.fn((observation, batch, candidate, target) => {
         if (
@@ -466,7 +474,15 @@ vi.mock(
           }
           mocks.targetInputs.push(input);
           const descriptor = Object.freeze({
+            version,
             descriptorDigestHex: 'b1'.repeat(32),
+            compiler: Object.freeze({
+              trackerRequestDigestHex: input.trackerRequest.requestDigestHex,
+              trackerReceiptDigestHex: input.trackerReceipt.receiptDigestHex,
+              familyRequestDigestHex: 'b5'.repeat(32),
+              familyReceiptDigestHex: input.familyReceipt.receiptDigestHex,
+              familyCompilerLockDigestHex: 'b7'.repeat(32),
+            }),
             profile: Object.freeze({
               familyIdHex: input.familyReceipt.profile.familyIdHex,
               encodedProfileHex:
@@ -735,6 +751,8 @@ import {
 } from './relayer-core/substrate-federated-isolated-devnet-packet-production-phase-v1.js';
 import {
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
+  collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2,
+  consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierMintProofConsumerReceiptV2Provenance,
@@ -747,6 +765,7 @@ import {
 } from './substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
@@ -762,6 +781,7 @@ const h20 = (byte: string): string => `0x${byte.repeat(20)}`;
 const MINT_BATCH = Object.freeze({ role: 'mint-batch' });
 const MINT_ERGO_TARGET = Object.freeze({ role: 'mint-ergo-target' });
 const MINT_CANDIDATE = Object.freeze({ candidateDigestHex: h32('81') });
+const MINT_CANDIDATE_V2 = Object.freeze({ version: 2, candidateDigestHex: h32('b2') });
 const MINT_FINALITY_PATH = Object.freeze([
   h32('82'),
   h32('85'),
@@ -2210,6 +2230,82 @@ describe('isolated-devnet portable packet producer', () => {
 });
 
 describe('SessionV4 PacketV3 continuation with V2 compiler-family mocks', () => {
+  it.each([2, 3] as const)('rejects the opposite draft version at PacketV%s before source evidence consumption', async version => {
+    const session = version === 3 ? packetCheckpointContinuationSessionV4() :
+      createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(mocks.ergoAdmissionSigner);
+    mocks.packetSignerBinding = session.signer;
+    const packet = await session.produce(packetInput());
+    const source = mocks.sourceSessions.at(-1);
+    const wrongDraft = version === 3 ? mintDraftForTarget(requiredTargetDescriptor())
+      : mintDraftForTarget(requiredTargetDescriptor(), {}, 2);
+    expect(() => session.produceMintSourceProof(packet as never, {
+      draft: wrongDraft, evidenceReceipt: {} as never,
+      issuedAtNativeHeight: '4', expiresAtNativeHeight: '36',
+    } as never)).toThrow(/mint-reservation draft lacks same-process provenance/);
+    assertSourceDisposed(source);
+    expect(() => session.produceMintSourceProof(packet as never, {} as never))
+      .toThrow(/requires one completed packet/);
+  });
+
+  it.each([1, 2] as const)('the retained source target V%s independently rejects the opposite draft version', async version => {
+    const session = version === 2 ? packetCheckpointContinuationSessionV4() :
+      createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV3(mocks.ergoAdmissionSigner);
+    mocks.packetSignerBinding = session.signer;
+    await session.produce(packetInput());
+    const source = mocks.sourceSessions.at(-1);
+    const draft = version === 2 ? mintDraftForTarget(requiredTargetDescriptor())
+      : mintDraftForTarget(requiredTargetDescriptor(), {}, 2);
+    expect(() => source.produceSettlementFamilyMintSourceProof({
+      draft, evidenceReceipt: {}, issuedAtNativeHeight: '4', expiresAtNativeHeight: '36',
+    })).toThrow(/mint-reservation draft lacks same-process provenance/);
+    session.dispose();
+  });
+
+  it('rejects a real V2 receipt for a different equal-byte draft and closes packet custody', async () => {
+    const session = packetCheckpointContinuationSessionV4();
+    const packet = await session.produce(packetInput());
+    const input = mintInputForCurrentTarget();
+    const otherDraft = buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2({
+      batch: MINT_BATCH as never, target: MINT_ERGO_TARGET as never,
+      candidate: MINT_CANDIDATE_V2 as never, committedVaultObservation: MINT_OBSERVATION as never,
+    });
+    expect(otherDraft).toEqual(input.draft);
+    expect(() => session.produceMintSourceProof(packet, { ...input, draft: otherDraft }))
+      .toThrow(/different mint-reservation draft/);
+    assertSourceDisposed(mocks.sourceSessions.at(-1));
+    expect(() => session.produceMintSourceProof(packet, input)).toThrow(/requires one completed packet/);
+  });
+
+  it('rejects a copied V2 draft before consuming its genuine evidence receipt', async () => {
+    const session = packetCheckpointContinuationSessionV4();
+    const packet = await session.produce(packetInput());
+    const input = mintInputForCurrentTarget();
+    expect(() => session.produceMintSourceProof(packet, { ...input, draft: structuredClone(input.draft) }))
+      .toThrow(/provenance/);
+    assertSourceDisposed(mocks.sourceSessions.at(-1));
+  });
+
+  it.each([
+    ['trackerRequestDigestHex', 'tracker request'],
+    ['trackerReceiptDigestHex', 'tracker receipt'],
+    ['familyRequestDigestHex', 'family request'],
+    ['familyReceiptDigestHex', 'family receipt'],
+    ['compilerLockDigestHex', 'family compiler lock'],
+  ] as const)('rejects isolated %s mismatch against the signed target before consuming evidence', async (field, label) => {
+    const session = packetCheckpointContinuationSessionV4();
+    await session.produce(packetInput());
+    const source = mocks.sourceSessions.at(-1);
+    const target = requiredTargetDescriptor();
+    const input = mintInputForCurrentTarget({ [field]: h32('ff') });
+    expect(input.draft.statement.lineageProfileIdHex.replace(/^0x/u, '')).toBe(target.profile.familyIdHex);
+    expect(input.draft.provenance.familyCompiler[field]).toBe(h32('ff'));
+    expect(() => source.produceSettlementFamilyMintSourceProof(input))
+      .toThrow(`isolated-devnet mint source-proof ${label} compiler binding differs from signed target`);
+    expect(consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2(input.evidenceReceipt, input.draft))
+      .toBe(input.evidenceReceipt.evidence);
+    session.dispose();
+  });
+
   it.each([1, 2] as const)('selects only V2 components with Ergo history V%s', async version => {
     mocks.ergoHistory = ergoHistory(version);
     const session = packetCheckpointContinuationSessionV4();
@@ -2454,10 +2550,14 @@ function packetCheckpointContinuationSessionV4() {
   return session;
 }
 
-function mintInputForCurrentTarget() {
+function mintInputForCurrentTarget(compilerOverrides: Readonly<Record<string, string>> = {}) {
+  const draft = mintDraftForTarget(requiredTargetDescriptor(), { compilerOverrides }, 2);
   return {
-    draft: mintDraftForTarget(requiredTargetDescriptor()),
-    evidenceReceipt: MINT_EVIDENCE_RECEIPT,
+    draft,
+    evidenceReceipt: collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2({
+      draft, batch: MINT_BATCH as never, target: MINT_ERGO_TARGET as never,
+      candidate: MINT_CANDIDATE_V2 as never, committedVaultObservation: MINT_OBSERVATION as never,
+    }),
     issuedAtNativeHeight: '4',
     expiresAtNativeHeight: '36',
   };
@@ -2579,9 +2679,15 @@ function passingConsumerSourceBaseline() {
   });
 }
 
+type MintDraftOverrides = Readonly<{ sidechainIdHex?: string; compilerOverrides?: Readonly<Record<string, string>> }>;
+function mintDraftForTarget(target: any, overrides?: MintDraftOverrides, version?: 1):
+  ReturnType<typeof buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
+function mintDraftForTarget(target: any, overrides: MintDraftOverrides, version: 2):
+  ReturnType<typeof buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2>;
 function mintDraftForTarget(
   target: any,
-  overrides: Readonly<{ sidechainIdHex?: string }> = {},
+  overrides: MintDraftOverrides = {},
+  version: 1 | 2 = 1,
 ) {
   const amountNanoErg = '10000000';
   const sourceIntentHex = encodePegInSourceIntentV2Hex({
@@ -2621,8 +2727,16 @@ function mintDraftForTarget(
     outputs: Object.freeze([reserveSuccessor]),
   });
   mocks.committedPacket = Object.freeze({
+    version,
     familyIdHex: target.profile.familyIdHex,
-    familyCompiler: Object.freeze({ bindingDigestHex: h32('92') }),
+    familyCompiler: Object.freeze(version === 1 ? { bindingDigestHex: h32('92') } : {
+      trackerRequestDigestHex: target.compiler.trackerRequestDigestHex,
+      trackerReceiptDigestHex: target.compiler.trackerReceiptDigestHex,
+      familyRequestDigestHex: target.compiler.familyRequestDigestHex,
+      familyReceiptDigestHex: target.compiler.familyReceiptDigestHex,
+      compilerLockDigestHex: target.compiler.familyCompilerLockDigestHex,
+      ...overrides.compilerOverrides,
+    }),
     sourceIntentHex,
     depositCommitmentHex: h32('93'),
     reserve: Object.freeze({
@@ -2639,10 +2753,12 @@ function mintDraftForTarget(
       reserveSuccessor,
     }),
   });
-  return buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+  const build = version === 1 ? buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
+    : buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2;
+  return build({
     batch: MINT_BATCH as never,
     target: MINT_ERGO_TARGET as never,
-    candidate: MINT_CANDIDATE as never,
+    candidate: (version === 1 ? MINT_CANDIDATE : MINT_CANDIDATE_V2) as never,
     committedVaultObservation: MINT_OBSERVATION as never,
   });
 }

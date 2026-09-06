@@ -53,6 +53,7 @@ import {
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA,
@@ -942,6 +943,7 @@ function producePacketBoundMintSourceProofV2(input: Readonly<{
       buildMintSourceProofInputForPacket(
         input.input,
         input.completedPacketBinding,
+        input.packet.receipt.version,
       ),
     );
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
@@ -1720,6 +1722,7 @@ function buildMintSourceProofInputForPacket(
     ProduceSubstrateFederatedIsolatedDevnetPacketMintSourceProofV2Input
   >,
   binding: Readonly<PacketMintContinuationBindingV1>,
+  packetVersion: 2 | 3,
 ): Readonly<ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input> {
   const inputRecord = exactDataRecord(input, [
     'draft',
@@ -1728,7 +1731,11 @@ function buildMintSourceProofInputForPacket(
     'issuedAtNativeHeight',
   ], 'isolated packet mint source-proof input');
   const draft = inputRecord.draft;
-  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft);
+  if (packetVersion === 3) {
+    assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(draft);
+  } else {
+    assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft);
+  }
   const sourceIntent = decodePegInSourceIntentV2Hex(
     draft.statement.sourceIntentHex,
   );

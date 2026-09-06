@@ -93,7 +93,6 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| V2 committed deposit -> mint source proof | Main owner; consumes the setup-bound V2 candidate and its exact committed-reserve observation | Connect the V2 observation to mint draft/evidence and its source-proof consumer, retaining all five V2 compiler bindings and the exact source intent, reserve transition, successor and depth policy. The current draft/evidence consumers still require V1 candidate/setup provenance; generic observations cannot substitute for those bindings. Authorization and observation now have explicit V2 entrypoints; the managed caller still needs to select them |
 | Application composition | Can be prepared independently of deposit confirmation; consumes PacketV3/SessionV4 | Add explicit PacketV3 support to the application root and proof-bound signer, preserving the exact owner, recipient, signed triplet and checkpoint bindings. Existing PacketV2 provenance cannot be relabelled |
 | Actual campaign caller | Main owner; consumes the preceding joins and component-tested V2 admission lifecycle | Select PacketV3/SessionV4, portable replay V2, V3 setup and V2 deposit/observation consumers in the managed root. Replace its V1 tracker projections with genuine V2 construction. Confirm external-fee funding before fixing the checkpoint admission window and freezing the anchor. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
@@ -125,10 +124,19 @@ observations and archive production. Session lifecycle tests use compiler-family
 mocks. Complete V1 provisioning and replay outputs are byte-identical to the
 preceding commit. No target admission, activation or funds authority is established.
 The actual application root and proof-bound signer still consume PacketV2.
-The confirmed-deposit draft and evidence chain still requires V1 candidate and
-setup provenance. Both consumer joins must accept genuine V2 identities before
-the managed campaign selects the new packet route. Shared outer mint-proof and
-checkpoint receipt versions need not change where their semantics are unchanged.
+The confirmed-deposit chain now has a V2 mint draft with all five compiler
+bindings, derived from the exact setup-bound candidate and reserve observation.
+Its collector retains that draft, candidate, observation, target and deposit
+packet, revalidates their lineage and permits one consumption. PacketV3 and its
+signed V2 target require the V2 draft; the old route requires V1. The
+source-proof consumer compares each compiler binding with that signed target
+before consuming evidence. The canonical V4 mint statement and source-proof
+wire formats are unchanged. The new draft
+has its own schema and digest domain; generic evidence and outer mint-proof
+receipts keep their existing byte-collection and attestation semantics. These
+receipts do not activate a runtime profile, authorize an operational mint or
+prove Ergo consensus. The application join and managed caller still need to
+select the new route before a fresh campaign.
 
 The V3 setup now retains its exact V2 compiler provenance for deposit
 construction. Its caller can construct the source-lock and reserve-transition

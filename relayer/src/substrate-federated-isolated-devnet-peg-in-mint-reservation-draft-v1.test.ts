@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
+  assertCommittedVaultForCandidateV2: vi.fn(),
 }));
 
 vi.mock(
@@ -10,6 +11,8 @@ vi.mock(
     SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1: 10,
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1:
       mocks.assertCommittedVaultForCandidate,
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
+      mocks.assertCommittedVaultForCandidateV2,
   }),
 );
 
@@ -19,6 +22,8 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2,
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as assertDraftV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
@@ -81,8 +86,24 @@ const PACKET = Object.freeze({
   }),
 });
 
+const COMPILER_V2 = Object.freeze({
+  trackerRequestDigestHex: h32('41'), trackerReceiptDigestHex: h32('42'),
+  familyRequestDigestHex: h32('43'), familyReceiptDigestHex: h32('44'),
+  compilerLockDigestHex: h32('45'),
+});
+const CANDIDATE_V2 = Object.freeze({ version: 2, candidateDigestHex: h32('46') });
+const PACKET_V2 = Object.freeze({ ...PACKET, version: 2, familyCompiler: COMPILER_V2 });
+const draftV2Input = () => ({ batch: BATCH as never, target: TARGET as never,
+  candidate: CANDIDATE_V2 as never, committedVaultObservation: OBSERVATION as never });
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.assertCommittedVaultForCandidateV2.mockImplementation((observation, batch, candidate, target) => {
+    if (observation !== OBSERVATION || batch !== BATCH || candidate !== CANDIDATE_V2 || target !== TARGET) {
+      throw new Error('committed-vault V2 candidate provenance missing');
+    }
+    return PACKET_V2;
+  });
   mocks.assertCommittedVaultForCandidate.mockImplementation(
     (observation, batch, candidate, target) => {
       if (
@@ -218,5 +239,64 @@ describe('isolated devnet peg-in mint-reservation draft V1', () => {
         committedVaultObservation: OBSERVATION as never,
       })
     ).toThrow(/liability cannot be lower/);
+  });
+});
+
+describe('isolated devnet peg-in mint-reservation draft V2', () => {
+  it('retains all five compiler bindings without changing canonical V4 bytes or authority boundaries', () => {
+    const draft = buildDraftV2(draftV2Input());
+    const legacy = buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+      ...draftV2Input(), candidate: CANDIDATE as never,
+    });
+    expect(draft).toMatchObject({
+      schema: 'e2s.substrate-federated-isolated-devnet-peg-in-mint-reservation-draft.v2', version: 2,
+      provenance: { familyCompiler: COMPILER_V2, candidateDigestHex: CANDIDATE_V2.candidateDigestHex,
+        committedVaultObservationDigestHex: OBSERVATION.observationDigestHex,
+        exactSameProcessCandidateAndObservationBound: true },
+    });
+    expect(draft.provenance).not.toHaveProperty('familyCompilerBindingDigestHex');
+    expect(draft.statementHex).toBe(legacy.statementHex);
+    expect(draft.statementIdHex).toBe(legacy.statementIdHex);
+    expect(draft.reservationKeyHex).toBe(legacy.reservationKeyHex);
+    expect(draft.boundary).toEqual(legacy.boundary);
+    expect(draft.draftDigestHex).not.toBe(legacy.draftDigestHex);
+    expect(Object.isFrozen(draft.provenance.familyCompiler)).toBe(true);
+    expect(() => assertDraftV2(draft)).not.toThrow();
+  });
+
+  it.each(Object.keys(COMPILER_V2) as Array<keyof typeof COMPILER_V2>)(
+    'binds isolated compiler field %s into draft identity', field => {
+      const original = buildDraftV2(draftV2Input());
+      mocks.assertCommittedVaultForCandidateV2.mockReturnValueOnce({
+        ...PACKET_V2, familyCompiler: { ...COMPILER_V2, [field]: h32('ff') },
+      });
+      const changed = buildDraftV2(draftV2Input());
+      expect(changed.provenance.familyCompiler[field]).toBe(h32('ff'));
+      expect(changed.draftDigestHex).not.toBe(original.draftDigestHex);
+      expect(changed.statementHex).toBe(original.statementHex);
+    },
+  );
+
+  it.each(['batch', 'target', 'candidate', 'committedVaultObservation'] as const)(
+    'rejects copied %s identity', field => {
+      const input = draftV2Input();
+      expect(() => buildDraftV2({ ...input, [field]: { ...(input[field] as object) } } as never))
+        .toThrow(/provenance/);
+    },
+  );
+
+  it('rejects copied drafts and both cross-version provenance claims', () => {
+    const current = buildDraftV2(draftV2Input());
+    const legacy = buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+      ...draftV2Input(), candidate: CANDIDATE as never,
+    });
+    expect(() => assertDraftV2(structuredClone(current))).toThrow(/provenance/);
+    expect(() => assertDraftV2(legacy)).toThrow(/provenance|version/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(current))
+      .toThrow(/provenance|version/);
+    expect(() => buildDraftV2({ ...draftV2Input(), candidate: CANDIDATE as never }))
+      .toThrow(/provenance/);
+    expect(() => buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draftV2Input()))
+      .toThrow(/provenance/);
   });
 });
