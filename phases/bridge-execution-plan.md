@@ -95,7 +95,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 |---|---|---|
 | V2 admission lifecycle | Main owner; consumes the V170 session-owned check | Exact two-input candidate, checkpoint, target and successor -> explicit authorization -> durable reservation -> fixed transport -> canonical/ambiguous outcome handling. Implement this join together; preserve each separate capability. No V1/V7 receipt relabelling |
 | Actual campaign caller | Main owner; depends on the admission lifecycle | Select the retained V3 route in the real application root. Confirm external-fee funding before freezing the anchor; preserve application/checkpoint provenance. One fresh authorized owned-node campaign reaches canonical tracker admission. No standalone funding/check replay |
-| V2 withdrawal construction | Disjoint worker may start alongside admission | Connect the genuine V2 family compiler receipt to the full burn/DUP/reserve/payout planner with external fees and isolated negatives. Stop at a checked synthetic candidate; actual acceptance waits for canonical inputs |
+| V2 withdrawal acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction is available; it neither proves canonical input history nor authorizes signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
 both directions through recovery, and finish target/custody rehearsal and FED-7.
@@ -111,6 +111,15 @@ pass with unchanged case bodies, negative tables and timeouts. The two optional
 node cases were not re-executed. Fresh signer-bound compilation remains fresh;
 see the [measured preparation scope](../docs/development-process.md#september-2026-audit-baseline).
 This improves focused iteration, not the bridge's runtime acceptance status.
+
+The V2 withdrawal constructor connects genuine V2 tracker and settlement-family
+compiler receipts to a complete unsigned reserve/DUP/payout transaction. The
+reserve value and liability decrease by the burn amount; a separate input pays
+the miner fee. Isolated negatives cover compiler provenance, source/profile
+bindings, payout substitution, replay and conservation. The V1 golden fixture
+and transaction identity are unchanged. These checks establish synthetic
+construction, not canonical tracker admission, full-transaction V2 VM/node
+acceptance, signing authority or a completed exit.
 
 V150-V170 specifications and validation limits are retained in the
 [checkpoint archive](bridge-execution-checkpoints-2026-09-06.md). Consult the
