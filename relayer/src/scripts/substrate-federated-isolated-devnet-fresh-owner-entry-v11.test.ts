@@ -27,6 +27,8 @@ import {
 import {
   runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV11,
 } from './run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v11.js';
+import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments }
+  from './run-substrate-federated-isolated-devnet-tracker-v2-campaign.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_BOOTSTRAP_COMMAND_REQUEST_V1_SCHEMA,
   type BootstrapCommandRequestV1,
@@ -36,12 +38,17 @@ const io = vi.hoisted(() => ({
   build: vi.fn(),
   read: vi.fn(),
   sourcePreflight: vi.fn(),
+  campaignPreflight: vi.fn(),
   files: new Map<string, Uint8Array>(),
   directories: new Set<string>(),
 }));
 
-// Only external filesystem/source/build IO is replaced. The request loader,
-// request provenance, V11 worker, genesis root and owner adapter remain real.
+vi.mock('./preflight-substrate-federated-isolated-devnet-campaign-v1.js', () => ({
+  preflightSubstrateFederatedIsolatedDevnetCampaignFromArgumentsV1: io.campaignPreflight,
+}));
+
+// External IO and campaign preflight are simulated. The request loader,
+// request provenance, V11/V2 workers, campaign roots and owner adapter remain real.
 vi.mock('node:fs', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs')>();
   return {
@@ -96,6 +103,7 @@ const at = (name: string): string => resolve(fixtureRoot, name);
 const requestPath = at('request.json');
 const missingCustody = 'LAB application request has no unclaimed live owner custody';
 const sessions: Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1>[] = [];
+let useV2 = false;
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -119,6 +127,17 @@ beforeEach(() => {
     return { bytes: Uint8Array.from(bytes), canonicalPath: path };
   });
   io.sourcePreflight.mockImplementation(input => Object.freeze(input));
+  io.campaignPreflight.mockImplementation((args: string[]) => {
+    const request = JSON.parse(Buffer.from(io.files.get(requestPath)!).toString('utf8')) as BootstrapCommandRequestV1;
+    if (`0x${args[7]}` !== request.sourceTarget.bridgeOwnerAddress) {
+      throw new Error('synthetic V2 preflight recipient mismatch');
+    }
+    return Object.freeze({
+      status: 'request_bound_lab_campaign_preflight_passed', requestSha256Hex: args[3],
+      pegIn: { amountNanoErg: args[5], recipientAddressHex: args[7] },
+      requestBindings: { expectedHeadCommitSha1Hex: request.relayer.expectedHeadCommitSha1Hex },
+    });
+  });
   io.build.mockImplementation(() => { throw new Error('unexpected build entry'); });
 });
 
@@ -127,7 +146,8 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('fresh-owner same-process entry through the real V11 worker and root', () => {
+describe.each(['V11', 'V2'])('fresh-owner same-process entry through the real %s worker and root', version => {
+  beforeEach(() => { useV2 = version === 'V2'; });
   it('claims the exact request owner before build and disposes it on build failure', async () => {
     const fixture = await createFixture();
     const unrelated = await createFixture(false);
@@ -151,7 +171,7 @@ describe('fresh-owner same-process entry through the real V11 worker and root', 
     expect(io.build).toHaveBeenCalledOnce();
     expect(io.sourcePreflight).toHaveBeenCalledOnce();
     expect(projectSubstrateFederatedIsolatedDevnetTrackerTransportManagedCampaignPhaseFailureV9(reachedBuild))
-      .toBe('ergo node build');
+      .toBe(useV2 ? null : 'ergo node build');
     expect(() => assertFrontierLabApplicationOwnerRequestV1(fixture.session.owner, fixture.digest))
       .toThrow('LAB application owner lacks live process custody');
     expect(() => claimFrontierLabApplicationOwnerRequestV1(fixture.digest)).toThrow(missingCustody);
@@ -200,7 +220,8 @@ describe('fresh-owner same-process entry through the real V11 worker and root', 
     const fixture = await createFixture();
     await expectBeforeBuildFailure(
       runWorker(fixture, 'cd'.repeat(20)),
-      'canonical bootstrap request owner-mint probe differs from the V11 peg-in plan',
+      useV2 ? 'synthetic V2 preflight recipient mismatch'
+        : 'canonical bootstrap request owner-mint probe differs from the V11 peg-in plan',
     );
     expect(io.sourcePreflight).not.toHaveBeenCalled();
     expect(claimFrontierLabApplicationOwnerRequestV1(fixture.digest)).toBe(fixture.session.owner);
@@ -291,7 +312,7 @@ function runWorker(
   fixture: Awaited<ReturnType<typeof createFixture>>,
   recipient = fixture.session.owner.ownerAddressHex.slice(2),
 ) {
-  return runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV11([
+  const args = [
     '--request', requestPath,
     '--expected-request-sha256', fixture.digest,
     '--amount-nano-erg', '15000000',
@@ -299,5 +320,10 @@ function runWorker(
     '--frontier-temporary-root', at('temporary'),
     '--frontier-cargo-cache', at('frontier-cargo'),
     '--tracker-transport-journal-root', at('journal'),
-  ]);
+  ];
+  return useV2
+    ? runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments([
+      ...args, '--relayer-cargo-cache', at('relayer-cargo'),
+    ])
+    : runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignWorkerFromArgumentsV11(args);
 }

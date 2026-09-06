@@ -42,6 +42,93 @@ function staticAppFixture(file: string, source: string): Record<string, string> 
 }
 
 describe('layer import rules', () => {
+  it.each(['local export', 'alias export', 'returned function', 'assigned function'])('rejects the fixed worker authority escape through %s', mode => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
+    const specifier = '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
+    const escape = mode === 'local export' ? `export { ${binding} };`
+      : mode === 'alias export' ? `export { ${binding} as exposed };`
+        : mode === 'returned function' ? `function expose(){ return ${binding}; }`
+          : `const exposed = ${binding};`;
+    const violations = inspect(staticAppFixture(worker, `import { ${binding} } from '${specifier}'; ${escape}`));
+    expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+  });
+
+  it('permits only the fixed V2 worker to import its campaign root', () => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const rootSpecifier = '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
+    expect(inspect(staticAppFixture(worker, `import { ${binding} } from '${rootSpecifier}'; ${binding}();`))).toEqual([]);
+    expect(inspect(staticAppFixture('scripts/foreign-worker.ts',
+      `import { ${binding} } from '${rootSpecifier}'; ${binding}();`)).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${rootSpecifier}#${binding}`,
+    );
+    expect(inspect(staticAppFixture(worker,
+      `import { ${binding} as run } from '${rootSpecifier}'; run();`)).map(item => item.message)).toEqual([
+      `exclusive authority import must not be aliased: ${rootSpecifier}#${binding}`,
+    ]);
+    expect(inspect(staticAppFixture(worker,
+      `import * as root from '${rootSpecifier}'; root.${binding}();`)).map(item => item.message)).toEqual([
+      `exclusive authority module must use named runtime imports: ${rootSpecifier}`,
+    ]);
+    expect(inspect({
+      [TRACKER_V2_CAMPAIGN_ROOT]: 'export {};',
+      [worker]: `export { ${binding} } from '${rootSpecifier}';`,
+    }).map(item => item.message)).toContain(
+      `exclusive authority module must use named runtime imports: ${rootSpecifier}`,
+    );
+  });
+
+  it('keeps the V2 worker behind its exact command and rejects alternate callers', () => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';
+    const specifier = './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js';
+    const source = `const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments } = await import('${specifier}');`;
+    expect(inspect({ [worker]: 'export {};', [command]: source })).toEqual([]);
+    expect(inspect({ [worker]: 'export {};', 'scripts/unregistered.ts': source }).map(item => item.message)).toContain(
+      `exclusive runtime module import has the wrong owner: ${specifier}`,
+    );
+  });
+
+  it.each(['local export', 'returned function', 'assigned function'])('rejects a command capability escape through %s', mode => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments';
+    const escape = mode === 'local export' ? `export { ${binding} };`
+      : mode === 'returned function' ? `function expose(){ return ${binding}; }`
+        : `const exposed = ${binding};`;
+    const violations = inspect({ [worker]: 'export {};', [command]:
+      `const { ${binding} } = await import('./run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js'); ${escape}` });
+    expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+  });
+
+  it.each([
+    'const worker = await import(SPECIFIER);',
+    'const worker = await import(SPECIFIER_LITERAL);',
+    'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments: run } = await import(SPECIFIER_LITERAL);',
+  ])('rejects a non-canonical dynamic command binding: %s', declaration => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';
+    const specifier = './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js';
+    const source = declaration.replace('SPECIFIER_LITERAL', `'${specifier}'`);
+    const expected = declaration.includes('SPECIFIER_LITERAL')
+      ? `exclusive authority module must use named runtime imports: ${specifier}`
+      : 'unclassified runtime modules require a static string import target';
+    expect(inspect({ [worker]: 'export {};', [command]: source }).map(item => item.message)).toContain(expected);
+  });
+
+  it('rejects a local root re-export through worker and command to an unregistered consumer', () => {
+    const stem = 'substrate-federated-isolated-devnet-tracker-v2-campaign';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
+    const violations = inspect({
+      [`apps/bridge-daemon/${stem}-root.ts`]: `export function ${binding}(_input: unknown) {}`,
+      [`scripts/run-${stem}-worker.ts`]: `import { ${binding} } from '../apps/bridge-daemon/${stem}-root.js'; export { ${binding} };`,
+      [`scripts/run-${stem}.ts`]: `export { ${binding} } from './run-${stem}-worker.js';`,
+      'scripts/foreign-worker.ts': `import { ${binding} } from './run-${stem}.js'; ${binding}({});`,
+    });
+    expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+  });
+
   it.each([MANAGED_SETUP_V2, TRACKER_V2_CAMPAIGN_ROOT, GENESIS_SETUP_ROOT])(
     'accepts the actual reviewed app source without executing it: %s', file => {
       const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');

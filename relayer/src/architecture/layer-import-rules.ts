@@ -1566,6 +1566,25 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
   [
+    'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+    new Map([
+      ['runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments', new Set([
+        'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts',
+      ])],
+    ]),
+  ],
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Map([
+      ['runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot', new Set([
+        'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+      ])],
+      ['assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt', new Set([
+        'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+      ])],
+    ]),
+  ],
+  [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
     new Map([
       ['signFrontierLabProofBoundApplicationV1', new Set([
@@ -1614,6 +1633,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
           'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
           'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.test.ts',
           'scripts/preflight-substrate-federated-isolated-devnet-campaign-v1.ts',
+          'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.ts',
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.test.ts',
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-worker-v1.ts',
@@ -1682,6 +1702,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
           'scripts/run-substrate-federated-isolated-devnet-bootstrap-v1.test.ts',
           'scripts/run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v10.ts',
           'scripts/run-substrate-federated-isolated-devnet-peg-in-tracker-transport-campaign-worker-v11.ts',
+          'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
         ]),
       ],
     ]),
@@ -1867,6 +1888,14 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [
+    'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
+    new Set(['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts']),
+  ],
+  [
+    'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+    new Set(['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts']),
+  ],
   [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
     new Set([
@@ -2144,6 +2173,11 @@ function inspectExclusiveRuntimeAuthorityImport(
     && imported.form === 'dynamic-import' && imported.bindings.length === 1
     && imported.bindings[0]!.imported === 'replaySubstrateFederatedIsolatedDevnetPortableV1'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
+  if (file === 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts'
+    && imported.value === './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js'
+    && imported.form === 'dynamic-import' && imported.bindings.length === 1
+    && imported.bindings[0]!.imported === 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments'
+    && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (imported.form !== 'named-import') {
     return [{
       file,
@@ -2297,6 +2331,43 @@ function collectReviewedAppExportViolations(
     }
     addViolation(statement, '<anonymous>');
   }
+  return violations;
+}
+
+const FIXED_CAMPAIGN_SCRIPT_EXPORTS = new Map([
+  ['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+    'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments'],
+  ['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts',
+    'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments'],
+]);
+
+function collectFixedCampaignScriptViolations(
+  file: string, parsed: ts.SourceFile, imports: readonly CollectedModuleSpecifier[],
+  knownFiles: ReadonlySet<string>,
+): LayerImportViolation[] {
+  const entry = FIXED_CAMPAIGN_SCRIPT_EXPORTS.get(file);
+  if (entry === undefined) return [];
+  const violations = collectReviewedAppExportViolations(file, parsed, new Set([entry]));
+  const protectedNames = new Set<string>();
+  for (const imported of imports) {
+    if (imported.value === null || imported.typeOnly) continue;
+    const resolved = resolveRelativeImport(file, imported.value, knownFiles);
+    const restricted = resolved === null ? undefined : EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS.get(resolved);
+    for (const binding of imported.bindings) {
+      if (restricted?.has(binding.imported)) protectedNames.add(binding.local);
+    }
+  }
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && protectedNames.has(node.text)
+      && !ts.isImportSpecifier(node.parent)
+      && !(ts.isBindingElement(node.parent) && node.parent.name === node)
+      && !(ts.isCallExpression(node.parent) && node.parent.expression === node)) {
+      violations.push({ file, line: parsed.getLineAndCharacterOfPosition(node.getStart(parsed)).line + 1,
+        importSpecifier: null, message: `fixed campaign capability must only be called directly: ${node.text}` });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(parsed);
   return violations;
 }
 
@@ -2770,6 +2841,7 @@ export function inspectLayerImports(
         knownFiles,
       ));
     }
+    violations.push(...collectFixedCampaignScriptViolations(file, parsed, imports, knownFiles));
     if (sourceLayer === null) continue;
 
     adjacency.set(file, new Set());

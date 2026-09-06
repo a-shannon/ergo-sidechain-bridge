@@ -83,7 +83,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB funded V2 tracker -> canonical admission | Promote the V2 campaign composition through the fixed worker/CLI and exact artifact closure, then run one fresh owned-target campaign | The new source path connects V4 application/V3 setup/V2 deposits to funded V2 admission. Worker selection, real fee-box confirmation and canonical tracker admission remain open. Do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
+| **Now** | FED-6-LAB funded V2 tracker -> canonical admission | Freeze the integrated V2 command at a clean HEAD, regenerate the request-bound artifacts and run one fresh owned-target campaign | The fixed in-process worker selects V4 application/V3 setup/V2 deposits and funded V2 admission. Real fee-box confirmation and canonical tracker admission remain open. Retain fresh request-owner custody in the command process; a public request file cannot restore it. Do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
 | 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -93,7 +93,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| V2 campaign promotion and execution | Main owner; consumes the new tracker V2 campaign root and its managed setup helper | Select the root in the fixed worker/CLI, bind its exact build and executable inputs, then run one fresh authorized owned-node campaign. Confirm fee funding before fixing the checkpoint admission window and freezing the anchor; require the V2 reservation, revalidation, fixed transport and canonical-confirmation consumers. Preserve the old V10/V11 command and receipt identities. No standalone funding/check replay |
+| V2 campaign promotion and execution | Main owner; consumes the fixed in-process V2 command, campaign root and managed setup helper | Bind a fresh request to the clean integrated HEAD and regenerate its source/build artifact identities. The request creator invokes `runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments` in the same process while retaining synthetic custody through owner-dependent genesis calibration; do not spawn a child with only the request file. Confirm fee funding before fixing the checkpoint admission window and freezing the anchor; require the V2 reservation, revalidation, fixed transport and canonical-confirmation consumers. Preserve the old V10/V11 command and receipt identities. No standalone funding/check replay |
 | V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
 
 Then connect exact withdrawal transport and the operational mint caller, exercise
@@ -103,6 +103,22 @@ withdrawal construction is not a completed exit. Do not omit either consumer
 from the final delivery contract.
 
 ## Reference Checkpoints
+
+The fixed V2 command loads its worker inside the command error boundary and
+returns the original process-provenant V2 campaign receipt, not a relabelled
+V10/V11 envelope. The worker loads the exact canonical request, rejects journal
+overlap with source/artifact paths, then executes request-bound preflight before
+entering the V2 root. It checks disjoint external roots, explicit Cargo cache
+selection and request/HEAD/peg-in equality. Same-process entry tests
+exercise real owner claim and disposal through the root up to the build boundary;
+external preflight/build effects are simulated. A standalone invocation without
+creator custody remains fail-closed. No operational mint or payout is enabled.
+Promotion must regenerate the artifact identities at the integrated clean HEAD.
+The source archive covers these scripts; the existing compiled runtime archive
+does not include the campaign as an entrypoint. This remains source execution
+on a trusted local host, not authenticated loader/dependency execution or
+resistance to hostile same-user mutation. No artifact format or protocol pin
+changes are required solely to add this caller.
 
 The tracker V2 campaign composition now connects the existing components in one
 owned lifecycle. It consumes the PacketV3 portable replay continuation, prepares
@@ -115,8 +131,8 @@ Failure at a phase stops its downstream actions. Cleanup attempts every acquired
 resource and withholds successful receipt provenance if teardown fails.
 The campaign uses a separate receipt schema and domain; historical V10/V11
 bodies remain unchanged. Direct tests establish orchestration with simulated
-external effects, not actual node execution. Fixed worker/CLI selection and a
-fresh campaign must still establish canonical admission before withdrawal.
+external effects, not actual node execution. The fixed worker/CLI now selects
+this root; a fresh campaign must establish canonical admission before withdrawal.
 
 The V2 launch join has passed its affected checks and independent review.
 Genuine V2 compiler receipts and source history produce an explicit
@@ -180,7 +196,7 @@ acceptance or canonical confirmation. Existing generic check-receipt schemas
 remain byte/target/signer-bound checks, not V2 lifecycle or transport authority.
 The historical campaign caller retains its old packet, deposit authorization,
 observation and tracker paths. The separate V2 composition selects the new
-consumers; its fixed worker/CLI promotion remains pending before a fresh campaign.
+consumers; its fixed worker/CLI now requires fresh campaign promotion and execution.
 
 The managed setup session now exposes that V3/V2 execution sequence through
 its existing signer and mining-credential ownership boundary. Separate phase
