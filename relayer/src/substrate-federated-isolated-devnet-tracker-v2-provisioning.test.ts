@@ -29,6 +29,11 @@ import {
   revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission as revalidateTrackerV2,
   confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission as confirmTrackerV2,
 } from './substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js';
+import {
+  authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2 as authorizeWithdrawalV2,
+  reserveSubstrateFederatedIsolatedDevnetWithdrawalV2 as reserveWithdrawalV2,
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalV2 as confirmWithdrawalV2,
+} from './substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js';
 import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesisBatchV3,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as executeFeeFunding }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -47,6 +52,8 @@ import {
   finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1 as finalizeWithdrawalFunding,
   submitSubstrateFederatedIsolatedDevnetTrackerV2Admission as submitTrackerV2,
   finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission as finalizeTrackerV2,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalV2 as submitWithdrawalV2,
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2 as finalizeWithdrawalV2,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as authorizeFeeFunding,
@@ -2358,7 +2365,9 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     'admission-transport-journal-drift', 'admission-ambiguous',
     'admission-confirmation-parent', 'admission-successor-drift',
     'admission-confirmation-reincluded', 'admission-confirmation-depth', 'admission-unfinalized-row',
-    'withdrawal-valid', 'withdrawal-no-fee', 'withdrawal-before-transport', 'withdrawal-disposed', 'withdrawal-concurrent',
+    'withdrawal-valid', 'withdrawal-lifecycle-valid', 'withdrawal-lifecycle-ambiguous',
+    'withdrawal-lifecycle-stale-fee', 'withdrawal-lifecycle-reincluded',
+    'withdrawal-no-fee', 'withdrawal-before-transport', 'withdrawal-disposed', 'withdrawal-concurrent',
     'withdrawal-wrong-target', 'withdrawal-wrong-claim', 'withdrawal-node-reject',
     'withdrawal-input-0-primary', 'withdrawal-input-1-primary', 'withdrawal-input-2-primary', 'withdrawal-input-3-primary',
     'withdrawal-input-0-witness', 'withdrawal-input-1-witness', 'withdrawal-input-2-witness', 'withdrawal-input-3-witness',
@@ -2591,7 +2600,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
               genesisDrift.mockRestore();
               await exerciseTrackerV2Admission(fault === 'peg-in-v2' ? 'valid' : fault, checked, frozenTarget, frozenBinding, observed, () => {
                 frozenCustody.mockImplementation(() => { throw new Error('synthetic frozen action expired'); });
-              }, withdrawal ? async confirmationTarget => {
+              }, withdrawal ? async (confirmationTarget, state) => {
                 const deposit = withdrawalDeposit!;
                 const fee = withdrawalFee!;
                 const dup = await materializeUnsignedTransaction(
@@ -2652,7 +2661,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
                   if (fault === 'withdrawal-concurrent') {
                     await expect(fixture.session.checkWithdrawalV2(claim, confirmationTarget)).rejects.toThrow(/continuation/);
                   }
-                  if (fault === 'withdrawal-valid') {
+                  if (fault === 'withdrawal-valid' || fault.startsWith('withdrawal-lifecycle-')) {
                     const checkedWithdrawal = await result;
                     const packet = checkedWithdrawal.packet;
                     expect(packet.transaction.eip12Tx.inputs.map(box => box.boxId)).toEqual(liveBoxes.slice(0, 3).map(box => box.boxId));
@@ -2663,6 +2672,9 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
                     expect(packet.reserve.outputLiabilityNanoErg).toBe('0');
                     expect(checkedWithdrawal.checkedResult.txId).toBe(packet.transaction.txId);
                     expect(signedCheckOracle(observed.checkBodies.at(-1)!)).toBe(packet.transaction.txId);
+                    if (fault.startsWith('withdrawal-lifecycle-')) {
+                      await exerciseWithdrawalV2Lifecycle(fault, checkedWithdrawal, confirmationTarget, state, observed);
+                    }
                   } else {
                     const expected = inputFault || postFault ? /withdrawal live input differs/
                       : reincluded ? new RegExp(`withdrawal canonical predecessor ${reincluded[1]} changed`)
@@ -2677,7 +2689,8 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
                   }
                   expect(assertRetainedCustody).toThrow(/revoked|active process provenance/);
                   await expect(fixture.session.checkWithdrawalV2(claim, confirmationTarget)).rejects.toThrow(/continuation/);
-                  expect(observed.submissionBodies).toHaveLength(1);
+                  expect(observed.submissionBodies).toHaveLength(
+                    fault.startsWith('withdrawal-lifecycle-') && fault !== 'withdrawal-lifecycle-stale-fee' ? 2 : 1);
                 } finally { reads.mockRestore(); rejected?.mockRestore(); }
               } : undefined);
             } else {
@@ -2692,7 +2705,9 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
           } finally { genesisDrift.mockRestore(); }
         }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
-          submissionOracle: body => fault === 'admission-ambiguous' ? { unavailable: true } : signedCheckOracle(body),
+          submissionOracle: (body, ordinal) => fault === 'admission-ambiguous'
+            || (fault === 'withdrawal-lifecycle-ambiguous' && ordinal === 1) ? { unavailable: true } : signedCheckOracle(body),
+          removeSubmittedInputs: fault.startsWith('withdrawal-lifecycle-'),
           confirmSubmittedGenesis: true, publishSubmittedOutputs: true });
       } finally {
         errors.mockRestore(); frozenCustody.mockRestore(); custody.mockRestore(); fixture.session.dispose();
@@ -3730,7 +3745,7 @@ async function exerciseTrackerV2Admission(
   frozenBinding: Readonly<{ processBindingDigestHex: string; executionTargetIdentityDigestHex: string }>,
   observed: ObservationFixture,
   expireFrozen: () => void,
-  afterConfirmation?: (target: ReturnType<typeof executionTarget>) => Promise<void>,
+  afterConfirmation?: (target: ReturnType<typeof executionTarget>, state: StateTracker) => Promise<void>,
 ): Promise<void> {
   const checkedBodies = observed.checkBodies.filter(body =>
     signedCheckOracle(body) === checked.result.transaction.unsignedTransactionIdHex);
@@ -3926,13 +3941,75 @@ async function exerciseTrackerV2Admission(
       expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)).toEqual(beforeConfirmation);
     } else {
       await expect(confirmed).resolves.toMatchObject({ expectedTxId: attempt.expectedTxId, status: 'confirmed' });
-      await afterConfirmation?.(confirmationTarget);
+      await afterConfirmation?.(confirmationTarget, state);
     }
-    expect(observed.submissionBodies).toHaveLength(1);
+    expect(observed.submissionBodies).toHaveLength(
+      fault.startsWith('withdrawal-lifecycle-') && fault !== 'withdrawal-lifecycle-stale-fee' ? 2 : 1);
   } finally {
     for (const spy of spies.reverse()) spy.mockRestore();
     state.close();
   }
+}
+
+async function exerciseWithdrawalV2Lifecycle(
+  fault: string,
+  check: Parameters<typeof authorizeWithdrawalV2>[0],
+  target: ReturnType<typeof executionTarget>,
+  state: StateTracker,
+  observed: ObservationFixture,
+): Promise<void> {
+  const txId = check.packet.transaction.txId;
+  const checkedBody = canonicalJson(observed.checkBodies.at(-1));
+  await expect(authorizeWithdrawalV2({ ...check }, target)).rejects.toThrow(/provenance/);
+  await expect(authorizeWithdrawalV2(check, { ...target })).rejects.toThrow(/provenance/);
+  const authorization = await authorizeWithdrawalV2(check, target);
+  await expect(authorizeWithdrawalV2(check, target)).rejects.toThrow(/claimed/);
+  const attempt = reserveWithdrawalV2(authorization, state);
+  const reserved = state.getErgoOperationalTransactionAttempt(txId)!;
+  expect(reserved.inputBoxIds).toEqual(check.packet.transaction.eip12Tx.inputs.map(box => box.boxId));
+  expect(reserved.operationProfile).toBe('e2s.substrate-federated-local-devnet-withdrawal-operation.v2');
+  expect(reserved.status).toBe('pending');
+  expect(() => reserveWithdrawalV2(authorization, state)).toThrow(/consumed/);
+  const originalRead = ergoHelpers.ngetDirect;
+  const stale = fault === 'withdrawal-lifecycle-stale-fee'
+    ? vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+      const value = await originalRead(...args);
+      return args[0] === `/utxo/byId/${check.packet.boxes.feeFundingInput.boxId}`
+        && args[1] === target.witnessNodeOrigin ? reidentifyBox(value, 'ef'.repeat(32)) : value;
+    }) : undefined;
+  try {
+    const submission = submitWithdrawalV2(target, attempt);
+    if (stale !== undefined) {
+      await expect(submission).rejects.toThrow(/revalidated input changed/);
+      expect(state.getErgoOperationalTransactionAttempt(txId)).toEqual(reserved);
+      expect(observed.submissionBodies).toHaveLength(1);
+      await expect(submitWithdrawalV2(target, attempt)).rejects.toThrow(/consumed/);
+      return;
+    }
+    const result = await submission;
+    expect(result.status).toBe(fault === 'withdrawal-lifecycle-ambiguous' ? 'ambiguous' : 'accepted');
+    expect(observed.submissionBodies).toHaveLength(2);
+    expect(canonicalJson(observed.submissionBodies[1])).toBe(checkedBody);
+    expect(canonicalJson(observed.checkBodies.at(-1))).toBe(checkedBody);
+    expect(signedCheckOracle(observed.submissionBodies[1]!)).toBe(txId);
+    expect(() => finalizeWithdrawalV2(attempt, { ...result })).toThrow(/provenance/);
+    finalizeWithdrawalV2(attempt, result);
+    await expect(submitWithdrawalV2(target, attempt)).rejects.toThrow(/consumed/);
+    const confirmation = await createConfirmationObserver(target, authorization.genesisHeaderIdHex)
+      .observe(txId, target.primaryNodeOrigin);
+    expect(confirmation?.status).toBe('confirmed');
+    const finalized = state.getErgoOperationalTransactionAttempt(txId);
+    if (fault === 'withdrawal-lifecycle-reincluded') observed.reincludeSubmitted(txId, 10);
+    const confirmed = confirmWithdrawalV2(attempt, target, confirmation!);
+    if (fault === 'withdrawal-lifecycle-reincluded') {
+      await expect(confirmed).rejects.toThrow(/canonical payout changed/);
+      expect(state.getErgoOperationalTransactionAttempt(txId)).toEqual(finalized);
+    } else {
+      await expect(confirmed).resolves.toMatchObject({ status: 'confirmed', expectedTxId: txId });
+    }
+    expect(state.getErgoOperationalTransactionAttempt(txId)?.inputBoxIds).toEqual(reserved.inputBoxIds);
+    expect(observed.submissionBodies).toHaveLength(2);
+  } finally { stale?.mockRestore(); }
 }
 
 function reidentifyBox(box: Eip12Box, transactionId: string): Eip12Box {
@@ -4016,6 +4093,7 @@ function checkObservationOptions(): ObservationOptions {
 // Only these two bounded loopback origins exist while a test callback is active.
 interface ObservationOptions {
   readonly publishSubmittedOutputs?: boolean;
+  readonly removeSubmittedInputs?: boolean;
   readonly boxes?: Boxes;
   readonly tipHeight?: number;
   readonly genesisHeaderId?: string;
@@ -4047,6 +4125,7 @@ async function withObservations<T>(
   const confirmations = new Map<string, { inclusionHeight: number; headerId: string }>();
   const confirmationReads = new Map<string, Set<string>>();
   const reportedDepth = new Map<string, number>();
+  const spentInputIds = new Set<string>();
   const syntheticHeaderId = (height: number) => createHash('sha256')
     .update(`V166 synthetic confirmation header ${height}`).digest('hex');
   const start = async () => {
@@ -4092,6 +4171,11 @@ async function withObservations<T>(
                 }
               } finally { outputs.free(); transaction.free(); }
             }
+            if (options.removeSubmittedInputs) {
+              for (const input of candidate.inputs as Array<{ boxId: string }>) {
+                json.delete(input.boxId); sigma.delete(input.boxId); spentInputIds.add(input.boxId);
+              }
+            }
           }
           response.writeHead(200, { 'Content-Type': 'application/json' });
           response.end(JSON.stringify(body));
@@ -4132,7 +4216,9 @@ async function withObservations<T>(
           }
         }
       }
-      if (body === undefined) unexpected.push(request.method + ' ' + path);
+      const expectedSpent = request.method === 'GET' && /^\/utxo\/byId\/[0-9a-f]{64}$/.test(path)
+        && spentInputIds.has(path.slice('/utxo/byId/'.length));
+      if (body === undefined && !expectedSpent) unexpected.push(request.method + ' ' + path);
       response.writeHead(body === undefined ? 404 : 200, { 'Content-Type': 'application/json' });
       response.end(JSON.stringify(body ?? {}));
     });

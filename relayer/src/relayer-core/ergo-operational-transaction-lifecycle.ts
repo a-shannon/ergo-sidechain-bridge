@@ -21,6 +21,8 @@ export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_P
   'e2s.substrate-federated-local-devnet-withdrawal-fee-funding-operation.v1' as const;
 export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE =
   'e2s.substrate-federated-local-devnet-tracker-admission-operation.v2' as const;
+export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE =
+  'e2s.substrate-federated-local-devnet-withdrawal-operation.v2' as const;
 
 const OPERATION_BINDING_DIGEST_DOMAIN =
   'E2S_ERGO_OPERATIONAL_TRANSACTION_BINDING_V1';
@@ -34,7 +36,8 @@ export type ErgoOperationalTransactionProfile =
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
-  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE;
+  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
+  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE;
 
 export interface ErgoOperationalTransactionInput {
   readonly operationProfile: ErgoOperationalTransactionProfile;
@@ -324,6 +327,8 @@ function normalizeOperationContext(input: ErgoOperationalTransactionInput): {
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
+    || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE
   ) {
     if (
       input.targetSidechainHeight != null
@@ -347,6 +352,12 @@ export function admitErgoOperationalTransaction(
   const expectedTxId = normalizeHex32(input.expectedTxId, 'operational expectedTxId');
   const sourceBoxId = normalizeHex32(input.sourceBoxId, 'operational sourceBoxId');
   const inputBoxIds = normalizeInputBoxIds(input.inputBoxIds, sourceBoxId);
+  if (
+    input.operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE
+    && (inputBoxIds.length !== 3 || [0, 1, 2].some(index => typeof inputBoxIds[index] !== 'string'))
+  ) {
+    throw new Error('withdrawal V2 operation requires exactly three inputs: reserve, DUP and fee');
+  }
   const attemptedAtHeight = normalizeHeight(
     input.attemptedAtHeight,
     'operational attempted height',

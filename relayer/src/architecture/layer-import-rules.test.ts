@@ -337,6 +337,11 @@ describe('layer import rules', () => {
     ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Transport', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
     ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'assertSubstrateFederatedIsolatedDevnetTrackerV2TransportReady', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
     ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2TransportJournal', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
@@ -345,6 +350,21 @@ describe('layer import rules', () => {
     const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
     expect(inspect({ ...producer, [`${owner}.ts`]: source })).toEqual([]);
     expect(inspect({ ...producer, 'other-admission-caller.ts': source }).map(item => item.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
+    ]);
+  });
+
+  it.each([
+    'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+    'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
+    'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2',
+  ])('keeps withdrawal orchestration %s in the owned campaign', symbol => {
+    const module = 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle';
+    const source = `import { ${symbol} } from '../../${module}.js'; ${symbol}();`;
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT, source))).toEqual([]);
+    expect(inspect({ [`${module}.ts`]: `export const ${symbol} = () => {};`,
+      'other-withdrawal-caller.ts': `import { ${symbol} } from './${module}.js'; ${symbol}();` })
+      .map(item => item.message)).toEqual([
       `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
     ]);
   });

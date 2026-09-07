@@ -178,6 +178,11 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
         'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission',
         'confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission',
       ])],
+      ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts', new Set([
+        'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+        'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
+        'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2',
+      ])],
       ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
         'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission',
         'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
@@ -1794,7 +1799,25 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       'claimSubstrateFederatedIsolatedDevnetTrackerV2Check',
       'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation',
       'checkSubstrateFederatedIsolatedDevnetTrackerV2Transport',
-    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts'])])),
+    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts'])] as const).concat([
+      'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Check',
+      'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check',
+    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts'])] as const))),
+  ],
+  [
+    'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts',
+    new Map([
+      ...[
+        'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport',
+        'assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady',
+        'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2TransportJournal',
+      ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts'])] as const),
+      ...[
+        'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+        'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
+        'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2',
+      ].map(symbol => [symbol, new Set(['apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts'])] as const),
+    ]),
   ],
   [
     'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts',

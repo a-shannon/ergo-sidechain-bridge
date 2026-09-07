@@ -58,6 +58,11 @@ import {
   finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal,
   type SubstrateFederatedIsolatedDevnetTrackerV2Attempt,
 } from './substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js';
+import { claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport,
+  assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady,
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2TransportJournal,
+  type SubstrateFederatedIsolatedDevnetWithdrawalV2Attempt }
+  from './substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-checked-submission-transport.v1' as const;
@@ -87,6 +92,10 @@ const TRANSPORT_PROFILES = Object.freeze({
     schema: 'e2s.substrate-federated-isolated-devnet-withdrawal-fee-funding-transport.v1',
     domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_WITHDRAWAL_FEE_FUNDING_RESPONSE_V1',
   }),
+  6: Object.freeze({
+    schema: 'e2s.substrate-federated-isolated-devnet-withdrawal-transport.v2',
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_WITHDRAWAL_RESPONSE_V2',
+  }),
 });
 type TransportVersion = keyof typeof TRANSPORT_PROFILES;
 type GenesisAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
@@ -103,6 +112,7 @@ type AcceptedOrAmbiguousSubmission = Exclude<
 const FEE_FUNDING_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>>();
 const WITHDRAWAL_FEE_FUNDING_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>>();
 const TRACKER_V2_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Attempt>>();
+const WITHDRAWAL_V2_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Attempt>>();
 const SUBMISSION_DIAGNOSTICS = new WeakMap<object, Readonly<{
   outcome: SubmissionDigestInput['outcome'];
   httpStatus: number | null;
@@ -143,6 +153,32 @@ export function finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(
   }
   TRACKER_V2_SUBMISSIONS.delete(submission);
   return finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal(attempt, submission);
+}
+
+export async function submitSubstrateFederatedIsolatedDevnetWithdrawalV2(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  attempt: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Attempt>,
+): Promise<AcceptedOrAmbiguousSubmission> {
+  const { check, binding, checkedAcceptance, authorization } =
+    await claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport(attempt, target);
+  const handle = checkedAcceptance.submissionHandle;
+  assertExactAttemptBinding(handle, check.signedCandidate, attempt.expectedTxId, target.primaryNodeOrigin,
+    check.signedCandidate.signedTransactionDigestHex, handle.checkResponseDigestHex);
+  const submission = await consumeLocalWasmCheckedSubmissionHandleV1(handle, check.signedCandidate, async signed => {
+    assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady(attempt, target);
+    return submitExactTransaction(signed, attempt.expectedTxId, attempt.durableAttemptDigestHex,
+      authorization.authorizationDigestHex, handle, binding, 6);
+  });
+  WITHDRAWAL_V2_SUBMISSIONS.set(submission, attempt);
+  return submission;
+}
+
+export function finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2(
+  attempt: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Attempt>, submission: AcceptedOrAmbiguousSubmission,
+) {
+  if (WITHDRAWAL_V2_SUBMISSIONS.get(submission) !== attempt) throw new Error('withdrawal V2 result lacks exact transport provenance');
+  WITHDRAWAL_V2_SUBMISSIONS.delete(submission);
+  return finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2TransportJournal(attempt, submission);
 }
 
 /** Only the separately authorized, durably reserved operator-fee transaction. */

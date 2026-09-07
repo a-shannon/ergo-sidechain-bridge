@@ -241,6 +241,46 @@ export interface SubstrateFederatedIsolatedDevnetWithdrawalV2Check {
   readonly checkedResult: Readonly<LocalWasmOpaqueCheckResult>;
 }
 
+const WITHDRAWAL_V2_CHECKS = new WeakMap<object, Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  trackerTransportBinding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  trackerTransactionIdHex: string;
+  genesisHeaderIdHex: string;
+  setupRequestDigestHex: string;
+  checkDigestHex: string;
+  predecessors: readonly Readonly<{ transactionIdHex: string; confirmationHeight: number; confirmationHeaderIdHex: string;
+    confirmations: number; observedAtHeight: number }>[];
+}>>();
+const CLAIMED_WITHDRAWAL_V2_CHECKS = new WeakSet<object>();
+
+/** Public bytes survive signer disposal; authority remains bound to the original live target. */
+export function assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check(
+  check: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  const material = WITHDRAWAL_V2_CHECKS.get(check);
+  if (material === undefined || material.target !== target
+    || sha256CanonicalJson(check, 'E2S_ISOLATED_WITHDRAWAL_V2_CHECK') !== material.checkDigestHex) {
+    throw new Error('withdrawal V2 check lacks exact retained provenance');
+  }
+  const binding = assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(
+    target, material.trackerTransportBinding, material.trackerTransactionIdHex,
+  );
+  if (canonicalJson(binding) !== canonicalJson(material.binding)) throw new Error('withdrawal V2 check target changed');
+  return material;
+}
+
+export function claimSubstrateFederatedIsolatedDevnetWithdrawalV2Check(
+  check: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  const material = assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check(check, target);
+  if (CLAIMED_WITHDRAWAL_V2_CHECKS.has(check)) throw new Error('withdrawal V2 check is already claimed');
+  CLAIMED_WITHDRAWAL_V2_CHECKS.add(check);
+  return material;
+}
+
 export function assertSubstrateFederatedIsolatedDevnetTrackerV2Check(
   value: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>,
   target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
@@ -1926,7 +1966,17 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
             throw new Error(`withdrawal canonical predecessor ${i} changed during check`);
           }
         }
-        return Object.freeze({ packet, signedCandidate: candidate.signedCandidate, checkedResult });
+        const result = Object.freeze({ packet, signedCandidate: candidate.signedCandidate, checkedResult });
+        WITHDRAWAL_V2_CHECKS.set(result, Object.freeze({ target, binding,
+          trackerTransportBinding: transport, trackerTransactionIdHex: trackerTxId,
+          genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex,
+          setupRequestDigestHex: continuation.batch.request.requestDigestHex,
+          checkDigestHex: sha256CanonicalJson(result, 'E2S_ISOLATED_WITHDRAWAL_V2_CHECK'),
+          predecessors: Object.freeze(after.map((item, index) => Object.freeze({ transactionIdHex: txIds[index]!,
+            confirmationHeight: item.confirmationHeight!, confirmationHeaderIdHex: item.confirmationHeaderIdHex!,
+            confirmations: item.confirmations, observedAtHeight: item.observedAtHeight }))),
+        }));
+        return result;
       }, 'closed'),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
