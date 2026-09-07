@@ -48,6 +48,8 @@ import {
 import {
   claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1,
   requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1,
+  claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1,
+  requireSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingFinalizationV1,
   type SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1,
 } from './substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
 import {
@@ -81,6 +83,10 @@ const TRANSPORT_PROFILES = Object.freeze({
     schema: 'e2s.substrate-federated-isolated-devnet-tracker-admission-transport.v2',
     domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_ADMISSION_RESPONSE_V2',
   }),
+  5: Object.freeze({
+    schema: 'e2s.substrate-federated-isolated-devnet-withdrawal-fee-funding-transport.v1',
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_WITHDRAWAL_FEE_FUNDING_RESPONSE_V1',
+  }),
 });
 type TransportVersion = keyof typeof TRANSPORT_PROFILES;
 type GenesisAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
@@ -95,6 +101,7 @@ type AcceptedOrAmbiguousSubmission = Exclude<
   Readonly<{ status: 'rejected' }>
 >;
 const FEE_FUNDING_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>>();
+const WITHDRAWAL_FEE_FUNDING_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>>();
 const TRACKER_V2_SUBMISSIONS = new WeakMap<object, Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Attempt>>();
 const SUBMISSION_DIAGNOSTICS = new WeakMap<object, Readonly<{
   outcome: SubmissionDigestInput['outcome'];
@@ -143,8 +150,24 @@ export async function submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
 ): Promise<AcceptedOrAmbiguousSubmission> {
-  const { check, binding, authorization } =
-    await claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1(attempt, target);
+  return submitFeeFunding(target, attempt, 'tracker');
+}
+
+export async function submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
+): Promise<AcceptedOrAmbiguousSubmission> {
+  return submitFeeFunding(target, attempt, 'withdrawal');
+}
+
+async function submitFeeFunding(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
+  purpose: 'tracker' | 'withdrawal',
+): Promise<AcceptedOrAmbiguousSubmission> {
+  const { check, binding, authorization } = purpose === 'tracker'
+    ? await claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1(attempt, target)
+    : await claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1(attempt, target);
   const handle = check.checkedAcceptance.submissionHandle;
   assertExactAttemptBinding(handle, check.signedCandidate, attempt.expectedTxId,
     target.primaryNodeOrigin, check.signedCandidate.signedTransactionDigestHex,
@@ -152,8 +175,8 @@ export async function submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   const submission = await consumeLocalWasmCheckedSubmissionHandleV1(handle, check.signedCandidate,
     async signed => await submitExactTransaction(signed, attempt.expectedTxId,
       attempt.durableAttemptDigestHex, authorization.authorizationDigestHex,
-      handle, binding, 3));
-  FEE_FUNDING_SUBMISSIONS.set(submission, attempt);
+      handle, binding, purpose === 'tracker' ? 3 : 5));
+  (purpose === 'tracker' ? FEE_FUNDING_SUBMISSIONS : WITHDRAWAL_FEE_FUNDING_SUBMISSIONS).set(submission, attempt);
   return submission;
 }
 
@@ -161,11 +184,29 @@ export function finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
   submission: AcceptedOrAmbiguousSubmission,
 ) {
-  if (FEE_FUNDING_SUBMISSIONS.get(submission) !== attempt) {
+  return finalizeFeeFunding(attempt, submission, 'tracker');
+}
+
+export function finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(
+  attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
+  submission: AcceptedOrAmbiguousSubmission,
+) {
+  return finalizeFeeFunding(attempt, submission, 'withdrawal');
+}
+
+function finalizeFeeFunding(
+  attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
+  submission: AcceptedOrAmbiguousSubmission,
+  purpose: 'tracker' | 'withdrawal',
+) {
+  const submissions = purpose === 'tracker' ? FEE_FUNDING_SUBMISSIONS : WITHDRAWAL_FEE_FUNDING_SUBMISSIONS;
+  if (submissions.get(submission) !== attempt) {
     throw new Error('tracker fee funding result lacks exact completed transport provenance');
   }
-  FEE_FUNDING_SUBMISSIONS.delete(submission);
-  const state = requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1(attempt);
+  submissions.delete(submission);
+  const state = purpose === 'tracker'
+    ? requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1(attempt)
+    : requireSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingFinalizationV1(attempt);
   return state.finalizeErgoOperationalTransactionAttempt({
     expectedTxId: attempt.expectedTxId, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
     disposition: submission.status, submittedTxId: submission.submittedTxId,

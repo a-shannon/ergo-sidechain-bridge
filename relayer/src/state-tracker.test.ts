@@ -156,6 +156,7 @@ import {
   type AuthenticatedSettlementCandidateInput,
   type AuthenticatedSpvTrackerHistoryEntry,
   type SpvTrackerHistoryEntry,
+  type ReserveErgoOperationalTransactionAttemptInput,
 } from './state-tracker.js';
 import {
   createPegInCommitmentReceipt,
@@ -166,7 +167,13 @@ import {
 import {
   DUP_HEARTBEAT_OPERATION_PROFILE,
   SCS_ORACLE_UPDATE_OPERATION_PROFILE,
+  DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as TRACKER_FEE_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE as TRACKER_ADMISSION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE as WITHDRAWAL_FEE_PROFILE,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
   reconcileCompletePegOutBackingInventory,
@@ -251,6 +258,290 @@ function withTrackerDbPath(run: (dbPath: string) => void): void {
     });
   }
 }
+
+describe('withdrawal fee funding journal', () => {
+  const hex = (byte: string): string => byte.repeat(32);
+  const TABLE = 'ergo_operational_transaction_attempts';
+  const INDEX = 'ergo_operational_active_singleton_profile';
+  const input = (
+    patch: Partial<ReserveErgoOperationalTransactionAttemptInput> = {},
+  ): ReserveErgoOperationalTransactionAttemptInput => ({
+    operationProfile: WITHDRAWAL_FEE_PROFILE,
+    expectedTxId: hex('11'), sourceBoxId: hex('12'), inputBoxIds: [hex('12'), hex('13')],
+    attemptedAtHeight: 100, reconciliationIdentityDigestHex: hex('14'),
+    targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+    bindingDigestHex: hex('21'), signedTransactionDigestHex: hex('22'),
+    checkResponseDigestHex: hex('23'), revalidationDigestHex: hex('24'),
+    authorizationDigestHex: hex('25'), ...patch,
+  });
+  const replacement = (
+    patch: Partial<ReserveErgoOperationalTransactionAttemptInput> = {},
+  ) => input({
+    expectedTxId: hex('31'), sourceBoxId: hex('32'), inputBoxIds: [hex('32'), hex('33')],
+    ...patch,
+  });
+  function fixture(run: (journal: {
+    state: () => StateTracker;
+    restart: () => void;
+    db: <T>(read: (db: Database.Database) => T) => T;
+    second: () => StateTracker;
+  }) => void): void {
+    withTrackerDbPath(dbPath => {
+      let state = new StateTracker(dbPath);
+      try {
+        run({
+          state: () => state,
+          restart: () => { state.close(); state = new StateTracker(dbPath); },
+          second: () => new StateTracker(dbPath),
+          db: read => {
+            const db = new Database(dbPath);
+            try { return read(db); } finally { db.close(); }
+          },
+        });
+      } finally { state.close(); }
+    });
+  }
+  function schema(db: Database.Database, name: string): string {
+    return (db.prepare('SELECT sql FROM sqlite_master WHERE name = ?').get(name) as { sql: string }).sql;
+  }
+  const readers = (state: StateTracker, profile = WITHDRAWAL_FEE_PROFILE as ReserveErgoOperationalTransactionAttemptInput['operationProfile']) => [
+    () => state.getErgoOperationalTransactionAttempts(profile),
+    () => state.getActiveErgoOperationalTransactionAttempts(profile),
+    () => state.getReconcilableErgoOperationalTransactionAttempts(profile),
+    () => state.getConfirmedErgoOperationalTransactionAttempts(profile),
+    () => state.getQuarantinedErgoOperationalTransactionAttempts(profile),
+  ];
+
+  it.each([
+    { reconciliationIdentityDigestHex: undefined },
+    { reconciliationIdentityDigestHex: null },
+    { reconciliationIdentityDigestHex: 'not-hex' },
+    { reconciliationIdentityDigestHex: hex('14').slice(2) },
+    { targetSidechainHeight: 1 },
+    { targetSidechainBlockHashHex: hex('41') },
+    { heartbeatKeyHex: hex('42') },
+  ])('rejects missing identity or foreign context %j without a durable row', patch => {
+    fixture(j => {
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input(patch)))
+        .toThrow(/reconciliation identity digest|invalid route context/);
+      expect(j.state().getErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([]);
+    });
+  });
+
+  it.each([
+    'e2s.substrate-federated-local-devnet-withdrawal-fee-funding-operation.v2',
+    'e2s.substrate-federated-local-devnet-withdrawal-operation.v1',
+  ])('rejects unknown profile %s on admission and every selection path', value => {
+    fixture(j => {
+      const profile = value as ReserveErgoOperationalTransactionAttemptInput['operationProfile'];
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input({ operationProfile: profile })))
+        .toThrow(/unknown Ergo operational transaction profile/);
+      for (const read of readers(j.state(), profile)) expect(read).toThrow(/unknown Ergo operational transaction profile/);
+    });
+  });
+
+  it.each(['pending', 'accepted', 'ambiguous'] as const)(
+    'retains exact %s state across restart and blocks duplicate active attempts on another connection', status => {
+      fixture(j => {
+        const reserved = j.state().reserveErgoOperationalTransactionAttempt(input());
+        if (status !== 'pending') j.state().finalizeErgoOperationalTransactionAttempt({
+          expectedTxId: reserved.expectedTxId, durableAttemptDigestHex: reserved.durableAttemptDigestHex,
+          disposition: status, submittedTxId: status === 'accepted' ? reserved.expectedTxId : null,
+          responseDigestHex: status === 'accepted' ? hex('26') : null,
+        });
+        const exact = j.state().getErgoOperationalTransactionAttempt(reserved.expectedTxId);
+        j.restart();
+        expect(j.state().getErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([exact]);
+        expect(exact).toMatchObject({
+          status, inputBoxIds: input().inputBoxIds, reconciliationIdentityDigestHex: hex('14'),
+          durableAttemptDigestHex: reserved.durableAttemptDigestHex, fundsReleaseAuthorityEpochHex: null,
+          targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+        });
+        expect(j.state().getReconcilableErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([exact]);
+        const second = j.second();
+        try {
+          expect(() => second.reserveErgoOperationalTransactionAttempt(replacement()))
+            .toThrow(/must be reconciled before replacement/);
+          expect(() => second.reserveErgoOperationalTransactionAttempt(input()))
+            .toThrow(/already exists; reconcile/);
+        } finally { second.close(); }
+        if (status === 'ambiguous') {
+          expect(() => j.state().finalizeErgoOperationalTransactionAttempt({
+            expectedTxId: reserved.expectedTxId, durableAttemptDigestHex: reserved.durableAttemptDigestHex,
+            disposition: 'accepted', submittedTxId: reserved.expectedTxId, responseDigestHex: hex('26'),
+          })).toThrow(/cannot be finalized/);
+          expect(j.state().getErgoOperationalTransactionAttempt(reserved.expectedTxId)).toEqual(exact);
+        }
+      });
+    },
+  );
+
+  it.each([
+    { operationProfile: TRACKER_FEE_PROFILE },
+    { reconciliationIdentityDigestHex: hex('51') },
+    { inputBoxIds: [hex('12'), hex('52')] },
+    { bindingDigestHex: hex('53') },
+    { signedTransactionDigestHex: hex('54') },
+    { checkResponseDigestHex: hex('55') },
+    { revalidationDigestHex: hex('56') },
+    { authorizationDigestHex: hex('57') },
+  ])('binds exact durable fields and rejects foreign finalization digest %j', patch => {
+    fixture(j => {
+      const original = j.state().reserveErgoOperationalTransactionAttempt(input());
+      withTrackerDb(other => {
+        const changed = other.reserveErgoOperationalTransactionAttempt(input(patch));
+        expect(changed.durableAttemptDigestHex).not.toBe(original.durableAttemptDigestHex);
+        expect(() => j.state().finalizeErgoOperationalTransactionAttempt({
+          expectedTxId: original.expectedTxId, durableAttemptDigestHex: changed.durableAttemptDigestHex,
+          disposition: 'accepted', submittedTxId: original.expectedTxId, responseDigestHex: hex('26'),
+        })).toThrow(/cannot be finalized/);
+      });
+      j.restart();
+      expect(j.state().getErgoOperationalTransactionAttempt(original.expectedTxId)).toEqual(original);
+    });
+  });
+
+  it.each(['pending', 'accepted', 'ambiguous', 'confirmed', 'abandoned', 'quarantined'] as const)(
+    'holds every journaled input after %s across profiles in both directions', status => {
+      const context = (operationProfile: ReserveErgoOperationalTransactionAttemptInput['operationProfile']) => ({
+        operationProfile,
+        reconciliationIdentityDigestHex: operationProfile === PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE
+          || operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE || operationProfile === DUP_HEARTBEAT_OPERATION_PROFILE
+          ? null : hex('14'),
+        targetSidechainHeight: operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE ? 100 : null,
+        targetSidechainBlockHashHex: operationProfile === SCS_ORACLE_UPDATE_OPERATION_PROFILE ? hex('16') : null,
+        heartbeatKeyHex: operationProfile === DUP_HEARTBEAT_OPERATION_PROFILE ? hex('17') : null,
+      });
+      for (const otherProfile of [TRACKER_FEE_PROFILE, TRACKER_ADMISSION_PROFILE, PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+        SCS_ORACLE_UPDATE_OPERATION_PROFILE, DUP_HEARTBEAT_OPERATION_PROFILE, DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE,
+        SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE, SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE]) {
+        for (const reverse of [false, true]) {
+          fixture(j => {
+            const priorProfile = reverse ? otherProfile : WITHDRAWAL_FEE_PROFILE;
+            const nextProfile = reverse ? WITHDRAWAL_FEE_PROFILE : otherProfile;
+            const prior = j.state().reserveErgoOperationalTransactionAttempt(input(context(priorProfile)));
+            if (status === 'accepted' || status === 'ambiguous') j.state().finalizeErgoOperationalTransactionAttempt({
+              expectedTxId: prior.expectedTxId, durableAttemptDigestHex: prior.durableAttemptDigestHex,
+              disposition: status, submittedTxId: status === 'accepted' ? prior.expectedTxId : null,
+              responseDigestHex: status === 'accepted' ? hex('26') : null,
+            });
+            if (status === 'confirmed') j.state().confirmErgoOperationalTransactionAttempt({
+              expectedTxId: prior.expectedTxId, confirmationHeight: 103, confirmationHeaderId: hex('15'),
+            });
+            if (status === 'abandoned') j.state().abandonErgoOperationalTransactionAttempt(prior.expectedTxId, 'synthetic absent source');
+            if (status === 'quarantined') j.state().quarantineErgoOperationalTransactionAttempt(prior.expectedTxId, 'synthetic rollback');
+            j.restart();
+            for (const oldInput of prior.inputBoxIds) {
+              for (const sourcePosition of [true, false]) {
+                expect(() => j.state().reserveErgoOperationalTransactionAttempt(replacement({
+                  ...context(nextProfile),
+                  sourceBoxId: sourcePosition ? oldInput : hex('32'),
+                  inputBoxIds: sourcePosition ? [oldInput, hex('33')] : [hex('32'), oldInput],
+                }))).toThrow(/previously journaled .* box/);
+              }
+            }
+            expect(j.state().reserveErgoOperationalTransactionAttempt(replacement(context(nextProfile))).status).toBe('pending');
+          });
+        }
+      }
+    },
+  );
+
+  it('never reopens a confirmed withdrawal fee attempt and preserves quarantine on restart', () => {
+    fixture(j => {
+      const prior = j.state().reserveErgoOperationalTransactionAttempt(input());
+      j.state().confirmErgoOperationalTransactionAttempt({
+        expectedTxId: prior.expectedTxId, confirmationHeight: 103, confirmationHeaderId: hex('15'),
+      });
+      expect(() => j.state().reopenConfirmedErgoOperationalTransactionAttempt(prior.expectedTxId))
+        .toThrow(/cannot be reopened; quarantine on rollback/);
+      const held = j.state().quarantineErgoOperationalTransactionAttempt(prior.expectedTxId, 'synthetic rollback');
+      j.restart();
+      expect(j.state().getQuarantinedErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([held]);
+      expect(j.state().getReconcilableErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_PROFILE)).toEqual([]);
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(replacement({ inputBoxIds: [hex('32'), hex('13')] })))
+        .toThrow(/previously journaled withdrawal fee funding box/);
+    });
+  });
+
+  it.each([
+    ['target_sidechain_height', 1], ['target_sidechain_block_hash', hex('61')],
+    ['heartbeat_key_hex', hex('62')], ['reconciliation_identity_digest', null],
+    ['operation_profile', 'unknown-profile'],
+  ] as const)('enforces the SQL constraint independently for %s', (column, value) => {
+    fixture(j => {
+      const original = j.state().reserveErgoOperationalTransactionAttempt(input());
+      expect(() => j.db(db => db.prepare(`UPDATE ${TABLE} SET ${column} = ? WHERE expected_tx_id = ?`)
+        .run(value, original.expectedTxId))).toThrow(/CHECK constraint failed/);
+      expect(j.state().getErgoOperationalTransactionAttempt(original.expectedTxId)).toEqual(original);
+    });
+  });
+
+  it('enforces the SQL singleton independently of API checks', () => {
+    fixture(j => {
+      j.state().reserveErgoOperationalTransactionAttempt(input());
+      expect(() => j.db(db => {
+        const row = db.prepare(`SELECT * FROM ${TABLE}`).get() as Record<string, string | number | null>;
+        const changed = { ...row, expected_tx_id: hex('71'), source_box_id: hex('72'),
+          input_box_ids_json: JSON.stringify([hex('72')]), durable_attempt_digest: hex('73') };
+        db.prepare(`INSERT INTO ${TABLE} (${Object.keys(changed).join(',')}) VALUES (${Object.keys(changed).map(() => '?').join(',')})`)
+          .run(...Object.values(changed));
+      })).toThrow(/UNIQUE constraint failed: ergo_operational_transaction_attempts.operation_profile/);
+    });
+  });
+
+  it.each([
+    ['profile allowlist', 'table', (sql: string) => sql.replace(`,\n  '${WITHDRAWAL_FEE_PROFILE}'`, '')],
+    ['route context', 'table', (sql: string) => sql.replace(
+      `operation_profile = '${WITHDRAWAL_FEE_PROFILE}'\n  AND target_sidechain_height IS NULL`,
+      `operation_profile = '${WITHDRAWAL_FEE_PROFILE}'\n  AND target_sidechain_height IS NOT NULL`,
+    )],
+    ['index profile', 'index', (sql: string) => sql.replace(`,\n    '${WITHDRAWAL_FEE_PROFILE}'`, '')],
+    ['index statuses', 'index', (sql: string) => sql.replace("'pending', 'accepted', 'ambiguous'", "'pending', 'accepted'")],
+    ['index uniqueness', 'index', (sql: string) => sql.replace('CREATE UNIQUE INDEX', 'CREATE INDEX')],
+  ] as const)('rejects isolated %s schema drift after restart on every selection path', (_name, kind, mutate) => {
+    fixture(j => {
+      j.db(db => {
+        const name = kind === 'table' ? TABLE : INDEX;
+        const original = schema(db, name);
+        const changed = mutate(original);
+        expect(changed).not.toBe(original);
+        db.exec(`DROP ${kind} ${name}; ${changed};`);
+      });
+      j.restart();
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input())).toThrow(/schema is unsupported/);
+      for (const read of readers(j.state())) expect(read).toThrow(/schema is unsupported/);
+    });
+  });
+
+  it.each([false, true])('preserves old rows without migrating withdrawal authority (pre-V2=%s)', preV2 => {
+    fixture(j => {
+      j.db(db => {
+        let table = schema(db, TABLE);
+        let index = schema(db, INDEX);
+        for (const profile of [WITHDRAWAL_FEE_PROFILE, ...(preV2 ? [TRACKER_ADMISSION_PROFILE] : [])]) {
+          table = table.replace(`,\n  '${profile}'`, '').replace(
+            `OR (\n  operation_profile = '${profile}'\n  AND target_sidechain_height IS NULL\n  AND target_sidechain_block_hash IS NULL\n  AND heartbeat_key_hex IS NULL\n  AND reconciliation_identity_digest IS NOT NULL\n)`, '',
+          );
+          index = index.replace(`,\n    '${profile}'`, '');
+          expect(table).not.toContain(profile);
+        }
+        db.exec(`DROP TABLE ${TABLE}; ${table}; ${index};`);
+      });
+      const profiles = [TRACKER_FEE_PROFILE, ...(preV2 ? [] : [TRACKER_ADMISSION_PROFILE])];
+      const prior = profiles.map((operationProfile, index) => j.state().reserveErgoOperationalTransactionAttempt(
+        index === 0 ? input({ operationProfile }) : replacement({ operationProfile }),
+      ));
+      const before = j.db(db => ({ table: schema(db, TABLE), index: schema(db, INDEX), rows: db.prepare(`SELECT * FROM ${TABLE}`).all() }));
+      j.restart();
+      for (const row of prior) expect(j.state().getErgoOperationalTransactionAttempt(row.expectedTxId)).toEqual(row);
+      for (const read of readers(j.state())) expect(read).toThrow(/schema is unsupported/);
+      expect(() => j.state().reserveErgoOperationalTransactionAttempt(input()))
+        .toThrow(/schema is unsupported; a fresh LAB database is required/);
+      expect(j.db(db => ({ table: schema(db, TABLE), index: schema(db, INDEX), rows: db.prepare(`SELECT * FROM ${TABLE}`).all() }))).toEqual(before);
+    });
+  });
+});
 
 function isolatedDevnetTrackerAdmissionReservationInput(offset = 0) {
   const digest = (value: number): string =>

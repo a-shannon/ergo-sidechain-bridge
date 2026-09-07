@@ -16,6 +16,9 @@ export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFI
   'e2s.substrate-federated-local-devnet-peg-in-source-lock-operation.v1' as const;
 export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE =
   'e2s.substrate-federated-local-devnet-tracker-fee-funding-operation.v1' as const;
+// LAB operator fee funding only; not reserve withdrawal, payout or funds authority.
+export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE =
+  'e2s.substrate-federated-local-devnet-withdrawal-fee-funding-operation.v1' as const;
 export const SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE =
   'e2s.substrate-federated-local-devnet-tracker-admission-operation.v2' as const;
 
@@ -30,6 +33,7 @@ export type ErgoOperationalTransactionProfile =
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+  | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
   | typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE;
 
 export interface ErgoOperationalTransactionInput {
@@ -316,6 +320,8 @@ function normalizeOperationContext(input: ErgoOperationalTransactionInput): {
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+    || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {

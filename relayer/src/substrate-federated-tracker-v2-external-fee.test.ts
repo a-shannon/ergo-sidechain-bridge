@@ -26,6 +26,7 @@ import {
   assertSubstrateFederatedTrackerV2ExternalFeeTransaction as assertTransaction,
   buildSubstrateFederatedTrackerV2ExternalFeeTransaction as build,
   buildSubstrateFederatedTrackerV2FeeFunding as buildFunding,
+  buildSubstrateFederatedWithdrawalV2FeeFunding as buildWithdrawalFunding,
   type BuildSubstrateFederatedTrackerV2ExternalFeeTransactionInput as BuildInput,
   type SubstrateFederatedTrackerV2ExternalFeeTransaction,
 } from './substrate-federated-tracker-v2-external-fee.js';
@@ -153,6 +154,8 @@ describe('bounded V2 tracker external fee composition', () => {
       creationHeight: 100, assets: [], additionalRegisters: {} });
     const funded = await buildFunding({ sourceBox: source, fundingPublicKeyHex: OTHER_PUBLIC_KEY,
       feePayerPublicKeyHex: PUBLIC_KEY, currentHeight: CURRENT_HEIGHT - 1 });
+    expect(await buildWithdrawalFunding({ sourceBox: source, fundingPublicKeyHex: OTHER_PUBLIC_KEY,
+      feePayerPublicKeyHex: PUBLIC_KEY, currentHeight: CURRENT_HEIGHT - 1 })).toEqual(funded);
     expect(funded.outputs.map(box => box.value)).toEqual(['1100000', '36700000', '1100000']);
     expect(funded.outputs.map(box => box.ergoTree))
       .toEqual([`0008cd${PUBLIC_KEY}`, `0008cd${OTHER_PUBLIC_KEY}`, MINER_FEE_TREE]);
@@ -177,15 +180,22 @@ describe('bounded V2 tracker external fee composition', () => {
       creationHeight: 100, assets: [], additionalRegisters: {}, ...structuredClone(patch) as Partial<Candidate> });
     await expect(buildFunding({ sourceBox: source, fundingPublicKeyHex: PUBLIC_KEY,
       feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight: CURRENT_HEIGHT })).rejects.toThrow(error);
+    await expect(buildWithdrawalFunding({ sourceBox: source, fundingPublicKeyHex: PUBLIC_KEY,
+      feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight: CURRENT_HEIGHT })).rejects.toThrow(error);
   });
 
   it.each([0, -1, 1.5, 0x80000000, NaN])('rejects invalid fee funding height %s', async currentHeight => {
     await expect(buildFunding({ sourceBox: feeInputBox, fundingPublicKeyHex: PUBLIC_KEY,
       feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight })).rejects.toThrow(/signed Int/);
+    await expect(buildWithdrawalFunding({ sourceBox: feeInputBox, fundingPublicKeyHex: PUBLIC_KEY,
+      feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight })).rejects.toThrow(/signed Int/);
   });
 
   it.each(['fundingPublicKeyHex', 'feePayerPublicKeyHex'] as const)('rejects invalid %s', async field => {
     await expect(buildFunding({ sourceBox: feeInputBox, fundingPublicKeyHex: PUBLIC_KEY,
+      feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight: CURRENT_HEIGHT,
+      [field]: `02${'ff'.repeat(32)}` })).rejects.toThrow();
+    await expect(buildWithdrawalFunding({ sourceBox: feeInputBox, fundingPublicKeyHex: PUBLIC_KEY,
       feePayerPublicKeyHex: OTHER_PUBLIC_KEY, currentHeight: CURRENT_HEIGHT,
       [field]: `02${'ff'.repeat(32)}` })).rejects.toThrow();
   });

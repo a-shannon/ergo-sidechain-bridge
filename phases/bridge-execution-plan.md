@@ -119,13 +119,24 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Withdrawal funding and retained check | Main owner; consumes the V3 setup, V2 deposit and admitted tracker lifecycle | Select the withdrawal continuation before signer disposal. Fund an exact, distinct withdrawal fee box from operator funds and confirm it before freezing the admission window. Keep tracker-only funding authorization and historical transaction identities unchanged; give the new operation its own explicit authorization and durable discriminator where required. Retain the actual compiler receipts, deposit reserve successor, DUP genesis/history, admitted tracker successor and source burn, then reobserve those inputs and check the complete withdrawal while the owned target remains alive. Preserve the tracker-only route. No payout transport in this batch |
+| Retained withdrawal check | Main owner; consumes the V3 setup, V2 deposit, distinct fee-funding lifecycle and admitted tracker | Wire withdrawal-fee funding before freezing the admission window. Select the withdrawal continuation before signer disposal. Retain the actual compiler receipts, deposit reserve successor, DUP genesis/history, admitted tracker successor and source burn, then reobserve those inputs and check the complete withdrawal while the owned target remains alive. Preserve the tracker-only route. No payout transport in this batch |
 | V2 withdrawal transport and confirmation | Depends on the checked withdrawal and its still-live custody/target | Bind explicit LAB authorization, all three input reservations, fresh revalidation and one-shot transport to the exact checked transaction. Confirm spent predecessors, reserve/DUP successors and payout against canonical history. Keep ambiguous transport outcomes non-retryable; a journal row or prior campaign receipt cannot restore authority |
 
-If withdrawal funding changes the durable operation schema, close its
-producer-to-confirmation boundary as a separate implementation batch. Keep
-fresh-node execution grouped with the complete withdrawal consumer; do not
-insert a funding-only campaign or recreate historical tracker evidence.
+The dedicated withdrawal-fee funding API binds DUP-genesis operator change
+output 1, separate authorization and response domains, and its own closed
+durable operation discriminator. It composes checking, reservation, one-shot
+transport and confirmation without spending reserve backing. Journal input
+holds cover every other operational profile in both directions. Old database
+schemas do not acquire withdrawal authority through automatic migration.
+Fee confirmation reobserves canonical inclusion and depth after reading the
+fee outputs, because re-inclusion can preserve their bytes.
+
+This is a component boundary exercised with fresh local signatures, SQLite
+and loopback HTTP fixtures, not a completed withdrawal or a fresh-node funding
+campaign. Its confirmation API does not turn local RPC agreement into an
+independent consensus proof. Wire this API into the retained withdrawal
+consumer before the next fresh-node run; do not insert a funding-only campaign
+or recreate historical tracker evidence.
 
 Then connect the operational mint caller, exercise both directions through
 recovery, and finish target/custody rehearsal and FED-7.

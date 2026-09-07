@@ -73,6 +73,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInCommittedVaultV2RetainingSigner'];
   readonly checkTrackerFeeFundingV3:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3'];
+  readonly checkWithdrawalFeeFundingV3:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3'];
   readonly checkFrozenTrackerV2Candidate:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2Candidate'];
   readonly run: (
@@ -210,6 +212,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'v3-setup-complete'
     | 'v2-source-lock-check-complete'
     | 'v2-committed-vault-check-complete'
+    | 'v3-withdrawal-fee-check-complete'
     | 'v3-tracker-fee-check-complete'
     | 'closed' = 'open';
   let terminalInvalidationRequested = false;
@@ -259,6 +262,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'v3-setup-complete'
       | 'v2-source-lock-check-complete'
       | 'v2-committed-vault-check-complete'
+      | 'v3-withdrawal-fee-check-complete'
       | 'v3-tracker-fee-check-complete',
     operation: () => Promise<T>,
     successState:
@@ -270,6 +274,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'v3-setup-complete'
       | 'v2-source-lock-check-complete'
       | 'v2-committed-vault-check-complete'
+      | 'v3-withdrawal-fee-check-complete'
       | 'v3-tracker-fee-check-complete'
       | 'closed',
   ): Promise<T> => {
@@ -323,6 +328,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'v3-setup-complete'
           || state === 'v2-source-lock-check-complete'
           || state === 'v2-committed-vault-check-complete'
+          || state === 'v3-withdrawal-fee-check-complete'
           || state === 'v3-tracker-fee-check-complete'
       ) {
         close();
@@ -352,10 +358,17 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       () => execution.checkPegInCommittedVaultV2RetainingSigner(packet, target),
       'v2-committed-vault-check-complete',
     ),
+    checkWithdrawalFeeFundingV3: async (
+      ...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3']>
+    ) => consume(
+      'v2-committed-vault-check-complete',
+      () => execution.checkWithdrawalFeeFundingV3(target),
+      'v3-withdrawal-fee-check-complete',
+    ),
     checkTrackerFeeFundingV3: async (
       ...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>
     ) => consume(
-      'v2-committed-vault-check-complete',
+      state === 'v3-withdrawal-fee-check-complete' ? 'v3-withdrawal-fee-check-complete' : 'v2-committed-vault-check-complete',
       () => execution.checkTrackerFeeFundingV3(target),
       'v3-tracker-fee-check-complete',
     ),

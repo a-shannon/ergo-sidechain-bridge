@@ -99,6 +99,7 @@ import {
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE,
   type ErgoOperationalTransactionProfile,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
@@ -1120,6 +1121,7 @@ const ERGO_OPERATIONAL_PROFILE_SQL = `operation_profile IN (
   '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
   '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}',
   '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}',
+  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE}',
   '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'
 )`;
 const ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL = `
@@ -1136,6 +1138,13 @@ const ERGO_OPERATIONAL_TRACKER_ADMISSION_CONTEXT_SQL = `
   AND heartbeat_key_hex IS NULL
   AND reconciliation_identity_digest IS NOT NULL
 `;
+const ERGO_OPERATIONAL_WITHDRAWAL_FEE_FUNDING_CONTEXT_SQL = `
+  operation_profile = '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE}'
+  AND target_sidechain_height IS NULL
+  AND target_sidechain_block_hash IS NULL
+  AND heartbeat_key_hex IS NULL
+  AND reconciliation_identity_digest IS NOT NULL
+`;
 const ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL = `
   CREATE UNIQUE INDEX ergo_operational_active_singleton_profile
   ON ergo_operational_transaction_attempts(operation_profile)
@@ -1146,6 +1155,7 @@ const ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL = `
     '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE}',
     '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE}',
     '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE}',
+    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE}',
     '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'
   ) AND status IN ('pending', 'accepted', 'ambiguous')
 `;
@@ -1163,6 +1173,8 @@ function normalizeErgoOperationalTransactionProfile(
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     && value
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+    && value
+      !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
     && value
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {
@@ -1253,6 +1265,8 @@ function normalizeErgoOperationalContext(input: {
     || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
     || input.operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
+    || input.operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {
     if (
@@ -1299,6 +1313,8 @@ function normalizeErgoOperationalReconciliationIdentity(
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     || operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+    || operationProfile
+      === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
     || operationProfile
       === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
   ) {
@@ -5360,6 +5376,7 @@ export class StateTracker {
             AND reconciliation_identity_digest IS NOT NULL
           )
           OR (${ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL})
+          OR (${ERGO_OPERATIONAL_WITHDRAWAL_FEE_FUNDING_CONTEXT_SQL})
           OR (${ERGO_OPERATIONAL_TRACKER_ADMISSION_CONTEXT_SQL})
         ),
         CHECK (
@@ -15378,6 +15395,7 @@ export class StateTracker {
     profile: ErgoOperationalTransactionProfile,
   ): void {
     if (profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+      && profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
       && profile !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE) {
       return;
     }
@@ -15393,25 +15411,40 @@ export class StateTracker {
     const tableSql = readSql('table', 'ergo_operational_transaction_attempts');
     const indexSql = readSql('index', 'ergo_operational_active_singleton_profile');
     const isAdmission = profile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE;
+    const isWithdrawalFee = profile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE;
     const contextSql = isAdmission ? ERGO_OPERATIONAL_TRACKER_ADMISSION_CONTEXT_SQL
+      : isWithdrawalFee ? ERGO_OPERATIONAL_WITHDRAWAL_FEE_FUNDING_CONTEXT_SQL
       : ERGO_OPERATIONAL_TRACKER_FEE_FUNDING_CONTEXT_SQL;
     // Adding V2 must not retire a previously supported fee-funding database.
     // Recognize its exact old allowlists, but never migrate them into V2 authority.
-    const legacyProfiles = ERGO_OPERATIONAL_PROFILE_SQL.replace(
+    const previousProfiles = ERGO_OPERATIONAL_PROFILE_SQL.replace(
+      `,\n  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE}'`, '');
+    const previousIndex = ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL.replace(
+      `,\n    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE}'`, '');
+    const legacyProfiles = previousProfiles.replace(
       `,\n  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'`, '');
-    const legacyIndex = ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL.replace(
+    const legacyIndex = previousIndex.replace(
       `,\n    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'`, '');
     const currentShape = tableSql.includes(normalizeSql(`CHECK (${ERGO_OPERATIONAL_PROFILE_SQL})`))
       && indexSql === normalizeSql(ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL);
-    const supportedLegacyFeeShape = !isAdmission
-      && tableSql.includes(normalizeSql(`CHECK (${legacyProfiles})`))
-      && indexSql === normalizeSql(legacyIndex);
+    const supportedPreviousShape = !isWithdrawalFee
+      && tableSql.includes(normalizeSql(`CHECK (${previousProfiles})`))
+      && indexSql === normalizeSql(previousIndex);
+    const supportedLegacyFeeShape = !isAdmission && !isWithdrawalFee
+      && [
+        [legacyProfiles, legacyIndex],
+        [ERGO_OPERATIONAL_PROFILE_SQL.replace(
+          `,\n  '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'`, ''),
+        ERGO_OPERATIONAL_ACTIVE_SINGLETON_INDEX_SQL.replace(
+          `,\n    '${SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE}'`, '')],
+      ].some(([profiles, index]) => tableSql.includes(normalizeSql(`CHECK (${profiles})`))
+        && indexSql === normalizeSql(index));
     if (
-      (!currentShape && !supportedLegacyFeeShape)
+      (!currentShape && !supportedPreviousShape && !supportedLegacyFeeShape)
       || !tableSql.includes(normalizeSql(`OR (${contextSql})`))
     ) {
       throw new Error(
-        `${isAdmission ? 'tracker V2 admission' : 'tracker fee funding'} operational schema is unsupported; a fresh LAB database is required`,
+        `${isAdmission ? 'tracker V2 admission' : isWithdrawalFee ? 'withdrawal fee funding' : 'tracker fee funding'} operational schema is unsupported; a fresh LAB database is required`,
       );
     }
   }
@@ -15539,6 +15572,8 @@ export class StateTracker {
           || operationProfile
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
           || operationProfile
+            === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
+          || operationProfile
             === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
         )
         && this.getActiveErgoOperationalTransactionAttempts(operationProfile).length !== 0
@@ -15547,20 +15582,30 @@ export class StateTracker {
           'an unresolved local devnet operational attempt must be reconciled before replacement',
         );
       }
-      if (
+      const protectsPriorInputs = (
         operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
         || operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
         || operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
-      ) {
+        || operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
+      );
+      {
         const boxLabel = operationProfile === DEVNET_REWARD_CONSOLIDATION_OPERATION_PROFILE
           ? 'reward' : operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
-            ? 'tracker V2 admission' : 'tracker fee funding';
+            ? 'tracker V2 admission'
+            : operationProfile === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+              ? 'tracker fee funding' : 'withdrawal fee funding';
         const inputSet = new Set(inputBoxIds);
         const priorRows = this.db.prepare(`
           SELECT input_box_ids_json
           FROM ergo_operational_transaction_attempts
-          WHERE operation_profile = ?
-        `).all(operationProfile) as Array<{ input_box_ids_json: string }>;
+          WHERE (operation_profile = ? AND ?)
+            OR operation_profile = ?
+            OR ? = ?
+        `).all(
+          operationProfile, Number(protectsPriorInputs),
+          SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+          operationProfile, SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+        ) as Array<{ input_box_ids_json: string }>;
         for (const row of priorRows) {
           const parsed = parseStrictJson(
             row.input_box_ids_json,
@@ -16053,6 +16098,8 @@ export class StateTracker {
       if (
         current.operationProfile
           === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE
+        || current.operationProfile
+          === SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE
         || current.operationProfile
           === SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_ADMISSION_V2_OPERATION_PROFILE
       ) {

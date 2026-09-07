@@ -71,6 +71,7 @@ const V3_SETUP_BATCH = Object.freeze({ stage: 'v3-setup' });
 const V2_SOURCE_LOCK_RECEIPT = Object.freeze({ stage: 'v2-source-lock' });
 const V2_COMMITTED_VAULT_RECEIPT = Object.freeze({ stage: 'v2-committed-vault' });
 const V3_FEE_CHECK = Object.freeze({ stage: 'v3-fee-check' });
+const V3_WITHDRAWAL_FEE_CHECK = Object.freeze({ stage: 'v3-withdrawal-fee-check' });
 const V2_TRACKER_CHECK = Object.freeze({ stage: 'v2-tracker-check' });
 
 type FacadeSession = Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
@@ -431,6 +432,41 @@ describe('managed facade V3 setup -> V2 tracker admission continuation', () => {
     mocks.registerSignerBinding.mockReturnValue(SIGNER_BINDING);
   });
 
+  it.each(['valid', 'before-vault', 'repeat', 'disposed', 'failure', 'concurrent', 'legacy-interleave'] as const)(
+    'retains the managed withdrawal fee continuation only in order: %s', async fault => {
+      const execution = executionSession();
+      mocks.createExecutionSession.mockResolvedValue(execution);
+      const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      try {
+        for (const phase of MANAGED_PHASES.slice(0, fault === 'before-vault' ? 2 : 3)) await phase.invoke(session);
+        if (fault === 'disposed') session.dispose();
+        if (fault === 'failure') execution.checkWithdrawalFeeFundingV3.mockRejectedValueOnce(new Error('synthetic withdrawal check failed'));
+        const gate = deferred<typeof V3_WITHDRAWAL_FEE_CHECK>();
+        if (fault === 'concurrent') execution.checkWithdrawalFeeFundingV3.mockImplementationOnce(() => gate.promise);
+        const pending = session.checkWithdrawalFeeFundingV3(TARGET as never);
+        if (fault === 'concurrent') {
+          await expect(session.checkWithdrawalFeeFundingV3(TARGET as never)).rejects.toThrow(/continuation/);
+          gate.resolve(V3_WITHDRAWAL_FEE_CHECK);
+        }
+        if (['before-vault', 'disposed', 'failure', 'concurrent'].includes(fault)) {
+          await expect(pending).rejects.toThrow(fault === 'failure' ? /synthetic withdrawal check failed/ : /continuation|invalidated/);
+          expect(execution.checkTrackerFeeFundingV3).not.toHaveBeenCalled();
+          return;
+        }
+        expect(await pending).toBe(V3_WITHDRAWAL_FEE_CHECK);
+        expect(execution.checkWithdrawalFeeFundingV3).toHaveBeenCalledWith(TARGET);
+        if (fault === 'repeat' || fault === 'legacy-interleave') {
+          await expect(fault === 'repeat' ? session.checkWithdrawalFeeFundingV3(TARGET as never)
+            : session.checkPegInCommittedVaultRetainingSigner(COMMITTED_VAULT_INPUT as never, TARGET as never)).rejects.toThrow(/continuation/);
+          await expect(session.checkTrackerFeeFundingV3(TARGET as never)).rejects.toThrow(/continuation/);
+          return;
+        }
+        for (const phase of MANAGED_PHASES.slice(3)) expect(await phase.invoke(session)).toBe(phase.result);
+        expect(execution.dispose).toHaveBeenCalledTimes(1);
+      } finally { session.dispose(); }
+    },
+  );
+
   it.each(['unclaimed', 'pair', 'sequence'] as const)(
     'preserves exact arguments, results and dispatch order with %s mining credentials', async custody => {
       const { session, execution } = await managedFacade();
@@ -626,6 +662,7 @@ function executionSession() {
     checkPegInSourceLockV2RetainingSigner: vi.fn(async () => V2_SOURCE_LOCK_RECEIPT),
     checkPegInCommittedVaultV2RetainingSigner: vi.fn(async () => V2_COMMITTED_VAULT_RECEIPT),
     checkTrackerFeeFundingV3: vi.fn(async () => V3_FEE_CHECK),
+    checkWithdrawalFeeFundingV3: vi.fn(async () => V3_WITHDRAWAL_FEE_CHECK),
     checkFrozenTrackerV2Candidate: vi.fn(async () => V2_TRACKER_CHECK),
   };
 }

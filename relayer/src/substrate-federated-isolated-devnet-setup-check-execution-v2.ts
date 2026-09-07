@@ -120,7 +120,7 @@ import {
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
 import { ngetDirect } from './ergo-helpers.js';
-import { buildSubstrateFederatedTrackerV2FeeFunding } from './substrate-federated-tracker-v2-external-fee.js';
+import { buildSubstrateFederatedTrackerV2FeeFunding, buildSubstrateFederatedWithdrawalV2FeeFunding } from './substrate-federated-tracker-v2-external-fee.js';
 import {
   materializeUnsignedTransaction,
   normalizeEip12Box,
@@ -196,6 +196,13 @@ const TRACKER_FEE_CHECKS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
 }>>();
 const CLAIMED_TRACKER_FEE_CHECKS = new WeakSet<object>();
+export type SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1 =
+  SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1;
+const WITHDRAWAL_FEE_CHECKS = new WeakMap<object, Readonly<{
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+}>>();
+const CLAIMED_WITHDRAWAL_FEE_CHECKS = new WeakSet<object>();
 const TRACKER_PROTOCOL_V2_CHECKS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>;
   result: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result>;
@@ -367,6 +374,19 @@ export function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(
   }
   const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(material.batch, target);
   CLAIMED_TRACKER_FEE_CHECKS.add(check);
+  return Object.freeze({ batch: material.batch, binding });
+}
+
+export function claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1(
+  check: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  const material = WITHDRAWAL_FEE_CHECKS.get(check);
+  if (material === undefined || material.target !== target || CLAIMED_WITHDRAWAL_FEE_CHECKS.has(check)) {
+    throw new Error('withdrawal fee funding check lacks unconsumed exact provenance');
+  }
+  const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(material.batch, target);
+  CLAIMED_WITHDRAWAL_FEE_CHECKS.add(check);
   return Object.freeze({ batch: material.batch, binding });
 }
 const FAMILY_EXECUTION_BATCHES = new WeakMap<
@@ -542,6 +562,9 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly checkTrackerFeeFundingV3: (
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>>;
+  readonly checkWithdrawalFeeFundingV3: (
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1>>;
   readonly checkFrozenTrackerV2Candidate: (
     input: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
     target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
@@ -1277,6 +1300,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       trackerCompilerRequest: Readonly<SubstrateFederatedTrackerCompilerRequestV2>;
     }> | undefined;
     let retainedTrackerFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1> | undefined;
+    let retainedWithdrawalFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1> | undefined;
+    let retainedCommittedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let state:
       | 'open'
@@ -1318,6 +1343,11 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       frozenTrackerCheck = undefined;
       trackerFeeContinuation = undefined;
       retainedTrackerFeeCheck = undefined;
+      if (retainedWithdrawalFeeCheck !== undefined && !CLAIMED_WITHDRAWAL_FEE_CHECKS.has(retainedWithdrawalFeeCheck)) {
+        WITHDRAWAL_FEE_CHECKS.delete(retainedWithdrawalFeeCheck);
+      }
+      retainedWithdrawalFeeCheck = undefined;
+      retainedCommittedPegInPacket = undefined;
       retainedPegInPacket = undefined;
       mnemonic = '';
       state = 'closed';
@@ -1579,7 +1609,68 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         }, target, signer, activeMnemonic);
         await assertPegInPacketV2(packet, target);
         retainedPegInPacket = undefined;
+        retainedCommittedPegInPacket = packet;
         return checked;
+      }, 'v3-tracker-fee-ready'),
+      checkWithdrawalFeeFundingV3: async (
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('v3-tracker-fee-ready', async activeMnemonic => {
+        const continuation = trackerFeeContinuation;
+        if (continuation?.retainTrackerSigner !== true || retainedCommittedPegInPacket === undefined
+          || retainedWithdrawalFeeCheck !== undefined) {
+          throw new Error('withdrawal fee funding requires unconsumed committed-deposit custody');
+        }
+        await assertPegInPacketV2(retainedCommittedPegInPacket, target);
+        const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
+        const issuance = continuation.batch.orderedTransactions[1]!.issuance;
+        const genesis = await materializeUnsignedTransaction(
+          structuredClone(issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+          'retained V3 DUP genesis change',
+        );
+        const source = genesis.outputs[1];
+        if (genesis.txId !== issuance.unsignedTransactionIdHex || genesis.outputs.length !== 3
+          || source === undefined || source.assets.length !== 0
+          || ![signer.p2pkErgoTreeHex, signer.rewardInputErgoTrees.delay1, signer.rewardInputErgoTrees.delay720]
+            .includes(source.ergoTree)) {
+          throw new Error('retained V3 DUP genesis has no exact operator change');
+        }
+        const reobserve = async (): Promise<void> => {
+          assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
+          for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+            const exact = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${source.boxId}`, origin), 'withdrawal fee funding live source');
+            if (canonicalJson(exact) !== canonicalJson(source)) {
+              throw new Error('withdrawal fee funding live source differs from retained genesis change');
+            }
+          }
+        };
+        await reobserve();
+        const headers: unknown = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
+        if (!Array.isArray(headers) || headers.length !== 10) {
+          throw new Error('withdrawal fee funding requires ten signing headers');
+        }
+        const tip = selectLatestHeader(headers);
+        const transaction = await buildSubstrateFederatedWithdrawalV2FeeFunding({
+          sourceBox: source, fundingPublicKeyHex: signer.publicKeyHex,
+          feePayerPublicKeyHex: signer.publicKeyHex, currentHeight: tip.header.height + 1,
+        });
+        const prepared = await prepareLocalWasmRootCheckCandidates({
+          mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
+          candidates: [{ role: 'withdrawal-v2-fee-funding', eip12Tx: transaction.eip12Tx, expectedTxId: transaction.txId }],
+        });
+        if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
+          || prepared.candidates.length !== 1 || prepared.candidates[0]!.expectedTxId !== transaction.txId) {
+          throw new Error('withdrawal fee funding signer binding differs');
+        }
+        const candidate = prepared.candidates[0]!.signedCandidate;
+        const checked = await checkSignedTransaction(candidate, 'isolated withdrawal V2 fee funding', target.primaryNodeOrigin);
+        if (checked === null) throw new Error('withdrawal fee funding JVM node check failed');
+        await reobserve();
+        const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding);
+        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
+        const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
+        WITHDRAWAL_FEE_CHECKS.set(result, Object.freeze({ batch: continuation.batch, target }));
+        retainedWithdrawalFeeCheck = result;
+        return result;
       }, 'v3-tracker-fee-ready'),
       checkTrackerFeeFundingV3: async (
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,

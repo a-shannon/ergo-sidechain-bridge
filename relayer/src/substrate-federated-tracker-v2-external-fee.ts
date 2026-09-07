@@ -61,6 +61,19 @@ export async function buildSubstrateFederatedTrackerV2FeeFunding(input: Readonly
   feePayerPublicKeyHex: string;
   currentHeight: number;
 }>): Promise<Readonly<MaterializedUnsignedTransaction>> {
+  return buildOperatorFeeFunding(input, 'tracker');
+}
+
+export async function buildSubstrateFederatedWithdrawalV2FeeFunding(
+  input: Parameters<typeof buildSubstrateFederatedTrackerV2FeeFunding>[0],
+): Promise<Readonly<MaterializedUnsignedTransaction>> {
+  return buildOperatorFeeFunding(input, 'withdrawal');
+}
+
+async function buildOperatorFeeFunding(
+  input: Parameters<typeof buildSubstrateFederatedTrackerV2FeeFunding>[0],
+  purpose: 'tracker' | 'withdrawal',
+): Promise<Readonly<MaterializedUnsignedTransaction>> {
   const sourceSnapshot = structuredClone(input.sourceBox);
   const fundingKey = input.fundingPublicKeyHex;
   const feeKey = input.feePayerPublicKeyHex;
@@ -97,7 +110,7 @@ export async function buildSubstrateFederatedTrackerV2FeeFunding(input: Readonly
       { value: MINER_FEE_NANO_ERG, ergoTree: MINER_FEE_TREE, creationHeight: height,
         assets: [], additionalRegisters: {} },
     ],
-  }, 'tracker V2 external fee funding'));
+  }, `${purpose} V2 external fee funding`));
 }
 
 function canonicalP2pkTree(wasm: any, key: string): string {

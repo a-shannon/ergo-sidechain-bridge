@@ -31,6 +31,7 @@ import { executeSubstrateFederatedIsolatedDevnetGenesisBatchV3 as executeGenesis
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as executeFeeFunding }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_OPERATION_PROFILE as GENESIS_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE as WITHDRAWAL_FEE_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as FEE_OPERATION_PROFILE }
   from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { createSubstrateFederatedLocalDevnetGenesisJournalV1 as createGenesisJournal }
@@ -40,6 +41,8 @@ import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2 as createTransportV2,
   submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as submitFeeFunding,
   finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as finalizeFeeFunding,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1 as submitWithdrawalFunding,
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1 as finalizeWithdrawalFunding,
   submitSubstrateFederatedIsolatedDevnetTrackerV2Admission as submitTrackerV2,
   finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission as finalizeTrackerV2,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
@@ -49,6 +52,10 @@ import {
   claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1 as claimFeeTransport,
   requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1 as requireFeeFinalization,
   confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1 as confirmFeeFunding,
+  authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1 as authorizeWithdrawalFunding,
+  reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1 as reserveWithdrawalFunding,
+  requireSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingFinalizationV1 as requireWithdrawalFinalization,
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1 as confirmWithdrawalFunding,
 } from './substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1 as createAuthorizerV1,
@@ -2538,10 +2545,212 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     }, 60_000,
   );
 
+  it.each(['valid', 'bidirectional-authority', 'before-vault', 'repeat-check', 'disposed-check',
+    'missing-source', 'witness-source-drift', 'post-check-source-drift', 'concurrent-check',
+    'check-rejected', 'forged-check', 'wrong-target', 'authorization-source-drift',
+    'journal-failure', 'journal-drift', 'pretransport-source-drift', 'post-pretransport-check-drift',
+    'pretransport-check-rejected', 'wrong-confirmed-fee', 'ambiguous-response',
+    'confirmation-reinclusion', 'confirmation-depth-regression', 'confirmation-height-advance'] as const)(
+    'binds distinct withdrawal fee funding through confirmation: %s', async fault => {
+      const fixture = await createRootFixture(true);
+      const state = new StateTracker(':memory:');
+      const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue(executionBinding);
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await withObservations(async observed => {
+          const target = executionTarget();
+          const batch = await fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target);
+          const compiler = getSetupCompilerV3(batch, target);
+          const family = compiler.familyReceipt;
+          const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
+          const height = Math.max(...batch.request.orderedIssuances.map(value => value.predictedStateOutput.creationHeight)) + 1;
+          const packet = assertPegInV2(await buildPegInV2({
+            batch, target, sourceFundingInput: fundingCandidate('20000000', fixture.session.signer.p2pkErgoTreeHex),
+            sourceIntent: { formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+              sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+              tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+              admissionProfileIdHex: family.profile.familyIdHex, sourceAssetIdHex: profile.settlementAssetIdHex,
+              amountNanoErg: '10000000', recipientAddressHex: '61'.repeat(20) },
+            depositorErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex,
+            creationHeights: { currentErgoHeight: height, sourceLockCreation: height, reserveTransition: height },
+          }), batch, target);
+          const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+            currentHeight: height + 12, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
+          }).headers.map(header => header.raw);
+          for (const box of [packet.boxes.sourceFundingInput, packet.boxes.reservePredecessor,
+            packet.boxes.sourceLock, packet.boxes.transitionFeeFunding]) observed.publishBox(box, headers);
+          await fixture.session.checkPegInSourceLockV2RetainingSigner(packet, target);
+          if (fault === 'before-vault') {
+            await expect(fixture.session.checkWithdrawalFeeFundingV3(target)).rejects.toThrow(/continuation/);
+            expect(observed.submissionBodies).toHaveLength(0);
+            return;
+          }
+          await fixture.session.checkPegInCommittedVaultV2RetainingSigner(packet, target);
+          const changeBox = (index: number): Eip12Box => {
+            const tx = wasm.UnsignedTransaction.from_json(JSON.stringify(batch.orderedTransactions[index]!.issuance.unsignedTransactionBody));
+            const id = tx.id();
+            const outputs = tx.output_candidates();
+            const output = outputs.get(1);
+            const box = wasm.ErgoBox.from_box_candidate(output, id, 1);
+            try { return box.to_js_eip12(); }
+            finally { box.free(); output.free(); outputs.free(); id.free(); tx.free(); }
+          };
+          const source = changeBox(1);
+          const trackerSource = changeBox(0);
+          expect(source.boxId).not.toBe(trackerSource.boxId);
+          expect(source.assets).toEqual([]);
+          observed.publishBox(source, headers);
+          observed.publishBox(trackerSource, headers);
+          const originalGet = ergoHelpers.ngetDirect;
+          let phase = 'check';
+          let checkingConcurrent = false;
+          let feeBoxId: string | undefined;
+          let onConfirmedFeeRead: (() => void) | undefined;
+          const reads = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+            const result = await originalGet(...args);
+            if (args[0] === `/utxo/byId/${source.boxId}`) {
+              if (fault === 'concurrent-check' && !checkingConcurrent) {
+                checkingConcurrent = true;
+                await expect(fixture.session.checkWithdrawalFeeFundingV3(target)).rejects.toThrow(/continuation/);
+              }
+              if (fault === 'missing-source') return undefined;
+              if ((fault === 'witness-source-drift' && args[1] === target.witnessNodeOrigin)
+                || (fault === 'post-check-source-drift' && observed.checkBodies.length === 6)
+                || (fault === 'authorization-source-drift' && phase === 'authorize')
+                || (fault === 'pretransport-source-drift' && phase === 'transport')
+                || (fault === 'post-pretransport-check-drift' && observed.checkBodies.length === 7)) return trackerSource;
+            }
+            if (fault === 'wrong-confirmed-fee' && args[0] === `/utxo/byId/${feeBoxId}`) return source;
+            if (args[0] === `/utxo/byId/${feeBoxId}` && args[1] === target.witnessNodeOrigin) {
+              const mutate = onConfirmedFeeRead;
+              onConfirmedFeeRead = undefined;
+              mutate?.();
+            }
+            return result;
+          });
+          try {
+            const check = fixture.session.checkWithdrawalFeeFundingV3(target);
+            if (['missing-source', 'witness-source-drift', 'post-check-source-drift', 'concurrent-check', 'check-rejected'].includes(fault)) {
+              const expected = fault === 'missing-source' ? /withdrawal fee funding live source/
+                : fault === 'concurrent-check' ? /invalidated by a concurrent transition/
+                : fault === 'check-rejected' ? /withdrawal fee funding JVM node check failed/
+                : /withdrawal fee funding live source differs from retained genesis change/;
+              await expect(check).rejects.toThrow(expected);
+              await expect(fixture.session.checkWithdrawalFeeFundingV3(target)).rejects.toThrow(/continuation/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            const checked = await check;
+            feeBoxId = checked.transaction.outputs[0]!.boxId;
+            expect(checked.transaction.eip12Tx.inputs.map(box => box.boxId)).toEqual([source.boxId]);
+            if (fault === 'repeat-check' || fault === 'disposed-check') {
+              if (fault === 'repeat-check') await expect(fixture.session.checkWithdrawalFeeFundingV3(target)).rejects.toThrow(/unconsumed committed-deposit custody/);
+              else fixture.session.dispose();
+              await expect(authorizeWithdrawalFunding(checked, target)).rejects.toThrow(/unconsumed exact provenance/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            await expect(authorizeFeeFunding(checked, target)).rejects.toThrow(/unconsumed exact provenance/);
+            phase = 'authorize';
+            if (fault === 'forged-check' || fault === 'wrong-target' || fault === 'authorization-source-drift') {
+              await expect(authorizeWithdrawalFunding(fault === 'forged-check' ? { ...checked } : checked,
+                fault === 'wrong-target' ? executionTarget() : target)).rejects.toThrow(/provenance|source differs/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            const authorization = await authorizeWithdrawalFunding(checked, target);
+            expect(() => reserveFeeFunding(authorization, state)).toThrow(/authorization is absent/);
+            if (fault === 'journal-failure') {
+              const write = vi.spyOn(state, 'reserveErgoOperationalTransactionAttempt').mockImplementation(() => { throw new Error('synthetic persistence failure'); });
+              try { expect(() => reserveWithdrawalFunding(authorization, state)).toThrow(/synthetic persistence failure/); }
+              finally { write.mockRestore(); }
+              expect(() => reserveWithdrawalFunding(authorization, state)).toThrow(/authorization is absent/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            const attempt = reserveWithdrawalFunding(authorization, state);
+            expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!.operationProfile).toBe(WITHDRAWAL_FEE_OPERATION_PROFILE);
+            await expect(submitFeeFunding(target, attempt)).rejects.toThrow(/exact provenance/);
+            expect(() => requireFeeFinalization(attempt)).toThrow(/exact provenance/);
+            if (fault === 'bidirectional-authority') {
+              // The tracker continuation closes signer custody; claimed fee authority is already transferred.
+              const trackerCheck = await fixture.session.checkTrackerFeeFundingV3(target);
+              await expect(authorizeWithdrawalFunding(trackerCheck, target)).rejects.toThrow(/unconsumed exact provenance/);
+              const trackerAuthorization = await authorizeFeeFunding(trackerCheck, target);
+              expect(trackerAuthorization.authorizationDigestHex).not.toBe(authorization.authorizationDigestHex);
+              expect(() => reserveWithdrawalFunding(trackerAuthorization, state)).toThrow(/authorization is absent/);
+              const trackerAttempt = reserveFeeFunding(trackerAuthorization, state);
+              await expect(submitWithdrawalFunding(target, trackerAttempt)).rejects.toThrow(/exact provenance/);
+              expect(() => requireWithdrawalFinalization(trackerAttempt)).toThrow(/exact provenance/);
+              const trackerSubmission = await submitFeeFunding(target, trackerAttempt);
+              expect(() => finalizeWithdrawalFunding(trackerAttempt, trackerSubmission)).toThrow(/transport provenance/);
+              finalizeFeeFunding(trackerAttempt, trackerSubmission);
+              const trackerConfirmation = (await createConfirmationObserver(target, authorization.genesisHeaderIdHex)
+                .observe(trackerAttempt.expectedTxId, target.primaryNodeOrigin))!;
+              await expect(confirmWithdrawalFunding(trackerAttempt, trackerConfirmation)).rejects.toThrow(/exact provenance/);
+              await confirmFeeFunding(trackerAttempt, trackerConfirmation);
+            }
+            if (fault === 'journal-drift') {
+              const row = state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!;
+              const drift = vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...row, authorizationDigestHex: 'ef'.repeat(32) });
+              try { await expect(submitWithdrawalFunding(target, attempt)).rejects.toThrow(/journal binding/); }
+              finally { drift.mockRestore(); }
+              await expect(submitWithdrawalFunding(target, attempt)).rejects.toThrow(/consumed/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            phase = 'transport';
+            const pending = submitWithdrawalFunding(target, attempt);
+            if (['pretransport-source-drift', 'post-pretransport-check-drift', 'pretransport-check-rejected'].includes(fault)) {
+              await expect(pending).rejects.toThrow(/pretransport source differs|pretransport node check failed/);
+              await expect(submitWithdrawalFunding(target, attempt)).rejects.toThrow(/consumed/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
+            const submission = await pending;
+            expect(submission.status).toBe(fault === 'ambiguous-response' ? 'ambiguous' : 'accepted');
+            expect(() => finalizeFeeFunding(attempt, submission)).toThrow(/transport provenance/);
+            expect(() => finalizeWithdrawalFunding(attempt, { ...submission })).toThrow(/transport provenance/);
+            finalizeWithdrawalFunding(attempt, submission);
+            expect(() => finalizeWithdrawalFunding(attempt, submission)).toThrow(/transport provenance/);
+            await expect(submitWithdrawalFunding(target, attempt)).rejects.toThrow(/consumed/);
+            const confirmation = (await createConfirmationObserver(target, authorization.genesisHeaderIdHex)
+              .observe(attempt.expectedTxId, target.primaryNodeOrigin))!;
+            await expect(confirmFeeFunding(attempt, confirmation)).rejects.toThrow(/exact provenance/);
+            if (fault === 'confirmation-reinclusion') onConfirmedFeeRead = () => observed.reincludeSubmitted(attempt.expectedTxId, 10);
+            if (fault === 'confirmation-depth-regression') onConfirmedFeeRead = () => observed.setSubmittedDepth(attempt.expectedTxId, 9);
+            if (fault === 'confirmation-height-advance') onConfirmedFeeRead = () => observed.setSubmittedDepth(attempt.expectedTxId, 11);
+            if (fault === 'confirmation-reinclusion' || fault === 'confirmation-depth-regression') {
+              await expect(confirmWithdrawalFunding(attempt, confirmation)).rejects.toThrow(/canonical confirmation changed/);
+              expect(state.getConfirmedErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_OPERATION_PROFILE)).toHaveLength(0);
+              expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!.status).toBe('accepted');
+            } else if (fault === 'wrong-confirmed-fee') {
+              await expect(confirmWithdrawalFunding(attempt, confirmation)).rejects.toThrow(/confirmed tracker fee box differs/);
+              expect(state.getConfirmedErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_OPERATION_PROFILE)).toHaveLength(0);
+            } else {
+              await confirmWithdrawalFunding(attempt, confirmation);
+              expect(state.getConfirmedErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_OPERATION_PROFILE)).toHaveLength(1);
+              expect(state.getActiveErgoOperationalTransactionAttempts(WITHDRAWAL_FEE_OPERATION_PROFILE)).toHaveLength(0);
+            }
+            expect(observed.submissionBodies.at(-1)).toEqual(observed.checkBodies[5]);
+            expect(observed.checkBodies.at(-1)).toEqual(observed.checkBodies[5]);
+            expect(observed.submissionBodies).toHaveLength(fault === 'bidirectional-authority' ? 2 : 1);
+          } finally { reads.mockRestore(); }
+        }, { ...checkObservationOptions(), boxes: fixture.boxes, fixedSetupPorts: true,
+          confirmSubmittedGenesis: true, publishSubmittedOutputs: true,
+          checkOracle: (body, index) => (fault === 'check-rejected' && index === 5)
+            || (fault === 'pretransport-check-rejected' && index === 6) ? 'ff'.repeat(32) : signedCheckOracle(body),
+          submissionOracle: body => fault === 'ambiguous-response' ? 'ff'.repeat(32) : signedCheckOracle(body) });
+      } finally { errors.mockRestore(); custody.mockRestore(); state.close(); fixture.session.dispose(); }
+    }, 60_000,
+  );
+
   it.each(['valid', 'ambiguous-response', 'forged-check', 'wrong-target', 'journal-failure',
     'journal-drift', 'pretransport-source-drift', 'post-check-source-drift',
     'pretransport-check-rejected', 'wrong-confirmed-fee', 'concurrent-execution',
-    'reservation-field-drift', 'fabricated-transport-result', 'copied-transport-result', 'mutable-confirmation'] as const)(
+    'reservation-field-drift', 'fabricated-transport-result', 'copied-transport-result', 'mutable-confirmation',
+    'confirmation-reinclusion', 'confirmation-depth-regression'] as const)(
     'executes only the exact durably reserved V3 fee funding: %s', async fault => {
       const fixture = await createRootFixture();
       const state = new StateTracker(':memory:');
@@ -2565,7 +2774,8 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
           }).headers.map(header => header.raw);
           observed.publishBox(source, headers);
           const checked = await fixture.session.checkTrackerFeeFundingV3(target);
-          if (['reservation-field-drift', 'fabricated-transport-result', 'copied-transport-result', 'mutable-confirmation'].includes(fault)) {
+          if (['reservation-field-drift', 'fabricated-transport-result', 'copied-transport-result', 'mutable-confirmation',
+            'confirmation-reinclusion', 'confirmation-depth-regression'].includes(fault)) {
             const authorization = await authorizeFeeFunding(checked, target);
             const attempt = reserveFeeFunding(authorization, state);
             if (fault === 'reservation-field-drift' || fault === 'fabricated-transport-result') {
@@ -2609,9 +2819,19 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
                 mutable.confirmationHeight = original.confirmationHeight! + 1;
                 mutable.confirmationHeaderIdHex = 'ef'.repeat(32);
               }
+              if (args[0] === `/utxo/byId/${checked.transaction.outputs[0]!.boxId}` && args[1] === target.witnessNodeOrigin) {
+                if (fault === 'confirmation-reinclusion') observed.reincludeSubmitted(attempt.expectedTxId, 10);
+                if (fault === 'confirmation-depth-regression') observed.setSubmittedDepth(attempt.expectedTxId, 9);
+              }
               return await originalGet(...args);
             });
             try {
+              if (fault === 'confirmation-reinclusion' || fault === 'confirmation-depth-regression') {
+                await expect(confirmFeeFunding(attempt, original)).rejects.toThrow(/canonical confirmation changed/);
+                expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)!.status).toBe('accepted');
+                expect(observed.submissionBodies).toEqual([observed.checkBodies[3]]);
+                return;
+              }
               const confirmed = await confirmFeeFunding(attempt, mutable);
               expect(confirmed.confirmationHeight).toBe(original.confirmationHeight);
               expect(confirmed.confirmationHeaderId).toBe(original.confirmationHeaderIdHex);

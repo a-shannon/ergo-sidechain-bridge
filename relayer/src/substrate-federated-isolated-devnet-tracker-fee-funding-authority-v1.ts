@@ -5,6 +5,7 @@ import { normalizeEip12Box } from './unsigned-ergo-transaction.js';
 import {
   admitErgoOperationalTransaction,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE as PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE as WITHDRAWAL_PROFILE,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { StateTracker, type ErgoOperationalTransactionAttempt } from './state-tracker.js';
 import {
@@ -14,10 +15,12 @@ import {
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1,
+  claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1,
   type SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1 as Check,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1,
+  createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
 } from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import { normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
   type SubstrateFederatedLocalDevnetGenesisConfirmation as Confirmation } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
@@ -30,10 +33,15 @@ export interface SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1 {
   readonly expectedTxId: string;
   readonly durableAttemptDigestHex: string;
 }
+export type SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingAuthorizationV1 =
+  SubstrateFederatedIsolatedDevnetTrackerFeeFundingAuthorizationV1;
+export type SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingAttemptV1 =
+  SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1;
 type Authorization = Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAuthorizationV1>;
 type Attempt = Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>;
 export type SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1 = StateTracker;
 interface Material {
+  readonly purpose: 'tracker' | 'withdrawal';
   readonly check: Readonly<Check>;
   readonly target: Readonly<Target>;
   readonly binding: Readonly<Binding>;
@@ -49,12 +57,34 @@ const AUTHORIZATIONS = new WeakMap<object, Material>();
 const RESERVED = new WeakSet<object>();
 const ATTEMPTS = new WeakMap<object, DurableMaterial>();
 const TRANSPORT_STARTED = new WeakSet<object>();
+const FUNDING_PROFILES = Object.freeze({
+  tracker: Object.freeze({ profile: PROFILE,
+    authorizationDomain: 'E2S_ISOLATED_TRACKER_FEE_FUNDING_AUTHORIZATION_V1',
+    sourceDomain: 'E2S_ISOLATED_TRACKER_FEE_FUNDING_SOURCE_V1' }),
+  withdrawal: Object.freeze({ profile: WITHDRAWAL_PROFILE,
+    authorizationDomain: 'E2S_ISOLATED_WITHDRAWAL_FEE_FUNDING_AUTHORIZATION_V1',
+    sourceDomain: 'E2S_ISOLATED_WITHDRAWAL_FEE_FUNDING_SOURCE_V1' }),
+});
 
 /** Explicit LAB-only authorization; checking alone never constructs this capability. */
 export async function authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   check: Readonly<Check>, target: Readonly<Target>,
 ): Promise<Authorization> {
-  const { batch, binding } = claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(check, target);
+  return authorizeFeeFunding(check, target, 'tracker');
+}
+
+export async function authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(
+  check: Readonly<Check>, target: Readonly<Target>,
+): Promise<Authorization> {
+  return authorizeFeeFunding(check, target, 'withdrawal');
+}
+
+async function authorizeFeeFunding(
+  check: Readonly<Check>, target: Readonly<Target>, purpose: Material['purpose'],
+): Promise<Authorization> {
+  const { batch, binding } = purpose === 'tracker'
+    ? claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(check, target)
+    : claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1(check, target);
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(check.checkedAcceptance.submissionHandle, binding);
   await reobserveSource(check, target, binding);
   const authorization = Object.freeze({ genesisHeaderIdHex: batch.request.target.genesisHeaderIdHex, authorizationDigestHex: sha256CanonicalJson({
@@ -64,9 +94,9 @@ export async function authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFunding
     expectedTxId: check.transaction.txId,
     signedTransactionBytesSha256Hex: check.signedCandidate.signedTransactionBytesSha256Hex,
     checkResponseDigestHex: check.checkedAcceptance.submissionHandle.checkResponseDigestHex,
-  }, 'E2S_ISOLATED_TRACKER_FEE_FUNDING_AUTHORIZATION_V1') });
+  }, FUNDING_PROFILES[purpose].authorizationDomain) });
   AUTHORIZATIONS.set(authorization, Object.freeze({
-    check, target, binding, authorization,
+    purpose, check, target, binding, authorization,
     genesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
   }));
   return authorization;
@@ -75,8 +105,20 @@ export async function authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFunding
 export function reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   authorization: Authorization, state: StateTracker,
 ): Attempt {
+  return reserveFeeFunding(authorization, state, 'tracker');
+}
+
+export function reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(
+  authorization: Authorization, state: StateTracker,
+): Attempt {
+  return reserveFeeFunding(authorization, state, 'withdrawal');
+}
+
+function reserveFeeFunding(
+  authorization: Authorization, state: StateTracker, purpose: Material['purpose'],
+): Attempt {
   const material = AUTHORIZATIONS.get(authorization);
-  if (material === undefined || RESERVED.has(authorization) || !(state instanceof StateTracker)) {
+  if (material === undefined || material.purpose !== purpose || RESERVED.has(authorization) || !(state instanceof StateTracker)) {
     throw new Error('tracker fee funding authorization is absent, consumed or has no journal');
   }
   RESERVED.add(authorization);
@@ -84,7 +126,7 @@ export function reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   const { check, binding } = material;
   const source = check.transaction.eip12Tx.inputs[0]!;
   const admission = admitErgoOperationalTransaction({
-    operationProfile: PROFILE, expectedTxId: check.transaction.txId,
+    operationProfile: FUNDING_PROFILES[purpose].profile, expectedTxId: check.transaction.txId,
     sourceBoxId: source.boxId, inputBoxIds: [source.boxId],
     attemptedAtHeight: check.transaction.eip12Tx.outputs[0]!.creationHeight - 1,
     unsignedTransaction: check.transaction.eip12Tx,
@@ -95,7 +137,7 @@ export function reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
     reconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
     signedTransactionDigestHex: check.signedCandidate.signedTransactionDigestHex,
     checkResponseDigestHex: check.checkedAcceptance.submissionHandle.checkResponseDigestHex,
-    revalidationDigestHex: sha256CanonicalJson(source, 'E2S_ISOLATED_TRACKER_FEE_FUNDING_SOURCE_V1'),
+    revalidationDigestHex: sha256CanonicalJson(source, FUNDING_PROFILES[purpose].sourceDomain),
     authorizationDigestHex: authorization.authorizationDigestHex,
   });
   const expectedReservation = Object.freeze({ ...reservation, fundsReleaseAuthorityEpochHex: null,
@@ -114,7 +156,17 @@ export function reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
 export async function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1(
   attempt: Attempt, target: Readonly<Target>,
 ) {
-  const material = requireAttempt(attempt);
+  return claimFeeFundingTransport(attempt, target, 'tracker');
+}
+
+export async function claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1(
+  attempt: Attempt, target: Readonly<Target>,
+) {
+  return claimFeeFundingTransport(attempt, target, 'withdrawal');
+}
+
+async function claimFeeFundingTransport(attempt: Attempt, target: Readonly<Target>, purpose: Material['purpose']) {
+  const material = requireAttempt(attempt, purpose);
   if (material.target !== target || TRANSPORT_STARTED.has(attempt)) {
     throw new Error('tracker fee funding transport target differs or attempt is consumed');
   }
@@ -132,7 +184,17 @@ export async function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTran
 export function requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1(
   attempt: Attempt,
 ) {
-  const material = requireAttempt(attempt);
+  return requireFeeFundingFinalization(attempt, 'tracker');
+}
+
+export function requireSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingFinalizationV1(
+  attempt: Attempt,
+) {
+  return requireFeeFundingFinalization(attempt, 'withdrawal');
+}
+
+function requireFeeFundingFinalization(attempt: Attempt, purpose: Material['purpose']) {
+  const material = requireAttempt(attempt, purpose);
   if (!TRANSPORT_STARTED.has(attempt)) throw new Error('tracker fee funding transport has not started');
   assertStored(material, 'pending');
   return material.state;
@@ -141,8 +203,18 @@ export function requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinaliza
 export async function confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   attempt: Attempt, confirmationValue: Confirmation,
 ) {
+  return confirmFeeFunding(attempt, confirmationValue, 'tracker');
+}
+
+export async function confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(
+  attempt: Attempt, confirmationValue: Confirmation,
+) {
+  return confirmFeeFunding(attempt, confirmationValue, 'withdrawal');
+}
+
+async function confirmFeeFunding(attempt: Attempt, confirmationValue: Confirmation, purpose: Material['purpose']) {
   const confirmation = normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(confirmationValue);
-  const material = requireAttempt(attempt);
+  const material = requireAttempt(attempt, purpose);
   assertStored(material, 'submitted');
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
     confirmation.observerArtifact, material.binding.executionTargetIdentityDigestHex,
@@ -157,6 +229,17 @@ export async function confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1
     const current = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${feeBox.boxId}`, origin), 'confirmed tracker fee box');
     if (canonicalJson(current) !== canonicalJson(feeBox)) throw new Error('confirmed tracker fee box differs');
   }
+  // Re-inclusion preserves box bytes; authenticate current inclusion after the UTXO reads.
+  const currentConfirmation = await createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+    material.target, material.genesisHeaderIdHex,
+  ).observe(attempt.expectedTxId, material.target.primaryNodeOrigin);
+  if (currentConfirmation === null || currentConfirmation.status !== 'confirmed'
+    || currentConfirmation.confirmationHeight !== confirmation.confirmationHeight
+    || currentConfirmation.confirmationHeaderIdHex !== confirmation.confirmationHeaderIdHex
+    || currentConfirmation.observedAtHeight < confirmation.observedAtHeight
+    || currentConfirmation.confirmations < confirmation.confirmations) {
+    throw new Error('fee funding canonical confirmation changed before persistence');
+  }
   assertBinding(material.target, material.binding);
   assertStored(material, 'submitted');
   return material.state.confirmErgoOperationalTransactionAttempt({
@@ -165,9 +248,9 @@ export async function confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1
   });
 }
 
-function requireAttempt(attempt: Attempt): DurableMaterial {
+function requireAttempt(attempt: Attempt, purpose: Material['purpose']): DurableMaterial {
   const material = ATTEMPTS.get(attempt);
-  if (material === undefined || attempt.expectedTxId !== material.stored.expectedTxId
+  if (material === undefined || material.purpose !== purpose || attempt.expectedTxId !== material.stored.expectedTxId
     || attempt.durableAttemptDigestHex !== material.stored.durableAttemptDigestHex) {
     throw new Error('tracker fee funding durable attempt lacks exact provenance');
   }
@@ -178,7 +261,7 @@ function requireAttempt(attempt: Attempt): DurableMaterial {
 function assertStored(material: DurableMaterial, phase: 'pending' | 'submitted'): void {
   const current = material.state.getErgoOperationalTransactionAttempt(material.stored.expectedTxId);
   const { check, stored, binding } = material;
-  if (current === null || current.operationProfile !== PROFILE
+  if (current === null || current.operationProfile !== FUNDING_PROFILES[material.purpose].profile
     || canonicalJson(Object.fromEntries(Object.keys(material.expectedReservation)
       .map(key => [key, current[key as keyof ErgoOperationalTransactionAttempt]])))
       !== canonicalJson(material.expectedReservation)
