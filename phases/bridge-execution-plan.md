@@ -67,9 +67,16 @@ establish deployment safety or independent operator custody.
   forwarding step while preserving process containment and output limits.
   The exact-file replay passed 24 transfers and the retained Frontier binary
   passed 38 semantic chain-spec comparisons. This repairs a local execution
-  prerequisite, not tracker admission. The next fresh campaign must regenerate
-  the request and node-build identities against the updated runner pin; old
-  campaign custody and receipts remain terminal.
+  prerequisite, not tracker admission. A fresh campaign using that runner
+  reached confirmed external-fee funding and the frozen tracker check, then
+  failed during admission authorization's header reobservation. The Ergo API
+  returns oldest-first headers; that consumer passed them to a newest-first
+  context builder without reversing the window. Its HTTP fixture had also
+  used the wrong order. The correction reverses a copied API window before
+  anchor selection and preserves canonical header, lineage, frozen-context and
+  input checks on both nodes. The next fresh campaign must establish actual
+  tracker admission; component checks do not substitute for it. Regenerate
+  request/build identities and never reuse terminal custody or receipts.
 
 ## Critical Path
 

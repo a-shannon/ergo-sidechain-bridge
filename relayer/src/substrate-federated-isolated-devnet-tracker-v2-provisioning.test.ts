@@ -2340,10 +2340,12 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     'wrong-target', 'copied-context', 'disposed', 'concurrent',
     'admission-input-0-primary', 'admission-input-1-primary',
     'admission-input-0-witness', 'admission-input-1-witness',
-    'admission-genesis', 'admission-headers', 'admission-expired',
+    'admission-genesis', 'admission-headers', 'admission-headers-witness', 'admission-expired',
     'admission-journal-failure', 'admission-journal-drift',
     'admission-freshness-parent', 'admission-freshness-check', 'admission-freshness-input',
+    'admission-freshness-headers-primary', 'admission-freshness-headers-witness',
     'admission-transport-parent', 'admission-transport-check', 'admission-stale-anchor',
+    'admission-transport-headers-primary', 'admission-transport-headers-witness',
     'admission-transport-journal-drift', 'admission-ambiguous',
     'admission-confirmation-parent', 'admission-successor-drift',
     'admission-confirmation-reincluded', 'admission-confirmation-depth', 'admission-unfinalized-row'] as const)(
@@ -3398,14 +3400,25 @@ async function exerciseTrackerV2Admission(
       return executionBinding;
     }));
   const originalGet = ergoHelpers.ngetDirect;
+  const headerOrderFault = fault === 'admission-headers'
+    ? { phase: 'authorization', origin: frozenTarget.primaryNodeOrigin }
+    : fault === 'admission-headers-witness'
+      ? { phase: 'authorization', origin: frozenTarget.witnessNodeOrigin }
+      : /^admission-(freshness|transport)-headers-(primary|witness)$/.test(fault)
+        ? { phase: fault.split('-')[1]!, origin: fault.endsWith('-primary')
+          ? frozenTarget.primaryNodeOrigin : frozenTarget.witnessNodeOrigin }
+        : undefined;
+  let headerOrderFaultHits = 0;
   spies.push(vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
     const value = await originalGet(...args);
     const [path, origin] = args;
+    if (headerOrderFault?.phase === phase && headerOrderFault.origin === origin
+      && path === '/blocks/lastHeaders/10') {
+      headerOrderFaultHits++;
+      return [...value].reverse();
+    }
     if (phase === 'authorization') {
       if (fault === 'admission-genesis' && path === '/blocks/at/1') return ['ff'.repeat(32)];
-      if (fault === 'admission-headers' && path === '/blocks/lastHeaders/10') {
-        return [...value].reverse();
-      }
       const match = /^admission-input-([01])-(primary|witness)$/.exec(fault);
       if (match && origin === (match[2] === 'primary' ? frozenTarget.primaryNodeOrigin : frozenTarget.witnessNodeOrigin)
         && path === `/utxo/byId/${checked.result.transaction.inputBoxes[Number(match[1])]!.boxId}`) {
@@ -3427,9 +3440,11 @@ async function exerciseTrackerV2Admission(
     await expect(authorizeTrackerV2(checked, { ...frozenTarget })).rejects.toThrow(/session provenance/);
     if (fault === 'admission-expired') expireFrozen();
     const pendingAuthorization = authorizeTrackerV2(checked, frozenTarget);
-    if (fault === 'admission-expired' || fault === 'admission-genesis' || fault === 'admission-headers' || fault.startsWith('admission-input-')) {
-      await expect(pendingAuthorization).rejects.toThrow(fault === 'admission-headers'
+    if (fault === 'admission-expired' || fault === 'admission-genesis'
+      || headerOrderFault?.phase === 'authorization' || fault.startsWith('admission-input-')) {
+      await expect(pendingAuthorization).rejects.toThrow(headerOrderFault !== undefined
         ? 'observed header 0 parent lineage is broken' : /changed|expired/);
+      if (headerOrderFault !== undefined) expect(headerOrderFaultHits).toBe(1);
       expect(state.getErgoOperationalTransactionAttempt(checked.result.transaction.unsignedTransactionIdHex)).toBeNull();
       expect(observed.submissionBodies).toHaveLength(0);
       return;
@@ -3461,7 +3476,9 @@ async function exerciseTrackerV2Admission(
     if (fault === 'admission-freshness-check') spies.push(vi.spyOn(fleet, 'checkSignedTransaction').mockResolvedValue(null));
     const fresh = revalidateTrackerV2(attempt, freshnessTarget);
     if (fault === 'admission-journal-drift' || fault.startsWith('admission-freshness-')) {
-      await expect(fresh).rejects.toThrow(/journal|lineage|node check failed|input changed/);
+      await expect(fresh).rejects.toThrow(headerOrderFault !== undefined
+        ? 'observed header 0 parent lineage is broken' : /journal|lineage|node check failed|input changed/);
+      if (headerOrderFault !== undefined) expect(headerOrderFaultHits).toBe(1);
       await expect(revalidateTrackerV2(attempt, freshnessTarget)).rejects.toThrow(/consumed/);
       expect(observed.submissionBodies).toHaveLength(0);
       return;
@@ -3480,7 +3497,9 @@ async function exerciseTrackerV2Admission(
     }
     const submission = submitTrackerV2(transportTarget, attempt);
     if (fault.startsWith('admission-transport-') || fault === 'admission-stale-anchor') {
-      await expect(submission).rejects.toThrow(/descend|node check failed|stale|journal/);
+      await expect(submission).rejects.toThrow(headerOrderFault !== undefined
+        ? 'observed header 0 parent lineage is broken' : /descend|node check failed|stale|journal/);
+      if (headerOrderFault !== undefined) expect(headerOrderFaultHits).toBe(1);
       await expect(submitTrackerV2(transportTarget, attempt)).rejects.toThrow(/consumed/);
       expect(observed.submissionBodies).toHaveLength(0);
       return;
@@ -3704,7 +3723,7 @@ async function withObservations<T>(
       if (request.method === 'GET') {
         if (path === '/info') body = { network: 'devnet', fullHeight: tipHeight };
         else if (path === '/blocks/lastHeaders/1') body = [{ id: tipHeaderId, height: tipHeight }];
-        else if (path === '/blocks/lastHeaders/10' && signingHeaders) body = signingHeaders;
+        else if (path === '/blocks/lastHeaders/10' && signingHeaders) body = [...signingHeaders].reverse();
         else if (path === '/blocks/at/1') body = [genesisHeaderId];
         else if (options.confirmSubmittedGenesis && path.startsWith('/blockchain/transaction/byId/')) {
           const id = path.slice('/blockchain/transaction/byId/'.length);

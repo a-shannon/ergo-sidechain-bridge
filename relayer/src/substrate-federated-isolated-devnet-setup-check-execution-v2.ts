@@ -328,8 +328,10 @@ async function reobserveTrackerV2(
     if (canonicalJson(genesis) !== canonicalJson([material.genesisHeaderIdHex])) {
       throw new Error('tracker V2 admission genesis changed');
     }
-    const headers = await ngetDirect('/blocks/lastHeaders/10', origin);
-    if (!Array.isArray(headers) || headers.length !== 10) throw new Error('tracker V2 admission headers unavailable');
+    const apiHeaders = await ngetDirect('/blocks/lastHeaders/10', origin);
+    if (!Array.isArray(apiHeaders) || apiHeaders.length !== 10) throw new Error('tracker V2 admission headers unavailable');
+    // Ergo's API returns oldest-first; the checked state context is newest-first.
+    const headers = [...apiHeaders].reverse();
     const anchor = check.result.observedHeaderContext.anchorHeader;
     const anchorIndex = headers.findIndex(header => header.height === anchor.height);
     if (anchorIndex < 0) throw new Error('tracker V2 transport anchor is stale or replaced');
