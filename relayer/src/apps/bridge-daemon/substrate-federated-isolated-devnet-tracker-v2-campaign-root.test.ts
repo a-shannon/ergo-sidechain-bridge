@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import blakejs from 'blakejs';
+import { buildTrustlessBurnInclusionProof, deriveTrustlessBurnIdHex } from '../../trustless-burn-proof.js';
 
 const fixture = vi.hoisted(() => ({
   calls: [] as string[], active: '', fault: '', cleanupFault: '',
@@ -6,6 +8,9 @@ const fixture = vi.hoisted(() => ({
   setupInput: undefined as Record<string, unknown> | undefined,
   finalizedReceipt: undefined as object | undefined,
   prepared: undefined as any,
+  withdrawalClaim: undefined as any,
+  withdrawal: undefined as any,
+  assetIdHex: '00'.repeat(32),
   owner: Object.freeze({ owner: 'synthetic' }),
   signer: Object.freeze({ publicKeyHex: '02' + '11'.repeat(32),
     p2pkErgoTreeHex: '0008cd02' + '11'.repeat(32),
@@ -96,6 +101,14 @@ vi.mock('../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', ()
       checkFrozenTrackerV2Candidate: async (input: any, target: unknown) => {
         inPhase('frozen', target); expect(input.transaction).toBe(trackerTransaction);
         step('check.v2'); return fixture.check;
+      },
+      checkFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (input: any, target: unknown) => {
+        inPhase('frozen', target); expect(input.transaction).toBe(trackerTransaction);
+        step('check.v2.retained'); return fixture.check;
+      },
+      checkWithdrawalV2: async (claim: unknown, target: unknown) => {
+        inPhase('confirmation', target); expect(fixture.calls).toContain('confirm');
+        step('check.withdrawal'); fixture.withdrawalClaim = claim; return fixture.withdrawal;
       } };
   },
   claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2: () => { step('mining'); return fixture.mining; },
@@ -120,6 +133,12 @@ vi.mock('./substrate-federated-isolated-devnet-frontier-application-checkpoint-r
 vi.mock('./substrate-federated-isolated-devnet-managed-setup-v2.js', () => ({
   executeSubstrateFederatedIsolatedDevnetManagedSetupV2: async (input: Record<string, unknown>) => {
     inPhase('setup', input.target); step('execute.setup.v2'); fixture.setupInput = input; return fixture.prepared;
+  },
+}));
+vi.mock('../../substrate-federated-settlement-family-v1.js', () => ({
+  decodeSubstrateFederatedSettlementFamilyV1Profile: (profile: unknown) => {
+    expect(profile).toBe(fixture.prepared.compilerInput.familyReceipt.profile);
+    return { settlementAssetIdHex: fixture.assetIdHex };
   },
 }));
 vi.mock('../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', () => ({
@@ -195,7 +214,9 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
 }));
 
 import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot as run,
-  assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt as assertReceipt }
+  assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt as assertReceipt,
+  runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot as runWithdrawal,
+  assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt as assertWithdrawalReceipt }
   from './substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
 
 function input() {
@@ -207,16 +228,44 @@ function input() {
 beforeEach(() => {
   fixture.calls.length = 0; fixture.active = ''; fixture.fault = ''; fixture.cleanupFault = '';
   fixture.buildGate = undefined; fixture.setupInput = undefined; fixture.finalizedReceipt = undefined;
+  fixture.withdrawalClaim = undefined; fixture.assetIdHex = '00'.repeat(32);
+  const leaf = { sidechainIdHex: '51'.repeat(32), sidechainBlockHashHex: '52'.repeat(32),
+    sidechainTxHashHex: '53'.repeat(32), eventIndex: 3,
+    burnIdHex: deriveTrustlessBurnIdHex({ sidechainIdHex: '51'.repeat(32), sidechainTxHashHex: '53'.repeat(32), eventIndex: 3 }),
+    recipientErgoTreeHashHex: Buffer.from(blakejs.blake2b(Buffer.from(fixture.signer.p2pkErgoTreeHex, 'hex'), undefined, 32)).toString('hex'),
+    amountNanoErg: '10000000', assetIdHex: fixture.assetIdHex };
+  const proof = buildTrustlessBurnInclusionProof([leaf], leaf.burnIdHex);
   fixture.prepared = {
     batch: { request: { target: { genesisHeaderIdHex: '20'.repeat(32) }, requestDigestHex: '21'.repeat(32) } },
-    compilerInput: { trackerRequest: {}, trackerReceipt: {} },
+    compilerInput: { trackerRequest: {}, trackerReceipt: {}, familyReceipt: { profile: { id: 'original' } } },
     packet: { receipt: { receiptDigestHex: '22'.repeat(32) } }, genesisTransactions: [],
     trackerInputBox: { boxId: '23'.repeat(32) },
     feeFunding: { expectedTxId: '24'.repeat(32), durableAttemptDigestHex: '25'.repeat(32),
       confirmationHeight: 190, confirmationHeaderIdHex: '26'.repeat(32), feeInputBox: { boxId: '27'.repeat(32) } },
-    applicationCheckpoint: { checkpoint: { checkpointAttestation: { checkpointStatement: {
-      encodedStatementHex: 'statement-v2', admissionValidFromErgoHeight: '200' } } } },
+    withdrawalFeeFunding: { expectedTxId: '64'.repeat(32), durableAttemptDigestHex: '65'.repeat(32),
+      confirmationHeight: 180, confirmationHeaderIdHex: '66'.repeat(32), feeInputBox: { boxId: '67'.repeat(32) } },
+    applicationCheckpoint: { applicationRunner: { executionResult: { applicationEvidence: {
+      execution: { sidechainIdHex: '0x' + leaf.sidechainIdHex, blockHashHex: '0x' + leaf.sidechainBlockHashHex,
+        transactionHashHex: '0x' + leaf.sidechainTxHashHex, eventIndex: leaf.eventIndex },
+      burn: { burnIdHex: '0x' + leaf.burnIdHex, recipientErgoTreeHashHex: '0x' + leaf.recipientErgoTreeHashHex,
+        amountNanoErg: leaf.amountNanoErg, recipientErgoTreeHex: fixture.signer.p2pkErgoTreeHex,
+        bridgeEventRootHex: '0x' + proof.bridgeEventRootHex, burnLeafCount: proof.leafCount },
+    } } }, checkpoint: { checkpointAttestation: { checkpointStatement: {
+      encodedStatementHex: 'statement-v2', admissionValidFromErgoHeight: '200',
+      sourceNativeBlockHeight: '10', sourceNativeBlockHashHex: '54'.repeat(32),
+      executionBlockHashHex: leaf.sidechainBlockHashHex, bridgeEventRootHex: proof.bridgeEventRootHex,
+      burnLeafCount: proof.leafCount } } } },
   };
+  fixture.withdrawal = { packet: { transaction: { txId: '61'.repeat(32), eip12Tx: { inputs: [
+    { boxId: '62'.repeat(32) }, { boxId: '63'.repeat(32) }, fixture.prepared.withdrawalFeeFunding.feeInputBox] } },
+    burn: { leaf, recipientErgoTreeHex: fixture.signer.p2pkErgoTreeHex },
+    reserve: { inputValueNanoErg: '20000000', outputValueNanoErg: '10000000',
+      inputLiabilityNanoErg: '10000000', outputLiabilityNanoErg: '0' },
+    duplicatePrevention: { inputDigestHex: '68'.repeat(33), outputDigestHex: '69'.repeat(33) },
+    boxes: { trackerDataInput: { boxId: '70'.repeat(32) }, payout: { boxId: '71'.repeat(32) } } },
+    signedCandidate: { signedTransactionDigestHex: '72'.repeat(32), signedTransactionBytesSha256Hex: '73'.repeat(32),
+      signedTransactionBytesLength: 1024 },
+    checkedResult: { checkerIdentity: { path: '/transactions/check' }, signerContext: { publicKeyHex: fixture.signer.publicKeyHex } } };
 });
 
 describe('tracker V2 managed campaign composition', () => {
@@ -279,4 +328,84 @@ describe('tracker V2 managed campaign composition', () => {
     release(); await pending;
     expect(fixture.setupInput!.lifecycle).toBe(original);
   });
+
+  it('checks the actual application burn within confirmed tracker custody without payout transport', async () => {
+    const result = await runWithdrawal(input() as never);
+    expect(fixture.setupInput!.withdrawalCheck).toBe(true);
+    expect(fixture.calls).not.toContain('check.v2');
+    const steps = ['check.v2.retained', 'authorize', 'reserve', 'revalidate', 'submit', 'finalize',
+      'confirm', 'check.withdrawal', 'node.stop', 'owner.dispose'];
+    expect(fixture.calls.filter(call => steps.includes(call))).toEqual(steps);
+    expect(fixture.calls.filter(call => call === 'submit')).toHaveLength(1);
+    expect(fixture.active).toBe('');
+    const evidence = fixture.prepared.applicationCheckpoint.applicationRunner.executionResult.applicationEvidence;
+    const statement = fixture.prepared.applicationCheckpoint.checkpoint.checkpointAttestation.checkpointStatement;
+    expect(fixture.withdrawalClaim).toEqual({ trackerIdentity: {
+      sourceNativeBlockHeight: statement.sourceNativeBlockHeight,
+      sourceNativeBlockHashHex: statement.sourceNativeBlockHashHex, executionBlockHashHex: statement.executionBlockHashHex },
+      burnLeaf: { sidechainIdHex: evidence.execution.sidechainIdHex, sidechainBlockHashHex: evidence.execution.blockHashHex,
+        sidechainTxHashHex: evidence.execution.transactionHashHex, eventIndex: evidence.execution.eventIndex,
+        burnIdHex: evidence.burn.burnIdHex, recipientErgoTreeHashHex: evidence.burn.recipientErgoTreeHashHex,
+        amountNanoErg: evidence.burn.amountNanoErg, assetIdHex: fixture.assetIdHex },
+      leafIndex: 0, leafCount: 1, burnProof: [], recipientErgoTreeHex: evidence.burn.recipientErgoTreeHex });
+    expect(() => assertWithdrawalReceipt(result.receipt)).not.toThrow();
+    expect(() => assertWithdrawalReceipt({ ...result.receipt })).toThrow(/provenance/);
+    expect(() => assertReceipt(result.receipt)).toThrow(/provenance/);
+    expect(() => assertReceipt(result.receipt.trackerCampaign)).toThrow(/provenance/);
+    expect(result.receipt.status).toBe('local_withdrawal_v2_checked');
+    expect(result.receipt.withdrawal.expectedTxId).toBe(fixture.withdrawal.packet.transaction.txId);
+    expect(result.receipt.withdrawal.predecessorBoxIds).toHaveLength(3);
+    expect(result.receipt.boundaries).toMatchObject({ withdrawalCheckedWithOriginalCustody: true,
+      withdrawalTransportPerformed: false, canonicalPayoutObserved: false, payoutAuthorized: false,
+      fundsAuthorityEstablished: false, gate5Closed: false });
+  });
+
+  it('keeps tracker-only receipts outside withdrawal provenance', async () => {
+    const result = await run(input() as never);
+    expect(fixture.setupInput).not.toHaveProperty('withdrawalCheck');
+    expect(fixture.calls).not.toContain('check.withdrawal');
+    expect(() => assertWithdrawalReceipt(result.receipt)).toThrow(/provenance/);
+  });
+
+  it.each(['missing', 'future', 'early-window'])(
+    'rejects %s withdrawal fee confirmation before anchor work', async fault => {
+      if (fault === 'missing') delete fixture.prepared.withdrawalFeeFunding;
+      else if (fault === 'future') fixture.prepared.withdrawalFeeFunding.confirmationHeight = 201;
+      else fixture.prepared.withdrawalFeeFunding.confirmationHeight = 199;
+      if (fault === 'early-window') fixture.prepared.applicationCheckpoint.checkpoint.checkpointAttestation.checkpointStatement.admissionValidFromErgoHeight = '195';
+      await expect(runWithdrawal(input() as never)).rejects.toThrow(/precedes confirmed withdrawal fee funding/);
+      expect(fixture.calls).not.toContain('anchor'); expect(fixture.calls).not.toContain('submit');
+    });
+
+  it.each(['application-root', 'statement-root', 'application-count', 'statement-count', 'amount', 'event', 'asset'])(
+    'rejects a burn claim with changed %s before anchor work', async fault => {
+      const evidence = fixture.prepared.applicationCheckpoint.applicationRunner.executionResult.applicationEvidence;
+      const statement = fixture.prepared.applicationCheckpoint.checkpoint.checkpointAttestation.checkpointStatement;
+      if (fault === 'application-root') evidence.burn.bridgeEventRootHex = '0x' + 'ff'.repeat(32);
+      if (fault === 'statement-root') statement.bridgeEventRootHex = 'ff'.repeat(32);
+      if (fault === 'application-count') evidence.burn.burnLeafCount = 2;
+      if (fault === 'statement-count') statement.burnLeafCount = 2;
+      if (fault === 'amount') evidence.burn.amountNanoErg = '9000000';
+      if (fault === 'event') evidence.execution.eventIndex = 4;
+      if (fault === 'asset') fixture.assetIdHex = 'ff'.repeat(32);
+      await expect(runWithdrawal(input() as never)).rejects.toThrow(/burn|root|asset/i);
+      expect(fixture.calls).not.toContain('anchor'); expect(fixture.calls).not.toContain('submit');
+    });
+
+  it.each(['check.v2.retained', 'confirm', 'check.withdrawal'])(
+    'does not issue a withdrawal receipt after %s failure', async fault => {
+      fixture.fault = fault;
+      await expect(runWithdrawal(input() as never)).rejects.toThrow(`injected ${fault}`);
+      expect(fixture.calls).not.toContain('receipt');
+      expect(fixture.calls).toContain('setup.dispose'); expect(fixture.calls).toContain('node.stop');
+      if (fault !== 'check.withdrawal') expect(fixture.calls).not.toContain('check.withdrawal');
+    });
+
+  it.each(['application.dispose', 'setup.dispose', 'node.stop', 'state.close', 'owner.dispose'])(
+    'withholds withdrawal provenance when %s cleanup fails', async fault => {
+      fixture.cleanupFault = fault;
+      await expect(runWithdrawal(input() as never)).rejects.toThrow(/cleanup failed/);
+      expect(() => assertWithdrawalReceipt(fixture.finalizedReceipt)).toThrow(/provenance/);
+      expect(fixture.calls).toContain('owner.dispose');
+    });
 });

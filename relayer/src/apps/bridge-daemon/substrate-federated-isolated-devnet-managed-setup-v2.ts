@@ -71,6 +71,7 @@ import {
 import {
   executeSubstrateFederatedIsolatedDevnetGenesisBatchV3,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
   waitForCanonicalConfirmation,
   projectTrackerCanonicalConfirmationFailureDiagnosticV1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
@@ -87,6 +88,7 @@ export interface ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input {
   readonly state: StateTracker;
   readonly markerDirectory: string;
   readonly completionDeadline: number;
+  readonly withdrawalCheck?: true;
 }
 
 type Input = Readonly<ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input>;
@@ -143,6 +145,10 @@ export function projectSubstrateFederatedIsolatedDevnetManagedSetupFailureV2(val
 /** Runs within caller-owned mining, custody and storage lifetimes; does not admit a tracker. */
 export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(input: Input) {
   const { lifecycle, setupSession, continuation, target, state, completionDeadline } = input;
+  const withdrawalCheck = input.withdrawalCheck;
+  if (withdrawalCheck !== undefined && withdrawalCheck !== true) {
+    throw new Error('managed V2 withdrawal selection is invalid');
+  }
   requireTime(completionDeadline);
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (target.primaryMining !== true || target.witnessReadOnly !== true
@@ -311,6 +317,19 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
   }, completionDeadline);
 
   // Funding must reach canonical confirmation before choosing the admission window.
+  let withdrawalFeeFunding: Awaited<ReturnType<typeof executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1>> | undefined;
+  if (withdrawalCheck) {
+    requireTime(completionDeadline, CONFIRMATION_BUDGET_MS);
+    const checked = await setupSession.checkWithdrawalFeeFundingV3(target);
+    requireTime(completionDeadline, CONFIRMATION_BUDGET_MS);
+    withdrawalFeeFunding = await executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1({ target, checked, state });
+    if (withdrawalFeeFunding.confirmationHeight === null
+      || !Number.isSafeInteger(withdrawalFeeFunding.confirmationHeight) || withdrawalFeeFunding.confirmationHeight < 1
+      || withdrawalFeeFunding.confirmationHeaderIdHex === null
+      || !/^[0-9a-f]{64}$/.test(withdrawalFeeFunding.confirmationHeaderIdHex)) {
+      throw new Error('managed V2 withdrawal fee funding lacks canonical confirmation');
+    }
+  }
   requireTime(completionDeadline, CONFIRMATION_BUDGET_MS);
   const checkedFunding = await setupSession.checkTrackerFeeFundingV3(target);
   requireTime(completionDeadline, CONFIRMATION_BUDGET_MS);
@@ -321,6 +340,9 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
     throw new Error('managed V2 external-fee funding lacks canonical confirmation');
   }
   const feeFunding = Object.freeze({ ...funded, confirmationHeight, confirmationHeaderIdHex });
+  if (withdrawalFeeFunding?.feeInputBox.boxId === feeFunding.feeInputBox.boxId) {
+    throw new Error('managed V2 withdrawal and tracker fee inputs overlap');
+  }
   requireTime(completionDeadline);
   const freshReserve = await waitForCanonicalConfirmation(observer, reserveTransaction.txId,
     completionDeadline, 'application-checkpoint-admission');
@@ -328,7 +350,8 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
     || freshReserve.confirmationHeaderIdHex !== committedVaultObservation.confirmationHeaderIdHex
     || !Number.isSafeInteger(freshReserve.observedAtHeight)
     || freshReserve.observedAtHeight < committedVaultObservation.confirmationHeight
-    || freshReserve.observedAtHeight < feeFunding.confirmationHeight) {
+    || freshReserve.observedAtHeight < feeFunding.confirmationHeight
+    || (withdrawalFeeFunding !== undefined && freshReserve.observedAtHeight < withdrawalFeeFunding.confirmationHeight!)) {
     throw new Error('managed V2 committed reserve changed before checkpoint attestation');
   }
   requireTime(completionDeadline);
@@ -371,7 +394,8 @@ export async function executeSubstrateFederatedIsolatedDevnetManagedSetupV2(inpu
   requireTime(completionDeadline);
   return Object.freeze({ packet, batch, genesisTransactions: refreshedGenesis, candidate,
     sourceLockObservation, committedVaultObservation, mintDraft, sourceEvidence,
-    feeFunding, applicationCheckpoint, trackerInputBox, compilerInput });
+    feeFunding, applicationCheckpoint, trackerInputBox, compilerInput,
+    ...(withdrawalFeeFunding === undefined ? {} : { withdrawalFeeFunding }) });
 }
 
 function requireTime(deadline: number, reserveMs = 0): void {

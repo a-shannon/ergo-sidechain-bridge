@@ -54,10 +54,13 @@ describe('layer import rules', () => {
     expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
   });
 
-  it('permits only the fixed V2 worker to import its campaign root', () => {
+  it.each([
+    'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot',
+    'runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot',
+    'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt',
+  ])('permits only the fixed V2 worker to import %s', binding => {
     const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
     const rootSpecifier = '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
-    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
     expect(inspect(staticAppFixture(worker, `import { ${binding} } from '${rootSpecifier}'; ${binding}();`))).toEqual([]);
     expect(inspect(staticAppFixture('scripts/foreign-worker.ts',
       `import { ${binding} } from '${rootSpecifier}'; ${binding}();`)).map(item => item.message)).toContain(

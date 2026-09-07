@@ -257,11 +257,16 @@ import {
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
   submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
   type SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1,
 } from '../../substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
 import {
@@ -2455,6 +2460,34 @@ export async function executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1
     performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
     'tracker-fee-funding');
   const confirmed = await confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, confirmation);
+  return Object.freeze({
+    expectedTxId: attempt.expectedTxId,
+    durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+    transportStatus: submission.status,
+    journalDigestHex: finalized.journalDigestHex,
+    confirmationDigestHex: confirmation.observationDigestHex,
+    confirmationHeight: confirmed.confirmationHeight,
+    confirmationHeaderIdHex: confirmed.confirmationHeaderId,
+    feeInputBox: checked.transaction.outputs[0]!,
+  });
+}
+
+/** Execute the distinct retained withdrawal fee funding; the caller owns target and journal lifetime. */
+export async function executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  checked: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>;
+  state: SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1;
+}>) {
+  const { target, checked, state } = input;
+  const authorization = await authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(checked, target);
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, authorization.genesisHeaderIdHex);
+  const attempt = reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(authorization, state);
+  const submission = await submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(target, attempt);
+  const finalized = finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(attempt, submission);
+  const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+    performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
+    'withdrawal-fee-funding');
+  const confirmed = await confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(attempt, confirmation);
   return Object.freeze({
     expectedTxId: attempt.expectedTxId,
     durableAttemptDigestHex: attempt.durableAttemptDigestHex,

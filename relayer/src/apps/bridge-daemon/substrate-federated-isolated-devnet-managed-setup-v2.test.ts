@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => {
     'sourcePromote', 'vaultPromote', 'sourceAuthorizer', 'vaultAuthorization',
     'sourceTransport', 'vaultTransport', 'sourceJournal', 'vaultJournal', 'genesisJournal',
     'observer', 'sourceObserve', 'sourceGuard', 'vaultObserve', 'vaultGuard', 'draft',
-    'evidence', 'checkpointGuard', 'genesis', 'fees', 'wait', 'materialize', 'profile',
+    'evidence', 'checkpointGuard', 'genesis', 'fees', 'withdrawalFees', 'wait', 'materialize', 'profile',
     'submissionDiagnostic', 'confirmationDiagnostic'] as const;
   return Object.fromEntries(names.map(name => [name, vi.fn()])) as Record<typeof names[number], ReturnType<typeof vi.fn>>;
 });
@@ -64,6 +64,7 @@ vi.mock('./substrate-federated-isolated-devnet-frontier-application-checkpoint-r
 vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', () => ({
   executeSubstrateFederatedIsolatedDevnetGenesisBatchV3: mocks.genesis,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1: mocks.fees,
+  executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1: mocks.withdrawalFees,
   waitForCanonicalConfirmation: mocks.wait,
   projectTrackerCanonicalConfirmationFailureDiagnosticV1: mocks.confirmationDiagnostic,
 }));
@@ -134,6 +135,8 @@ function fixture() {
   const evidence = { receiptDigestHex: hex(74) };
   const feeFunding = { feeInputBox: { boxId: hex(75) }, confirmationHeight: 25, confirmationHeaderIdHex: hex(76) };
   const checkedFunding = { transaction: { outputs: [feeFunding.feeInputBox] } };
+  const withdrawalFeeFunding = { feeInputBox: { boxId: hex(78) }, confirmationHeight: 24, confirmationHeaderIdHex: hex(79) };
+  const checkedWithdrawalFunding = { transaction: { outputs: [withdrawalFeeFunding.feeInputBox] } };
   const application = { packet };
   const checkpoint = { version: 4, packet: { receipt: packet.receipt }, mintSourceProof: {
     packetReceiptDigestHex: packet.receipt.receiptDigestHex, sourceProof: { sourceEvidenceReceiptDigestHex: evidence.receiptDigestHex,
@@ -145,7 +148,8 @@ function fixture() {
   const setupSession = { signer, runForExecutionV3RetainingPegInAndTrackerSigner: record('setup-v3', batch),
     checkPegInSourceLockV2RetainingSigner: record('source-check-v2', sourceReceipt),
     checkPegInCommittedVaultV2RetainingSigner: record('vault-check-v2', vaultReceipt),
-    checkTrackerFeeFundingV3: record('fee-check-v3', checkedFunding), dispose: vi.fn() };
+    checkTrackerFeeFundingV3: record('fee-check-v3', checkedFunding),
+    checkWithdrawalFeeFundingV3: record('withdrawal-fee-check-v3', checkedWithdrawalFunding), dispose: vi.fn() };
   const state = { close: vi.fn() };
   const input = { lifecycle: { sourceHistory: {}, relayerArtifacts: {} }, setupSession, continuation,
     expectedProfilePins: {}, target, pegIn: { amountNanoErg: '10000000', recipientAddressHex: '11'.repeat(20) },
@@ -199,18 +203,21 @@ function fixture() {
   mocks.draft.mockImplementation(record('draft-v2', draft));
   mocks.evidence.mockImplementation(record('evidence-v2', evidence));
   mocks.fees.mockImplementation(record('fees-confirmed', feeFunding));
+  mocks.withdrawalFees.mockImplementation(record('withdrawal-fees-confirmed', withdrawalFeeFunding));
   const genesisJournal = { revalidateConfirmed: record('genesis-revalidate', 3) };
   mocks.genesisJournal.mockReturnValue(genesisJournal);
   mocks.materialize.mockImplementation(record('tracker-materialize', { txId: hex(20), outputs: [output] }));
   return { input, events, packet, batch, genesis, deposit, candidate, funding, sourceReceipt, vaultReceipt,
     sourceCheck, vaultCheck, sourceJournal, vaultJournal, genesisJournal, sourceAuthorizer, vaultAuthorization,
     sourceTransport, vaultTransport, confirmation, sourceObservation, vaultObservation, draft, evidence,
-    feeFunding, checkedFunding, application, checkpoint, output, sourceHistory, rewards, ergoHistory, observer, compilerInput, replay };
+    feeFunding, checkedFunding, withdrawalFeeFunding, checkedWithdrawalFunding,
+    application, checkpoint, output, sourceHistory, rewards, ergoHistory, observer, compilerInput, replay };
 }
 
 describe('managed setup V2 composition', () => {
   let f: ReturnType<typeof fixture>;
   const run = () => execute(f.input as unknown as Input);
+  const runWithdrawal = () => execute({ ...f.input, withdrawalCheck: true } as unknown as Input);
   beforeEach(() => {
     vi.resetAllMocks();
     vi.spyOn(performance, 'now').mockReturnValue(1_000);
@@ -219,6 +226,73 @@ describe('managed setup V2 composition', () => {
     mocks.confirmationDiagnostic.mockReturnValue(null);
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it('confirms separate withdrawal fees before tracker fees and checkpoint attestation', async () => {
+    const result = await runWithdrawal();
+    expect(result.withdrawalFeeFunding).toBe(f.withdrawalFeeFunding);
+    expect(mocks.withdrawalFees).toHaveBeenCalledWith({ target: f.input.target,
+      checked: f.checkedWithdrawalFunding, state: f.input.state });
+    expect(f.events.filter(event => /fee|attestation/.test(event))).toEqual([
+      'withdrawal-fee-check-v3', 'withdrawal-fees-confirmed', 'fee-check-v3', 'fees-confirmed', 'attestation-v4',
+    ]);
+    expect(f.input.setupSession.dispose).not.toHaveBeenCalled();
+  });
+
+  it('does not change the tracker-only funding route', async () => {
+    const result = await run();
+    expect(result).not.toHaveProperty('withdrawalFeeFunding');
+    expect(f.input.setupSession.checkWithdrawalFeeFundingV3).not.toHaveBeenCalled();
+    expect(mocks.withdrawalFees).not.toHaveBeenCalled();
+  });
+
+  it('awaits withdrawal funding before selecting the tracker funding and admission window', async () => {
+    let release!: (value: typeof f.withdrawalFeeFunding) => void;
+    let signal!: () => void;
+    const started = new Promise<void>(resolve => { signal = resolve; });
+    mocks.withdrawalFees.mockImplementation(() => { signal(); return new Promise(resolve => { release = resolve; }); });
+    const pending = runWithdrawal();
+    await started;
+    expect(f.input.setupSession.checkTrackerFeeFundingV3).not.toHaveBeenCalled();
+    expect(f.input.continuation.attestCheckpoint).not.toHaveBeenCalled();
+    release(f.withdrawalFeeFunding);
+    await pending;
+  });
+
+  it.each(['check', 'funding'] as const)('stops at withdrawal %s failure without selecting a tracker', async fault => {
+    const operation = fault === 'check' ? f.input.setupSession.checkWithdrawalFeeFundingV3 : mocks.withdrawalFees;
+    operation.mockImplementation(() => { throw new Error('withdrawal fee failed'); });
+    await expect(runWithdrawal()).rejects.toThrow('withdrawal fee failed');
+    expect(f.input.setupSession.checkTrackerFeeFundingV3).not.toHaveBeenCalled();
+    expect(f.input.continuation.attestCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { confirmationHeight: null }, { confirmationHeight: 24.5 },
+    { confirmationHeight: Number.MAX_SAFE_INTEGER + 1 }, { confirmationHeight: 0 },
+    { confirmationHeaderIdHex: null }, { confirmationHeaderIdHex: 'ff' },
+  ])('rejects incomplete withdrawal fee confirmation %j', async change => {
+    mocks.withdrawalFees.mockReturnValue({ ...f.withdrawalFeeFunding, ...change });
+    await expect(runWithdrawal()).rejects.toThrow('withdrawal fee funding lacks canonical confirmation');
+    expect(f.input.setupSession.checkTrackerFeeFundingV3).not.toHaveBeenCalled();
+    expect(f.input.continuation.attestCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('rejects overlapping fee outputs', async () => {
+    mocks.withdrawalFees.mockReturnValue({ ...f.withdrawalFeeFunding, feeInputBox: f.feeFunding.feeInputBox });
+    await expect(runWithdrawal()).rejects.toThrow('fee inputs overlap');
+    expect(f.input.continuation.attestCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it('requires reserve refresh to reach the withdrawal fee confirmation height', async () => {
+    mocks.withdrawalFees.mockReturnValue({ ...f.withdrawalFeeFunding, confirmationHeight: 31 });
+    await expect(runWithdrawal()).rejects.toThrow('reserve changed before checkpoint attestation');
+    expect(f.input.continuation.attestCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it.each([false, 'yes', 1, null])('rejects an invalid withdrawal selector %j before work', async withdrawalCheck => {
+    await expect(execute({ ...f.input, withdrawalCheck } as unknown as Input)).rejects.toThrow('withdrawal selection is invalid');
+    expect(f.events).toEqual([]);
+  });
 
   it('retains exact V3/V2/V4 components and confirms fees before the fresh checkpoint window', async () => {
     const result = await run();
