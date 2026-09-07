@@ -35,9 +35,9 @@ establish deployment safety or independent operator custody.
   [exact-head CI](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/33926887851)
   for promotion status, not for runtime acceptance.
 - Local campaign evidence covers setup, a committed reserve, packet-bound
-  mint, burn and application checkpoint production. The mint consumer used
-  a source-locked TestClient. This does not establish an enabled operational
-  mint route, canonical tracker admission or a completed withdrawal.
+  mint, burn, application checkpoint production and funded V2 tracker admission.
+  The mint consumer used a source-locked TestClient. This does not establish
+  an enabled operational mint route or a completed withdrawal.
 - The ordinary daemon cannot initiate new owner minting or legacy payout
   transport. Deposits on that route remain refundable while the selected
   authenticated mint route is unavailable. Preserve these holds.
@@ -56,7 +56,7 @@ establish deployment safety or independent operator custody.
   and actual source proof to runner V3 and overlay 0003. The Ergo recipient is
   the campaign setup signer's exact compressed key, also bound to the packet's
   Ergo-admission keys. Legacy runner V2 remains a separate reference route,
-  never a fallback. A fresh composed campaign now reaches one local tracker
+  never a fallback. An earlier composed campaign reached one local tracker
   transport attempt. The node returned HTTP 400; the transaction was not found
   in 85 observations over its 120-second confirmation budget. No acceptance
   of that submission or canonical tracker admission was established.
@@ -74,9 +74,19 @@ establish deployment safety or independent operator custody.
   context builder without reversing the window. Its HTTP fixture had also
   used the wrong order. The correction reverses a copied API window before
   anchor selection and preserves canonical header, lineage, frozen-context and
-  input checks on both nodes. The next fresh campaign must establish actual
-  tracker admission; component checks do not substitute for it. Regenerate
-  request/build identities and never reuse terminal custody or receipts.
+  input checks on both nodes.
+- A fresh campaign at `1e00dffd000d2dc1152c6135eb6c06a3306339e9`
+  completed with `local_tracker_v2_canonically_confirmed`. External fee funding
+  confirmed at height 197 before the admission window was fixed. Tracker
+  transaction `98e12cdc5946ebae0a64b1fbcd6cb23f1e4a928ad20977cb4872522b389008d4`
+  was accepted and confirmed at height 219; the confirmation phase finished at
+  height 230. The terminal receipt digest is
+  `2c53a381bc2e815caa9d7dd910c57e871ad1e230342d3e7d81cced22de93fc66`.
+  Its request digest and source HEAD were checked, and all owned processes and
+  target listeners stopped. This closes local funded tracker admission only.
+  The campaign disposes its custody on return; its receipt cannot resume a
+  withdrawal or authorize payout. The next fresh campaign must retain the
+  required custody and live target through the withdrawal consumer.
 
 ## Critical Path
 
@@ -88,7 +98,7 @@ legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
 
 ```text
 frozen foundations + selected launch mode + fresh-owner application execution
-  -> exact tracker transport and canonical admission
+  -> exact tracker transport and canonical admission [local campaign passed]
   -> burn/checkpoint binding + global DUP insertion + external-fee payout
   -> composed two-way recovery and operational integration
   -> exact target/custody activation and operational rehearsal
@@ -100,21 +110,25 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | FED-6-LAB funded V2 tracker -> canonical admission | Freeze the integrated V2 command at a clean HEAD, regenerate the request-bound artifacts and run one fresh owned-target campaign | The fixed in-process worker selects V4 application/V3 setup/V2 deposits and funded V2 admission. Real fee-box confirmation and canonical tracker admission remain open. Retain fresh request-owner custody in the command process; a public request file cannot restore it. Do not reopen disposed custody, relabel V1 receipts, retry terminal campaigns or mutate signed bytes |
-| 2 | Checkpoint -> complete withdrawal | Compose the observed checkpoint with its burn, global replay insertion, reserve successor and externally funded miner fee | One full positive transaction and isolated negative cases; exact JVM/node acceptance and, under separate authorization, canonical confirmation. Reserve decrease equals burned liability, not liability plus miner fee |
-| 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
-| 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
-| 5 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
+| **Now** | Admitted checkpoint -> complete withdrawal | Retain the original V2 compiler/setup lineage and signer through admission, confirm distinct withdrawal-fee funding, and check the complete reserve/DUP/payout transaction before the owned target is disposed | Local funded tracker admission passed. Withdrawal node acceptance and canonical payout remain open. Preserve separate check, authorization and transport capabilities; reserve decrease equals burned liability, not liability plus miner fee |
+| 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
+| 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
+| 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
 
 ## Next Executable Batches
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| V2 campaign promotion and execution | Main owner; consumes the fixed in-process V2 command, campaign root and managed setup helper | Bind a fresh request to the clean integrated HEAD and regenerate its source/build artifact identities. The request creator invokes `runSubstrateFederatedIsolatedDevnetTrackerV2CampaignFromArguments` in the same process while retaining synthetic custody through owner-dependent genesis calibration; do not spawn a child with only the request file. Confirm fee funding before fixing the checkpoint admission window and freezing the anchor; require the V2 reservation, revalidation, fixed transport and canonical-confirmation consumers. Preserve the old V10/V11 command and receipt identities. No standalone funding/check replay |
-| V2 withdrawal target acceptance | Depends on canonical tracker admission and exact reserve/DUP/fee inputs | Feed the V2 constructor with the admitted checkpoint and current predecessor state, then check the complete transaction on the exact target. Synthetic construction and the offline three-input JVM matrix are available; neither proves canonical input history nor authorizes operational signing or transport |
+| Withdrawal funding and retained check | Main owner; consumes the V3 setup, V2 deposit and admitted tracker lifecycle | Select the withdrawal continuation before signer disposal. Fund an exact, distinct withdrawal fee box from operator funds and confirm it before freezing the admission window. Keep tracker-only funding authorization and historical transaction identities unchanged; give the new operation its own explicit authorization and durable discriminator where required. Retain the actual compiler receipts, deposit reserve successor, DUP genesis/history, admitted tracker successor and source burn, then reobserve those inputs and check the complete withdrawal while the owned target remains alive. Preserve the tracker-only route. No payout transport in this batch |
+| V2 withdrawal transport and confirmation | Depends on the checked withdrawal and its still-live custody/target | Bind explicit LAB authorization, all three input reservations, fresh revalidation and one-shot transport to the exact checked transaction. Confirm spent predecessors, reserve/DUP successors and payout against canonical history. Keep ambiguous transport outcomes non-retryable; a journal row or prior campaign receipt cannot restore authority |
 
-Then connect exact withdrawal transport and the operational mint caller, exercise
-both directions through recovery, and finish target/custody rehearsal and FED-7.
+If withdrawal funding changes the durable operation schema, close its
+producer-to-confirmation boundary as a separate implementation batch. Keep
+fresh-node execution grouped with the complete withdrawal consumer; do not
+insert a funding-only campaign or recreate historical tracker evidence.
+
+Then connect the operational mint caller, exercise both directions through
+recovery, and finish target/custody rehearsal and FED-7.
 A source-locked TestClient mint is not the operational mint route. Synthetic
 withdrawal construction is not a completed exit. Do not omit either consumer
 from the final delivery contract.
@@ -130,7 +144,8 @@ selection and request/HEAD/peg-in equality. Same-process entry tests
 exercise real owner claim and disposal through the root up to the build boundary;
 external preflight/build effects are simulated. A standalone invocation without
 creator custody remains fail-closed. No operational mint or payout is enabled.
-Promotion must regenerate the artifact identities at the integrated clean HEAD.
+The fresh campaign recorded above now supplies the local tracker acceptance
+evidence. A changed campaign must regenerate artifact identities at its clean HEAD.
 The source archive covers these scripts; the existing compiled runtime archive
 does not include the campaign as an entrypoint. This remains source execution
 on a trusted local host, not authenticated loader/dependency execution or
@@ -148,8 +163,9 @@ Failure at a phase stops its downstream actions. Cleanup attempts every acquired
 resource and withholds successful receipt provenance if teardown fails.
 The campaign uses a separate receipt schema and domain; historical V10/V11
 bodies remain unchanged. Direct tests establish orchestration with simulated
-external effects, not actual node execution. The fixed worker/CLI now selects
-this root; a fresh campaign must establish canonical admission before withdrawal.
+external effects, not actual node execution. The fixed worker/CLI selects
+this root, whose local canonical admission is now recorded above. Withdrawal
+must consume the admitted state inside a fresh campaign's live target lifetime.
 
 The V2 launch join has passed its affected checks and independent review.
 Genuine V2 compiler receipts and source history produce an explicit
@@ -178,8 +194,8 @@ V4 schema, digest domain and process provenance. The old V3 root and V1 signer
 remain the PacketV2 route; there is no automatic fallback. Component tests
 exercise both routes, real synthetic application signing and lifecycle
 rejection. Packet/compiler/runner observations in the root tests are bounded
-fixtures, not a Rust execution or target-node campaign. The managed caller
-still needs to select the new route.
+fixtures, not a Rust execution or target-node campaign. The fresh campaign
+recorded above used the managed caller's selected V4 route.
 The confirmed-deposit chain now has a V2 mint draft with all five compiler
 bindings, derived from the exact setup-bound candidate and reserve observation.
 Its collector retains that draft, candidate, observation, target and deposit
@@ -191,8 +207,7 @@ wire formats are unchanged. The new draft
 has its own schema and digest domain; generic evidence and outer mint-proof
 receipts keep their existing byte-collection and attestation semantics. These
 receipts do not activate a runtime profile, authorize an operational mint or
-prove Ergo consensus. The managed caller still needs to select the new route
-before a fresh campaign.
+prove Ergo consensus.
 
 The V3 setup now retains its exact V2 compiler provenance for deposit
 construction. Its caller can construct the source-lock and reserve-transition
@@ -213,7 +228,8 @@ acceptance or canonical confirmation. Existing generic check-receipt schemas
 remain byte/target/signer-bound checks, not V2 lifecycle or transport authority.
 The historical campaign caller retains its old packet, deposit authorization,
 observation and tracker paths. The separate V2 composition selects the new
-consumers; its fixed worker/CLI now requires fresh campaign promotion and execution.
+consumers; its fixed worker/CLI completed the local tracker campaign recorded
+above. Fresh execution is next due for the changed withdrawal consumer.
 
 The managed setup session now exposes that V3/V2 execution sequence through
 its existing signer and mining-credential ownership boundary. Separate phase
@@ -248,8 +264,8 @@ outcome; confirmation rechecks exact successor bytes and fresh canonical
 inclusion/depth after observation. Component tests use real WASM signing and
 SQLite with bounded loopback HTTP fixtures. A separate fresh-node test covers
 managed process lineage, without submitting the tracker transaction. These
-results do not establish canonical tracker admission; the real V3 campaign
-caller is the next consumer.
+component results do not establish canonical tracker admission. The completed
+fresh campaign above supplies that separate local execution evidence.
 
 Scoped test preparation is complete. The selected fresh-custody V2 positive
 uses no unrelated static compiler pair; all 114 ordinary provisioning cases
@@ -300,10 +316,11 @@ remain binding. V149 remains terminal and must not be retried or inspected.
 2. Select one independently testable producer-to-consumer boundary, normally
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
-3. Use the cheapest decisive check first. For the current tracker boundary,
-   reuse the frozen V2 WASM/JVM/node-code checks while their inputs match. Close
-   the distinct V2 setup/operational identity join before provisioning fresh
-   boxes and checking the exact candidate on the selected node.
+3. Use the cheapest decisive check first. For the withdrawal boundary,
+   reuse the frozen V2 constructor and JVM matrices while their inputs match.
+   Exercise retained custody, distinct external fees and exact predecessor
+   reobservation before the next complete fresh-node campaign. Its new inputs
+   still require fresh checks; historical admission cannot authorize payout.
    Raw error strings, RPC payloads, logs, journals and local statuses never
    become evidence authority.
 4. A complete bounded diagnostic may identify the first failing field, but
