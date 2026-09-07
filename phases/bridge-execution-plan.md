@@ -117,6 +117,7 @@ legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
 frozen foundations + selected launch mode + fresh-owner application execution
   -> exact tracker transport and canonical admission [local campaign passed]
   -> burn/checkpoint binding + profile-bound DUP insertion + external-fee payout [local campaign passed]
+  -> typed FED genesis initialization + configured federation + runtime execution permission
   -> operational FED mint caller through the selected runtime admission consumer
   -> composed two-way recovery and cross-profile replay cutover
   -> exact target/custody activation and operational rehearsal
@@ -128,16 +129,70 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Selected FED mint consumer -> operational caller | Connect the packet-bound runtime admission and mint transition to a running isolated Frontier target, preserving the canonical committed deposit and one mint identity | The current campaign's source-locked TestClient mint is not an operational route. Do not reopen the unrestricted owner-mint entrypoint or use a local receipt as authority |
-| 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
-| 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
-| 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
+| **Now** | Selected FED profile -> executable target initialization | Implement typed greenfield genesis initialization with a build-bound federation and distinct execution/public-activation permissions | The main runtime blocks profile execution; its Sudo-free genesis has no V4 profile. Its reference keys are not an operational federation. Preserve all existing inert targets and LAB evidence |
+| 2 | Initialized target -> operational mint caller | Submit the exact proof-bound reservation through native dispatch, then mint from its parent-state reservation on the running isolated target | No receipt, observer or unrestricted owner-mint call substitutes for the deciding runtime consumer |
+| 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
+| 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
+| 5 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
 
 ## Next Executable Batches
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Operational FED mint caller | Depends on the reviewed packet-bound source-proof consumer and the selected runtime profile | Trace the source-locked TestClient admission into the real runtime dispatch and caller. Reject unsupported activation or profile semantics before any mint. Prove one committed-deposit mint on the isolated target, with duplicate, absent-commitment and wrong-binding negatives; preserve ordinary daemon holds until this route has its deciding consumer |
+| FED runtime initialization | Runtime configuration and typed genesis consumer | Compile an exact explicitly supplied federation, reject reference authority in the operational profile, validate the complete genesis application, install one immutable height-zero V4 profile and enforcement state, and keep Sudo/public Root activation disabled. Prove genesis-to-first-block behavior and isolated invalid-profile/state negatives. Do not enable the existing main runtime by changing one flag |
+| Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
+| Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
+
+### Operational Mint Bootstrap Decision
+
+The source audit at `f8f7c9f6d29f51ac293c777532b8f2cad33b0219` found a
+missing runtime prerequisite, not a missing forwarding wrapper. In
+`sources/frontier/0001-bridge-runtime-commitment.patch`, pallet 12 call 5
+(`activate_pooled_reserve_mint_reservation_profile_v4`) requires Root and a
+compile-time permission. The same permission also gates reservation and mint
+execution. The main runtime disables it and selects fixed reference proof
+keys. Its typed genesis config accepts only a quarantine address. The
+authority-safe chain-spec producer removes Sudo. Consequently that target
+cannot reach V4 activation through the existing calls.
+
+The LAB runtime instead compiles supplied public federation keys and the
+TestClient initializes the profile through a signed Sudo call before removing
+Sudo. This is valid local component evidence, but not the initialization path
+of the Sudo-free running target. Call 6 (`reserve_pooled_reserve_mint_v4`)
+accepts a signed submitter and verifies the source proof; it writes a
+reservation, not a mint. A later Ethereum transaction must match the unchanged
+parent-state reservation, application code, token effects and replay identity.
+
+The selected implementation direction is typed, greenfield genesis-bound
+initialization. V4 already permits activation height zero; do not revise its
+wire format, domains or statement meaning. A new target must derive its own
+complete profile/family identities and cannot relabel an older nonzero-height
+packet. Validate after EVM genesis accounts are initialized: exact bridge/token
+code, token ownership, bridge configuration, unpaused state, quarantine
+address, empty reservation/replay state and Sudo absence. Genesis failure must
+prevent a usable target, not leave a partially initialized mint route.
+
+Separate permission to execute a genesis-authorized profile from permission to
+activate one through a public Root call. The operational variant must bind its
+configured federation in the runtime build; a profile ID cannot replace its
+compiled signer set. Retain the current default runtime and compatibility
+fixtures unchanged. Unknown profiles, incomplete configuration and reference
+authority in the operational variant fail closed. This is an implementation
+direction, not an activation or runtime-acceptance claim.
+
+Before implementation promotion, close these concrete obligations:
+
+| Boundary | Deciding evidence |
+|---|---|
+| Provisioning order | Exact build/profile/application/genesis dependency graph without a self-referential genesis-hash definition; chain domain and actual genesis identity are bound separately |
+| Genesis to first block | Actual runtime genesis build and first block with the full application state; wrong code, owner, token, pause, Sudo, height, proof profile and partial-state negatives |
+| Immutable initialization | No second initialization, replacement through Root, reference-key substitution, legacy reactivation or raw-storage initialization route |
+| Reservation to mint | Existing source-proof predicates and parent-state atomicity, plus actual native/Ethereum dispatch; a rejected candidate block is not proof of safe transaction-pool admission |
+| Reference delivery | Fresh-node two-way run with the configured operational runtime and retained negative matrices; LAB/TestClient results remain separately labelled |
+
+Do not add a new post-genesis administrator merely to unlock the old target.
+A migration target needs its own authenticated cutover and replay history;
+greenfield initialization does not satisfy that obligation.
 
 The dedicated withdrawal-fee funding API binds DUP-genesis operator change
 output 1, separate authorization and response domains, and its own closed
