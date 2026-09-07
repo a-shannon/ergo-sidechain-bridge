@@ -19,7 +19,7 @@ when their exact boundary is reached; do not discard their safety obligations.
 
 | Track | Deliverable | Deciding trust model | State |
 |---|---|---|---|
-| **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. Local component and campaign evidence exists; the full tracker-to-payout lifecycle is not closed |
+| **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. The local tracker-to-payout campaign passed; operational mint integration and composed two-way recovery remain open |
 | **WP-06-STARK / Gate 5** | An Ergo-verifiable trustless upgrade | An activated verifier checks the separately versioned statement and finality semantics before value release | Frozen pending a compatible activated target. Not a prerequisite for the federated reference |
 
 Neither track currently supports a production-ready or mainnet-ready claim.
@@ -37,7 +37,8 @@ establish deployment safety or independent operator custody.
 - Local campaign evidence covers setup, a committed reserve, packet-bound
   mint, burn, application checkpoint production and funded V2 tracker admission.
   The mint consumer used a source-locked TestClient. This does not establish
-  an enabled operational mint route or a completed withdrawal.
+  an enabled operational mint route. The separate completed withdrawal
+  campaign is recorded below.
 - The ordinary daemon cannot initiate new owner minting or legacy payout
   transport. Deposits on that route remain refundable while the selected
   authenticated mint route is unavailable. Preserve these holds.
@@ -87,6 +88,22 @@ establish deployment safety or independent operator custody.
   The campaign disposes its custody on return; its receipt cannot resume a
   withdrawal or authorize payout. The next fresh campaign must retain the
   required custody and live target through the withdrawal consumer.
+- The complete withdrawal campaign at
+  `1f2e138fe89233e48bdd58aa5cc7c4cd5816698a` passed with
+  `local_withdrawal_v2_canonically_confirmed`. Withdrawal transaction
+  `281ac86bf491141cb16aca62145cee14b8eaa6af9428c1214c8578162247092d`
+  was accepted and confirmed at height 251. The terminal receipt digest is
+  `0a44a96fff4b732dc414b21a29e322135fb74e6f24553daec5e825b0d0f57f85`.
+  Payout, reserve and DUP successors were checked on both local nodes.
+  The 10,000,000-nanoERG payout reduced reserve value from 25,000,000 to
+  15,000,000 and liability from 15,000,000 to 5,000,000; miner fees were
+  funded separately. Owned processes and listeners stopped after completion.
+  This closes the fresh local withdrawal milestone, not operational mint,
+  cross-profile replay cutover, independent custody or Gate 5.
+  The campaign reused its raw-verified original Frontier source checkout
+  after an offline build reproduced the pinned runtime exactly. Moving the
+  same source to another root had changed its WASM bytes; cross-root build
+  reproducibility remains unestablished. No artifact pin or guard was relaxed.
 
 ## Critical Path
 
@@ -99,8 +116,9 @@ legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
 ```text
 frozen foundations + selected launch mode + fresh-owner application execution
   -> exact tracker transport and canonical admission [local campaign passed]
-  -> burn/checkpoint binding + global DUP insertion + external-fee payout
-  -> composed two-way recovery and operational integration
+  -> burn/checkpoint binding + profile-bound DUP insertion + external-fee payout [local campaign passed]
+  -> operational FED mint caller through the selected runtime admission consumer
+  -> composed two-way recovery and cross-profile replay cutover
   -> exact target/custody activation and operational rehearsal
   -> profile-correct evidence + final independent assurance
   -> FED-7 federated reference package
@@ -110,8 +128,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Owned campaign -> canonical payout | Run one fresh complete synthetic campaign through the fixed command's explicit withdrawal operation | The caller now connects check, authorization, three-input reservation, single transport and confirmation. Local funded tracker admission passed; fresh-node withdrawal acceptance and canonical payout remain open. Reserve decrease equals burned liability, not liability plus miner fee |
-| 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
+| **Now** | Selected FED mint consumer -> operational caller | Connect the packet-bound runtime admission and mint transition to a running isolated Frontier target, preserving the canonical committed deposit and one mint identity | The current campaign's source-locked TestClient mint is not an operational route. Do not reopen the unrestricted owner-mint entrypoint or use a local receipt as authority |
+| 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
 
@@ -119,7 +137,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Fresh complete withdrawal campaign | Depends on the composed check/transport/confirmation path and its independent review | Use fresh synthetic ownership and the actual application burn. Fund both distinct fees before fixing the tracker window, admit the tracker, check and transport the withdrawal once, then verify canonical payout and reserve/DUP successors. Do not insert an intermediate funding-only or checker-only fresh-node campaign |
+| Operational FED mint caller | Depends on the reviewed packet-bound source-proof consumer and the selected runtime profile | Trace the source-locked TestClient admission into the real runtime dispatch and caller. Reject unsupported activation or profile semantics before any mint. Prove one committed-deposit mint on the isolated target, with duplicate, absent-commitment and wrong-binding negatives; preserve ordinary daemon holds until this route has its deciding consumer |
 
 The dedicated withdrawal-fee funding API binds DUP-genesis operator change
 output 1, separate authorization and response domains, and its own closed
@@ -189,15 +207,16 @@ canonical payout, reserve and DUP successor checks and successful owned-resource
 cleanup. Check-only, tracker-only, copied and failed-campaign receipts cannot
 acquire its process provenance. An ambiguous transport response never causes a
 second submission. This command-level integration is covered by orchestration
-and boundary tests; its first fresh-node withdrawal campaign is still pending.
+and boundary tests, and the fresh-node withdrawal campaign recorded above.
 Neither the command nor its receipt establishes operational mint, independent
 custody, global replay cutover, Gate 5 closure or production readiness.
 
 Then connect the operational mint caller, exercise both directions through
 recovery, and finish target/custody rehearsal and FED-7.
-A source-locked TestClient mint is not the operational mint route. Synthetic
-withdrawal construction is not a completed exit. Do not omit either consumer
-from the final delivery contract.
+A source-locked TestClient mint is not the operational mint route. The completed
+local exit does not close operational integration or recovery. Reuse the
+withdrawal evidence while its inputs remain unchanged; do not repeat it as an
+intermediate milestone before connecting the mint consumer.
 
 ## Reference Checkpoints
 

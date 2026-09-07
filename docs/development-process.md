@@ -69,6 +69,13 @@ input closure and the producer's actual process-provenance rules. Prepare a
 profile on demand, once per required scope; do not compile unrelated profiles
 in a global hook for a narrow test selection.
 
+Source checkouts and locked dependency caches may also be reused after exact
+source validation. Fresh campaign custody and chain state do not require a new
+source directory. Path remapping alone does not prove cross-root build
+reproducibility: compare the produced runtime bytes before carrying a build pin
+to another root. A mismatch requires diagnosis, not a weaker comparison or an
+unreviewed replacement pin.
+
 Never cache or restore sessions, private custody, claimed handles, authorizations,
 journals, target observations or node-check results as new authority. Fresh
 synthetic signers and signer-bound compilation remain fresh where required.
