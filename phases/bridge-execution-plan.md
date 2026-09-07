@@ -104,6 +104,15 @@ establish deployment safety or independent operator custody.
   after an offline build reproduced the pinned runtime exactly. Moving the
   same source to another root had changed its WASM bytes; cross-root build
   reproducibility remains unestablished. No artifact pin or guard was relaxed.
+- The [dedicated FED genesis runtime](../docs/federated-genesis-runtime.md)
+  now passes native full-genesis and first-block integration. Overlay 0004
+  installs the exact height-zero V4 profile only after validating its compiled
+  federation and fresh application state; public Root activation stays off.
+  Eight runtime integration tests, three build-profile tests, all 114 main
+  runtime tests and the LAB default genesis test pass. This is not a running
+  node target: WASM/build pins, typed chain-spec provisioning and operational
+  reservation/mint dispatch remain open. The old source locks and completed
+  withdrawal campaign retain their original scope.
 
 ## Critical Path
 
@@ -117,7 +126,8 @@ legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
 frozen foundations + selected launch mode + fresh-owner application execution
   -> exact tracker transport and canonical admission [local campaign passed]
   -> burn/checkpoint binding + profile-bound DUP insertion + external-fee payout [local campaign passed]
-  -> typed FED genesis initialization + configured federation + runtime execution permission
+  -> typed FED genesis + compiled federation [native first-block checks passed]
+  -> exact WASM/node selection + reviewed typed chain-spec provisioning
   -> operational FED mint caller through the selected runtime admission consumer
   -> composed two-way recovery and cross-profile replay cutover
   -> exact target/custody activation and operational rehearsal
@@ -129,7 +139,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Selected FED profile -> executable target initialization | Implement typed greenfield genesis initialization with a build-bound federation and distinct execution/public-activation permissions | The main runtime blocks profile execution; its Sudo-free genesis has no V4 profile. Its reference keys are not an operational federation. Preserve all existing inert targets and LAB evidence |
+| **Now** | Native-verified FED genesis -> selected running target | Bind the dedicated runtime to node selection and typed chain-spec provisioning; produce exact WASM/build pins and check the configured genesis on the isolated target | Native genesis is implemented in overlay 0004. No node selects it yet; no old LAB artifact or packet may substitute. Preserve all existing inert targets and LAB evidence |
 | 2 | Initialized target -> operational mint caller | Submit the exact proof-bound reservation through native dispatch, then mint from its parent-state reservation on the running isolated target | No receipt, observer or unrestricted owner-mint call substitutes for the deciding runtime consumer |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -139,7 +149,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| FED runtime initialization | Runtime configuration and typed genesis consumer | Compile an exact explicitly supplied federation, reject reference authority in the operational profile, validate the complete genesis application, install one immutable height-zero V4 profile and enforcement state, and keep Sudo/public Root activation disabled. Prove genesis-to-first-block behavior and isolated invalid-profile/state negatives. Do not enable the existing main runtime by changing one flag |
+| FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
+| FED target binding | Next; depends on native initialization | Select the dedicated runtime without enabling the existing main runtime; build and pin its WASM, bind reviewed application/profile/chain identities through a typed genesis producer, and verify the fresh isolated target. No circular genesis identity or old LAB artifact substitution |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 
@@ -180,12 +191,16 @@ fixtures unchanged. Unknown profiles, incomplete configuration and reference
 authority in the operational variant fail closed. This is an implementation
 direction, not an activation or runtime-acceptance claim.
 
-Before implementation promotion, close these concrete obligations:
+Native initialization is implemented by the separate
+[FED genesis overlay](../docs/federated-genesis-runtime.md). Its code-hash
+checks bind profile-declared code, not an independent audited allowlist.
+Reviewed application and chain identity therefore remain target-provisioning
+obligations. Before operational promotion, close the remaining obligations:
 
 | Boundary | Deciding evidence |
 |---|---|
 | Provisioning order | Exact build/profile/application/genesis dependency graph without a self-referential genesis-hash definition; chain domain and actual genesis identity are bound separately |
-| Genesis to first block | Actual runtime genesis build and first block with the full application state; wrong code, owner, token, pause, Sudo, height, proof profile and partial-state negatives |
+| Genesis to first block | Native closure passed with the full application and isolated negatives; new WASM and selected-node execution still required |
 | Immutable initialization | No second initialization, replacement through Root, reference-key substitution, legacy reactivation or raw-storage initialization route |
 | Reservation to mint | Existing source-proof predicates and parent-state atomicity, plus actual native/Ethereum dispatch; a rejected candidate block is not proof of safe transaction-pool admission |
 | Reference delivery | Fresh-node two-way run with the configured operational runtime and retained negative matrices; LAB/TestClient results remain separately labelled |
