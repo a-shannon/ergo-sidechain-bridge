@@ -186,6 +186,8 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
       ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
         'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission',
         'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+        'submitSubstrateFederatedIsolatedDevnetWithdrawalV2',
+        'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
       ])],
       ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set([
         'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
@@ -1381,6 +1383,9 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot',
       'SubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt',
       'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt',
+      'runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot',
+      'SubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt',
+      'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt',
     ]),
   ],
   [
@@ -1612,6 +1617,12 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
       ])],
       ['assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt', new Set([
+        'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+      ])],
+      ['runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot', new Set([
+        'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
+      ])],
+      ['assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt', new Set([
         'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
       ])],
     ]),

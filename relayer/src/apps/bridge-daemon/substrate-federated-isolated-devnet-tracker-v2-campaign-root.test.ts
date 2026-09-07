@@ -10,6 +10,12 @@ const fixture = vi.hoisted(() => ({
   prepared: undefined as any,
   withdrawalClaim: undefined as any,
   withdrawal: undefined as any,
+  withdrawalGate: undefined as Promise<void> | undefined, gatedStep: '',
+  payoutPatch: {} as Record<string, unknown>,
+  state: undefined as object | undefined,
+  withdrawalAuthorization: Object.freeze({ authorizationDigestHex: '74'.repeat(32) }),
+  withdrawalAttempt: Object.freeze({ expectedTxId: '61'.repeat(32), durableAttemptDigestHex: '75'.repeat(32) }),
+  withdrawalSubmission: undefined as any,
   assetIdHex: '00'.repeat(32),
   owner: Object.freeze({ owner: 'synthetic' }),
   signer: Object.freeze({ publicKeyHex: '02' + '11'.repeat(32),
@@ -47,7 +53,7 @@ async function action(phase: string, callback: (target: never) => Promise<unknow
 
 vi.mock('node:fs', () => ({ mkdirSync: () => step('mkdir') }));
 vi.mock('../../state-tracker.js', () => ({ StateTracker: class {
-  constructor() { step('state'); }
+  constructor() { step('state'); fixture.state = this; }
   close() { step('state.close'); }
 } }));
 vi.mock('ergo-lib-wasm-nodejs', () => ({ default: {} }));
@@ -194,6 +200,34 @@ vi.mock('../../substrate-federated-isolated-devnet-checked-submission-transport-
     expect(fixture.active).toBe('transport'); expect(attempt).toBe(fixture.attempt);
     expect(submission).toBe(fixture.submission); step('finalize'); return { journalDigestHex: '44'.repeat(32) };
   },
+  submitSubstrateFederatedIsolatedDevnetWithdrawalV2: async (target: unknown, attempt: unknown) => {
+    inPhase('confirmation', target); expect(attempt).toBe(fixture.withdrawalAttempt); step('submit.withdrawal');
+    if (fixture.gatedStep === 'submit.withdrawal') await fixture.withdrawalGate;
+    return fixture.withdrawalSubmission;
+  },
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2: (attempt: unknown, submission: unknown) => {
+    expect(fixture.active).toBe('confirmation'); expect(attempt).toBe(fixture.withdrawalAttempt);
+    expect(submission).toBe(fixture.withdrawalSubmission); step('finalize.withdrawal');
+    return { journalDigestHex: '76'.repeat(32) };
+  },
+}));
+vi.mock('../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', () => ({
+  authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2: async (check: unknown, target: unknown) => {
+    inPhase('confirmation', target); expect(check).toBe(fixture.withdrawal); step('authorize.withdrawal');
+    if (fixture.gatedStep === 'authorize.withdrawal') await fixture.withdrawalGate;
+    return fixture.withdrawalAuthorization;
+  },
+  reserveSubstrateFederatedIsolatedDevnetWithdrawalV2: (authorization: unknown, state: unknown) => {
+    expect(fixture.active).toBe('confirmation'); expect(authorization).toBe(fixture.withdrawalAuthorization);
+    expect(state).toBe(fixture.state); step('reserve.withdrawal'); return fixture.withdrawalAttempt;
+  },
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalV2: async (attempt: unknown, target: unknown, confirmation: any) => {
+    inPhase('confirmation', target); expect(attempt).toBe(fixture.withdrawalAttempt);
+    expect(confirmation.observationDigestHex).toBe('77'.repeat(32)); step('confirm.withdrawal');
+    if (fixture.gatedStep === 'confirm.withdrawal') await fixture.withdrawalGate;
+    return { expectedTxId: fixture.withdrawalAttempt.expectedTxId, status: 'confirmed',
+      confirmationHeight: 230, confirmationHeaderId: '78'.repeat(32), ...fixture.payoutPatch };
+  },
 }));
 vi.mock('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', () => ({
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1: () => { step('observer'); return {}; },
@@ -205,6 +239,11 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
   normalizePegInCandidatePlan: (input: unknown) => input,
   normalizeFrontierApplicationRunnerPlan: (input: unknown) => input,
   waitForCanonicalConfirmation: async (_observer: unknown, txId: unknown) => {
+    if (txId === fixture.withdrawalAttempt.expectedTxId) {
+      expect(fixture.active).toBe('confirmation'); step('wait.withdrawal');
+      if (fixture.gatedStep === 'wait.withdrawal') await fixture.withdrawalGate;
+      return { observationDigestHex: '77'.repeat(32) };
+    }
     expect(txId).toBe(fixture.attempt.expectedTxId); step('wait.confirmation'); return { observationDigestHex: '45'.repeat(32) };
   },
   finalizeReceipt: (body: object) => {
@@ -218,6 +257,9 @@ import { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot as run,
   runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot as runWithdrawal,
   assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt as assertWithdrawalReceipt }
   from './substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
+import { runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot as runCompleteWithdrawal,
+  assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt as assertCompleteWithdrawalReceipt }
+  from './substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
 
 function input() {
   return { build: {}, lifecycle: { sourceHistory: { acceptance: { bridgeAddress: 'bridge', tokenAddress: 'token' } } },
@@ -229,6 +271,9 @@ beforeEach(() => {
   fixture.calls.length = 0; fixture.active = ''; fixture.fault = ''; fixture.cleanupFault = '';
   fixture.buildGate = undefined; fixture.setupInput = undefined; fixture.finalizedReceipt = undefined;
   fixture.withdrawalClaim = undefined; fixture.assetIdHex = '00'.repeat(32);
+  fixture.withdrawalGate = undefined; fixture.gatedStep = ''; fixture.payoutPatch = {}; fixture.state = undefined;
+  fixture.withdrawalSubmission = { status: 'accepted', submittedTxId: fixture.withdrawalAttempt.expectedTxId,
+    responseDigestHex: '79'.repeat(32) };
   const leaf = { sidechainIdHex: '51'.repeat(32), sidechainBlockHashHex: '52'.repeat(32),
     sidechainTxHashHex: '53'.repeat(32), eventIndex: 3,
     burnIdHex: deriveTrustlessBurnIdHex({ sidechainIdHex: '51'.repeat(32), sidechainTxHashHex: '53'.repeat(32), eventIndex: 3 }),
@@ -262,7 +307,8 @@ beforeEach(() => {
     reserve: { inputValueNanoErg: '20000000', outputValueNanoErg: '10000000',
       inputLiabilityNanoErg: '10000000', outputLiabilityNanoErg: '0' },
     duplicatePrevention: { inputDigestHex: '68'.repeat(33), outputDigestHex: '69'.repeat(33) },
-    boxes: { trackerDataInput: { boxId: '70'.repeat(32) }, payout: { boxId: '71'.repeat(32) } } },
+    boxes: { trackerDataInput: { boxId: '70'.repeat(32) }, payout: { boxId: '71'.repeat(32) },
+      reserveSuccessor: { boxId: '7a'.repeat(32) }, duplicatePreventionSuccessor: { boxId: '7b'.repeat(32) } } },
     signedCandidate: { signedTransactionDigestHex: '72'.repeat(32), signedTransactionBytesSha256Hex: '73'.repeat(32),
       signedTransactionBytesLength: 1024 },
     checkedResult: { checkerIdentity: { path: '/transactions/check' }, signerContext: { publicKeyHex: fixture.signer.publicKeyHex } } };
@@ -365,7 +411,87 @@ describe('tracker V2 managed campaign composition', () => {
     expect(fixture.setupInput).not.toHaveProperty('withdrawalCheck');
     expect(fixture.calls).not.toContain('check.withdrawal');
     expect(() => assertWithdrawalReceipt(result.receipt)).toThrow(/provenance/);
+    expect(() => assertCompleteWithdrawalReceipt(result.receipt)).toThrow(/provenance/);
   });
+
+  it.each(['accepted', 'ambiguous'] as const)('completes %s withdrawal in the live callback before cleanup', async status => {
+    fixture.withdrawalSubmission.status = status;
+    fixture.withdrawalSubmission.submittedTxId = status === 'accepted' ? fixture.withdrawalAttempt.expectedTxId : null;
+    const result = await runCompleteWithdrawal(input() as never);
+    const steps = ['confirm', 'check.withdrawal', 'authorize.withdrawal', 'reserve.withdrawal', 'submit.withdrawal',
+      'finalize.withdrawal', 'wait.withdrawal', 'confirm.withdrawal', 'node.stop', 'owner.dispose'];
+    expect(fixture.calls.filter(call => steps.includes(call))).toEqual(steps);
+    expect(fixture.calls.filter(call => call === 'submit.withdrawal')).toHaveLength(1);
+    expect(fixture.active).toBe('');
+    expect(() => assertCompleteWithdrawalReceipt(result.receipt)).not.toThrow();
+    for (const value of [{ ...result.receipt }, result.receipt.withdrawalCheck, result.receipt.withdrawalCheck.trackerCampaign]) {
+      expect(() => assertCompleteWithdrawalReceipt(value)).toThrow(/provenance/);
+    }
+    expect(() => assertWithdrawalReceipt(result.receipt)).toThrow(/provenance/);
+    expect(() => assertReceipt(result.receipt)).toThrow(/provenance/);
+    expect(result.receipt.schema).toBe('e2s.substrate-federated-isolated-devnet-withdrawal-v2-campaign');
+    expect(result.receipt.status).toBe('local_withdrawal_v2_canonically_confirmed');
+    expect(result.receipt.withdrawal).toMatchObject({
+      authorizationDigestHex: fixture.withdrawalAuthorization.authorizationDigestHex,
+      durableAttemptDigestHex: fixture.withdrawalAttempt.durableAttemptDigestHex,
+      transportStatus: status, journalDigestHex: '76'.repeat(32),
+      confirmation: { expectedTxId: fixture.withdrawalAttempt.expectedTxId, confirmationHeight: 230,
+        confirmationHeaderIdHex: '78'.repeat(32), observationDigestHex: '77'.repeat(32) },
+      payoutBoxIdHex: fixture.withdrawal.packet.boxes.payout.boxId,
+      reserveSuccessorBoxIdHex: fixture.withdrawal.packet.boxes.reserveSuccessor.boxId,
+      duplicatePreventionSuccessorBoxIdHex: fixture.withdrawal.packet.boxes.duplicatePreventionSuccessor.boxId,
+    });
+    expect(result.receipt.boundaries).toMatchObject({ payoutAuthorized: true, withdrawalTransportPerformed: true,
+      canonicalPayoutObserved: true, canonicalReserveSuccessorObserved: true, canonicalDuplicatePreventionSuccessorObserved: true,
+      independentAttestorCustodyEstablished: false, operationalMintEnabled: false, globalReplayInsertionEstablished: false,
+      fundsAuthorityEstablished: false, gate5Closed: false, trustlessStatusEstablished: false, productionReadinessEstablished: false });
+  });
+
+  it('keeps check-only results and calls outside completed withdrawal authority', async () => {
+    const result = await runWithdrawal(input() as never);
+    expect(() => assertCompleteWithdrawalReceipt(result.receipt)).toThrow(/provenance/);
+    expect(fixture.calls).not.toContain('authorize.withdrawal');
+    expect(fixture.calls).not.toContain('submit.withdrawal');
+  });
+
+  it.each(['authorize.withdrawal', 'reserve.withdrawal', 'submit.withdrawal', 'finalize.withdrawal',
+    'wait.withdrawal', 'confirm.withdrawal'])(
+    'fails closed at %s without issuing completed provenance', async fault => {
+      fixture.fault = fault;
+      await expect(runCompleteWithdrawal(input() as never)).rejects.toThrow(`injected ${fault}`);
+      expect(fixture.calls).not.toContain('receipt');
+      expect(fixture.calls.at(-1)).toBe('owner.dispose');
+      expect(fixture.calls).toContain('node.stop'); expect(fixture.calls).toContain('state.close');
+      expect(fixture.calls.filter(call => call === 'submit.withdrawal').length).toBeLessThanOrEqual(1);
+    });
+
+  it.each([{ expectedTxId: 'ff'.repeat(32) }, { status: 'accepted' },
+    { confirmationHeight: null }, { confirmationHeaderId: null }])('rejects incomplete payout %j', async patch => {
+    fixture.payoutPatch = patch;
+    await expect(runCompleteWithdrawal(input() as never)).rejects.toThrow(/lacks exact confirmed payout/);
+    expect(fixture.calls).not.toContain('receipt'); expect(fixture.calls).toContain('owner.dispose');
+  });
+
+  it.each(['authorize.withdrawal', 'submit.withdrawal', 'wait.withdrawal', 'confirm.withdrawal'])(
+    'awaits %s without expiring target or disposing ownership', async stage => {
+      fixture.gatedStep = stage;
+      let release!: () => void;
+      fixture.withdrawalGate = new Promise<void>(resolve => { release = resolve; });
+      const pending = runCompleteWithdrawal(input() as never);
+      await vi.waitFor(() => expect(fixture.calls).toContain(stage));
+      expect(fixture.active).toBe('confirmation'); expect(fixture.calls).not.toContain('node.stop');
+      expect(fixture.calls).not.toContain('receipt');
+      release(); const result = await pending;
+      expect(() => assertCompleteWithdrawalReceipt(result.receipt)).not.toThrow();
+    });
+
+  it.each(['node.stop', 'state.close', 'revoke.1', 'owner.dispose'])(
+    'withholds completed withdrawal provenance when %s fails', async fault => {
+      fixture.cleanupFault = fault;
+      await expect(runCompleteWithdrawal(input() as never)).rejects.toThrow(/cleanup failed/);
+      expect(() => assertCompleteWithdrawalReceipt(fixture.finalizedReceipt)).toThrow(/provenance/);
+      expect(fixture.calls).toContain('revoke.4'); expect(fixture.calls).toContain('owner.dispose');
+    });
 
   it.each(['missing', 'future', 'early-window'])(
     'rejects %s withdrawal fee confirmation before anchor work', async fault => {

@@ -54,7 +54,14 @@ import {
 import {
   submitSubstrateFederatedIsolatedDevnetTrackerV2Admission,
   finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalV2,
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2,
+  reserveSubstrateFederatedIsolatedDevnetWithdrawalV2,
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalV2,
+} from '../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js';
 import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 }
   from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import { StateTracker } from '../../state-tracker.js';
@@ -80,15 +87,32 @@ const RECEIPTS = new WeakSet<object>();
 const WITHDRAWAL_RECEIPT_SCHEMA = 'e2s.substrate-federated-isolated-devnet-withdrawal-v2-check-campaign';
 const WITHDRAWAL_RECEIPT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_WITHDRAWAL_V2_CHECK_CAMPAIGN';
 const WITHDRAWAL_RECEIPTS = new WeakSet<object>();
+const COMPLETED_WITHDRAWAL_RECEIPT_SCHEMA = 'e2s.substrate-federated-isolated-devnet-withdrawal-v2-campaign';
+const COMPLETED_WITHDRAWAL_RECEIPT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_WITHDRAWAL_V2_CAMPAIGN';
+const COMPLETED_WITHDRAWAL_RECEIPTS = new WeakSet<object>();
+type CampaignMode = 'tracker' | 'withdrawal-check' | 'withdrawal';
 type SetupSession = Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
 type WithdrawalCheck = Awaited<ReturnType<SetupSession['checkWithdrawalV2']>>;
 type WithdrawalClaim = Parameters<SetupSession['checkWithdrawalV2']>[0];
+interface WithdrawalCompletion {
+  readonly authorizationDigestHex: string;
+  readonly durableAttemptDigestHex: string;
+  readonly transportStatus: 'accepted' | 'ambiguous';
+  readonly transportResponseDigestHex: string | null;
+  readonly journalDigestHex: string;
+  readonly confirmation: Readonly<{
+    expectedTxId: string;
+    confirmationHeight: number;
+    confirmationHeaderIdHex: string;
+    observationDigestHex: string;
+  }>;
+}
 
 /** Own the full V2 campaign; no caller-supplied execution ports or legacy fallback. */
 export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot(
   input: RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput,
 ) {
-  const result = await runOwnedCampaign(input, false);
+  const result = await runOwnedCampaign(input, 'tracker');
   RECEIPTS.add(result.trackerReceipt);
   return Object.freeze({ receipt: result.trackerReceipt });
 }
@@ -97,13 +121,23 @@ export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot(
 export async function runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot(
   input: RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput,
 ) {
-  const result = await runOwnedCampaign(input, true);
+  const result = await runOwnedCampaign(input, 'withdrawal-check');
   if (result.withdrawalReceipt === undefined) throw new Error('withdrawal campaign produced no checked receipt');
   WITHDRAWAL_RECEIPTS.add(result.withdrawalReceipt);
   return Object.freeze({ receipt: result.withdrawalReceipt });
 }
 
-async function runOwnedCampaign(input: RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput, withdrawalCheck: boolean) {
+/** Execute one local withdrawal and finish canonical confirmation before cleanup. */
+export async function runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot(
+  input: RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput,
+) {
+  const result = await runOwnedCampaign(input, 'withdrawal');
+  if (result.completedWithdrawalReceipt === undefined) throw new Error('withdrawal campaign produced no confirmed receipt');
+  COMPLETED_WITHDRAWAL_RECEIPTS.add(result.completedWithdrawalReceipt);
+  return Object.freeze({ receipt: result.completedWithdrawalReceipt });
+}
+
+async function runOwnedCampaign(input: RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput, mode: CampaignMode) {
   const buildInput = input.build;
   const lifecycle = input.lifecycle;
   const pegInInput = input.pegIn;
@@ -165,7 +199,7 @@ async function runOwnedCampaign(input: RunSubstrateFederatedIsolatedDevnetTracke
     state = new StateTracker(join(journalRoot, 'state-store'));
     await node.startMining();
     receipt = await runCampaign({
-      node, setup, application, state, markerDirectory, withdrawalCheck,
+      node, setup, application, state, markerDirectory, mode,
       lifecycle, pegIn, applicationRunner, requestSha256Hex,
       buildReceipt: built.receipt,
       expectedProfilePins: {
@@ -201,7 +235,7 @@ async function runOwnedCampaign(input: RunSubstrateFederatedIsolatedDevnetTracke
 
 async function runCampaign(input: Readonly<{
   node: ReturnType<typeof createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1>;
-  withdrawalCheck: boolean;
+  mode: CampaignMode;
   setup: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
   application: ReturnType<typeof createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV4>;
   state: StateTracker;
@@ -214,12 +248,13 @@ async function runCampaign(input: Readonly<{
   buildReceipt: Awaited<ReturnType<typeof buildSubstrateFederatedIsolatedDevnetErgoNodeV1>>['receipt'];
 }>) {
   const { node, setup, state } = input;
+  const withdrawalCheck = input.mode !== 'tracker';
   const managed = await node.withMiningActiveExecutionTarget(target => executeSubstrateFederatedIsolatedDevnetManagedSetupV2({
     lifecycle: input.lifecycle, setupSession: setup, continuation: input.application,
     expectedProfilePins: input.expectedProfilePins, target, pegIn: input.pegIn,
     applicationRunner: input.applicationRunner, state, markerDirectory: input.markerDirectory,
     completionDeadline: performance.now() + APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS,
-    ...(input.withdrawalCheck ? { withdrawalCheck: true as const } : {}),
+    ...(withdrawalCheck ? { withdrawalCheck: true as const } : {}),
   }));
   const prepared = managed.value;
   const checkpoint = prepared.applicationCheckpoint;
@@ -229,13 +264,13 @@ async function runCampaign(input: Readonly<{
   const genesisHeaderIdHex = prepared.batch.request.target.genesisHeaderIdHex;
   const priorSnapshot = managed.receipt.finalSnapshot;
   const withdrawalFee = prepared.withdrawalFeeFunding;
-  if (input.withdrawalCheck && (withdrawalFee === undefined
+  if (withdrawalCheck && (withdrawalFee === undefined
     || withdrawalFee.confirmationHeight === null || !Number.isSafeInteger(withdrawalFee.confirmationHeight)
     || withdrawalFee.confirmationHeight < 1 || withdrawalFee.confirmationHeight > priorSnapshot.fullHeight
     || BigInt(statement.admissionValidFromErgoHeight) < BigInt(withdrawalFee.confirmationHeight))) {
     throw new Error('withdrawal V2 admission window precedes confirmed withdrawal fee funding');
   }
-  const withdrawalClaim = input.withdrawalCheck ? deriveApplicationWithdrawalClaim(prepared) : undefined;
+  const withdrawalClaim = withdrawalCheck ? deriveApplicationWithdrawalClaim(prepared) : undefined;
   if (prepared.feeFunding.confirmationHeight > priorSnapshot.fullHeight
     || BigInt(statement.admissionValidFromErgoHeight) < BigInt(prepared.feeFunding.confirmationHeight)) {
     throw new Error('tracker V2 admission window precedes confirmed external-fee funding');
@@ -279,7 +314,7 @@ async function runCampaign(input: Readonly<{
       feeInputBox: prepared.feeFunding.feeInputBox, feePayerPublicKeyHex: setup.signer.publicKeyHex,
     });
     const checkInput = { context, transaction, observedHeaderContext: headers };
-    const check = input.withdrawalCheck
+    const check = withdrawalCheck
       ? await setup.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(checkInput, target)
       : await setup.checkFrozenTrackerV2Candidate(checkInput, target);
     const authorization = await authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(check, target);
@@ -296,12 +331,37 @@ async function runCampaign(input: Readonly<{
     return { submission, journalDigestHex: finalized.journalDigestHex };
   });
   let withdrawal: WithdrawalCheck | undefined;
+  let withdrawalCompletion: WithdrawalCompletion | undefined;
   const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {
     const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, genesisHeaderIdHex);
     const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
       performance.now() + 2 * 60_000, 'tracker-v2-admission');
     const stored = await confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target, confirmation);
-    if (withdrawalClaim !== undefined) withdrawal = await setup.checkWithdrawalV2(withdrawalClaim, target);
+    if (withdrawalClaim !== undefined) {
+      withdrawal = await setup.checkWithdrawalV2(withdrawalClaim, target);
+      if (input.mode === 'withdrawal') {
+        const withdrawalAuthorization = await authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2(withdrawal, target);
+        const withdrawalAttempt = reserveSubstrateFederatedIsolatedDevnetWithdrawalV2(withdrawalAuthorization, state);
+        const submission = await submitSubstrateFederatedIsolatedDevnetWithdrawalV2(target, withdrawalAttempt);
+        const finalized = finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2(withdrawalAttempt, submission);
+        const payoutConfirmation = await waitForCanonicalConfirmation(observer, withdrawalAttempt.expectedTxId,
+          performance.now() + 2 * 60_000, 'withdrawal-v2');
+        const payout = await confirmSubstrateFederatedIsolatedDevnetWithdrawalV2(withdrawalAttempt, target, payoutConfirmation);
+        if (payout.expectedTxId !== withdrawal.packet.transaction.txId || payout.status !== 'confirmed'
+          || payout.confirmationHeight === null || payout.confirmationHeaderId === null) {
+          throw new Error('withdrawal V2 campaign lacks exact confirmed payout');
+        }
+        withdrawalCompletion = Object.freeze({
+          authorizationDigestHex: withdrawalAuthorization.authorizationDigestHex,
+          durableAttemptDigestHex: withdrawalAttempt.durableAttemptDigestHex,
+          transportStatus: submission.status, transportResponseDigestHex: submission.responseDigestHex,
+          journalDigestHex: finalized.journalDigestHex,
+          confirmation: Object.freeze({ expectedTxId: payout.expectedTxId,
+            confirmationHeight: payout.confirmationHeight, confirmationHeaderIdHex: payout.confirmationHeaderId,
+            observationDigestHex: payoutConfirmation.observationDigestHex }),
+        });
+      }
+    }
     return {
       expectedTxId: attempt.expectedTxId, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
       confirmationHeight: stored.confirmationHeight,
@@ -349,7 +409,7 @@ async function runCampaign(input: Readonly<{
       trustlessStatusEstablished: false, productionReadinessEstablished: false,
     },
   }, RECEIPT_DOMAIN);
-  if (!input.withdrawalCheck) return { trackerReceipt, withdrawalReceipt: undefined };
+  if (!withdrawalCheck) return { trackerReceipt, withdrawalReceipt: undefined, completedWithdrawalReceipt: undefined };
   if (withdrawal === undefined || withdrawalFee === undefined) throw new Error('withdrawal V2 campaign check is absent');
   const packet = withdrawal.packet;
   const withdrawalReceipt = finalizeReceipt({
@@ -386,7 +446,22 @@ async function runCampaign(input: Readonly<{
       withdrawalTransportPerformed: false, canonicalPayoutObserved: false,
     },
   }, WITHDRAWAL_RECEIPT_DOMAIN);
-  return { trackerReceipt, withdrawalReceipt };
+  if (input.mode === 'withdrawal-check') return { trackerReceipt, withdrawalReceipt, completedWithdrawalReceipt: undefined };
+  if (withdrawalCompletion === undefined) throw new Error('withdrawal V2 campaign completion is absent');
+  const completedWithdrawalReceipt = finalizeReceipt({
+    schema: COMPLETED_WITHDRAWAL_RECEIPT_SCHEMA, version: 1 as const,
+    status: 'local_withdrawal_v2_canonically_confirmed' as const,
+    requestSha256Hex: input.requestSha256Hex,
+    withdrawalCheck: withdrawalReceipt,
+    withdrawal: { ...withdrawalCompletion,
+      payoutBoxIdHex: packet.boxes.payout.boxId,
+      reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
+      duplicatePreventionSuccessorBoxIdHex: packet.boxes.duplicatePreventionSuccessor.boxId },
+    boundaries: { ...withdrawalReceipt.boundaries,
+      payoutAuthorized: true, withdrawalTransportPerformed: true, canonicalPayoutObserved: true,
+      canonicalReserveSuccessorObserved: true, canonicalDuplicatePreventionSuccessorObserved: true },
+  }, COMPLETED_WITHDRAWAL_RECEIPT_DOMAIN);
+  return { trackerReceipt, withdrawalReceipt, completedWithdrawalReceipt };
 }
 
 export type SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt =
@@ -394,6 +469,8 @@ export type SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt =
 
 export type SubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt =
   NonNullable<Awaited<ReturnType<typeof runCampaign>>['withdrawalReceipt']>;
+export type SubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt =
+  NonNullable<Awaited<ReturnType<typeof runCampaign>>['completedWithdrawalReceipt']>;
 
 export function assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt(
   value: unknown,
@@ -408,6 +485,14 @@ export function assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignR
 ): asserts value is Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt> {
   if (value === null || typeof value !== 'object' || !Object.isFrozen(value) || !WITHDRAWAL_RECEIPTS.has(value)) {
     throw new Error('withdrawal V2 campaign receipt lacks completed process provenance');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt> {
+  if (value === null || typeof value !== 'object' || !Object.isFrozen(value) || !COMPLETED_WITHDRAWAL_RECEIPTS.has(value)) {
+    throw new Error('completed withdrawal V2 campaign receipt lacks completed process provenance');
   }
 }
 

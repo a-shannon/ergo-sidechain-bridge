@@ -58,6 +58,8 @@ describe('layer import rules', () => {
     'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot',
     'runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot',
     'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt',
+    'runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot',
+    'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt',
   ])('permits only the fixed V2 worker to import %s', binding => {
     const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
     const rootSpecifier = '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';

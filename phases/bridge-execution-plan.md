@@ -110,7 +110,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Owned campaign -> canonical payout | Connect the checked-withdrawal caller to the authorization/reservation/transport/confirmation component, then run one fresh complete synthetic campaign | The component composes real signatures, SQLite and loopback HTTP fixtures. Local funded tracker admission passed; fresh-node withdrawal acceptance and canonical payout remain open. Reserve decrease equals burned liability, not liability plus miner fee |
+| **Now** | Owned campaign -> canonical payout | Run one fresh complete synthetic campaign through the fixed command's explicit withdrawal operation | The caller now connects check, authorization, three-input reservation, single transport and confirmation. Local funded tracker admission passed; fresh-node withdrawal acceptance and canonical payout remain open. Reserve decrease equals burned liability, not liability plus miner fee |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; integrate the operational application root | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -119,7 +119,6 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Owned withdrawal campaign and command | Depends on the composed withdrawal lifecycle and the live tracker-confirmation target | Invoke authorization, three-input reservation, transport and confirmation inside the owned callback; expose the complete result through the fixed worker/command without relabelling a check-only receipt. Await terminal cleanup. No journal row or prior receipt restores authority |
 | Fresh complete withdrawal campaign | Depends on the composed check/transport/confirmation path and its independent review | Use fresh synthetic ownership and the actual application burn. Fund both distinct fees before fixing the tracker window, admit the tracker, check and transport the withdrawal once, then verify canonical payout and reserve/DUP successors. Do not insert an intermediate funding-only or checker-only fresh-node campaign |
 
 The dedicated withdrawal-fee funding API binds DUP-genesis operator change
@@ -134,9 +133,9 @@ fee outputs, because re-inclusion can preserve their bytes.
 This is a component boundary exercised with fresh local signatures, SQLite
 and loopback HTTP fixtures, not a completed withdrawal or a fresh-node funding
 campaign. Its confirmation API does not turn local RPC agreement into an
-independent consensus proof. Wire this API into the retained withdrawal
-consumer before the next fresh-node run; do not insert a funding-only campaign
-or recreate historical tracker evidence.
+independent consensus proof. The retained withdrawal consumer now uses this
+API; do not insert a funding-only campaign or recreate historical tracker
+evidence.
 
 The setup session now has an explicit retained-withdrawal route. It derives
 the complete V2 transaction from the original compiler, deposit reserve
@@ -160,8 +159,8 @@ original session checks the full withdrawal inside the still-owned tracker
 confirmation callback. The tracker-only entrypoint and receipt remain separate.
 The new receipt records a checked transaction, not payout authorization or
 confirmation, and gains process provenance only after owned-resource cleanup.
-These caller tests establish orchestration; no fresh-node withdrawal acceptance
-is claimed. Connect transport before the next fresh-node campaign.
+These caller tests establish check-only orchestration; no fresh-node withdrawal
+acceptance is claimed. The complete operation below has separate provenance.
 
 The withdrawal lifecycle now retains the original check and target lineage
 after signer disposal. Explicit authorization and a dedicated journal profile
@@ -175,9 +174,24 @@ nodes, and unchanged canonical transaction inclusion after those observations.
 
 The composed cases exercise accepted and ambiguous transport, stale fee input,
 and payout re-inclusion with real compiler/signing/journal implementations and
-synthetic HTTP chain state. They do not prove independent consensus, fresh-node
-acceptance or completed campaign integration. The fixed command still does not
-select this withdrawal lifecycle; that caller join is the next batch.
+synthetic HTTP chain state. They do not prove independent consensus or
+fresh-node acceptance.
+
+The complete managed campaign now calls that lifecycle inside the still-owned
+tracker-confirmation callback. Its fixed worker selects it only when the exact
+final argument pair is `--operation withdrawal`; omitting the pair preserves
+the tracker-only operation. The worker remains behind
+`relayer/src/scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts`
+and same-process request creation with fresh synthetic custody.
+
+The complete receipt uses `local_withdrawal_v2_canonically_confirmed` only after
+canonical payout, reserve and DUP successor checks and successful owned-resource
+cleanup. Check-only, tracker-only, copied and failed-campaign receipts cannot
+acquire its process provenance. An ambiguous transport response never causes a
+second submission. This command-level integration is covered by orchestration
+and boundary tests; its first fresh-node withdrawal campaign is still pending.
+Neither the command nor its receipt establishes operational mint, independent
+custody, global replay cutover, Gate 5 closure or production readiness.
 
 Then connect the operational mint caller, exercise both directions through
 recovery, and finish target/custody rehearsal and FED-7.

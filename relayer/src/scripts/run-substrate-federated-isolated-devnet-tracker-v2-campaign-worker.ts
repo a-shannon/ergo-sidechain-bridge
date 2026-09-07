@@ -8,6 +8,9 @@ import {
   runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot,
   assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt,
   type SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt,
+  runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot,
+  assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt,
+  type SubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt,
 } from '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
 import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../bridge-repository-layout.js';
 import { canonicalPathIdentity, isPathInside } from '../create-only-out-of-repository-artifact.js';
@@ -35,7 +38,8 @@ export function formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure(v
 /** The request creator must retain its fresh owner in this same process. */
 export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments(
   argv: readonly string[],
-): Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt>> {
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt
+  | SubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt>> {
   const args = parseArguments(argv);
   if (process.platform !== 'win32' || process.versions.node.split('.')[0] !== '24') {
     throw new Error('tracker V2 campaign worker requires Windows and Node 24');
@@ -92,7 +96,7 @@ export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorker
     throw new Error('tracker V2 preflight differs from the exact execution request');
   }
   const acceptance = loaded.input.lifecycle.sourceHistory.acceptance;
-  const result = await runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot({
+  const input = {
     ...loaded.input,
     requestBinding: loaded.requestBinding,
     pegIn: Object.freeze({ amountNanoErg: args.amount, recipientAddressHex: args.recipient }),
@@ -105,7 +109,16 @@ export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorker
       offline: true,
     }),
     trackerTransportJournalRoot,
-  });
+  };
+  if (args.operation === 'withdrawal') {
+    const result = await runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot(input);
+    assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt(result.receipt);
+    if (result.receipt.requestSha256Hex !== args.digest) {
+      throw new Error('withdrawal V2 campaign receipt belongs to a different request');
+    }
+    return result.receipt;
+  }
+  const result = await runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot(input);
   assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt(result.receipt);
   if (result.receipt.requestSha256Hex !== args.digest) {
     throw new Error('tracker V2 campaign receipt belongs to a different request');
@@ -115,7 +128,10 @@ export async function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorker
 
 function parseArguments(argv: readonly string[]) {
   const values = [...argv];
-  if (values.length !== FLAGS.length * 2 || FLAGS.some((flag, index) =>
+  const withdrawal = values.length === FLAGS.length * 2 + 2
+    && values[FLAGS.length * 2] === '--operation'
+    && values[FLAGS.length * 2 + 1] === 'withdrawal';
+  if ((values.length !== FLAGS.length * 2 && !withdrawal) || FLAGS.some((flag, index) =>
     values[index * 2] !== flag || typeof values[index * 2 + 1] !== 'string'
     || values[index * 2 + 1]!.length === 0 || values[index * 2 + 1]!.startsWith('--'))
     || !/^[0-9a-f]{64}$/u.test(values[3]!)
@@ -126,7 +142,8 @@ function parseArguments(argv: readonly string[]) {
   }
   return Object.freeze({ request: values[1]!, digest: values[3]!, amount: values[5]!,
     recipient: values[7]!, temporary: values[9]!, frontierCargo: values[11]!,
-    journal: values[13]!, relayerCargo: values[15]! });
+    journal: values[13]!, relayerCargo: values[15]!,
+    operation: withdrawal ? 'withdrawal' : 'tracker' });
 }
 
 function pathsOverlap(left: string, right: string): boolean {
