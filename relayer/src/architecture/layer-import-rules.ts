@@ -1851,6 +1851,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ])],
       ['assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', new Set([
         'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts',
+        'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         'substrate-federated-isolated-devnet-ergo-node-process-v1.test.ts',
         'substrate-federated-isolated-devnet-tracker-v2-provisioning.test.ts',
       ])],

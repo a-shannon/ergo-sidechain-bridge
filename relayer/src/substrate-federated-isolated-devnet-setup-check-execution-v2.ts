@@ -44,6 +44,11 @@ import {
 import { assertSubstrateFederatedTrackerV2ExternalFeeTransaction,
   type SubstrateFederatedTrackerV2ExternalFeeTransaction }
   from './substrate-federated-tracker-v2-external-fee.js';
+import { buildSubstrateFederatedBurnSettlementV2,
+  type SubstrateFederatedBurnSettlementV2Packet } from './substrate-federated-burn-settlement-v2.js';
+import type { SubstrateFederatedBurnClaimV1 } from './substrate-federated-burn-settlement-v1.js';
+import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 }
+  from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import {
   assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
   bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
@@ -80,6 +85,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
   assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
@@ -210,6 +216,8 @@ const TRACKER_PROTOCOL_V2_CHECKS = new WeakMap<object, Readonly<{
 }>>();
 const CLAIMED_TRACKER_V2_CHECKS = new WeakSet<object>();
 const REVALIDATED_TRACKER_V2_CHECKS = new WeakSet<object>();
+const TRACKER_V2_TRANSPORT_BINDINGS = new WeakMap<object,
+  Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>>();
 const TRACKER_V2_FRESHNESS = new WeakMap<object, Readonly<{
   check: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>;
   binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
@@ -225,6 +233,12 @@ export interface SubstrateFederatedIsolatedDevnetTrackerV2Check {
   readonly result: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result>;
   readonly setupRequestDigestHex: string;
   readonly feeFundingTransactionIdHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetWithdrawalV2Check {
+  readonly packet: Readonly<SubstrateFederatedBurnSettlementV2Packet>;
+  readonly signedCandidate: Readonly<LocalWasmExactBytesSignedCheckCandidate>;
+  readonly checkedResult: Readonly<LocalWasmOpaqueCheckResult>;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetTrackerV2Check(
@@ -311,6 +325,7 @@ export async function checkSubstrateFederatedIsolatedDevnetTrackerV2Transport(
     processBindingDigestHex: binding.processBindingDigestHex,
     executionTargetIdentityDigestHex: binding.executionTargetIdentityDigestHex,
   });
+  TRACKER_V2_TRANSPORT_BINDINGS.set(check, binding);
   return Object.freeze({ binding, checkedAcceptance });
 }
 
@@ -569,6 +584,14 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     input: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
     target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>>;
+  readonly checkFrozenTrackerV2CandidateRetainingWithdrawalSigner: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>>;
+  readonly checkWithdrawalV2: (
+    claim: Readonly<SubstrateFederatedBurnClaimV1>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check>>;
   readonly runForExecution: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1302,6 +1325,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let retainedTrackerFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1> | undefined;
     let retainedWithdrawalFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1> | undefined;
     let retainedCommittedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
+    let retainedWithdrawalCompiler: ReturnType<typeof getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3> | undefined;
+    let retainedWithdrawalTracker: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let state:
       | 'open'
@@ -1311,11 +1336,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'v3-source-lock-checked'
       | 'v3-tracker-fee-ready'
       | 'v3-tracker-ready'
+      | 'v2-withdrawal-ready'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
       | 'frozen-tracker-check-complete'
       | 'closed' = 'open';
     let terminalInvalidationRequested = false;
+    let withdrawalRouteSelected = false;
     const close = (): void => {
       if (state === 'closed') return;
       terminalInvalidationRequested = true;
@@ -1348,6 +1375,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       }
       retainedWithdrawalFeeCheck = undefined;
       retainedCommittedPegInPacket = undefined;
+      retainedWithdrawalCompiler = undefined;
+      retainedWithdrawalTracker = undefined;
       retainedPegInPacket = undefined;
       mnemonic = '';
       state = 'closed';
@@ -1360,6 +1389,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
         | 'v3-tracker-ready'
+        | 'v2-withdrawal-ready'
         | 'source-lock-check-complete'
         | 'committed-vault-check-complete'
         | 'frozen-tracker-check-complete',
@@ -1370,6 +1400,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
         | 'v3-tracker-ready'
+        | 'v2-withdrawal-ready'
         | 'source-lock-check-complete'
         | 'committed-vault-check-complete'
         | 'frozen-tracker-check-complete'
@@ -1455,6 +1486,58 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       }
       assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
     };
+    const checkTrackerV2 = async (
+      inputValue: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+      activeMnemonic: string,
+    ): Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check>> => {
+      const continuation = trackerFeeContinuation;
+      const feeCheck = retainedTrackerFeeCheck;
+      const context = inputValue.context;
+      const transaction = inputValue.transaction;
+      const observedHeaderContext = inputValue.observedHeaderContext;
+      if (continuation?.retainTrackerSigner !== true || feeCheck === undefined) {
+        throw new Error('retained tracker V2 signer or fee funding is absent');
+      }
+      assertSubstrateFederatedTrackerV2Context(context);
+      assertSubstrateFederatedTrackerV2ExternalFeeTransaction(transaction);
+      assertBridgeValidityTrackerObservedHeaderContextV1(observedHeaderContext);
+      const genesis = await materializeUnsignedTransaction(
+        structuredClone(continuation.batch.orderedTransactions[0]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+        'retained V3 tracker input',
+      );
+      if (canonicalJson(transaction.inputBoxes[0]) !== canonicalJson(genesis.outputs[0])
+        || canonicalJson(transaction.inputBoxes[1]) !== canonicalJson(feeCheck.transaction.outputs[0])) {
+        throw new Error('tracker V2 inputs differ from retained genesis and fee funding');
+      }
+      assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+      for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+        if (canonicalJson(await ngetDirect('/blocks/at/1', origin))
+          !== canonicalJson([continuation.batch.request.target.genesisHeaderIdHex])) {
+          throw new Error('tracker V2 frozen target genesis differs from setup');
+        }
+      }
+      const result = await executeSubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1({
+        compilerRequest: continuation.trackerCompilerRequest,
+        context, transaction, observedHeaderContext, target,
+        expectedSigner: { publicKeyHex: signer.publicKeyHex, p2pkErgoTreeHex: signer.p2pkErgoTreeHex, networkPrefix: signer.networkPrefix },
+        operations: {
+          captureTargetBinding: () => assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target),
+          observeInputBox: (boxId, origin) => ngetDirect(`/utxo/byId/${boxId}`, origin),
+          prepareCandidate: input => prepareLocalWasmRootCheckCandidates({
+            mnemonic: activeMnemonic, networkPrefix: input.networkPrefix, nodeOrigin: input.nodeOrigin,
+            headers: input.headers,
+            candidates: [{ role: input.role, eip12Tx: input.eip12Tx, expectedTxId: input.expectedTxId }],
+          }),
+          checkCandidate: (candidate, origin) => checkSignedTransaction(candidate, 'isolated tracker protocol V2 check', origin),
+        },
+      });
+      const check = Object.freeze({ result, setupRequestDigestHex: continuation.batch.request.requestDigestHex,
+        feeFundingTransactionIdHex: feeCheck.transaction.txId });
+      TRACKER_PROTOCOL_V2_CHECKS.set(check, Object.freeze({ target, result,
+        genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex }));
+      return check;
+    };
     const runForExecution = async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
       target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1520,6 +1603,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       },
       dispose: () => {
         if (state === 'running') {
+          if (withdrawalRouteSelected) terminalInvalidationRequested = true;
           throw new Error('isolated fixed setup-check session is running');
         }
         close();
@@ -1669,6 +1753,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
         const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
         WITHDRAWAL_FEE_CHECKS.set(result, Object.freeze({ batch: continuation.batch, target }));
+        retainedWithdrawalCompiler = getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3(continuation.batch, target);
         retainedWithdrawalFeeCheck = result;
         return result;
       }, 'v3-tracker-fee-ready'),
@@ -1732,53 +1817,116 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       checkFrozenTrackerV2Candidate: async (
         inputValue: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
         target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+      ) => consume('v3-tracker-ready', activeMnemonic => checkTrackerV2(inputValue, target, activeMnemonic), 'closed'),
+      checkFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (
+        input: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
       ) => consume('v3-tracker-ready', async activeMnemonic => {
+        withdrawalRouteSelected = true;
+        if (retainedCommittedPegInPacket === undefined || retainedWithdrawalFeeCheck === undefined
+          || retainedWithdrawalCompiler === undefined) {
+          throw new Error('withdrawal continuation requires the original deposit, compiler and distinct fee check');
+        }
+        const check = await checkTrackerV2(input, target, activeMnemonic);
+        retainedWithdrawalTracker = check;
+        return check;
+      }, 'v2-withdrawal-ready'),
+      checkWithdrawalV2: async (
+        claimValue: Readonly<SubstrateFederatedBurnClaimV1>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('v2-withdrawal-ready', async activeMnemonic => {
+        const claim = structuredClone(claimValue);
+        const tracker = retainedWithdrawalTracker;
+        const deposit = retainedCommittedPegInPacket;
+        const fee = retainedWithdrawalFeeCheck;
+        const compiler = retainedWithdrawalCompiler;
         const continuation = trackerFeeContinuation;
-        const feeCheck = retainedTrackerFeeCheck;
-        const context = inputValue.context;
-        const transaction = inputValue.transaction;
-        const observedHeaderContext = inputValue.observedHeaderContext;
-        if (continuation?.retainTrackerSigner !== true || feeCheck === undefined) {
-          throw new Error('retained tracker V2 signer or fee funding is absent');
+        const transport = tracker === undefined ? undefined : TRACKER_V2_TRANSPORT_BINDINGS.get(tracker);
+        if (tracker === undefined || deposit === undefined || fee === undefined || compiler === undefined
+          || continuation === undefined || transport === undefined) {
+          throw new Error('withdrawal check lacks retained deposit, fee, compiler or tracker transport');
         }
-        assertSubstrateFederatedTrackerV2Context(context);
-        assertSubstrateFederatedTrackerV2ExternalFeeTransaction(transaction);
-        assertBridgeValidityTrackerObservedHeaderContextV1(observedHeaderContext);
-        const genesis = await materializeUnsignedTransaction(
-          structuredClone(continuation.batch.orderedTransactions[0]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
-          'retained V3 tracker input',
+        const trackerTxId = tracker.result.transaction.unsignedTransactionIdHex;
+        const binding = assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId);
+        const assertActive = (): void => {
+          if (canonicalJson(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId))
+            !== canonicalJson(binding)) throw new Error('withdrawal check target binding changed');
+        };
+        const admitted = await materializeUnsignedTransaction(
+          structuredClone(tracker.result.transaction.eip12UnsignedTransaction) as unknown as Eip12UnsignedTransaction,
+          'withdrawal admitted tracker',
         );
-        if (canonicalJson(transaction.inputBoxes[0]) !== canonicalJson(genesis.outputs[0])
-          || canonicalJson(transaction.inputBoxes[1]) !== canonicalJson(feeCheck.transaction.outputs[0])) {
-          throw new Error('tracker V2 inputs differ from retained genesis and fee funding');
-        }
-        assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
-        for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
-          if (canonicalJson(await ngetDirect('/blocks/at/1', origin))
-            !== canonicalJson([continuation.batch.request.target.genesisHeaderIdHex])) {
-            throw new Error('tracker V2 frozen target genesis differs from setup');
+        const dup = await materializeUnsignedTransaction(
+          structuredClone(continuation.batch.orderedTransactions[1]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+          'withdrawal DUP genesis',
+        );
+        const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+          target, continuation.batch.request.target.genesisHeaderIdHex,
+        );
+        const txIds = [deposit.transactions.reserveTransition.txId, dup.txId, fee.transaction.txId, trackerTxId];
+        const observeConfirmations = async () => {
+          const confirmations = [];
+          for (const [index, txId] of txIds.entries()) {
+            const confirmation = await observer.observe(txId, PRIMARY_NODE_ORIGIN);
+            if (confirmation === null || confirmation.status !== 'confirmed') throw new Error(`withdrawal predecessor ${index} lacks canonical confirmation`);
+            confirmations.push(confirmation);
+          }
+          assertActive();
+          return confirmations;
+        };
+        const before = await observeConfirmations();
+        const headers = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
+        if (!Array.isArray(headers) || headers.length !== 10) throw new Error('withdrawal requires ten signing headers');
+        const height = selectLatestHeader(headers).header.height + 1;
+        const packet = await buildSubstrateFederatedBurnSettlementV2({
+          familyCompilerInput: {
+            trackerRequest: compiler.trackerRequest, trackerReceipt: compiler.trackerReceipt,
+            templates: compiler.familyTemplates,
+            duplicatePreventionGenesisInputBoxIdHex: compiler.familyReceipt.profile.duplicatePreventionNftIdHex,
+            pooledReserveGenesisInputBoxIdHex: compiler.familyReceipt.profile.pooledReserveNftIdHex,
+          },
+          familyCompilerReceipt: compiler.familyReceipt,
+          trackerState: { dataInput: admitted.outputs[0]!, history: [{
+            key: tracker.result.context.trackerTransition.trackerKeyHex,
+            value: tracker.result.context.trackerTransition.trackerValueHex,
+          }] },
+          reserveState: { predecessor: deposit.boxes.reserveSuccessor },
+          duplicatePreventionState: { predecessor: dup.outputs[0]!, historyKeys: [] },
+          feeFundingInput: fee.transaction.outputs[0]!, claim,
+          currentErgoHeight: height, creationHeight: height,
+        });
+        const observeInputs = async (): Promise<void> => {
+          for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+            for (const box of [packet.boxes.reservePredecessor, packet.boxes.duplicatePreventionPredecessor,
+              packet.boxes.feeFundingInput, packet.boxes.trackerDataInput]) {
+              const observed = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${box.boxId}`, origin), 'withdrawal live input');
+              if (canonicalJson(observed) !== canonicalJson(box)) throw new Error('withdrawal live input differs from retained lineage');
+            }
+          }
+          assertActive();
+        };
+        await observeInputs();
+        const prepared = await prepareLocalWasmRootCheckCandidates({
+          mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
+          candidates: [{ role: 'withdrawal-v2', eip12Tx: packet.transaction.eip12Tx, expectedTxId: packet.transaction.txId }],
+        });
+        const candidate = prepared.candidates[0];
+        if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
+          || prepared.candidates.length !== 1 || candidate?.expectedTxId !== packet.transaction.txId
+          || candidate.signedCandidate.txId !== packet.transaction.txId) throw new Error('withdrawal signer binding differs');
+        const checkedResult = await checkSignedTransaction(candidate.signedCandidate, 'isolated withdrawal V2 check', target.primaryNodeOrigin);
+        if (checkedResult === null) throw new Error('withdrawal JVM node check failed');
+        await observeInputs();
+        const after = await observeConfirmations();
+        for (let i = 0; i < before.length; i++) {
+          if (after[i]!.confirmationHeight !== before[i]!.confirmationHeight
+            || after[i]!.confirmationHeaderIdHex !== before[i]!.confirmationHeaderIdHex
+            || after[i]!.confirmations < before[i]!.confirmations
+            || after[i]!.observedAtHeight < before[i]!.observedAtHeight) {
+            throw new Error(`withdrawal canonical predecessor ${i} changed during check`);
           }
         }
-        const result = await executeSubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1({
-          compilerRequest: continuation.trackerCompilerRequest,
-          context, transaction, observedHeaderContext, target,
-          expectedSigner: { publicKeyHex: signer.publicKeyHex, p2pkErgoTreeHex: signer.p2pkErgoTreeHex, networkPrefix: signer.networkPrefix },
-          operations: {
-            captureTargetBinding: () => assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target),
-            observeInputBox: (boxId, origin) => ngetDirect(`/utxo/byId/${boxId}`, origin),
-            prepareCandidate: input => prepareLocalWasmRootCheckCandidates({
-              mnemonic: activeMnemonic, networkPrefix: input.networkPrefix, nodeOrigin: input.nodeOrigin,
-              headers: input.headers,
-              candidates: [{ role: input.role, eip12Tx: input.eip12Tx, expectedTxId: input.expectedTxId }],
-            }),
-            checkCandidate: (candidate, origin) => checkSignedTransaction(candidate, 'isolated tracker protocol V2 check', origin),
-          },
-        });
-        const check = Object.freeze({ result, setupRequestDigestHex: continuation.batch.request.requestDigestHex,
-          feeFundingTransactionIdHex: feeCheck.transaction.txId });
-        TRACKER_PROTOCOL_V2_CHECKS.set(check, Object.freeze({ target, result,
-          genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex }));
-        return check;
+        return Object.freeze({ packet, signedCandidate: candidate.signedCandidate, checkedResult });
       }, 'closed'),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,

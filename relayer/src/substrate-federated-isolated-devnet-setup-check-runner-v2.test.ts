@@ -73,6 +73,8 @@ const V2_COMMITTED_VAULT_RECEIPT = Object.freeze({ stage: 'v2-committed-vault' }
 const V3_FEE_CHECK = Object.freeze({ stage: 'v3-fee-check' });
 const V3_WITHDRAWAL_FEE_CHECK = Object.freeze({ stage: 'v3-withdrawal-fee-check' });
 const V2_TRACKER_CHECK = Object.freeze({ stage: 'v2-tracker-check' });
+const WITHDRAWAL_CLAIM = Object.freeze({ source: 'withdrawal-claim' });
+const WITHDRAWAL_CHECK = Object.freeze({ stage: 'withdrawal-check' });
 
 type FacadeSession = Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
 const MANAGED_PHASES = [
@@ -432,6 +434,64 @@ describe('managed facade V3 setup -> V2 tracker admission continuation', () => {
     mocks.registerSignerBinding.mockReturnValue(SIGNER_BINDING);
   });
 
+  it.each(['valid', 'before-tracker', 'tracker-only', 'disposed', 'failure', 'concurrent', 'legacy-interleave',
+    'dispose-during-tracker', 'dispose-during-check'] as const)(
+    'retains the full withdrawal continuation only in order: %s', async fault => {
+      const execution = executionSession();
+      mocks.createExecutionSession.mockResolvedValue(execution);
+      const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      try {
+        for (const phase of MANAGED_PHASES.slice(0, 3)) await phase.invoke(session);
+        await session.checkWithdrawalFeeFundingV3(TARGET as never);
+        await session.checkTrackerFeeFundingV3(TARGET as never);
+        if (fault === 'tracker-only') await session.checkFrozenTrackerV2Candidate(V2_TRACKER_INPUT as never, TARGET as never);
+        else if (fault !== 'before-tracker') {
+          if (fault === 'dispose-during-tracker') {
+            const gate = deferred<typeof V2_TRACKER_CHECK>();
+            execution.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner.mockImplementationOnce(() => gate.promise);
+            const pending = session.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(V2_TRACKER_INPUT as never, TARGET as never);
+            expect(() => session.dispose()).toThrow(/running/);
+            gate.resolve(V2_TRACKER_CHECK);
+            await expect(pending).rejects.toThrow(/invalidated/);
+            expect(execution.dispose).toHaveBeenCalledOnce();
+            await expect(session.checkWithdrawalV2(WITHDRAWAL_CLAIM as never, TARGET as never)).rejects.toThrow(/continuation/);
+            return;
+          }
+          expect(await session.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(V2_TRACKER_INPUT as never, TARGET as never))
+            .toBe(V2_TRACKER_CHECK);
+          expect(execution.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner).toHaveBeenCalledWith(V2_TRACKER_INPUT, TARGET);
+          expect(execution.dispose).not.toHaveBeenCalled();
+        }
+        if (fault === 'disposed') session.dispose();
+        if (fault === 'failure') execution.checkWithdrawalV2.mockRejectedValueOnce(new Error('synthetic complete withdrawal rejected'));
+        if (fault === 'legacy-interleave') {
+          await expect(session.checkFrozenTrackerV2Candidate(V2_TRACKER_INPUT as never, TARGET as never)).rejects.toThrow(/continuation/);
+        }
+        const gate = deferred<typeof WITHDRAWAL_CHECK>();
+        if (fault === 'concurrent' || fault === 'dispose-during-check') execution.checkWithdrawalV2.mockImplementationOnce(() => gate.promise);
+        const pending = session.checkWithdrawalV2(WITHDRAWAL_CLAIM as never, TARGET as never);
+        if (fault === 'concurrent') {
+          await expect(session.checkWithdrawalV2(WITHDRAWAL_CLAIM as never, TARGET as never)).rejects.toThrow(/continuation/);
+          gate.resolve(WITHDRAWAL_CHECK);
+        }
+        if (fault === 'dispose-during-check') {
+          expect(() => session.dispose()).toThrow(/running/);
+          gate.resolve(WITHDRAWAL_CHECK);
+        }
+        if (fault === 'valid') {
+          expect(await pending).toBe(WITHDRAWAL_CHECK);
+          expect(execution.checkWithdrawalV2).toHaveBeenCalledWith(WITHDRAWAL_CLAIM, TARGET);
+        } else {
+          await expect(pending).rejects.toThrow(fault === 'failure' ? /synthetic complete withdrawal rejected/ : /continuation|invalidated/);
+        }
+        expect(execution.dispose).toHaveBeenCalledOnce();
+        expect(mocks.revokeSignerBinding).toHaveBeenCalledOnce();
+        await expect(session.checkWithdrawalV2(WITHDRAWAL_CLAIM as never, TARGET as never)).rejects.toThrow(/continuation/);
+        await expect(session.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(V2_TRACKER_INPUT as never, TARGET as never)).rejects.toThrow(/continuation/);
+      } finally { session.dispose(); }
+    },
+  );
+
   it.each(['valid', 'before-vault', 'repeat', 'disposed', 'failure', 'concurrent', 'legacy-interleave'] as const)(
     'retains the managed withdrawal fee continuation only in order: %s', async fault => {
       const execution = executionSession();
@@ -664,6 +724,8 @@ function executionSession() {
     checkTrackerFeeFundingV3: vi.fn(async () => V3_FEE_CHECK),
     checkWithdrawalFeeFundingV3: vi.fn(async () => V3_WITHDRAWAL_FEE_CHECK),
     checkFrozenTrackerV2Candidate: vi.fn(async () => V2_TRACKER_CHECK),
+    checkFrozenTrackerV2CandidateRetainingWithdrawalSigner: vi.fn(async () => V2_TRACKER_CHECK),
+    checkWithdrawalV2: vi.fn(async () => WITHDRAWAL_CHECK),
   };
 }
 

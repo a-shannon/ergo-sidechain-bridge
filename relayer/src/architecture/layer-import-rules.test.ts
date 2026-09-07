@@ -336,6 +336,7 @@ describe('layer import rules', () => {
     ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
     ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
   ])('keeps the V2 admission capability %s#%s in its concrete owner', (module, symbol, owner) => {
     const source = `import { ${symbol} } from './${module}.js'; ${symbol}();`;
     const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };

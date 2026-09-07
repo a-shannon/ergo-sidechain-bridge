@@ -77,6 +77,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3'];
   readonly checkFrozenTrackerV2Candidate:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2Candidate'];
+  readonly checkFrozenTrackerV2CandidateRetainingWithdrawalSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkWithdrawalV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>>;
@@ -214,8 +218,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'v2-committed-vault-check-complete'
     | 'v3-withdrawal-fee-check-complete'
     | 'v3-tracker-fee-check-complete'
+    | 'v2-withdrawal-ready'
     | 'closed' = 'open';
   let terminalInvalidationRequested = false;
+  let withdrawalRouteSelected = false;
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   const close = (): void => {
     if (state === 'closed') return;
@@ -263,7 +269,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'v2-source-lock-check-complete'
       | 'v2-committed-vault-check-complete'
       | 'v3-withdrawal-fee-check-complete'
-      | 'v3-tracker-fee-check-complete',
+      | 'v3-tracker-fee-check-complete'
+      | 'v2-withdrawal-ready',
     operation: () => Promise<T>,
     successState:
       | 'setup-complete'
@@ -276,6 +283,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'v2-committed-vault-check-complete'
       | 'v3-withdrawal-fee-check-complete'
       | 'v3-tracker-fee-check-complete'
+      | 'v2-withdrawal-ready'
       | 'closed',
   ): Promise<T> => {
     if (state !== expectedState) {
@@ -316,6 +324,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     signer,
     dispose: () => {
       if (state === 'running') {
+        if (withdrawalRouteSelected) terminalInvalidationRequested = true;
         throw new Error('isolated fixed setup-check session is running');
       }
       if (
@@ -330,6 +339,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'v2-committed-vault-check-complete'
           || state === 'v3-withdrawal-fee-check-complete'
           || state === 'v3-tracker-fee-check-complete'
+          || state === 'v2-withdrawal-ready'
       ) {
         close();
       }
@@ -379,6 +389,19 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       () => execution.checkFrozenTrackerV2Candidate(input, target),
       'closed',
     ),
+    checkFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (
+      ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner']>
+    ) => consume(
+      'v3-tracker-fee-check-complete',
+      () => {
+        withdrawalRouteSelected = true;
+        return execution.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target);
+      },
+      'v2-withdrawal-ready',
+    ),
+    checkWithdrawalV2: async (
+      ...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2']>
+    ) => consume('v2-withdrawal-ready', () => execution.checkWithdrawalV2(claim, target), 'closed'),
     runForExecution: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
       target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,

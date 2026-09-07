@@ -119,7 +119,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|
-| Retained withdrawal check | Main owner; consumes the V3 setup, V2 deposit, distinct fee-funding lifecycle and admitted tracker | Wire withdrawal-fee funding before freezing the admission window. Select the withdrawal continuation before signer disposal. Retain the actual compiler receipts, deposit reserve successor, DUP genesis/history, admitted tracker successor and source burn, then reobserve those inputs and check the complete withdrawal while the owned target remains alive. Preserve the tracker-only route. No payout transport in this batch |
+| Managed withdrawal campaign | Main owner; consumes the retained V2 withdrawal checker and the V3 setup/application producers | Wire withdrawal-fee funding before freezing the admission window. Select the withdrawal continuation before signer disposal. Derive the burn claim from the actual application evidence and bind its root/count to the admitted statement. Invoke the complete withdrawal check inside the still-owned tracker-confirmation callback. Preserve the tracker-only route. No payout transport in this batch |
 | V2 withdrawal transport and confirmation | Depends on the checked withdrawal and its still-live custody/target | Bind explicit LAB authorization, all three input reservations, fresh revalidation and one-shot transport to the exact checked transaction. Confirm spent predecessors, reserve/DUP successors and payout against canonical history. Keep ambiguous transport outcomes non-retryable; a journal row or prior campaign receipt cannot restore authority |
 
 The dedicated withdrawal-fee funding API binds DUP-genesis operator change
@@ -137,6 +137,20 @@ campaign. Its confirmation API does not turn local RPC agreement into an
 independent consensus proof. Wire this API into the retained withdrawal
 consumer before the next fresh-node run; do not insert a funding-only campaign
 or recreate historical tracker evidence.
+
+The setup session now has an explicit retained-withdrawal route. It derives
+the complete V2 transaction from the original compiler, deposit reserve
+successor, exact DUP genesis, distinct fee output and admitted external-fee
+tracker successor. All four boxes are observed on both nodes before and after
+the check; the four creating transactions must remain canonically confirmed.
+The signer closes after this one check, on failure or on invalid concurrent
+use. The existing tracker-only route still closes immediately after its check.
+
+This checker covers the fresh setup's exact empty DUP lineage, not arbitrary
+migration history. Its composed tests use genuine compiler/signing/check
+implementations against synthetic HTTP chain state; they do not establish a
+fresh-node withdrawal. The campaign still needs the caller described above.
+The returned check is not payout transport or broadcast authorization.
 
 Then connect the operational mint caller, exercise both directions through
 recovery, and finish target/custody rehearsal and FED-7.

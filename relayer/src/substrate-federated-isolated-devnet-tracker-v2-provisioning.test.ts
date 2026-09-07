@@ -11,6 +11,8 @@ import { Mnemonic } from 'ethers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
+import { materializeUnsignedTransaction, type Eip12UnsignedTransaction } from './unsigned-ergo-transaction.js';
+import { buildTrustlessBurnInclusionProof, deriveTrustlessBurnIdHex } from './trustless-burn-proof.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1,
   buildBridgeValidityTrackerObservedHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
 import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
@@ -2355,9 +2357,20 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
     'admission-transport-headers-primary', 'admission-transport-headers-witness',
     'admission-transport-journal-drift', 'admission-ambiguous',
     'admission-confirmation-parent', 'admission-successor-drift',
-    'admission-confirmation-reincluded', 'admission-confirmation-depth', 'admission-unfinalized-row'] as const)(
+    'admission-confirmation-reincluded', 'admission-confirmation-depth', 'admission-unfinalized-row',
+    'withdrawal-valid', 'withdrawal-no-fee', 'withdrawal-before-transport', 'withdrawal-disposed', 'withdrawal-concurrent',
+    'withdrawal-wrong-target', 'withdrawal-wrong-claim', 'withdrawal-node-reject',
+    'withdrawal-input-0-primary', 'withdrawal-input-1-primary', 'withdrawal-input-2-primary', 'withdrawal-input-3-primary',
+    'withdrawal-input-0-witness', 'withdrawal-input-1-witness', 'withdrawal-input-2-witness', 'withdrawal-input-3-witness',
+    'withdrawal-post-input-0', 'withdrawal-post-input-1', 'withdrawal-post-input-2', 'withdrawal-post-input-3',
+    'withdrawal-post-witness-0', 'withdrawal-post-witness-1', 'withdrawal-post-witness-2', 'withdrawal-post-witness-3',
+    'withdrawal-dispose-during-tracker', 'withdrawal-dispose-during-check',
+    'withdrawal-execution-dispose-during-tracker', 'withdrawal-execution-dispose-during-check',
+    'withdrawal-reincluded-0', 'withdrawal-reincluded-1', 'withdrawal-reincluded-2', 'withdrawal-reincluded-3',
+    'withdrawal-pending-0', 'withdrawal-pending-1', 'withdrawal-pending-2', 'withdrawal-pending-3'] as const)(
     'retains exact V3 custody through funding into the protocol V2 checker: %s', async fault => {
-      const selected = fault === 'peg-in-v2'
+      const withdrawal = fault.startsWith('withdrawal-');
+      const selected = fault === 'peg-in-v2' || (withdrawal && !fault.includes('-execution-'))
         ? { kind: 'managed' as const, fixture: await prepareRootFixture(await createManagedSession(), true) }
         : { kind: 'execution' as const, fixture: await createRootFixture(true) };
       const fixture = selected.fixture;
@@ -2365,6 +2378,8 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
       const credentials = managed === undefined ? undefined : claimManagedMiningCredentials(managed);
       const miningCredential = 'miningCredential' in fixture.session
         ? fixture.session.miningCredential : credentials!.miningCredential;
+      const assertRetainedCustody = () => managed === undefined
+        ? assertMiningCredential(miningCredential, fixture.session.signer.publicKeyHex) : assertManagedSigner(managed.signer);
       const custody = vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
         .mockReturnValue(executionBinding);
       const frozenBinding = Object.freeze({ processBindingDigestHex: '51'.repeat(32),
@@ -2378,6 +2393,8 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
       try {
         await withObservations(async observed => {
           const target = executionTarget();
+          let withdrawalDeposit: ReturnType<typeof assertPegInV2> | undefined;
+          let withdrawalFee: Awaited<ReturnType<typeof fixture.session.checkWithdrawalFeeFundingV3>> | undefined;
           let batch: Awaited<ReturnType<typeof fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner>>;
           if (managed !== undefined) {
             expect(fixture.session).toBe(managed);
@@ -2387,11 +2404,13 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             if (selected.kind !== 'execution') {
               throw new Error('component case requires the execution session');
             }
-            batch = fault === 'default-closed'
+            batch = withdrawal
+              ? await selected.fixture.session.runForExecutionV3RetainingPegInAndTrackerSigner(fixture.input, target)
+              : fault === 'default-closed'
               ? await selected.fixture.session.runForExecutionV3RetainingTrackerFeeSigner(fixture.input, target, fixture.session.signer.publicKeyHex)
               : await selected.fixture.session.runForExecutionV3RetainingTrackerSigner(fixture.input, target);
           }
-          if (fault === 'peg-in-v2') {
+          if (fault === 'peg-in-v2' || withdrawal) {
             assertExecutionV3(batch, target);
             const family = fixture.input.sourceAndCompilerInput.familyReceipt;
             const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
@@ -2407,6 +2426,7 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
               creationHeights: { currentErgoHeight: height, sourceLockCreation: height, reserveTransition: height },
             });
             const packet = assertPegInV2(candidate, batch, target);
+            withdrawalDeposit = packet;
             const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
               currentHeight: height, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
             }).headers.map(header => header.raw);
@@ -2450,10 +2470,29 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             currentHeight: 1012, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
           }).headers.map(header => header.raw);
           observed.publishBox(boxes[1]!, fundingHeaders);
+          if (withdrawal && fault !== 'withdrawal-no-fee') {
+            const dup = await materializeUnsignedTransaction(
+              batch.orderedTransactions[1]!.issuance.unsignedTransactionBody as unknown as Eip12UnsignedTransaction,
+              'withdrawal fixture DUP',
+            );
+            observed.publishBox(dup.outputs[1]!, fundingHeaders);
+            withdrawalFee = await fixture.session.checkWithdrawalFeeFundingV3(target);
+          }
           const feeCheck = await fixture.session.checkTrackerFeeFundingV3(target);
           const { trackerRequest, trackerReceipt } = fixture.input.sourceAndCompilerInput;
+          const leaf = {
+            sidechainIdHex: trackerRequest.application.sidechainIdHex,
+            sidechainBlockHashHex: vector.input.statement.executionBlockHashHex as string,
+            sidechainTxHashHex: '63'.repeat(32), eventIndex: 3,
+            burnIdHex: deriveTrustlessBurnIdHex({ sidechainIdHex: trackerRequest.application.sidechainIdHex,
+              sidechainTxHashHex: '63'.repeat(32), eventIndex: 3 }),
+            recipientErgoTreeHashHex: Buffer.from(blakejs.blake2b(Buffer.from(fixture.session.signer.p2pkErgoTreeHex, 'hex'), undefined, 32)).toString('hex'),
+            amountNanoErg: '10000000', assetIdHex: '00'.repeat(32),
+          };
+          const proof = withdrawal ? buildTrustlessBurnInclusionProof([leaf], leaf.burnIdHex) : undefined;
           const statement = buildSubstrateFederatedCheckpointStatementV1({
             ...vector.input.statement, ...trackerRequest.application, profile: trackerRequest.profile,
+            ...(proof === undefined ? {} : { bridgeEventRootHex: proof.bridgeEventRootHex, burnLeafCount: proof.leafCount }),
           });
           const membership = buildErgoExtensionMembershipProof([
             { key: Buffer.from('0401', 'hex'), value: Buffer.from(
@@ -2490,27 +2529,58 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
             primaryReadOnly: true as const, witnessReadOnly: true as const,
             miningStopped: true as const, checkpointBound: true as const });
           const originalGet = ergoHelpers.ngetDirect;
-          const genesisDrift = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) =>
-            fault === 'wrong-genesis' && args[0] === '/blocks/at/1' ? ['ef'.repeat(32)] : await originalGet(...args));
+          let disposedDuringTracker = false;
+          const genesisDrift = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+            if (fault.endsWith('dispose-during-tracker') && !disposedDuringTracker && args[0] === '/blocks/at/1') {
+              disposedDuringTracker = true;
+              expect(() => fixture.session.dispose()).toThrow(/running/);
+            }
+            return fault === 'wrong-genesis' && args[0] === '/blocks/at/1' ? ['ef'.repeat(32)] : await originalGet(...args);
+          });
           try {
             if (fault === 'disposed') fixture.session.dispose();
             const input = { context: fault === 'copied-context' ? { ...context } : context, transaction, observedHeaderContext };
-            const pending = fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget);
+            const pending = withdrawal
+              ? fixture.session.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, frozenTarget)
+              : fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget);
+            if (fault === 'withdrawal-no-fee') {
+              await expect(pending).rejects.toThrow(/original deposit, compiler and distinct fee check/);
+              expect(() => assertManagedSigner(managed!.signer)).toThrow(/active process provenance/);
+              return;
+            }
+            if (fault.endsWith('dispose-during-tracker')) {
+              await expect(pending).rejects.toThrow(/invalidated/);
+              expect(disposedDuringTracker).toBe(true);
+              expect(assertRetainedCustody).toThrow(/revoked|active process provenance/);
+              expect(observed.submissionBodies).toHaveLength(0);
+              return;
+            }
             if (fault === 'concurrent') {
               await expect(fixture.session.checkFrozenTrackerV2Candidate(input, frozenTarget)).rejects.toThrow(/continuation/);
             }
-            if (fault === 'valid' || fault === 'peg-in-v2' || fault.startsWith('admission-')) {
+            if (fault === 'valid' || fault === 'peg-in-v2' || fault.startsWith('admission-') || withdrawal) {
               const checked = await pending;
               expect(checked.result.transaction.unsignedTransactionIdHex).toBe(transaction.unsignedTransactionIdHex);
               expect(checked.feeFundingTransactionIdHex).toBe(feeCheck.transaction.txId);
               expect(() => assertTrackerV2Check(checked, frozenTarget)).not.toThrow();
               expect(() => assertTrackerV2Check({ ...checked }, frozenTarget)).toThrow(/session provenance/);
               expect(() => assertTrackerV2Check(checked, { ...frozenTarget })).toThrow(/session provenance/);
-              expect(observed.checkBodies).toHaveLength(fault === 'peg-in-v2' ? 7 : 5);
+              expect(observed.checkBodies).toHaveLength(withdrawal ? 8 : fault === 'peg-in-v2' ? 7 : 5);
               expect(observed.checkBodies.at(-1)!.inputs).toHaveLength(2);
               expect(observed.submissionBodies).toHaveLength(0);
-              expect(() => assertMiningCredential(miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
-              if (managed !== undefined) {
+              if (withdrawal) {
+                expect(assertRetainedCustody).not.toThrow();
+                if (fault === 'withdrawal-before-transport') {
+                  await expect(fixture.session.checkWithdrawalV2({} as never, target))
+                    .rejects.toThrow(/lacks retained deposit, fee, compiler or tracker transport/);
+                  expect(() => assertManagedSigner(managed!.signer)).toThrow(/active process provenance/);
+                  expect(observed.submissionBodies).toHaveLength(0);
+                  return;
+                }
+              } else {
+                expect(() => assertMiningCredential(miningCredential, fixture.session.signer.publicKeyHex)).toThrow(/revoked/);
+              }
+              if (managed !== undefined && !withdrawal) {
                 expect(() => assertManagedSigner(managed.signer)).toThrow(/active process provenance/);
                 expect(() => claimManagedMiningCredentials(managed)).toThrow(/absent, partially claimed, or disposed/);
                 for (const credential of [credentials!.checkpointMiningCredential,
@@ -2521,7 +2591,95 @@ describe('owned synthetic session -> V3 no-submit setup root', () => {
               genesisDrift.mockRestore();
               await exerciseTrackerV2Admission(fault === 'peg-in-v2' ? 'valid' : fault, checked, frozenTarget, frozenBinding, observed, () => {
                 frozenCustody.mockImplementation(() => { throw new Error('synthetic frozen action expired'); });
-              });
+              }, withdrawal ? async confirmationTarget => {
+                const deposit = withdrawalDeposit!;
+                const fee = withdrawalFee!;
+                const dup = await materializeUnsignedTransaction(
+                  batch.orderedTransactions[1]!.issuance.unsignedTransactionBody as unknown as Eip12UnsignedTransaction,
+                  'withdrawal fixture DUP',
+                );
+                const admitted = await materializeUnsignedTransaction(
+                  transaction.eip12UnsignedTransaction as unknown as Eip12UnsignedTransaction, 'withdrawal fixture tracker',
+                );
+                const currentHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+                  currentHeight: 1050, anchorContextIndex: 1, anchorExtensionRootHex: '25'.repeat(32),
+                }).headers.map(header => header.raw);
+                for (const box of [deposit.boxes.reserveSuccessor, dup.outputs[0]!, fee.transaction.outputs[0]!]) {
+                  observed.publishBox(box, currentHeaders);
+                }
+                // Synthetic already-confirmed predecessors; this fixture does not
+                // claim a live deposit/funding campaign or mint execution.
+                for (const tx of [deposit.transactions.reserveTransition, dup, fee.transaction]) observed.publishConfirmed(tx.txId);
+                const txIds = [deposit.transactions.reserveTransition.txId, dup.txId, fee.transaction.txId, admitted.txId];
+                const claim = { trackerIdentity: { sourceNativeBlockHeight: statement.sourceNativeBlockHeight,
+                  sourceNativeBlockHashHex: statement.sourceNativeBlockHashHex, executionBlockHashHex: statement.executionBlockHashHex },
+                  burnLeaf: fault === 'withdrawal-wrong-claim' ? { ...leaf, amountNanoErg: '9000000' } : leaf,
+                  leafIndex: proof!.leafIndex, leafCount: proof!.leafCount, burnProof: proof!.proof,
+                  recipientErgoTreeHex: fixture.session.signer.p2pkErgoTreeHex };
+                const liveBoxes = [deposit.boxes.reserveSuccessor, dup.outputs[0]!, fee.transaction.outputs[0]!, admitted.outputs[0]!];
+                const beforeChecks = observed.checkBodies.length;
+                const originalRead = ergoHelpers.ngetDirect;
+                let injected = false;
+                const inputFault = /^withdrawal-input-([0-3])-(primary|witness)$/.exec(fault);
+                const postFault = /^withdrawal-post-(input|witness)-([0-3])$/.exec(fault);
+                const reincluded = /^withdrawal-reincluded-([0-3])$/.exec(fault);
+                const pendingTx = /^withdrawal-pending-([0-3])$/.exec(fault);
+                if (pendingTx) observed.setReportedDepth(txIds[Number(pendingTx[1])]!, 9);
+                const reads = vi.spyOn(ergoHelpers, 'ngetDirect').mockImplementation(async (...args) => {
+                  const value = await originalRead(...args);
+                  if (fault.endsWith('dispose-during-check') && !injected && args[0].startsWith('/utxo/byId/')) {
+                    injected = true;
+                    expect(() => fixture.session.dispose()).toThrow(/running/);
+                  }
+                  const isInput = inputFault && args[0] === `/utxo/byId/${liveBoxes[Number(inputFault[1])]!.boxId}`
+                    && args[1] === (inputFault[2] === 'primary' ? confirmationTarget.primaryNodeOrigin : confirmationTarget.witnessNodeOrigin);
+                  const isPost = postFault && observed.checkBodies.length > beforeChecks
+                    && args[0] === `/utxo/byId/${liveBoxes[Number(postFault[2])]!.boxId}`
+                    && args[1] === (postFault[1] === 'witness' ? confirmationTarget.witnessNodeOrigin : confirmationTarget.primaryNodeOrigin);
+                  if (isInput || isPost) { injected = true; return reidentifyBox(value, 'fe'.repeat(32)); }
+                  if (reincluded && !injected && observed.checkBodies.length > beforeChecks
+                    && args[0] === `/utxo/byId/${liveBoxes[3]!.boxId}` && args[1] === confirmationTarget.witnessNodeOrigin) {
+                    injected = true; observed.reincludePreservingTip(txIds[Number(reincluded[1])]!);
+                  }
+                  return value;
+                });
+                const rejected = fault === 'withdrawal-node-reject'
+                  ? vi.spyOn(fleet, 'checkSignedTransaction').mockResolvedValue(null) : undefined;
+                try {
+                  if (fault === 'withdrawal-disposed') fixture.session.dispose();
+                  const result = fixture.session.checkWithdrawalV2(claim, fault === 'withdrawal-wrong-target'
+                    ? { ...confirmationTarget } : confirmationTarget);
+                  if (fault === 'withdrawal-concurrent') {
+                    await expect(fixture.session.checkWithdrawalV2(claim, confirmationTarget)).rejects.toThrow(/continuation/);
+                  }
+                  if (fault === 'withdrawal-valid') {
+                    const checkedWithdrawal = await result;
+                    const packet = checkedWithdrawal.packet;
+                    expect(packet.transaction.eip12Tx.inputs.map(box => box.boxId)).toEqual(liveBoxes.slice(0, 3).map(box => box.boxId));
+                    expect(packet.transaction.eip12Tx.dataInputs.map(box => box.boxId)).toEqual([admitted.outputs[0]!.boxId]);
+                    expect(packet.reserve.inputValueNanoErg).toBe(String(deposit.boxes.reserveSuccessor.value));
+                    expect(BigInt(packet.reserve.inputValueNanoErg) - BigInt(packet.reserve.outputValueNanoErg))
+                      .toBe(BigInt(leaf.amountNanoErg));
+                    expect(packet.reserve.outputLiabilityNanoErg).toBe('0');
+                    expect(checkedWithdrawal.checkedResult.txId).toBe(packet.transaction.txId);
+                    expect(signedCheckOracle(observed.checkBodies.at(-1)!)).toBe(packet.transaction.txId);
+                  } else {
+                    const expected = inputFault || postFault ? /withdrawal live input differs/
+                      : reincluded ? new RegExp(`withdrawal canonical predecessor ${reincluded[1]} changed`)
+                        : pendingTx ? new RegExp(`withdrawal predecessor ${pendingTx[1]} lacks canonical confirmation`)
+                          : fault === 'withdrawal-disposed' ? /continuation/
+                            : fault === 'withdrawal-concurrent' || fault.endsWith('dispose-during-check') ? /invalidated by a concurrent transition/
+                              : fault === 'withdrawal-node-reject' ? /withdrawal JVM node check failed/
+                                : fault === 'withdrawal-wrong-target' ? /synthetic confirmation target differs/
+                                  : /burn|root|inclusion/;
+                    await expect(result).rejects.toThrow(expected);
+                    if (inputFault || postFault || reincluded || fault.endsWith('dispose-during-check')) expect(injected).toBe(true);
+                  }
+                  expect(assertRetainedCustody).toThrow(/revoked|active process provenance/);
+                  await expect(fixture.session.checkWithdrawalV2(claim, confirmationTarget)).rejects.toThrow(/continuation/);
+                  expect(observed.submissionBodies).toHaveLength(1);
+                } finally { reads.mockRestore(); rejected?.mockRestore(); }
+              } : undefined);
             } else {
               const expected = fault === 'wrong-input' || fault === 'wrong-fee' ? /inputs differ from retained/
                 : fault === 'wrong-genesis' ? /frozen target genesis differs/
@@ -3572,6 +3730,7 @@ async function exerciseTrackerV2Admission(
   frozenBinding: Readonly<{ processBindingDigestHex: string; executionTargetIdentityDigestHex: string }>,
   observed: ObservationFixture,
   expireFrozen: () => void,
+  afterConfirmation?: (target: ReturnType<typeof executionTarget>) => Promise<void>,
 ): Promise<void> {
   const checkedBodies = observed.checkBodies.filter(body =>
     signedCheckOracle(body) === checked.result.transaction.unsignedTransactionIdHex);
@@ -3613,6 +3772,7 @@ async function exerciseTrackerV2Admission(
     }));
   spies.push(vi.spyOn(ownedTargets, 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2')
     .mockImplementation((target, parent, txId) => {
+      if (target !== confirmationTarget) throw new Error('synthetic confirmation target differs');
       expect(target).toBe(confirmationTarget);
       expect(parent).toEqual(transportBinding);
       expect(txId).toBe(checked.result.transaction.unsignedTransactionIdHex);
@@ -3766,6 +3926,7 @@ async function exerciseTrackerV2Admission(
       expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)).toEqual(beforeConfirmation);
     } else {
       await expect(confirmed).resolves.toMatchObject({ expectedTxId: attempt.expectedTxId, status: 'confirmed' });
+      await afterConfirmation?.(confirmationTarget);
     }
     expect(observed.submissionBodies).toHaveLength(1);
   } finally {
@@ -3885,6 +4046,7 @@ async function withObservations<T>(
   const submissionBodies: Record<string, unknown>[] = [];
   const confirmations = new Map<string, { inclusionHeight: number; headerId: string }>();
   const confirmationReads = new Map<string, Set<string>>();
+  const reportedDepth = new Map<string, number>();
   const syntheticHeaderId = (height: number) => createHash('sha256')
     .update(`V166 synthetic confirmation header ${height}`).digest('hex');
   const start = async () => {
@@ -3952,7 +4114,7 @@ async function withObservations<T>(
             const readers = confirmationReads.get(id) ?? new Set<string>();
             readers.add(primary ? 'primary' : 'witness');
             confirmationReads.set(id, readers);
-            body = { id, ...confirmation, numConfirmations: tipHeight - confirmation.inclusionHeight };
+            body = { id, ...confirmation, numConfirmations: reportedDepth.get(id) ?? tipHeight - confirmation.inclusionHeight };
           }
         } else if (options.confirmSubmittedGenesis && /^\/blocks\/at\/[1-9][0-9]*$/.test(path)) {
           body = [syntheticHeaderId(Number(path.slice('/blocks/at/'.length)))];
@@ -4012,6 +4174,18 @@ async function withObservations<T>(
         tipHeight = prior.inclusionHeight + depth;
         tipHeaderId = syntheticHeaderId(tipHeight);
       },
+      publishConfirmed: txId => {
+        const inclusionHeight = tipHeight - 11;
+        confirmations.set(txId, { inclusionHeight, headerId: syntheticHeaderId(inclusionHeight) });
+      },
+      reincludePreservingTip: txId => {
+        const prior = confirmations.get(txId);
+        if (prior === undefined) throw new Error('synthetic re-inclusion requires a prior transaction');
+        const inclusionHeight = prior.inclusionHeight + 1;
+        if (tipHeight - inclusionHeight < 10) throw new Error('synthetic re-inclusion must preserve every other confirmation');
+        confirmations.set(txId, { inclusionHeight, headerId: syntheticHeaderId(inclusionHeight) });
+      },
+      setReportedDepth: (txId, depth) => { reportedDepth.set(txId, depth); },
       publishBox: (box, headers) => {
         json.set(box.boxId, structuredClone(box)); sigma.set(box.boxId, sigmaBytes(box));
         signingHeaders = headers;
@@ -4041,6 +4215,9 @@ interface ObservationFixture {
   readonly submissionBodies: readonly Record<string, unknown>[];
   readonly reincludeSubmitted: (txId: string, depth: number) => void;
   readonly setSubmittedDepth: (txId: string, depth: number) => void;
+  readonly publishConfirmed: (txId: string) => void;
+  readonly reincludePreservingTip: (txId: string) => void;
+  readonly setReportedDepth: (txId: string, depth: number) => void;
   readonly publishBox: (box: Eip12Box, headers: readonly Readonly<Record<string, unknown>>[]) => void;
 }
 
