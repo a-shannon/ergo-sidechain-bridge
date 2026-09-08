@@ -26,12 +26,44 @@ import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readS
 import * as trackerCompiler from './substrate-federated-tracker-jvm-compiler-v2.js';
 import * as familyCompiler from './substrate-federated-settlement-family-jvm-compiler-v2.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
+import * as unsigned from './unsigned-ergo-transaction.js';
+import * as issuanceMaterializer from './substrate-federated-genesis-issuance-materialization-v1.js';
+import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
+import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
+import { encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister, MINER_FEE_TREE } from './ergo-encoding.js';
 
 const bridgeRoot = fileURLToPath(new URL('../../', import.meta.url));
 const runTracker = trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2;
 let setup: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
 let source: ReturnType<typeof createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
 let input: CompileObservedSubstrateFederatedGenesisV1Input;
+const BASE_INPUT = {
+  boxId: '8f25f8b850290c20b9f3568eba3604bee2f4e2d7167c7ea68f2943997ea742a5', value: '300000000',
+  ergoTree: `0008cd02${'22'.repeat(32)}`, assets: [], additionalRegisters: {}, creationHeight: 110,
+  transactionId: '950cd6f0a49a53a05d67908dcbc367273fea828c046d2ad58c0ee0c7f59e81ab', index: 0,
+};
+
+async function observedInputs(delay: 1 | 720, target: object) {
+  const tree = delay === 1 ? setup.signer.rewardInputErgoTrees.delay1 : setup.signer.rewardInputErgoTrees.delay720;
+  const boxes = (await unsigned.materializeUnsignedTransaction({
+    inputs: [{ ...BASE_INPUT, extension: {} }], dataInputs: [], outputs: [50, 60, 70, 120].map(amount => ({
+      value: String(amount * 1_000_000), ergoTree: tree, creationHeight: 120,
+    })),
+  }, 'observed FED issuance fixture')).outputs;
+  const genesisInputs = Object.freeze({ tracker: boxes[0]!, duplicatePrevention: boxes[1]!, pooledReserve: boxes[2]! });
+  const discovery = Object.freeze({ reportDigestHex: '71'.repeat(32),
+    target: Object.freeze({ genesisHeaderIdHex: '72'.repeat(32), tipHeight: 1000, tipHeaderIdHex: '73'.repeat(32) }),
+    signer: Object.freeze({ publicKeyHex: setup.signer.publicKeyHex, p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+      rewardDelayBlocks: delay, rewardInputErgoTreeHex: tree }),
+    genesisBoxIds: Object.freeze({ tracker: boxes[0]!.boxId, duplicatePrevention: boxes[1]!.boxId, pooledReserve: boxes[2]!.boxId }),
+    genesisInputs });
+  const ownedDiscovery = Object.freeze({ observation: discovery });
+  const history = Object.freeze({ receipt: Object.freeze({ rewardInputDiscoveryDigestHex: discovery.reportDigestHex,
+    genesisBoxIds: discovery.genesisBoxIds, target: Object.freeze({ genesisHeaderIdHex: discovery.target.genesisHeaderIdHex,
+      setupAnchorHeaderIdHex: discovery.target.tipHeaderIdHex, setupAnchorHeight: discovery.target.tipHeight }) }) });
+  observations.owned.set(ownedDiscovery, target); observations.history.add(history);
+  return { ownedDiscovery: ownedDiscovery as never, history: history as never };
+}
 
 beforeEach(async () => {
   observations.active = true;
@@ -41,18 +73,7 @@ beforeEach(async () => {
   });
   const runtimeWasm = Buffer.from('0061736d01000000', 'hex');
   const target = Object.freeze({});
-  const discovery = Object.freeze({ reportDigestHex: '71'.repeat(32),
-    target: Object.freeze({ genesisHeaderIdHex: '72'.repeat(32), tipHeight: 20, tipHeaderIdHex: '73'.repeat(32) }),
-    signer: Object.freeze({ publicKeyHex: setup.signer.publicKeyHex, p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
-      rewardDelayBlocks: 1, rewardInputErgoTreeHex: setup.signer.rewardInputErgoTrees.delay1 }),
-    genesisBoxIds: Object.freeze({ tracker: '0d'.repeat(32), duplicatePrevention: '0e'.repeat(32), pooledReserve: '0f'.repeat(32) }) });
-  const ownedDiscovery = Object.freeze({ observation: discovery });
-  const history = Object.freeze({ receipt: Object.freeze({ rewardInputDiscoveryDigestHex: discovery.reportDigestHex,
-    genesisBoxIds: discovery.genesisBoxIds, target: Object.freeze({ genesisHeaderIdHex: discovery.target.genesisHeaderIdHex,
-      setupAnchorHeaderIdHex: discovery.target.tipHeaderIdHex, setupAnchorHeight: discovery.target.tipHeight }) }) });
-  observations.owned.set(ownedDiscovery, target);
-  observations.history.add(history);
-  input = { target: target as never, ownedDiscovery: ownedDiscovery as never, history: history as never,
+  input = { target: target as never, ...await observedInputs(1, target),
     setupSigner: setup.signer, sourceSession: source,
     genesis: { bridgeRoot, launchDomainHex: '61'.repeat(32), evmChainId: '198407',
       operatorAddressHex: '31'.repeat(20), bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20),
@@ -66,11 +87,7 @@ afterEach(() => { source?.dispose(); setup?.dispose(); vi.restoreAllMocks(); });
 describe('observed FED genesis compilation', () => {
   it.each([1, 720])('joins delay-%i observations through the real JVM pair and retains pre-await inputs', async delay => {
     if (delay === 720) {
-      const observation = { ...input.ownedDiscovery.observation, signer: { ...input.ownedDiscovery.observation.signer,
-        rewardDelayBlocks: 720 as const, rewardInputErgoTreeHex: setup.signer.rewardInputErgoTrees.delay720 } };
-      const ownedDiscovery = { ...input.ownedDiscovery, observation };
-      observations.owned.set(ownedDiscovery, input.target);
-      input = { ...input, ownedDiscovery };
+      input = { ...input, ...await observedInputs(720, input.target) };
     }
     const expectedDiscovery = input.ownedDiscovery.observation;
     const expectedHistory = input.history;
@@ -101,6 +118,40 @@ describe('observed FED genesis compilation', () => {
       expect(result.candidate.runtimeProfile.sourceProofProfileIdHex).toBe(source.binding.federatedMintProfile.proofProfileIdHex);
       expect(result.discovery).toBe(expectedDiscovery);
       expect(result.history).toBe(expectedHistory);
+      expect(result.issuance.creationHeight).toBe(1001);
+      expect(result.issuance.greenfieldReplayBaselineEstablished).toBe(false);
+      expect(result.issuance.targetNodeAcceptanceEstablished).toBe(false);
+      expect(result.issuance.issuanceEstablished).toBe(false);
+      const familyId = encodeCollByteRegister(Buffer.from(result.familyReceipt.profile.familyIdHex, 'hex'));
+      const expectedRegisters = [
+        { R4: encodeCollByteRegister(Buffer.from(result.preparation.checkpointProfile.profileIdHex, 'hex')),
+          R5: encodeAvlTreeRegister(Buffer.from(getSubstrateFederatedTrackerDigestV1Hex([]), 'hex'), 1, 370),
+          R6: encodeCollByteRegister(Buffer.from(result.preparation.application.sidechainIdHex, 'hex')),
+          R7: encodeLongRegister(0n), R8: encodeIntRegister(0),
+          R9: encodeCollByteRegister(Buffer.from(result.preparation.checkpointProfile.ergoAdmissionKeySetDigestHex, 'hex')) },
+        { R4: familyId, R5: encodeAvlTreeRegister(Buffer.from(getDupTreeDigest([]), 'hex'), 1, 1) },
+        { R4: familyId, R5: encodeAvlTreeRegister(Buffer.from(getPooledReserveEmptyDigest(), 'hex'), 1, 32), R6: encodeLongRegister(0n) },
+      ];
+      const trees = [result.familyCompilerInput.trackerReceipt.contract.propositionHex,
+        result.familyReceipt.contracts.duplicatePrevention.propositionHex, result.familyReceipt.contracts.pooledReserve.propositionHex];
+      expect(result.issuance.orderedTransactions.map(value => value.role)).toEqual(['tracker', 'duplicatePrevention', 'pooledReserve']);
+      for (const [index, { role, transaction }] of result.issuance.orderedTransactions.entries()) {
+        const funding = expectedDiscovery.genesisInputs[role];
+        expect(transaction.eip12Tx.inputs).toEqual([{ ...funding, extension: {} }]);
+        expect(transaction.eip12Tx.dataInputs).toEqual([]);
+        expect(transaction.outputs).toHaveLength(3);
+        const [state, change, fee] = transaction.outputs;
+        expect(state).toMatchObject({ transactionId: transaction.txId, index: 0, creationHeight: 1001,
+          value: '10000000', ergoTree: trees[index], assets: [{ tokenId: funding.boxId, amount: '1' }],
+          additionalRegisters: expectedRegisters[index] });
+        expect(change).toMatchObject({ value: String(BigInt(funding.value) - 11_100_000n), ergoTree: funding.ergoTree,
+          assets: [], additionalRegisters: {}, creationHeight: 1001 });
+        expect(fee).toMatchObject({ value: '1100000', ergoTree: MINER_FEE_TREE, assets: [], additionalRegisters: {}, creationHeight: 1001 });
+        expect(transaction.outputs.reduce((sum, box) => sum + BigInt(box.value), 0n)).toBe(BigInt(funding.value));
+        expect(await unsigned.materializeUnsignedTransaction(transaction.eip12Tx, 'FED issuance replay')).toEqual(transaction);
+        expect(Object.isFrozen(transaction.eip12Tx.inputs[0])).toBe(true);
+        expect(Object.isFrozen(state!.additionalRegisters)).toBe(true);
+      }
       expect(result.preparation.launchDomainHex).toBe('61'.repeat(32));
       expect(result.preparation.operatorAddressHex).toBe('31'.repeat(20));
       expect(JSON.parse(result.candidate.genesisJson).balances.balances).toEqual([
@@ -139,6 +190,102 @@ describe('observed FED genesis compilation', () => {
       expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).not.toHaveBeenCalled();
       expect(familyCompiler.compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2).not.toHaveBeenCalled();
     });
+
+  it.each(['tracker', 'duplicatePrevention', 'pooledReserve'].flatMap(role =>
+    ['id', 'serialized value', 'tree', 'asset', 'register', 'immature'].map(fault => ({ role, fault }))))
+    ('rejects $role input $fault before compilation', async ({ role, fault }) => {
+      const observation = structuredClone(input.ownedDiscovery.observation);
+      const selectedRole = role as keyof typeof observation.genesisInputs;
+      const box = observation.genesisInputs[selectedRole] as any;
+      if (fault === 'id') box.boxId = 'ab'.repeat(32);
+      else if (fault === 'serialized value') box.value = String(BigInt(box.value) + 1n);
+      else if (fault === 'tree') box.ergoTree = setup.signer.p2pkErgoTreeHex;
+      else if (fault === 'asset') box.assets = [{ tokenId: BASE_INPUT.boxId, amount: '1' }];
+      else if (fault === 'register') box.additionalRegisters = { R4: '0400' };
+      else box.creationHeight = observation.target.tipHeight;
+      let history = input.history;
+      if (fault !== 'id' && fault !== 'serialized value') {
+        // Semantic negatives retain valid serialized identities and matching provenance.
+        const { value, ergoTree, assets, additionalRegisters, creationHeight } = box;
+        const transaction = await unsigned.materializeUnsignedTransaction({
+          inputs: [{ ...BASE_INPUT, extension: {} }], dataInputs: [], outputs: [
+            { value, ergoTree, assets, additionalRegisters, creationHeight },
+            { value: String(BigInt(BASE_INPUT.value) - BigInt(value)),
+              ergoTree: BASE_INPUT.ergoTree, creationHeight },
+          ],
+        }, 'canonical FED semantic-negative fixture');
+        const canonical = transaction.outputs[0]!;
+        expect(await unsigned.normalizeEip12Box(canonical, 'semantic-negative identity')).toEqual(canonical);
+        (observation.genesisInputs as any)[selectedRole] = canonical;
+        (observation.genesisBoxIds as any)[selectedRole] = canonical.boxId;
+        history = { ...input.history, receipt: { ...input.history.receipt, genesisBoxIds: observation.genesisBoxIds } };
+        observations.history.add(history);
+      }
+      const ownedDiscovery = { ...input.ownedDiscovery, observation };
+      observations.owned.set(ownedDiscovery, input.target);
+      await expect(compileObservedSubstrateFederatedGenesisV1({ ...input, ownedDiscovery, history })).rejects.toThrow(
+        fault === 'serialized value' ? /differs from calculated from box serialized bytes/
+          : fault === 'register' ? /^observed FED genesis requires exact data fields$/
+            : fault === 'id' || fault === 'immature' ? /^observed FED issuance input identity or maturity differs$/
+              : /^observed FED issuance input must be mature pure ERG owned by the setup signer$/);
+      expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).not.toHaveBeenCalled();
+      expect(familyCompiler.compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2).not.toHaveBeenCalled();
+    });
+
+  it.each([0, -1, 1.5, Number.NaN, 2_147_483_647])('rejects issuance height %s before compilation', async height => {
+    const observation = { ...input.ownedDiscovery.observation, target: { ...input.ownedDiscovery.observation.target, tipHeight: height } };
+    const history = { ...input.history, receipt: { ...input.history.receipt,
+      target: { ...input.history.receipt.target, setupAnchorHeight: height } } };
+    const ownedDiscovery = { ...input.ownedDiscovery, observation };
+    observations.owned.set(ownedDiscovery, input.target); observations.history.add(history);
+    await expect(compileObservedSubstrateFederatedGenesisV1({ ...input, ownedDiscovery, history })).rejects.toThrow(
+      Number.isNaN(height) ? /history differs/ : /height cannot bind/);
+    expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate canonical inputs even with matching observation and history IDs', async () => {
+    const original = input.ownedDiscovery.observation;
+    const genesisBoxIds = { ...original.genesisBoxIds, duplicatePrevention: original.genesisBoxIds.tracker };
+    const observation = { ...original, genesisBoxIds,
+      genesisInputs: { ...original.genesisInputs, duplicatePrevention: original.genesisInputs.tracker } };
+    const ownedDiscovery = { ...input.ownedDiscovery, observation };
+    const history = { ...input.history, receipt: { ...input.history.receipt, genesisBoxIds } };
+    observations.owned.set(ownedDiscovery, input.target); observations.history.add(history);
+    await expect(compileObservedSubstrateFederatedGenesisV1({ ...input, ownedDiscovery, history })).rejects.toThrow(/must be distinct/);
+    expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).not.toHaveBeenCalled();
+  });
+
+  it.each(['source', 'setup', 'target'])('rechecks %s after input normalization', async owner => {
+    const normalize = unsigned.normalizeEip12Box;
+    vi.spyOn(unsigned, 'normalizeEip12Box').mockImplementationOnce(async (...args) => {
+      const box = await normalize(...args);
+      if (owner === 'source') source.dispose();
+      else if (owner === 'setup') setup.dispose();
+      else observations.active = false;
+      return box;
+    });
+    await expect(compileObservedSubstrateFederatedGenesisV1(input)).rejects.toThrow(
+      owner === 'source' ? /disposed/ : owner === 'setup' ? /active process provenance/ : /observation inactive/);
+    expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).not.toHaveBeenCalled();
+  });
+
+  it('rejects target expiry during materialization after the real JVM pair', async () => {
+    const materialize = issuanceMaterializer.materializeSubstrateFederatedSingletonIssuanceV1;
+    const spy = vi.spyOn(issuanceMaterializer, 'materializeSubstrateFederatedSingletonIssuanceV1').mockImplementationOnce(async args => {
+      const result = await materialize(args); observations.active = false; return result;
+    });
+    const previous = process.env.NODE_OPTIONS;
+    if (ORIGINAL_NODE_OPTIONS === undefined) delete process.env.NODE_OPTIONS;
+    else process.env.NODE_OPTIONS = ORIGINAL_NODE_OPTIONS;
+    try {
+      await expect(compileObservedSubstrateFederatedGenesisV1(input)).rejects.toThrow(/observation inactive/);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).toHaveBeenCalledTimes(1);
+      expect(familyCompiler.compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2).toHaveBeenCalledTimes(1);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = previous;
+    }
+  }, 120_000);
 
   it.each(['publicKeyHex', 'p2pkErgoTreeHex', 'rewardInputErgoTreeHex'])('rejects mismatched observed signer %s', async field => {
     const observation = { ...input.ownedDiscovery.observation,

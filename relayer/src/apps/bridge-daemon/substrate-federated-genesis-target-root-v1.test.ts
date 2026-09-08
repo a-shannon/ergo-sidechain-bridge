@@ -179,7 +179,10 @@ beforeEach(() => {
       mintProofProfileScaleHex: source!.binding.federatedMintProfileScaleHex,
       application: { bridgeAddressHex: '33'.repeat(20) } },
       candidate: { genesisJson, genesisJsonSha256Hex: sha256(genesisJson), runtimeProfileScaleHex: '0x0102',
-        runtimeProfileIdHex: '55'.repeat(32), familyIdHex: '56'.repeat(32) }, discovery: discovery.observation };
+        runtimeProfileIdHex: '55'.repeat(32), familyIdHex: '56'.repeat(32) }, discovery: discovery.observation,
+      issuance: { orderedTransactions: ['tracker', 'duplicatePrevention', 'pooledReserve'].map((role, i) => ({
+        role, transaction: { txId: String(i + 4).repeat(64), outputs: [{ boxId: String(i + 7).repeat(64) }] },
+      })) } };
   });
   mocked.environment.mockReturnValue({ bounded: 'environment stub' });
   mocked.pin.mockResolvedValue(undefined);
@@ -228,6 +231,9 @@ describe('fresh FED target composition', () => {
     expect(result.nativeGenesisHashHex).toBe(genesis);
     expect(result.operatorAddressHex).toBe(operator!.addressHex);
     expect(result.issuanceInputBoxIds).toEqual(discovery.observation.genesisBoxIds);
+    expect(result.unsignedIssuance).toEqual(['tracker', 'duplicatePrevention', 'pooledReserve'].map((role, i) => ({
+      role, transactionIdHex: String(i + 4).repeat(64), predictedSingletonBoxIdHex: String(i + 7).repeat(64),
+    })));
     expect(result.singletonIssuanceEstablished).toBe(false); expect(result.operationalMintEstablished).toBe(false);
     expect(result.storageKeysChecked).toBe(6); expect(Object.isFrozen(result)).toBe(true);
     expect(order).toEqual(['setup', 'source', 'operator', 'frontier-build', 'ergo-build', 'process', 'mine',

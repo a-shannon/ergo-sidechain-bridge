@@ -142,7 +142,9 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         sourceProofProfileIdHex: frontier.sourceProofProfileIdHex,
         nodeSha256Hex: frontier.node.sha256Hex, wasmSha256Hex: frontier.wasm.sha256Hex,
         operatorAddressHex: retainedOperator.addressHex, storageKeysChecked: Object.keys(expected).length,
-        issuanceInputBoxIds: compiled.discovery.genesisBoxIds });
+        issuanceInputBoxIds: compiled.discovery.genesisBoxIds,
+        unsignedIssuance: Object.freeze(compiled.issuance.orderedTransactions.map(({ role, transaction }) =>
+          Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) });
     });
     assertCustody();
     return Object.freeze({ status: 'fresh-federated-genesis-observed' as const,

@@ -2,6 +2,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { canonicalJson } from './strict-json.js';
+import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
+import { encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister, MINER_FEE } from './ergo-encoding.js';
+import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
+import { materializeSubstrateFederatedSingletonIssuanceV1 } from './substrate-federated-genesis-issuance-materialization-v1.js';
+import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SINGLETON_VALUE_NANOERG } from './substrate-federated-isolated-devnet-generation-v1.js';
+import { normalizeEip12Box, type Eip12Box, type MaterializedUnsignedTransaction } from './unsigned-ergo-transaction.js';
+import { VALIDITY_APPLICATION_POOLED_RESERVE_INSERT_ONLY_AVL_FLAGS } from './validity-application-pooled-reserve-instance-v4.js';
 import {
   assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance,
   type SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
@@ -36,8 +43,8 @@ export interface CompileObservedSubstrateFederatedGenesisV1Input {
   readonly history: Readonly<SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2>;
 }
 
-/** Compile one candidate from live custody and exact issuance-input observations.
- * The caller retains custody and owns node revalidation, issuance and activation.
+/** Compile one candidate and its unsigned Ergo issuance transactions from live
+ * custody. The caller still owns fresh node checks, authorization and issuance.
  */
 export async function compileObservedSubstrateFederatedGenesisV1(
   input: Readonly<CompileObservedSubstrateFederatedGenesisV1Input>,
@@ -77,6 +84,29 @@ export async function compileObservedSubstrateFederatedGenesisV1(
     throw new Error('observed FED genesis history differs from discovery anchor or issuance inputs');
   }
   const preparation = prepareSubstrateFederatedGenesisV1({ ...genesis, ...profiles });
+  const observedHeight = discovery.target.tipHeight;
+  if (!Number.isSafeInteger(observedHeight) || observedHeight < 1 || observedHeight >= 2_147_483_647) {
+    throw new Error('observed FED genesis height cannot bind issuance');
+  }
+  const roles = ['tracker', 'duplicatePrevention', 'pooledReserve'] as const;
+  const capturedBoxes = exact(discovery.genesisInputs, [...roles]);
+  const snapshots = roles.map(role => {
+    const box = exact(capturedBoxes[role], ['boxId', 'value', 'ergoTree', 'assets',
+      'additionalRegisters', 'creationHeight', 'transactionId', 'index']);
+    if (!Array.isArray(box.assets) || box.assets.length !== 0
+      || Object.keys(exact(box.additionalRegisters, [])).length !== 0
+      || box.ergoTree !== rewardTree || box.creationHeight > observedHeight) {
+      throw new Error('observed FED issuance input must be mature pure ERG owned by the setup signer');
+    }
+    if (box.boxId !== discovery.genesisBoxIds[role]
+      || observedHeight < box.creationHeight + observedSigner.rewardDelayBlocks + 1) {
+      throw new Error('observed FED issuance input identity or maturity differs');
+    }
+    return structuredClone(box);
+  });
+  if (new Set(snapshots.map(box => box.boxId)).size !== 3) {
+    throw new Error('observed FED issuance inputs must be distinct');
+  }
   const template = (relativePath: string) => Object.freeze({ relativePath,
     source: readFileSync(join(genesis.bridgeRoot, relativePath), 'utf8') });
   const trackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
@@ -92,6 +122,11 @@ export async function compileObservedSubstrateFederatedGenesisV1(
   });
   const duplicatePreventionGenesisInputBoxIdHex = discovery.genesisBoxIds.duplicatePrevention;
   const pooledReserveGenesisInputBoxIdHex = discovery.genesisBoxIds.pooledReserve;
+  const funding: Eip12Box[] = [];
+  for (const box of snapshots) {
+    funding.push(await normalizeEip12Box(box, 'observed FED issuance input'));
+    assertCustody();
+  }
   const trackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(trackerRequest);
   assertCustody();
   const familyCompilerInput = Object.freeze({ trackerRequest, trackerReceipt, templates,
@@ -99,7 +134,48 @@ export async function compileObservedSubstrateFederatedGenesisV1(
   const familyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2(familyCompilerInput);
   assertCustody();
   const candidate = buildSubstrateFederatedGenesisV1({ preparation, familyCompilerInput, familyReceipt });
-  return Object.freeze({ preparation, familyCompilerInput, familyReceipt, candidate, discovery, history });
+  const familyRegister = encodeCollByteRegister(Buffer.from(familyReceipt.profile.familyIdHex, 'hex'));
+  // Proposed greenfield state, not evidence that historical replay is empty.
+  const registers: Readonly<Record<string, string>>[] = [
+    {
+      R4: encodeCollByteRegister(Buffer.from(preparation.checkpointProfile.profileIdHex, 'hex')),
+      R5: encodeAvlTreeRegister(Buffer.from(getSubstrateFederatedTrackerDigestV1Hex([]), 'hex'),
+        VALIDITY_APPLICATION_POOLED_RESERVE_INSERT_ONLY_AVL_FLAGS, 370),
+      R6: encodeCollByteRegister(Buffer.from(preparation.application.sidechainIdHex, 'hex')),
+      R7: encodeLongRegister(0n), R8: encodeIntRegister(0),
+      R9: encodeCollByteRegister(Buffer.from(preparation.checkpointProfile.ergoAdmissionKeySetDigestHex, 'hex')),
+    },
+    { R4: familyRegister, R5: encodeAvlTreeRegister(Buffer.from(getDupTreeDigest([]), 'hex'),
+      VALIDITY_APPLICATION_POOLED_RESERVE_INSERT_ONLY_AVL_FLAGS, 1) },
+    { R4: familyRegister, R5: encodeAvlTreeRegister(Buffer.from(getPooledReserveEmptyDigest(), 'hex'),
+      VALIDITY_APPLICATION_POOLED_RESERVE_INSERT_ONLY_AVL_FLAGS, 32), R6: encodeLongRegister(0n) },
+  ];
+  const trees = [trackerReceipt.contract.propositionHex,
+    familyReceipt.contracts.duplicatePrevention.propositionHex, familyReceipt.contracts.pooledReserve.propositionHex];
+  const transactions: Readonly<{ role: typeof roles[number]; transaction: Readonly<MaterializedUnsignedTransaction> }>[] = [];
+  for (const [index, role] of roles.entries()) {
+    const transaction = await materializeSubstrateFederatedSingletonIssuanceV1({
+      label: `observed FED ${role} issuance`, genesisInput: funding[index]!,
+      expectedNftIdHex: snapshots[index]!.boxId, propositionHex: trees[index]!, registers: registers[index]!,
+      singletonValue: BigInt(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SINGLETON_VALUE_NANOERG),
+      fee: BigInt(MINER_FEE), creationHeight: observedHeight + 1,
+    });
+    assertCustody();
+    transactions.push(Object.freeze({ role, transaction: freezeData(transaction) }));
+  }
+  const issuance = Object.freeze({ creationHeight: observedHeight + 1,
+    orderedTransactions: Object.freeze(transactions),
+    greenfieldReplayBaselineEstablished: false as const,
+    targetNodeAcceptanceEstablished: false as const, issuanceEstablished: false as const });
+  return Object.freeze({ preparation, familyCompilerInput, familyReceipt, candidate, discovery, history, issuance });
+}
+
+function freezeData<T>(value: T): Readonly<T> {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) freezeData(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function exact<T>(value: T, keys: readonly string[]): Readonly<T> {

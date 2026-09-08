@@ -292,6 +292,34 @@ singleton issuance. Disposal releases the retained references; memory
 zeroization is not established. Operational mint must run inside the same
 managed lifetime before cleanup, using a separately reviewed FED-bound signer.
 
+## Ergo Issuance Materialization
+
+The observed-input compiler also produces the three unsigned Ergo transactions
+for tracker, duplicate-prevention and reserve issuance, in that order. Each
+uses its exact observed funding box as the singleton token ID, the compiled
+ErgoTree, 10,000,000 nanoERG of initial state value, canonical registers, the
+fixed miner-fee output and change returned to the funding script. Transaction
+and predicted output IDs are derived from the serialized bodies, not supplied
+by the caller. Input bodies are reparsed before compilation; mismatched IDs,
+non-ERG assets, registers, insufficient maturity and duplicate inputs reject.
+
+The three proposed states use empty tracker, replay and deposit trees, with
+zero reserve liability. This constructs greenfield candidates; it does not
+prove historical non-instantiation or authorize an empty replay baseline.
+The compiler tests exercise real JVM compilation and WASM transaction
+materialization for both supported reward delays. They do not sign, evaluate
+the full issuance transaction in the JVM, or call a node transaction checker.
+The root reports only the unsigned transaction and predicted singleton IDs.
+
+The existing executable V3 setup request requires a G1dA history/compiler
+closure whose historical source identity does not describe FED genesis.
+The FED-native checker entry must bind the original compiler and observed
+input material under its own request identity, retaining fresh reobservation,
+one-shot custody and exact signed-byte checking. It must not fabricate a
+historical receipt or remove the V3 history checks. The existing operational
+lifecycle and journals remain responsible for authorization, reservation,
+transport and canonical confirmation.
+
 ## Next Boundary
 
 The historical packet derives its domain from observed genesis/spec identities,
