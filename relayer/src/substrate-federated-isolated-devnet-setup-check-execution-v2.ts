@@ -117,6 +117,9 @@ import {
 import {
   runSubstrateFederatedIsolatedDevnetSetupCheckV2,
   runSubstrateFederatedIsolatedDevnetSetupCheckV3,
+  runSubstrateFederatedNativeGenesisSetupCheckV1,
+  takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1,
+  type SubstrateFederatedNativeGenesisSetupCheckReceiptV1,
   takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2,
   takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
@@ -124,6 +127,14 @@ import {
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
+import {
+  buildSubstrateFederatedNativeGenesisSetupCheckRequestV1,
+  type SubstrateFederatedNativeGenesisSetupCheckRequestV1,
+} from './substrate-federated-native-genesis-setup-check-request-v1.js';
+import {
+  assertObservedSubstrateFederatedGenesisV1,
+  type ObservedSubstrateFederatedGenesisV1,
+} from './substrate-federated-observed-genesis-v1.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
 import { ngetDirect } from './ergo-helpers.js';
 import { buildSubstrateFederatedTrackerV2FeeFunding, buildSubstrateFederatedWithdrawalV2FeeFunding } from './substrate-federated-tracker-v2-external-fee.js';
@@ -191,6 +202,12 @@ const EXECUTION_BATCHES_V3 = new WeakMap<
     sourceAndCompilerInput: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>;
   }>
 >();
+const NATIVE_EXECUTION_BATCHES = new WeakMap<object, Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
+  assertSessionActive: () => void;
+}>>();
 export interface SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1 {
   readonly transaction: Readonly<MaterializedUnsignedTransaction>;
   readonly signedCandidate: Readonly<LocalWasmExactBytesSignedCheckCandidate>;
@@ -589,6 +606,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly runV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>>;
+  readonly runNativeGenesisRetainingSigner: (
+    compiled: Readonly<ObservedSubstrateFederatedGenesisV1>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>>;
   readonly runForExecutionV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1261,6 +1282,14 @@ export interface SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3 extends O
   readonly request: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>;
 }
 
+export interface SubstrateFederatedNativeGenesisSetupExecutionBatchV1 extends Omit<
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2, 'receipt' | 'request'
+> {
+  readonly profile: 'fed-native-height-zero-v1';
+  readonly receipt: Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1>;
+  readonly request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>;
+}
+
 interface FixedSetupCheckRunV3 {
   readonly receipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
   readonly executionReceipt: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV3>;
@@ -1372,6 +1401,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'open'
       | 'running'
       | 'setup-complete'
+      | 'native-setup-complete'
       | 'v3-peg-in-ready'
       | 'v3-source-lock-checked'
       | 'v3-tracker-fee-ready'
@@ -1383,9 +1413,18 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'closed' = 'open';
     let terminalInvalidationRequested = false;
     let withdrawalRouteSelected = false;
+    let nativeRouteSelected = false;
+    const nativeCancellation = new AbortController();
+    const assertNativeSessionActive = (): void => {
+      if (!nativeRouteSelected || terminalInvalidationRequested || nativeCancellation.signal.aborted
+        || (state !== 'running' && state !== 'native-setup-complete')) {
+        throw new Error('native FED setup session is inactive');
+      }
+    };
     const close = (): void => {
       if (state === 'closed') return;
       terminalInvalidationRequested = true;
+      nativeCancellation.abort();
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         miningCredential,
       );
@@ -1436,6 +1475,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       operation: (activeMnemonic: string) => Promise<T>,
       successState:
         | 'setup-complete'
+        | 'native-setup-complete'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
@@ -1454,6 +1494,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         );
         if (state === 'running') {
           terminalInvalidationRequested = true;
+          if (nativeRouteSelected) nativeCancellation.abort();
         } else if (state !== 'closed') {
           close();
         }
@@ -1644,6 +1685,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       dispose: () => {
         if (state === 'running') {
           if (withdrawalRouteSelected) terminalInvalidationRequested = true;
+          if (nativeRouteSelected) {
+            terminalInvalidationRequested = true;
+            nativeCancellation.abort();
+          }
           throw new Error('isolated fixed setup-check session is running');
         }
         close();
@@ -1663,6 +1708,31 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         async activeMnemonic => (await runFixedSetupCheckV3(input, activeMnemonic)).receipt,
         'closed',
       ),
+      runNativeGenesisRetainingSigner: async (
+        compiled: Readonly<ObservedSubstrateFederatedGenesisV1>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) => consume('open', async activeMnemonic => {
+        nativeRouteSelected = true;
+        assertNativeSessionActive();
+        assertObservedSubstrateFederatedGenesisV1(compiled, target);
+        const profile = compiled.familyCompilerInput.trackerRequest.profile;
+        if (profile.ergoAdmissionThreshold !== 1 || profile.ergoAdmissionPublicKeysHex.length !== 1
+          || profile.ergoAdmissionPublicKeysHex[0] !== signer.publicKeyHex
+          || compiled.discovery.signer.publicKeyHex !== signer.publicKeyHex
+          || compiled.discovery.signer.p2pkErgoTreeHex !== signer.p2pkErgoTreeHex) {
+          throw new Error('native FED setup requires its exact retained synthetic signer');
+        }
+        const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, {
+          primaryNodeOrigin: compiled.discovery.sources.primaryNodeOrigin,
+          witnessNodeOrigin: compiled.discovery.sources.witnessNodeOrigin,
+        }) });
+        const request = await buildSubstrateFederatedNativeGenesisSetupCheckRequestV1({ compiled, target });
+        assertNativeSessionActive();
+        const receipt = await runSubstrateFederatedNativeGenesisSetupCheckV1(request, activeMnemonic, nativeCancellation.signal);
+        assertNativeSessionActive();
+        return promoteNativeSetupExecutionBatch({ compiled, target, binding, request, receipt,
+          assertSessionActive: assertNativeSessionActive });
+      }, 'native-setup-complete'),
       runForExecutionV3: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -2250,6 +2320,83 @@ export function assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV
     material.familyCompilerBinding,
   );
   return material.familyCompilerBinding;
+}
+
+// Native material retains its own compiler and session, never a V3 history identity.
+function promoteNativeSetupExecutionBatch(input: Readonly<{
+  compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>;
+  receipt: Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1>;
+  assertSessionActive: () => void;
+}>): Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> {
+  const assertCurrent = (): void => {
+    input.assertSessionActive();
+    assertObservedSubstrateFederatedGenesisV1(input.compiled, input.target);
+    const current = assertExecutionTargetMatchesOrigins(input.target, {
+      primaryNodeOrigin: input.request.target.primary.nodeOrigin,
+      witnessNodeOrigin: input.request.target.witness.nodeOrigin,
+    });
+    if (canonicalJson(current) !== canonicalJson(input.binding)) {
+      throw new Error('native FED setup process binding changed');
+    }
+  };
+  assertCurrent();
+  const material = takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1(
+    input.receipt, input.request, input.target,
+  );
+  const orderedTransactions = material.orderedTransactions.map((transaction, index) => {
+    const issuance = input.request.orderedIssuances[index];
+    if (issuance === undefined || issuance.ordinal !== transaction.ordinal || issuance.role !== transaction.role) {
+      throw new Error('native FED setup issuance order changed');
+    }
+    return Object.freeze({ issuance, signedCandidate: transaction.signedCandidate,
+      checkedAcceptance: promoteLocalWasmCheckedTransactionForSubmissionV1(
+        transaction.signedCandidate, transaction.checked, input.binding,
+      ) });
+  });
+  assertCurrent();
+  const batch = Object.freeze({ profile: 'fed-native-height-zero-v1' as const,
+    receipt: input.receipt, request: input.request, targetBinding: input.binding,
+    orderedTransactions: Object.freeze(orderedTransactions) });
+  NATIVE_EXECUTION_BATCHES.set(batch, Object.freeze({ target: input.target, binding: input.binding,
+    compiled: input.compiled, assertSessionActive: input.assertSessionActive }));
+  return batch;
+}
+
+export function assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const retained = NATIVE_EXECUTION_BATCHES.get(batch);
+  if (retained === undefined || retained.target !== target) {
+    throw new Error('native FED setup batch lacks exact process provenance');
+  }
+  retained.assertSessionActive();
+  assertObservedSubstrateFederatedGenesisV1(retained.compiled, target);
+  const current = assertExecutionTargetMatchesOrigins(target, {
+    primaryNodeOrigin: batch.request.target.primary.nodeOrigin,
+    witnessNodeOrigin: batch.request.target.witness.nodeOrigin,
+  });
+  if (canonicalJson(current) !== canonicalJson(retained.binding) || batch.targetBinding !== retained.binding
+    || batch.profile !== 'fed-native-height-zero-v1' || batch.orderedTransactions.length !== 3) {
+    throw new Error('native FED setup batch process binding changed');
+  }
+  // Request age governs checking, not later issuance. Each later action reobserves its own state.
+  return current;
+}
+
+export function getSubstrateFederatedNativeGenesisSetupCompilerInputV1(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<Pick<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
+  'trackerRequest' | 'trackerReceipt' | 'familyReceipt' | 'familyTemplates'>> {
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  const compiled = NATIVE_EXECUTION_BATCHES.get(batch)!.compiled;
+  return Object.freeze({ trackerRequest: compiled.familyCompilerInput.trackerRequest,
+    trackerReceipt: compiled.familyCompilerInput.trackerReceipt, familyReceipt: compiled.familyReceipt,
+    familyTemplates: structuredClone(compiled.familyCompilerInput.templates) });
 }
 
 // Only the session can pair a pre-check process binding with its own result.

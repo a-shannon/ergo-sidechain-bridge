@@ -5,15 +5,18 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 // Request provenance and observations are component doubles. WASM signing and
 // exact checked-byte custody are real; the HTTP checker is not a JVM oracle.
 const boundary = vi.hoisted(() => ({
-  requests: new WeakMap<object, object>(), active: true, observe: vi.fn(),
+  requests: new WeakMap<object, object>(), active: true, observe: vi.fn(), build: vi.fn(),
+  custody: undefined as (() => void) | undefined,
   assert(value: unknown, target?: object) {
     const retained = value !== null && typeof value === 'object' ? this.requests.get(value) : undefined;
     if (!this.active || retained === undefined || (target !== undefined && retained !== target)) {
       throw new Error('native request lacks active exact provenance');
     }
+    this.custody?.();
   },
 }));
 vi.mock('./substrate-federated-native-genesis-setup-check-request-v1.js', () => ({
+  buildSubstrateFederatedNativeGenesisSetupCheckRequestV1: (...args: unknown[]) => boundary.build(...args),
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1: (value: unknown, target?: object) => boundary.assert(value, target),
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1RuntimeProvenance: async (value: unknown) => boundary.assert(value),
   reobserveSubstrateFederatedNativeGenesisSetupCheckRequestV1: async (value: unknown) => {
@@ -40,6 +43,11 @@ import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signe
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
 import { sha256CanonicalJson } from './strict-json.js';
+import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
+import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertSigner }
+  from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -63,9 +71,15 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   boundary.active = true;
+  boundary.custody = undefined;
   boundary.observe.mockReset();
+  boundary.build.mockReset();
   mnemonic = Mnemonic.fromEntropy(randomBytes(32)).phrase;
   const signer = await deriveLocalWasmRootSignerPublicIdentity(mnemonic);
+  await configureFixture(signer);
+});
+
+async function configureFixture(signer: { publicKeyHex: string; p2pkErgoTreeHex: string }) {
   const tree = deriveDevnetRewardErgoTreeHexForDelay(signer.publicKeyHex, 1);
   const funding = (await materializeUnsignedTransaction({ inputs: [{ ...BASE, extension: {} }], dataInputs: [],
     outputs: [50, 60, 70, 120].map(amount => ({ value: String(amount * 1_000_000), ergoTree: tree, creationHeight: 120 })),
@@ -111,7 +125,7 @@ beforeEach(async () => {
   });
   vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
     .mockReturnValue({ processBindingDigestHex: '68'.repeat(32), executionTargetIdentityDigestHex: '69'.repeat(32) });
-});
+}
 afterEach(() => { mnemonic = ''; vi.restoreAllMocks(); });
 
 describe('native FED request through the retained checking engine', () => {
@@ -245,4 +259,192 @@ describe('native FED request through the retained checking engine', () => {
     expect(() => validate(receipt, request)).toThrow(fault === 'signed bytes'
       ? /signer receipt is invalid/ : /does not bind the exact request/);
   });
+});
+
+describe('native FED managed setup session', () => {
+  let session: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
+  let privateSession: Awaited<ReturnType<typeof execution.createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2>>;
+  let compiled: compiledGenesis.ObservedSubstrateFederatedGenesisV1;
+  let sessionMnemonic: string;
+  beforeEach(async () => {
+    const create = execution.createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2;
+    const fromEntropy = Mnemonic.fromEntropy;
+    sessionMnemonic = '';
+    vi.spyOn(Mnemonic, 'fromEntropy').mockImplementationOnce((...args) => {
+      const result = fromEntropy(...args);
+      sessionMnemonic = result.phrase;
+      return result;
+    });
+    vi.spyOn(execution, 'createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2')
+      .mockImplementation(async () => { privateSession = await create(); return privateSession; });
+    session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await configureFixture(session.signer);
+    compiled = { familyCompilerInput: { trackerRequest: { profile: { ergoAdmissionThreshold: 1,
+      ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] } }, trackerReceipt: {}, templates: { fixture: 'native' } },
+      familyReceipt: {}, discovery: { signer: session.signer,
+        sources: { primaryNodeOrigin: ORIGIN, witnessNodeOrigin: WITNESS } },
+    } as unknown as compiledGenesis.ObservedSubstrateFederatedGenesisV1;
+    boundary.custody = () => assertSigner(session.signer);
+    vi.spyOn(compiledGenesis, 'assertObservedSubstrateFederatedGenesisV1').mockImplementation((value, expectedTarget) => {
+      if (value !== compiled || expectedTarget !== target || !boundary.active) throw new Error('native compiled provenance absent');
+      boundary.custody!();
+    });
+    boundary.build.mockImplementation(async value => {
+      compiledGenesis.assertObservedSubstrateFederatedGenesisV1(value.compiled, value.target);
+      return request;
+    });
+  });
+  afterEach(() => { session?.dispose(); sessionMnemonic = ''; });
+
+  it('retains exact checked transactions and compiler custody without granting transport', async () => {
+    const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
+    expect(batch.profile).toBe('fed-native-height-zero-v1');
+    expect(batch.request).toBe(request);
+    expect(batch.orderedTransactions).toHaveLength(3);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).not.toThrow();
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1({ ...batch }, target)).toThrow(/exact process provenance/);
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, { ...target })).toThrow(/exact process provenance/);
+    expect(() => execution.assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(batch as never, target)).toThrow(/exact process provenance/);
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1({ version: 3 } as never, target)).toThrow(/exact process provenance/);
+    const compiler = execution.getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, target);
+    expect(compiler.trackerRequest).toBe(compiled.familyCompilerInput.trackerRequest);
+    expect(compiler.trackerReceipt).toBe(compiled.familyCompilerInput.trackerReceipt);
+    expect(compiler.familyReceipt).toBe(compiled.familyReceipt);
+    expect(compiler.familyTemplates).toEqual(compiled.familyCompilerInput.templates);
+    expect(compiler.familyTemplates).not.toBe(compiled.familyCompilerInput.templates);
+    expect(() => take(batch.receipt, request, target)).toThrow(/exact process provenance/);
+    expect(batch.receipt.stages.submission).toBe('not-authorized');
+    expect(batch.receipt.stages.broadcast).toBe('not-authorized');
+    expect(Object.keys(session)).not.toContain('mnemonic');
+    expect(sessionMnemonic.length).toBeGreaterThan(0);
+    expect(JSON.stringify(batch).includes(sessionMnemonic)).toBe(false);
+    expect(JSON.stringify(session).includes(sessionMnemonic)).toBe(false);
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 60_001);
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).not.toThrow();
+    session.dispose();
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toThrow(/inactive/);
+    expect(() => execution.getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, target)).toThrow(/inactive/);
+  });
+
+  it.each(['compiler clone', 'target clone', 'foreign signer'])('rejects %s before building or signing', async fault => {
+    const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+    let other: typeof session | undefined;
+    try {
+      if (fault === 'foreign signer') other = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      await expect((other ?? session).runNativeGenesisRetainingSigner(
+        fault === 'compiler clone' ? { ...compiled } : compiled,
+        fault === 'target clone' ? { ...target } : target,
+      )).rejects.toThrow(fault === 'foreign signer' ? /exact retained synthetic signer/ : /compiled provenance absent/);
+      expect(boundary.build).not.toHaveBeenCalled(); expect(signatures).not.toHaveBeenCalled();
+      expect(helpers.ncheck).not.toHaveBeenCalled();
+    } finally { other?.dispose(); }
+  });
+
+  it.each(['repeat', 'legacy', 'dispose', 'private dispose'])('cancels %s before any signature at the preparation await', async fault => {
+    const prepare = fleet.prepareLocalWasmRootCheckCandidates;
+    const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+    vi.spyOn(fleet, 'prepareLocalWasmRootCheckCandidates').mockImplementation(async args => {
+      if (fault === 'repeat') await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toThrow(/consumed/);
+      else if (fault === 'legacy') await expect(session.run({} as never)).rejects.toThrow(/consumed/);
+      else expect(() => (fault === 'private dispose' ? privateSession : session).dispose()).toThrow(/running/);
+      return prepare(args);
+    });
+    const error = await session.runNativeGenesisRetainingSigner(compiled, target).then(() => undefined, value => value);
+    expect(signatures).not.toHaveBeenCalled(); expect(helpers.ncheck).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/cancelled|active process provenance/);
+    expect(() => assertSigner(session.signer)).toThrow(/active process provenance/);
+  });
+
+  it('cancels during request construction before invoking signing', async () => {
+    const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+    boundary.build.mockImplementation(async () => {
+      expect(() => session.dispose()).toThrow(/running/);
+      return request;
+    });
+    await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toThrow(/inactive/);
+    expect(signatures).not.toHaveBeenCalled(); expect(helpers.ncheck).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 1, 2])('stops after actual signature %i when its private owner cancels', async ordinal => {
+    const sign = wasm.Wallet.prototype.sign_transaction;
+    let count = 0;
+    const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction').mockImplementation(function (this: unknown, ...args) {
+      const result = sign.apply(this, args);
+      if (count++ === ordinal) expect(() => privateSession.dispose()).toThrow(/running/);
+      return result;
+    });
+    const error = await session.runNativeGenesisRetainingSigner(compiled, target).then(() => undefined, value => value);
+    expect(signatures).toHaveBeenCalledTimes(ordinal + 1);
+    expect(helpers.ncheck).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/cancelled/);
+  });
+
+  it('propagates private-session cancellation into checking before any POST', async () => {
+    const check = fleet.checkSignedTransaction;
+    vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
+      expect(() => privateSession.dispose()).toThrow(/running/);
+      return check(...args);
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const error = await session.runNativeGenesisRetainingSigner(compiled, target).then(() => undefined, value => value);
+    expect(helpers.ncheck).not.toHaveBeenCalled();
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toMatch(/cancelled/);
+  });
+
+  it.each([0, 1, 2])('invalidates cancellation during check %i before the next action or promotion', async ordinal => {
+    const check = vi.mocked(helpers.ncheck).getMockImplementation()!;
+    let count = 0;
+    vi.mocked(helpers.ncheck).mockImplementation(async (...args) => {
+      const result = await check(...args);
+      if (count++ === ordinal) expect(() => session.dispose()).toThrow(/running/);
+      return result;
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const promote = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1');
+    await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toThrow(/cancelled|active process provenance/);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(ordinal + 1); expect(promote).not.toHaveBeenCalled();
+  });
+
+  it('rejects process-binding drift before promoting checked material', async () => {
+    const observe = boundary.observe.getMockImplementation()!;
+    let count = 0;
+    boundary.observe.mockImplementation(async (...args) => {
+      const result = await observe(...args);
+      if (++count === 3) vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1)
+        .mockReturnValue({ processBindingDigestHex: 'ab'.repeat(32), executionTargetIdentityDigestHex: '69'.repeat(32) });
+      return result;
+    });
+    const promote = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1');
+    await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toThrow(/process binding changed/);
+    expect(promote).not.toHaveBeenCalled();
+  });
+
+  it.each(['repeat', 'legacy'])('revokes a retained native batch on a %s transition', async fault => {
+    const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
+    await expect(fault === 'repeat' ? session.runNativeGenesisRetainingSigner(compiled, target)
+      : session.checkPegInSourceLockV2RetainingSigner({} as never, target)).rejects.toThrow(/consumed|absent/);
+    expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toThrow(/inactive/);
+    expect(() => execution.getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, target)).toThrow(/inactive/);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['threshold', 'key count', 'admission key', 'observation key', 'observation tree'])
+    ('rejects independently changed %s before request construction', async fault => {
+      const other = await deriveLocalWasmRootSignerPublicIdentity(mnemonic);
+      const profile = compiled.familyCompilerInput.trackerRequest.profile as any;
+      if (fault === 'threshold') profile.ergoAdmissionThreshold = 0;
+      else if (fault === 'key count') profile.ergoAdmissionPublicKeysHex.push(other.publicKeyHex);
+      else if (fault === 'admission key') profile.ergoAdmissionPublicKeysHex = [other.publicKeyHex];
+      else (compiled.discovery as any).signer = { ...session.signer,
+        ...(fault === 'observation key' ? { publicKeyHex: other.publicKeyHex } : { p2pkErgoTreeHex: other.p2pkErgoTreeHex }) };
+      const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+      await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toThrow(/exact retained synthetic signer/);
+      expect(boundary.build).not.toHaveBeenCalled(); expect(signatures).not.toHaveBeenCalled();
+      expect(helpers.ncheck).not.toHaveBeenCalled();
+    });
 });

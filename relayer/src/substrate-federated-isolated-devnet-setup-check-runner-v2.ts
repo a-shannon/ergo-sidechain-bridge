@@ -65,6 +65,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   readonly signer:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>;
   readonly dispose: () => void;
+  readonly runNativeGenesisRetainingSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSigner'];
   readonly runForExecutionV3RetainingPegInAndTrackerSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
   readonly checkPegInSourceLockV2RetainingSigner:
@@ -214,6 +216,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'check-complete'
     | 'frozen-tracker-check-complete'
     | 'v3-setup-complete'
+    | 'native-setup-complete'
     | 'v2-source-lock-check-complete'
     | 'v2-committed-vault-check-complete'
     | 'v3-withdrawal-fee-check-complete'
@@ -222,6 +225,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'closed' = 'open';
   let terminalInvalidationRequested = false;
   let withdrawalRouteSelected = false;
+  let nativeRouteSelected = false;
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   const close = (): void => {
     if (state === 'closed') return;
@@ -279,6 +283,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'check-complete'
       | 'frozen-tracker-check-complete'
       | 'v3-setup-complete'
+      | 'native-setup-complete'
       | 'v2-source-lock-check-complete'
       | 'v2-committed-vault-check-complete'
       | 'v3-withdrawal-fee-check-complete'
@@ -294,6 +299,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       );
       if (state === 'running') {
         terminalInvalidationRequested = true;
+        if (nativeRouteSelected) revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
       } else if (state !== 'closed') {
         close();
       }
@@ -325,6 +331,11 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     dispose: () => {
       if (state === 'running') {
         if (withdrawalRouteSelected) terminalInvalidationRequested = true;
+        if (nativeRouteSelected) {
+          terminalInvalidationRequested = true;
+          revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+          execution.dispose();
+        }
         throw new Error('isolated fixed setup-check session is running');
       }
       if (
@@ -335,6 +346,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'check-complete'
           || state === 'frozen-tracker-check-complete'
           || state === 'v3-setup-complete'
+          || state === 'native-setup-complete'
           || state === 'v2-source-lock-check-complete'
           || state === 'v2-committed-vault-check-complete'
           || state === 'v3-withdrawal-fee-check-complete'
@@ -347,6 +359,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     run: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
     ) => consume('open', () => execution.run(input), 'closed'),
+    runNativeGenesisRetainingSigner: async (
+      ...[compiled, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSigner']>
+    ) => consume('open', () => {
+      nativeRouteSelected = true;
+      return execution.runNativeGenesisRetainingSigner(compiled, target);
+    }, 'native-setup-complete'),
     runForExecutionV3RetainingPegInAndTrackerSigner: async (
       ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
     ) => consume(

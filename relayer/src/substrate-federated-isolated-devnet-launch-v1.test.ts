@@ -2391,6 +2391,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-genesis-observation-v1.js',
       './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
+      './substrate-federated-native-genesis-setup-check-request-v1.js',
     ]);
     expect(source).not.toMatch(
       /\b(?:signTransactionForSubmission|submitSigned|npost|broadcastTransaction|getSignerKeys)\b/u,
@@ -2486,7 +2487,11 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-isolated-devnet-tracker-v2-check-kernel-v1.js',
       './substrate-federated-tracker-v2.js',
       './substrate-federated-tracker-compiler-v2.js',
+      './substrate-federated-pooled-reserve-deposit-v2.js',
       './substrate-federated-tracker-v2-external-fee.js',
+      './substrate-federated-burn-settlement-v2.js',
+      './substrate-federated-burn-settlement-v1.js',
+      './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js',
       './substrate-federated-settlement-family-compiler-binding-v1.js',
       './local-wasm-root-signer-public-identity.js',
       './relayer-core/devnet-reward-consolidation.js',
@@ -2499,6 +2504,8 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-isolated-devnet-settlement-target-v2.js',
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
       './substrate-federated-isolated-devnet-setup-check-v2.js',
+      './substrate-federated-native-genesis-setup-check-request-v1.js',
+      './substrate-federated-observed-genesis-v1.js',
       './strict-json.js',
       './ergo-helpers.js',
       './substrate-federated-tracker-v2-external-fee.js',
@@ -2509,7 +2516,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect([...execution.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/substrate-federated-tracker-v2-external-fee\.js'/gu)]
       .map(match => match[1]!.replace(/\s+/gu, ' ').trim())).toEqual([
       'assertSubstrateFederatedTrackerV2ExternalFeeTransaction, type SubstrateFederatedTrackerV2ExternalFeeTransaction',
-      'buildSubstrateFederatedTrackerV2FeeFunding',
+      'buildSubstrateFederatedTrackerV2FeeFunding, buildSubstrateFederatedWithdrawalV2FeeFunding',
     ]);
     expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}\n${trackerV2Kernel}`).not.toMatch(
       /process\.env|node:(?:fs|http|https|net|tls|child_process)|profile-registry|state-tracker/iu,

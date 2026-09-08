@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // These two upstream observation boundaries are stubs, not live-node evidence.
 // Custody, profile encoding, tracked templates and both JVM compilers stay real.
@@ -35,12 +35,18 @@ import { buildSubstrateFederatedNativeGenesisSetupCheckRequestV1 } from './subst
 import * as genesisObservation from './substrate-federated-genesis-observation-v1.js';
 import * as ownedTarget from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import * as readOnlySource from './authenticated-spv-tracker-read-only-node-client.js';
+import * as helpers from './ergo-helpers.js';
+import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
+import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1, getSubstrateFederatedNativeGenesisSetupCompilerInputV1 }
+  from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
 const bridgeRoot = fileURLToPath(new URL('../../', import.meta.url));
 const runTracker = trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2;
 let setup: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
 let source: ReturnType<typeof createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
 let input: CompileObservedSubstrateFederatedGenesisV1Input;
+let wasm: any;
+let headers: Record<string, any>[];
 const BASE_INPUT = {
   boxId: '8f25f8b850290c20b9f3568eba3604bee2f4e2d7167c7ea68f2943997ea742a5', value: '300000000',
   ergoTree: `0008cd02${'22'.repeat(32)}`, assets: [], additionalRegisters: {}, creationHeight: 110,
@@ -56,7 +62,7 @@ async function observedInputs(delay: 1 | 720, target: object) {
   }, 'observed FED issuance fixture')).outputs;
   const genesisInputs = Object.freeze({ tracker: boxes[0]!, duplicatePrevention: boxes[1]!, pooledReserve: boxes[2]! });
   const discovery = Object.freeze({ reportDigestHex: '71'.repeat(32),
-    target: Object.freeze({ network: 'devnet', genesisHeaderIdHex: '72'.repeat(32), tipHeight: 1000, tipHeaderIdHex: '73'.repeat(32) }),
+    target: Object.freeze({ network: 'devnet', genesisHeaderIdHex: '72'.repeat(32), tipHeight: 1000, tipHeaderIdHex: headers[0]!.id }),
     sources: Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052' }),
     signer: Object.freeze({ publicKeyHex: setup.signer.publicKeyHex, p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
       rewardDelayBlocks: delay, rewardInputErgoTreeHex: tree }),
@@ -70,6 +76,12 @@ async function observedInputs(delay: 1 | 720, target: object) {
   return { ownedDiscovery: ownedDiscovery as never, history: history as never };
 }
 
+beforeAll(async () => {
+  const module = await import('ergo-lib-wasm-nodejs'); wasm = module.default ?? module;
+  headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+    currentHeight: 1001, anchorContextIndex: 0, anchorExtensionRootHex: '94'.repeat(32),
+  }).headers.map(header => header.raw);
+});
 beforeEach(async () => {
   observations.active = true;
   setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
@@ -173,10 +185,16 @@ describe('observed FED genesis compilation', () => {
       vi.spyOn(ownedTarget, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
         .mockReturnValue({ processBindingDigestHex: '74'.repeat(32), executionTargetIdentityDigestHex: '75'.repeat(32) });
       vi.spyOn(genesisObservation, 'observeSubstrateFederatedGenesisV1').mockImplementation(async profile => ({
-        observedAt: new Date().toISOString(), reportDigestHex: '76'.repeat(32),
-        target: { tipHeight: 1000, tipHeaderIdHex: expectedDiscovery.target.tipHeaderIdHex },
-        boxes: Object.fromEntries(['tracker', 'duplicatePrevention', 'pooledReserve'].map(role =>
-          [role, { box: expectedDiscovery.genesisInputs[role as keyof typeof expectedDiscovery.genesisInputs] }])),
+        status: 'AGREED', observedAt: new Date().toISOString(), reportDigestHex: '76'.repeat(32),
+        target: { ...expectedDiscovery.target },
+        sources: { primary: { endpointOrigin: profile.sources.primary.endpointOrigin, sourceIdHex: profile.sources.primary.sourceIdHex },
+          witness: { endpointOrigin: profile.sources.witness.endpointOrigin, sourceIdHex: profile.sources.witness.sourceIdHex } },
+        agreement: { fixtureAgreement: true }, authorization: { fixtureAuthority: false },
+        boundary: { readOnlyNodeRequestsOnly: true, signerOrWalletMaterialRead: false, targetAcceptanceEstablished: false },
+        boxes: Object.fromEntries(['tracker', 'duplicatePrevention', 'pooledReserve'].map((role, index) =>
+          [role, { box: expectedDiscovery.genesisInputs[role as keyof typeof expectedDiscovery.genesisInputs],
+            role: ['tracker', 'duplicate-prevention', 'pooled-reserve'][index], sigmaSerializedSha256Hex: '77'.repeat(32),
+            checks: { presentInCurrentUtxoView: true, boxIdRecomputedFromJson: true, sigmaBytesCanonical: true } }])),
         profile,
       }) as never);
       vi.spyOn(genesisObservation, 'assertSubstrateFederatedGenesisObservationV1Provenance').mockImplementation(() => {});
@@ -193,15 +211,40 @@ describe('observed FED genesis compilation', () => {
       expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).not.toThrow();
       expect(() => assertObservedSubstrateFederatedGenesisV1({ ...result }, expectedTarget)).toThrow(/compiler and target provenance/);
       expect(() => assertObservedSubstrateFederatedGenesisV1(result, {} as never)).toThrow(/compiler and target provenance/);
+      vi.spyOn(helpers, 'ngetDirect').mockResolvedValue(headers);
+      vi.spyOn(helpers, 'ncheck').mockImplementation(async (_path, body) => {
+        const transaction = wasm.Transaction.from_json(JSON.stringify(body));
+        const id = transaction.id();
+        try { return id.to_str(); } finally { id.free(); transaction.free(); }
+      });
+      const batch = await setup.runNativeGenesisRetainingSigner(result, expectedTarget);
+      expect(batch.profile).toBe('fed-native-height-zero-v1');
+      expect(batch.orderedTransactions.map(value => value.signedCandidate.txId))
+        .toEqual(result.issuance.orderedTransactions.map(value => value.transaction.txId));
+      expect(batch.orderedTransactions.map(value => value.issuance.unsignedTransactionBody))
+        .toEqual(result.issuance.orderedTransactions.map(value => value.transaction.eip12Tx));
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+      expect(batch.receipt.signer.publicKeyHex).toBe(setup.signer.publicKeyHex);
+      expect(batch.receipt.signer.rewardDelayBlocks).toBe(delay);
+      expect(batch.receipt.boundaries.fundsAuthorityEstablished).toBe(false);
+      const retainedCompiler = getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, expectedTarget);
+      expect(retainedCompiler.trackerRequest).toBe(result.familyCompilerInput.trackerRequest);
+      expect(retainedCompiler.trackerReceipt).toBe(result.familyCompilerInput.trackerReceipt);
+      expect(retainedCompiler.familyReceipt).toBe(result.familyReceipt);
+      expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, expectedTarget)).not.toThrow();
       observations.active = false;
       expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/observation inactive/);
       observations.active = true;
       if (delay === 1) {
         setup.dispose();
         expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/active process provenance/);
+        expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, expectedTarget)).toThrow(/inactive/);
+        expect(() => getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, expectedTarget)).toThrow(/inactive/);
       } else {
         source.dispose();
         expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/disposed/);
+        expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, expectedTarget)).toThrow(/disposed/);
+        expect(() => getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, expectedTarget)).toThrow(/disposed/);
       }
     } finally {
       if (previous === undefined) delete process.env.NODE_OPTIONS;

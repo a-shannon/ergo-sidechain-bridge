@@ -351,8 +351,9 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV3(
 export async function runSubstrateFederatedNativeGenesisSetupCheckV1(
   request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>,
   syntheticMnemonic: string,
+  cancellation?: AbortSignal,
 ): Promise<Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1>> {
-  return runSetupCheck(request, syntheticMnemonic, nativeGenesisBinding);
+  return runSetupCheck(request, syntheticMnemonic, nativeGenesisBinding, cancellation);
 }
 
 export function takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1(
@@ -375,15 +376,18 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   request: Readonly<R>,
   syntheticMnemonic: string,
   binding: Readonly<SetupCheckBinding<R, C>>,
+  cancellation?: AbortSignal,
 ): Promise<Readonly<C>> {
   const mnemonic = syntheticMnemonic.trim();
   if (!mnemonic) {
     throw new Error('isolated local setup-check synthetic mnemonic is empty');
   }
   const assertActive = () => {
+    if (cancellation?.aborted) throw new Error('native FED setup session was cancelled');
     assertRuntimeFresh(request);
     binding.assertActive?.(request);
   };
+  assertActive();
   await assertRuntimeRequest(request, binding);
   const preSignObservation = await reobserveAndBind(
     request,
@@ -550,6 +554,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   );
   await assertRuntimeRequest(request, binding);
 
+  assertActive();
   const controlledInputErgoTreeHex =
     request.orderedIssuances[0]!.requiredInputErgoTreeHex;
   const body = deepFreeze({

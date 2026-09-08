@@ -147,12 +147,17 @@ establish deployment safety or independent operator custody.
   contracts. Their predicted IDs are not confirmed issuance. The next join
   uses a separately identified FED-native setup request/checker entry; the old
   V3 G1dA history closure is not interchangeable with height-zero FED identity.
-  The native binding now reaches the existing exact-byte checking engine at
-  component-test level. Original compiler/target custody and fresh observation
-  are required; V2/V3 material stays separate. The remaining join is the
-  managed one-shot native session and authorized issuance in the live root.
-  Reuse the operational lifecycle without fabricating historical provenance
-  or weakening its guards. Simulated HTTP checks are not node acceptance.
+  The managed native session now takes the original compiled family through
+  three exact WASM signatures and check results, retaining the synthetic
+  signer and a distinct target-bound native batch. Compiler receipts remain
+  tied to that session; disposal or concurrent misuse prevents the next
+  signature/check and invalidates retained batch access. Component tests use
+  the real JVM compilers and WASM signer with simulated observations/HTTP,
+  not target-node acceptance. V2/V3 material stays separate. Next, connect
+  this batch to authorized issuance and committed-reserve confirmation inside
+  the live root, preserving its lifetime and fresh per-action observations.
+  Do not fabricate historical provenance or treat a checked batch as broadcast
+  authority.
   The old source locks and withdrawal campaign retain their original scope.
 
 ## Critical Path
@@ -196,7 +201,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Active; native request/checking-engine join implemented at component level; actual composed run pending | Connect the managed one-shot native setup session to the exact compiler, checked transactions and retained target, then authorized issuance and committed-reserve confirmation inside the live root. The historical V3 G1dA request cannot stand in for that native identity. Continue through operational mint before the fresh campaign; predicted output IDs are not issued singleton successors |
+| FED running-target binding | Active; native retained-session checking join implemented at component level; actual composed run pending | Connect the distinct native checked batch and retained compiler to authorized singleton issuance and committed-reserve confirmation inside the live root. Keep request freshness at checking separate from each later action's fresh observation, and reject disposed or cross-profile custody. The historical V3 G1dA request cannot stand in for native identity. Continue through operational mint before the fresh campaign; checked transaction IDs are not confirmed successors |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 
