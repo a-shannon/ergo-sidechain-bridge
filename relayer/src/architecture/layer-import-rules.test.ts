@@ -1229,10 +1229,13 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedNativeGenesisRevalidatorV1'],
+    ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedNativeGenesisBroadcastAuthorizerV1'],
+    ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1'],
     ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2'],
     ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2'],
     ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2'],
-  ] as const)('keeps V3 genesis capability %s#%s inside the fixed root', (module, factory) => {
+  ] as const)('keeps native and V3 genesis capability %s#%s inside the fixed root', (module, factory) => {
     const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const target = `${module}.ts`;
     const specifier = `../../${module}.js`;

@@ -1,6 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import axios from 'axios';
 import { Mnemonic } from 'ethers';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 // Request provenance and observations are component doubles. WASM signing and
 // exact checked-byte custody are real; the HTTP checker is not a JVM oracle.
@@ -48,6 +52,10 @@ import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertSigner }
   from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import * as readOnlyNode from './authenticated-spv-tracker-read-only-node-client.js';
+import { StateTracker } from './state-tracker.js';
+import { executeSubstrateFederatedNativeGenesisBatchV1 }
+  from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -92,6 +100,7 @@ async function configureFixture(signer: { publicKeyHex: string; p2pkErgoTreeHex:
     });
     issuances.push({ ordinal, role, genesisInputBoxIdHex: funding[ordinal]!.boxId, requiredInputErgoTreeHex: tree,
       unsignedTransactionIdHex: transaction.txId, unsignedTransactionBody: transaction.eip12Tx,
+      predictedStateOutput: transaction.outputs[0],
       bytesToSignBlake2b256Hex: transaction.txId });
   }
   target = { primaryNodeOrigin: ORIGIN, witnessNodeOrigin: WITNESS, primaryMining: true, witnessReadOnly: true };
@@ -295,6 +304,134 @@ describe('native FED managed setup session', () => {
     });
   });
   afterEach(() => { session?.dispose(); sessionMnemonic = ''; });
+
+  async function withNativeIssuance(
+    runTest: (context: {
+      input: Parameters<typeof executeSubstrateFederatedNativeGenesisBatchV1>[0] & { state: StateTracker };
+      post: MockInstance<typeof axios.post>;
+      markers: string;
+      sent: Set<string>;
+      beforeBoxRead: (callback: () => void) => void;
+      afterPost: (callback: () => void) => void;
+    }) => Promise<void>,
+  ) {
+    const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
+    const root = mkdtempSync(join(tmpdir(), 'e2s-native-issuance-test-'));
+    const markers = join(root, 'markers');
+    mkdirSync(markers);
+    const state = new StateTracker(join(root, 'state.sqlite'));
+    const sent = new Set<string>();
+    let onBoxRead = () => {};
+    let onPost = () => {};
+    const boxes = new Map(batch.orderedTransactions.map(transaction => {
+      const input = (transaction.issuance.unsignedTransactionBody.inputs as any[])[0];
+      const { extension: _extension, ...box } = input;
+      return [box.boxId, box] as const;
+    }));
+    // Only observations and HTTP are simulated. Signing, byte checks, both
+    // authorizers, confirmation provenance and the durable journal are real.
+    vi.spyOn(readOnlyNode, 'createBoundedAuthenticatedSpvTrackerReadOnlySource')
+      .mockImplementation(() => ({
+        getInfo: async () => ({ network: 'devnet', fullHeight: 1020 }),
+        getBestHeader: async () => ({ height: 1020, id: '70'.repeat(32) }),
+        getBlockHeaderIdsAtHeight: async () => [request.target.genesisHeaderIdHex],
+        getIndexedHeight: async () => { throw new Error('unexpected indexed-height read'); },
+        getIndexedBoxesByTokenId: async () => { throw new Error('unexpected indexed-token read'); },
+        getTransaction: async () => { throw new Error('unexpected transaction read'); },
+        getBlockHeaderById: async () => { throw new Error('unexpected header read'); },
+        getBoxByIdOrNull: async id => { onBoxRead(); return boxes.get(id) ?? null; },
+        getBoxBinaryByIdOrNull: async id => {
+          const box = boxes.get(id);
+          if (!box) return null;
+          const parsed = wasm.ErgoBox.from_json(JSON.stringify(box));
+          try { return { bytes: Buffer.from(parsed.sigma_serialize_bytes()).toString('hex') }; }
+          finally { parsed.free(); }
+        },
+      }) as ReturnType<typeof readOnlyNode.createBoundedAuthenticatedSpvTrackerReadOnlySource>);
+    vi.spyOn(axios, 'create').mockImplementation(() => ({
+      get: async (path: string) => {
+        if (path === '/info') return { data: { network: 'devnet', fullHeight: 1020 } };
+        if (path === '/blocks/at/1') return { data: [request.target.genesisHeaderIdHex] };
+        if (path === '/blocks/at/1000') return { data: ['71'.repeat(32)] };
+        const match = /^\/blockchain\/transaction\/byId\/([0-9a-f]{64})$/.exec(path);
+        if (match && sent.has(match[1]!)) return { data: {
+          id: match[1], numConfirmations: 20, inclusionHeight: 1000, headerId: '71'.repeat(32),
+        } };
+        throw new Error(`unexpected component observation ${path}`);
+      },
+    }) as ReturnType<typeof axios.create>);
+    const post = vi.spyOn(axios, 'post').mockImplementation(async (url, body) => {
+      expect(url).toBe(`${ORIGIN}/transactions`);
+      if (!body || typeof body !== 'object' || !('id' in body) || typeof body.id !== 'string') {
+        throw new Error('component transport requires a signed transaction ID');
+      }
+      const expected = batch.orderedTransactions[sent.size]!;
+      expect(body.id).toBe(expected.issuance.unsignedTransactionIdHex);
+      expect(state.getErgoOperationalTransactionAttempt(body.id)).not.toBeNull();
+      expect(readdirSync(markers)).toHaveLength(sent.size + 1);
+      for (const predecessor of sent) {
+        expect(state.getErgoOperationalTransactionAttempt(predecessor)?.status).toBe('confirmed');
+      }
+      sent.add(body.id);
+      onPost();
+      return { status: 200, data: body.id };
+    });
+    try {
+      await runTest({ input: { target, batch, state, markerDirectory: markers },
+        post, markers, sent, beforeBoxRead: callback => { onBoxRead = callback; },
+        afterPost: callback => { onPost = callback; } });
+    } finally {
+      state.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  it('composes native checked custody through durable ordered issuance and canonical confirmation', async () => {
+    await withNativeIssuance(async ({ input, post, markers, sent }) => {
+      const now = Date.now();
+      vi.spyOn(Date, 'now').mockReturnValue(now + 60_001);
+      const result = await executeSubstrateFederatedNativeGenesisBatchV1(input);
+      expect(result.map(value => value.role)).toEqual(KEYS);
+      expect(result.map(value => value.expectedTxId)).toEqual([...sent]);
+      expect(result.every(value => value.transportStatus === 'accepted' && value.confirmationHeight === 1000)).toBe(true);
+      expect(result.every(value => value.confirmationHeaderIdHex === '71'.repeat(32))).toBe(true);
+      expect(result.every(value => input.state.getErgoOperationalTransactionAttempt(value.expectedTxId)?.status === 'confirmed')).toBe(true);
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(post).toHaveBeenCalledTimes(3);
+      expect(readdirSync(markers)).toHaveLength(3);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(input.batch, target)).not.toThrow();
+      await expect(executeSubstrateFederatedNativeGenesisBatchV1(input)).rejects.toThrow();
+      expect(post).toHaveBeenCalledTimes(3);
+      expect(JSON.stringify(result).includes(sessionMnemonic)).toBe(false);
+    });
+  });
+
+  it('stops native issuance when custody expires during pre-transport reobservation', async () => {
+    await withNativeIssuance(async ({ input, post, markers, beforeBoxRead }) => {
+      let reads = 0;
+      beforeBoxRead(() => { if (++reads === 3) session.dispose(); });
+      await expect(executeSubstrateFederatedNativeGenesisBatchV1(input)).rejects.toThrow(/inactive/);
+      expect(reads).toBe(4);
+      expect(post).not.toHaveBeenCalled();
+      expect(readdirSync(markers)).toHaveLength(0);
+    });
+  });
+
+  it('retains the durable first attempt without authorizing a successor after custody loss at transport', async () => {
+    await withNativeIssuance(async ({ input, post, markers, sent, afterPost }) => {
+      afterPost(() => session.dispose());
+      await expect(executeSubstrateFederatedNativeGenesisBatchV1(input)).rejects.toThrow(/inactive/);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(sent.size).toBe(1);
+      expect(readdirSync(markers)).toHaveLength(1);
+      const first = input.batch.orderedTransactions[0]!.issuance.unsignedTransactionIdHex;
+      const retained = input.state.getErgoOperationalTransactionAttempt(first);
+      expect(retained).not.toBeNull();
+      expect(retained?.status).not.toBe('confirmed');
+      expect(input.state.getErgoOperationalTransactionAttempt(input.batch.orderedTransactions[1]!.issuance.unsignedTransactionIdHex)).toBeNull();
+    });
+  });
 
   it('retains exact checked transactions and compiler custody without granting transport', async () => {
     const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
