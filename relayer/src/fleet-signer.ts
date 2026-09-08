@@ -190,6 +190,7 @@ const LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL = new WeakMap<
     signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
     checkResponseDigestHex: string;
     executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>;
+    assertActive?: () => void;
   }>
 >();
 const CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
@@ -755,8 +756,11 @@ export async function prepareLocalWasmRootCheckCandidatesFromNode(input: {
   networkPrefix: number;
   nodeOrigin: string;
   candidates: readonly LocalWasmCheckCandidate[];
+  assertActive?: () => void;
 }): Promise<PreparedLocalWasmRootCheckBatch> {
+  input.assertActive?.();
   const { ngetDirect } = await import('./ergo-helpers.js');
+  input.assertActive?.();
   const nodeOrigin = normalizeNodeOrigin(input.nodeOrigin);
   return prepareLocalWasmRootCheckCandidates({
     ...input,
@@ -1154,7 +1158,9 @@ export function promoteLocalWasmCheckedTransactionForSubmissionV1(
   candidate: LocalWasmExactBytesSignedCheckCandidate,
   checked: Readonly<LocalWasmOpaqueCheckResult>,
   executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+  assertActive?: () => void,
 ): Readonly<LocalWasmCheckedSubmissionAcceptanceV1> {
+  assertActive?.();
   assertLocalWasmSignedCheckCandidateProvenance(candidate);
   if (LOCAL_WASM_CHECK_RESULTS.get(checked) !== candidate) {
     throw new Error('checked submission result lacks exact process provenance');
@@ -1199,6 +1205,7 @@ export function promoteLocalWasmCheckedTransactionForSubmissionV1(
     signedCandidate: candidate,
     checkResponseDigestHex,
     executionBinding: frozenExecutionBinding,
+    assertActive,
   }));
   return Object.freeze({
     checked: frozenChecked,
@@ -1224,6 +1231,7 @@ export function assertLocalWasmCheckedSubmissionHandleV1Provenance(
   if (!material) {
     throw new Error('local WASM checked submission material is unavailable');
   }
+  material.assertActive?.();
   assertLocalWasmSignedCheckCandidateProvenance(material.signedCandidate);
   if (
     handle.profile !== LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE

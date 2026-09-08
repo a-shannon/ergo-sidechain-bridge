@@ -479,6 +479,7 @@ const PEG_IN_SOURCE_LOCK_CHECK_MATERIAL = new WeakMap<
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
     signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
     checked: Readonly<LocalWasmOpaqueCheckResult>;
+    assertActive?: () => void;
   }>
 >();
 const PEG_IN_COMMITTED_VAULT_CHECK_MATERIAL = new WeakMap<
@@ -489,6 +490,7 @@ const PEG_IN_COMMITTED_VAULT_CHECK_MATERIAL = new WeakMap<
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
     signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
     checked: Readonly<LocalWasmOpaqueCheckResult>;
+    assertActive?: () => void;
   }>
 >();
 const OBSERVED_ANCHOR_TRACKER_CHECK_RECEIPTS = new WeakSet<object>();
@@ -524,6 +526,7 @@ const PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+    assertActive?: () => void;
   }>
 >();
 
@@ -541,6 +544,7 @@ const PEG_IN_COMMITTED_VAULT_EXECUTION_CHECKS = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+    assertActive?: () => void;
   }>
 >();
 
@@ -610,6 +614,14 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     compiled: Readonly<ObservedSubstrateFederatedGenesisV1>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>>;
+  readonly checkNativePegInSourceLockRetainingSignerV1: (
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>>;
+  readonly checkNativePegInCommittedVaultRetainingSignerV1: (
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>>;
   readonly runForExecutionV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1093,6 +1105,7 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1> {
   const material = PEG_IN_SOURCE_LOCK_CHECK_MATERIAL.get(receipt);
+  material?.assertActive?.();
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (
@@ -1120,11 +1133,13 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(
         material.signedCandidate,
         material.checked,
         current,
+        material.assertActive,
       ),
   });
   PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS.set(promoted, Object.freeze({
     target,
     binding: current,
+    assertActive: material.assertActive,
   }));
   return promoted;
 }
@@ -1135,6 +1150,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCh
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
   const material = PEG_IN_SOURCE_LOCK_EXECUTION_CHECKS.get(value);
+  material?.assertActive?.();
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (
@@ -1173,6 +1189,7 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1> {
   const material = PEG_IN_COMMITTED_VAULT_CHECK_MATERIAL.get(receipt);
+  material?.assertActive?.();
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (
@@ -1200,11 +1217,13 @@ export function promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV
         material.signedCandidate,
         material.checked,
         current,
+        material.assertActive,
       ),
   });
   PEG_IN_COMMITTED_VAULT_EXECUTION_CHECKS.set(promoted, Object.freeze({
     target,
     binding: current,
+    assertActive: material.assertActive,
   }));
   return promoted;
 }
@@ -1215,6 +1234,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecuti
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
   const material = PEG_IN_COMMITTED_VAULT_EXECUTION_CHECKS.get(value);
+  material?.assertActive?.();
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   if (
@@ -1397,11 +1417,14 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let retainedWithdrawalCompiler: ReturnType<typeof getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3> | undefined;
     let retainedWithdrawalTracker: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
+    let nativeBatch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> | undefined;
     let state:
       | 'open'
       | 'running'
       | 'setup-complete'
       | 'native-setup-complete'
+      | 'native-source-lock-checked'
+      | 'native-vault-checked'
       | 'v3-peg-in-ready'
       | 'v3-source-lock-checked'
       | 'v3-tracker-fee-ready'
@@ -1417,7 +1440,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     const nativeCancellation = new AbortController();
     const assertNativeSessionActive = (): void => {
       if (!nativeRouteSelected || terminalInvalidationRequested || nativeCancellation.signal.aborted
-        || (state !== 'running' && state !== 'native-setup-complete')) {
+        || !['running', 'native-setup-complete', 'native-source-lock-checked', 'native-vault-checked'].includes(state)) {
         throw new Error('native FED setup session is inactive');
       }
     };
@@ -1457,12 +1480,15 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       retainedWithdrawalCompiler = undefined;
       retainedWithdrawalTracker = undefined;
       retainedPegInPacket = undefined;
+      nativeBatch = undefined;
       mnemonic = '';
       state = 'closed';
     };
     const consume = async <T>(
       expectedState:
         | 'open'
+        | 'native-setup-complete'
+        | 'native-source-lock-checked'
         | 'setup-complete'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
@@ -1476,6 +1502,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       successState:
         | 'setup-complete'
         | 'native-setup-complete'
+        | 'native-source-lock-checked'
+        | 'native-vault-checked'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
@@ -1537,6 +1565,40 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
         trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
       return batch;
+    };
+    const assertNativePegInCustody = (
+      packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => {
+      assertNativeSessionActive();
+      assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
+      if (nativeBatch === undefined) throw new Error('native FED peg-in setup custody is absent');
+      const compiler = getSubstrateFederatedNativeGenesisSetupCompilerInputV1(nativeBatch, target);
+      if (packet.familyIdHex !== compiler.familyReceipt.profile.familyIdHex
+        || canonicalJson(packet.familyCompiler) !== canonicalJson({
+          trackerRequestDigestHex: compiler.familyReceipt.trackerCompilerRequestDigestHex,
+          trackerReceiptDigestHex: compiler.familyReceipt.trackerCompilerReceiptDigestHex,
+          familyRequestDigestHex: compiler.familyReceipt.familyCompilerRequestDigestHex,
+          familyReceiptDigestHex: compiler.familyReceipt.receiptDigestHex,
+          compilerLockDigestHex: compiler.familyReceipt.compilerLockDigestHex,
+        })) {
+        throw new Error('native FED peg-in compiler differs from retained setup');
+      }
+      return nativeBatch;
+    };
+    const assertNativePegInPacket = async (
+      packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ): Promise<void> => {
+      const retained = assertNativePegInCustody(packet, target);
+      const reserve = await materializeUnsignedTransaction(
+        structuredClone(retained.orderedTransactions[2]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+        'native FED peg-in reserve',
+      );
+      if (canonicalJson(packet.boxes.reservePredecessor) !== canonicalJson(reserve.outputs[0])) {
+        throw new Error('native FED peg-in reserve differs from retained setup');
+      }
+      assertNativePegInCustody(packet, target);
     };
     const assertPegInPacketV2 = async (
       packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
@@ -1730,9 +1792,44 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         assertNativeSessionActive();
         const receipt = await runSubstrateFederatedNativeGenesisSetupCheckV1(request, activeMnemonic, nativeCancellation.signal);
         assertNativeSessionActive();
-        return promoteNativeSetupExecutionBatch({ compiled, target, binding, request, receipt,
+        nativeBatch = promoteNativeSetupExecutionBatch({ compiled, target, binding, request, receipt,
           assertSessionActive: assertNativeSessionActive });
+        return nativeBatch;
       }, 'native-setup-complete'),
+      checkNativePegInSourceLockRetainingSignerV1: async (
+        packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) =>
+        consume('native-setup-complete', async activeMnemonic => {
+          await assertNativePegInPacket(packet, target);
+          const checked = await runPegInSourceLockCheck({
+            sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+            unsignedTransaction: packet.transactions.sourceLockCreation,
+          }, target, signer, activeMnemonic, () => assertNativePegInCustody(packet, target));
+          await assertNativePegInPacket(packet, target);
+          retainedPegInPacket = packet;
+          return checked;
+        }, 'native-source-lock-checked'),
+      checkNativePegInCommittedVaultRetainingSignerV1: async (
+        packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+      ) =>
+        consume('native-source-lock-checked', async activeMnemonic => {
+          if (packet !== retainedPegInPacket) {
+            throw new Error('native FED peg-in packet differs from the checked source lock');
+          }
+          await assertNativePegInPacket(packet, target);
+          const checked = await runPegInCommittedVaultCheck({
+            reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+            sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+            transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+            unsignedTransaction: packet.transactions.reserveTransition,
+          }, target, signer, activeMnemonic, () => assertNativePegInCustody(packet, target));
+          await assertNativePegInPacket(packet, target);
+          retainedPegInPacket = undefined;
+          retainedCommittedPegInPacket = packet;
+          return checked;
+        }, 'native-vault-checked'),
       runForExecutionV3: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -2509,7 +2606,9 @@ async function runPegInSourceLockCheck(
   expectedSigner:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSignerV2>,
   mnemonic: string,
+  assertActive?: () => void,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>> {
+  assertActive?.();
   const input = capturePegInSourceLockCheckInput(inputValue);
   const before = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
     target,
@@ -2546,6 +2645,7 @@ async function runPegInSourceLockCheck(
   );
   const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
     mnemonic,
+    ...(assertActive === undefined ? {} : { assertActive }),
     networkPrefix: expectedSigner.networkPrefix,
     nodeOrigin,
     candidates: [{
@@ -2555,6 +2655,7 @@ async function runPegInSourceLockCheck(
     }],
   });
   const prepared = batch.candidates[0];
+  assertActive?.();
   if (
     batch.derivation !== 'wasm-root'
     || batch.pubKeyHex !== expectedSigner.publicKeyHex
@@ -2571,7 +2672,9 @@ async function runPegInSourceLockCheck(
     prepared.signedCandidate,
     'isolated local peg-in source-lock check',
     nodeOrigin,
+    assertActive,
   );
+  assertActive?.();
   if (checked === null) {
     throw new Error('isolated local peg-in source-lock JVM node check failed');
   }
@@ -2678,6 +2781,7 @@ async function runPegInSourceLockCheck(
     binding: after,
     signedCandidate: prepared.signedCandidate,
     checked,
+    assertActive,
   }));
   return receipt;
 }
@@ -2689,7 +2793,9 @@ async function runPegInCommittedVaultCheck(
   expectedSigner:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSignerV2>,
   mnemonic: string,
+  assertActive?: () => void,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>> {
+  assertActive?.();
   const input = capturePegInCommittedVaultCheckInput(inputValue);
   const before = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
     target,
@@ -2742,6 +2848,7 @@ async function runPegInCommittedVaultCheck(
   );
   const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
     mnemonic,
+    ...(assertActive === undefined ? {} : { assertActive }),
     networkPrefix: expectedSigner.networkPrefix,
     nodeOrigin,
     candidates: [{
@@ -2751,6 +2858,7 @@ async function runPegInCommittedVaultCheck(
     }],
   });
   const prepared = batch.candidates[0];
+  assertActive?.();
   if (
     batch.derivation !== 'wasm-root'
     || batch.pubKeyHex !== expectedSigner.publicKeyHex
@@ -2767,7 +2875,9 @@ async function runPegInCommittedVaultCheck(
     prepared.signedCandidate,
     'isolated local peg-in committed-vault check',
     nodeOrigin,
+    assertActive,
   );
+  assertActive?.();
   if (checked === null) {
     throw new Error('isolated local committed-vault JVM node check failed');
   }
@@ -2881,6 +2991,7 @@ async function runPegInCommittedVaultCheck(
     binding: after,
     signedCandidate: prepared.signedCandidate,
     checked,
+    assertActive,
   }));
   return receipt;
 }

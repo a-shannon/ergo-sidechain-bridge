@@ -5,6 +5,9 @@ import {
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  getSubstrateFederatedNativeGenesisSetupCompilerInputV1,
+  type SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   assertSubstrateFederatedPooledReserveDepositV2Packet,
@@ -106,4 +109,52 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(
   assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(batch, target);
   assertSubstrateFederatedPooledReserveDepositV2Packet(candidate.depositPacket);
   return candidate.depositPacket;
+}
+
+/** Native setup binding; the underlying deposit format remains V2. */
+export async function buildSubstrateFederatedNativeGenesisPegInPacketV1(
+  input: Readonly<Omit<BuildSubstrateFederatedIsolatedDevnetPegInCandidateV2Input, 'batch'> & {
+    readonly batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  }>,
+): Promise<Readonly<SubstrateFederatedPooledReserveDepositV2Packet>> {
+  const required = ['batch', 'target', 'sourceFundingInput', 'sourceIntent', 'depositorErgoTreeHex', 'creationHeights'];
+  if (input === null || typeof input !== 'object' || Array.isArray(input)
+    || required.some(key => !Object.hasOwn(input, key))
+    || Reflect.ownKeys(input).some(key => typeof key !== 'string' || ![...required, 'fees'].includes(key)
+      || !Object.hasOwn(Object.getOwnPropertyDescriptor(input, key)!, 'value'))) {
+    throw new Error('native FED peg-in requires exact own-data construction inputs');
+  }
+  const { batch, target, sourceFundingInput, sourceIntent, depositorErgoTreeHex, creationHeights, fees } = input;
+  const compiler = getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, target);
+  const issuance = batch.orderedTransactions[2]!.issuance;
+  const outputs = issuance.unsignedTransactionBody['outputs'];
+  if (issuance.ordinal !== 2 || issuance.role !== 'pooled-reserve'
+    || issuance.predictedStateOutput.index !== 0 || !Array.isArray(outputs)
+    || outputs[0] === null || typeof outputs[0] !== 'object' || Array.isArray(outputs[0])) {
+    throw new Error('native FED reserve issuance output is invalid');
+  }
+  const predecessor: Eip12Box = {
+    ...structuredClone(outputs[0]),
+    boxId: issuance.predictedStateOutput.boxIdHex,
+    transactionId: issuance.predictedStateOutput.transactionIdHex,
+    index: 0,
+  };
+  const packet = await buildSubstrateFederatedPooledReserveDepositV2({
+    familyCompilerInput: {
+      trackerRequest: compiler.trackerRequest,
+      trackerReceipt: compiler.trackerReceipt,
+      templates: compiler.familyTemplates,
+      duplicatePreventionGenesisInputBoxIdHex: compiler.familyReceipt.profile.duplicatePreventionNftIdHex,
+      pooledReserveGenesisInputBoxIdHex: compiler.familyReceipt.profile.pooledReserveNftIdHex,
+    },
+    familyCompilerReceipt: compiler.familyReceipt,
+    sourceFundingInput,
+    reserveState: { predecessor, depositHistory: [] },
+    sourceIntent,
+    depositorErgoTreeHex,
+    creationHeights,
+    fees,
+  });
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  return packet;
 }

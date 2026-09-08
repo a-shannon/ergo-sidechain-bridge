@@ -306,6 +306,19 @@ session. Disposal releases retained references; memory zeroization is not
 established. Committed-reserve and operational mint consumers must still be
 connected inside that lifetime before running the fresh composed campaign.
 
+The native setup batch can now construct the existing V2 deposit packet from
+its retained compiler and exact reserve predecessor, without a historical V3
+setup plan. Separate native session states check source-lock creation before
+the same packet's reserve transition. Session validity is checked around
+asynchronous signing/checking and retained on promoted submission handles;
+disposing either session invalidates later use. The deposit format, contracts
+and historical V3 sequence are unchanged. Component tests exercise canonical
+transaction materialization and actual WASM signatures with simulated
+compiler/deposit provenance and node responses. Checking alone establishes
+neither deposit confirmation nor mint eligibility. Source-lock/reserve
+execution, fresh observations and operational mint still need composition
+inside the target root.
+
 ## Ergo Issuance Materialization
 
 The observed-input compiler also produces the three unsigned Ergo transactions

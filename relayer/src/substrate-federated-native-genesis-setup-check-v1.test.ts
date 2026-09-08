@@ -54,6 +54,11 @@ import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenan
   from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 import * as readOnlyNode from './authenticated-spv-tracker-read-only-node-client.js';
 import { StateTracker } from './state-tracker.js';
+import * as deposits from './substrate-federated-pooled-reserve-deposit-v2.js';
+import { buildSubstrateFederatedNativeGenesisPegInPacketV1 as buildNativePegIn,
+  buildSubstrateFederatedIsolatedDevnetPegInCandidateV2 as buildLegacyPegIn }
+  from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import { MINER_FEE_TREE } from './ergo-encoding.js';
 import { executeSubstrateFederatedNativeGenesisBatchV1 }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
@@ -64,6 +69,13 @@ const KEYS = ['tracker', 'duplicatePrevention', 'pooledReserve'] as const;
 const BASE = { boxId: '8f25f8b850290c20b9f3568eba3604bee2f4e2d7167c7ea68f2943997ea742a5', value: '300000000',
   ergoTree: `0008cd02${'22'.repeat(32)}`, assets: [], additionalRegisters: {}, creationHeight: 110,
   transactionId: '950cd6f0a49a53a05d67908dcbc367273fea828c046d2ad58c0ee0c7f59e81ab', index: 0 };
+function freezeFixture<T>(value: T): Readonly<T> {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value)) freezeFixture(child);
+    Object.freeze(value);
+  }
+  return value;
+}
 let wasm: any;
 let mnemonic: string;
 let headers: Record<string, any>[];
@@ -100,7 +112,10 @@ async function configureFixture(signer: { publicKeyHex: string; p2pkErgoTreeHex:
     });
     issuances.push({ ordinal, role, genesisInputBoxIdHex: funding[ordinal]!.boxId, requiredInputErgoTreeHex: tree,
       unsignedTransactionIdHex: transaction.txId, unsignedTransactionBody: transaction.eip12Tx,
-      predictedStateOutput: transaction.outputs[0],
+      predictedStateOutput: { boxIdHex: transaction.outputs[0]!.boxId,
+        transactionIdHex: transaction.outputs[0]!.transactionId, index: 0,
+        creationHeight: transaction.outputs[0]!.creationHeight,
+        bodyDigestHex: sha256CanonicalJson(transaction.outputs[0], 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_OUTPUT_BODY_V2') },
       bytesToSignBlake2b256Hex: transaction.txId });
   }
   target = { primaryNodeOrigin: ORIGIN, witnessNodeOrigin: WITNESS, primaryMining: true, witnessReadOnly: true };
@@ -290,7 +305,12 @@ describe('native FED managed setup session', () => {
     await configureFixture(session.signer);
     compiled = { familyCompilerInput: { trackerRequest: { profile: { ergoAdmissionThreshold: 1,
       ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] } }, trackerReceipt: {}, templates: { fixture: 'native' } },
-      familyReceipt: {}, discovery: { signer: session.signer,
+      familyReceipt: { profile: { familyIdHex: '81'.repeat(32),
+        duplicatePreventionNftIdHex: request.orderedIssuances[1]!.genesisInputBoxIdHex,
+        pooledReserveNftIdHex: request.orderedIssuances[2]!.genesisInputBoxIdHex },
+        trackerCompilerRequestDigestHex: '82'.repeat(32), trackerCompilerReceiptDigestHex: '83'.repeat(32),
+        familyCompilerRequestDigestHex: '84'.repeat(32), receiptDigestHex: '85'.repeat(32), compilerLockDigestHex: '86'.repeat(32) },
+      discovery: { signer: session.signer,
         sources: { primaryNodeOrigin: ORIGIN, witnessNodeOrigin: WITNESS } },
     } as unknown as compiledGenesis.ObservedSubstrateFederatedGenesisV1;
     boundary.custody = () => assertSigner(session.signer);
@@ -304,6 +324,219 @@ describe('native FED managed setup session', () => {
     });
   });
   afterEach(() => { session?.dispose(); sessionMnemonic = ''; });
+
+  // Deposit semantics and JVM contract evaluation have their own matrices.
+  // Here canonical transaction materialization, root signatures, check-byte
+  // custody and both native session state machines are real.
+  async function nativePegInFixture() {
+    const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
+    const reserve = await materializeUnsignedTransaction(
+      batch.orderedTransactions[2]!.issuance.unsignedTransactionBody as never, 'native peg-in fixture reserve');
+    const sourceFunding = await materializeUnsignedTransaction({ inputs: [{ ...BASE, extension: {} }], dataInputs: [],
+      outputs: [30, 270].map(amount => ({ value: String(amount * 1_000_000),
+        ergoTree: session.signer.p2pkErgoTreeHex, creationHeight: 1000 })) }, 'native peg-in fixture funding');
+    const sourceLockCreation = await materializeUnsignedTransaction({
+      inputs: [{ ...sourceFunding.outputs[0]!, extension: {} }], dataInputs: [],
+      outputs: [
+        { value: '20000000', ergoTree: session.signer.p2pkErgoTreeHex, creationHeight: 1000 },
+        { value: '2000000', ergoTree: session.signer.p2pkErgoTreeHex, creationHeight: 1000 },
+        { value: '8000000', ergoTree: MINER_FEE_TREE, creationHeight: 1000 },
+      ],
+    }, 'native peg-in fixture source lock');
+    const reserveTransition = await materializeUnsignedTransaction({
+      inputs: [{ ...reserve.outputs[0]!, extension: { '0': '0e0100' } },
+        { ...sourceLockCreation.outputs[0]!, extension: {} }, { ...sourceLockCreation.outputs[1]!, extension: {} }],
+      dataInputs: [], outputs: [
+        { value: '30000000', ergoTree: session.signer.p2pkErgoTreeHex, creationHeight: 1000,
+          assets: reserve.outputs[0]!.assets, additionalRegisters: reserve.outputs[0]!.additionalRegisters },
+        { value: '2000000', ergoTree: MINER_FEE_TREE, creationHeight: 1000 },
+      ],
+    }, 'native peg-in fixture reserve transition');
+    const family = compiled.familyReceipt;
+    const packet = freezeFixture({ schema: 'e2s.substrate-federated-pooled-reserve-deposit.v2', version: 2,
+      familyIdHex: family.profile.familyIdHex, familyCompiler: {
+        trackerRequestDigestHex: family.trackerCompilerRequestDigestHex,
+        trackerReceiptDigestHex: family.trackerCompilerReceiptDigestHex,
+        familyRequestDigestHex: family.familyCompilerRequestDigestHex,
+        familyReceiptDigestHex: family.receiptDigestHex, compilerLockDigestHex: family.compilerLockDigestHex,
+      }, boxes: { sourceFundingInput: sourceFunding.outputs[0], sourceLock: sourceLockCreation.outputs[0],
+        transitionFeeFunding: sourceLockCreation.outputs[1], reservePredecessor: reserve.outputs[0],
+        reserveSuccessor: reserveTransition.outputs[0] }, transactions: { sourceLockCreation, reserveTransition },
+    }) as unknown as Readonly<deposits.SubstrateFederatedPooledReserveDepositV2Packet>;
+    const packets = new WeakSet<object>([packet]);
+    vi.spyOn(deposits, 'assertSubstrateFederatedPooledReserveDepositV2Packet').mockImplementation(value => {
+      if (value === null || typeof value !== 'object' || !packets.has(value)) throw new Error('fixture deposit provenance absent');
+    });
+    const builder = vi.spyOn(deposits, 'buildSubstrateFederatedPooledReserveDepositV2').mockResolvedValue(packet);
+    return { batch, packet, packets, builder, input: { batch, target, sourceFundingInput: packet.boxes.sourceFundingInput,
+      sourceIntent: {} as never, depositorErgoTreeHex: session.signer.p2pkErgoTreeHex,
+      creationHeights: { sourceLockCreation: 1000, reserveTransition: 1000 } as never } };
+  }
+
+  it('binds native setup to the unchanged deposit packet and checks both transactions in order', async () => {
+    const { batch, packet, builder, input } = await nativePegInFixture();
+    expect(await buildNativePegIn(input)).toBe(packet);
+    expect(builder).toHaveBeenCalledWith({ familyCompilerInput: {
+      trackerRequest: compiled.familyCompilerInput.trackerRequest, trackerReceipt: compiled.familyCompilerInput.trackerReceipt,
+      templates: compiled.familyCompilerInput.templates,
+      duplicatePreventionGenesisInputBoxIdHex: compiled.familyReceipt.profile.duplicatePreventionNftIdHex,
+      pooledReserveGenesisInputBoxIdHex: compiled.familyReceipt.profile.pooledReserveNftIdHex,
+    }, familyCompilerReceipt: compiled.familyReceipt, sourceFundingInput: input.sourceFundingInput,
+    reserveState: { predecessor: packet.boxes.reservePredecessor, depositHistory: [] }, sourceIntent: input.sourceIntent,
+    depositorErgoTreeHex: input.depositorErgoTreeHex, creationHeights: input.creationHeights, fees: undefined });
+    const source = await session.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+    const sourceHandle = execution.promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(source, target);
+    const vault = await session.checkNativePegInCommittedVaultRetainingSignerV1(packet, target);
+    const vaultHandle = execution.promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(vault, target);
+    expect(source.unsignedTransactionIdHex).toBe(packet.transactions.sourceLockCreation.txId);
+    expect(vault.unsignedTransactionIdHex).toBe(packet.transactions.reserveTransition.txId);
+    expect(vault.boundaries.mintAuthorized).toBe(false);
+    expect(vault.boundaries.broadcastAuthorityEstablished).toBe(false);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(5);
+    execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+    execution.assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1(sourceHandle, target);
+    execution.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(vaultHandle, target);
+    session.dispose();
+    expect(() => execution.assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1(sourceHandle, target)).toThrow(/inactive/);
+    expect(() => execution.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(vaultHandle, target)).toThrow(/inactive/);
+    for (const handle of [sourceHandle, vaultHandle]) {
+      const consumer = vi.fn();
+      await expect(fleet.consumeLocalWasmCheckedSubmissionHandleV1(handle.checkedAcceptance.submissionHandle,
+        handle.signedCandidate, consumer)).rejects.toThrow(/inactive/);
+      expect(consumer).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each(['batch clone', 'target clone', 'legacy factory', 'extra key', 'accessor', 'symbol', 'missing key', 'disposed during construction'])
+    ('rejects native construction with %s', async fault => {
+      const { input, builder } = await nativePegInFixture();
+      const value: any = { ...input };
+      if (fault === 'batch clone') value.batch = { ...input.batch };
+      if (fault === 'target clone') value.target = { ...target };
+      if (fault === 'extra key') value.reserveState = {};
+      if (fault === 'accessor') Object.defineProperty(value, 'batch', { get() { throw new Error('getter executed'); } });
+      if (fault === 'symbol') value[Symbol('extra')] = true;
+      if (fault === 'missing key') delete value.sourceIntent;
+      if (fault === 'disposed during construction') builder.mockImplementationOnce(async () => { session.dispose(); return {} as never; });
+      await expect(fault === 'legacy factory' ? buildLegacyPegIn(value) : buildNativePegIn(value)).rejects.toThrow(
+        fault === 'disposed during construction' ? /inactive/ : /provenance|exact own-data/);
+      expect(builder).toHaveBeenCalledTimes(fault === 'disposed during construction' ? 1 : 0);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    });
+
+  it.each(['familyIdHex', 'trackerRequestDigestHex', 'trackerReceiptDigestHex', 'familyRequestDigestHex',
+    'familyReceiptDigestHex', 'compilerLockDigestHex', 'reserve predecessor', 'packet clone', 'target clone'])
+    ('rejects native peg-in with changed %s before signing', async field => {
+      const { packet, packets } = await nativePegInFixture();
+      const changed: any = structuredClone(packet);
+      if (field === 'familyIdHex') changed.familyIdHex = 'ff'.repeat(32);
+      else if (field === 'reserve predecessor') changed.boxes.reservePredecessor.value = '11000000';
+      else if (field !== 'packet clone' && field !== 'target clone') changed.familyCompiler[field] = 'ff'.repeat(32);
+      if (field !== 'packet clone') packets.add(changed);
+      const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+      await expect(session.checkNativePegInSourceLockRetainingSignerV1(changed,
+        field === 'target clone' ? { ...target } : target)).rejects.toThrow(/compiler|reserve|provenance/);
+      expect(signatures).not.toHaveBeenCalled(); expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    });
+
+  it.each(['vault first', 'repeat source', 'different packet', 'legacy source', 'legacy vault'])
+    ('rejects the %s native state transition and revokes custody', async fault => {
+      const { packet, packets, batch } = await nativePegInFixture();
+      if (fault !== 'vault first' && fault !== 'legacy source') await session.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+      const before = vi.mocked(helpers.ncheck).mock.calls.length;
+      const other = freezeFixture(structuredClone(packet)); packets.add(other);
+      const operation = fault === 'repeat source' ? () => session.checkNativePegInSourceLockRetainingSignerV1(packet, target)
+        : fault === 'legacy source' ? () => session.checkPegInSourceLockV2RetainingSigner(packet, target)
+          : fault === 'legacy vault' ? () => session.checkPegInCommittedVaultV2RetainingSigner(packet, target)
+            : () => session.checkNativePegInCommittedVaultRetainingSignerV1(fault === 'different packet' ? other : packet, target);
+      await expect(operation()).rejects.toThrow(/absent|differs/);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(before);
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toThrow(/inactive/);
+    });
+
+  it.each(['boxId', 'transactionId', 'index', 'creationHeight', 'ergoTree', 'assets', 'additionalRegisters'])
+    ('binds native reserve predecessor field %s before signing', async field => {
+      const { packet, packets } = await nativePegInFixture();
+      const changed: any = structuredClone(packet);
+      changed.boxes.reservePredecessor[field] = field === 'index' ? 1 : field === 'creationHeight' ? 1001
+        : field === 'ergoTree' ? MINER_FEE_TREE : field === 'assets' ? []
+          : field === 'additionalRegisters' ? { R4: '0e0100' } : 'ff'.repeat(32);
+      packets.add(changed);
+      const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+      await expect(session.checkNativePegInSourceLockRetainingSignerV1(changed, target)).rejects.toThrow(/reserve differs/);
+      expect(signatures).not.toHaveBeenCalled(); expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    });
+
+  it('retains one-shot native handle use while its session remains active', async () => {
+    const { packet } = await nativePegInFixture();
+    const receipt = await session.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+    const promoted = execution.promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(receipt, target);
+    const consumer = vi.fn(async (value: Readonly<Record<string, unknown>>) => value.id);
+    await expect(fleet.consumeLocalWasmCheckedSubmissionHandleV1(promoted.checkedAcceptance.submissionHandle,
+      promoted.signedCandidate, consumer)).resolves.toBe(packet.transactions.sourceLockCreation.txId);
+    await expect(fleet.consumeLocalWasmCheckedSubmissionHandleV1(promoted.checkedAcceptance.submissionHandle,
+      promoted.signedCandidate, consumer)).rejects.toThrow(/already consumed/);
+    expect(consumer).toHaveBeenCalledTimes(1);
+    await session.checkNativePegInCommittedVaultRetainingSignerV1(packet, target);
+    await expect(session.checkNativePegInCommittedVaultRetainingSignerV1(packet, target)).rejects.toThrow(/absent/);
+  });
+
+  for (const stage of ['source', 'vault'] as const) {
+    it(`rejects native ${stage} node-check failure without retaining a continuation`, async () => {
+      const { packet, batch } = await nativePegInFixture();
+      if (stage === 'vault') await session.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+      vi.mocked(helpers.ncheck).mockResolvedValueOnce(null);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      await expect(stage === 'source' ? session.checkNativePegInSourceLockRetainingSignerV1(packet, target)
+        : session.checkNativePegInCommittedVaultRetainingSignerV1(packet, target)).rejects.toThrow(/check failed/);
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toThrow(/inactive/);
+    });
+
+    it.each(['headers', 'signature', 'checker', 'response'])
+      (`cancels native ${stage} custody at %s without promoting a check`, async boundaryName => {
+        const { packet, batch } = await nativePegInFixture();
+        if (stage === 'vault') await session.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+        const before = vi.mocked(helpers.ncheck).mock.calls.length;
+        const originalSign = wasm.Wallet.prototype.sign_transaction;
+        const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+        if (boundaryName === 'headers') {
+          vi.mocked(helpers.ngetDirect).mockImplementationOnce(async () => {
+            expect(() => session.dispose()).toThrow(/running/); return headers;
+          });
+        } else if (boundaryName === 'signature') {
+          signatures.mockImplementation(function (this: unknown, ...args) {
+            const result = originalSign.apply(this, args);
+            expect(() => privateSession.dispose()).toThrow(/running/); return result;
+          });
+        } else if (boundaryName === 'checker') {
+          const original = fleet.checkSignedTransaction;
+          vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
+            expect(() => session.dispose()).toThrow(/running/); return original(...args);
+          });
+        } else {
+          const original = vi.mocked(helpers.ncheck).getMockImplementation()!;
+          vi.mocked(helpers.ncheck).mockImplementation(async (...args) => {
+            const result = await original(...args);
+            expect(() => privateSession.dispose()).toThrow(/running/); return result;
+          });
+        }
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        await expect(stage === 'source' ? session.checkNativePegInSourceLockRetainingSignerV1(packet, target)
+          : session.checkNativePegInCommittedVaultRetainingSignerV1(packet, target)).rejects.toThrow(/inactive|active process provenance/);
+        if (boundaryName === 'headers') expect(signatures).not.toHaveBeenCalled();
+        expect(helpers.ncheck).toHaveBeenCalledTimes(before + (boundaryName === 'response' ? 1 : 0));
+        expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toThrow(/inactive/);
+      });
+
+    it(`rejects promotion of a native ${stage} check after disposal`, async () => {
+      const { packet } = await nativePegInFixture();
+      const source = await session.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+      const vault = stage === 'vault' ? await session.checkNativePegInCommittedVaultRetainingSignerV1(packet, target) : undefined;
+      session.dispose();
+      expect(() => vault === undefined ? execution.promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(source, target)
+        : execution.promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(vault, target)).toThrow(/inactive/);
+    });
+  }
 
   async function withNativeIssuance(
     runTest: (context: {

@@ -167,8 +167,15 @@ establish deployment safety or independent operator custody.
   nodes, rechecks canonical inclusion around the output reads, and reobserves
   FED genesis before returning. Component tests cover this caller with real
   custody, SQLite and box codecs; builds, checking and transport are doubled.
-  No fresh target run is established by that composition. Connect the
-  committed-reserve and operational mint consumers inside the same lifetime
+  The native batch also feeds the existing V2 deposit format and a separate
+  retained source-lock/reserve-transition checker sequence. Compiler identity,
+  reserve predecessor and packet identity remain bound through both checks;
+  native custody invalidation reaches the nested submission handles. These
+  component tests use actual transaction codecs and WASM signatures with
+  simulated deposit/compiler provenance and node checks. They do not establish
+  confirmed deposits or reserve transitions. No fresh target run is established
+  by that composition. Connect committed-reserve execution/confirmation and
+  operational mint consumers inside the same lifetime
   before running the fresh campaign. An issuance receipt is not mint authority.
   The old source locks and withdrawal campaign retain their original scope.
 
@@ -213,7 +220,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Active; native target caller now composes checking, ordered issuance and exact output observation at component level | Connect committed-reserve confirmation and operational mint inside that same retained lifetime. Keep request freshness at checking separate from each later action's fresh observation, and reject disposed or cross-profile custody. The historical V3 G1dA request cannot stand in for native identity. The target owner retains the closed journal with its build artifacts, including unresolved attempts. Run the fresh campaign only once these consumers are connected |
+| FED running-target binding | Active; native issuance caller and native deposit/checker continuation are component-composed | Connect the native deposit packet to source-lock/reserve execution and confirmation, then operational mint inside the same retained lifetime. Keep request freshness at checking separate from each later action's fresh observation, and reject disposed or cross-profile custody. The historical V3 G1dA request cannot stand in for native identity. The target owner retains the closed journal with its build artifacts, including unresolved attempts. Run the fresh campaign only once these consumers are connected |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 
