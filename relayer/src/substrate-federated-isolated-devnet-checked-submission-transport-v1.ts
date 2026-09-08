@@ -470,14 +470,13 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubm
       return await consumeLocalWasmCheckedSubmissionHandleV1(
         exactHandle,
         exactSignedCandidate,
-        async signedTransaction => await submitExactTransaction(
-          signedTransaction,
-          admission.expectedTxId,
-          attempt.durableAttemptDigestHex,
-          attempt.authorization.authorizationDigestHex,
-          exactHandle,
-          binding,
-        ),
+        async signedTransaction => {
+          assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(authorizer, target);
+          return await submitExactTransaction(
+            signedTransaction, admission.expectedTxId, attempt.durableAttemptDigestHex,
+            attempt.authorization.authorizationDigestHex, exactHandle, binding,
+          );
+        },
       );
     },
   });

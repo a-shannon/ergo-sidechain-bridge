@@ -315,9 +315,20 @@ disposing either session invalidates later use. The deposit format, contracts
 and historical V3 sequence are unchanged. Component tests exercise canonical
 transaction materialization and actual WASM signatures with simulated
 compiler/deposit provenance and node responses. Checking alone establishes
-neither deposit confirmation nor mint eligibility. Source-lock/reserve
-execution, fresh observations and operational mint still need composition
-inside the target root.
+neither deposit confirmation nor mint eligibility.
+
+`executeSubstrateFederatedNativeGenesisPegInSourceLockV1` now connects that
+packet to retained checking, two owned funding observations, native-scoped
+authorization, durable reservation and the fixed checked transport. It requires
+canonical confirmation and exact unspent source-lock/transition-fee outputs on
+both local nodes. Observation permits at most three read-only windows while
+mining advances; changed inclusion, tip regression and same-height replacement
+reject without another submission. Custody is checked through transport and
+observation consumption. The deposit remains refundable and supplies no mint
+authority. Composed tests retain actual WASM signatures, SQLite lifecycle and
+HTTP decoding, with simulated compiler/deposit provenance and target responses.
+Reserve execution and operational mint still need composition inside the target
+root before a fresh node campaign.
 
 ## Ergo Issuance Materialization
 

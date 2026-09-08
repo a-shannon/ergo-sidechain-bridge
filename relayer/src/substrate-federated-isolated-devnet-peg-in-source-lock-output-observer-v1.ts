@@ -22,12 +22,16 @@ import {
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  assertSubstrateFederatedNativeGenesisPegInPacketV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV2Packet }
+  from './substrate-federated-pooled-reserve-deposit-v2.js';
 import {
   normalizeEip12Box,
   type Eip12Box,
@@ -75,8 +79,9 @@ const OBSERVATIONS = new WeakMap<
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
     batch: object;
-    candidate: object;
+    candidate?: object;
     packet: DepositPacket;
+    assertNativePacket?: () => DepositPacket;
   }>
 >();
 
@@ -118,16 +123,26 @@ async function observeOutputs(
   input: Readonly<{
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     batch: Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
-      | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
-    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1
-      | SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+      | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3
+      | SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+    candidate?: object;
     confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
   }>,
   assertCandidate: () => DepositPacket,
+  native = false,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
   const packet = assertCandidate();
+  const assertActive = () => {
+    if (!native) return;
+    const current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
+    if (current.processBindingDigestHex !== binding.processBindingDigestHex
+      || current.executionTargetIdentityDigestHex !== binding.executionTargetIdentityDigestHex
+      || assertCandidate() !== packet) {
+      throw new Error('native source-lock output target or packet changed during observation');
+    }
+  };
   const expectedTxId = packet.transactions.sourceLockCreation.txId;
   const confirmation =
     normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
@@ -156,6 +171,7 @@ async function observeOutputs(
   const refreshConfirmation = async (
     prior: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>,
   ) => {
+    assertActive();
     const refreshed = await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
       artifact: prior.observerArtifact,
       expectedReconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
@@ -163,101 +179,183 @@ async function observeOutputs(
       expectedTxId,
       priorConfirmation: prior,
     });
+    assertActive();
     if (refreshed.status !== 'confirmed' || refreshed.confirmationHeight === null
       || refreshed.confirmationHeaderIdHex === null) {
       throw new Error('isolated source-lock output observation requires refreshed canonical confirmation');
+    }
+    if (native && (refreshed.confirmationHeight !== confirmation.confirmationHeight
+      || refreshed.confirmationHeaderIdHex !== confirmation.confirmationHeaderIdHex
+      || refreshed.observedAtHeight < prior.observedAtHeight)) {
+      throw new Error('native source-lock canonical inclusion changed or confirmation regressed');
     }
     return Object.freeze({ ...refreshed,
       confirmationHeight: refreshed.confirmationHeight,
       confirmationHeaderIdHex: refreshed.confirmationHeaderIdHex,
     });
   };
-  const initialConfirmation = await refreshConfirmation(confirmation);
-  const primaryTipBefore = await readTip(primary);
-  const witnessTipBefore = await readTip(witness);
-  const primaryState = await observeNodeState(
-    primary,
-    packet.boxes.sourceFundingInput.boxId,
-    packet.boxes.sourceLock,
-    packet.boxes.transitionFeeFunding,
-    'primary',
-  );
-  const witnessState = await observeNodeState(
-    witness,
-    packet.boxes.sourceFundingInput.boxId,
-    packet.boxes.sourceLock,
-    packet.boxes.transitionFeeFunding,
-    'witness',
-  );
-  if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
-    throw new Error('isolated source-lock output observations disagree');
+  type Tip = Awaited<ReturnType<typeof readTip>>;
+  const previousTips = new Map<AuthenticatedSpvTrackerReadOnlyNodeClient, Tip>();
+  const observedHeaders = new Map<number, string>();
+  const readWindowTip = async (client: AuthenticatedSpvTrackerReadOnlyNodeClient) => {
+    const tip = await readTip(client, assertActive);
+    if (native) {
+      const previous = previousTips.get(client);
+      if (previous && (tip.height < previous.height
+        || (tip.height === previous.height && tip.idHex !== previous.idHex))) {
+        throw new Error('native source-lock output-observation tip regressed or changed');
+      }
+      const observedId = observedHeaders.get(tip.height);
+      if (observedId !== undefined && observedId !== tip.idHex) {
+        throw new Error('native source-lock output-observation tips disagree at a previously observed height');
+      }
+      observedHeaders.set(tip.height, tip.idHex);
+      previousTips.set(client, tip);
+    }
+    return tip;
+  };
+  const sameNativeTip = (first: Tip, second: Tip) => {
+    if (first.height !== second.height) return false;
+    if (first.idHex !== second.idHex) {
+      throw new Error('native source-lock output-observation tips disagree');
+    }
+    return true;
+  };
+  let priorConfirmation = confirmation;
+  // Native mining may advance; only complete read-only windows are repeated.
+  for (let attempt = 0; attempt < (native ? 3 : 1); attempt++) {
+    const initialConfirmation = await refreshConfirmation(priorConfirmation);
+    priorConfirmation = initialConfirmation;
+    const primaryTipBefore = await readWindowTip(primary);
+    const witnessTipBefore = await readWindowTip(witness);
+    if (native && !sameNativeTip(primaryTipBefore, witnessTipBefore)) continue;
+    const primaryState = await observeNodeState(
+      primary,
+      packet.boxes.sourceFundingInput.boxId,
+      packet.boxes.sourceLock,
+      packet.boxes.transitionFeeFunding,
+      'primary',
+      assertActive,
+    );
+    const witnessState = await observeNodeState(
+      witness,
+      packet.boxes.sourceFundingInput.boxId,
+      packet.boxes.sourceLock,
+      packet.boxes.transitionFeeFunding,
+      'witness',
+      assertActive,
+    );
+    if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
+      throw new Error('isolated source-lock output observations disagree');
+    }
+    const latestConfirmation = await refreshConfirmation(initialConfirmation);
+    if (latestConfirmation.confirmationHeight !== initialConfirmation.confirmationHeight
+      || latestConfirmation.confirmationHeaderIdHex !== initialConfirmation.confirmationHeaderIdHex) {
+      throw new Error('isolated source-lock canonical inclusion changed during observation');
+    }
+    const primaryTipAfter = await readWindowTip(primary);
+    const witnessTipAfter = await readWindowTip(witness);
+    if (native) {
+      priorConfirmation = latestConfirmation;
+      const primaryStable = sameNativeTip(primaryTipBefore, primaryTipAfter);
+      const witnessStable = sameNativeTip(primaryTipBefore, witnessTipAfter);
+      sameNativeTip(primaryTipAfter, witnessTipAfter);
+      if (!primaryStable || !witnessStable) continue;
+      if (packet.boxes.sourceLock.creationHeight > primaryTipBefore.height
+        || packet.boxes.transitionFeeFunding.creationHeight > primaryTipBefore.height) {
+        throw new Error('native source-lock output creation height exceeds the stable tip');
+      }
+    }
+    if ([witnessTipBefore, primaryTipAfter, witnessTipAfter].some(
+      tip => canonicalJson(tip) !== canonicalJson(primaryTipBefore),
+    )) {
+      throw new Error('isolated source-lock observation requires one stable dual-node tip');
+    }
+    if (initialConfirmation.observedAtHeight > primaryTipBefore.height
+      || latestConfirmation.observedAtHeight !== primaryTipBefore.height
+      || latestConfirmation.confirmationHeight > primaryTipBefore.height) {
+      throw new Error('isolated source-lock confirmation snapshots differ from the stable output tip');
+    }
+    const current =
+      assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
+    if (
+      current.processBindingDigestHex !== binding.processBindingDigestHex
+      || current.executionTargetIdentityDigestHex
+        !== binding.executionTargetIdentityDigestHex
+      || assertCandidate() !== packet
+    ) {
+      throw new Error('isolated source-lock output target changed during observation');
+    }
+    const body = Object.freeze({
+      schema:
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_OUTPUT_OBSERVATION_V1_SCHEMA,
+      version: 1 as const,
+      status: 'exact_source_spent_and_refundable_outputs_unspent' as const,
+      expectedTxId,
+      sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+      sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+      transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+      confirmationHeight: latestConfirmation.confirmationHeight,
+      confirmationHeaderIdHex: latestConfirmation.confirmationHeaderIdHex,
+      confirmationObservationDigestHex: latestConfirmation.observationDigestHex,
+      processBindingDigestHex: current.processBindingDigestHex,
+      executionTargetIdentityDigestHex:
+        current.executionTargetIdentityDigestHex,
+      primaryObservationDigestHex: primaryState.digestHex,
+      witnessObservationDigestHex: witnessState.digestHex,
+      boundaries: Object.freeze({
+        exactDualLoopbackNodesAgreed: true as const,
+        sourceFundingSpent: true as const,
+        sourceLockUnspentAndExact: true as const,
+        transitionFeeFundingUnspentAndExact: true as const,
+        sourceLockStillRefundable: true as const,
+        sourceLockConsumptionEstablished: false as const,
+        reserveLineageEstablished: false as const,
+        mintAuthorized: false as const,
+      }),
+    });
+    const observation = Object.freeze({
+      ...body,
+      observationDigestHex: sha256CanonicalJson(
+        body,
+        OBSERVATION_DIGEST_DOMAIN,
+      ),
+    });
+    OBSERVATIONS.set(observation, Object.freeze({
+      target: input.target, binding, batch: input.batch, candidate: input.candidate, packet,
+      ...(native ? { assertNativePacket: assertCandidate } : {}),
+    }));
+    return observation;
   }
-  const latestConfirmation = await refreshConfirmation(initialConfirmation);
-  if (latestConfirmation.confirmationHeight !== initialConfirmation.confirmationHeight
-    || latestConfirmation.confirmationHeaderIdHex !== initialConfirmation.confirmationHeaderIdHex) {
-    throw new Error('isolated source-lock canonical inclusion changed during observation');
+  throw new Error('native source-lock output-observation did not stabilize within three windows');
+}
+
+export async function observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { target, batch, packet } = retained;
+  return observeOutputs(retained, () =>
+    assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target), true);
+}
+
+export function assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(
+  observation: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+): Readonly<SubstrateFederatedPooledReserveDepositV2Packet> {
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, target);
+  const material = OBSERVATIONS.get(observation);
+  if (material?.assertNativePacket === undefined || material.batch !== batch || material.packet !== packet) {
+    throw new Error('native source-lock output observation lacks exact packet and batch provenance');
   }
-  const primaryTipAfter = await readTip(primary);
-  const witnessTipAfter = await readTip(witness);
-  if ([witnessTipBefore, primaryTipAfter, witnessTipAfter].some(
-    tip => canonicalJson(tip) !== canonicalJson(primaryTipBefore),
-  )) {
-    throw new Error('isolated source-lock observation requires one stable dual-node tip');
-  }
-  if (initialConfirmation.observedAtHeight > primaryTipBefore.height
-    || latestConfirmation.observedAtHeight !== primaryTipBefore.height
-    || latestConfirmation.confirmationHeight > primaryTipBefore.height) {
-    throw new Error('isolated source-lock confirmation snapshots differ from the stable output tip');
-  }
-  const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
-  if (
-    current.processBindingDigestHex !== binding.processBindingDigestHex
-    || current.executionTargetIdentityDigestHex
-      !== binding.executionTargetIdentityDigestHex
-    || assertCandidate() !== packet
-  ) {
-    throw new Error('isolated source-lock output target changed during observation');
-  }
-  const body = Object.freeze({
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_OUTPUT_OBSERVATION_V1_SCHEMA,
-    version: 1 as const,
-    status: 'exact_source_spent_and_refundable_outputs_unspent' as const,
-    expectedTxId,
-    sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
-    sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
-    transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
-    confirmationHeight: latestConfirmation.confirmationHeight,
-    confirmationHeaderIdHex: latestConfirmation.confirmationHeaderIdHex,
-    confirmationObservationDigestHex: latestConfirmation.observationDigestHex,
-    processBindingDigestHex: current.processBindingDigestHex,
-    executionTargetIdentityDigestHex:
-      current.executionTargetIdentityDigestHex,
-    primaryObservationDigestHex: primaryState.digestHex,
-    witnessObservationDigestHex: witnessState.digestHex,
-    boundaries: Object.freeze({
-      exactDualLoopbackNodesAgreed: true as const,
-      sourceFundingSpent: true as const,
-      sourceLockUnspentAndExact: true as const,
-      transitionFeeFundingUnspentAndExact: true as const,
-      sourceLockStillRefundable: true as const,
-      sourceLockConsumptionEstablished: false as const,
-      reserveLineageEstablished: false as const,
-      mintAuthorized: false as const,
-    }),
-  });
-  const observation = Object.freeze({
-    ...body,
-    observationDigestHex: sha256CanonicalJson(
-      body,
-      OBSERVATION_DIGEST_DOMAIN,
-    ),
-  });
-  OBSERVATIONS.set(observation, Object.freeze({
-    target: input.target, binding, batch: input.batch, candidate: input.candidate, packet,
-  }));
-  return observation;
+  return packet;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2(
@@ -297,6 +395,9 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObser
   ) {
     throw new Error('isolated source-lock output observation lacks provenance');
   }
+  if (material.assertNativePacket && material.assertNativePacket() !== material.packet) {
+    throw new Error('native source-lock output observation packet changed');
+  }
 }
 
 async function observeNodeState(
@@ -305,6 +406,7 @@ async function observeNodeState(
   expectedSourceLock: Eip12Box,
   expectedTransitionFeeFunding: Eip12Box,
   label: string,
+  assertActive: () => void = () => {},
 ): Promise<Readonly<{
   sourceFundingBoxIdHex: string;
   sourceFundingPresent: false;
@@ -312,11 +414,15 @@ async function observeNodeState(
   transitionFeeFunding: Eip12Box;
   digestHex: string;
 }>> {
+  assertActive();
   const sourceFunding = await client.getBoxByIdOrNull(sourceFundingBoxIdHex);
+  assertActive();
   const rawSourceLock = await client.getBoxByIdOrNull(expectedSourceLock.boxId);
+  assertActive();
   const rawTransitionFee = await client.getBoxByIdOrNull(
     expectedTransitionFeeFunding.boxId,
   );
+  assertActive();
   if (sourceFunding !== null) {
     throw new Error(`isolated source-lock ${label} still reports source funding`);
   }
@@ -327,10 +433,12 @@ async function observeNodeState(
     rawSourceLock,
     `isolated source-lock ${label} source-lock output`,
   );
+  assertActive();
   const transitionFeeFunding = await normalizeEip12Box(
     rawTransitionFee,
     `isolated source-lock ${label} transition-fee output`,
   );
+  assertActive();
   if (
     canonicalJson(sourceLock) !== canonicalJson(expectedSourceLock)
     || canonicalJson(transitionFeeFunding)
@@ -352,8 +460,11 @@ async function observeNodeState(
 
 async function readTip(
   client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  assertActive: () => void = () => {},
 ): Promise<Readonly<{ height: number; idHex: string }>> {
+  assertActive();
   const header = await client.getBestHeader();
+  assertActive();
   if (header === null || typeof header !== 'object' || Array.isArray(header)
     || !('height' in header) || !('id' in header)
     || typeof header.height !== 'number' || !Number.isSafeInteger(header.height) || header.height <= 0

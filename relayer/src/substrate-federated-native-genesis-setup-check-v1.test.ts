@@ -56,11 +56,16 @@ import * as readOnlyNode from './authenticated-spv-tracker-read-only-node-client
 import { StateTracker } from './state-tracker.js';
 import * as deposits from './substrate-federated-pooled-reserve-deposit-v2.js';
 import { buildSubstrateFederatedNativeGenesisPegInPacketV1 as buildNativePegIn,
+  assertSubstrateFederatedNativeGenesisPegInPacketV1 as assertNativePegIn,
   buildSubstrateFederatedIsolatedDevnetPegInCandidateV2 as buildLegacyPegIn }
   from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { MINER_FEE_TREE } from './ergo-encoding.js';
-import { executeSubstrateFederatedNativeGenesisBatchV1 }
+import { executeSubstrateFederatedNativeGenesisBatchV1, executeSubstrateFederatedNativeGenesisPegInSourceLockV1 as executeNativeSourceLock }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import * as rewardDiscovery from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
+import * as sourceLockAuthority from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+import { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1 as assertNativeSourceOutputs }
+  from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -537,6 +542,209 @@ describe('native FED managed setup session', () => {
         : execution.promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(vault, target)).toThrow(/inactive/);
     });
   }
+
+  async function withNativeSourceLock(runTest: (context: {
+    input: Parameters<typeof executeNativeSourceLock>[0] & { state: StateTracker };
+    post: MockInstance<typeof axios.post>;
+    funding: any;
+    onFunding: (callback: (count: number) => void) => void;
+    onPost: (callback: () => void) => void;
+    onConfirmation: (callback: (count: number) => number) => void;
+  }) => Promise<void>) {
+    const fixture = await nativePegInFixture();
+    const packet = await buildNativePegIn(fixture.input);
+    const extra = await materializeUnsignedTransaction({ inputs: [{ ...BASE, extension: {} }], dataInputs: [],
+      outputs: [100, 200].map(value => ({ value: String(value * 1_000_000),
+        ergoTree: session.signer.p2pkErgoTreeHex, creationHeight: 1000 })) }, 'source-lock extra fixture funding');
+    const inputs = { tracker: packet.boxes.sourceFundingInput, duplicatePrevention: extra.outputs[0]!, pooledReserve: extra.outputs[1]! };
+    const funding: any = { sources: { primaryNodeOrigin: ORIGIN, witnessNodeOrigin: WITNESS },
+      signer: session.signer, target: { network: 'devnet', genesisHeaderIdHex: request.target.genesisHeaderIdHex,
+        tipHeight: 1020, tipHeaderIdHex: '70'.repeat(32) },
+      genesisBoxIds: Object.fromEntries(Object.entries(inputs).map(([key, box]) => [key, box.boxId])),
+      genesisInputs: structuredClone(inputs), reportDigestHex: 'a0'.repeat(32),
+      boundary: { fixedDualLoopbackOrigins: true, targetBinaryRevalidationRequired: true } };
+    const observations = new WeakSet<object>();
+    let fundingCount = 0;
+    let fundingCallback = (_count: number) => {};
+    let postCallback = () => {};
+    let confirmationCount = 0;
+    let confirmationCallback = (_count: number) => 20;
+    vi.spyOn(rewardDiscovery, 'discoverSubstrateFederatedRewardInputsV2').mockImplementation(async () => {
+      fundingCallback(++fundingCount);
+      const snapshot = freezeFixture(structuredClone(funding)); observations.add(snapshot); return snapshot as never;
+    });
+    vi.spyOn(rewardDiscovery, 'assertSubstrateFederatedRewardInputDiscoveryV2Provenance').mockImplementation(value => {
+      if (value === null || typeof value !== 'object' || !observations.has(value)) throw new Error('fixture funding provenance absent');
+    });
+    const directory = mkdtempSync(join(tmpdir(), 'e2s-native-source-lock-test-'));
+    const state = new StateTracker(join(directory, 'state.sqlite'));
+    let sent = false;
+    vi.spyOn(axios, 'create').mockImplementation(() => ({ get: async (path: string) => {
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: 1020 } };
+      if (path === '/blocks/at/1') return { data: [request.target.genesisHeaderIdHex] };
+      if (path === '/blocks/at/1000') return { data: ['71'.repeat(32)] };
+      if (path === '/blocks/lastHeaders/1') return { status: 200,
+        data: Buffer.from(JSON.stringify([{ height: 1020, id: '70'.repeat(32) }])) };
+      const boxMatch = /^\/utxo\/byId\/([0-9a-f]{64})$/.exec(path);
+      if (boxMatch) {
+        const id = boxMatch[1];
+        const box = id === packet.boxes.sourceFundingInput.boxId ? (sent ? null : packet.boxes.sourceFundingInput)
+          : sent ? [packet.boxes.sourceLock, packet.boxes.transitionFeeFunding].find(value => value.boxId === id) ?? null : null;
+        return { status: box === null ? 404 : 200, data: Buffer.from(JSON.stringify(box)) };
+      }
+      if (path === `/blockchain/transaction/byId/${packet.transactions.sourceLockCreation.txId}` && sent) {
+        return { data: { id: packet.transactions.sourceLockCreation.txId,
+          numConfirmations: confirmationCallback(++confirmationCount),
+          inclusionHeight: 1000, headerId: '71'.repeat(32) } };
+      }
+      throw new Error(`unexpected source-lock fixture observation ${path}`);
+    } }) as ReturnType<typeof axios.create>);
+    const post = vi.spyOn(axios, 'post').mockImplementation(async (url, body) => {
+      expect(url).toBe(`${ORIGIN}/transactions`);
+      if (body === null || typeof body !== 'object' || !('id' in body) || typeof body.id !== 'string') {
+        throw new Error('source-lock fixture requires exact signed transaction ID');
+      }
+      expect(body.id).toBe(packet.transactions.sourceLockCreation.txId);
+      expect(state.getErgoOperationalTransactionAttempt(body.id)?.status).toBe('pending');
+      const signed = wasm.Transaction.from_json(JSON.stringify(body)); const id = signed.id();
+      try { expect(id.to_str()).toBe(body.id); } finally { id.free(); signed.free(); }
+      sent = true; postCallback();
+      return { status: 200, data: body.id };
+    });
+    try { await runTest({ input: { target, batch: fixture.batch, packet, setupSession: session, state }, post, funding,
+      onFunding: callback => { fundingCallback = callback; }, onPost: callback => { postCallback = callback; },
+      onConfirmation: callback => { confirmationCallback = callback; } }); }
+    finally { state.close(); rmSync(directory, { recursive: true, force: true }); }
+  }
+
+  it('executes native source-lock checking, authorization, durable transport and exact confirmed outputs', async () => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      const create = sourceLockAuthority.createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1;
+      const scopes: string[] = [];
+      vi.spyOn(sourceLockAuthority, 'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1')
+        .mockImplementation(value => {
+          const original = create(value);
+          // Observe the port without replacing its provenance-bearing authorizer.
+          const authorize = original.authorize;
+          const artifactAssert = sourceLockAuthority.assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1;
+          vi.spyOn(sourceLockAuthority, 'assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1')
+            .mockImplementation((authorizer, authorization) => {
+              artifactAssert(authorizer, authorization);
+              scopes.push((authorization.authorizationArtifact as { authorizationScope: string }).authorizationScope);
+            });
+          expect(authorize).toBeTypeOf('function');
+          return original;
+        });
+      const result = await executeNativeSourceLock(input);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(4);
+      expect(result.transportStatus).toBe('accepted');
+      expect(input.state.getErgoOperationalTransactionAttempt(result.expectedTxId)?.status).toBe('confirmed');
+      expect(scopes.length).toBeGreaterThan(0);
+      expect(new Set(scopes)).toEqual(new Set(['fed-6-native-local-synthetic-peg-in-source-lock-creation-only']));
+      expect(result.outputObservation.boundaries.sourceLockStillRefundable).toBe(true);
+      expect(result.outputObservation.boundaries.mintAuthorized).toBe(false);
+      assertNativeSourceOutputs(result.outputObservation, target, input.batch, input.packet);
+      await session.checkNativePegInCommittedVaultRetainingSignerV1(input.packet, target);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(5);
+      session.dispose();
+      expect(() => assertNativeSourceOutputs(result.outputObservation, target, input.batch, input.packet)).toThrow(/inactive/);
+    });
+  });
+
+  it.each(['packet clone', 'batch clone', 'target clone', 'disposed'])('rejects %s before native source-lock checking', async fault => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      const changed = { ...input };
+      if (fault === 'packet clone') changed.packet = { ...input.packet };
+      if (fault === 'batch clone') changed.batch = { ...input.batch };
+      if (fault === 'target clone') changed.target = { ...target };
+      if (fault === 'disposed') session.dispose();
+      await expect(executeNativeSourceLock(changed)).rejects.toThrow(/provenance|inactive/);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3); expect(post).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['value', 'genesis', 'signer', 'height', 'disposed after check', 'disposed after funding'])
+    ('rejects changed %s before native authorization', async fault => {
+      await withNativeSourceLock(async ({ input, post, funding, onFunding }) => {
+        onFunding(count => {
+          if (fault === 'value') funding.genesisInputs.tracker.value = '31000000';
+          if (fault === 'genesis') funding.target.genesisHeaderIdHex = 'ff'.repeat(32);
+          if (fault === 'signer') funding.signer = { ...funding.signer, publicKeyHex: `02${'ff'.repeat(32)}` };
+          if (fault === 'height' && count === 2) funding.target.tipHeight = 1019;
+          if (fault === 'disposed after check' || (fault === 'disposed after funding' && count === 2)) session.dispose();
+        });
+        await expect(executeNativeSourceLock(input)).rejects.toThrow(/funding|inactive|provenance/);
+        expect(post).not.toHaveBeenCalled();
+        expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)).toBeNull();
+      });
+    });
+
+  it('retains durable ambiguity and reconciles an accepted native source lock after a lost response', async () => {
+    await withNativeSourceLock(async ({ input, post, onPost }) => {
+      onPost(() => { throw new Error('fixture response lost'); });
+      const result = await executeNativeSourceLock(input);
+      expect(result.transportStatus).toBe('reconciled'); expect(post).toHaveBeenCalledTimes(1);
+      expect(input.state.getErgoOperationalTransactionAttempt(result.expectedTxId)?.status).toBe('confirmed');
+    });
+  });
+
+  it('does not transport when native journal reservation fails', async () => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      vi.spyOn(input.state, 'reserveErgoOperationalTransactionAttempt').mockImplementation(() => { throw new Error('fixture journal failure'); });
+      await expect(executeNativeSourceLock(input)).rejects.toThrow(/fixture journal failure/);
+      expect(post).not.toHaveBeenCalled();
+    });
+  });
+
+  it('rechecks native custody at the exact transport callback without reusing the consumed handle', async () => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      const consume = fleet.consumeLocalWasmCheckedSubmissionHandleV1;
+      vi.spyOn(fleet, 'consumeLocalWasmCheckedSubmissionHandleV1').mockImplementation(async (handle, candidate, callback) =>
+        consume(handle, candidate, async signed => { session.dispose(); return callback(signed); }));
+      await expect(executeNativeSourceLock(input)).rejects.toThrow(/not transported|inactive/);
+      expect(post).not.toHaveBeenCalled();
+      expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)).not.toBeNull();
+    });
+  });
+
+  it('retains the transported journal but issues no completion receipt after native custody is disposed', async () => {
+    await withNativeSourceLock(async ({ input, post, onPost }) => {
+      onPost(() => session.dispose());
+      await expect(executeNativeSourceLock(input)).rejects.toThrow(/inactive/);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)).not.toBeNull();
+    });
+  });
+
+  it('rejects a second native source-lock execution without a second transport', async () => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      await executeNativeSourceLock(input);
+      await expect(executeNativeSourceLock(input)).rejects.toThrow(/absent/);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(() => assertNativePegIn(input.packet, input.batch, target)).toThrow(/inactive/);
+    });
+  });
+
+  it.each([
+    { stage: 'pending confirmation', stopAfter: 2, status: 'accepted' },
+    { stage: 'journal reconciliation', stopAfter: 4, status: 'confirmed' },
+    { stage: 'confirmed journal revalidation', stopAfter: 6, status: 'confirmed' },
+  ])('stops after the current $stage read when custody is disposed', async ({ stage, stopAfter, status }) => {
+    await withNativeSourceLock(async ({ input, post, onConfirmation }) => {
+      let reads = 0;
+      onConfirmation(count => {
+        reads = count;
+        if (count === stopAfter) session.dispose();
+        return stage === 'pending confirmation' ? 1 : 20;
+      });
+      await expect(executeNativeSourceLock(input)).rejects.toThrow(/inactive/);
+      expect(reads).toBe(stopAfter);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)?.status)
+        .toBe(status);
+    });
+  });
 
   async function withNativeIssuance(
     runTest: (context: {

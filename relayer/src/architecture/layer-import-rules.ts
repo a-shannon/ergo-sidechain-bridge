@@ -329,6 +329,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts',
       'substrate-federated-isolated-devnet-genesis-revalidator-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-candidate-v1.ts',
+      'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
       'substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.ts',
       'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts',
@@ -741,6 +742,9 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'SubstrateFederatedIsolatedDevnetPegInCandidateV1',
         ]),
       ],
+      ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set([
+        'assertSubstrateFederatedNativeGenesisPegInPacketV1',
+      ])],
       [
         'substrate-federated-isolated-devnet-checked-submission-transport-v1.ts',
         new Set([
@@ -786,6 +790,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.ts',
         new Set([
           'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+          'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1',
         ]),
       ],
       [
@@ -794,6 +799,8 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
           'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1',
           'SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
+          'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1',
+          'assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1',
         ]),
       ],
       [
@@ -842,6 +849,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         'substrate-federated-local-devnet-peg-in-source-lock-journal-v1.ts',
         new Set([
           'createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1',
+          'SubstrateFederatedLocalDevnetPegInSourceLockJournalStateV1',
         ]),
       ],
       [
@@ -1223,6 +1231,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         '../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js',
         new Set([
           'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
+          'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1',
         ]),
       ],
       [
@@ -1230,6 +1239,8 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1',
           'observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1',
+          'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1',
+          'assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1',
         ]),
       ],
       [
@@ -1564,6 +1575,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_TRACKER_CANDIDATE_CAMPAIGN_STATIC_EXECUTION_MANIFEST_DIGEST_V4',
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
       'executeSubstrateFederatedNativeGenesisBatchV1',
+      'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
       'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3',
       'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1',
       'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1',

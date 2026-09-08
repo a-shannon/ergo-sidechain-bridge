@@ -252,6 +252,8 @@ import {
   buildSubstrateFederatedIsolatedDevnetPegInCandidateV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from '../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
+import { assertSubstrateFederatedNativeGenesisPegInPacketV1 }
+  from '../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
@@ -293,6 +295,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+  createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1,
 } from '../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
 import {
   discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
@@ -301,6 +304,8 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
   observeSubstrateFederatedIsolatedDevnetPegInSourceLockOutputsV1,
+  observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1,
+  assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1,
   type SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
 } from '../../substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 import {
@@ -336,6 +341,7 @@ import {
 } from '../../substrate-federated-local-devnet-genesis-journal-v1.js';
 import {
   createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1,
+  type SubstrateFederatedLocalDevnetPegInSourceLockJournalStateV1,
 } from '../../substrate-federated-local-devnet-peg-in-source-lock-journal-v1.js';
 import {
   createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1,
@@ -2563,6 +2569,121 @@ export async function executeSubstrateFederatedNativeGenesisBatchV1(input: Reado
   );
   assertActive();
   return transactions;
+}
+
+/** Create and confirm the refundable native deposit; reserve commitment and mint are separate. */
+export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  packet: ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV1>;
+  setupSession: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
+  state: SubstrateFederatedLocalDevnetPegInSourceLockJournalStateV1;
+}>): Promise<Readonly<{
+  expectedTxId: string;
+  transportStatus: 'accepted' | 'reconciled';
+  durableAttemptDigestHex: string;
+  journalDigestHex: string;
+  outputObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
+}>> {
+  const { target, batch, packet, setupSession, state } = input;
+  const assertActive = () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+  assertActive();
+  const completionDeadline = performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS;
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+    target, batch.request.target.genesisHeaderIdHex,
+  );
+  const receipt = await setupSession.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+  assertActive();
+  const discoverFunding = async (minimumHeight: number) => {
+    assertActive();
+    const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setupSession.signer, target);
+    assertActive();
+    const funding = ownedFunding.observation;
+    assertPegInFundingObservation(funding, setupSession, batch, target, minimumHeight);
+    if (sha256CanonicalJson(funding.genesisInputs.tracker, PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN)
+      !== sha256CanonicalJson(packet.boxes.sourceFundingInput, PEG_IN_SOURCE_FUNDING_BOX_DIGEST_DOMAIN)) {
+      throw new Error('native source-lock funding differs from the exact packet');
+    }
+    return ownedFunding;
+  };
+  const postCheck = await discoverFunding(receipt.signer.stateContextTipHeight);
+  const preTransport = await discoverFunding(postCheck.observation.target.tipHeight);
+  const executionCheck = promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(receipt, target);
+  const authorizer = createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1({
+    target, batch, packet, executionCheck, postCheck, preTransport,
+  });
+  const journal = createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1({
+    state, authorizer, reconciliationIdentityDigestHex: batch.targetBinding.executionTargetIdentityDigestHex,
+    targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+  });
+  if (await journal.reconcileActive(observer) !== 'none') {
+    throw new Error('unexpected prior native source-lock attempt was reconciled');
+  }
+  assertActive();
+  const transport = createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(target, authorizer);
+  const transaction = packet.transactions.sourceLockCreation;
+  const sourceBoxId = packet.boxes.sourceFundingInput.boxId;
+  const creationHeight = transaction.eip12Tx.outputs[0]?.creationHeight;
+  if (!Number.isSafeInteger(creationHeight) || Number(creationHeight) < 0) {
+    throw new Error('native source-lock creation height is invalid');
+  }
+  const result = await runErgoOperationalTransaction({
+    operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+    expectedTxId: transaction.txId, sourceBoxId, inputBoxIds: [sourceBoxId], attemptedAtHeight: Number(creationHeight),
+    targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+    unsignedTransaction: transaction.eip12Tx,
+  }, {
+    sign: async admission => {
+      assertActive();
+      assertSourceLockOperationalAdmission(admission, executionCheck, transaction.eip12Tx, sourceBoxId);
+      return Object.freeze({ nodeOrigin: target.primaryNodeOrigin,
+        signedTransactionDigestHex: executionCheck.receipt.signedTransactionCanonicalJsonSha256Hex,
+        signerArtifact: executionCheck.signedCandidate });
+    },
+    check: async signed => {
+      assertActive();
+      if (signed.signerArtifact !== executionCheck.signedCandidate
+        || signed.signedTransactionDigestHex !== executionCheck.receipt.signedTransactionCanonicalJsonSha256Hex) {
+        throw new Error('native source-lock checked signer binding changed');
+      }
+      return Object.freeze({ checkResponseDigestHex: executionCheck.checkedAcceptance.submissionHandle.checkResponseDigestHex,
+        checkerArtifact: executionCheck.checkedAcceptance.submissionHandle });
+    },
+    revalidate: async () => {
+      assertActive();
+      return Object.freeze({ revalidationDigestHex: authorizer.revalidationDigestHex });
+    },
+    authorize: value => authorizer.authorize(value),
+    reserve: value => journal.journal.reserve(value),
+    finalize: value => journal.journal.finalize(value),
+    submit: attempt => {
+      assertActive();
+      assertFullConfirmationWindowAvailable(completionDeadline, 'native source-lock');
+      return transport.submit(attempt);
+    },
+  });
+  assertSourceLockTransportExecution(result, transaction.txId);
+  assertActive();
+  const confirmation = await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline, 'native source-lock', assertActive);
+  assertActive();
+  const reconciled = await journal.reconcileActive(observer);
+  assertActive();
+  if (reconciled !== 'confirmed') {
+    throw new Error('native source-lock journal did not retain exact confirmation');
+  }
+  const revalidated = await journal.revalidateConfirmed(observer);
+  assertActive();
+  if (revalidated !== 1) {
+    throw new Error('native source-lock journal did not retain exact confirmation');
+  }
+  assertActive();
+  const outputObservation = await observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1({
+    target, batch, packet, confirmation,
+  });
+  assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(outputObservation, target, batch, packet);
+  return Object.freeze({ expectedTxId: transaction.txId,
+    transportStatus: result.status === 'accepted' ? 'accepted' : 'reconciled',
+    durableAttemptDigestHex: result.durableAttemptDigestHex, journalDigestHex: result.journalDigestHex, outputObservation });
 }
 
 export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
@@ -8268,7 +8389,7 @@ function assertPegInFundingObservation(
   setupSession:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
   batch:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>,
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2 | SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   minimumSetupConfirmationHeight: number,
 ): void {
@@ -8624,7 +8745,9 @@ export async function waitForCanonicalConfirmation(
   expectedTxId: string,
   completionDeadline: number,
   stage: string,
+  assertActive: () => void = () => {},
 ): Promise<Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>> {
+  assertActive();
   let observedAt = performance.now();
   if (
     !Number.isFinite(observedAt)
@@ -8658,6 +8781,7 @@ export async function waitForCanonicalConfirmation(
     Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation> | null = null;
   let observationCount = 0;
   for (;;) {
+    assertActive();
     const beforeObservation = performance.now();
     if (!Number.isFinite(beforeObservation) || beforeObservation < observedAt) {
       throw canonicalConfirmationFailureDiagnosticErrorV1({
@@ -8694,6 +8818,7 @@ export async function waitForCanonicalConfirmation(
       lastObservationFailure = error;
       rawObservation = null;
     }
+    assertActive();
     const afterObservation = performance.now();
     if (!Number.isFinite(afterObservation) || afterObservation < observedAt) {
       throw canonicalConfirmationFailureDiagnosticErrorV1({

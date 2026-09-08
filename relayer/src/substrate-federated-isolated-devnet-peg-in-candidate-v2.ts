@@ -21,6 +21,8 @@ const DOMAIN = 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_CANDIDATE_V2';
 type Target = Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
 type Batch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
 const candidates = new WeakMap<object, Readonly<{ batch: Batch; target: Target }>>();
+type NativeBatch = Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+const nativePackets = new WeakMap<object, Readonly<{ batch: NativeBatch; target: Target }>>();
 
 export interface BuildSubstrateFederatedIsolatedDevnetPegInCandidateV2Input
   extends Omit<BuildSubstrateFederatedPooledReserveDepositV2Input,
@@ -156,5 +158,25 @@ export async function buildSubstrateFederatedNativeGenesisPegInPacketV1(
     fees,
   });
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
+  const retained = nativePackets.get(packet);
+  if (retained !== undefined && (retained.batch !== batch || retained.target !== target)) {
+    throw new Error('native FED peg-in packet is already bound to another setup');
+  }
+  nativePackets.set(packet, Object.freeze({ batch, target }));
+  return packet;
+}
+
+export function assertSubstrateFederatedNativeGenesisPegInPacketV1(
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+  batch: NativeBatch,
+  target: Target,
+): Readonly<SubstrateFederatedPooledReserveDepositV2Packet> {
+  const retained = nativePackets.get(packet);
+  if (retained === undefined || retained.batch !== batch || retained.target !== target) {
+    throw new Error('native FED peg-in packet lacks exact process provenance');
+  }
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
   return packet;
 }
