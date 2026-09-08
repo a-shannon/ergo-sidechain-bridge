@@ -7,10 +7,11 @@ V4 mint-reservation profile at genesis without Sudo or post-genesis Root
 activation. Its source-attestation authority is the federation compiled into
 that runtime, not a profile identifier supplied by a caller.
 
-This is native runtime evidence. No node selects this runtime yet. WASM
-production, exact chain-spec provisioning, transaction-pool admission and an
-operational reservation-to-mint run remain open. The existing main runtime
-stays inert; the LAB/TestClient route remains a separate fixture path.
+The dedicated node now selects this runtime and accepts a typed genesis
+through its compiled WASM. Native and WASM genesis storage match in the
+configured fixture. Reviewed chain-spec provisioning, a running target,
+transaction-pool admission and operational reservation-to-mint remain open.
+The existing main runtime stays inert; LAB/TestClient remains a separate route.
 
 ## Source Closure
 
@@ -22,6 +23,8 @@ Apply these inputs to a separate checkout in this order:
    SHA-256 `bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634`.
 3. [Genesis overlay 0004](../sources/frontier/0004-federated-genesis-initialization.patch),
    SHA-256 `b3688c77c1a6a2b85b95367057572f053056fa11ee31ac291373571717dd7331`.
+4. For the node, [selection overlay 0005](../sources/frontier/0005-federated-genesis-node.patch),
+   SHA-256 `c3d0ba7ae90913a6dda3b76d6542ee5ac10c7fa3aaa3fb28d565c3b120aae4e4`.
 
 Overlay 0004 changes eleven source files. It adds one non-publishable runtime
 crate and its integration tests, separates execution permission from public
@@ -30,6 +33,10 @@ change adds only the local package entry. It does not replace the source lock,
 enable the existing node, or require LAB application overlays 0002/0003 for
 these native tests. Historical build and campaign pins still identify their
 original source closure.
+
+Overlay 0005 changes only the node manifest, its local lock dependency,
+runtime/CLI selection and the typed loader with direct tests. It introduces
+no runtime, proof, contract or application-byte changes.
 
 V4 profile bytes remain exactly 349 bytes. Existing proof formats, domains,
 verifier IDs, contracts and ErgoTrees are unchanged. A new target must derive
@@ -114,15 +121,81 @@ or treated as acceptance evidence.
 
 ## Next Boundary
 
-Bind this runtime to a separately selected node target and an exact typed
-chain-spec producer. Close the build/profile/application/genesis dependency
-graph without defining the chain domain circularly through its own genesis
-hash. Produce and verify new WASM/build pins instead of reusing the previous
-LAB artifact. Then connect native reservation, its confirmed parent-state
-observation and the matching Ethereum mint. Keep pool rejection separate from
-whole-block rejection and preserve the ordinary daemon's mint hold.
+The remaining producer must construct reviewed application, family and
+height-zero profile identities before producing the typed genesis. Keep this
+order acyclic:
+
+```text
+public federation -> compiled runtime
+pre-genesis domain + application + runtime pins -> application identity
+application identity + tracker/family compilation -> family ID
+family + application + proof profile + finality -> height-zero V4 profile
+typed genesis -> actual genesis/spec identity -> separate target binding
+```
+
+The historical packet derives its domain from observed genesis/spec identities,
+and its source-attestation route fixes activation at block 4. Neither can be
+reused unchanged for genesis initialization. Preserve the authority-safe V1
+schema, which accepts quarantine only. Family runtime/application profile ID,
+V4 lineage/family ID and V4 profile ID remain distinct.
+
+After the new producer and actual target binding, connect native reservation,
+its confirmed parent-state observation and the matching Ethereum mint. Keep
+pool rejection separate from whole-block rejection and preserve the ordinary
+daemon's mint hold.
 
 Only after that join should a fresh operational two-way campaign reuse the
 verified withdrawal consumer. This checkpoint establishes neither that
 campaign nor independent custody, consensus trustlessness, Gate 5 closure or
 production readiness. See the [execution plan](../phases/bridge-execution-plan.md).
+
+## Selected Node And WASM Verification
+
+The node feature `bridge-federated-v4-genesis-node` selects only the dedicated
+runtime. Main, LAB and FED selections are mutually exclusive at compilation;
+the default node remains main. The FED CLI accepts only
+`fed-genesis:<typed-genesis.json>`. It rejects implicit development/local
+selectors, the LAB selector and ordinary raw chain-spec files.
+
+The file contains a full `RuntimeGenesisConfig`, not raw storage or runtime
+code. The loader accepts at most 4 MiB of JSON, requires its sealing mode to
+match the CLI, and executes the compiled WASM genesis builder before returning
+the spec. Node runtime code, chain-spec type, boot nodes and telemetry are not
+caller-selected fields. The resulting development spec has no boot nodes or
+telemetry. This does not attest the caller's application or federation choices;
+that remains the reviewed provisioning producer's responsibility.
+
+With the public build profile above and the same source closure:
+
+```powershell
+Remove-Item Env:SKIP_WASM_BUILD -ErrorAction SilentlyContinue
+$env:WASM_BUILD_WORKSPACE_HINT = (Get-Location).Path
+$env:CARGO_PROFILE_DEV_DEBUG = '0'
+$env:CARGO_PROFILE_DEV_CODEGEN_UNITS = '1'
+$env:CARGO_INCREMENTAL = '0'
+cargo test --offline --locked -p frontier-template-node --no-default-features --features bridge-federated-v4-genesis-node federated_genesis -- --test-threads=1
+cargo build --offline --locked -p frontier-template-node --no-default-features --features bridge-federated-v4-genesis-node
+```
+
+The workspace hint lets the nested WASM builder find the exact Cargo.lock when
+build outputs are outside the source tree. An initial missing-lock failure was
+resolved with this hint; dependency pins and offline resolution were retained.
+
+Three node tests pass. The positive writes a synthetic typed configuration,
+parses the CLI selector and compares all resulting WASM genesis storage with
+native storage, with the compiled code checked separately. Single-fault
+negatives cover unknown/raw/code fields, input size, sealing mismatch, absent
+profile, wrong proof profile, nonzero activation, Sudo, quarantine, application
+code, operator and pre-existing token supply. The built executable also rejects
+the ordinary `dev` selector.
+
+The Rust 1.82.0 Windows debug build produced:
+
+| Artifact | Bytes | SHA-256 |
+|---|---:|---|
+| FED runtime WASM | 2,103,533 | `b4219a6ef4d6e3f94d50ecb55faae6887341980775e584d04195ed3ed06ae625` |
+| Selected node executable | 96,507,904 | `0d30747c8d76b18f5020f6897d4dad823fad8fc8e6a9372038d5eea72ea191b4` |
+
+These identify the tested build with the synthetic public configuration above,
+not usable custody or a running operational target. Cross-root reproducibility
+and acceptance of a reviewed FED provisioning packet remain unestablished.
