@@ -37,6 +37,10 @@ const UINT128_MAX = (1n << 128n) - 1n;
 // The selected Frontier runtime dispatches these addresses before EVM code.
 const PRECOMPILE_ADDRESSES = new Set([1, 2, 3, 4, 5, 1024, 1025]
   .map(value => value.toString(16).padStart(40, '0')));
+// The isolated node owner selects --alice. GRANDPA's client still initializes
+// its authority set with --no-grandpa; these development keys never attest bridge funds.
+const DEV_AURA_AUTHORITY = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY';
+const DEV_GRANDPA_AUTHORITY = '5FA9nQDVg267DEd8m1ZypXLBnvN7SFxYwV7ndqSYGiN9TTpu';
 
 export interface PrepareSubstrateFederatedGenesisV1Input {
   readonly bridgeRoot: string;
@@ -209,7 +213,7 @@ export function buildSubstrateFederatedGenesisV1(input: Readonly<{
   const config = {
     system: {}, sudo: { key: null },
     balances: { balances: captured.endowments.map(item => [`0x${item.addressHex}`, rawUint(item.balance)]) },
-    aura: { authorities: [] }, grandpa: { authorities: [] },
+    aura: { authorities: [DEV_AURA_AUTHORITY] }, grandpa: { authorities: [[DEV_GRANDPA_AUTHORITY, 1]] },
     transactionPayment: { multiplier: '1000000000000000000' },
     ethereum: {}, baseFee: { baseFeePerGas: '0x3b9aca00', elasticity: 125000 },
     evmChainId: { chainId: rawUint(preparation.evmChainId) },

@@ -27,6 +27,8 @@ vi.mock('./native-executable-pin.js', () => ({
 
 import {
   assertOwnedAuthoritySafeDevnetProcessV1Receipt,
+  assertOwnedFederatedGenesisDevnetProcessV1Receipt,
+  withOwnedFederatedGenesisDevnetProcessesV1,
   assertOwnedAuthoritySafeDevnetRecoveryLifecycleV1Receipt,
   assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt,
   assertOwnedAuthoritySafeDevnetRecoveryTimelineV1Material,
@@ -570,6 +572,83 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     expect(children.every(child => !child.alive)).toBe(true);
   });
 
+  it.each([
+    ['legacy chain spec', { genesis: { runtimeGenesis: { patch: {} } } }, /requires direct typed genesis/],
+    ['raw chain spec', { genesis: { raw: { top: {} } } }, /requires direct typed genesis/],
+    ['bootnodes', { ...typedGenesis(), bootNodes: [] }, /requires direct typed genesis/],
+    ['runtime override', { ...typedGenesis(), code: '0x00' }, /requires direct typed genesis/],
+    ['sealing mode', { ...typedGenesis(), manualSeal: { enable: false } }, /requires manual sealing and no Sudo/],
+    ['Sudo', { ...typedGenesis(), sudo: { key: '0x' + '11'.repeat(20) } }, /requires manual sealing and no Sudo/],
+    ['absent V4', { ...typedGenesis(), bridgeCommitment: {} }, /requires its V4 initialization/],
+  ])('rejects incompatible FED %s before launch', async (_label, config, error) => {
+    const genesisJsonBytes = Buffer.from(JSON.stringify(config));
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1({
+      ...federatedInput(), genesisJsonBytes, expectedGenesisJsonSha256Hex: sha256(genesisJsonBytes),
+    }, async () => 'unreachable')).rejects.toThrow(error as RegExp);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pin', /chain-spec bytes differ/], ['size', /must contain bounded bytes/],
+    ['utf8', /encoded data.*encoding/], ['duplicate', /strict valid JSON without duplicate keys/],
+    ['accessor', /exact data fields/], ['extra', /exact data fields/],
+  ])('rejects FED input %s before launch', async (fault, error) => {
+    let genesisJsonBytes = Buffer.from(JSON.stringify(typedGenesis()));
+    if (fault === 'size') genesisJsonBytes = Buffer.alloc(4 * 1024 * 1024 + 1, 32);
+    if (fault === 'utf8') genesisJsonBytes = Buffer.from([0xff]);
+    if (fault === 'duplicate') genesisJsonBytes = Buffer.from(
+      JSON.stringify(typedGenesis()).replace('"sudo":', '"sudo":{"key":null},"sudo":'));
+    const value = { ...federatedInput(), genesisJsonBytes, expectedGenesisJsonSha256Hex: sha256(genesisJsonBytes) };
+    if (fault === 'pin') value.expectedGenesisJsonSha256Hex = '11'.repeat(32);
+    if (fault === 'accessor') Object.defineProperty(value, 'primaryRpcUrl', {
+      enumerable: true, get: () => { throw new Error('getter was invoked'); },
+    });
+    if (fault === 'extra') Object.defineProperty(value, 'unexpected', { value: true });
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(value, async () => 'unreachable'))
+      .rejects.toThrow(error as RegExp);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('runs the typed FED selector with fixed manual sealing and a distinct receipt', async () => {
+    const value = federatedInput();
+    const result = await withOwnedFederatedGenesisDevnetProcessesV1(value, async endpoints => {
+      expect(children).toHaveLength(2);
+      expect(children.every(child => child.alive)).toBe(true);
+      expect(Object.keys(endpoints).sort()).toEqual(['primaryRpcUrl', 'witnessRpcUrl']);
+      expect(readFileSync(join(runtimeDirectory, 'authority-safe.json'))).toEqual(value.genesisJsonBytes);
+      return { observed: true };
+    });
+    for (const call of mocks.spawn.mock.calls) {
+      const args = call[1] as string[];
+      expect(args[args.indexOf('--chain') + 1]).toBe(`fed-genesis:${join(runtimeDirectory, 'authority-safe.json')}`);
+      expect(args[args.indexOf('--sealing') + 1]).toBe('manual');
+      expect(args).toContain('--no-grandpa');
+    }
+    expect(result.value).toEqual({ observed: true });
+    expect(result.receipt.schema).toBe('e2s.substrate-federated-genesis-devnet-process.v1');
+    expect(result.receipt.chainSpecSha256Hex).toBe(value.expectedGenesisJsonSha256Hex);
+    expect(result.receipt.checks.bothProcessesStoppedAndListenersReleased).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt(result.receipt)).not.toThrow();
+    expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt({ ...result.receipt })).toThrow(/provenance/);
+    expect(() => assertOwnedAuthoritySafeDevnetProcessV1Receipt(result.receipt)).toThrow(/provenance/);
+    expect(() => assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt(result.receipt)).toThrow(/provenance/);
+  });
+
+  it.each(['image', 'listener', 'peer', 'action', 'spec', 'cleanup'])('retains FED %s failure containment', async fault => {
+    const value = federatedInput();
+    if (fault === 'listener') wrongListenerAddress = true;
+    if (fault === 'peer') wrongPeerIdentity = true;
+    if (fault === 'cleanup') retainListenersAfterStop = true;
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(value, async () => {
+      if (fault === 'image') runningImagePath = join(runtimeDirectory, 'different.exe');
+      if (fault === 'spec') writeFileSync(join(runtimeDirectory, 'authority-safe.json'), '{}');
+      if (fault === 'action') throw new Error('synthetic observation failure');
+      return 'observed';
+    })).rejects.toThrow();
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
   it('captures one sealed four-snapshot timeline and rejects an injected reader disagreement', async () => {
     const result = await captureOwnedAuthoritySafeDevnetRecoveryTimelineV1({
       process: input(),
@@ -901,6 +980,19 @@ function input(): OwnedAuthoritySafeDevnetProcessV1Input {
     witnessP2pPort: PORTS.witnessP2p,
     primaryPrometheusPort: PORTS.primaryPrometheus,
     witnessPrometheusPort: PORTS.witnessPrometheus,
+  };
+}
+
+function federatedInput() {
+  const { chainSpecBytes: _bytes, expectedChainSpecSha256Hex: _hash, ...processInput } = input();
+  const genesisJsonBytes = Buffer.from(JSON.stringify(typedGenesis()));
+  return { ...processInput, genesisJsonBytes, expectedGenesisJsonSha256Hex: sha256(genesisJsonBytes) };
+}
+
+function typedGenesis() {
+  return {
+    manualSeal: { enable: true }, sudo: { key: null },
+    bridgeCommitment: { pooledReserveMintGenesisV4: ['0x' + '31'.repeat(20), [4]] },
   };
 }
 

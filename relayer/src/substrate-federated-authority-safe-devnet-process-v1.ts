@@ -33,6 +33,8 @@ import { parseStrictJson } from './strict-json.js';
 
 export const SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_PROCESS_V1_SCHEMA =
   'e2s.substrate-federated-authority-safe-devnet-process.v1' as const;
+export const SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA =
+  'e2s.substrate-federated-genesis-devnet-process.v1' as const;
 export const SUBSTRATE_FEDERATED_OWNED_RECOVERY_PROCESS_V1_SCHEMA =
   'e2s.substrate-federated-owned-recovery-process.v1' as const;
 export const SUBSTRATE_FEDERATED_OWNED_RECOVERY_LIFECYCLE_V1_SCHEMA =
@@ -47,6 +49,7 @@ const MAX_RPC_RESPONSE_BYTES = 64 * 1024;
 const MAX_CHAIN_SPEC_BYTES = 16 * 1024 * 1024;
 const RECOVERY_LAG_BLOCKS = 2;
 const ACCEPTANCE_PROCESS_RECEIPTS = new WeakSet<object>();
+const FEDERATED_GENESIS_PROCESS_RECEIPTS = new WeakSet<object>();
 const RECOVERY_PROCESS_RECEIPTS = new WeakSet<object>();
 const RECOVERY_RECEIPTS = new WeakSet<object>();
 const RECOVERY_TIMELINE_RECEIPTS = new WeakSet<object>();
@@ -90,6 +93,17 @@ export interface OwnedAuthoritySafeDevnetProcessV1Receipt {
     readonly exactBinaryRecheckedAfterAction: true;
     readonly bothProcessesStoppedAndListenersReleased: true;
   }>;
+}
+
+export interface OwnedFederatedGenesisDevnetProcessV1Input
+  extends Omit<OwnedAuthoritySafeDevnetProcessV1Input, 'chainSpecBytes' | 'expectedChainSpecSha256Hex'> {
+  readonly genesisJsonBytes: Uint8Array;
+  readonly expectedGenesisJsonSha256Hex: string;
+}
+
+export interface OwnedFederatedGenesisDevnetProcessV1Receipt
+  extends Omit<OwnedAuthoritySafeDevnetProcessV1Receipt, 'schema'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA;
 }
 
 export interface OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
@@ -251,6 +265,7 @@ interface OwnedAuthoritySafeDevnetInternalOwnerV1 {
 
 type OwnedAuthoritySafeDevnetProcessModeV1 =
   | 'acceptance_observation'
+  | 'federated_genesis_observation'
   | 'recovery_lifecycle';
 
 interface OwnedAuthoritySafeDevnetRecoveryTimelineV1 {
@@ -297,6 +312,37 @@ export async function withOwnedAuthoritySafeDevnetProcessesV1<T>(
     owner => action(owner.endpoints),
     'acceptance_observation',
   );
+}
+
+/** Own two isolated FED nodes; typed-loader execution is not mint authority. */
+export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
+  input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
+  action: (endpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>) => Promise<T>,
+): Promise<Readonly<{ value: T; receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt> }>> {
+  if (typeof action !== 'function') throw new Error('FED genesis owned-process action is required');
+  const keys = ['nodeBinaryPath', 'expectedNodeBinarySha256Hex', 'genesisJsonBytes',
+    'expectedGenesisJsonSha256Hex', 'primaryRpcUrl', 'witnessRpcUrl', 'primaryP2pPort',
+    'witnessP2pPort', 'primaryPrometheusPort', 'witnessPrometheusPort'];
+  if (input === null || typeof input !== 'object'
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) {
+    throw new Error('FED genesis process input requires exact data fields');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(input);
+  if (Reflect.ownKeys(descriptors).length !== keys.length
+    || keys.some(key => !descriptors[key]?.enumerable || !('value' in descriptors[key]!))) {
+    throw new Error('FED genesis process input requires exact data fields');
+  }
+  const captured = Object.fromEntries(keys.map(key => [key, descriptors[key]!.value]));
+  return withOwnedAuthoritySafeDevnetProcessOwnerV1(Object.freeze({
+    nodeBinaryPath: captured.nodeBinaryPath,
+    expectedNodeBinarySha256Hex: captured.expectedNodeBinarySha256Hex,
+    chainSpecBytes: captured.genesisJsonBytes,
+    expectedChainSpecSha256Hex: captured.expectedGenesisJsonSha256Hex,
+    primaryRpcUrl: captured.primaryRpcUrl, witnessRpcUrl: captured.witnessRpcUrl,
+    primaryP2pPort: captured.primaryP2pPort, witnessP2pPort: captured.witnessP2pPort,
+    primaryPrometheusPort: captured.primaryPrometheusPort,
+    witnessPrometheusPort: captured.witnessPrometheusPort,
+  }), owner => action(owner.endpoints), 'federated_genesis_observation');
 }
 
 export async function exerciseOwnedAuthoritySafeDevnetRecoveryLifecycleV1(
@@ -709,12 +755,21 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
 async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   input: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
   action: (owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>) => Promise<T>,
+  mode: 'federated_genesis_observation',
+): Promise<Readonly<{
+  value: T;
+  receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>;
+}>>;
+async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
+  input: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
+  action: (owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>) => Promise<T>,
   mode: OwnedAuthoritySafeDevnetProcessModeV1,
 ): Promise<Readonly<{
   value: T;
   receipt: Readonly<
     OwnedAuthoritySafeDevnetProcessV1Receipt
     | OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
+    | OwnedFederatedGenesisDevnetProcessV1Receipt
   >;
 }>> {
   if (process.platform !== 'win32') {
@@ -730,7 +785,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   );
   const chainSpecBytes = boundedBytes(
     input.chainSpecBytes,
-    MAX_CHAIN_SPEC_BYTES,
+    mode === 'federated_genesis_observation' ? 4 * 1024 * 1024 : MAX_CHAIN_SPEC_BYTES,
     'authority-safe chain spec',
   );
   const chainSpecSha256Hex = digest(
@@ -742,6 +797,8 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   }
   if (mode === 'recovery_lifecycle') {
     assertRecoveryManualSealGenesis(chainSpecBytes);
+  } else if (mode === 'federated_genesis_observation') {
+    assertFederatedTypedGenesis(chainSpecBytes);
   }
   const primaryRpc = loopbackRpc(input.primaryRpcUrl, 'primary RPC');
   const witnessRpc = loopbackRpc(input.witnessRpcUrl, 'witness RPC');
@@ -767,6 +824,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
 
   const runtimeDirectory = mkdtempSync(join(tmpdir(), 'e2s-fed6g1c-runtime-'));
   const specPath = join(runtimeDirectory, 'authority-safe.json');
+  const chainSelector = mode === 'federated_genesis_observation' ? `fed-genesis:${specPath}` : specPath;
   const primaryBasePath = join(runtimeDirectory, 'primary');
   const witnessBasePath = join(runtimeDirectory, 'witness');
   writeFileSync(specPath, chainSpecBytes, { flag: 'wx', mode: 0o600 });
@@ -794,7 +852,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     assertPortsUnowned(witnessPorts);
     const retainedPeerId = witnessPeerId;
     witness = spawnNode(nodeBinaryPath, [
-      '--chain', specPath,
+      '--chain', chainSelector,
       '--base-path', witnessBasePath,
       '--listen-addr', `/ip4/127.0.0.1/tcp/${input.witnessP2pPort}`,
       '--rpc-port', String(witnessRpc.port),
@@ -805,7 +863,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
       '--state-pruning', 'archive',
       '--blocks-pruning', 'archive',
       '--unsafe-force-node-key-generation',
-      ...(mode === 'recovery_lifecycle'
+      ...(mode !== 'acceptance_observation'
         ? ['--sealing', 'manual', '--no-grandpa']
         : []),
       '--name', 'fed6g1c-witness',
@@ -870,7 +928,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   };
   try {
     primary = spawnNode(nodeBinaryPath, [
-      '--chain', specPath,
+      '--chain', chainSelector,
       '--base-path', primaryBasePath,
       '--listen-addr', `/ip4/127.0.0.1/tcp/${input.primaryP2pPort}`,
       '--rpc-port', String(primaryRpc.port),
@@ -881,7 +939,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
       '--state-pruning', 'archive',
       '--blocks-pruning', 'archive',
       '--unsafe-force-node-key-generation',
-      ...(mode === 'recovery_lifecycle'
+      ...(mode !== 'acceptance_observation'
         ? ['--sealing', 'manual', '--no-grandpa']
         : []),
       '--name', 'fed6g1c-primary',
@@ -1004,6 +1062,9 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     witnessP2pListenAddress: `/ip4/127.0.0.1/tcp/${input.witnessP2pPort}`,
     primaryPeerIdSha256Hex: sha256(Buffer.from(primaryPeerId, 'utf8')),
     witnessPeerIdSha256Hex: sha256(Buffer.from(witnessPeerId, 'utf8')),
+    ...(mode === 'federated_genesis_observation'
+      ? { typedFederatedGenesis: true, manualSeal: true, grandpaVoter: false }
+      : {}),
     ...(mode === 'recovery_lifecycle'
       ? {
           manualSealPinnedForRecoveryLifecycle: true as const,
@@ -1014,7 +1075,9 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   const receipt = Object.freeze({
     schema: mode === 'acceptance_observation'
       ? SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_PROCESS_V1_SCHEMA
-      : SUBSTRATE_FEDERATED_OWNED_RECOVERY_PROCESS_V1_SCHEMA,
+      : mode === 'federated_genesis_observation'
+        ? SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA
+        : SUBSTRATE_FEDERATED_OWNED_RECOVERY_PROCESS_V1_SCHEMA,
     version: 1 as const,
     nodeBinarySha256Hex,
     chainSpecSha256Hex,
@@ -1034,6 +1097,8 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   });
   if (mode === 'acceptance_observation') {
     ACCEPTANCE_PROCESS_RECEIPTS.add(receipt);
+  } else if (mode === 'federated_genesis_observation') {
+    FEDERATED_GENESIS_PROCESS_RECEIPTS.add(receipt);
   } else {
     RECOVERY_PROCESS_RECEIPTS.add(receipt);
   }
@@ -1049,6 +1114,14 @@ export function assertOwnedAuthoritySafeDevnetProcessV1Receipt(
     || !ACCEPTANCE_PROCESS_RECEIPTS.has(value)
   ) {
     throw new Error('authority-safe owned-process receipt provenance is missing');
+  }
+}
+
+export function assertOwnedFederatedGenesisDevnetProcessV1Receipt(
+  value: unknown,
+): asserts value is OwnedFederatedGenesisDevnetProcessV1Receipt {
+  if (typeof value !== 'object' || value === null || !FEDERATED_GENESIS_PROCESS_RECEIPTS.has(value)) {
+    throw new Error('FED genesis owned-process receipt provenance is missing');
   }
 }
 
@@ -2041,6 +2114,25 @@ function assertRecoveryManualSealGenesis(chainSpecBytes: Uint8Array): void {
     throw new Error(
       'authority-safe recovery chain spec must enable manual sealing at genesis',
     );
+  }
+}
+
+function assertFederatedTypedGenesis(bytes: Uint8Array): void {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  // Inspect shape only. Pass the original pinned bytes to FRAME without numeric reserialization.
+  const parsed = parseStrictJson(text, 'FED typed genesis');
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
+    || Object.hasOwn(parsed, 'genesis') || Object.hasOwn(parsed, 'bootNodes')
+    || Object.hasOwn(parsed, 'code')) {
+    throw new Error('FED process requires direct typed genesis, not a chain spec');
+  }
+  if (objectField(parsed, 'manualSeal').enable !== true
+    || objectField(parsed, 'sudo').key !== null) {
+    throw new Error('FED typed genesis requires manual sealing and no Sudo');
+  }
+  const profile = objectField(parsed, 'bridgeCommitment').pooledReserveMintGenesisV4;
+  if (!Array.isArray(profile) || profile.length !== 2) {
+    throw new Error('FED typed genesis requires its V4 initialization');
   }
 }
 

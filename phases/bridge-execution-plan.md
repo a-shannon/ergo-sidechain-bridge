@@ -119,7 +119,12 @@ establish deployment safety or independent operator custody.
   profile. The built node accepts its full configuration through `build-spec`;
   exact runtime/profile storage and Sudo absence were checked. This uses
   synthetic family inputs, not observed Ergo singleton issuance or usable
-  custody. Actual genesis/running-target binding and operational mint remain open.
+  custody. The configured target now also starts two isolated nodes: all 51
+  expected raw storage entries match at the same genesis, with V4 enforcement
+  and no Sudo. Actual startup required nonempty SDK development consensus
+  authorities in SS58 format; these are separate from bridge attestors. The
+  process owner preserves exact pins and cleanup under a distinct FED mode.
+  Fresh custody/observed-family target binding and operational mint remain open.
   The old source locks and withdrawal campaign retain their original scope.
 
 ## Critical Path
@@ -137,7 +142,8 @@ frozen foundations + selected launch mode + fresh-owner application execution
   -> typed FED genesis + compiled federation [native first-block checks passed]
   -> exact WASM/node selection + typed loader [local node tests passed]
   -> typed chain-spec producer + real node materialization [local check passed]
-  -> actual genesis identity + observed Ergo family + running-target binding
+  -> typed FED process owner + matching genesis storage [configured nodes passed]
+  -> fresh custody + observed Ergo family + exact running-target binding
   -> operational FED mint caller through the selected runtime admission consumer
   -> composed two-way recovery and cross-profile replay cutover
   -> exact target/custody activation and operational rehearsal
@@ -149,7 +155,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Typed FED provisioning -> reviewed running target | Use fresh synthetic custody and observed Ergo genesis inputs, compile the matching federation, bind actual genesis/spec identity and verify the isolated target | The producer-to-JVM-family-to-node join passes with synthetic configuration. No running-target or operational-mint claim yet. The old genesis-derived domain and block-4 LAB packet remain separate |
+| **Now** | Configured FED nodes -> usable target custody and Ergo family | Use fresh retained synthetic custody and observed Ergo genesis inputs, compile the matching federation, bind its own genesis/spec identity and verify the isolated target | Two configured nodes now start and agree on genesis storage. Configuration-only attestor keys and synthetic Ergo IDs are not usable custody or observed issuance. Operational mint remains open. The old genesis-derived domain and block-4 LAB packet remain separate |
 | 2 | Initialized target -> operational mint caller | Submit the exact proof-bound reservation through native dispatch, then mint from its parent-state reservation on the running isolated target | No receipt, observer or unrestricted owner-mint call substitutes for the deciding runtime consumer |
 | 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
@@ -162,7 +168,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Next; depends on typed provisioning | Replace configuration-only keys and synthetic family input IDs with fresh retained custody and observed Ergo genesis inputs. Bind the actual spec/genesis identity separately and verify the isolated running target; no circular identity or old LAB substitution |
+| FED running-target binding | Active; configured-node startup and exact genesis storage passed | Replace configuration-only keys and synthetic family input IDs with fresh retained custody and observed Ergo genesis inputs. Use the FED process owner, bind the new spec/genesis identity separately and verify the isolated running target; no circular identity or old LAB substitution |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 

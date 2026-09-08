@@ -217,6 +217,12 @@ describe('FED runtime genesis from the actual JVM family', () => {
       .toBe(candidate.genesisJson);
     expect(parsed.sudo).toEqual({ key: null });
     expect(parsed.manualSeal).toEqual({ enable: true });
+    expect(parsed.aura).toEqual({ authorities: [
+      '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+    ] });
+    expect(parsed.grandpa).toEqual({ authorities: [[
+      '5FA9nQDVg267DEd8m1ZypXLBnvN7SFxYwV7ndqSYGiN9TTpu', 1,
+    ]] });
     expect(parsed.transactionPayment).toEqual({ multiplier: '1000000000000000000' });
     expect(parsed.baseFee).toEqual({ baseFeePerGas: '0x3b9aca00', elasticity: 125000 });
     expect(parsed.ethereum).toEqual({});

@@ -9,9 +9,10 @@ that runtime, not a profile identifier supplied by a caller.
 
 The dedicated node selects this runtime and accepts typed genesis through its
 compiled WASM. The provisioning producer now connects actual JVM tracker and
-family compilation to that loader. Its synthetic configuration passes the
-built node's `build-spec` command. A running target, transaction-pool admission
-and operational reservation-to-mint remain open.
+family compilation to that loader. Its synthetic configuration passes
+`build-spec` and starts two isolated nodes with matching genesis storage.
+Fresh usable federation custody, observed Ergo family inputs, transaction-pool
+admission and operational reservation-to-mint remain open.
 The existing main runtime stays inert; LAB/TestClient remains a separate route.
 
 ## Source Closure
@@ -149,7 +150,12 @@ activation height zero and a 64-block pending window. It cannot install a
 profile from a copied receipt or from a different application/federation.
 
 The JSON is the full FRAME configuration, including typed byte arrays for
-EVM code and the selected runtime's payment/base-fee defaults. Native funding
+EVM code and the selected runtime's payment/base-fee defaults. The isolated
+manual-seal node uses the SDK's public Alice Aura/GRANDPA identities, serialized
+as SS58 strings. The GRANDPA client initializes its authority set even when
+voting is disabled; an empty set accepts offline genesis but prevents startup.
+These development block-authoring keys are not bridge source-attestation or
+Ergo-admission keys and establish no independent consensus authority. Native funding
 uses exact integers and rejects individual or total issuance overflow. Bridge
 and token constructor storage start with no token balances, supply or replay
 entries; native fees are endowed separately. The result is a candidate, not
@@ -166,9 +172,33 @@ The output's exact runtime code, V4 profile, sticky enforcement, bridge
 address and absent Sudo key were checked. Synthetic input IDs selected the
 Ergo family; this does not establish actual singleton issuance or custody.
 The tested genesis JSON SHA-256 is
-`4dfe43249fe4cbd3e36c67387467a5908b32f604435de9724fac6decbd8cbf00`;
+`262af44a977f93f9cde6b36ecc7a81f8763583089e1237688a70c7f40e933b5d`;
 the raw spec SHA-256 is
-`d17ef3f6e6a88f5d6e3e2a6dd40d7851eba6beb7927c333acef6efb6bc53a8e7`.
+`a0ca5d99860d7e0036b59990e7e0a47669a8b387c230fff12fec8b46372a2c26`.
+
+## Isolated Node Startup
+
+`withOwnedFederatedGenesisDevnetProcessesV1` in the
+[process owner](../relayer/src/substrate-federated-authority-safe-devnet-process-v1.ts)
+passes the original pinned typed bytes to `fed-genesis:<path>` with manual
+sealing and GRANDPA voting disabled. It retains the existing executable,
+listener, peer, file-identity and cleanup checks. Its receipt is separate from
+the legacy acceptance and recovery receipts; `chainSpecSha256Hex` identifies
+the supplied typed configuration, not the generated raw spec or genesis hash.
+
+The exact node binary listed below started two fresh loopback-only processes.
+Both reported genesis
+`704ea6168382f946a08468333b12c41e39f3283f22b67d968b2b8d7e77185e7e`
+at height zero and runtime `frontier-template-v4-fed-genesis` version 1.
+All 51 expected raw storage entries matched on both nodes, including the exact
+runtime bytes, V4 profile, sticky enforcement and application state. Sudo was
+absent, both transaction pools were empty, and cleanup released both processes
+and their listeners. No transaction was submitted.
+
+This configuration still uses synthetic Ergo input IDs and configuration-only
+source-attestation keys. It is a running-loader check, not a provisioned
+two-way bridge or reusable custody. The next target must use fresh retained
+signers and observed Ergo inputs, and bind its own genesis identity.
 
 ## Next Boundary
 
