@@ -140,7 +140,7 @@ negative cases and timeouts are preserved; static reuse remains suite-scoped,
 not per-case. Compiler caching, blanket parallelism and reduced hosted CI are
 separate decisions, not assumed improvements.
 
-The delivery audit also identifies two missing joins: V2 checker to admission
+At that baseline, the delivery audit identified two missing joins: V2 checker to admission
 authority, and the actual V3 campaign caller to that lifecycle. Withdrawal
 construction can proceed independently; canonical withdrawal and operational
 two-way recovery cannot be claimed before their real consumers run.

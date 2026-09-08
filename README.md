@@ -5,11 +5,27 @@ sidechain on Ergo.
 
 > **Status:** public research alpha, not an operational two-way release.
 > The active delivery target is an explicitly federated reference that works
-> without EIP-0045. Local evidence covers setup, committed reserve, mint, burn
-> and checkpoint production; canonical tracker admission, complete withdrawal
-> and composed recovery remain open. The separate trustless upgrade requires
+> without EIP-0045. The isolated local campaign has completed tracker admission
+> and an Ergo withdrawal, including reserve and replay-state updates with
+> separately funded miner fees. Its source mint uses a LAB/TestClient route;
+> operational mint and composed two-way recovery remain open. The separate
+> trustless upgrade requires
 > an activated Ergo-verifiable profile and full Gate 5 acceptance. Neither
 > public source availability nor green CI supports production or mainnet use.
+
+## Latest Milestone
+
+The local withdrawal campaign now carries a sidechain burn through checkpoint
+admission to a confirmed Ergo payout. Both local Ergo nodes agreed on the
+payout, remaining reserve and replay-protection successor. Miner fees come
+from separate funding, so the payout does not spend the backing of remaining
+sERG to pay transaction fees.
+
+This is progress toward an EVM-compatible sidechain that uses Ergo for
+settlement, under an explicit federated trust model. The next delivery step is
+operational mint integration, followed by composed two-way recovery. The
+[execution plan](phases/bridge-execution-plan.md#verified-baseline) records the
+exact local campaign and its limits; this milestone is not a supported release.
 
 ## Audit First
 
@@ -171,9 +187,10 @@ singleton checkpoint `observedAt` timestamp must be ISO UTC and no older than
 
 ## Open Blockers
 
-For the **federated reference**, the critical path is canonical tracker
-admission, a complete withdrawal with global replay protection and external
-miner-fee funding, then two-way recovery and operational integration. Exact
+For the **federated reference**, the next steps are operational mint,
+composed two-way recovery and global replay cutover, followed by exact
+target/custody rehearsal and the FED-7 reference package. Local tracker
+admission and withdrawal do not close those wider obligations. Exact
 target/custody approval, key-loss/rotation rehearsal, alert/recovery actions,
 reproducibility and independent review remain due for the selected profile.
 Greenfield launch and historical migration have distinct lineage obligations.
