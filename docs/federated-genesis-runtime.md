@@ -7,10 +7,11 @@ V4 mint-reservation profile at genesis without Sudo or post-genesis Root
 activation. Its source-attestation authority is the federation compiled into
 that runtime, not a profile identifier supplied by a caller.
 
-The dedicated node now selects this runtime and accepts a typed genesis
-through its compiled WASM. Native and WASM genesis storage match in the
-configured fixture. Reviewed chain-spec provisioning, a running target,
-transaction-pool admission and operational reservation-to-mint remain open.
+The dedicated node selects this runtime and accepts typed genesis through its
+compiled WASM. The provisioning producer now connects actual JVM tracker and
+family compilation to that loader. Its synthetic configuration passes the
+built node's `build-spec` command. A running target, transaction-pool admission
+and operational reservation-to-mint remain open.
 The existing main runtime stays inert; LAB/TestClient remains a separate route.
 
 ## Source Closure
@@ -24,7 +25,7 @@ Apply these inputs to a separate checkout in this order:
 3. [Genesis overlay 0004](../sources/frontier/0004-federated-genesis-initialization.patch),
    SHA-256 `b3688c77c1a6a2b85b95367057572f053056fa11ee31ac291373571717dd7331`.
 4. For the node, [selection overlay 0005](../sources/frontier/0005-federated-genesis-node.patch),
-   SHA-256 `c3d0ba7ae90913a6dda3b76d6542ee5ac10c7fa3aaa3fb28d565c3b120aae4e4`.
+   SHA-256 `ff24b3ca5063371462c8257cfd9018e586824f33b0965a4a5025b41dd84c61ce`.
 
 Overlay 0004 changes eleven source files. It adds one non-publishable runtime
 crate and its integration tests, separates execution permission from public
@@ -119,11 +120,10 @@ duplicate-target-path warning. Native builds additionally report unused
 imports and generated constants. These warnings are retained, not suppressed
 or treated as acceptance evidence.
 
-## Next Boundary
+## Typed Provisioning
 
-The remaining producer must construct reviewed application, family and
-height-zero profile identities before producing the typed genesis. Keep this
-order acyclic:
+The [runtime genesis producer](../relayer/src/substrate-federated-runtime-genesis-v1.ts)
+constructs application, family and height-zero profile identities in this order:
 
 ```text
 public federation -> compiled runtime
@@ -133,13 +133,53 @@ family + application + proof profile + finality -> height-zero V4 profile
 typed genesis -> actual genesis/spec identity -> separate target binding
 ```
 
+`prepareSubstrateFederatedGenesisV1` takes an explicit launch domain, EVM chain
+ID, application/operator addresses, pinned WASM bytes, public federation
+profiles and native endowments. It loads the tracked Solidity artifacts and
+storage layouts, rejects application precompile addresses and derives new
+pre-genesis identity domains. The checkpoint and mint profiles must use the
+same source members, threshold and epoch; neither may substitute reference
+source keys for the selected federation.
+
+Use its application and checkpoint profile with the existing V2 tracker and
+family JVM compilers. `buildSubstrateFederatedGenesisV1` requires their actual
+same-process family receipt and an exact captured compiler input. It emits
+the existing 349-byte V4 profile with the compiled family ID as lineage,
+activation height zero and a 64-block pending window. It cannot install a
+profile from a copied receipt or from a different application/federation.
+
+The JSON is the full FRAME configuration, including typed byte arrays for
+EVM code and the selected runtime's payment/base-fee defaults. Native funding
+uses exact integers and rejects individual or total issuance overflow. Bridge
+and token constructor storage start with no token balances, supply or replay
+entries; native fees are endowed separately. The result is a candidate, not
+an observed target, signer capability or mint authorization.
+
+The direct test uses one real JVM tracker/family pair for its positive and
+negative joins. A separate run with the compiled WASM passed the built node:
+
+```powershell
+frontier-template-node build-spec --chain fed-genesis:typed-genesis.json --disable-default-bootnode --raw
+```
+
+The output's exact runtime code, V4 profile, sticky enforcement, bridge
+address and absent Sudo key were checked. Synthetic input IDs selected the
+Ergo family; this does not establish actual singleton issuance or custody.
+The tested genesis JSON SHA-256 is
+`4dfe43249fe4cbd3e36c67387467a5908b32f604435de9724fac6decbd8cbf00`;
+the raw spec SHA-256 is
+`d17ef3f6e6a88f5d6e3e2a6dd40d7851eba6beb7927c333acef6efb6bc53a8e7`.
+
+## Next Boundary
+
 The historical packet derives its domain from observed genesis/spec identities,
 and its source-attestation route fixes activation at block 4. Neither can be
 reused unchanged for genesis initialization. Preserve the authority-safe V1
 schema, which accepts quarantine only. Family runtime/application profile ID,
 V4 lineage/family ID and V4 profile ID remain distinct.
 
-After the new producer and actual target binding, connect native reservation,
+Bind the actual genesis identity and running target with fresh synthetic
+custody and observed Ergo genesis inputs. Then connect native reservation,
 its confirmed parent-state observation and the matching Ethereum mint. Keep
 pool rejection separate from whole-block rejection and preserve the ordinary
 daemon's mint hold.
@@ -158,9 +198,12 @@ the default node remains main. The FED CLI accepts only
 selectors, the LAB selector and ordinary raw chain-spec files.
 
 The file contains a full `RuntimeGenesisConfig`, not raw storage or runtime
-code. The loader accepts at most 4 MiB of JSON, requires its sealing mode to
-match the CLI, and executes the compiled WASM genesis builder before returning
-the spec. Node runtime code, chain-spec type, boot nodes and telemetry are not
+code. The loader accepts at most 4 MiB of JSON and executes the compiled WASM
+genesis builder before returning the spec. Running-node mode must match the
+CLI sealing selection. Offline `build-spec` has no sealing option or block
+producer, so it retains the mode declared in the typed configuration; the
+startup mismatch check remains required. Node runtime code, chain-spec type,
+boot nodes and telemetry are not
 caller-selected fields. The resulting development spec has no boot nodes or
 telemetry. This does not attest the caller's application or federation choices;
 that remains the reviewed provisioning producer's responsibility.
@@ -182,8 +225,10 @@ build outputs are outside the source tree. An initial missing-lock failure was
 resolved with this hint; dependency pins and offline resolution were retained.
 
 Three node tests pass. The positive writes a synthetic typed configuration,
-parses the CLI selector and compares all resulting WASM genesis storage with
-native storage, with the compiled code checked separately. Single-fault
+parses both the running-node selector and `build-spec` CLI and compares all
+resulting WASM genesis storage with native storage, with the compiled code
+checked separately. A running-node CLI without the required sealing selection
+still rejects the same configuration. Single-fault
 negatives cover unknown/raw/code fields, input size, sealing mismatch, absent
 profile, wrong proof profile, nonzero activation, Sudo, quarantine, application
 code, operator and pre-existing token supply. The built executable also rejects
@@ -194,8 +239,9 @@ The Rust 1.82.0 Windows debug build produced:
 | Artifact | Bytes | SHA-256 |
 |---|---:|---|
 | FED runtime WASM | 2,103,533 | `b4219a6ef4d6e3f94d50ecb55faae6887341980775e584d04195ed3ed06ae625` |
-| Selected node executable | 96,507,904 | `0d30747c8d76b18f5020f6897d4dad823fad8fc8e6a9372038d5eea72ea191b4` |
+| Selected node executable | 96,507,904 | `28581cdb1158dc9ed58efdecc7cc94178ff077109c6a5b341673363f4abb0298` |
 
 These identify the tested build with the synthetic public configuration above,
-not usable custody or a running operational target. Cross-root reproducibility
-and acceptance of a reviewed FED provisioning packet remain unestablished.
+not usable custody or a running operational target. The typed producer-to-node
+join passes with those inputs; cross-root reproducibility and operational
+target binding remain unestablished.

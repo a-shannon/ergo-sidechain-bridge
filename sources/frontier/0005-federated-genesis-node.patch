@@ -51,16 +51,21 @@ index 82dc5f4e72862643bcd3779f667340db2a82f4a7..8c740eeecf99d3aee98d4ab886ce970d
  sql = [
  	"fc-db/sql",
 diff --git a/template/node/src/command.rs b/template/node/src/command.rs
-index 739e6ff6738a4b89ef65c3cc723be2c4d45824f8..9fa7fd3b9e4f211da8b7afecab7ecb002f281176 100644
+index 739e6ff6738a4b89ef65c3cc723be2c4d45824f8..c410d4e28ea3555091a51e55990a18c60525d296 100644
 --- a/template/node/src/command.rs
 +++ b/template/node/src/command.rs
-@@ -40,13 +40,19 @@ impl SubstrateCli for Cli {
+@@ -40,13 +40,24 @@ impl SubstrateCli for Cli {
  	}
  
  	fn load_spec(&self, id: &str) -> Result<Box<dyn ChainSpec>, String> {
 +		#[cfg(feature = "bridge-federated-v4-genesis-runtime")]
 +		{
-+			return crate::federated_genesis::load_spec(id, self.sealing.is_some())
++			// BuildSpec only materializes genesis; it has no block-production mode.
++			let manual_seal = match self.subcommand {
++				Some(Subcommand::BuildSpec(_)) => None,
++				_ => Some(self.sealing.is_some()),
++			};
++			return crate::federated_genesis::load_spec(id, manual_seal)
 +				.map(|spec| Box::new(spec) as Box<dyn ChainSpec>);
 +		}
 +
@@ -77,7 +82,7 @@ index 739e6ff6738a4b89ef65c3cc723be2c4d45824f8..9fa7fd3b9e4f211da8b7afecab7ecb00
  				let enable_manual_seal = self.sealing.map(|_| true).unwrap_or_default();
 diff --git a/template/node/src/federated_genesis.rs b/template/node/src/federated_genesis.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..cb3ad64278a4d8df68eb9b801e021b7200027769
+index 0000000000000000000000000000000000000000..df8527ad448dca7535d1bc51943ab7c842459fca
 --- /dev/null
 +++ b/template/node/src/federated_genesis.rs
 @@ -0,0 +1,57 @@
@@ -93,7 +98,7 @@ index 0000000000000000000000000000000000000000..cb3ad64278a4d8df68eb9b801e021b72
 +
 +const MAX_GENESIS_JSON_BYTES: usize = 4 * 1024 * 1024;
 +
-+pub(crate) fn load_spec(selector: &str, manual_seal: bool) -> Result<ChainSpec, String> {
++pub(crate) fn load_spec(selector: &str, manual_seal: Option<bool>) -> Result<ChainSpec, String> {
 +	let path = selector
 +		.strip_prefix("fed-genesis:")
 +		.filter(|path| !path.is_empty())
@@ -107,14 +112,14 @@ index 0000000000000000000000000000000000000000..cb3ad64278a4d8df68eb9b801e021b72
 +	from_genesis_json(&bytes, manual_seal)
 +}
 +
-+fn from_genesis_json(bytes: &[u8], manual_seal: bool) -> Result<ChainSpec, String> {
++fn from_genesis_json(bytes: &[u8], manual_seal: Option<bool>) -> Result<ChainSpec, String> {
 +	if bytes.len() > MAX_GENESIS_JSON_BYTES {
 +		return Err("FED typed genesis exceeds the input bound".into());
 +	}
 +	// FRAME's typed config rejects unknown fields; raw storage and caller WASM are not inputs.
 +	let config: RuntimeGenesisConfig =
 +		serde_json::from_slice(bytes).map_err(|_| "invalid FED RuntimeGenesisConfig JSON")?;
-+	if config.manual_seal.enable != manual_seal {
++	if manual_seal.is_some_and(|expected| config.manual_seal.enable != expected) {
 +		return Err("FED genesis and CLI sealing mode differ".into());
 +	}
 +	let wasm = WASM_BINARY.ok_or("the selected FED runtime WASM is unavailable")?;
@@ -140,10 +145,10 @@ index 0000000000000000000000000000000000000000..cb3ad64278a4d8df68eb9b801e021b72
 +mod tests;
 diff --git a/template/node/src/federated_genesis/tests.rs b/template/node/src/federated_genesis/tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..63ddd778c8bf71168648d61dd7ccd966e28c1975
+index 0000000000000000000000000000000000000000..11782806ed8ccfa8b576ee3533cb64d010b63ce5
 --- /dev/null
 +++ b/template/node/src/federated_genesis/tests.rs
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,267 @@
 +use std::collections::BTreeMap;
 +
 +use clap::Parser;
@@ -277,6 +282,25 @@ index 0000000000000000000000000000000000000000..63ddd778c8bf71168648d61dd7ccd966
 +	);
 +	assert_eq!(actual.top, native.top);
 +	assert_eq!(actual.children_default, native.children_default);
++	let build_cli = crate::cli::Cli::try_parse_from([
++		"bridge-node",
++		"build-spec",
++		"--chain",
++		&selector,
++		"--raw",
++	])
++	.unwrap();
++	let build_spec = build_cli.load_spec(&selector).unwrap();
++	assert_eq!(
++		build_spec.build_storage().unwrap().top,
++		spec.build_storage().unwrap().top
++	);
++	let missing_seal =
++		crate::cli::Cli::try_parse_from(["bridge-node", "--chain", &selector]).unwrap();
++	assert_eq!(
++		missing_seal.load_spec(&selector).err().as_deref(),
++		Some("FED genesis and CLI sealing mode differ")
++	);
 +}
 +
 +#[test]
@@ -289,13 +313,16 @@ index 0000000000000000000000000000000000000000..63ddd778c8bf71168648d61dd7ccd966
 +		"custom.json",
 +		"fed-genesis:",
 +	] {
-+		assert!(load_spec(selector, true).is_err(), "accepted {selector}");
++		assert!(
++			load_spec(selector, Some(true)).is_err(),
++			"accepted {selector}"
++		);
 +	}
 +	for field in ["raw", "runtimeGenesis", "unexpected"] {
 +		let mut json = serde_json::to_value(fixture()).unwrap();
 +		json[field] = serde_json::json!({"code": "0x00", "top": {}});
 +		assert_eq!(
-+			from_genesis_json(&serde_json::to_vec(&json).unwrap(), true)
++			from_genesis_json(&serde_json::to_vec(&json).unwrap(), Some(true))
 +				.err()
 +				.as_deref(),
 +			Some("invalid FED RuntimeGenesisConfig JSON")
@@ -304,7 +331,7 @@ index 0000000000000000000000000000000000000000..63ddd778c8bf71168648d61dd7ccd966
 +	let mut json = serde_json::to_value(fixture()).unwrap();
 +	json["system"]["code"] = "0x00".into();
 +	assert_eq!(
-+		from_genesis_json(&serde_json::to_vec(&json).unwrap(), true)
++		from_genesis_json(&serde_json::to_vec(&json).unwrap(), Some(true))
 +			.err()
 +			.as_deref(),
 +		Some("invalid FED RuntimeGenesisConfig JSON")
@@ -312,11 +339,11 @@ index 0000000000000000000000000000000000000000..63ddd778c8bf71168648d61dd7ccd966
 +	let mut oversized = serde_json::to_vec(&fixture()).unwrap();
 +	oversized.resize(MAX_GENESIS_JSON_BYTES + 1, b' ');
 +	assert_eq!(
-+		from_genesis_json(&oversized, true).err().as_deref(),
++		from_genesis_json(&oversized, Some(true)).err().as_deref(),
 +		Some("FED typed genesis exceeds the input bound")
 +	);
 +	assert_eq!(
-+		from_genesis_json(&serde_json::to_vec(&fixture()).unwrap(), false)
++		from_genesis_json(&serde_json::to_vec(&fixture()).unwrap(), Some(false))
 +			.err()
 +			.as_deref(),
 +		Some("FED genesis and CLI sealing mode differ")
@@ -381,7 +408,7 @@ index 0000000000000000000000000000000000000000..63ddd778c8bf71168648d61dd7ccd966
 +			_ => unreachable!(),
 +		}
 +		assert_eq!(
-+			from_genesis_json(&serde_json::to_vec(&config).unwrap(), true)
++			from_genesis_json(&serde_json::to_vec(&config).unwrap(), Some(true))
 +				.err()
 +				.as_deref(),
 +			Some("selected FED WASM rejected genesis"),
