@@ -6,11 +6,15 @@ import type {
   FederatedPooledReserveSourceProofEvidenceV1,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1,
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1,
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import {
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
@@ -64,6 +68,133 @@ interface ReceiptMaterialV1 {
 
 const RECEIPTS = new WeakMap<object, Readonly<ReceiptMaterialV1>>();
 const CONSUMED_RECEIPTS = new WeakSet<object>();
+
+export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_COMMITTED_RESERVE_EVIDENCE_V1_SCHEMA =
+  'e2s.substrate-federated-native-genesis-committed-reserve-evidence.v1' as const;
+const NATIVE_RECEIPT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_COMMITTED_RESERVE_EVIDENCE_V1';
+type NativeCollectionInput = Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input & {
+  readonly draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
+}>;
+const NATIVE_RECEIPTS = new WeakMap<object, NativeCollectionInput>();
+const NATIVE_CONSUMED_RECEIPTS = new WeakSet<object>();
+
+export interface SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1
+  extends Omit<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
+    'schema' | 'candidateDigestHex' | 'checks'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_COMMITTED_RESERVE_EVIDENCE_V1_SCHEMA;
+  readonly provenance: SubstrateFederatedNativeGenesisPegInMintReservationDraftV1['provenance'];
+  readonly checks: Readonly<Omit<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1['checks'],
+    'exactSameProcessDraftObservationAndCandidateBound'> & {
+      readonly exactSameProcessDraftBatchPacketAndObservationBound: true;
+    }>;
+}
+
+export function collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1(
+  input: NativeCollectionInput,
+): Readonly<SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1> {
+  assertExactKeys(input, ['batch', 'packet', 'committedVaultObservation', 'draft', 'target'],
+    'native committed-reserve evidence input');
+  if (Reflect.ownKeys(input).length !== 5) throw new Error('native evidence requires exact own-data fields');
+  input = Object.freeze({ ...input });
+  assertNativeLineage(input);
+  const { evidence, evidenceDigestHex, collectorIdentity } = buildEvidenceSnapshot(input, input.packet);
+  const body = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_COMMITTED_RESERVE_EVIDENCE_V1_SCHEMA,
+    version: 1 as const,
+    status: 'canonical_committed_reserve_evidence_collected' as const,
+    mintReservationDraftDigestHex: input.draft.draftDigestHex,
+    mintReservationStatementIdHex: input.draft.statementIdHex,
+    mintIdentityHex: input.draft.reservationKeyHex,
+    provenance: input.draft.provenance,
+    committedVaultObservationDigestHex: input.committedVaultObservation.observationDigestHex,
+    processBindingDigestHex: input.committedVaultObservation.processBindingDigestHex,
+    executionTargetIdentityDigestHex: input.committedVaultObservation.executionTargetIdentityDigestHex,
+    collectorExecutableSha256Hex: collectorIdentity.executableSha256Hex,
+    collectorModuleSha256Hex: collectorIdentity.moduleSha256Hex,
+    evidence,
+    evidenceDigestHex,
+    checks: {
+      exactSameProcessDraftBatchPacketAndObservationBound: true as const,
+      exactSourceLockAndReserveTransitionBound: true as const,
+      exactStatementAndReserveLineageBound: true as const,
+      exactInclusionAndCheckpointAncestryBound: true as const,
+      collectorExecutableRevalidated: true as const,
+      callerSuppliedEvidenceAccepted: false as const,
+    },
+    boundaries: {
+      sourceEvidenceCollectionProvenanceEstablished: true as const,
+      dualLoopbackObservationOnly: true as const,
+      atomicCollectorSnapshotEstablished: false as const,
+      exclusiveNonAdversarialSameUserExecutionRequired: true as const,
+      sourceCanonicalityIndependentlyVerified: false as const,
+      ergoPowAuthenticated: false as const,
+      independentAttestorCustodyEstablished: false as const,
+      mintAuthorized: false as const,
+      fundsAuthorityEstablished: false as const,
+      gate5Closed: false as const,
+      trustlessStatusEstablished: false as const,
+      productionReadinessEstablished: false as const,
+    },
+    limitations: [
+      'The native collector retains one same-process packet and observation with live setup and target custody.',
+      'Dual-RPC depth observations do not authenticate Ergo proof of work or establish independent attestor custody.',
+      'Executable and module hashes are not an atomic snapshot and require exclusive non-adversarial same-user execution.',
+      'No mint, target acceptance, activation, funds authority, or production readiness is established.',
+    ],
+  });
+  const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_RECEIPT_DOMAIN) });
+  NATIVE_RECEIPTS.set(receipt, input);
+  return receipt;
+}
+
+export function assertSubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1> {
+  if (value === null || typeof value !== 'object' || !NATIVE_RECEIPTS.has(value)) {
+    throw new Error('native committed-reserve evidence receipt lacks process provenance');
+  }
+  const input = NATIVE_RECEIPTS.get(value)!;
+  assertNativeLineage(input);
+  const receipt = value as Readonly<SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1>;
+  const { receiptDigestHex, ...body } = receipt;
+  const identity = currentCollectorIdentity();
+  if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_RECEIPT_DOMAIN)
+    || receipt.evidenceDigestHex !== sha256CanonicalJson(receipt.evidence, EVIDENCE_DIGEST_DOMAIN)
+    || receipt.collectorExecutableSha256Hex !== identity.executableSha256Hex
+    || receipt.collectorModuleSha256Hex !== identity.moduleSha256Hex
+    || receipt.evidence.verifierExecutableSha256Hex !== receipt.collectorExecutableSha256Hex) {
+    throw new Error('native committed-reserve evidence receipt changed');
+  }
+}
+
+export function consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1(
+  receipt: Readonly<SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1>,
+  draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>,
+): Readonly<FederatedPooledReserveSourceProofEvidenceV1> {
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draft);
+  assertSubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1Provenance(receipt);
+  if (NATIVE_RECEIPTS.get(receipt)!.draft !== draft
+    || receipt.mintReservationDraftDigestHex !== draft.draftDigestHex
+    || receipt.mintReservationStatementIdHex !== draft.statementIdHex
+    || receipt.mintIdentityHex !== draft.reservationKeyHex) {
+    throw new Error('native committed-reserve evidence targets a different mint-reservation draft');
+  }
+  if (NATIVE_CONSUMED_RECEIPTS.has(receipt)) throw new Error('native committed-reserve evidence receipt is already consumed');
+  NATIVE_CONSUMED_RECEIPTS.add(receipt);
+  return receipt.evidence;
+}
+
+function assertNativeLineage(input: NativeCollectionInput): void {
+  const { draft, batch, target, packet, committedVaultObservation } = input;
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draft,
+    { batch, target, packet, committedVaultObservation });
+  if (assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1(
+    committedVaultObservation, target, batch, packet,
+  ) !== packet || canonicalJson(draft.provenance.familyCompiler) !== canonicalJson(packet.familyCompiler)) {
+    throw new Error('native committed-reserve evidence compiler or packet lineage changed');
+  }
+  assertStatementLineage(draft, committedVaultObservation, packet);
+}
 
 export interface SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1 {
   readonly schema:
@@ -151,21 +282,13 @@ export function collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV
   ));
 }
 
-function collectEvidence(
+function buildEvidenceSnapshot(
   input: Readonly<{
-    readonly draft: RetainedDraft;
-    readonly target: ReceiptMaterialV1['target'];
-    readonly batch: ReceiptMaterialV1['batch'];
-    readonly candidate: ReceiptMaterialV1['candidate'];
+    readonly draft: Pick<RetainedDraft, 'statement'>;
     readonly committedVaultObservation: ReceiptMaterialV1['observation'];
   }>,
-  assertDraft: () => void,
-  readPacket: () => RetainedPacket,
-): Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1> {
-  assertDraft();
-  const packet = readPacket();
-  assertExactLineage(input.draft, input.candidate, input.committedVaultObservation, packet);
-
+  packet: RetainedPacket,
+) {
   const collectorIdentity = currentCollectorIdentity();
   const evidence = deepFreeze({
     sourceLockBoxCanonicalHex: canonicalObjectHex({
@@ -225,6 +348,24 @@ function collectEvidence(
     throw new Error('isolated committed-reserve evidence collector identity changed');
   }
   const evidenceDigestHex = sha256CanonicalJson(evidence, EVIDENCE_DIGEST_DOMAIN);
+  return { evidence, evidenceDigestHex, collectorIdentity };
+}
+
+function collectEvidence(
+  input: Readonly<{
+    readonly draft: RetainedDraft;
+    readonly target: ReceiptMaterialV1['target'];
+    readonly batch: ReceiptMaterialV1['batch'];
+    readonly candidate: ReceiptMaterialV1['candidate'];
+    readonly committedVaultObservation: ReceiptMaterialV1['observation'];
+  }>,
+  assertDraft: () => void,
+  readPacket: () => RetainedPacket,
+): Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1> {
+  assertDraft();
+  const packet = readPacket();
+  assertExactLineage(input.draft, input.candidate, input.committedVaultObservation, packet);
+  const { evidence, evidenceDigestHex, collectorIdentity } = buildEvidenceSnapshot(input, packet);
   const body = deepFreeze({
     schema:
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_COMMITTED_RESERVE_EVIDENCE_V1_SCHEMA,
@@ -367,14 +508,26 @@ function assertExactLineage(
   observation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
   packet: RetainedPacket,
 ): void {
-  const transition = packet.transactions.reserveTransition;
-  const path = observation.finalityPathHeaderIdsHex;
   if (
     draft.provenance.candidateDigestHex !== candidate.candidateDigestHex
     || draft.provenance.committedVaultObservationDigestHex
       !== observation.observationDigestHex
     || !compilerBindingsMatch(draft, packet)
-    || !sameHex(draft.statement.lineageProfileIdHex, packet.familyIdHex, 32)
+  ) {
+    throw new Error('isolated committed-reserve evidence lineage differs from the mint statement');
+  }
+  assertStatementLineage(draft, observation, packet);
+}
+
+function assertStatementLineage(
+  draft: Pick<RetainedDraft, 'statement'>,
+  observation: ReceiptMaterialV1['observation'],
+  packet: RetainedPacket,
+): void {
+  const transition = packet.transactions.reserveTransition;
+  const path = observation.finalityPathHeaderIdsHex;
+  if (
+    !sameHex(draft.statement.lineageProfileIdHex, packet.familyIdHex, 32)
     || !sameHex(draft.statement.sourceLockBoxIdHex, packet.boxes.sourceLock.boxId, 32)
     || !sameHex(draft.statement.reserveTransitionTransactionIdHex, transition.txId, 32)
     || !sameHex(observation.expectedTxId, transition.txId, 32)

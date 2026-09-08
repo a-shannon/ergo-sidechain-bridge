@@ -184,7 +184,12 @@ establish deployment safety or independent operator custody.
   to retained checking, fresh three-input/JVM revalidation, durable transport,
   canonical confirmation and exact reserve successor/ancestry observation.
   Composed tests cover both steps with simulated node responses; reserve lineage
-  is not mint authority. Connect these consumers and operational mint inside the same lifetime
+  is not mint authority. That observation now feeds a native mint draft and
+  one-time evidence collector/consumer. They retain exact packet, setup and
+  observation custody while using the unchanged V4 statement and FED evidence
+  formats. This does not produce a source attestation or establish Ergo PoW.
+  Bind the retained source attestors to the height-zero FED profile next, then
+  connect native reservation and operational mint inside the same lifetime
   before running the fresh campaign. An issuance receipt is not mint authority.
   The old source locks and withdrawal campaign retain their original scope.
 
@@ -229,7 +234,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Active; native issuance caller and deposit-to-reserve execution consumers are component-composed | Bind the confirmed native reserve observation to the height-zero FED source proof, native reservation and operational mint, then connect them inside the target root's retained lifetime. Keep request freshness at checking separate from each later action's fresh observation, and reject disposed or cross-profile custody. The historical V3 G1dA request cannot stand in for native identity. The target owner retains the closed journal with its build artifacts, including unresolved attempts. Run the fresh campaign only once these consumers are connected |
+| FED running-target binding | Active; native issuance caller and deposit-to-reserve evidence consumption are component-composed | Bind the native draft/evidence to the retained source-attestation session and exact height-zero FED profile, then connect native reservation and operational mint inside the target root's retained lifetime. Keep request freshness at checking separate from each later action's fresh observation, and reject disposed or cross-profile custody. Neither the historical V3 G1dA request nor the block-4 LAB launch supplies native identity. The target owner retains the closed journal with its build artifacts, including unresolved attempts. Run the fresh campaign only once these consumers are connected |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 

@@ -339,6 +339,22 @@ component-level reserve lineage, not source consensus or mint authority.
 Operational mint and the full target-root callback still need composition
 before a fresh node campaign. These component tests use simulated node responses.
 
+The native reserve observation now feeds a separate mint-reservation draft and
+evidence collector. The draft uses the unchanged V4 statement encoding and
+binds the original native packet, setup request, compiler and confirmed reserve.
+The collector encodes the source lock, reserve transaction, exact successor,
+inclusion observation and checkpoint ancestry for the existing FED proof format.
+Collection and one-time consumption both require the original draft and active
+custody. Native identities cannot pass as historical LAB drafts or evidence.
+
+The composed fixture covers deposit execution through evidence consumption
+with real WASM signing, journal and observation decoding, but simulated node
+responses and compiler/deposit provenance. The evidence describes a federated
+depth policy, not independently verified Ergo PoW. No source attestation,
+runtime reservation or mint is produced here. The next consumer must bind the
+retained attestors to the exact height-zero FED profile before signing; the
+old block-4 LAB launch cannot supply that binding.
+
 ## Ergo Issuance Materialization
 
 The observed-input compiler also produces the three unsigned Ergo transactions

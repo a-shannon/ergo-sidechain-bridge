@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   assertCommittedVaultForCandidate: vi.fn(),
   assertCommittedVaultForCandidateV2: vi.fn(),
+  assertNativeObservation: vi.fn(),
+  assertNativePacket: vi.fn(),
 }));
 
 vi.mock(
@@ -13,13 +15,20 @@ vi.mock(
       mocks.assertCommittedVaultForCandidate,
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
       mocks.assertCommittedVaultForCandidateV2,
+    assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1: mocks.assertNativeObservation,
   }),
 );
+
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
+}));
 
 import {
   encodePegInSourceIntentV2Hex,
 } from './peg-in-causal-admission-v2.js';
 import {
+  buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeDraft,
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as assertNativeDraft,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2,
@@ -95,9 +104,28 @@ const CANDIDATE_V2 = Object.freeze({ version: 2, candidateDigestHex: h32('46') }
 const PACKET_V2 = Object.freeze({ ...PACKET, version: 2, familyCompiler: COMPILER_V2 });
 const draftV2Input = () => ({ batch: BATCH as never, target: TARGET as never,
   candidate: CANDIDATE_V2 as never, committedVaultObservation: OBSERVATION as never });
+const NATIVE_BATCH = Object.freeze({ profile: 'fed-native-height-zero-v1',
+  request: Object.freeze({ requestDigestHex: h32('51') }),
+  receipt: Object.freeze({ receiptDigestHex: h32('52') }) });
+const NATIVE_OBSERVATION = Object.freeze({ ...OBSERVATION,
+  processBindingDigestHex: h32('53'), executionTargetIdentityDigestHex: h32('54') });
+const nativeInput = () => ({ batch: NATIVE_BATCH as never, target: TARGET as never,
+  packet: PACKET_V2 as never, committedVaultObservation: NATIVE_OBSERVATION as never });
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.assertNativePacket.mockImplementation((packet, batch, target) => {
+    if (packet !== PACKET_V2 || batch !== NATIVE_BATCH || target !== TARGET) {
+      throw new Error('native packet provenance missing');
+    }
+    return packet;
+  });
+  mocks.assertNativeObservation.mockImplementation((observation, target, batch, packet) => {
+    if (observation !== NATIVE_OBSERVATION || target !== TARGET || batch !== NATIVE_BATCH || packet !== PACKET_V2) {
+      throw new Error('native observation provenance missing');
+    }
+    return packet;
+  });
   mocks.assertCommittedVaultForCandidateV2.mockImplementation((observation, batch, candidate, target) => {
     if (observation !== OBSERVATION || batch !== BATCH || candidate !== CANDIDATE_V2 || target !== TARGET) {
       throw new Error('committed-vault V2 candidate provenance missing');
@@ -117,6 +145,77 @@ beforeEach(() => {
       return PACKET;
     },
   );
+});
+
+describe('native genesis mint-reservation draft V1', () => {
+  it('preserves canonical V4 bytes with a distinct native identity and all compiler bindings', () => {
+    const input = nativeInput();
+    const draft = buildNativeDraft(input);
+    const legacy = buildDraftV2(draftV2Input());
+    expect(draft.schema).toBe('e2s.substrate-federated-native-genesis-peg-in-mint-reservation-draft.v1');
+    expect(draft.statementHex).toBe(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_REFERENCE_MINT_RESERVATION_STATEMENT_V4_HEX);
+    expect(draft.statementIdHex).toBe(legacy.statementIdHex);
+    expect(draft.reservationKeyHex).toBe(legacy.reservationKeyHex);
+    expect(draft.boundary).toEqual(legacy.boundary);
+    expect(draft.draftDigestHex).not.toBe(legacy.draftDigestHex);
+    expect(draft.provenance).toMatchObject({ profile: 'fed-native-height-zero-v1',
+      setupRequestDigestHex: NATIVE_BATCH.request.requestDigestHex,
+      setupCheckReceiptDigestHex: NATIVE_BATCH.receipt.receiptDigestHex,
+      committedVaultObservationDigestHex: NATIVE_OBSERVATION.observationDigestHex,
+      familyCompiler: COMPILER_V2, exactSameProcessBatchPacketAndObservationBound: true });
+    expect(draft.provenance).not.toHaveProperty('candidateDigestHex');
+    expect(Object.isFrozen(draft.provenance.familyCompiler)).toBe(true);
+    expect(() => assertNativeDraft(draft, input)).not.toThrow();
+    expect(mocks.assertNativePacket).toHaveBeenCalledWith(PACKET_V2, NATIVE_BATCH, TARGET);
+    expect(mocks.assertNativeObservation).toHaveBeenCalledWith(NATIVE_OBSERVATION, TARGET, NATIVE_BATCH, PACKET_V2);
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation'] as const)(
+    'rejects copied %s during construction and original-input revalidation', field => {
+      const input = nativeInput();
+      const draft = buildNativeDraft(input);
+      const copied = { ...input, [field]: structuredClone(input[field]) };
+      expect(() => buildNativeDraft(copied as never)).toThrow(/provenance/);
+      expect(() => assertNativeDraft(draft, copied as never)).toThrow(/exact original/);
+    },
+  );
+
+  it.each(['setup-custody', 'target-custody'] as const)('revalidates %s on every assertion', fault => {
+    const draft = buildNativeDraft(nativeInput());
+    const check = fault === 'setup-custody' ? mocks.assertNativePacket : mocks.assertNativeObservation;
+    check.mockImplementation(() => { throw new Error(`${fault} disposed`); });
+    expect(() => assertNativeDraft(draft)).toThrow(/disposed/);
+  });
+
+  it('rejects copied drafts and native/legacy cross-version provenance', () => {
+    const draft = buildNativeDraft(nativeInput());
+    const legacyV2 = buildDraftV2(draftV2Input());
+    const legacyV1 = buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
+      ...draftV2Input(), candidate: CANDIDATE as never });
+    expect(() => assertNativeDraft(structuredClone(draft))).toThrow(/provenance/);
+    for (const legacy of [legacyV1, legacyV2]) expect(() => assertNativeDraft(legacy)).toThrow(/provenance/);
+    expect(() => assertDraftV2(draft)).toThrow(/provenance/);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft)).toThrow(/provenance/);
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation'] as const)(
+    'rejects %s getters without invoking them', field => {
+      const input = nativeInput();
+      const getter = vi.fn(() => input[field]);
+      Object.defineProperty(input, field, { enumerable: true, get: getter });
+      expect(() => buildNativeDraft(input)).toThrow(/own-data fields/);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['symbol', 'hidden', 'prototype', 'null-prototype'] as const)('rejects %s input fields', fault => {
+    const input = nativeInput();
+    if (fault === 'symbol') Object.defineProperty(input, Symbol('extra'), { value: true });
+    if (fault === 'hidden') Object.defineProperty(input, 'extra', { value: true });
+    if (fault === 'prototype') Object.setPrototypeOf(input, { inherited: true });
+    if (fault === 'null-prototype') Object.setPrototypeOf(input, null);
+    expect(() => buildNativeDraft(input)).toThrow(/own-data fields/);
+  });
 });
 
 describe('isolated devnet peg-in mint-reservation draft V1', () => {

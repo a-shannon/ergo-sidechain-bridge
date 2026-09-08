@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   assertObservation: vi.fn(),
   assertObservationV2: vi.fn(),
+  assertNativeObservation: vi.fn(),
+  assertNativePacket: vi.fn(),
+  nativeMaterials: [] as Array<{ batch: object; target: object; packet: object; observation: object }>,
+  setupActive: true,
+  targetActive: true,
   drafts: new WeakSet<object>(),
   packet: undefined as any,
   observation: undefined as any,
@@ -16,8 +21,13 @@ vi.mock(
       mocks.assertObservation,
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
       mocks.assertObservationV2,
+    assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1: mocks.assertNativeObservation,
   }),
 );
+
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
+  assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
+}));
 
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js',
@@ -33,13 +43,18 @@ vi.mock(
 );
 
 import {
+  assertSubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1Provenance as assertNativeReceipt,
+  collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 as collectNative,
+  consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1 as consumeNative,
   assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1Provenance,
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2 as collectV2,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2 as consumeV2,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
-import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2 }
+import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2,
+  buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeDraft,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input }
   from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 
@@ -56,6 +71,23 @@ const COMPILER_V2 = Object.freeze({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.nativeMaterials = [];
+  mocks.setupActive = true;
+  mocks.targetActive = true;
+  mocks.assertNativePacket.mockImplementation((packet, batch, target) => {
+    if (!mocks.setupActive) throw new Error('native setup custody disposed');
+    if (!mocks.targetActive) throw new Error('native target custody disposed');
+    if (!mocks.nativeMaterials.some(value => value.packet === packet && value.batch === batch && value.target === target)) {
+      throw new Error('native packet provenance missing');
+    }
+    return packet;
+  });
+  mocks.assertNativeObservation.mockImplementation((observation, target, batch, packet) => {
+    if (!mocks.targetActive) throw new Error('native target custody disposed');
+    if (!mocks.nativeMaterials.some(value => value.observation === observation && value.packet === packet
+      && value.batch === batch && value.target === target)) throw new Error('native observation provenance missing');
+    return packet;
+  });
   mocks.drafts = new WeakSet<object>();
   mocks.packet = packet();
   mocks.observation = observation();
@@ -256,7 +288,7 @@ function collect(draft: ReturnType<typeof mintDraft>) {
   });
 }
 
-function v2Input() {
+function prepareV2Packet() {
   mocks.packet = Object.freeze({ ...packet(), version: 2, familyCompiler: COMPILER_V2,
     sourceIntentHex: encodePegInSourceIntentV2Hex({
       formatVersion: 2, sourceNetworkIdHex: h32('01'), sidechainIdHex: h32('02'),
@@ -265,10 +297,188 @@ function v2Input() {
       sourceAssetIdHex: h32('00'), amountNanoErg: '10000000', recipientAddressHex: `0x${'06'.repeat(20)}`,
     }),
   });
+}
+
+function v2Input() {
+  prepareV2Packet();
   const observed = { batch: BATCH as never, target: TARGET as never,
     candidate: CANDIDATE_V2 as never, committedVaultObservation: mocks.observation as never };
   return { ...observed, draft: buildDraftV2(observed) };
 }
+
+function nativeInput(mutableLineage = false) {
+  prepareV2Packet();
+  const input = {
+    batch: Object.freeze({ profile: 'fed-native-height-zero-v1',
+      request: Object.freeze({ requestDigestHex: h32('81') }),
+      receipt: Object.freeze({ receiptDigestHex: h32('82') }) }),
+    target: Object.freeze({ ...TARGET }), packet: mutableLineage ? structuredClone(mocks.packet) : mocks.packet,
+    committedVaultObservation: mutableLineage ? structuredClone(observation()) : observation(),
+  } as unknown as SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input;
+  mocks.nativeMaterials.push({ batch: input.batch, target: input.target, packet: input.packet,
+    observation: input.committedVaultObservation });
+  return { ...input, draft: buildNativeDraft(input) };
+}
+
+describe('native genesis committed-reserve evidence join', () => {
+  it('collects unchanged evidence schemas and returns the exact bytes once from a real native draft', () => {
+    const input = nativeInput();
+    const receipt = collectNative(input);
+    const legacyInput = { batch: BATCH as never, target: TARGET as never, candidate: CANDIDATE_V2 as never,
+      committedVaultObservation: mocks.observation };
+    const legacy = collectV2({ ...legacyInput, draft: buildDraftV2(legacyInput) });
+    expect(receipt.schema).toBe('e2s.substrate-federated-native-genesis-committed-reserve-evidence.v1');
+    expect(receipt.provenance).toBe(input.draft.provenance);
+    expect(receipt).not.toHaveProperty('candidateDigestHex');
+    expect(receipt.receiptDigestHex).not.toBe(legacy.receiptDigestHex);
+    expect(receipt.evidence).toEqual(legacy.evidence);
+    expect(receipt.evidenceDigestHex).toBe(legacy.evidenceDigestHex);
+    expect(receipt.boundaries).toEqual(legacy.boundaries);
+    expect(Object.isFrozen(receipt.evidence)).toBe(true);
+    expect(decodeCanonicalObject(receipt.evidence.sourceLockBoxCanonicalHex).box).toEqual(input.packet.boxes.sourceLock);
+    expect(decodeCanonicalObject(receipt.evidence.reserveTransitionTransactionCanonicalHex).transaction)
+      .toEqual(input.packet.transactions.reserveTransition.eip12Tx);
+    expect(decodeCanonicalObject(receipt.evidence.successorReserveBoxCanonicalHex).box)
+      .toEqual(input.packet.boxes.reserveSuccessor);
+    expect(decodeCanonicalObject(receipt.evidence.checkpointAncestryCanonicalHex).pathHeaderIdsHex)
+      .toEqual(input.committedVaultObservation.finalityPathHeaderIdsHex);
+    expect(() => assertNativeReceipt(receipt)).not.toThrow();
+    expect(consumeNative(receipt, input.draft)).toBe(receipt.evidence);
+    expect(() => consumeNative(receipt, input.draft)).toThrow(/already consumed/);
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation', 'draft'] as const)(
+    'rejects cloned %s at collection', field => {
+      const input = nativeInput();
+      expect(() => collectNative({ ...input, [field]: structuredClone(input[field]) })).toThrow(/original|provenance/);
+    },
+  );
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation', 'draft'] as const)(
+    'rejects mixed original %s even with identical public bytes', field => {
+      const first = nativeInput();
+      const second = nativeInput();
+      expect(first[field]).toEqual(second[field]);
+      expect(first[field]).not.toBe(second[field]);
+      expect(() => collectNative({ ...first, [field]: second[field] })).toThrow(/original|provenance/);
+      expect(() => collectNative(first)).not.toThrow();
+    },
+  );
+
+  it.each(['setup', 'target'] as const)('rejects disposed %s custody at collection and consumption', kind => {
+    const input = nativeInput();
+    const receipt = collectNative(input);
+    if (kind === 'setup') mocks.setupActive = false;
+    else mocks.targetActive = false;
+    expect(() => collectNative(input)).toThrow(/disposed/);
+    expect(() => assertNativeReceipt(receipt)).toThrow(/disposed/);
+    expect(() => consumeNative(receipt, input.draft)).toThrow(/disposed/);
+  });
+
+  it.each(Object.keys(COMPILER_V2) as Array<keyof typeof COMPILER_V2>)(
+    'rejects retained compiler drift at both boundaries: %s', field => {
+      const input = nativeInput(true);
+      const receipt = collectNative(input);
+      const compiler = input.packet.familyCompiler as Record<string, string>;
+      compiler[field] = h32('ff');
+      expect(() => collectNative(input)).toThrow(/lineage changed/);
+      expect(() => consumeNative(receipt, input.draft)).toThrow(/lineage changed/);
+      compiler[field] = COMPILER_V2[field];
+      expect(consumeNative(receipt, input.draft)).toBe(receipt.evidence);
+    },
+  );
+
+  it.each([
+    ['family', (p: any) => { p.familyIdHex = h32('ff'); }],
+    ['source-lock', (p: any) => { p.boxes.sourceLock.boxId = h32('ff'); }],
+    ['successor', (p: any) => { p.boxes.reserveSuccessor.boxId = h32('ff'); }],
+    ['reserve-digest', (p: any) => { p.reserve.outputDigestHex = `0x01${'ff'.repeat(32)}`; }],
+    ['liability', (p: any) => { p.reserve.outputLiabilityNanoErg = '10000001'; }],
+    ['deposit-commitment', (p: any) => { p.depositCommitmentHex = h32('ff'); }],
+    ['transaction-id', (p: any) => { p.transactions.reserveTransition.txId = h32('ff'); }],
+    ['transaction-body', (p: any) => { p.transactions.reserveTransition.eip12Tx.inputs.pop(); }],
+  ] as const)('rejects retained %s drift at collection and consumption', (_field, mutate) => {
+    const input = nativeInput(true);
+    const receipt = collectNative(input);
+    mutate(input.packet);
+    expect(() => collectNative(input)).toThrow(/lineage|admission/);
+    expect(() => consumeNative(receipt, input.draft)).toThrow(/lineage|admission/);
+  });
+
+  it.each([
+    ['transaction-id', (o: any) => { o.expectedTxId = h32('ff'); }],
+    ['successor-id', (o: any) => { o.reserveSuccessorBoxIdHex = h32('ff'); }],
+    ['inclusion-height', (o: any) => { o.confirmationHeight += 1; }],
+    ['inclusion-header', (o: any) => { o.confirmationHeaderIdHex = h32('ff'); }],
+    ['target-height', (o: any) => { o.finalityTargetHeight -= 1; }],
+    ['target-header', (o: any) => { o.finalityTargetHeaderIdHex = h32('ff'); }],
+    ['depth', (o: any) => { o.requiredSuccessorDepth -= 1; }],
+    ['path-length', (o: any) => { o.finalityPathHeaderIdsHex.pop(); }],
+    ['path-start', (o: any) => { o.finalityPathHeaderIdsHex[0] = h32('ff'); }],
+    ['path-end', (o: any) => { o.finalityPathHeaderIdsHex[10] = h32('ff'); }],
+    ['tip-height', (o: any) => { o.observedTipHeight = 509; }],
+  ] as const)('rejects observed %s drift at collection and consumption', (_field, mutate) => {
+    const input = nativeInput(true);
+    const receipt = collectNative(input);
+    mutate(input.committedVaultObservation);
+    expect(() => collectNative(input)).toThrow(/lineage|ancestry|depth/);
+    expect(() => consumeNative(receipt, input.draft)).toThrow(/lineage|ancestry|depth/);
+  });
+
+  it('rejects copied receipts, copied drafts and a second real identical draft without burning the receipt', () => {
+    const input = nativeInput();
+    const receipt = collectNative(input);
+    const { draft: _draft, ...originals } = input;
+    const otherDraft = buildNativeDraft(originals);
+    expect(otherDraft).toEqual(input.draft);
+    expect(() => consumeNative(receipt, otherDraft)).toThrow(/different mint-reservation draft/);
+    expect(() => consumeNative(receipt, structuredClone(input.draft))).toThrow(/provenance/);
+    expect(() => consumeNative(structuredClone(receipt), input.draft)).toThrow(/provenance/);
+    expect(consumeNative(receipt, input.draft)).toBe(receipt.evidence);
+  });
+
+  it('rejects historical drafts and receipts in both directions', () => {
+    const legacyV1Draft = mintDraft();
+    const legacyV1Receipt = collect(legacyV1Draft);
+    const legacyInput = v2Input();
+    const legacyV2Receipt = collectV2(legacyInput);
+    const input = nativeInput();
+    const receipt = collectNative(input);
+    for (const draft of [legacyV1Draft, legacyInput.draft]) {
+      expect(() => collectNative({ ...input, draft: draft as never })).toThrow(/provenance/);
+      expect(() => consumeNative(receipt, draft as never)).toThrow(/provenance/);
+    }
+    for (const oldReceipt of [legacyV1Receipt, legacyV2Receipt]) {
+      expect(() => assertNativeReceipt(oldReceipt)).toThrow(/provenance/);
+      expect(() => consumeNative(oldReceipt as never, input.draft)).toThrow(/provenance/);
+    }
+    expect(() => assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1Provenance(receipt))
+      .toThrow(/provenance/);
+    expect(() => consumeV2(receipt as never, input.draft as never)).toThrow(/provenance/);
+    expect(() => consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(receipt as never, input.draft as never))
+      .toThrow(/provenance/);
+    expect(consumeNative(receipt, input.draft)).toBe(receipt.evidence);
+  });
+
+  it.each(['batch', 'target', 'packet', 'committedVaultObservation', 'draft'] as const)(
+    'rejects %s getters before evaluating them', field => {
+      const input = nativeInput();
+      const getter = vi.fn(() => input[field]);
+      Object.defineProperty(input, field, { enumerable: true, get: getter });
+      expect(() => collectNative(input)).toThrow(/must contain exactly/);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['evidence', 'hidden', 'symbol', 'prototype'] as const)('rejects caller-supplied %s', fault => {
+    const input = nativeInput();
+    if (fault === 'evidence') Object.assign(input, { evidence: {} });
+    if (fault === 'hidden') Object.defineProperty(input, 'extra', { value: true });
+    if (fault === 'symbol') Object.defineProperty(input, Symbol('extra'), { value: true });
+    if (fault === 'prototype') Object.setPrototypeOf(input, { inherited: true });
+    expect(() => collectNative(input)).toThrow(/must contain exactly|own-data|plain object/);
+  });
+});
 
 describe('isolated-devnet committed-reserve evidence collector V2', () => {
   it('collects generic V1 evidence from a real V2 draft and consumes it exactly once', () => {

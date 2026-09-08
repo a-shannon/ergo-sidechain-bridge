@@ -70,6 +70,16 @@ import { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1
   from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 import { assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1 as assertNativeVaultOutputs }
   from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
+import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
+import {
+  buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeMintDraft,
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as assertNativeMintDraft,
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as assertLegacyMintDraft,
+} from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import {
+  collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 as collectNativeReserveEvidence,
+  consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1 as consumeNativeReserveEvidence,
+} from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -362,13 +372,20 @@ describe('native FED managed setup session', () => {
       ],
     }, 'native peg-in fixture reserve transition');
     const family = compiled.familyReceipt;
+    const sourceIntent = { formatVersion: 2 as const, sourceNetworkIdHex: request.target.genesisHeaderIdHex,
+      sidechainIdHex: '87'.repeat(32), bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20),
+      settlementProfileIdHex: '88'.repeat(32), admissionProfileIdHex: family.profile.familyIdHex,
+      sourceAssetIdHex: '00'.repeat(32), amountNanoErg: sourceLockCreation.outputs[0]!.value,
+      recipientAddressHex: '89'.repeat(20) };
     const packet = freezeFixture({ schema: 'e2s.substrate-federated-pooled-reserve-deposit.v2', version: 2,
       familyIdHex: family.profile.familyIdHex, familyCompiler: {
         trackerRequestDigestHex: family.trackerCompilerRequestDigestHex,
         trackerReceiptDigestHex: family.trackerCompilerReceiptDigestHex,
         familyRequestDigestHex: family.familyCompilerRequestDigestHex,
         familyReceiptDigestHex: family.receiptDigestHex, compilerLockDigestHex: family.compilerLockDigestHex,
-      }, boxes: { sourceFundingInput: sourceFunding.outputs[0], sourceLock: sourceLockCreation.outputs[0],
+      }, sourceIntentHex: encodePegInSourceIntentV2Hex(sourceIntent), depositCommitmentHex: '8a'.repeat(32),
+      reserve: { outputDigestHex: `01${'8b'.repeat(32)}`, outputLiabilityNanoErg: sourceIntent.amountNanoErg },
+      boxes: { sourceFundingInput: sourceFunding.outputs[0], sourceLock: sourceLockCreation.outputs[0],
         transitionFeeFunding: sourceLockCreation.outputs[1], reservePredecessor: reserve.outputs[0],
         reserveSuccessor: reserveTransition.outputs[0] }, transactions: { sourceLockCreation, reserveTransition },
     }) as unknown as Readonly<deposits.SubstrateFederatedPooledReserveDepositV2Packet>;
@@ -378,7 +395,7 @@ describe('native FED managed setup session', () => {
     });
     const builder = vi.spyOn(deposits, 'buildSubstrateFederatedPooledReserveDepositV2').mockResolvedValue(packet);
     return { batch, packet, packets, builder, input: { batch, target, sourceFundingInput: packet.boxes.sourceFundingInput,
-      sourceIntent: {} as never, depositorErgoTreeHex: session.signer.p2pkErgoTreeHex,
+      sourceIntent, depositorErgoTreeHex: session.signer.p2pkErgoTreeHex,
       creationHeights: { sourceLockCreation: 1000, reserveTransition: 1000 } as never } };
   }
 
@@ -819,6 +836,89 @@ describe('native FED managed setup session', () => {
       assertNativeVaultOutputs(result.outputObservation, target, input.batch, input.packet);
       session.dispose();
       expect(() => assertNativeVaultOutputs(result.outputObservation, target, input.batch, input.packet)).toThrow(/inactive/);
+    });
+  });
+
+  it('collects and consumes native mint evidence from the composed confirmed reserve without mint authority', async () => {
+    await withNativeVault(async ({ input, post }) => {
+      const reserve = await executeNativeVault(input);
+      const joined = { target, batch: input.batch, packet: input.packet,
+        committedVaultObservation: reserve.outputObservation };
+      const draft = buildNativeMintDraft(joined);
+      assertNativeMintDraft(draft);
+      expect(() => assertLegacyMintDraft(draft)).toThrow(/provenance/);
+      expect(draft.statement.sourceIntentHex).toBe(`0x${input.packet.sourceIntentHex.replace(/^0x/, '')}`);
+      expect(draft.statement.reserveTransitionTransactionIdHex).toBe(`0x${reserve.expectedTxId}`);
+      expect(draft.statement.successorReserveBoxIdHex).toBe(`0x${input.packet.boxes.reserveSuccessor.boxId}`);
+      expect(draft.statement.successorReserveLiabilityNanoErg).toBe('20000000');
+      expect(draft.statement.inclusionHeight).toBe(1000);
+      expect(draft.statement.targetHeight).toBe(1010);
+      const receipt = collectNativeReserveEvidence({ ...joined, draft });
+      const evidence = consumeNativeReserveEvidence(receipt, draft);
+      const decode = (hex: string) => JSON.parse(Buffer.from(hex.replace(/^0x/, ''), 'hex').toString('utf8'));
+      expect(decode(evidence.sourceLockBoxCanonicalHex).box).toEqual(input.packet.boxes.sourceLock);
+      expect(decode(evidence.reserveTransitionTransactionCanonicalHex).transaction)
+        .toEqual(input.packet.transactions.reserveTransition.eip12Tx);
+      expect(decode(evidence.successorReserveBoxCanonicalHex).box).toEqual(input.packet.boxes.reserveSuccessor);
+      expect(decode(evidence.inclusionProofCanonicalHex).confirmationHeaderIdHex)
+        .toBe(`0x${reserve.outputObservation.confirmationHeaderIdHex}`);
+      expect(decode(evidence.checkpointAncestryCanonicalHex).pathHeaderIdsHex).toHaveLength(11);
+      expect(decode(evidence.finalityProofCanonicalHex).ergoPowAuthenticated).toBe(false);
+      expect(receipt.boundaries.mintAuthorized).toBe(false);
+      expect(receipt.boundaries.fundsAuthorityEstablished).toBe(false);
+      expect(() => consumeNativeReserveEvidence(receipt, draft)).toThrow(/consumed/);
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+    });
+  });
+
+  it.each(['packet clone', 'batch clone', 'target clone', 'observation clone', 'disposed'])
+    ('rejects native mint draft %s after actual reserve composition', async fault => {
+      await withNativeVault(async ({ input, post }) => {
+        const reserve = await executeNativeVault(input);
+        const joined = { target, batch: input.batch, packet: input.packet,
+          committedVaultObservation: reserve.outputObservation };
+        if (fault === 'packet clone') joined.packet = { ...input.packet };
+        if (fault === 'batch clone') joined.batch = { ...input.batch };
+        if (fault === 'target clone') joined.target = { ...target };
+        if (fault === 'observation clone') joined.committedVaultObservation = { ...reserve.outputObservation };
+        if (fault === 'disposed') session.dispose();
+        expect(() => buildNativeMintDraft(joined)).toThrow(/provenance|inactive/);
+        expect(post).toHaveBeenCalledTimes(2);
+        expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+      });
+    });
+
+  it.each(['collection', 'consumption'])('revokes native reserve evidence after custody disposal before %s', async stage => {
+    await withNativeVault(async ({ input, post }) => {
+      const reserve = await executeNativeVault(input);
+      const joined = { target, batch: input.batch, packet: input.packet,
+        committedVaultObservation: reserve.outputObservation };
+      const draft = buildNativeMintDraft(joined);
+      const receipt = stage === 'consumption' ? collectNativeReserveEvidence({ ...joined, draft }) : undefined;
+      session.dispose();
+      expect(() => assertNativeMintDraft(draft)).toThrow(/inactive/);
+      expect(() => receipt === undefined ? collectNativeReserveEvidence({ ...joined, draft })
+        : consumeNativeReserveEvidence(receipt, draft)).toThrow(/inactive/);
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+    });
+  });
+
+  it.each(['draft clone', 'receipt clone', 'different draft'])('rejects %s at native evidence consumption', async fault => {
+    await withNativeVault(async ({ input, post }) => {
+      const reserve = await executeNativeVault(input);
+      const joined = { target, batch: input.batch, packet: input.packet,
+        committedVaultObservation: reserve.outputObservation };
+      const draft = buildNativeMintDraft(joined);
+      const receipt = collectNativeReserveEvidence({ ...joined, draft });
+      const selectedDraft = fault === 'draft clone' ? { ...draft }
+        : fault === 'different draft' ? buildNativeMintDraft(joined) : draft;
+      expect(() => consumeNativeReserveEvidence(fault === 'receipt clone' ? { ...receipt } : receipt,
+        selectedDraft)).toThrow(/provenance|different/);
+      expect(consumeNativeReserveEvidence(receipt, draft)).toEqual(receipt.evidence);
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
     });
   });
 

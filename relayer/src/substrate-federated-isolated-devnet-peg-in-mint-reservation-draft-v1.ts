@@ -3,6 +3,7 @@ import {
   derivePegInSourceIntentIdV2Hex,
 } from './peg-in-causal-admission-v2.js';
 import {
+  assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1,
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1,
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1,
@@ -15,11 +16,13 @@ import type {
   SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import type { SubstrateFederatedIsolatedDevnetPegInCandidateV2 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import { assertSubstrateFederatedNativeGenesisPegInPacketV1 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type { SubstrateFederatedPooledReserveDepositV1Packet } from './substrate-federated-pooled-reserve-deposit-v1.js';
 import type { SubstrateFederatedPooledReserveDepositV2Packet } from './substrate-federated-pooled-reserve-deposit-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { sha256CanonicalJson } from './strict-json.js';
 import {
@@ -53,6 +56,103 @@ const DRAFTS = new WeakSet<object>();
 const DRAFT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V2';
 const DRAFTS_V2 = new WeakSet<object>();
+export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_MINT_RESERVATION_DRAFT_V1_SCHEMA =
+  'e2s.substrate-federated-native-genesis-peg-in-mint-reservation-draft.v1' as const;
+const NATIVE_DRAFT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_MINT_RESERVATION_DRAFT_V1';
+const NATIVE_PACKET_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_RESERVE_PACKET_V1';
+const NATIVE_DRAFTS = new WeakMap<object, Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>>();
+
+export interface SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input {
+  readonly batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  readonly target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  readonly packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>;
+  readonly committedVaultObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
+}
+
+export interface SubstrateFederatedNativeGenesisPegInMintReservationDraftV1
+  extends Omit<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1, 'schema' | 'provenance'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_MINT_RESERVATION_DRAFT_V1_SCHEMA;
+  readonly provenance: Readonly<{
+    readonly profile: 'fed-native-height-zero-v1';
+    readonly setupRequestDigestHex: string;
+    readonly setupCheckReceiptDigestHex: string;
+    readonly packetDigestHex: string;
+    readonly committedVaultObservationDigestHex: string;
+    readonly processBindingDigestHex: string;
+    readonly executionTargetIdentityDigestHex: string;
+    readonly familyCompiler: SubstrateFederatedPooledReserveDepositV2Packet['familyCompiler'];
+    readonly exactSameProcessBatchPacketAndObservationBound: true;
+  }>;
+}
+
+export function buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(
+  input: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>,
+): Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1> {
+  assertNativeInput(input);
+  input = Object.freeze({ ...input });
+  const body = buildNativeDraftBody(input);
+  const draft = deepFreeze({ ...body, draftDigestHex: sha256CanonicalJson(body, NATIVE_DRAFT_DOMAIN) });
+  NATIVE_DRAFTS.set(draft, input);
+  return draft;
+}
+
+export function assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(
+  value: unknown,
+  expectedInput?: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>,
+): asserts value is Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1> {
+  if (value === null || typeof value !== 'object' || !NATIVE_DRAFTS.has(value)) {
+    throw new Error('native mint-reservation draft lacks same-process provenance');
+  }
+  const retained = NATIVE_DRAFTS.get(value)!;
+  if (expectedInput !== undefined) {
+    assertNativeInput(expectedInput);
+    if (retained.batch !== expectedInput.batch || retained.target !== expectedInput.target
+      || retained.packet !== expectedInput.packet
+      || retained.committedVaultObservation !== expectedInput.committedVaultObservation) {
+      throw new Error('native mint-reservation draft requires exact original inputs');
+    }
+  }
+  const { draftDigestHex, ...body } = value as Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
+  if (draftDigestHex !== sha256CanonicalJson(body, NATIVE_DRAFT_DOMAIN)
+    || draftDigestHex !== sha256CanonicalJson(buildNativeDraftBody(retained), NATIVE_DRAFT_DOMAIN)) {
+    throw new Error('native mint-reservation draft retained lineage changed');
+  }
+}
+
+function buildNativeDraftBody(input: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>) {
+  const { packet, batch, target, committedVaultObservation: observation } = input;
+  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+  if (assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1(
+    observation, target, batch, packet,
+  ) !== packet) throw new Error('native committed reserve requires the original packet');
+  return deepFreeze({
+    schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_MINT_RESERVATION_DRAFT_V1_SCHEMA,
+    version: 1 as const,
+    ...buildDraftStatement(observation, packet),
+    provenance: {
+      profile: 'fed-native-height-zero-v1' as const,
+      setupRequestDigestHex: batch.request.requestDigestHex,
+      setupCheckReceiptDigestHex: batch.receipt.receiptDigestHex,
+      packetDigestHex: sha256CanonicalJson(packet, NATIVE_PACKET_DOMAIN),
+      committedVaultObservationDigestHex: observation.observationDigestHex,
+      processBindingDigestHex: observation.processBindingDigestHex,
+      executionTargetIdentityDigestHex: observation.executionTargetIdentityDigestHex,
+      familyCompiler: { ...packet.familyCompiler },
+      exactSameProcessBatchPacketAndObservationBound: true as const,
+    },
+  });
+}
+
+function assertNativeInput(value: unknown): void {
+  const fields = ['batch', 'target', 'packet', 'committedVaultObservation'];
+  if (value === null || typeof value !== 'object' || Object.getPrototypeOf(value) !== Object.prototype
+    || Reflect.ownKeys(value).length !== fields.length
+    || Reflect.ownKeys(value).some(key => typeof key !== 'string' || !fields.includes(key)
+      || !Object.getOwnPropertyDescriptor(value, key)?.enumerable
+      || !Object.hasOwn(Object.getOwnPropertyDescriptor(value, key)!, 'value'))) {
+    throw new Error('native mint-reservation draft input requires exact own-data fields');
+  }
+}
 
 export interface SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1 {
   readonly schema:
