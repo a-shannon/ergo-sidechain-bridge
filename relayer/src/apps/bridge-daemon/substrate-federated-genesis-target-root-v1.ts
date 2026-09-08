@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -7,7 +7,9 @@ import {
   type FederatedGenesisOperatorV1,
 } from '../../adapters/federated-genesis-operator-v1.js';
 import { observeFederatedGenesisTargetsV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
-import { assertNoDuplicateJsonKeys } from '../../ergo-settlement-core/strict-json.js';
+import { assertNoDuplicateJsonKeys, canonicalJson } from '../../ergo-settlement-core/strict-json.js';
+import { createBoundedAuthenticatedSpvTrackerReadOnlySource } from '../../authenticated-spv-tracker-read-only-node-client.js';
+import { StateTracker } from '../../state-tracker.js';
 import { verifyExecutableSha256 } from '../../native-executable-pin.js';
 import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
@@ -24,6 +26,10 @@ import {
 import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance } from '../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2, type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import { compileObservedSubstrateFederatedGenesisV1 } from '../../substrate-federated-observed-genesis-v1.js';
+import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import { normalizeEip12Box } from '../../unsigned-ergo-transaction.js';
+import { executeSubstrateFederatedNativeGenesisBatchV1 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 
 const PRIMARY = 'http://127.0.0.1:19955';
 const WITNESS = 'http://127.0.0.1:19956';
@@ -134,22 +140,121 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         const genesis = await observeFederatedGenesisTargetsV1(expected);
         assertCustody();
         assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
-        return genesis;
+        const batch = await setup.runNativeGenesisRetainingSigner(compiled, target);
+        const assertActive = () => {
+          assertCustody();
+          assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+        };
+        assertActive();
+        // This fresh journal stays with the build artifacts, including unresolved attempts.
+        const journalDirectory = mkdtempSync(join(frontier.targetDirectory, 'issuance-journal-'));
+        const markerDirectory = join(journalDirectory, 'attempt-markers');
+        mkdirSync(markerDirectory);
+        const state = new StateTracker(join(journalDirectory, 'state-store'));
+        try {
+          const transactions = await executeSubstrateFederatedNativeGenesisBatchV1({
+            target, batch, state, markerDirectory,
+          });
+          assertActive();
+          const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+            target, batch.request.target.genesisHeaderIdHex,
+          );
+          const primary = createBoundedAuthenticatedSpvTrackerReadOnlySource(target.primaryNodeOrigin);
+          const witness = createBoundedAuthenticatedSpvTrackerReadOnlySource(target.witnessNodeOrigin);
+          if (transactions.length !== compiled.issuance.orderedTransactions.length) {
+            throw new Error('FED native issuance receipt count differs');
+          }
+          const confirm = async () => {
+            for (const [index, expectedTransaction] of compiled.issuance.orderedTransactions.entries()) {
+              assertActive();
+              const receipt = transactions[index]!;
+              if (receipt.role !== expectedTransaction.role || receipt.ordinal !== index
+                || receipt.expectedTxId !== expectedTransaction.transaction.txId) {
+                throw new Error('FED native issuance receipt identity differs');
+              }
+              const current = await observer.observe(expectedTransaction.transaction.txId, target.primaryNodeOrigin);
+              assertActive();
+              if (current === null || current.status !== 'confirmed'
+                || current.confirmationHeight !== receipt.confirmationHeight
+                || current.confirmationHeaderIdHex !== receipt.confirmationHeaderIdHex) {
+                throw new Error('FED native issuance canonical inclusion changed');
+              }
+            }
+          };
+          const previousTips = new Map<typeof primary, { height: number; id: string }>();
+          const readTip = async (client: typeof primary) => {
+            assertActive();
+            const tip = record(await client.getBestHeader());
+            assertActive();
+            if (!Number.isSafeInteger(tip.height) || Number(tip.height) <= 0
+              || typeof tip.id !== 'string' || !/^[0-9a-f]{64}$/.test(tip.id)) {
+              throw new Error('FED native issuance requires a canonical output-observation tip');
+            }
+            const current = { height: Number(tip.height), id: tip.id };
+            const previous = previousTips.get(client);
+            if (previous && (current.height < previous.height
+              || (current.height === previous.height && current.id !== previous.id))) {
+              throw new Error('FED native issuance output-observation tip changed');
+            }
+            previousTips.set(client, current);
+            return current;
+          };
+          const sameTip = (first: { height: number; id: string }, second: { height: number; id: string }) => {
+            if (first.height !== second.height) return false;
+            if (first.id !== second.id) throw new Error('FED native issuance output-observation tips disagree');
+            return true;
+          };
+          let stableOutputs = false;
+          // Only observations retry. The three issued transactions remain one-shot.
+          for (let attempt = 0; attempt < 3; attempt++) {
+            await confirm();
+            const tip = await readTip(primary);
+            if (!sameTip(tip, await readTip(witness))) continue;
+            for (const [index, { transaction }] of compiled.issuance.orderedTransactions.entries()) {
+              const expectedOutput = transaction.outputs[0]!;
+              for (const client of [primary, witness]) {
+                assertActive();
+                const source = await client.getBoxByIdOrNull(batch.orderedTransactions[index]!.issuance.genesisInputBoxIdHex);
+                if (source !== null) throw new Error('FED native issuance funding source remains unspent');
+                const rawOutput = await client.getBoxByIdOrNull(expectedOutput.boxId);
+                if (rawOutput === null) throw new Error('FED native singleton output is unavailable');
+                const output = await normalizeEip12Box(rawOutput, 'FED native singleton output');
+                assertActive();
+                if (canonicalJson(output) !== canonicalJson(expectedOutput) || output.creationHeight > tip.height) {
+                  throw new Error('FED native singleton output differs from the compiled issuance');
+                }
+              }
+            }
+            await confirm();
+            const primaryStable = sameTip(tip, await readTip(primary));
+            const witnessStable = sameTip(tip, await readTip(witness));
+            if (primaryStable && witnessStable) { stableOutputs = true; break; }
+          }
+          if (!stableOutputs) throw new Error('FED native issuance output-observation did not stabilize');
+          if (await observeFederatedGenesisTargetsV1(expected) !== genesis) {
+            throw new Error('FED source genesis changed during Ergo issuance');
+          }
+          assertActive();
+          return Object.freeze({ genesis, transactions });
+        } finally {
+          state.close();
+        }
       });
-      return Object.freeze({ nativeGenesisHashHex: running.value, frontierProcess: running.receipt,
+      return Object.freeze({ nativeGenesisHashHex: running.value.genesis, frontierProcess: running.receipt,
         typedGenesisSha256Hex: candidate.genesisJsonSha256Hex, rawSpecSha256Hex: sha256(Buffer.from(raw.stdout)),
         runtimeProfileIdHex: candidate.runtimeProfileIdHex, familyIdHex: candidate.familyIdHex,
         sourceProofProfileIdHex: frontier.sourceProofProfileIdHex,
         nodeSha256Hex: frontier.node.sha256Hex, wasmSha256Hex: frontier.wasm.sha256Hex,
         operatorAddressHex: retainedOperator.addressHex, storageKeysChecked: Object.keys(expected).length,
         issuanceInputBoxIds: compiled.discovery.genesisBoxIds,
+        issuedTransactions: running.value.transactions,
         unsignedIssuance: Object.freeze(compiled.issuance.orderedTransactions.map(({ role, transaction }) =>
           Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) });
     });
     assertCustody();
-    return Object.freeze({ status: 'fresh-federated-genesis-observed' as const,
+    return Object.freeze({ status: 'fresh-federated-genesis-issued' as const,
       ...executed.value, ergoExecution: executed.receipt,
-      singletonIssuanceEstablished: false as const, operationalMintEstablished: false as const });
+      singletonIssuanceEstablished: true as const, operationalMintEstablished: false as const });
   } finally {
     try { if (ergo) await ergo.stop(); }
     finally {

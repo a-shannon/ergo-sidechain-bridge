@@ -52,6 +52,30 @@ describe('layer import rules', () => {
     expect(inspect(staticAppFixture(file, source))).toEqual([]);
   });
 
+  it.each([
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisBatchV1'],
+    ['../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1'],
+    ['../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', 'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'],
+    ['../../authenticated-spv-tracker-read-only-node-client.js', 'createBoundedAuthenticatedSpvTrackerReadOnlySource'],
+  ])('keeps native target issuance binding %s#%s at its fixed call site', (specifier, binding) => {
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}();`))).toEqual([]);
+    for (const escape of [`capture(${binding});`, `const escaped = ${binding};`, `function expose() { return ${binding}; }`]) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${escape}`))
+        .map(item => item.message)).toContain(
+        `restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    }
+  });
+
+  it('permits owned native journal construction without exposing StateTracker', () => {
+    const specifier = '../../state-tracker.js';
+    const declaration = `import { StateTracker } from '${specifier}';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} new StateTracker('owned');`))).toEqual([]);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} const escaped = StateTracker;`))
+      .map(item => item.message)).toContain(
+      `restricted capability binding must not escape its reviewed call: ${specifier}#StateTracker`);
+  });
+
   it('reserves FED genesis target observation to direct root calls', () => {
     const root = FEDERATED_GENESIS_TARGET_ROOT;
     const target = 'adapters/federated-genesis-target-observation-v1.ts';

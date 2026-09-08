@@ -279,18 +279,32 @@ the pinned SDK's [account storage](https://github.com/paritytech/polkadot-sdk/bl
 and [balance data](https://github.com/paritytech/polkadot-sdk/blob/bbc435c7667d3283ba280a8fec44676357392753/substrate/frame/balances/src/types.rs).
 A different source runtime requires a separately reviewed funding layout.
 
-Component tests keep real setup, federation and EVM key custody, but stub builds,
-JVM compilation, process launch and RPC responses. They cover input capture,
-matching custody/profile inputs, materialization drift, disagreement, stale
-targets, bounded response decoding and cleanup failures. The earlier real
+Component tests keep real setup, federation and EVM key custody, SQLite and
+box codecs, but stub builds, JVM compilation, checking, transport, process
+launch and RPC responses. They cover input capture, matching custody/profile
+inputs, materialization drift, disagreement, stale targets, bounded response
+decoding, issuance ordering, exact outputs and cleanup failures. The earlier real
 JVM and configuration-only node checks retain their separate scopes; this
 fresh composed campaign has not run yet.
 
-The root returns public observations after stopping the nodes and disposing
-custody. That result cannot resume a campaign, authorize minting or prove
-singleton issuance. Disposal releases the retained references; memory
-zeroization is not established. Operational mint must run inside the same
-managed lifetime before cleanup, using a separately reviewed FED-bound signer.
+Inside the owned target lifetime, the root calls the native setup checker and
+ordered issuance consumer. It checks canonical inclusion before and after
+observing the consumed funding inputs and exact singleton outputs on both Ergo
+nodes, within one stable tip. Ordinary tip advancement permits at most three
+observation windows, each rereading confirmations and outputs. Issuance is
+never retried; malformed state or changed inclusion still rejects. FED genesis
+is reobserved before returning.
+Its fresh journal remains closed beside the build artifacts, including after
+an unresolved attempt; it is not deleted or reused as funds authority.
+These local UTXO reads do not prove an atomic header/state snapshot or
+independent consensus. A later value-moving step requires fresh revalidation.
+
+The root returns terminal public observations and issuance transaction
+receipts after stopping the nodes and disposing custody. A successful runtime
+result records local singleton issuance, not mint authority or a resumable
+session. Disposal releases retained references; memory zeroization is not
+established. Committed-reserve and operational mint consumers must still be
+connected inside that lifetime before running the fresh composed campaign.
 
 ## Ergo Issuance Materialization
 
@@ -309,7 +323,9 @@ prove historical non-instantiation or authorize an empty replay baseline.
 The compiler tests exercise real JVM compilation and WASM transaction
 materialization for both supported reward delays. They do not sign, evaluate
 the full issuance transaction in the JVM, or call a node transaction checker.
-The root reports only the unsigned transaction and predicted singleton IDs.
+Unsigned transaction and predicted singleton IDs remain planning data. The
+root's completed issuance result additionally requires the separate checked,
+submitted, confirmed and output-observed lifecycle described above.
 
 The existing executable V3 setup request requires a G1dA history/compiler
 closure whose historical source identity does not describe FED genesis.

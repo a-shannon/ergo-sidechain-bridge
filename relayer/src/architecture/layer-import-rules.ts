@@ -207,6 +207,11 @@ const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-
 
 // Exact source-reviewed bindings, never inferred from the root's source imports.
 const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['authenticated-spv-tracker-read-only-node-client.ts', new Set(['createBoundedAuthenticatedSpvTrackerReadOnlySource'])],
+  ['state-tracker.ts', new Set(['StateTracker'])],
+  ['unsigned-ergo-transaction.ts', new Set(['normalizeEip12Box'])],
+  ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set(['assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1'])],
+  ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set(['createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'])],
   ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
   ['pinned-local-native-verifier-build.ts', new Set(['runBoundedProcess'])],
   ['substrate-federated-authority-safe-devnet-build-environment-v1.ts', new Set([
@@ -257,9 +262,10 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['../../adapters/federated-genesis-target-observation-v1.js', new Set([
     'observeFederatedGenesisTargetsV1',
   ])],
-  ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys'])],
+  ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set(['executeSubstrateFederatedNativeGenesisBatchV1'])],
+  ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys', 'canonicalJson'])],
   ['node:crypto', new Set(['createHash'])],
-  ['node:fs', new Set(['readFileSync', 'realpathSync', 'writeFileSync'])],
+  ['node:fs', new Set(['mkdirSync', 'mkdtempSync', 'readFileSync', 'realpathSync', 'writeFileSync'])],
   ['node:path', new Set(['join'])],
 ]);
 
