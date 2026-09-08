@@ -113,6 +113,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1Provenance,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  readSubstrateFederatedGenesisProfilesFromSessionV2,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -199,6 +200,17 @@ beforeEach(() => {
 });
 
 describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
+  it('rejects genesis profile reuse after the session has signed a launch', () => {
+    const session = sessionV2();
+    try {
+      expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2(session)).not.toThrow();
+      signLaunch(session);
+      expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2(session)).toThrow(/already bound to a launch/);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('joins a real same-process draft, exact lineage, profile, and one-shot signatures', () => {
     const session = sessionV1();
     signLaunch(session);

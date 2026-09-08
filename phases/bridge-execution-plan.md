@@ -125,6 +125,10 @@ establish deployment safety or independent operator custody.
   authorities in SS58 format; these are separate from bridge attestors. The
   process owner preserves exact pins and cleanup under a distinct FED mode.
   Fresh custody/observed-family target binding and operational mint remain open.
+  The observed-input compiler now connects active setup/source custody and
+  owned Ergo observation/history to both pinned JVM compilers and the typed
+  candidate. Component tests use real custody/JVMs with stubbed observations;
+  fresh-target composition and singleton issuance are not yet demonstrated.
   The old source locks and withdrawal campaign retain their original scope.
 
 ## Critical Path
@@ -168,7 +172,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Active; configured-node startup and exact genesis storage passed | Replace configuration-only keys and synthetic family input IDs with fresh retained custody and observed Ergo genesis inputs. Use the FED process owner, bind the new spec/genesis identity separately and verify the isolated running target; no circular identity or old LAB substitution |
+| FED running-target binding | Active; configured-node startup passed; observed-input/JVM composition implemented | Execute the observed-input compiler inside the managed Ergo target lifetime with retained custody. Build the matching fresh-federation runtime, use the FED process owner, bind the new spec/genesis identity separately and verify the isolated target; no circular identity or old LAB substitution. Observed issuance inputs are not issued singleton successors |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 

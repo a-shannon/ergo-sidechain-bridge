@@ -108,6 +108,10 @@ const CHECKPOINT_ATTESTATION_SIGNATURE_SET_DIGEST_DOMAIN =
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
 const SESSIONS = new WeakSet<object>();
 const V2_SESSIONS = new WeakSet<object>();
+const V2_GENESIS_PROFILES = new WeakMap<object, () => Readonly<{
+  checkpointProfile: ReturnType<typeof buildSubstrateFederatedCheckpointProfileV1>;
+  mintProofProfile: Readonly<FederatedPooledReserveSourceProofProfileV1Input>;
+}>>();
 const MINT_SOURCE_PROOF_RECEIPTS = new WeakSet<object>();
 const MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
 const CHECKPOINT_ATTESTATION_RECEIPTS = new WeakSet<object>();
@@ -1281,7 +1285,22 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     },
   });
   V2_SESSIONS.add(session);
+  V2_GENESIS_PROFILES.set(session, () => {
+    assertOpen(state);
+    if (launchSigningStarted) {
+      throw new Error('isolated-devnet source-attestation session is already bound to a launch');
+    }
+    return Object.freeze({ checkpointProfile, mintProofProfile: mintProfileInput });
+  });
   return session;
+}
+
+/** Public configuration only; requires retained custody not yet bound to a launch. */
+export function readSubstrateFederatedGenesisProfilesFromSessionV2(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+) {
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(session);
+  return V2_GENESIS_PROFILES.get(session)!();
 }
 
 export function assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance(

@@ -13,10 +13,25 @@ import {
 import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1Provenance,
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  readSubstrateFederatedGenesisProfilesFromSessionV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 const ERGO_ADMISSION_PUBLIC_KEY_HEX = `02${'11'.repeat(32)}`;
 
 describe('isolated-devnet source-attestation campaign session V1', () => {
+  it('exposes genesis profiles only from an open V2 session without consuming custody', () => {
+    const session = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [ERGO_ADMISSION_PUBLIC_KEY_HEX],
+    });
+    const profiles = readSubstrateFederatedGenesisProfilesFromSessionV2(session);
+    expect(profiles.checkpointProfile.profileIdHex).toBe(session.binding.checkpointFederationProfileIdHex);
+    expect(profiles.mintProofProfile.signerPublicKeysHex).toEqual(session.binding.federatedMintProfile.signerPublicKeysHex);
+    expect(readSubstrateFederatedGenesisProfilesFromSessionV2(session)).toEqual(profiles);
+    expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2({ ...session })).toThrow(/lacks provenance/);
+    session.dispose();
+    expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2(session)).toThrow(/disposed/);
+  });
+
   it('binds one fresh key set to distinct launch and FED-1 profiles', () => {
     const session = sessionV1();
     const other = sessionV1();

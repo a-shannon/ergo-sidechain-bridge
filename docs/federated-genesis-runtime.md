@@ -200,6 +200,28 @@ source-attestation keys. It is a running-loader check, not a provisioned
 two-way bridge or reusable custody. The next target must use fresh retained
 signers and observed Ergo inputs, and bind its own genesis identity.
 
+## Observed Input Compilation
+
+`compileObservedSubstrateFederatedGenesisV1` in the
+[observed-input compiler](../relayer/src/substrate-federated-observed-genesis-v1.ts)
+connects an owned Ergo reward observation to the typed producer. It consumes
+the exact active target, setup signer and unbound source-attestation session,
+then derives federation profiles from that session. The history receipt must
+match the discovery digest, Ergo genesis, anchor height/hash and all three
+issuance-input IDs. The setup key must also be the selected Ergo-admission key.
+
+Both pinned JVM compilers consume these identities. Custody and the owned
+target are rechecked after each compiler returns. A disposed session or one
+already bound to another launch cannot supply a new genesis configuration.
+The caller keeps the sessions and target alive through later consumers.
+
+Component coverage uses fresh custody and real JVM compilation, with stubbed
+observation boundaries. This is not a fresh-node campaign. Observed reward
+inputs identify future singleton issuance; they do not prove that those
+singletons have been issued. The candidate also does not prove EVM operator
+custody, a runtime compiled with those fresh attestors, target-node acceptance
+or mint authorization.
+
 ## Next Boundary
 
 The historical packet derives its domain from observed genesis/spec identities,
@@ -208,8 +230,9 @@ reused unchanged for genesis initialization. Preserve the authority-safe V1
 schema, which accepts quarantine only. Family runtime/application profile ID,
 V4 lineage/family ID and V4 profile ID remain distinct.
 
-Bind the actual genesis identity and running target with fresh synthetic
-custody and observed Ergo genesis inputs. Then connect native reservation,
+Compose the observed-input compiler inside the managed Ergo target lifetime,
+build the FED runtime for the retained public federation, and bind its actual
+genesis/spec identity on the running target. Then connect native reservation,
 its confirmed parent-state observation and the matching Ethereum mint. Keep
 pool rejection separate from whole-block rejection and preserve the ordinary
 daemon's mint hold.
