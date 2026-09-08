@@ -200,6 +200,69 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
   ],
 ]);
 
+const FEDERATED_GENESIS_TARGET_ROOT =
+  'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
+const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
+const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
+
+// Exact source-reviewed bindings, never inferred from the root's source imports.
+const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
+  ['pinned-local-native-verifier-build.ts', new Set(['runBoundedProcess'])],
+  ['substrate-federated-authority-safe-devnet-build-environment-v1.ts', new Set([
+    'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1',
+  ])],
+  ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
+    'withOwnedFederatedGenesisDevnetProcessesV1',
+  ])],
+  ['substrate-federated-genesis-node-build-v1.ts', new Set([
+    'buildSubstrateFederatedGenesisNodeV1', 'BuildSubstrateFederatedGenesisNodeV1Input',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-history-artifacts-v1.ts', new Set([
+    'collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-node-build-v1.ts', new Set([
+    'buildSubstrateFederatedIsolatedDevnetErgoNodeV1', 'BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input',
+  ])],
+  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2',
+    'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+    'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2',
+  ])],
+  ['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts', new Set([
+    'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+  ])],
+  ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
+    'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
+  ])],
+  ['substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts', new Set([
+    'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance',
+  ])],
+  ['substrate-federated-isolated-devnet-source-attestation-session-v1.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
+    'readSubstrateFederatedGenesisProfilesFromSessionV2',
+    'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
+  ])],
+  ['substrate-federated-observed-genesis-v1.ts', new Set(['compileObservedSubstrateFederatedGenesisV1'])],
+]);
+const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ...[...REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS].map(
+    ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
+  ),
+  ['../../adapters/federated-genesis-operator-v1.js', new Set([
+    'createFederatedGenesisOperatorV1', 'assertFederatedGenesisOperatorV1', 'disposeFederatedGenesisOperatorV1',
+    'FederatedGenesisOperatorV1',
+  ])],
+  ['../../adapters/federated-genesis-target-observation-v1.js', new Set([
+    'observeFederatedGenesisTargetsV1',
+  ])],
+  ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys'])],
+  ['node:crypto', new Set(['createHash'])],
+  ['node:fs', new Set(['readFileSync', 'realpathSync', 'writeFileSync'])],
+  ['node:path', new Set(['join'])],
+]);
+
 // Gate 5 may compose these reviewed legacy producers before WP-08A extracts
 // them. The seam is exact by source and target; capability-bearing targets may
 // additionally restrict imported bindings. It grants no general app escape.
@@ -207,6 +270,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, new Set(REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS.keys())],
   ...[...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS].map(
     ([file, bindings]) => [file, new Set(bindings.keys())] as const,
   ),
@@ -330,6 +394,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS],
   ...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS,
   [
     'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts',
@@ -885,6 +950,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
     new Map([
@@ -1365,6 +1431,9 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, new Set([
+    'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
+  ])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
     new Set([
@@ -1544,6 +1613,7 @@ const CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
     new Map([
@@ -1596,6 +1666,14 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_GENESIS_OPERATOR, new Map([
+    ['createFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+  ])],
+  [FEDERATED_GENESIS_TARGET_OBSERVATION, new Map([
+    ['observeFederatedGenesisTargetsV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+  ])],
   [
     'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
     new Map([
@@ -1878,6 +1956,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       [
         'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
         new Set([
+          FEDERATED_GENESIS_TARGET_ROOT,
           'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
         ]),
@@ -1950,6 +2029,8 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+  [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
     new Set(['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts']),

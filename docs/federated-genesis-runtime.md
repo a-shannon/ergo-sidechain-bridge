@@ -253,6 +253,45 @@ running target remain to be exercised together. A fresh export has a new
 workspace path; its resulting artifact hashes must not inherit the older
 build's pins or imply cross-root reproducibility.
 
+## Fresh Target Composition
+
+[`runSubstrateFederatedGenesisTargetRootV1`](../relayer/src/apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts)
+connects the fresh federation build, owned Ergo observations, JVM family
+compilation and the two fixed local FED nodes. Builds finish before the managed
+Ergo mining lifetime starts. The EVM operator adapter creates fresh custody
+and a launch domain without signing; its public address binds the genesis owner
+and simulated native-fee endowment.
+
+The root checks the materialized runtime code, exact V4 profile, enforcement,
+bridge address, retained operator funding and absence of Sudo before starting
+FED nodes. The read-only
+adapter then checks every materialized top-storage entry on both targets at
+the same height-zero genesis, with empty pools and a final height/hash check.
+These observations do not authenticate an arbitrary RPC or establish source
+consensus. Both process owners retain their existing containment and cleanup.
+
+The operator's funding expectation is specific to the pinned Frontier runtime:
+`System.Account`, `Blake2_128Concat` over `AccountId20`, and the 80-byte
+`AccountInfo<u32, AccountData<u128>>` layout. It requires zero nonce, consumers,
+sufficients, reserved and frozen balance, one provider, the SDK new-logic flag
+and exactly 100,000,000,000,000,000,000 raw native units. The layout follows
+the pinned SDK's [account storage](https://github.com/paritytech/polkadot-sdk/blob/bbc435c7667d3283ba280a8fec44676357392753/substrate/frame/system/src/lib.rs)
+and [balance data](https://github.com/paritytech/polkadot-sdk/blob/bbc435c7667d3283ba280a8fec44676357392753/substrate/frame/balances/src/types.rs).
+A different source runtime requires a separately reviewed funding layout.
+
+Component tests keep real setup, federation and EVM key custody, but stub builds,
+JVM compilation, process launch and RPC responses. They cover input capture,
+matching custody/profile inputs, materialization drift, disagreement, stale
+targets, bounded response decoding and cleanup failures. The earlier real
+JVM and configuration-only node checks retain their separate scopes; this
+fresh composed campaign has not run yet.
+
+The root returns public observations after stopping the nodes and disposing
+custody. That result cannot resume a campaign, authorize minting or prove
+singleton issuance. Disposal releases the retained references; memory
+zeroization is not established. Operational mint must run inside the same
+managed lifetime before cleanup, using a separately reviewed FED-bound signer.
+
 ## Next Boundary
 
 The historical packet derives its domain from observed genesis/spec identities,
@@ -261,12 +300,12 @@ reused unchanged for genesis initialization. Preserve the authority-safe V1
 schema, which accepts quarantine only. Family runtime/application profile ID,
 V4 lineage/family ID and V4 profile ID remain distinct.
 
-Compose the observed-input compiler inside the managed Ergo target lifetime,
-use the build owner for the retained public federation, and bind its actual
-genesis/spec identity on the running target. Then connect native reservation,
-its confirmed parent-state observation and the matching Ethereum mint. Keep
-pool rejection separate from whole-block rejection and preserve the ordinary
-daemon's mint hold.
+Complete singleton issuance and the committed-reserve consumer in the fresh
+target root, then connect height-zero source-proof binding, native reservation,
+its confirmed parent-state observation and the matching Ethereum mint. Run the
+fresh build/target campaign when those consumers can use its retained custody;
+a build followed by immediate disposal cannot supply them. Keep pool rejection
+separate from whole-block rejection and preserve the ordinary daemon's mint hold.
 
 Only after that join should a fresh operational two-way campaign reuse the
 verified withdrawal consumer. This checkpoint establishes neither that

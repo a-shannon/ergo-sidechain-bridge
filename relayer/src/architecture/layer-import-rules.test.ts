@@ -24,6 +24,10 @@ const TRACKER_V2_CAMPAIGN_ROOT =
   'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts';
 const GENESIS_SETUP_ROOT =
   'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+const FEDERATED_GENESIS_TARGET_ROOT =
+  'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
+const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
+const FEDERATED_GENESIS_OPERATOR_SPECIFIER = '../../adapters/federated-genesis-operator-v1.js';
 
 function staticAppFixture(file: string, source: string): Record<string, string> {
   const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2022, true);
@@ -42,6 +46,183 @@ function staticAppFixture(file: string, source: string): Record<string, string> 
 }
 
 describe('layer import rules', () => {
+  it('accepts the actual FED genesis source without executing the root', () => {
+    const file = FEDERATED_GENESIS_TARGET_ROOT;
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    expect(inspect(staticAppFixture(file, source))).toEqual([]);
+  });
+
+  it('reserves FED genesis target observation to direct root calls', () => {
+    const root = FEDERATED_GENESIS_TARGET_ROOT;
+    const target = 'adapters/federated-genesis-target-observation-v1.ts';
+    const specifier = '../../adapters/federated-genesis-target-observation-v1.js';
+    const binding = 'observeFederatedGenesisTargetsV1';
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(root, `${declaration} ${binding}({});`))).toEqual([]);
+    for (const escape of [
+      `const escaped = ${binding};`, `capture(${binding});`,
+      `export function runSubstrateFederatedGenesisTargetRootV1() { return ${binding}; }`,
+    ]) {
+      expect(inspect(staticAppFixture(root, `${declaration} ${escape}`)).map(item => item.message))
+        .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    }
+    expect(inspect(staticAppFixture(root, `${declaration} export { ${binding} };`)).map(item => item.message))
+      .toContain(`restricted capability binding must not be re-exported: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture(root,
+      `import { ${binding} as observe } from '${specifier}'; observe({});`)).map(item => item.message))
+      .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
+    for (const source of [
+      `import * as observer from '${specifier}';`,
+      `export { ${binding} } from '${specifier}';`,
+      `const observer = await import('${specifier}');`,
+      `const observer = require('${specifier}');`,
+    ]) {
+      expect(inspect({ [target]: 'export {};', [root]: source }).map(item => item.message))
+        .toContain(`exclusive authority module must use named runtime imports: ${specifier}`);
+    }
+    for (const foreign of ['apps/bridge-daemon/foreign.ts', 'adapters/foreign.ts', 'foreign.ts']) {
+      const relative = `./${path.posix.relative(path.posix.dirname(foreign), target).replace(/\.ts$/, '.js')}`;
+      expect(inspect(staticAppFixture(foreign, `import { ${binding} } from '${relative}';`))
+        .map(item => item.message))
+        .toContain(`exclusive runtime module import has the wrong owner: ${relative}`);
+    }
+  });
+
+  it.each([
+    ['../../adapters/federated-genesis-operator-v1.js', 'FederatedGenesisOperatorV1'],
+    ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js',
+      'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2'],
+    ['../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+      'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2'],
+  ])('accepts the explicit FED genesis type %s#%s without runtime escape', (specifier, binding) => {
+    const root = FEDERATED_GENESIS_TARGET_ROOT;
+    expect(inspect(staticAppFixture(root,
+      `import type { ${binding} } from '${specifier}'; type Current = Readonly<${binding}>;`)))
+      .toEqual([]);
+    expect(inspect(staticAppFixture(root,
+      `import { ${binding} } from '${specifier}'; const escaped = ${binding};`)).map(item => item.message))
+      .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+  });
+
+  it.each([
+    'createFederatedGenesisOperatorV1',
+    'assertFederatedGenesisOperatorV1',
+    'disposeFederatedGenesisOperatorV1',
+  ])('reserves FED genesis custody operation %s to direct root composition', binding => {
+    const specifier = FEDERATED_GENESIS_OPERATOR_SPECIFIER;
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}();`))).toEqual([]);
+    for (const escape of [
+      `export { ${binding} };`, `const escaped = ${binding};`,
+      `capture(${binding});`, `function expose() { return ${binding}; }`,
+      `export function runSubstrateFederatedGenesisTargetRootV1() { return ${binding}; }`,
+    ]) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${escape}`))
+        .map(item => item.message)).toContain(
+        `restricted capability binding must not ${escape.startsWith('export {')
+          ? 'be re-exported' : 'escape its reviewed call'}: ${specifier}#${binding}`,
+      );
+    }
+    for (const foreign of ['apps/bridge-daemon/foreign.ts', 'adapters/foreign.ts', 'foreign.ts']) {
+      const foreignSpecifier = path.posix.relative(path.posix.dirname(foreign), FEDERATED_GENESIS_OPERATOR)
+        .replace(/\.ts$/, '.js');
+      const relative = foreignSpecifier.startsWith('.') ? foreignSpecifier : `./${foreignSpecifier}`;
+      expect(inspect(staticAppFixture(foreign, `import { ${binding} } from '${relative}'; ${binding}();`))
+        .map(item => item.message)).toContain(
+        `exclusive authority import has the wrong owner: ${relative}#${binding}`,
+      );
+    }
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${binding} as alias } from '${specifier}'; alias();`)).map(item => item.message))
+      .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
+  });
+
+  it.each([
+    "import * as owner from 'SPECIFIER';",
+    "export * from 'SPECIFIER';",
+    "export { createFederatedGenesisOperatorV1 } from 'SPECIFIER';",
+    "const owner = await import('SPECIFIER');",
+    "const owner = require('SPECIFIER');",
+  ])('rejects broad FED genesis custody access: %s', declaration => {
+    const specifier = FEDERATED_GENESIS_OPERATOR_SPECIFIER;
+    expect(inspect({
+      [FEDERATED_GENESIS_OPERATOR]: 'export {};',
+      [FEDERATED_GENESIS_TARGET_ROOT]: declaration.replace('SPECIFIER', specifier),
+    }).map(item => item.message)).toContain(
+      `exclusive authority module must use named runtime imports: ${specifier}`,
+    );
+  });
+
+  it('keeps FED genesis owner types erased without granting foreign runtime ownership', () => {
+    const typeImport = "import type { FederatedGenesisOperatorV1 } from './adapters/federated-genesis-operator-v1.js';";
+    expect(inspect(staticAppFixture('foreign.ts', `${typeImport} type Owner = FederatedGenesisOperatorV1;`)))
+      .toEqual([]);
+    expect(inspect(staticAppFixture('foreign.ts', typeImport.replace('import type', 'import')))
+      .map(item => item.message)).toContain(
+      'exclusive runtime module import has the wrong owner: ./adapters/federated-genesis-operator-v1.js',
+    );
+  });
+
+  it.each([
+    ['../../adapters/federated-genesis-operator-v1.js', 'signFederatedGenesisOperatorV1'],
+    ['../../adapters/federated-genesis-target-observation-v1.js', 'rpc'],
+    ['../../ergo-settlement-core/strict-json.js', 'parseStrictJson'],
+    ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
+      'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+    ['node:fs', 'rmSync'],
+    ['node:crypto', 'createPrivateKey'],
+  ])('rejects an unregistered FED genesis binding %s#%s', (specifier, binding) => {
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${binding} } from '${specifier}'; ${binding}();`)).map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${specifier}#${binding}`,
+    );
+  });
+
+  it('retains exact FED genesis legacy, type and public export boundaries', () => {
+    const root = FEDERATED_GENESIS_TARGET_ROOT;
+    const specifier = '../../substrate-federated-genesis-node-build-v1.js';
+    expect(inspect(staticAppFixture(root, `
+      import type { BuildSubstrateFederatedGenesisNodeV1Input } from '${specifier}';
+      export interface RunSubstrateFederatedGenesisTargetRootV1Input {
+        readonly frontierBuild: Omit<BuildSubstrateFederatedGenesisNodeV1Input, 'sourceSession'>;
+      }
+      export function runSubstrateFederatedGenesisTargetRootV1() {}
+    `))).toEqual([]);
+    expect(inspect(staticAppFixture(root, "import '../../unregistered-authority.js';"))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: unregistered-authority.ts',
+    );
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts',
+      `import { buildSubstrateFederatedGenesisNodeV1 } from '${specifier}';`))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-genesis-node-build-v1.ts',
+    );
+    expect(inspect({ [root]: 'export function unexpectedAuthority() {}' }).map(item => item.message))
+      .toEqual(['reviewed app root export is not allowlisted: unexpectedAuthority']);
+    expect(inspect({ [root]: 'const hidden = () => {}; export { hidden as runSubstrateFederatedGenesisTargetRootV1 };' })
+      .map(item => item.message)).toContain(
+      'reviewed app root export must not be aliased: hidden#runSubstrateFederatedGenesisTargetRootV1',
+    );
+  });
+
+  it('does not exempt the FED genesis root from global RPC, reflection, entropy or type-query guards', () => {
+    const root = FEDERATED_GENESIS_TARGET_ROOT;
+    expect(inspect({ [root]: "fetch('http://127.0.0.1:19955');" }).map(item => item.message))
+      .toContain('apps must not access unbound global capability: fetch');
+    expect(inspect({ [root]: 'Reflect.ownKeys({});' }).map(item => item.message))
+      .toContain('apps must not access unbound global capability: Reflect');
+    expect(inspect({ [root]: "import { randomBytes } from 'node:crypto'; randomBytes(32);" })
+      .map(item => item.message)).toContain(
+      'restricted capability import binding is not allowlisted: node:crypto#randomBytes',
+    );
+    expect(inspect(staticAppFixture(root,
+      `import { createFederatedGenesisOperatorV1 } from '${FEDERATED_GENESIS_OPERATOR_SPECIFIER}';
+       type Owner = ReturnType<typeof createFederatedGenesisOperatorV1>;`))
+      .map(item => item.message)).toContain(
+      `restricted capability binding must not escape its reviewed call: ${FEDERATED_GENESIS_OPERATOR_SPECIFIER}#createFederatedGenesisOperatorV1`,
+    );
+  });
+
   it.each(['local export', 'alias export', 'returned function', 'assigned function'])('rejects the fixed worker authority escape through %s', mode => {
     const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
     const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';

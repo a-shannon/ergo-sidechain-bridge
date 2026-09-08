@@ -135,6 +135,13 @@ establish deployment safety or independent operator custody.
   a real export matches all 563 source files. The fresh Rust build still needs
   to run inside the composed target campaign so custody survives into its
   consumer. No new node/WASM acceptance is claimed by this build-only join.
+  A static target root now composes that build, owned Ergo observations, JVM
+  family compilation and paired FED genesis checks with retained synthetic
+  custody. Component coverage uses real keys with stubbed builds/processes;
+  no fresh composed target run or singleton issuance is established yet.
+  The root's result is terminal public data, not resumable custody. Add the
+  issuance and operational mint consumers inside its managed lifetime before
+  spending another fresh build on a campaign that ends too early.
   The old source locks and withdrawal campaign retain their original scope.
 
 ## Critical Path
@@ -178,7 +185,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Active; configured-node startup passed; observed-input/JVM composition and fresh-federation build owner implemented | Compose the build owner and observed-input compiler with retained custody. Build before starting the managed Ergo target, then observe inputs, compile the family and start the matching FED nodes. Bind the new spec/genesis identity separately and verify the isolated target; no circular identity or old LAB substitution. Observed issuance inputs are not issued singleton successors |
+| FED running-target binding | Active; configured-node startup passed; fresh target root implemented at component-test level | The root retains custody across build, observed family compilation and paired genesis checks, then stops/disposes on return. Connect singleton issuance and the operational consumer inside that lifetime before the fresh composed campaign. Bind the new spec/genesis identity separately; no circular identity or old LAB substitution. Observed issuance inputs are not issued singleton successors |
 | Native reservation and mint caller | Depends on initialized target; existing proof producer and V4 reservation/mint predicates | Submit one exact native reservation, observe its inclusion, then execute the matching mint against the required parent state. Verify supply, balance, replay and consumed reservation. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 
