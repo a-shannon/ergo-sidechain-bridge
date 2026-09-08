@@ -33,16 +33,26 @@ import {
   type SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
   type SubstrateFederatedIsolatedDevnetSetupCheckRequestV3,
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
+import {
+  assertSubstrateFederatedNativeGenesisSetupCheckRequestV1,
+  assertSubstrateFederatedNativeGenesisSetupCheckRequestV1RuntimeProvenance,
+  reobserveSubstrateFederatedNativeGenesisSetupCheckRequestV1,
+  type SubstrateFederatedNativeGenesisSetupCheckRequestV1,
+} from './substrate-federated-native-genesis-setup-check-request-v1.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-setup-check-receipt.v2' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-setup-check-receipt.v3' as const;
+export const SUBSTRATE_FEDERATED_NATIVE_GENESIS_SETUP_CHECK_RECEIPT_V1_SCHEMA =
+  'e2s.substrate-federated-native-genesis-setup-check-receipt.v1' as const;
 
 const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V2';
 const RECEIPT_V3_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_RECEIPT_V3';
+const NATIVE_GENESIS_RECEIPT_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_SETUP_CHECK_RECEIPT_V1';
 // These data-only digests retain their existing semantics under either envelope.
 const OBSERVED_INPUT_SET_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_OBSERVED_INPUT_SET_V2';
@@ -170,13 +180,27 @@ const SETUP_CHECK_EXECUTION_MATERIAL_V3 = new WeakMap<
   Readonly<SubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV3>
 >();
 
+export interface SubstrateFederatedNativeGenesisSetupCheckReceiptV1 extends Omit<
+  SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
+  'schema' | 'version' | 'sourceBindings'
+> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_NATIVE_GENESIS_SETUP_CHECK_RECEIPT_V1_SCHEMA;
+  readonly version: 1;
+  readonly sourceBindings: SubstrateFederatedNativeGenesisSetupCheckRequestV1['sourceBindings'];
+}
+
+const NATIVE_GENESIS_EXECUTION_MATERIAL = new WeakMap<object, Readonly<
+  SetupExecutionMaterial<SubstrateFederatedNativeGenesisSetupCheckRequestV1>
+>>();
+
 type SetupRequestCommonData = Omit<
   SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
   'schema' | 'version' | 'sourceBindings'
 > & {
   readonly sourceBindings:
     | SubstrateFederatedIsolatedDevnetSetupCheckRequestV2['sourceBindings']
-    | SubstrateFederatedIsolatedDevnetSetupCheckRequestV3['sourceBindings'];
+    | SubstrateFederatedIsolatedDevnetSetupCheckRequestV3['sourceBindings']
+    | SubstrateFederatedNativeGenesisSetupCheckRequestV1['sourceBindings'];
 };
 type SetupReceiptBody = Omit<
   SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
@@ -202,6 +226,7 @@ interface SetupCheckBinding<
   readonly version: C['version'];
   readonly receiptDomain: string;
   readonly assertProvenance: (value: unknown) => Promise<void>;
+  readonly assertActive?: (value: unknown) => void;
   readonly reobserve: (value: unknown) => Promise<Readonly<SubstrateFederatedGenesisObservationV1>>;
   readonly finish: (body: SetupReceiptBody, request: Readonly<R>) => Readonly<C>;
   readonly validateReceipt: (value: unknown, request: Readonly<R>) => Readonly<C>;
@@ -256,6 +281,23 @@ const setupCheckV3Binding: Readonly<SetupCheckBinding<
   material: SETUP_CHECK_EXECUTION_MATERIAL_V3,
 });
 
+const nativeGenesisBinding: Readonly<SetupCheckBinding<
+  SubstrateFederatedNativeGenesisSetupCheckRequestV1,
+  SubstrateFederatedNativeGenesisSetupCheckReceiptV1
+>> = Object.freeze({
+  schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_SETUP_CHECK_RECEIPT_V1_SCHEMA,
+  version: 1 as const,
+  receiptDomain: NATIVE_GENESIS_RECEIPT_DIGEST_DOMAIN,
+  assertProvenance: assertSubstrateFederatedNativeGenesisSetupCheckRequestV1RuntimeProvenance,
+  assertActive: assertSubstrateFederatedNativeGenesisSetupCheckRequestV1,
+  reobserve: reobserveSubstrateFederatedNativeGenesisSetupCheckRequestV1,
+  finish: (body: SetupReceiptBody, request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>) =>
+    digestReceipt({ schema: SUBSTRATE_FEDERATED_NATIVE_GENESIS_SETUP_CHECK_RECEIPT_V1_SCHEMA,
+      version: 1 as const, ...body, sourceBindings: request.sourceBindings }, NATIVE_GENESIS_RECEIPT_DIGEST_DOMAIN),
+  validateReceipt: validateSubstrateFederatedNativeGenesisSetupCheckReceiptV1,
+  material: NATIVE_GENESIS_EXECUTION_MATERIAL,
+});
+
 function digestReceipt<T extends object>(body: T, domain: string): Readonly<T & {
   receiptDigestHex: string;
 }> {
@@ -306,6 +348,29 @@ export async function runSubstrateFederatedIsolatedDevnetSetupCheckV3(
   return runSetupCheck(request, syntheticMnemonic, setupCheckV3Binding);
 }
 
+export async function runSubstrateFederatedNativeGenesisSetupCheckV1(
+  request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>,
+  syntheticMnemonic: string,
+): Promise<Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1>> {
+  return runSetupCheck(request, syntheticMnemonic, nativeGenesisBinding);
+}
+
+export function takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1(
+  receipt: Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1>,
+  request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(request, target);
+  return takeSetupCheckExecutionMaterial(receipt, request, target, nativeGenesisBinding);
+}
+
+export function validateSubstrateFederatedNativeGenesisSetupCheckReceiptV1(
+  value: unknown,
+  request: Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1>,
+): Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1> {
+  return validateSetupCheckReceipt(value, request, nativeGenesisBinding);
+}
+
 async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupReceiptCommonData>(
   request: Readonly<R>,
   syntheticMnemonic: string,
@@ -315,6 +380,10 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   if (!mnemonic) {
     throw new Error('isolated local setup-check synthetic mnemonic is empty');
   }
+  const assertActive = () => {
+    assertRuntimeFresh(request);
+    binding.assertActive?.(request);
+  };
   await assertRuntimeRequest(request, binding);
   const preSignObservation = await reobserveAndBind(
     request,
@@ -354,17 +423,20 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
     }
   }
 
+  assertActive();
   const batch = await prepareLocalWasmRootCheckCandidates({
     mnemonic,
     networkPrefix: request.checkPolicy.signingNetworkPrefix,
     headers,
     nodeOrigin: request.checkPolicy.nodeCheck.nodeOrigin,
+    assertActive,
     candidates: request.orderedIssuances.map(issuance => ({
       role: issuance.role,
       eip12Tx: issuance.unsignedTransactionBody,
       expectedTxId: issuance.unsignedTransactionIdHex,
     })),
   });
+  assertActive();
   assertSignerContext(batch, request, headerTip);
   const rewardDelay = assertSignerControlsExactInputTrees(
     batch.pubKeyHex,
@@ -391,11 +463,14 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   for (let index = 0; index < request.orderedIssuances.length; index += 1) {
     const issuance = request.orderedIssuances[index]!;
     const prepared = batch.candidates[index]!;
+    assertActive();
     const checked = await checkSignedTransaction(
       prepared.signedCandidate,
       `isolated local ${issuance.role} setup check`,
       request.checkPolicy.nodeCheck.nodeOrigin,
+      assertActive,
     );
+    assertActive();
     if (checked === null) {
       throw new Error(
         `isolated local ${issuance.role} JVM node check failed`,

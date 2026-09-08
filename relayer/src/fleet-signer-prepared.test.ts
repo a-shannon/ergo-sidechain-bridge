@@ -12,6 +12,8 @@ const signerMock = vi.hoisted(() => ({
   reducedFreeCalls: 0,
   fleetDerivations: 0,
   rootDerivations: 0,
+  afterRootDerivation: () => {},
+  afterSign: () => {},
 }));
 
 const nodeMock = vi.hoisted(() => ({
@@ -144,6 +146,7 @@ vi.mock('ergo-lib-wasm-nodejs', () => {
       ExtSecretKey: {
         derive_master: () => {
           signerMock.rootDerivations += 1;
+          signerMock.afterRootDerivation();
           return {
             secret_key_bytes: () => Uint8Array.from(Array(32).fill(0x24)),
             public_key: () => ({
@@ -224,6 +227,7 @@ vi.mock('ergo-lib-wasm-nodejs', () => {
           ) => {
             signerMock.signCalls += 1;
             signerMock.events.push(`sign:${signerMock.signCalls}`);
+            signerMock.afterSign();
             if (
               signerMock.signCalls === signerMock.failOnSignCall
               || signerMock.failStage === 'sign-transaction'
@@ -360,6 +364,8 @@ beforeEach(() => {
   signerMock.reducedFreeCalls = 0;
   signerMock.fleetDerivations = 0;
   signerMock.rootDerivations = 0;
+  signerMock.afterRootDerivation = () => {};
+  signerMock.afterSign = () => {};
   nodeMock.checkedIds.length = 0;
   nodeMock.checkedByteDigests.length = 0;
   nodeMock.headers = headers();
@@ -392,6 +398,53 @@ beforeEach(() => {
 });
 
 describe('prepared local WASM check signer', () => {
+  it.each(['before preparation', 'WASM load', 'key derivation', 'first signature', 'last signature'])(
+    'honors the session veto at %s without starting another signature', async stage => {
+      let active = stage !== 'before preparation';
+      let guards = 0;
+      const assertActive = () => {
+        if (!active) throw new Error('retained signing session closed');
+        if (++guards === 1 && stage === 'WASM load') queueMicrotask(() => { active = false; });
+      };
+      if (stage === 'key derivation') signerMock.afterRootDerivation = () => { active = false; };
+      if (stage === 'first signature' || stage === 'last signature') {
+        const stopAfter = stage === 'first signature' ? 1 : 2;
+        signerMock.afterSign = () => { if (signerMock.signCalls === stopAfter) active = false; };
+      }
+      await expect(prepareLocalWasmRootCheckCandidates({
+        mnemonic: 'synthetic root batch input', networkPrefix: 16, headers: headers(),
+        nodeOrigin: 'http://127.0.0.1:9052', assertActive,
+        candidates: [candidate('tracker-setup', firstTxId, 1), candidate('dup-setup', secondTxId, 2)],
+      })).rejects.toThrow('retained signing session closed');
+      expect(signerMock.signCalls).toBe(stage === 'first signature' ? 1 : stage === 'last signature' ? 2 : 0);
+      if (stage === 'before preparation' || stage === 'WASM load') expect(signerMock.rootDerivations).toBe(0);
+      expect(nodeMock.ncheck).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['before import', 'after import', 'after response'])(
+    'honors the session veto %s without returning checked authority', async stage => {
+      const batch = await prepareLocalWasmRootCheckCandidates({
+        mnemonic: 'synthetic root batch input', networkPrefix: 16, headers: headers(),
+        nodeOrigin: 'http://127.0.0.1:9052', candidates: [candidate('tracker-setup', firstTxId, 1)],
+      });
+      let active = stage !== 'before import';
+      let guards = 0;
+      const assertActive = () => {
+        if (!active) throw new Error('retained check session closed');
+        if (++guards === 1 && stage === 'after import') queueMicrotask(() => { active = false; });
+      };
+      if (stage === 'after response') nodeMock.ncheck.mockImplementation(async () => { active = false; return firstTxId; });
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await expect(checkSignedTransaction(batch.candidates[0]!.signedCandidate, 'session check',
+          'http://127.0.0.1:9052', assertActive)).resolves.toBeNull();
+        expect(nodeMock.ncheck).toHaveBeenCalledTimes(stage === 'after response' ? 1 : 0);
+        expect(errors).toHaveBeenCalledWith(expect.stringContaining('retained check session closed'));
+      } finally { errors.mockRestore(); }
+    },
+  );
+
   it('signs every candidate before exposing either signed transaction to the check transport', async () => {
     const signer = await prepareLocalWasmCheckSigner({
       mnemonic: 'synthetic test signer input',

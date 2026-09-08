@@ -320,6 +320,31 @@ historical receipt or remove the V3 history checks. The existing operational
 lifecycle and journals remain responsible for authorization, reservation,
 transport and canonical confirmation.
 
+## Native Setup Checker
+
+The native genesis request has a separate schema and digest domain. Its
+producer consumes the original observed compiler result, retained target and
+fresh paired Ergo observations. It binds the compiled family, height-zero
+configuration and exact unsigned issuance bytes without importing G1dA
+history. Copied compiler results and expired or foreign custody are rejected.
+
+The existing checking engine has a closed native binding alongside V2/V3.
+It retains exact unsigned identities, WASM signing, same-origin checks,
+reobservation before signing, before checks and after checks, and one-time
+extraction of checked transaction material. Native receipts cannot supply
+V2/V3 execution material. A serialized receipt remains data, not custody or
+broadcast authorization.
+
+The retained native session is checked again immediately before each signing
+or HTTP-check operation, including after asynchronous preparation. Closing it
+prevents the next operation and invalidates any response still in flight.
+
+Component tests exercise actual WASM signing with simulated observations and
+HTTP check responses. These are not full-transaction JVM acceptance or a live
+target campaign. The next connection is the managed one-shot native setup
+session inside the target root, retaining custody for authorized issuance and
+committed-reserve confirmation. The ordinary daemon's owner-mint hold stays on.
+
 ## Next Boundary
 
 The historical packet derives its domain from observed genesis/spec identities,

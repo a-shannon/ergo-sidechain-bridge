@@ -43,6 +43,13 @@ export interface CompileObservedSubstrateFederatedGenesisV1Input {
   readonly history: Readonly<SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2>;
 }
 
+export type ObservedSubstrateFederatedGenesisV1 = Awaited<ReturnType<typeof compileObservedSubstrateFederatedGenesisV1>>;
+
+const COMPILED_GENESIS = new WeakMap<object, Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  assertCustody: () => void;
+}>>();
+
 /** Compile one candidate and its unsigned Ergo issuance transactions from live
  * custody. The caller still owns fresh node checks, authorization and issuance.
  */
@@ -167,7 +174,23 @@ export async function compileObservedSubstrateFederatedGenesisV1(
     orderedTransactions: Object.freeze(transactions),
     greenfieldReplayBaselineEstablished: false as const,
     targetNodeAcceptanceEstablished: false as const, issuanceEstablished: false as const });
-  return Object.freeze({ preparation, familyCompilerInput, familyReceipt, candidate, discovery, history, issuance });
+  const result = Object.freeze({ preparation, familyCompilerInput, familyReceipt, candidate, discovery, history, issuance });
+  COMPILED_GENESIS.set(result, Object.freeze({ target, assertCustody: () => {
+    assertCustody();
+    assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(history);
+  } }));
+  return result;
+}
+
+export function assertObservedSubstrateFederatedGenesisV1(
+  value: unknown,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): asserts value is Readonly<ObservedSubstrateFederatedGenesisV1> {
+  const retained = value !== null && typeof value === 'object' ? COMPILED_GENESIS.get(value) : undefined;
+  if (retained === undefined || retained.target !== target) {
+    throw new Error('observed FED genesis lacks exact compiler and target provenance');
+  }
+  retained.assertCustody();
 }
 
 function freezeData<T>(value: T): Readonly<T> {

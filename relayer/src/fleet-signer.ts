@@ -651,11 +651,16 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
   headers: unknown;
   nodeOrigin: string;
   candidates: readonly LocalWasmCheckCandidate[];
+  /** Optional veto only; the caller's retained session still owns authority. */
+  assertActive?: () => void;
 }): Promise<PreparedLocalWasmRootCheckBatch> {
+  const assertActive = input.assertActive;
+  assertActive?.();
   if (!Array.isArray(input.candidates) || input.candidates.length === 0) {
     throw new Error('local WASM root check requires at least one candidate');
   }
   const wasm = await getWasm();
+  assertActive?.();
   const context = buildStateContextFromHeaders(wasm, input.headers);
   const nodeOrigin = normalizeNodeOrigin(input.nodeOrigin);
   let keys: SignerKeys;
@@ -668,6 +673,7 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
   } catch {
     throw new Error('local WASM root signer preparation failed');
   }
+  assertActive?.();
   const signerContext: SignedCheckSignerContext = Object.freeze({
     profile: LOCAL_WASM_CHECK_SIGNER_PROFILE,
     pubKeyHex: keys.pubKeyHex.toLowerCase(),
@@ -689,6 +695,7 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
     roles.add(candidate.role);
     assertContextExtensionSafe(candidate.eip12Tx?.inputs ?? [], candidate.role);
     assertEip12CreationHeights(candidate.role, candidate.eip12Tx);
+    assertActive?.();
     let signedTx: unknown;
     try {
       signedTx = await wasmSignWithStateContext(
@@ -705,6 +712,7 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
         `${candidate.role}: local WASM root signing failed${stage}`,
       );
     }
+    assertActive?.();
     assertSignedTransactionIdMatchesExpected(
       candidate.role,
       signedTx,
@@ -950,8 +958,10 @@ export async function checkSignedTransaction(
   candidate: LocalWasmSignedCheckCandidate,
   label: string,
   nodeOrigin: string,
+  assertActive?: () => void,
 ): Promise<LocalWasmOpaqueCheckResult | null> {
   try {
+    assertActive?.();
     const { ncheck } = await import('./ergo-helpers.js');
     assertLocalWasmSignedCheckCandidateProvenance(candidate);
     const material = requireLocalWasmSignedCheckMaterial(candidate);
@@ -959,12 +969,14 @@ export async function checkSignedTransaction(
     if (checkerNodeOrigin !== candidate.nodeOrigin) {
       throw new Error('checker node origin does not match the signed candidate context');
     }
+    assertActive?.();
     const result = await ncheck(
       '/transactions/check',
       material.signedTx,
       checkerNodeOrigin,
       { redactResponseBodyOnError: true },
     );
+    assertActive?.();
     const interpreted = interpretCheckResult(
       label,
       material.signedTx,

@@ -20,7 +20,7 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', ()
   },
 }));
 
-import { compileObservedSubstrateFederatedGenesisV1, type CompileObservedSubstrateFederatedGenesisV1Input } from './substrate-federated-observed-genesis-v1.js';
+import { assertObservedSubstrateFederatedGenesisV1, compileObservedSubstrateFederatedGenesisV1, type CompileObservedSubstrateFederatedGenesisV1Input } from './substrate-federated-observed-genesis-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import * as trackerCompiler from './substrate-federated-tracker-jvm-compiler-v2.js';
@@ -31,6 +31,10 @@ import * as issuanceMaterializer from './substrate-federated-genesis-issuance-ma
 import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
 import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
 import { encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister, MINER_FEE_TREE } from './ergo-encoding.js';
+import { buildSubstrateFederatedNativeGenesisSetupCheckRequestV1 } from './substrate-federated-native-genesis-setup-check-request-v1.js';
+import * as genesisObservation from './substrate-federated-genesis-observation-v1.js';
+import * as ownedTarget from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import * as readOnlySource from './authenticated-spv-tracker-read-only-node-client.js';
 
 const bridgeRoot = fileURLToPath(new URL('../../', import.meta.url));
 const runTracker = trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2;
@@ -52,7 +56,8 @@ async function observedInputs(delay: 1 | 720, target: object) {
   }, 'observed FED issuance fixture')).outputs;
   const genesisInputs = Object.freeze({ tracker: boxes[0]!, duplicatePrevention: boxes[1]!, pooledReserve: boxes[2]! });
   const discovery = Object.freeze({ reportDigestHex: '71'.repeat(32),
-    target: Object.freeze({ genesisHeaderIdHex: '72'.repeat(32), tipHeight: 1000, tipHeaderIdHex: '73'.repeat(32) }),
+    target: Object.freeze({ network: 'devnet', genesisHeaderIdHex: '72'.repeat(32), tipHeight: 1000, tipHeaderIdHex: '73'.repeat(32) }),
+    sources: Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052' }),
     signer: Object.freeze({ publicKeyHex: setup.signer.publicKeyHex, p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
       rewardDelayBlocks: delay, rewardInputErgoTreeHex: tree }),
     genesisBoxIds: Object.freeze({ tracker: boxes[0]!.boxId, duplicatePrevention: boxes[1]!.boxId, pooledReserve: boxes[2]!.boxId }),
@@ -72,7 +77,8 @@ beforeEach(async () => {
     ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [setup.signer.publicKeyHex],
   });
   const runtimeWasm = Buffer.from('0061736d01000000', 'hex');
-  const target = Object.freeze({});
+  const target = Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052',
+    primaryMining: true, witnessReadOnly: true });
   input = { target: target as never, ...await observedInputs(1, target),
     setupSigner: setup.signer, sourceSession: source,
     genesis: { bridgeRoot, launchDomainHex: '61'.repeat(32), evmChainId: '198407',
@@ -91,6 +97,7 @@ describe('observed FED genesis compilation', () => {
     }
     const expectedDiscovery = input.ownedDiscovery.observation;
     const expectedHistory = input.history;
+    const expectedTarget = input.target;
     vi.mocked(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).mockImplementationOnce(async request => {
       const result = await runTracker(request);
       (input.genesis as any).launchDomainHex = 'ab'.repeat(32);
@@ -162,6 +169,40 @@ describe('observed FED genesis compilation', () => {
       expect(readSubstrateFederatedGenesisProfilesFromSessionV2(source).checkpointProfile).toEqual(result.preparation.checkpointProfile);
       expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).toHaveBeenCalledTimes(1);
       expect(familyCompiler.compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2).toHaveBeenCalledTimes(1);
+      // This join retains real compiler provenance; only node observation/custody are doubled.
+      vi.spyOn(ownedTarget, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue({ processBindingDigestHex: '74'.repeat(32), executionTargetIdentityDigestHex: '75'.repeat(32) });
+      vi.spyOn(genesisObservation, 'observeSubstrateFederatedGenesisV1').mockImplementation(async profile => ({
+        observedAt: new Date().toISOString(), reportDigestHex: '76'.repeat(32),
+        target: { tipHeight: 1000, tipHeaderIdHex: expectedDiscovery.target.tipHeaderIdHex },
+        boxes: Object.fromEntries(['tracker', 'duplicatePrevention', 'pooledReserve'].map(role =>
+          [role, { box: expectedDiscovery.genesisInputs[role as keyof typeof expectedDiscovery.genesisInputs] }])),
+        profile,
+      }) as never);
+      vi.spyOn(genesisObservation, 'assertSubstrateFederatedGenesisObservationV1Provenance').mockImplementation(() => {});
+      vi.spyOn(readOnlySource, 'createBoundedAuthenticatedSpvTrackerReadOnlySource').mockReturnValue({
+        getBlockHeaderIdsAtHeight: async () => [expectedDiscovery.target.tipHeaderIdHex],
+      } as never);
+      const request = await buildSubstrateFederatedNativeGenesisSetupCheckRequestV1({ compiled: result, target: expectedTarget });
+      expect(request.sourceBindings.familyIdHex).toBe(result.candidate.familyIdHex);
+      expect(request.sourceBindings.runtimeProfileIdHex).toBe(result.candidate.runtimeProfileIdHex);
+      expect(request.sourceBindings.trackerCompilerReceiptDigestHex).toBe(result.familyCompilerInput.trackerReceipt.receiptDigestHex);
+      expect(request.sourceBindings.familyCompilerReceiptDigestHex).toBe(result.familyReceipt.receiptDigestHex);
+      expect(request.orderedIssuances.map(value => value.unsignedTransactionBody))
+        .toEqual(result.issuance.orderedTransactions.map(value => value.transaction.eip12Tx));
+      expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).not.toThrow();
+      expect(() => assertObservedSubstrateFederatedGenesisV1({ ...result }, expectedTarget)).toThrow(/compiler and target provenance/);
+      expect(() => assertObservedSubstrateFederatedGenesisV1(result, {} as never)).toThrow(/compiler and target provenance/);
+      observations.active = false;
+      expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/observation inactive/);
+      observations.active = true;
+      if (delay === 1) {
+        setup.dispose();
+        expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/active process provenance/);
+      } else {
+        source.dispose();
+        expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/disposed/);
+      }
     } finally {
       if (previous === undefined) delete process.env.NODE_OPTIONS;
       else process.env.NODE_OPTIONS = previous;
