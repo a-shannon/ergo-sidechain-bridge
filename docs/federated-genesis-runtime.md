@@ -327,8 +327,17 @@ reject without another submission. Custody is checked through transport and
 observation consumption. The deposit remains refundable and supplies no mint
 authority. Composed tests retain actual WASM signatures, SQLite lifecycle and
 HTTP decoding, with simulated compiler/deposit provenance and target responses.
-Reserve execution and operational mint still need composition inside the target
-root before a fresh node campaign.
+`executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1` then consumes that
+same packet and source-lock observation. It checks the reserve transition,
+reobserves all three unspent inputs around a fresh check of the exact signed
+transaction, reserves the attempt durably and uses the separately authorized
+checked transport. Canonical confirmation, spent inputs, the exact reserve
+successor and its observed ancestry are required before returning. Fees remain
+external to the reserve deposit. A disposed session cannot continue polling,
+start another phase or consume the returned observation. The result establishes
+component-level reserve lineage, not source consensus or mint authority.
+Operational mint and the full target-root callback still need composition
+before a fresh node campaign. These component tests use simulated node responses.
 
 ## Ergo Issuance Materialization
 

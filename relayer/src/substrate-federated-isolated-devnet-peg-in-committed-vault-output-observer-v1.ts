@@ -22,12 +22,16 @@ import {
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  assertSubstrateFederatedNativeGenesisPegInPacketV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV2Packet }
+  from './substrate-federated-pooled-reserve-deposit-v2.js';
 import {
   normalizeEip12Box,
   type Eip12Box,
@@ -95,8 +99,9 @@ const OBSERVATIONS = new WeakMap<
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
     batch: object;
-    candidate: object;
+    candidate?: object;
     packet: DepositPacket;
+    assertNativePacket?: () => DepositPacket;
   }>
 >();
 
@@ -306,6 +311,30 @@ async function observeOutputs(
       'isolated committed-vault output target changed during observation',
     );
   }
+  return retainObservation(input, packet, binding, current, primaryState, witnessState, {
+    ...latestConfirmation,
+    confirmationHeight: latestConfirmation.confirmationHeight,
+    confirmationHeaderIdHex: latestConfirmation.confirmationHeaderIdHex,
+  });
+}
+
+function retainObservation(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: object;
+    candidate?: object;
+  }>,
+  packet: DepositPacket,
+  binding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
+  current: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>,
+  primaryState: Awaited<ReturnType<typeof observeNodeState>>,
+  witnessState: Awaited<ReturnType<typeof observeNodeState>>,
+  latestConfirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation> & {
+    confirmationHeight: number; confirmationHeaderIdHex: string;
+  },
+  assertNativePacket?: () => DepositPacket,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1> {
+  const expectedTxId = packet.transactions.reserveTransition.txId;
   const body = Object.freeze({
     schema:
       SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_OUTPUT_OBSERVATION_V1_SCHEMA,
@@ -365,8 +394,157 @@ async function observeOutputs(
     batch: input.batch,
     candidate: input.candidate,
     packet,
+    ...(assertNativePacket ? { assertNativePacket } : {}),
   }));
   return observation;
+}
+
+type NativeTip = Readonly<{ height: number; idHex: string }>;
+interface NativeWindow {
+  assertActive(): void;
+  recordTip(client: AuthenticatedSpvTrackerReadOnlyNodeClient, tip: NativeTip): void;
+  recordHeader(header: NativeTip & { readonly parentIdHex?: string }): void;
+}
+class NativeTipAdvance extends Error {}
+
+export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { target, batch, packet } = retained;
+  const binding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const assertPacket = () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+  const assertActive = () => {
+    const current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+    if (current.processBindingDigestHex !== binding.processBindingDigestHex
+      || current.executionTargetIdentityDigestHex !== binding.executionTargetIdentityDigestHex
+      || assertPacket() !== packet) {
+      throw new Error('native committed-vault target or packet changed');
+    }
+  };
+  assertActive();
+  const confirmation = normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(retained.confirmation);
+  if (confirmation.status !== 'confirmed' || confirmation.confirmationHeight === null
+    || confirmation.confirmationHeaderIdHex === null) {
+    throw new Error('native committed-vault requires canonical confirmation');
+  }
+  const expectedTxId = packet.transactions.reserveTransition.txId;
+  assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1(
+    confirmation.observerArtifact, binding.executionTargetIdentityDigestHex,
+    batch.request.target.genesisHeaderIdHex, expectedTxId, confirmation,
+  );
+  let prior = confirmation;
+  const refresh = async () => {
+    assertActive();
+    const latest = await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
+      artifact: prior.observerArtifact,
+      expectedReconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
+      expectedTargetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+      expectedTxId, priorConfirmation: prior,
+    });
+    assertActive();
+    if (latest.status !== 'confirmed' || latest.confirmationHeight === null
+      || latest.confirmationHeaderIdHex === null
+      || latest.confirmationHeight !== confirmation.confirmationHeight
+      || latest.confirmationHeaderIdHex !== confirmation.confirmationHeaderIdHex
+      || latest.observedAtHeight < prior.observedAtHeight) {
+      throw new Error('native committed-vault canonical inclusion changed or confirmation regressed');
+    }
+    prior = latest;
+    return { ...latest, confirmationHeight: latest.confirmationHeight,
+      confirmationHeaderIdHex: latest.confirmationHeaderIdHex };
+  };
+  const primary = new AuthenticatedSpvTrackerReadOnlyNodeClient(target.primaryNodeOrigin);
+  const witness = new AuthenticatedSpvTrackerReadOnlyNodeClient(target.witnessNodeOrigin);
+  const tips = new Map<AuthenticatedSpvTrackerReadOnlyNodeClient, NativeTip>();
+  const headers = new Map<number, string>();
+  const heights = new Map<string, number>();
+  const parents = new Map<string, string>();
+  const window: NativeWindow = {
+    assertActive,
+    recordHeader(header) {
+      const known = headers.get(header.height);
+      const height = heights.get(header.idHex);
+      const parent = parents.get(header.idHex);
+      if ((known !== undefined && known !== header.idHex)
+        || (height !== undefined && height !== header.height)
+        || (parent !== undefined && header.parentIdHex !== undefined && parent !== header.parentIdHex)) {
+        throw new Error('native committed-vault conflicting header at a previously observed height');
+      }
+      headers.set(header.height, header.idHex);
+      heights.set(header.idHex, header.height);
+      if (header.parentIdHex !== undefined) parents.set(header.idHex, header.parentIdHex);
+    },
+    recordTip(client, tip) {
+      const previous = tips.get(client);
+      if (previous && (tip.height < previous.height
+        || (tip.height === previous.height && tip.idHex !== previous.idHex))) {
+        throw new Error('native committed-vault per-node tip regressed or replaced');
+      }
+      window.recordHeader(tip);
+      tips.set(client, tip);
+    },
+  };
+  // Repeat only read-only windows interrupted by mining, never failed state checks.
+  for (let attempt = 0; attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS; attempt++) {
+    try {
+      const initial = await refresh();
+      const observe = (client: AuthenticatedSpvTrackerReadOnlyNodeClient, label: string) =>
+        observeNodeState(client, packet.boxes.sourceFundingInput.boxId,
+          packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId,
+          packet.boxes.transitionFeeFunding.boxId, packet.boxes.reserveSuccessor,
+          initial.confirmationHeight, initial.confirmationHeaderIdHex, label, window);
+      const primaryState = await observe(primary, 'primary');
+      const witnessState = await observe(witness, 'witness');
+      if (canonicalJson(primaryState.finality) !== canonicalJson(witnessState.finality)) {
+        throw new Error('native committed-vault finality observations disagree');
+      }
+      const latest = await refresh();
+      const primaryFinality = await observeStableFinality(primary,
+        latest.confirmationHeight, latest.confirmationHeaderIdHex, 'primary', window);
+      const witnessFinality = await observeStableFinality(witness,
+        latest.confirmationHeight, latest.confirmationHeaderIdHex, 'witness', window);
+      if ([primaryFinality, witnessFinality].some(state =>
+        canonicalJson(state.finality) !== canonicalJson(primaryState.finality))) {
+        throw new Error('native committed-vault finality target changed');
+      }
+      if (initial.observedAtHeight > primaryState.tip.height
+        || latest.observedAtHeight < primaryState.tip.height) {
+        throw new Error('native committed-vault confirmation snapshot conflicts with output tip');
+      }
+      if ([witnessState, primaryFinality, witnessFinality].some(state =>
+        canonicalJson(state.tip) !== canonicalJson(primaryState.tip))
+        || latest.observedAtHeight > primaryState.tip.height) {
+        throw new NativeTipAdvance();
+      }
+      assertActive();
+      return retainObservation(retained, packet, binding, binding,
+        primaryState, witnessState, latest, assertPacket);
+    } catch (error) {
+      assertActive();
+      if (!(error instanceof NativeTipAdvance)) throw error;
+    }
+  }
+  throw new Error('native committed-vault observation did not stabilize within three windows');
+}
+
+export function assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1(
+  observation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+): Readonly<SubstrateFederatedPooledReserveDepositV2Packet> {
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, target);
+  const material = OBSERVATIONS.get(observation);
+  if (material?.assertNativePacket === undefined || material.batch !== batch || material.packet !== packet) {
+    throw new Error('native committed-vault observation lacks exact packet and batch provenance');
+  }
+  return packet;
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1(
@@ -440,6 +618,9 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputO
       'isolated committed-vault output observation lacks provenance',
     );
   }
+  if (material.assertNativePacket && material.assertNativePacket() !== material.packet) {
+    throw new Error('native committed-vault observation packet changed');
+  }
 }
 
 async function observeNodeState(
@@ -452,6 +633,7 @@ async function observeNodeState(
   confirmationHeight: number,
   confirmationHeaderIdHex: string,
   label: string,
+  window?: NativeWindow,
 ): Promise<Readonly<{
   sourceFundingBoxIdHex: string;
   sourceFundingPresent: false;
@@ -471,10 +653,13 @@ async function observeNodeState(
   digestHex: string;
 }>> {
   for (let attempt = 0; attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS; attempt += 1) {
+    window?.assertActive();
     const tipBefore = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} pre-output tip`,
     );
+    window?.assertActive();
+    window?.recordTip(client, tipBefore);
     const [
       sourceFunding,
       reservePredecessor,
@@ -488,10 +673,13 @@ async function observeNodeState(
       client.getBoxByIdOrNull(transitionFeeFundingBoxIdHex),
       client.getBoxByIdOrNull(expectedReserveSuccessor.boxId),
     ]);
+    window?.assertActive();
     const tipAfter = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} post-output tip`,
     );
+    window?.assertActive();
+    window?.recordTip(client, tipAfter);
     if (
       sourceFunding !== null
       || reservePredecessor !== null
@@ -511,6 +699,7 @@ async function observeNodeState(
       rawReserveSuccessor,
       `isolated committed-vault ${label} reserve successor`,
     );
+    window?.assertActive();
     if (
       canonicalJson(reserveSuccessor)
         !== canonicalJson(expectedReserveSuccessor)
@@ -519,6 +708,9 @@ async function observeNodeState(
         `isolated committed-vault ${label} reserve successor bytes changed`,
       );
     }
+    if (window && reserveSuccessor.creationHeight > tipAfter.height) {
+      throw new Error('native committed-vault successor creation height exceeds observed tip');
+    }
     if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
       const finality = await observeExactFinalityPath(
         client,
@@ -526,6 +718,7 @@ async function observeNodeState(
         confirmationHeight,
         confirmationHeaderIdHex,
         label,
+        window,
       );
       const body = Object.freeze({
         sourceFundingBoxIdHex,
@@ -546,6 +739,7 @@ async function observeNodeState(
       });
     }
     assertTipAdvancedWithoutReplacement(tipBefore, tipAfter, label);
+    if (window) throw new NativeTipAdvance();
   }
   throw new Error(
     `isolated committed-vault ${label} tip did not stabilize during output observation`,
@@ -558,6 +752,7 @@ async function observeExactFinalityPath(
   inclusionHeight: number,
   inclusionHeaderIdHex: string,
   label: string,
+  window?: NativeWindow,
 ): Promise<Readonly<{
   targetHeight: number;
   targetHeaderIdHex: string;
@@ -586,7 +781,9 @@ async function observeExactFinalityPath(
   }>> = [];
   let cursor = tip;
   while (cursor.height >= inclusionHeight) {
+    window?.assertActive();
     const raw = await client.getBlockHeaderById(cursor.idHex);
+    window?.assertActive();
     if (raw === null) {
       throw new Error(
         `isolated committed-vault ${label} finality header is unavailable`,
@@ -601,6 +798,7 @@ async function observeExactFinalityPath(
         `isolated committed-vault ${label} finality header identity changed`,
       );
     }
+    window?.recordHeader(header);
     if (header.height <= targetHeight) descending.push(header);
     if (header.height === inclusionHeight) break;
     cursor = Object.freeze({
@@ -640,6 +838,7 @@ async function observeStableFinality(
   inclusionHeight: number,
   inclusionHeaderIdHex: string,
   label: string,
+  window?: NativeWindow,
 ): Promise<Readonly<{
   tip: Readonly<{ height: number; idHex: string }>;
   finality: Readonly<{
@@ -653,25 +852,32 @@ async function observeStableFinality(
     attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS;
     attempt += 1
   ) {
+    window?.assertActive();
     const tipBefore = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} pre-finality tip`,
     );
+    window?.assertActive();
+    window?.recordTip(client, tipBefore);
     const finality = await observeExactFinalityPath(
       client,
       tipBefore,
       inclusionHeight,
       inclusionHeaderIdHex,
       label,
+      window,
     );
     const tipAfter = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} post-finality tip`,
     );
+    window?.assertActive();
+    window?.recordTip(client, tipAfter);
     if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
       return Object.freeze({ tip: tipAfter, finality });
     }
     assertTipAdvancedWithoutReplacement(tipBefore, tipAfter, label);
+    if (window) throw new NativeTipAdvance();
   }
   throw new Error(
     `isolated committed-vault ${label} tip did not stabilize during finality reobservation`,

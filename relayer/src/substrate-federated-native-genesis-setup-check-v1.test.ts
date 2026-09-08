@@ -60,12 +60,16 @@ import { buildSubstrateFederatedNativeGenesisPegInPacketV1 as buildNativePegIn,
   buildSubstrateFederatedIsolatedDevnetPegInCandidateV2 as buildLegacyPegIn }
   from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { MINER_FEE_TREE } from './ergo-encoding.js';
-import { executeSubstrateFederatedNativeGenesisBatchV1, executeSubstrateFederatedNativeGenesisPegInSourceLockV1 as executeNativeSourceLock }
+import { executeSubstrateFederatedNativeGenesisBatchV1, executeSubstrateFederatedNativeGenesisPegInSourceLockV1 as executeNativeSourceLock,
+  executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1 as executeNativeVault }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import * as rewardDiscovery from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
 import * as sourceLockAuthority from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+import * as vaultAuthority from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1 as assertNativeSourceOutputs }
   from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
+import { assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1 as assertNativeVaultOutputs }
+  from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -550,6 +554,8 @@ describe('native FED managed setup session', () => {
     onFunding: (callback: (count: number) => void) => void;
     onPost: (callback: () => void) => void;
     onConfirmation: (callback: (count: number) => number) => void;
+    onBoxRead: (callback: (id: string, count: number) => void) => void;
+    onTip: (callback: (origin: string, count: number) => { height: number; id: string }) => void;
   }) => Promise<void>) {
     const fixture = await nativePegInFixture();
     const packet = await buildNativePegIn(fixture.input);
@@ -569,6 +575,10 @@ describe('native FED managed setup session', () => {
     let postCallback = () => {};
     let confirmationCount = 0;
     let confirmationCallback = (_count: number) => 20;
+    let boxReadCount = 0;
+    let boxReadCallback = (_id: string, _count: number) => {};
+    const tipCounts = new Map<string, number>();
+    let tipCallback = (_origin: string, _count: number) => ({ height: 1020, id: '70'.repeat(32) });
     vi.spyOn(rewardDiscovery, 'discoverSubstrateFederatedRewardInputsV2').mockImplementation(async () => {
       fundingCallback(++fundingCount);
       const snapshot = freezeFixture(structuredClone(funding)); observations.add(snapshot); return snapshot as never;
@@ -579,21 +589,41 @@ describe('native FED managed setup session', () => {
     const directory = mkdtempSync(join(tmpdir(), 'e2s-native-source-lock-test-'));
     const state = new StateTracker(join(directory, 'state.sqlite'));
     let sent = false;
-    vi.spyOn(axios, 'create').mockImplementation(() => ({ get: async (path: string) => {
+    let vaultSent = false;
+    const headerId = (height: number): string => height === 1000 ? '71'.repeat(32)
+      : height === 1020 ? '70'.repeat(32) : height.toString(16).padStart(64, '0');
+    vi.spyOn(axios, 'create').mockImplementation(options => ({ get: async (path: string) => {
       if (path === '/info') return { data: { network: 'devnet', fullHeight: 1020 } };
       if (path === '/blocks/at/1') return { data: [request.target.genesisHeaderIdHex] };
       if (path === '/blocks/at/1000') return { data: ['71'.repeat(32)] };
-      if (path === '/blocks/lastHeaders/1') return { status: 200,
-        data: Buffer.from(JSON.stringify([{ height: 1020, id: '70'.repeat(32) }])) };
+      if (path === '/blocks/lastHeaders/1') {
+        const origin = options?.baseURL ?? '';
+        const count = (tipCounts.get(origin) ?? 0) + 1;
+        tipCounts.set(origin, count);
+        return { status: 200, data: Buffer.from(JSON.stringify([tipCallback(origin, count)])) };
+      }
+      const headerMatch = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(path);
+      if (headerMatch) {
+        const height = Array.from({ length: 21 }, (_, index) => 1000 + index).find(value => headerId(value) === headerMatch[1]);
+        if (height === undefined) throw new Error('unexpected source-lock fixture header');
+        return { status: 200, data: Buffer.from(JSON.stringify({ height, id: headerId(height), parentId: headerId(height - 1) })) };
+      }
       const boxMatch = /^\/utxo\/byId\/([0-9a-f]{64})$/.exec(path);
       if (boxMatch) {
-        const id = boxMatch[1];
+        const id = boxMatch[1]!;
+        boxReadCallback(id, ++boxReadCount);
         const box = id === packet.boxes.sourceFundingInput.boxId ? (sent ? null : packet.boxes.sourceFundingInput)
-          : sent ? [packet.boxes.sourceLock, packet.boxes.transitionFeeFunding].find(value => value.boxId === id) ?? null : null;
+          : vaultSent ? [packet.boxes.reserveSuccessor].find(value => value.boxId === id) ?? null
+          : [packet.boxes.reservePredecessor, ...(sent ? [packet.boxes.sourceLock, packet.boxes.transitionFeeFunding] : [])]
+            .find(value => value.boxId === id) ?? null;
         return { status: box === null ? 404 : 200, data: Buffer.from(JSON.stringify(box)) };
       }
-      if (path === `/blockchain/transaction/byId/${packet.transactions.sourceLockCreation.txId}` && sent) {
-        return { data: { id: packet.transactions.sourceLockCreation.txId,
+      const confirmedId = path === `/blockchain/transaction/byId/${packet.transactions.sourceLockCreation.txId}` && sent
+        ? packet.transactions.sourceLockCreation.txId
+        : path === `/blockchain/transaction/byId/${packet.transactions.reserveTransition.txId}` && vaultSent
+          ? packet.transactions.reserveTransition.txId : null;
+      if (confirmedId !== null) {
+        return { data: { id: confirmedId,
           numConfirmations: confirmationCallback(++confirmationCount),
           inclusionHeight: 1000, headerId: '71'.repeat(32) } };
       }
@@ -604,16 +634,20 @@ describe('native FED managed setup session', () => {
       if (body === null || typeof body !== 'object' || !('id' in body) || typeof body.id !== 'string') {
         throw new Error('source-lock fixture requires exact signed transaction ID');
       }
-      expect(body.id).toBe(packet.transactions.sourceLockCreation.txId);
+      expect([packet.transactions.sourceLockCreation.txId, packet.transactions.reserveTransition.txId]).toContain(body.id);
       expect(state.getErgoOperationalTransactionAttempt(body.id)?.status).toBe('pending');
       const signed = wasm.Transaction.from_json(JSON.stringify(body)); const id = signed.id();
       try { expect(id.to_str()).toBe(body.id); } finally { id.free(); signed.free(); }
-      sent = true; postCallback();
+      if (body.id === packet.transactions.sourceLockCreation.txId) sent = true;
+      else vaultSent = true;
+      postCallback();
       return { status: 200, data: body.id };
     });
     try { await runTest({ input: { target, batch: fixture.batch, packet, setupSession: session, state }, post, funding,
       onFunding: callback => { fundingCallback = callback; }, onPost: callback => { postCallback = callback; },
-      onConfirmation: callback => { confirmationCallback = callback; } }); }
+      onConfirmation: callback => { confirmationCount = 0; confirmationCallback = callback; },
+      onBoxRead: callback => { boxReadCount = 0; boxReadCallback = callback; },
+      onTip: callback => { tipCounts.clear(); tipCallback = callback; } }); }
     finally { state.close(); rmSync(directory, { recursive: true, force: true }); }
   }
 
@@ -743,6 +777,175 @@ describe('native FED managed setup session', () => {
       expect(post).toHaveBeenCalledTimes(1);
       expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)?.status)
         .toBe(status);
+    });
+  });
+
+  async function withNativeVault(runTest: (context: {
+    input: Parameters<typeof executeNativeVault>[0] & { state: StateTracker };
+    post: MockInstance<typeof axios.post>;
+    onPost: (callback: () => void) => void;
+    onConfirmation: (callback: (count: number) => number) => void;
+    onBoxRead: (callback: (id: string, count: number) => void) => void;
+    onTip: (callback: (origin: string, count: number) => { height: number; id: string }) => void;
+  }) => Promise<void>) {
+    await withNativeSourceLock(async context => {
+      const source = await executeNativeSourceLock(context.input);
+      context.onConfirmation(() => 20);
+      await runTest({ ...context, input: { ...context.input, sourceLockObservation: source.outputObservation } });
+    });
+  }
+
+  it('executes native deposit-to-reserve with external fees, exact checked transport and confirmed lineage', async () => {
+    await withNativeVault(async ({ input, post }) => {
+      const artifactAssert = vaultAuthority.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1;
+      const scopes: string[] = [];
+      vi.spyOn(vaultAuthority, 'assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1')
+        .mockImplementation((authorizer, authorization) => {
+          artifactAssert(authorizer, authorization);
+          scopes.push((authorization.authorizationArtifact as { authorizationScope: string }).authorizationScope);
+        });
+      const result = await executeNativeVault(input);
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+      expect(new Set(scopes)).toEqual(new Set(['fed-6-native-local-synthetic-peg-in-committed-vault-transition-only']));
+      expect(scopes.length).toBeGreaterThan(0);
+      expect(result.transportStatus).toBe('accepted');
+      expect(input.state.getErgoOperationalTransactionAttempt(result.expectedTxId)?.status).toBe('confirmed');
+      expect(result.outputObservation.boundaries.sourceLockConsumptionEstablished).toBe(true);
+      expect(result.outputObservation.boundaries.reserveLineageEstablished).toBe(true);
+      expect(result.outputObservation.boundaries.mintAuthorized).toBe(false);
+      expect(BigInt(input.packet.boxes.reserveSuccessor.value) - BigInt(input.packet.boxes.reservePredecessor.value))
+        .toBe(BigInt(input.packet.boxes.sourceLock.value));
+      assertNativeVaultOutputs(result.outputObservation, target, input.batch, input.packet);
+      session.dispose();
+      expect(() => assertNativeVaultOutputs(result.outputObservation, target, input.batch, input.packet)).toThrow(/inactive/);
+    });
+  });
+
+  it.each(['packet clone', 'batch clone', 'target clone', 'source observation clone', 'disposed'])
+    ('rejects native reserve %s before checking', async fault => {
+      await withNativeVault(async ({ input, post }) => {
+        const changed = { ...input };
+        if (fault === 'packet clone') changed.packet = { ...input.packet };
+        if (fault === 'batch clone') changed.batch = { ...input.batch };
+        if (fault === 'target clone') changed.target = { ...input.target };
+        if (fault === 'source observation clone') changed.sourceLockObservation = { ...input.sourceLockObservation };
+        if (fault === 'disposed') session.dispose();
+        await expect(executeNativeVault(changed)).rejects.toThrow(/provenance|inactive/);
+        expect(post).toHaveBeenCalledTimes(1); expect(helpers.ncheck).toHaveBeenCalledTimes(4);
+      });
+    });
+
+  it.each(['reserve', 'source lock', 'fee funding', 'restored funding'])('rejects changed native %s before reserve transport', async fault => {
+    await withNativeVault(async ({ input, post }) => {
+      const boxes = input.packet.boxes;
+      const id = fault === 'reserve' ? boxes.reservePredecessor.boxId : fault === 'source lock' ? boxes.sourceLock.boxId
+        : fault === 'fee funding' ? boxes.transitionFeeFunding.boxId : boxes.sourceFundingInput.boxId;
+      const read = readOnlyNode.AuthenticatedSpvTrackerReadOnlyNodeClient.prototype.getBoxByIdOrNull;
+      vi.spyOn(readOnlyNode.AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBoxByIdOrNull')
+        .mockImplementation(async function(this: readOnlyNode.AuthenticatedSpvTrackerReadOnlyNodeClient, boxId) {
+          const value = await read.call(this, boxId);
+          return boxId === id ? fault === 'restored funding' ? boxes.sourceFundingInput
+            : { ...(value as object), value: '1' } : value;
+        });
+      await expect(executeNativeVault(input)).rejects.toThrow(/original source funding|bytes changed|box/);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.reserveTransition.txId)).toBeNull();
+    });
+  });
+
+  it('rejects a failed fresh native reserve check without transport', async () => {
+    await withNativeVault(async ({ input, post }) => {
+      const check = vi.mocked(helpers.ncheck).getMockImplementation()!;
+      let calls = 0;
+      vi.mocked(helpers.ncheck).mockImplementation(async (...args) => ++calls === 2 ? null : check(...args));
+      await expect(executeNativeVault(input)).rejects.toThrow(/fresh JVM check rejected/);
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.each(['input observation', 'fresh check', 'transport callback'])('stops native reserve after disposal at %s', async stage => {
+    await withNativeVault(async ({ input, post, onBoxRead }) => {
+      if (stage === 'input observation') onBoxRead((_id, count) => { if (count === 1) session.dispose(); });
+      if (stage === 'fresh check') {
+        const check = vi.mocked(helpers.ncheck).getMockImplementation()!;
+        let calls = 0;
+        vi.mocked(helpers.ncheck).mockImplementation(async (...args) => {
+          const result = await check(...args);
+          if (++calls === 2) session.dispose();
+          return result;
+        });
+      }
+      if (stage === 'transport callback') {
+        const consume = fleet.consumeLocalWasmCheckedSubmissionHandleV1;
+        vi.spyOn(fleet, 'consumeLocalWasmCheckedSubmissionHandleV1').mockImplementation((handle, candidate, callback) =>
+          consume(handle, candidate, async signed => { session.dispose(); return callback(signed); }));
+      }
+      await expect(executeNativeVault(input)).rejects.toThrow(/inactive|not transported/);
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('retains and reconciles a native reserve attempt after response loss without resubmission', async () => {
+    await withNativeVault(async ({ input, post, onPost }) => {
+      onPost(() => { throw new Error('fixture reserve response lost'); });
+      const result = await executeNativeVault(input);
+      expect(result.transportStatus).toBe('reconciled'); expect(post).toHaveBeenCalledTimes(2);
+      expect(input.state.getErgoOperationalTransactionAttempt(result.expectedTxId)?.status).toBe('confirmed');
+    });
+  });
+
+  it.each([ORIGIN, WITNESS])('retains native input header history when %s advances first', async leader => {
+    await withNativeVault(async ({ input, post, onTip }) => {
+      onTip((origin, count) => {
+        const height = origin === leader ? Math.min(1020 + count, 1022) : 1019 + count;
+        return { height, id: origin !== leader && count === 2 ? 'ff'.repeat(32) : height.toString(16).padStart(64, '0') };
+      });
+      await expect(executeNativeVault(input)).rejects.toThrow(/previously observed height/);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  it('does not transport a native reserve when journal reservation fails', async () => {
+    await withNativeVault(async ({ input, post }) => {
+      vi.spyOn(input.state, 'reserveErgoOperationalTransactionAttempt').mockImplementation(() => { throw new Error('fixture reserve journal failure'); });
+      await expect(executeNativeVault(input)).rejects.toThrow('fixture reserve journal failure');
+      expect(post).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.each([ORIGIN, WITNESS])('rejects a historical header ID reused after an intervening tip from %s', async first => {
+    await withNativeVault(async ({ input, post, onTip }) => {
+      onTip((origin, count) => {
+        const height = Math.min((origin === first ? 1019 : 1020) + count, 1022);
+        return { height, id: height === 1021 ? 'b1'.repeat(32) : 'a0'.repeat(32) };
+      });
+      await expect(executeNativeVault(input)).rejects.toThrow(/reused a historical header ID/);
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  it('rejects another native reserve execution after its one-shot checker is consumed', async () => {
+    await withNativeVault(async ({ input, post }) => {
+      await executeNativeVault(input);
+      await expect(executeNativeVault(input)).rejects.toThrow(/absent|unavailable|inactive|state/);
+      expect(post).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it.each([
+    { stage: 'pending confirmation', stopAfter: 2, status: 'accepted' },
+    { stage: 'journal reconciliation', stopAfter: 4, status: 'confirmed' },
+    { stage: 'confirmed journal revalidation', stopAfter: 6, status: 'confirmed' },
+  ])('preserves reserve bookkeeping and stops after disposal during $stage', async ({ stage, stopAfter, status }) => {
+    await withNativeVault(async ({ input, post, onConfirmation }) => {
+      let reads = 0;
+      onConfirmation(count => { reads = count; if (count === stopAfter) session.dispose(); return stage === 'pending confirmation' ? 1 : 20; });
+      await expect(executeNativeVault(input)).rejects.toThrow(/inactive/);
+      expect(reads).toBe(stopAfter); expect(post).toHaveBeenCalledTimes(2);
+      expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.reserveTransition.txId)?.status).toBe(status);
     });
   });
 
