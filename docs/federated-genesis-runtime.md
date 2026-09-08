@@ -222,6 +222,37 @@ singletons have been issued. The candidate also does not prove EVM operator
 custody, a runtime compiled with those fresh attestors, target-node acceptance
 or mint authorization.
 
+## Fresh Federation Build
+
+The [FED build owner](../relayer/src/substrate-federated-genesis-node-build-v1.ts)
+accepts an open, unbound source-attestation session and derives the public
+profile bytes and ID used by Cargo. It reconstructs the three-patch source
+tree through a separate Git index and exports it to a fresh build directory.
+Every exported file is checked against its exact Git blob before and after
+compilation; the original checkout and historical outputs are not rewritten.
+
+The fixed offline command selects only `bridge-federated-v4-genesis-node`.
+The existing toolchain verifier and Cargo environment builder supply the
+locked tools, workspace hint and path-remapping policy. The owner returns the
+selected node/WASM paths, sizes and hashes while leaving custody with its
+caller. A disposed or launch-bound session cannot complete the build.
+
+Both Cargo configuration filenames are refused in the explicit Cargo home,
+source/member directories and their ancestors through the filesystem root,
+and the selected WASM build path. These checks run immediately before and
+after Cargo, without reading configuration contents. The WASM toolchain probe
+uses a fresh build-owned temporary directory. Build directories and dependency
+caches must remain exclusively controlled during compilation: before/after
+checks do not attest transient concurrent changes or the full dependency/tool
+closure. See [Cargo configuration lookup](https://doc.rust-lang.org/cargo/reference/config.html#hierarchical-structure)
+and the [pinned WASM probe](https://github.com/paritytech/polkadot-sdk/blob/bbc435c7667d3283ba280a8fec44676357392753/substrate/utils/wasm-builder/src/prerequisites.rs).
+
+Orchestration tests use stubbed subprocesses. A separate real Git export
+matched all 563 source files. The complete fresh-federation Rust build and
+running target remain to be exercised together. A fresh export has a new
+workspace path; its resulting artifact hashes must not inherit the older
+build's pins or imply cross-root reproducibility.
+
 ## Next Boundary
 
 The historical packet derives its domain from observed genesis/spec identities,
@@ -231,7 +262,7 @@ schema, which accepts quarantine only. Family runtime/application profile ID,
 V4 lineage/family ID and V4 profile ID remain distinct.
 
 Compose the observed-input compiler inside the managed Ergo target lifetime,
-build the FED runtime for the retained public federation, and bind its actual
+use the build owner for the retained public federation, and bind its actual
 genesis/spec identity on the running target. Then connect native reservation,
 its confirmed parent-state observation and the matching Ethereum mint. Keep
 pool rejection separate from whole-block rejection and preserve the ordinary
