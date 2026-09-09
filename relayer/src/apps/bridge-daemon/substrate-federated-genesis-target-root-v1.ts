@@ -13,23 +13,31 @@ import { StateTracker } from '../../state-tracker.js';
 import { verifyExecutableSha256 } from '../../native-executable-pin.js';
 import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
-import { withOwnedFederatedGenesisDevnetProcessesV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
+import { withOwnedFederatedGenesisDevnetProcessesV1, assertOwnedFederatedGenesisDevnetTargetV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
 import { collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2 } from '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1, type BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1, type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
-import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1, assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
 } from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance } from '../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
-import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2, type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2, produceSubstrateFederatedNativeGenesisMintSourceProofV1, type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import { compileObservedSubstrateFederatedGenesisV1 } from '../../substrate-federated-observed-genesis-v1.js';
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import { normalizeEip12Box } from '../../unsigned-ergo-transaction.js';
-import { executeSubstrateFederatedNativeGenesisBatchV1 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import { buildSubstrateFederatedNativeGenesisPegInPacketV1 } from '../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import { buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 } from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import { collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 } from '../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
+  executeSubstrateFederatedNativeGenesisBatchV1,
+  executeSubstrateFederatedNativeGenesisPegInSourceLockV1,
+  executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1,
+} from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import { executeFrontierNativeProofBoundReservationAndMintV1 } from './frontier-native-proof-bound-reservation-signing-v1.js';
 
 const PRIMARY = 'http://127.0.0.1:19955';
 const WITNESS = 'http://127.0.0.1:19956';
@@ -134,6 +142,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         primaryRpcUrl: PRIMARY, witnessRpcUrl: WITNESS,
         primaryP2pPort: 30355, witnessP2pPort: 30356, primaryPrometheusPort: 19615, witnessPrometheusPort: 19616,
       }, async endpoints => {
+        assertOwnedFederatedGenesisDevnetTargetV1(endpoints);
         if (endpoints.primaryRpcUrl !== PRIMARY || endpoints.witnessRpcUrl !== WITNESS) {
           throw new Error('FED owned node endpoints changed');
         }
@@ -143,6 +152,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         const batch = await setup.runNativeGenesisRetainingSigner(compiled, target);
         const assertActive = () => {
           assertCustody();
+          assertOwnedFederatedGenesisDevnetTargetV1(endpoints);
           assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
         };
         assertActive();
@@ -235,7 +245,57 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
             throw new Error('FED source genesis changed during Ergo issuance');
           }
           assertActive();
-          return Object.freeze({ genesis, transactions });
+          // Issuance funding is spent. Discover a new owned input for this deposit.
+          const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+          assertActive();
+          const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+          if (funding.target.genesisHeaderIdHex !== batch.request.target.genesisHeaderIdHex
+            || funding.target.tipHeight < Math.max(...transactions.map(receipt => receipt.confirmationHeight))) {
+            throw new Error('FED deposit funding does not follow the confirmed genesis issuance');
+          }
+          const profile = candidate.runtimeProfile;
+          const packet = await buildSubstrateFederatedNativeGenesisPegInPacketV1({
+            batch, target, sourceFundingInput: funding.genesisInputs.tracker,
+            sourceIntent: {
+              formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+              sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+              tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+              admissionProfileIdHex: profile.lineageProfileIdHex, sourceAssetIdHex: '00'.repeat(32),
+              amountNanoErg: '20000000', recipientAddressHex: retainedOperator.addressHex,
+            },
+            depositorErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+            creationHeights: { currentErgoHeight: funding.target.tipHeight,
+              sourceLockCreation: funding.target.tipHeight, reserveTransition: funding.target.tipHeight },
+          });
+          assertActive();
+          const sourceLock = await executeSubstrateFederatedNativeGenesisPegInSourceLockV1({
+            target, batch, packet, setupSession: setup, state,
+          });
+          assertActive();
+          const reserve = await executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1({
+            target, batch, packet, sourceLockObservation: sourceLock.outputObservation,
+            setupSession: setup, state,
+          });
+          assertActive();
+          const draftInputs = Object.freeze({ target, batch, packet, committedVaultObservation: reserve.outputObservation });
+          const draft = buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draftInputs);
+          const evidenceReceipt = collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1({ ...draftInputs, draft });
+          const proof = produceSubstrateFederatedNativeGenesisMintSourceProofV1(retainedSource, {
+            draftInputs, draft, evidenceReceipt, issuedAtNativeHeight: '0', expiresAtNativeHeight: '32',
+          });
+          assertActive();
+          const mint = await executeFrontierNativeProofBoundReservationAndMintV1({
+            signing: { operator: retainedOperator, sourceSession: retainedSource, draft, proof, compiled, target,
+              frontierTarget: endpoints, expectedStorage: expected, expectedGenesisHashHex: genesis },
+            attemptDirectory: mkdtempSync(join(journalDirectory, 'native-mint-')),
+            broadcastScope: 'fed-native-local-synthetic-reservation-and-mint-only',
+          });
+          assertActive();
+          return Object.freeze({ genesis, transactions, mint,
+            pegIn: Object.freeze({ sourceLockTransactionIdHex: sourceLock.expectedTxId,
+              reserveTransitionTransactionIdHex: reserve.expectedTxId, sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+              reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
+              mintIdentityHex: mint.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex }) });
         } finally {
           state.close();
         }
@@ -248,13 +308,15 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         operatorAddressHex: retainedOperator.addressHex, storageKeysChecked: Object.keys(expected).length,
         issuanceInputBoxIds: compiled.discovery.genesisBoxIds,
         issuedTransactions: running.value.transactions,
+        pegIn: running.value.pegIn, mint: running.value.mint,
         unsignedIssuance: Object.freeze(compiled.issuance.orderedTransactions.map(({ role, transaction }) =>
           Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) });
     });
     assertCustody();
-    return Object.freeze({ status: 'fresh-federated-genesis-issued' as const,
+    return Object.freeze({ status: 'fresh-federated-peg-in-minted' as const,
       ...executed.value, ergoExecution: executed.receipt,
-      singletonIssuanceEstablished: true as const, operationalMintEstablished: false as const });
+      singletonIssuanceEstablished: true as const, operationalMintEstablished: true as const,
+      sourceFinalityEstablished: false as const, trustless: false as const });
   } finally {
     try { if (ergo) await ergo.stop(); }
     finally {

@@ -254,7 +254,7 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1',
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
-    'withOwnedFederatedGenesisDevnetProcessesV1',
+    'withOwnedFederatedGenesisDevnetProcessesV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
   ])],
   ['substrate-federated-genesis-node-build-v1.ts', new Set([
     'buildSubstrateFederatedGenesisNodeV1', 'BuildSubstrateFederatedGenesisNodeV1Input',
@@ -272,6 +272,7 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ])],
   ['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts', new Set([
     'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
+    'assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1',
   ])],
   ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
     'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
@@ -284,8 +285,12 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
     'readSubstrateFederatedGenesisProfilesFromSessionV2',
     'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
+    'produceSubstrateFederatedNativeGenesisMintSourceProofV1',
   ])],
   ['substrate-federated-observed-genesis-v1.ts', new Set(['compileObservedSubstrateFederatedGenesisV1'])],
+  ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInPacketV1'])],
+  ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
+  ['substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts', new Set(['collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'])],
 ]);
 const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ...[...REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS].map(
@@ -298,7 +303,11 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['../../adapters/federated-genesis-target-observation-v1.js', new Set([
     'observeFederatedGenesisTargetsV1',
   ])],
-  ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set(['executeSubstrateFederatedNativeGenesisBatchV1'])],
+  ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
+    'executeSubstrateFederatedNativeGenesisBatchV1', 'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
+    'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
+  ])],
+  ['./frontier-native-proof-bound-reservation-signing-v1.js', new Set(['executeFrontierNativeProofBoundReservationAndMintV1'])],
   ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys', 'canonicalJson'])],
   ['node:crypto', new Set(['createHash'])],
   ['node:fs', new Set(['mkdirSync', 'mkdtempSync', 'readFileSync', 'realpathSync', 'writeFileSync'])],
@@ -1774,7 +1783,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['observeFederatedNativeMintStateV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Map([
-    ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Map([
     ['observeFederatedGenesisTargetsV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],

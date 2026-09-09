@@ -57,7 +57,16 @@ describe('layer import rules', () => {
     ['../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1'],
     ['../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', 'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'],
     ['../../authenticated-spv-tracker-read-only-node-client.js', 'createBoundedAuthenticatedSpvTrackerReadOnlySource'],
-  ])('keeps native target issuance binding %s#%s at its fixed call site', (specifier, binding) => {
+    ['../../substrate-federated-authority-safe-devnet-process-v1.js', 'assertOwnedFederatedGenesisDevnetTargetV1'],
+    ['../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', 'assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1'],
+    ['../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', 'buildSubstrateFederatedNativeGenesisPegInPacketV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisPegInSourceLockV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1'],
+    ['../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', 'buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'],
+    ['../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', 'collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'],
+    ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'produceSubstrateFederatedNativeGenesisMintSourceProofV1'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationAndMintV1'],
+  ])('keeps native target lifecycle binding %s#%s at its fixed call site', (specifier, binding) => {
     const declaration = `import { ${binding} } from '${specifier}';`;
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}();`))).toEqual([]);
     for (const escape of [`capture(${binding});`, `const escaped = ${binding};`, `function expose() { return ${binding}; }`]) {
@@ -195,8 +204,14 @@ describe('layer import rules', () => {
       expect(inspect(staticAppFixture(composition, `${declaration} ${escape}`)).map(item => item.message))
         .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
     }
-    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}({});`))
-      .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    if (binding === 'assertOwnedFederatedGenesisDevnetTargetV1') {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}({});`))).toEqual([]);
+      expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts', `${declaration} ${binding}({});`))
+        .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    } else {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}({});`))
+        .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    }
   });
 
   it('accepts the exact native target-observed signing composition', () => {
@@ -270,6 +285,9 @@ describe('layer import rules', () => {
     ['../../ergo-settlement-core/strict-json.js', 'parseStrictJson'],
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
       'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+    ['../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', 'buildSubstrateFederatedIsolatedDevnetPegInCandidateV2'],
+    ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'signFrontierNativeProofBoundReservationV1'],
     ['node:fs', 'rmSync'],
     ['node:crypto', 'createPrivateKey'],
   ])('rejects an unregistered FED genesis binding %s#%s', (specifier, binding) => {

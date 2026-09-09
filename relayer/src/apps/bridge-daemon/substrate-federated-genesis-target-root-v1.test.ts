@@ -1,16 +1,19 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Builds, compilers, observations and processes are stubs. Session/key custody,
 // root control flow, journal ownership, box codecs and bounded FED RPC decoding stay real.
+// Downstream peg-in/proof/mint stages are named component doubles, not crypto evidence.
 const mocked = vi.hoisted(() => ({
   frontier: vi.fn(), ergoBuild: vi.fn(), process: vi.fn(), owned: vi.fn(),
   discover: vi.fn(), history: vi.fn(), compile: vi.fn(), materialize: vi.fn(),
   pin: vi.fn(), nodes: vi.fn(), environment: vi.fn(),
   check: vi.fn(), batch: vi.fn(), execute: vi.fn(), source: vi.fn(), confirmation: vi.fn(),
+  frontierOwned: vi.fn(), fundingOwned: vi.fn(), packet: vi.fn(), sourceLock: vi.fn(), committedVault: vi.fn(),
+  draft: vi.fn(), evidence: vi.fn(), proof: vi.fn(), mint: vi.fn(),
 }));
 vi.mock('../../substrate-federated-genesis-node-build-v1.js', () => ({ buildSubstrateFederatedGenesisNodeV1: mocked.frontier }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () => ({ buildSubstrateFederatedIsolatedDevnetErgoNodeV1: mocked.ergoBuild }));
@@ -21,6 +24,7 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', asy
 }));
 vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
   discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1: mocked.discover,
+  assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1: mocked.fundingOwned,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', () => ({
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2: mocked.history,
@@ -35,9 +39,26 @@ vi.mock('../../substrate-federated-authority-safe-devnet-build-environment-v1.js
 }));
 vi.mock('../../substrate-federated-authority-safe-devnet-process-v1.js', () => ({
   withOwnedFederatedGenesisDevnetProcessesV1: mocked.nodes,
+  assertOwnedFederatedGenesisDevnetTargetV1: mocked.frontierOwned,
 }));
 vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', () => ({
   executeSubstrateFederatedNativeGenesisBatchV1: mocked.execute,
+  executeSubstrateFederatedNativeGenesisPegInSourceLockV1: mocked.sourceLock,
+  executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1: mocked.committedVault,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
+  buildSubstrateFederatedNativeGenesisPegInPacketV1: mocked.packet,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js')>(),
+  buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1: mocked.draft,
+}));
+vi.mock('../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js')>(),
+  collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1: mocked.evidence,
+}));
+vi.mock('./frontier-native-proof-bound-reservation-signing-v1.js', () => ({
+  executeFrontierNativeProofBoundReservationAndMintV1: mocked.mint,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js')>(),
@@ -99,6 +120,23 @@ let journalState: StateTracker | undefined;
 let observeConfirmation: ReturnType<typeof vi.fn>;
 let readErgoBox: (origin: string, id: string) => unknown;
 let readErgoTip: (origin: string) => unknown;
+let retainedSetup: any;
+let frontierEndpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>;
+let frontierActive: boolean;
+let batchActive: boolean;
+let journalDirectory: string;
+let attemptFiles: string[];
+let funding: any;
+let packet: any;
+let sourceLock: any;
+let committedVault: any;
+let draftInputs: any;
+let draft: any;
+let evidence: any;
+let proof: any;
+let mint: any;
+const downstreamStages = ['funding', 'packet', 'sourceLock', 'committedVault', 'draft', 'evidence', 'proof', 'mint'] as const;
+type DownstreamStage = typeof downstreamStages[number];
 const target = Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052' });
 const discovery = Object.freeze({ observation: Object.freeze({ genesisBoxIds: Object.freeze({
   tracker: '81'.repeat(32), duplicatePrevention: '82'.repeat(32), pooledReserve: '83'.repeat(32),
@@ -114,6 +152,30 @@ function assertDisposed() {
   if (operator) expect(() => operators.assertFederatedGenesisOperatorV1(operator!)).toThrow(/disposed/);
   if (source) expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).toThrow(/disposed/);
   if (setup) expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).toThrow(/active process provenance/);
+}
+function stageMock(stage: DownstreamStage) { return stage === 'funding' ? mocked.discover : mocked[stage]; }
+function assertDownstreamPrefix(stage: DownstreamStage) {
+  const last = downstreamStages.indexOf(stage);
+  for (const [index, name] of downstreamStages.entries()) {
+    expect(stageMock(name)).toHaveBeenCalledTimes(name === 'funding' ? 2 : index <= last ? 1 : 0);
+  }
+  expect(mocked.check).toHaveBeenCalledOnce(); expect(mocked.execute).toHaveBeenCalledOnce();
+}
+function assertDownstreamCleanup() {
+  expect(StateTracker.prototype.close).toHaveBeenCalledOnce();
+  expect(vi.mocked(StateTracker.prototype.close).mock.contexts[0]).toBe(journalState);
+  expect(order.slice(-2)).toEqual(['nodes-stop', 'stop']);
+  expect(stop).toHaveBeenCalledOnce(); assertDisposed();
+  expect(setups.createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2).toHaveBeenCalledOnce();
+  expect(sources.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2).toHaveBeenCalledOnce();
+  expect(operators.createFederatedGenesisOperatorV1).toHaveBeenCalledOnce();
+  expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toHaveLength(1);
+  for (const file of attemptFiles) expect(readFileSync(file, 'utf8')).toBe('synthetic retained attempt');
+}
+function retainAttempt(name: string, parent = journalDirectory) {
+  const path = join(parent, name);
+  writeFileSync(path, 'synthetic retained attempt', { flag: 'wx' });
+  attemptFiles.push(path);
 }
 function rawSpec() {
   return { id: 'bridge_federated_v4_genesis', bootNodes: [], genesis: { raw: { top, childrenDefault: {} } } };
@@ -148,6 +210,32 @@ beforeEach(() => {
   setup = undefined; source = undefined; operator = undefined;
   miningCredential = undefined; compiledGenesisBytes = undefined;
   compiled = undefined; batch = undefined; receipts = []; journalState = undefined;
+  retainedSetup = undefined; draftInputs = undefined; journalDirectory = ''; attemptFiles = [];
+  frontierActive = false; batchActive = true;
+  frontierEndpoints = Object.freeze({ primaryRpcUrl: PRIMARY, witnessRpcUrl: WITNESS });
+  funding = Object.freeze({ observation: Object.freeze({
+    target: Object.freeze({ tipHeight: 137, genesisHeaderIdHex: '91'.repeat(32) }),
+    genesisInputs: Object.freeze({ tracker: Object.freeze({ component: 'fresh reward funding double', boxId: 'a1'.repeat(32) }) }),
+  }) });
+  packet = Object.freeze({ component: 'native peg-in packet double',
+    boxes: Object.freeze({ sourceLock: Object.freeze({ boxId: 'a2'.repeat(32) }),
+      reserveSuccessor: Object.freeze({ boxId: 'a3'.repeat(32) }) }),
+    transactions: Object.freeze({ sourceLockCreation: Object.freeze({ txId: 'a4'.repeat(32) }),
+      reserveTransition: Object.freeze({ txId: 'a5'.repeat(32) }) }),
+  });
+  sourceLock = Object.freeze({ expectedTxId: 'a4'.repeat(32),
+    outputObservation: Object.freeze({ component: 'native source-lock observation double', sourceLockBoxIdHex: 'a2'.repeat(32) }) });
+  committedVault = Object.freeze({ expectedTxId: 'a5'.repeat(32),
+    outputObservation: Object.freeze({ component: 'native committed reserve observation double',
+      sourceLockBoxIdHex: 'a2'.repeat(32), reserveSuccessorBoxIdHex: 'a3'.repeat(32) }) });
+  draft = Object.freeze({ component: 'native reservation draft double', reservationKeyHex: '0x' + 'a6'.repeat(32) });
+  evidence = Object.freeze({ component: 'native reserve evidence double' });
+  proof = Object.freeze({ component: 'native source proof double', mintIdentityHex: draft.reservationKeyHex,
+    receiptDigestHex: 'a7'.repeat(32), result: Object.freeze({ issuedAtNativeHeight: '0', expiresAtNativeHeight: '32' }) });
+  mint = Object.freeze({ mintExecuted: true, runtimeReservationConsumed: true, amountNanoErg: '20000000',
+    mintIdentityHex: proof.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex,
+    sourceFinalityEstablished: false, trustless: false });
+  vi.spyOn(sources, 'produceSubstrateFederatedNativeGenesisMintSourceProofV1').mockImplementation(mocked.proof);
   order = []; calls = []; active = false; started = false;
   directory = mkdtempSync(join(tmpdir(), 'fed-root-component-'));
   const bridgeRoot = join(directory, 'bridge');
@@ -165,7 +253,8 @@ beforeEach(() => {
     [KEYS.enforced]: '0x01', [KEYS.bridge]: '0x' + '33'.repeat(20), '0x1234': '0x5678' };
   vi.spyOn(setups, 'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2').mockImplementation(async () => {
     order.push('setup'); setup = await makeSetup();
-    return { ...setup, runNativeGenesisRetainingSigner: mocked.check };
+    retainedSetup = { ...setup, runNativeGenesisRetainingSigner: mocked.check };
+    return retainedSetup;
   });
   vi.spyOn(sources, 'createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2').mockImplementation(value => {
     order.push('source'); source = makeSource(value); return source;
@@ -211,7 +300,14 @@ beforeEach(() => {
   });
   mocked.owned.mockImplementation(value => { if (!active || value !== target) throw new Error('target inactive'); });
   mocked.discover.mockImplementation(async (signer, value) => {
-    order.push('discover'); expect(signer).toBe(setup!.signer); expect(value).toBe(target); expect(active).toBe(true);
+    expect(signer).toBe(setup!.signer); expect(value).toBe(target); expect(active).toBe(true);
+    if (order.includes('execute')) {
+      order.push('funding');
+      expect(observeConfirmation.mock.calls.length).toBeGreaterThanOrEqual(6);
+      expect(calls.filter(call => call.method === 'state_getStorage')).toHaveLength(28);
+      return funding;
+    }
+    order.push('discover');
     return discovery;
   });
   mocked.history.mockImplementation(async value => { order.push('history'); expect(value).toBe(discovery.observation); return history; });
@@ -223,6 +319,7 @@ beforeEach(() => {
     expect(value.genesis.launchDomainHex).toBe(operator!.launchDomainHex);
     expect(value.genesis.endowments).toEqual([{ addressHex: operator!.addressHex, balance: '100000000000000000000' }]);
     expect(value.genesis.runtimeWasm).toEqual(wasm);
+    expect(value.genesis.evmChainId).toBe('4242');
     const profiles = sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!);
     const genesisJson = JSON.stringify({ component: 'typed compiler stub', operatorAddressHex: operator!.addressHex });
     compiledGenesisBytes = Buffer.from(genesisJson);
@@ -230,6 +327,9 @@ beforeEach(() => {
       mintProofProfileScaleHex: source!.binding.federatedMintProfileScaleHex,
       application: { bridgeAddressHex: '33'.repeat(20) } },
       candidate: { genesisJson, genesisJsonSha256Hex: sha256(genesisJson), runtimeProfileScaleHex: '0x0102',
+        runtimeProfile: Object.freeze({ sourceNetworkIdHex: '0x' + 'b1'.repeat(32), sidechainIdHex: '0x' + 'b2'.repeat(32),
+          bridgeAddressHex: '0x' + '33'.repeat(20), tokenAddressHex: '0x' + '44'.repeat(20),
+          settlementProfileIdHex: '0x' + 'b3'.repeat(32), lineageProfileIdHex: '0x' + 'b4'.repeat(32) }),
         runtimeProfileIdHex: '55'.repeat(32), familyIdHex: '56'.repeat(32) }, discovery: discovery.observation,
       issuance: { orderedTransactions: ['tracker', 'duplicatePrevention', 'pooledReserve'].map((role, i) => {
         const txId = String(i + 4).repeat(64);
@@ -251,8 +351,10 @@ beforeEach(() => {
     return batch;
   });
   mocked.batch.mockImplementation((value, executionTarget) => {
+    if (!active) throw new Error('target inactive');
     assertCustodyActive(); expect(active).toBe(true);
     if (value !== batch || executionTarget !== target) throw new Error('wrong native batch');
+    if (!batchActive) throw new Error('native batch inactive');
   });
   mocked.execute.mockImplementation(async value => {
     order.push('execute'); assertCustodyActive(); expect(active).toBe(true);
@@ -261,6 +363,8 @@ beforeEach(() => {
     expect(value.state).toBeInstanceOf(StateTracker); journalState = value.state;
     expect(existsSync(value.markerDirectory)).toBe(true);
     expect(value.markerDirectory.startsWith(join(directory, 'target', 'issuance-journal-'))).toBe(true);
+    journalDirectory = dirname(value.markerDirectory);
+    retainAttempt('issuance-attempt', value.markerDirectory);
     receipts = compiled.issuance.orderedTransactions.map(({ role, transaction }: any, ordinal: number) => ({
       ordinal, role, expectedTxId: transaction.txId, confirmationHeight: 100,
       confirmationHeaderIdHex: '92'.repeat(32),
@@ -303,8 +407,81 @@ beforeEach(() => {
     expect([value.primaryP2pPort, value.witnessP2pPort, value.primaryPrometheusPort, value.witnessPrometheusPort])
       .toEqual([30355, 30356, 19615, 19616]);
     expect(sha256(value.genesisJsonBytes)).toBe(value.expectedGenesisJsonSha256Hex);
-    try { return { value: await callback({ primaryRpcUrl: PRIMARY, witnessRpcUrl: WITNESS }), receipt: { component: 'FED process stub' } }; }
-    finally { order.push('nodes-stop'); }
+    frontierActive = true;
+    try { return { value: await callback(frontierEndpoints), receipt: { component: 'FED process stub' } }; }
+    finally { frontierActive = false; order.push('nodes-stop'); }
+  });
+  mocked.frontierOwned.mockImplementation(value => {
+    if (!frontierActive || value !== frontierEndpoints) throw new Error('FED target inactive');
+  });
+  mocked.fundingOwned.mockImplementation((value, executionTarget) => {
+    expect(value).toBe(funding); expect(executionTarget).toBe(target); return funding.observation;
+  });
+  mocked.packet.mockImplementation(async value => {
+    order.push('packet');
+    expect(Object.keys(value).sort()).toEqual(['batch', 'target', 'sourceFundingInput', 'sourceIntent', 'depositorErgoTreeHex', 'creationHeights'].sort());
+    expect(value.batch).toBe(batch); expect(value.target).toBe(target);
+    expect(value.sourceFundingInput).toBe(funding.observation.genesisInputs.tracker);
+    const profile = compiled.candidate.runtimeProfile;
+    expect(value.sourceIntent).toEqual({ formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+      sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+      tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+      admissionProfileIdHex: profile.lineageProfileIdHex, sourceAssetIdHex: '00'.repeat(32),
+      amountNanoErg: '20000000', recipientAddressHex: operator!.addressHex });
+    expect(value.depositorErgoTreeHex).toBe(setup!.signer.p2pkErgoTreeHex);
+    expect(value.creationHeights).toEqual({ currentErgoHeight: 137, sourceLockCreation: 137, reserveTransition: 137 });
+    return packet;
+  });
+  mocked.sourceLock.mockImplementation(async value => {
+    order.push('sourceLock');
+    expect(value).toEqual({ target, batch, packet, setupSession: retainedSetup, state: journalState });
+    expect(value.target).toBe(target); expect(value.batch).toBe(batch);
+    expect(value.setupSession).toBe(retainedSetup); expect(value.packet).toBe(packet); expect(value.state).toBe(journalState);
+    retainAttempt('source-lock-attempt'); return sourceLock;
+  });
+  mocked.committedVault.mockImplementation(async value => {
+    order.push('committedVault');
+    expect(value).toEqual({ target, batch, packet, sourceLockObservation: sourceLock.outputObservation,
+      setupSession: retainedSetup, state: journalState });
+    expect(value.target).toBe(target); expect(value.batch).toBe(batch);
+    expect(value.packet).toBe(packet); expect(value.sourceLockObservation).toBe(sourceLock.outputObservation);
+    expect(value.setupSession).toBe(retainedSetup); expect(value.state).toBe(journalState);
+    retainAttempt('reserve-transition-attempt'); return committedVault;
+  });
+  mocked.draft.mockImplementation(value => {
+    order.push('draft'); draftInputs = value;
+    expect(value).toEqual({ target, batch, packet, committedVaultObservation: committedVault.outputObservation });
+    expect(value.target).toBe(target); expect(value.batch).toBe(batch);
+    expect(value.packet).toBe(packet); expect(value.committedVaultObservation).toBe(committedVault.outputObservation);
+    return draft;
+  });
+  mocked.evidence.mockImplementation(value => {
+    order.push('evidence'); expect(value).toEqual({ ...draftInputs, draft });
+    expect(value.target).toBe(target); expect(value.batch).toBe(batch);
+    expect(value.draft).toBe(draft); expect(value.packet).toBe(packet);
+    expect(value.committedVaultObservation).toBe(committedVault.outputObservation); return evidence;
+  });
+  mocked.proof.mockImplementation((session, value) => {
+    order.push('proof'); expect(session).toBe(source);
+    expect(value).toEqual({ draftInputs, draft, evidenceReceipt: evidence, issuedAtNativeHeight: '0', expiresAtNativeHeight: '32' });
+    expect(value.draftInputs).toBe(draftInputs); expect(value.draft).toBe(draft); expect(value.evidenceReceipt).toBe(evidence);
+    return proof;
+  });
+  mocked.mint.mockImplementation(async value => {
+    order.push('mint');
+    expect(Object.keys(value).sort()).toEqual(['attemptDirectory', 'broadcastScope', 'signing']);
+    expect(value.signing).toEqual({ operator, sourceSession: source, draft, proof, compiled, target,
+      frontierTarget: frontierEndpoints, expectedStorage: top, expectedGenesisHashHex: genesis });
+    for (const [key, original] of Object.entries({ operator, sourceSession: source, draft, proof, compiled, target, frontierTarget: frontierEndpoints })) {
+      expect(value.signing[key]).toBe(original);
+    }
+    expect(value.broadcastScope).toBe('fed-native-local-synthetic-reservation-and-mint-only');
+    expect(dirname(value.attemptDirectory)).toBe(journalDirectory);
+    expect(basename(value.attemptDirectory)).toMatch(/^native-mint-.+/);
+    expect(readdirSync(value.attemptDirectory)).toEqual([]);
+    retainAttempt('native-reservation-attempt', value.attemptDirectory);
+    retainAttempt('native-mint-attempt', value.attemptDirectory);
+    return mint;
   });
   readResult = (_url, method, params) => {
     if (method === 'chain_getBlockHash') return genesis;
@@ -329,23 +506,139 @@ afterEach(() => {
 describe('fresh FED target composition', () => {
   it('binds retained custody, actual component handles and both target views, then disposes them', async () => {
     const result = await runSubstrateFederatedGenesisTargetRootV1(input);
-    expect(result.status).toBe('fresh-federated-genesis-issued');
+    expect(result.status).toBe('fresh-federated-peg-in-minted');
     expect(result.nativeGenesisHashHex).toBe(genesis);
     expect(result.operatorAddressHex).toBe(operator!.addressHex);
     expect(result.issuanceInputBoxIds).toEqual(discovery.observation.genesisBoxIds);
     expect(result.unsignedIssuance).toEqual(compiled.issuance.orderedTransactions.map(({ role, transaction }: any) => ({
       role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0].boxId,
     })));
-    expect(result.singletonIssuanceEstablished).toBe(true); expect(result.operationalMintEstablished).toBe(false);
+    expect(result.singletonIssuanceEstablished).toBe(true); expect(result.operationalMintEstablished).toBe(true);
+    expect(result.sourceFinalityEstablished).toBe(false); expect(result.trustless).toBe(false);
+    expect(result.pegIn).toEqual({ sourceLockTransactionIdHex: sourceLock.expectedTxId,
+      reserveTransitionTransactionIdHex: committedVault.expectedTxId, sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+      reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId, mintIdentityHex: mint.mintIdentityHex,
+      sourceProofReceiptDigestHex: proof.receiptDigestHex });
+    expect(Object.isFrozen(result.pegIn)).toBe(true); expect(result.mint).toBe(mint);
     expect(result.issuedTransactions).toBe(receipts); expect(observeConfirmation).toHaveBeenCalledTimes(6);
     expect(StateTracker.prototype.close).toHaveBeenCalledOnce();
     expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toHaveLength(1);
     expect(result.storageKeysChecked).toBe(6); expect(Object.isFrozen(result)).toBe(true);
     expect(order).toEqual(['setup', 'source', 'operator', 'frontier-build', 'ergo-build', 'process', 'mine',
-      'discover', 'history', 'compile', 'materialize', 'nodes', 'check', 'execute', 'nodes-stop', 'stop']);
+      'discover', 'history', 'compile', 'materialize', 'nodes', 'check', 'execute',
+      ...downstreamStages, 'nodes-stop', 'stop']);
     expect(calls.filter(call => call.method === 'state_getStorage')).toHaveLength(28);
     expect(new Set(calls.map(call => call.url))).toEqual(new Set([PRIMARY, WITNESS]));
     expect(mocked.pin).toHaveBeenCalledTimes(2); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
+    assertDownstreamPrefix('mint'); assertDownstreamCleanup();
+    expect(mocked.fundingOwned).toHaveBeenCalledOnce();
+    expect(mocked.frontierOwned).toHaveBeenCalledWith(frontierEndpoints);
+    expect(readdirSync(journalDirectory).filter(name => name.startsWith('native-mint-'))).toHaveLength(1);
+  });
+
+  it('returns only public receipt data, never portable custody or downstream handles', async () => {
+    const result = await runSubstrateFederatedGenesisTargetRootV1(input);
+    expect(Object.keys(result).sort()).toEqual(['status', 'nativeGenesisHashHex', 'frontierProcess',
+      'typedGenesisSha256Hex', 'rawSpecSha256Hex', 'runtimeProfileIdHex', 'familyIdHex', 'sourceProofProfileIdHex',
+      'nodeSha256Hex', 'wasmSha256Hex', 'operatorAddressHex', 'storageKeysChecked', 'issuanceInputBoxIds',
+      'issuedTransactions', 'pegIn', 'mint', 'unsignedIssuance', 'ergoExecution', 'singletonIssuanceEstablished',
+      'operationalMintEstablished', 'sourceFinalityEstablished', 'trustless'].sort());
+    const privateHandles = new Set([setup, retainedSetup, source, operator, miningCredential, target,
+      frontierEndpoints, batch, compiled, funding, packet, sourceLock, sourceLock.outputObservation,
+      committedVault, committedVault.outputObservation, draftInputs, draft, evidence, proof, journalState]);
+    const visit = (value: unknown) => {
+      expect(typeof value).not.toBe('function'); expect(typeof value).not.toBe('symbol');
+      if (value === null || typeof value !== 'object') return;
+      expect(privateHandles.has(value)).toBe(false);
+      expect(Object.getOwnPropertySymbols(value)).toEqual([]);
+      expect([Object.prototype, Array.prototype, null]).toContain(Object.getPrototypeOf(value));
+      for (const descriptor of Object.values(Object.getOwnPropertyDescriptors(value))) {
+        expect(descriptor.get).toBeUndefined(); expect(descriptor.set).toBeUndefined(); visit(descriptor.value);
+      }
+    };
+    visit(result); expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+
+  for (const stage of ['funding', 'packet', 'sourceLock', 'committedVault', 'mint'] as const) {
+    it.each(['source', 'setup', 'operator', 'Ergo target', 'FED target', 'batch'] as const)
+      (`holds later transactions after losing %s at awaited ${stage}`, async owner => {
+        const component = stageMock(stage);
+        const run = component.getMockImplementation()!;
+        component.mockImplementation(async (...args) => {
+          const result = await run(...args);
+          if (stage === 'funding' && result !== funding) return result;
+          if (owner === 'source') source!.dispose();
+          if (owner === 'setup') setup!.dispose();
+          if (owner === 'operator') operators.disposeFederatedGenesisOperatorV1(operator!);
+          if (owner === 'Ergo target') active = false;
+          if (owner === 'FED target') frontierActive = false;
+          if (owner === 'batch') batchActive = false;
+          return result;
+        });
+        await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(
+          /disposed|active process provenance|target inactive|batch inactive/);
+        assertDownstreamPrefix(stage); assertDownstreamCleanup();
+      });
+  }
+
+  it.each(downstreamStages)('preserves attempts and disposes all owners on %s failure without retry', async stage => {
+    const component = stageMock(stage);
+    const run = component.getMockImplementation()!;
+    const reject = () => { throw new Error(`downstream ${stage} failed`); };
+    if (['draft', 'evidence', 'proof'].includes(stage)) {
+      component.mockImplementation((...args) => { run(...args); return reject(); });
+    } else {
+      component.mockImplementation(async (...args) => {
+        const result = await run(...args);
+        if (stage === 'funding' && result !== funding) return result;
+        return reject();
+      });
+    }
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(`downstream ${stage} failed`);
+    assertDownstreamPrefix(stage); assertDownstreamCleanup();
+    expect(readdirSync(journalDirectory).filter(name => name.startsWith('native-mint-'))).toHaveLength(stage === 'mint' ? 1 : 0);
+  });
+
+  for (const stage of ['draft', 'evidence', 'proof'] as const) {
+    it.each(['source', 'setup', 'operator', 'Ergo target', 'FED target', 'batch'] as const)
+      (`holds mint after losing %s during synchronous ${stage}`, async owner => {
+        const component = stageMock(stage);
+        const run = component.getMockImplementation()!;
+        component.mockImplementation((...args) => {
+          const result = run(...args);
+          if (owner === 'source') source!.dispose();
+          if (owner === 'setup') setup!.dispose();
+          if (owner === 'operator') operators.disposeFederatedGenesisOperatorV1(operator!);
+          if (owner === 'Ergo target') active = false;
+          if (owner === 'FED target') frontierActive = false;
+          if (owner === 'batch') batchActive = false;
+          return result;
+        });
+        await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(
+          /disposed|active process provenance|target inactive|batch inactive/);
+        // Synchronous doubles can finish, but no new transaction may follow them.
+        assertDownstreamPrefix('proof'); assertDownstreamCleanup();
+        expect(readdirSync(journalDirectory).filter(name => name.startsWith('native-mint-'))).toEqual([]);
+      });
+  }
+
+  it('rejects lost FED endpoint ownership before observing genesis or allocating a journal', async () => {
+    mocked.frontierOwned.mockImplementationOnce(() => { throw new Error('FED target inactive'); });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('FED target inactive');
+    expect(fetch).not.toHaveBeenCalled(); expect(mocked.check).not.toHaveBeenCalled();
+    expect(mocked.execute).not.toHaveBeenCalled(); expect(mocked.packet).not.toHaveBeenCalled();
+    expect(StateTracker.prototype.close).not.toHaveBeenCalled();
+    expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toEqual([]);
+    expect(order.slice(-2)).toEqual(['nodes-stop', 'stop']); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
+  it.each(['provenance', 'genesis', 'height'] as const)('rejects second funding %s before constructing a packet', async fault => {
+    if (fault === 'provenance') mocked.fundingOwned.mockImplementationOnce(() => { throw new Error('funding provenance lost'); });
+    else funding = { ...funding, observation: { ...funding.observation, target: { ...funding.observation.target,
+      ...(fault === 'genesis' ? { genesisHeaderIdHex: '99'.repeat(32) } : { tipHeight: 99 }) } } };
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/funding provenance lost|does not follow/);
+    expect(mocked.fundingOwned).toHaveBeenCalledOnce();
+    assertDownstreamPrefix('funding'); assertDownstreamCleanup();
   });
 
   it.each(['top extra', 'top accessor', 'nested extra', 'nested accessor', 'different roots'])
@@ -366,7 +659,8 @@ describe('fresh FED target composition', () => {
     const expected = { ...input.frontierBuild };
     vi.mocked(setups.createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2).mockImplementationOnce(async () => {
       setup = await makeSetup(); (input.frontierBuild as any).cargoExecutablePath = 'changed';
-      return { ...setup, runNativeGenesisRetainingSigner: mocked.check };
+      retainedSetup = { ...setup, runNativeGenesisRetainingSigner: mocked.check };
+      return retainedSetup;
     });
     await runSubstrateFederatedGenesisTargetRootV1(input);
     expect(mocked.frontier.mock.calls[0][0]).toMatchObject(expected); assertDisposed();
@@ -729,8 +1023,9 @@ describe('fresh FED target composition', () => {
         if (fault === 'genesis' && method === 'state_getStorage') return top[params[0] as string] ?? null;
         return base(url, method, params);
       };
-      if (fault === 'endpoint') mocked.nodes.mockImplementationOnce(async (_value, callback) =>
-        ({ value: await callback({ primaryRpcUrl: 'http://127.0.0.1:19957', witnessRpcUrl: WITNESS }) }));
+      if (fault === 'endpoint') frontierEndpoints = Object.freeze({
+        primaryRpcUrl: 'http://127.0.0.1:19957', witnessRpcUrl: WITNESS,
+      });
       await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/endpoints changed|disagree on genesis|no longer at genesis|storage differs|pool is not empty|genesis changed/);
       expect(stop).toHaveBeenCalledOnce(); assertDisposed();
     });
