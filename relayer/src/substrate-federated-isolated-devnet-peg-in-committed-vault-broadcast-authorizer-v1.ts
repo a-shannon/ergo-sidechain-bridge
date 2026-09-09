@@ -26,7 +26,12 @@ import {
   type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2,
   type SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
 } from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 import {
@@ -37,6 +42,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   normalizeEip12Box,
@@ -135,9 +141,13 @@ interface AuthorizerMaterialV1 {
   readonly binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
   readonly batch:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>;
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+      | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
   readonly candidate:
-    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1
+      | SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  readonly assertCandidate: () => DepositPacket;
+  readonly assertSourceObservation: () => void;
   readonly executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1>;
   readonly sourceLockObservation:
@@ -159,6 +169,11 @@ const AUTHORIZERS = new WeakMap<object, AuthorizerMaterialV1>();
 const AUTHORIZATIONS = new WeakMap<object, AuthorizationMaterialV1>();
 const CLAIMED_EXECUTION_CHECKS = new WeakSet<object>();
 
+type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+type SessionInput = Pick<AuthorizerMaterialV1,
+  'target' | 'batch' | 'candidate' | 'executionCheck' | 'sourceLockObservation'>;
+
 export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
   input: Readonly<{
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
@@ -172,22 +187,42 @@ export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthori
       Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target, sourceLockObservation } = retained;
+  return createAuthorizationSession(retained,
+    () => assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(candidate, batch, target),
+    () => assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
+      sourceLockObservation, target));
+}
+
+export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2(
+  input: Readonly<Omit<SessionInput, 'batch' | 'candidate'> & {
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target, sourceLockObservation } = retained;
+  return createAuthorizationSession(retained,
+    () => assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target),
+    () => { assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2(
+      sourceLockObservation, batch, candidate, target); });
+}
+
+function createAuthorizationSession(
+  input: Readonly<SessionInput>,
+  assertCandidate: () => DepositPacket,
+  assertSourceObservation: () => void,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
-  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
-    input.candidate,
-    input.batch,
-    input.target,
-  );
+  const packet = assertCandidate();
   const checkBinding =
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(
       input.executionCheck,
       input.target,
     );
-  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
-    input.sourceLockObservation,
-    input.target,
-  );
+  assertSourceObservation();
   const check = input.executionCheck.receipt;
   const source = input.sourceLockObservation;
   if (
@@ -246,6 +281,7 @@ export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthori
           observation,
           freshJvmCheckResponseDigestHex,
         } = await recheckAgainstStableTransitionInputs(material, packet);
+        assertAuthorizer(authorizer, input.target);
         const revalidationDigestHex = sha256CanonicalJson({
           schema:
             SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
@@ -340,6 +376,8 @@ export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthori
     binding,
     batch: input.batch,
     candidate: input.candidate,
+    assertCandidate,
+    assertSourceObservation,
     executionCheck: input.executionCheck,
     sourceLockObservation: input.sourceLockObservation,
     revalidation: undefined,
@@ -441,19 +479,12 @@ function assertAuthorizer(
   ) {
     throw new Error('isolated committed-vault authorizer process binding changed');
   }
-  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
-    material.candidate,
-    material.batch,
-    material.target,
-  );
+  material.assertCandidate();
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(
     material.executionCheck,
     material.target,
   );
-  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
-    material.sourceLockObservation,
-    material.target,
-  );
+  material.assertSourceObservation();
   return material;
 }
 
@@ -516,9 +547,7 @@ function validateRevalidated(
 
 async function observeExactTransitionInputs(
   material: AuthorizerMaterialV1,
-  packet: ReturnType<
-    typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1
-  >,
+  packet: DepositPacket,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
 >> {
@@ -738,9 +767,7 @@ async function recheckExactSignedCandidate(
 
 async function recheckAgainstStableTransitionInputs(
   material: AuthorizerMaterialV1,
-  packet: ReturnType<
-    typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1
-  >,
+  packet: DepositPacket,
 ): Promise<Readonly<{
   observation: Readonly<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1

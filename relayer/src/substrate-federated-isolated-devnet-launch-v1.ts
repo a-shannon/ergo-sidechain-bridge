@@ -24,6 +24,15 @@ import {
 import type {
   SubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
+import type { SubstrateFederatedTrackerCompilerRequestV2 } from './substrate-federated-tracker-compiler-v2.js';
+import {
+  assertSubstrateFederatedTrackerJvmCompilerReceiptV2,
+  type SubstrateFederatedTrackerJvmCompilerReceiptV2,
+} from './substrate-federated-tracker-jvm-compiler-v2.js';
+import {
+  assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV2,
+  type SubstrateFederatedSettlementFamilyJvmCompilerReceiptV2,
+} from './substrate-federated-settlement-family-jvm-compiler-v2.js';
 import {
   VALIDITY_APPLICATION_POOLED_RESERVE_LEGACY_ROUTE_REQUIREMENTS_V6,
   type LegacyRouteRetirementRequirementV6,
@@ -39,9 +48,17 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-launch-statement.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-launch-baseline.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-target-descriptor.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-launch-statement.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-launch-baseline.v2' as const;
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1';
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2';
 const ERGO_HISTORY_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HISTORY_V1';
 const RELAYER_CLOSURE_DIGEST_DOMAIN =
@@ -58,6 +75,14 @@ const SIGNATURE_SET_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SIGNATURE_SET_V1';
 const BASELINE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V1';
+const STATEMENT_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V2';
+const ATTESTATION_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_ATTESTATION_V2';
+const SIGNATURE_SET_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SIGNATURE_SET_V2';
+const BASELINE_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V2';
 const G1DA_HISTORY_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_HISTORY_V1';
 const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
@@ -68,6 +93,9 @@ const ergoHistories = new WeakSet<object>();
 const relayerClosures = new WeakSet<object>();
 const launchStatements = new WeakSet<object>();
 const launchBaselines = new WeakSet<object>();
+const targetDescriptorsV2 = new WeakSet<object>();
+const launchStatementsV2 = new WeakSet<object>();
+const launchBaselinesV2 = new WeakSet<object>();
 
 type FamilyTemplates = Readonly<{
   readonly duplicatePrevention: SubstrateFederatedSettlementFamilyV1Template;
@@ -282,7 +310,8 @@ export interface SubstrateFederatedIsolatedDevnetErgoHistoryV1 {
 }
 
 export interface BuildSubstrateFederatedIsolatedDevnetErgoHistoryV1Input {
-  readonly target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1>;
+  readonly target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+    | SubstrateFederatedIsolatedDevnetTargetDescriptorV2>;
   readonly genesisHeaderIdHex: string;
   readonly genesisHeight: number;
   readonly setupAnchorHeaderIdHex: string;
@@ -308,7 +337,8 @@ export interface SubstrateFederatedIsolatedDevnetRelayerClosureV1 {
 }
 
 export interface BuildSubstrateFederatedIsolatedDevnetRelayerClosureV1Input {
-  readonly target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1>;
+  readonly target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+    | SubstrateFederatedIsolatedDevnetTargetDescriptorV2>;
   readonly gitCommitSha1Hex: string;
   readonly sourceArchive: Uint8Array;
   readonly packageLock: Uint8Array;
@@ -420,9 +450,102 @@ export interface SubstrateFederatedIsolatedDevnetLaunchBaselineV1 {
   }>;
 }
 
+export interface SubstrateFederatedIsolatedDevnetTargetDescriptorV2
+  extends Omit<SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+    'schema' | 'version' | 'settlementNetworkId'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_SCHEMA;
+  readonly version: 2;
+  readonly settlementNetworkId: 'ergo-local-devnet';
+  readonly compilerProfile: 'absolute-height-tracker-v2';
+}
+
+export interface SubstrateFederatedIsolatedDevnetLaunchStatementV2
+  extends Omit<SubstrateFederatedIsolatedDevnetLaunchStatementV1,
+    'schema' | 'version' | 'settlementNetworkId' | 'target'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V2_SCHEMA;
+  readonly version: 2;
+  readonly settlementNetworkId: 'ergo-local-devnet';
+  readonly target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV2>;
+}
+
+export interface BuildSubstrateFederatedIsolatedDevnetLaunchStatementV2Input
+  extends Omit<BuildSubstrateFederatedIsolatedDevnetLaunchStatementV1Input, 'target'> {
+  readonly target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV2>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetLaunchBaselineV2
+  extends Omit<SubstrateFederatedIsolatedDevnetLaunchBaselineV1,
+    'schema' | 'version' | 'statement'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V2_SCHEMA;
+  readonly version: 2;
+  readonly statement: Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV2>;
+}
+
 export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
   input: Readonly<DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input>,
 ): Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1> {
+  const body = {
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA,
+    version: 1 as const,
+    settlementNetworkId: 'ergo-testnet' as const,
+    ...deriveSourceCompilerClosure(input, 1),
+  };
+  const descriptor = deepFreeze({
+    ...body,
+    descriptorDigestHex: sha256CanonicalJson(
+      body,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN,
+    ),
+  });
+  targetDescriptors.add(descriptor);
+  return descriptor;
+}
+
+export interface DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input
+  extends Omit<DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input,
+    'trackerRequest' | 'trackerReceipt' | 'familyReceipt'> {
+  readonly trackerRequest: Readonly<SubstrateFederatedTrackerCompilerRequestV2>;
+  readonly trackerReceipt: Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV2>;
+  readonly familyReceipt: Readonly<SubstrateFederatedSettlementFamilyJvmCompilerReceiptV2>;
+}
+
+export type SubstrateFederatedIsolatedDevnetSourceCompilerClosureV2 = Omit<
+  SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  'schema' | 'version' | 'descriptorDigestHex' | 'settlementNetworkId'
+>;
+
+/** Source/compiled bytes only; this does not issue a V1 target or launch receipt. */
+export function deriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetSourceCompilerClosureV2> {
+  return deriveSourceCompilerClosure(input, 2);
+}
+
+export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV2> {
+  const body = {
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_SCHEMA,
+    version: 2 as const,
+    settlementNetworkId: 'ergo-local-devnet' as const,
+    compilerProfile: 'absolute-height-tracker-v2' as const,
+    ...deriveSourceCompilerClosure(input, 2),
+  };
+  const descriptor = deepFreeze({
+    ...body,
+    descriptorDigestHex: sha256CanonicalJson(
+      body, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V2_DIGEST_DOMAIN,
+    ),
+  });
+  targetDescriptorsV2.add(descriptor);
+  return descriptor;
+}
+
+function deriveSourceCompilerClosure(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input
+    | DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input>,
+  compilerVersion: 1 | 2,
+): Readonly<SubstrateFederatedIsolatedDevnetSourceCompilerClosureV2> {
   exactRecord(input, [
     'trackerRequest',
     'trackerReceipt',
@@ -442,7 +565,19 @@ export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
     'expectedSourceAttestationKeySetDigestHex',
     'expectedSourceAttestationThreshold',
   ], 'isolated-devnet target trust pins');
-  assertCompilerClosure(input);
+  if (compilerVersion === 1) {
+    assertCompilerClosure(input as DeriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1Input);
+  } else {
+    const current = input as DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input;
+    assertSubstrateFederatedTrackerJvmCompilerReceiptV2(current.trackerReceipt, current.trackerRequest);
+    assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV2(current.familyReceipt, {
+      trackerRequest: current.trackerRequest,
+      trackerReceipt: current.trackerReceipt,
+      templates: current.familyTemplates,
+      duplicatePreventionGenesisInputBoxIdHex: current.familyReceipt.profile.duplicatePreventionNftIdHex,
+      pooledReserveGenesisInputBoxIdHex: current.familyReceipt.profile.pooledReserveNftIdHex,
+    });
+  }
   const tracker = input.trackerRequest;
   const family = input.familyReceipt;
   const familyProfile = decodeSubstrateFederatedSettlementFamilyV1Profile(
@@ -479,9 +614,6 @@ export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
     throw new Error('isolated-devnet source-attestation threshold pin differs');
   }
   const body = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_V1_SCHEMA,
-    version: 1 as const,
-    settlementNetworkId: 'ergo-testnet' as const,
     sourceNetworkScope: 'isolated-devnet' as const,
     trustModel: 'federated_non_trustless' as const,
     compiler: {
@@ -532,15 +664,7 @@ export function deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV1(
     },
     boundaries: falseBoundaries(),
   };
-  const descriptor = deepFreeze({
-    ...body,
-    descriptorDigestHex: sha256CanonicalJson(
-      body,
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TARGET_DESCRIPTOR_DIGEST_DOMAIN,
-    ),
-  });
-  targetDescriptors.add(descriptor);
-  return descriptor;
+  return deepFreeze(body);
 }
 
 export function inspectSubstrateFederatedAuthoritySafeDevnetHistoryBundleV1(
@@ -563,7 +687,7 @@ export function buildSubstrateFederatedIsolatedDevnetErgoHistoryV1(
     'transactionsManifest',
     'utxoTransitionsManifest',
   ], 'isolated-devnet Ergo-history input');
-  assertTargetDescriptor(input.target);
+  assertAnyTargetDescriptor(input.target);
   const genesisHeight = nonnegativeInteger(input.genesisHeight, 'Ergo genesis height');
   const setupAnchorHeight = positiveInteger(input.setupAnchorHeight, 'Ergo setup-anchor height');
   if (setupAnchorHeight < genesisHeight) {
@@ -617,7 +741,7 @@ export function buildSubstrateFederatedIsolatedDevnetRelayerClosureV1(
     'runtimeEntrypointsManifest',
     'buildArtifact',
   ], 'isolated-devnet relayer-closure input');
-  assertTargetDescriptor(input.target);
+  assertAnyTargetDescriptor(input.target);
   const body = {
     schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_CLOSURE_V1_SCHEMA,
     version: 1 as const,
@@ -641,13 +765,27 @@ export function buildSubstrateFederatedIsolatedDevnetRelayerClosureV1(
 export function buildSubstrateFederatedIsolatedDevnetLaunchStatementV1(
   input: Readonly<BuildSubstrateFederatedIsolatedDevnetLaunchStatementV1Input>,
 ): Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1> {
+  return buildLaunchStatement(input, 1) as Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1>;
+}
+
+export function buildSubstrateFederatedIsolatedDevnetLaunchStatementV2(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetLaunchStatementV2Input>,
+): Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV2> {
+  return buildLaunchStatement(input, 2) as Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV2>;
+}
+
+function buildLaunchStatement(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetLaunchStatementV1Input
+    | BuildSubstrateFederatedIsolatedDevnetLaunchStatementV2Input>,
+  version: 1 | 2,
+) {
   exactRecord(input, [
     'activationGenerationIdHex',
     'target',
     'ergoHistory',
     'relayerClosure',
   ], 'isolated-devnet launch-statement input');
-  assertTargetDescriptor(input.target);
+  assertTargetDescriptor(input.target, version);
   assertErgoHistory(input.ergoHistory);
   assertRelayerClosure(input.relayerClosure);
   if (
@@ -665,10 +803,12 @@ export function buildSubstrateFederatedIsolatedDevnetLaunchStatementV1(
     input.relayerClosure.closureDigestHex,
   );
   const body = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V1_SCHEMA,
-    version: 1 as const,
+    schema: version === 1
+      ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V1_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_STATEMENT_V2_SCHEMA,
+    version,
     activationGenerationIdHex: digest(input.activationGenerationIdHex, 'activation generation ID'),
-    settlementNetworkId: 'ergo-testnet' as const,
+    settlementNetworkId: input.target.settlementNetworkId,
     sourceNetworkScope: 'isolated-devnet' as const,
     trustModel: 'federated_non_trustless' as const,
     target: input.target,
@@ -690,20 +830,22 @@ export function buildSubstrateFederatedIsolatedDevnetLaunchStatementV1(
       emptyGlobalReplayRequired: true as const,
     },
   };
-  const statementDigestHex = sha256CanonicalJson(body, STATEMENT_DIGEST_DOMAIN);
+  const statementDigestHex = sha256CanonicalJson(
+    body, version === 1 ? STATEMENT_DIGEST_DOMAIN : STATEMENT_V2_DIGEST_DOMAIN,
+  );
   const statement = deepFreeze({
     ...body,
     statementDigestHex,
     attestationDigestHex:
-      deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
+      deriveLaunchAttestationDigest({
         statementDigestHex,
         sourceAttestationKeySetDigestHex:
           input.target.federation.sourceAttestationKeySetDigestHex,
         sourceAttestationThreshold:
           input.target.federation.sourceAttestationThreshold,
-      }),
+      }, version),
   });
-  launchStatements.add(statement);
+  (version === 1 ? launchStatements : launchStatementsV2).add(statement);
   return statement;
 }
 
@@ -711,6 +853,19 @@ export function deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1(
   input: Readonly<
     DeriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1Input
   >,
+): string {
+  return deriveLaunchAttestationDigest(input, 1);
+}
+
+export function deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV2(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1Input>,
+): string {
+  return deriveLaunchAttestationDigest(input, 2);
+}
+
+function deriveLaunchAttestationDigest(
+  input: Readonly<DeriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1Input>,
+  version: 1 | 2,
 ): string {
   exactRecord(
     input,
@@ -734,7 +889,7 @@ export function deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1(
       input.sourceAttestationThreshold,
       'launch source-attestation threshold',
     ),
-  }, ATTESTATION_DIGEST_DOMAIN);
+  }, version === 1 ? ATTESTATION_DIGEST_DOMAIN : ATTESTATION_V2_DIGEST_DOMAIN);
 }
 
 export function buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1(
@@ -745,18 +900,39 @@ export function buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1(
       readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV1> {
+  return buildLaunchBaseline(input, 1) as Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV1>;
+}
+
+export function buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2(
+  input: Readonly<{
+    readonly statement: Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV2>;
+    readonly signatures: readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV2> {
+  return buildLaunchBaseline(input, 2) as Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV2>;
+}
+
+function buildLaunchBaseline(
+  input: Readonly<{
+    readonly statement: Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1
+      | SubstrateFederatedIsolatedDevnetLaunchStatementV2>;
+    readonly signatures: readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
+  }>,
+  version: 1 | 2,
+) {
   exactRecord(input, ['statement', 'signatures'], 'isolated-devnet launch-baseline input');
-  assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance(
-    input.statement,
-  );
+  if (version === 1) assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance(input.statement);
+  else assertSubstrateFederatedIsolatedDevnetLaunchStatementV2Provenance(input.statement);
   const signatures = normalizeAndVerifySignatures(input.signatures, input.statement);
   const signatureSetDigestHex = sha256CanonicalJson(
     signatures,
-    SIGNATURE_SET_DIGEST_DOMAIN,
+    version === 1 ? SIGNATURE_SET_DIGEST_DOMAIN : SIGNATURE_SET_V2_DIGEST_DOMAIN,
   );
   const binding = {
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V1_SCHEMA,
-    version: 1 as const,
+    schema: version === 1
+      ? SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V1_SCHEMA
+      : SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LAUNCH_BASELINE_V2_SCHEMA,
+    version,
     status: 'authenticated_federated_isolated_devnet_baseline' as const,
     statement: input.statement,
     signatures,
@@ -789,9 +965,11 @@ export function buildSubstrateFederatedIsolatedDevnetLaunchBaselineV1(
   };
   const baseline = deepFreeze({
     ...binding,
-    baselineDigestHex: sha256CanonicalJson(binding, BASELINE_DIGEST_DOMAIN),
+    baselineDigestHex: sha256CanonicalJson(
+      binding, version === 1 ? BASELINE_DIGEST_DOMAIN : BASELINE_V2_DIGEST_DOMAIN,
+    ),
   });
-  launchBaselines.add(baseline);
+  (version === 1 ? launchBaselines : launchBaselinesV2).add(baseline);
   return baseline;
 }
 
@@ -800,6 +978,14 @@ export function assertSubstrateFederatedIsolatedDevnetLaunchBaselineV1Provenance
 ): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV1> {
   if (value === null || typeof value !== 'object' || !launchBaselines.has(value)) {
     throw new Error('isolated-devnet launch baseline was not built in this process');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetLaunchBaselineV2Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLaunchBaselineV2> {
+  if (value === null || typeof value !== 'object' || !launchBaselinesV2.has(value)) {
+    throw new Error('isolated-devnet V2 launch baseline was not built in this process');
   }
 }
 
@@ -1075,7 +1261,8 @@ function buildRouteCoverage(
 
 function normalizeAndVerifySignatures(
   raw: readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[],
-  statement: Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1>,
+  statement: Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1
+    | SubstrateFederatedIsolatedDevnetLaunchStatementV2>,
 ): readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[] {
   if (!Array.isArray(raw) || raw.length !== statement.target.federation.sourceAttestationThreshold) {
     throw new Error('isolated-devnet launch requires the exact source-attestation threshold');
@@ -1134,7 +1321,8 @@ function assertCompilerClosure(
 }
 
 function assertCompilerSemanticJoin(
-  tracker: Readonly<SubstrateFederatedTrackerCompilerRequestV1>,
+  tracker: Readonly<Pick<SubstrateFederatedTrackerCompilerRequestV1,
+    'trackerNftIdHex' | 'application' | 'profile'>>,
   family: ReturnType<typeof decodeSubstrateFederatedSettlementFamilyV1Profile>,
 ): void {
   const pairs: readonly (readonly [unknown, unknown, string])[] = [
@@ -1844,10 +2032,18 @@ function sortG1cCanonical(value: unknown): unknown {
 
 function assertTargetDescriptor(
   value: unknown,
-): asserts value is Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1> {
-  if (value === null || typeof value !== 'object' || !targetDescriptors.has(value)) {
+  version: 1 | 2,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+  | SubstrateFederatedIsolatedDevnetTargetDescriptorV2> {
+  const descriptors = version === 1 ? targetDescriptors : targetDescriptorsV2;
+  if (value === null || typeof value !== 'object' || !descriptors.has(value)) {
     throw new Error('isolated-devnet target descriptor lacks process provenance');
   }
+}
+
+function assertAnyTargetDescriptor(value: unknown): void {
+  if (value !== null && typeof value === 'object' && targetDescriptorsV2.has(value)) return;
+  assertTargetDescriptor(value, 1);
 }
 
 function assertErgoHistory(
@@ -1870,6 +2066,24 @@ export function assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenanc
   value: unknown,
 ): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1> {
   if (value === null || typeof value !== 'object' || !launchStatements.has(value)) {
+    throw new Error('isolated-devnet launch statement lacks process provenance');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetLaunchStatementV2Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV2> {
+  if (value === null || typeof value !== 'object' || !launchStatementsV2.has(value)) {
+    throw new Error('isolated-devnet V2 launch statement lacks process provenance');
+  }
+}
+
+export function assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLaunchStatementV1
+  | SubstrateFederatedIsolatedDevnetLaunchStatementV2> {
+  if (value === null || typeof value !== 'object'
+    || (!launchStatements.has(value) && !launchStatementsV2.has(value))) {
     throw new Error('isolated-devnet launch statement lacks process provenance');
   }
 }

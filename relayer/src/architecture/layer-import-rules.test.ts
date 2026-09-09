@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -14,7 +18,359 @@ function inspect(files: Record<string, string>) {
   return inspectLayerImports(sourceFiles);
 }
 
+const MANAGED_SETUP_V2 =
+  'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts';
+const TRACKER_V2_CAMPAIGN_ROOT =
+  'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts';
+const GENESIS_SETUP_ROOT =
+  'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+
+function staticAppFixture(file: string, source: string): Record<string, string> {
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.ES2022, true);
+  const files: Record<string, string> = {};
+  // Resolve direct source edges without loading or executing their runtime modules.
+  for (const statement of parsed.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    const specifier = statement.moduleSpecifier.text;
+    if (!specifier.startsWith('.')) continue;
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier))
+      .replace(/\.js$/, '.ts');
+    files[target] = 'export {};';
+  }
+  files[file] = source;
+  return files;
+}
+
 describe('layer import rules', () => {
+  it.each(['local export', 'alias export', 'returned function', 'assigned function'])('rejects the fixed worker authority escape through %s', mode => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
+    const specifier = '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
+    const escape = mode === 'local export' ? `export { ${binding} };`
+      : mode === 'alias export' ? `export { ${binding} as exposed };`
+        : mode === 'returned function' ? `function expose(){ return ${binding}; }`
+          : `const exposed = ${binding};`;
+    const violations = inspect(staticAppFixture(worker, `import { ${binding} } from '${specifier}'; ${escape}`));
+    expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+  });
+
+  it.each([
+    'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot',
+    'runSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignRoot',
+    'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CheckCampaignReceipt',
+    'runSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignRoot',
+    'assertSubstrateFederatedIsolatedDevnetWithdrawalV2CampaignReceipt',
+  ])('permits only the fixed V2 worker to import %s', binding => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const rootSpecifier = '../apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.js';
+    expect(inspect(staticAppFixture(worker, `import { ${binding} } from '${rootSpecifier}'; ${binding}();`))).toEqual([]);
+    expect(inspect(staticAppFixture('scripts/foreign-worker.ts',
+      `import { ${binding} } from '${rootSpecifier}'; ${binding}();`)).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${rootSpecifier}#${binding}`,
+    );
+    expect(inspect(staticAppFixture(worker,
+      `import { ${binding} as run } from '${rootSpecifier}'; run();`)).map(item => item.message)).toEqual([
+      `exclusive authority import must not be aliased: ${rootSpecifier}#${binding}`,
+    ]);
+    expect(inspect(staticAppFixture(worker,
+      `import * as root from '${rootSpecifier}'; root.${binding}();`)).map(item => item.message)).toEqual([
+      `exclusive authority module must use named runtime imports: ${rootSpecifier}`,
+    ]);
+    expect(inspect({
+      [TRACKER_V2_CAMPAIGN_ROOT]: 'export {};',
+      [worker]: `export { ${binding} } from '${rootSpecifier}';`,
+    }).map(item => item.message)).toContain(
+      `exclusive authority module must use named runtime imports: ${rootSpecifier}`,
+    );
+  });
+
+  it('keeps the V2 worker behind its exact command and rejects alternate callers', () => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';
+    const specifier = './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js';
+    const source = `const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments } = await import('${specifier}');`;
+    expect(inspect({ [worker]: 'export {};', [command]: source })).toEqual([]);
+    const diagnosticSource = source.replace('WorkerFromArguments }',
+      'WorkerFromArguments, formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure }');
+    expect(inspect({ [worker]: 'export {};', [command]: diagnosticSource })).toEqual([]);
+    expect(inspect({ [worker]: 'export {};', 'scripts/unregistered.ts': source }).map(item => item.message)).toContain(
+      `exclusive runtime module import has the wrong owner: ${specifier}`,
+    );
+  });
+
+  it.each(['local export', 'returned function', 'assigned function'])('rejects a command capability escape through %s', mode => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments';
+    const escape = mode === 'local export' ? `export { ${binding} };`
+      : mode === 'returned function' ? `function expose(){ return ${binding}; }`
+        : `const exposed = ${binding};`;
+    const violations = inspect({ [worker]: 'export {};', [command]:
+      `const { ${binding} } = await import('./run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js'); ${escape}` });
+    expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+  });
+
+  it.each([
+    'const worker = await import(SPECIFIER);',
+    'const worker = await import(SPECIFIER_LITERAL);',
+    'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments: run } = await import(SPECIFIER_LITERAL);',
+    'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments, formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure: format } = await import(SPECIFIER_LITERAL);',
+    'const { runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments, unknownCapability } = await import(SPECIFIER_LITERAL);',
+  ])('rejects a non-canonical dynamic command binding: %s', declaration => {
+    const worker = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts';
+    const command = 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts';
+    const specifier = './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js';
+    const source = declaration.replace('SPECIFIER_LITERAL', `'${specifier}'`);
+    const expected = declaration.includes('SPECIFIER_LITERAL')
+      ? `exclusive authority module must use named runtime imports: ${specifier}`
+      : 'unclassified runtime modules require a static string import target';
+    expect(inspect({ [worker]: 'export {};', [command]: source }).map(item => item.message)).toContain(expected);
+  });
+
+  it('rejects a local root re-export through worker and command to an unregistered consumer', () => {
+    const stem = 'substrate-federated-isolated-devnet-tracker-v2-campaign';
+    const binding = 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot';
+    const violations = inspect({
+      [`apps/bridge-daemon/${stem}-root.ts`]: `export function ${binding}(_input: unknown) {}`,
+      [`scripts/run-${stem}-worker.ts`]: `import { ${binding} } from '../apps/bridge-daemon/${stem}-root.js'; export { ${binding} };`,
+      [`scripts/run-${stem}.ts`]: `export { ${binding} } from './run-${stem}-worker.js';`,
+      'scripts/foreign-worker.ts': `import { ${binding} } from './run-${stem}.js'; ${binding}({});`,
+    });
+    expect(violations.map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+  });
+
+  it.each([MANAGED_SETUP_V2, TRACKER_V2_CAMPAIGN_ROOT, GENESIS_SETUP_ROOT])(
+    'accepts the actual reviewed app source without executing it: %s', file => {
+      const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+      expect(inspect(staticAppFixture(file, source))).toEqual([]);
+    },
+  );
+
+  it.each([
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/frontier-lab-application-owner-v1', 'claimFrontierLabApplicationOwnerRequestV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/frontier-lab-application-owner-v1', 'disposeFrontierLabApplicationOwnerV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1', 'claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1', 'consumeSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'substrate-federated-isolated-devnet-setup-check-runner-v2', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'substrate-federated-isolated-devnet-mining-credential-v1', 'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    [MANAGED_SETUP_V2, 'substrate-federated-isolated-devnet-portable-replay-v1', 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2'],
+  ])('pins the V2 lifecycle import %s -> %s#%s to its exact owner', (owner, module, binding) => {
+    const specifier = `../../${module}.js`;
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect(staticAppFixture(owner, source))).toEqual([]);
+    const otherOwner = owner === MANAGED_SETUP_V2 ? TRACKER_V2_CAMPAIGN_ROOT : MANAGED_SETUP_V2;
+    expect(inspect(staticAppFixture(otherOwner, source)).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${specifier}#${binding}`,
+    );
+    expect(inspect({
+      [`${module}.ts`]: 'export {};',
+      'unowned-v2-campaign.ts': `import { ${binding} } from './${module}.js'; ${binding}();`,
+    }).map(item => item.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./${module}.js#${binding}`,
+    ]);
+    expect(inspect(staticAppFixture(owner,
+      `import { ${binding} as escaped } from '${specifier}'; escaped();`,
+    )).map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${specifier}#${binding}`,
+    );
+  });
+
+  it.each([
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Check'],
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2'],
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-portable-replay-v1.js', 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1'],
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    [MANAGED_SETUP_V2, './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../adapters/frontier-lab-application-owner-v1.js', 'createFrontierLabApplicationOwnerV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../adapters/frontier-lab-application-owner-v1.js', 'signFrontierLabApplicationCallsOnceV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../substrate-federated-isolated-devnet-mining-credential-v1.js', 'issueSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Transport'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.js', 'createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3'],
+    [TRACKER_V2_CAMPAIGN_ROOT, 'node:fs', 'readFileSync'],
+  ])('rejects a capability outside the V2 allowlist: %s -> %s#%s', (file, specifier, binding) => {
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    expect(inspect(staticAppFixture(file, source)).map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${specifier}#${binding}`,
+    );
+  });
+
+  it.each([
+    [MANAGED_SETUP_V2, '../../substrate-federated-isolated-devnet-portable-replay-v1.js', 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-managed-setup-v2.js', 'executeSubstrateFederatedIsolatedDevnetManagedSetupV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'finalizeReceipt'],
+  ])('keeps V2 capability values inside direct calls: %s -> %s#%s', (file, specifier, binding) => {
+    const imported = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(file, `${imported} ${binding}();`))).toEqual([]);
+    for (const use of [`const escaped = ${binding};`, `capture(${binding});`, `export { ${binding} };`]) {
+      expect(inspect(staticAppFixture(file, `${imported} ${use}`)).map(item => item.message)).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(/restricted capability binding must not (?:escape its reviewed call|be re-exported)/),
+        ]),
+      );
+    }
+    for (const source of [
+      `import * as authority from '${specifier}';`,
+      `await import('${specifier}');`,
+      `require('${specifier}');`,
+      `export * from '${specifier}';`,
+    ]) {
+      expect(inspect(staticAppFixture(file, `${imported} ${source}`)).map(item => item.message)).toEqual(
+        expect.arrayContaining([expect.stringMatching(/must use (?:reviewed named bindings|named runtime imports)/)]),
+      );
+    }
+  });
+
+  it.each([MANAGED_SETUP_V2, TRACKER_V2_CAMPAIGN_ROOT, GENESIS_SETUP_ROOT])(
+    'rejects an additional public export from %s', file => {
+      expect(inspect({ [file]: 'export const unexpectedAuthority = () => {};' }).map(item => item.message))
+        .toEqual(['reviewed app root export is not allowlisted: unexpectedAuthority']);
+    },
+  );
+
+  it.each([
+    [MANAGED_SETUP_V2, './ergo-operational-transaction.js', 'runErgoOperationalTransaction'],
+    [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-managed-setup-v2.js', 'executeSubstrateFederatedIsolatedDevnetManagedSetupV2'],
+    [TRACKER_V2_CAMPAIGN_ROOT, '../../state-tracker.js', 'StateTracker'],
+  ])('allows erased V2 type references but not runtime capability values: %s#%s',
+    (file, specifier, binding) => {
+      const imported = `import { ${binding} } from '${specifier}';`;
+      expect(inspect(staticAppFixture(file,
+        `${imported} type Input = Parameters<typeof ${binding}>; type Instance = ${binding};`,
+      ))).toEqual([]);
+      for (const use of [
+        `const escaped = typeof ${binding};`,
+        `const escaped = ${binding} as unknown as typeof ${binding};`,
+        `const escaped = { authority: ${binding} };`,
+      ]) {
+        expect(inspect(staticAppFixture(file, `${imported} ${use}`)).map(item => item.message))
+          .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+      }
+    },
+  );
+
+  it('allows only the existing replay CLI function through a caught dynamic binding', () => {
+    const file = 'scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts';
+    const target = 'substrate-federated-isolated-devnet-portable-replay-v1.ts';
+    const specifier = `../${target.replace(/\.ts$/, '.js')}`;
+    const binding = 'replaySubstrateFederatedIsolatedDevnetPortableV1';
+    const authority = 'takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2';
+    const source = `async function main() {
+      const { ${binding} } = await import('${specifier}'); ${binding}();
+    } main().catch(() => {});`;
+    expect(inspect({ [file]: source, [target]: 'export {};' })).toEqual([]);
+    const actual = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    expect(inspect({ [file]: actual, [target]: 'export {};' })).toEqual([]);
+    for (const expression of [
+      `const module = await import('${specifier}');`,
+      `const { ${authority} } = await import('${specifier}');`,
+      `const { ${binding}, ${authority} } = await import('${specifier}');`,
+      `const { ${binding}, ...rest } = await import('${specifier}');`,
+      `const { ${binding}: alias } = await import('${specifier}');`,
+      `const { ${binding} = fallback } = await import('${specifier}');`,
+      `let { ${binding} } = await import('${specifier}');`,
+      `const [{ ${binding} }] = await Promise.all([import('${specifier}')]);`,
+      `const { ${binding} } = await import('.././${target.replace(/\.ts$/, '.js')}');`,
+    ]) {
+      expect(inspect({ [file]: expression, [target]: 'export {};' }).map(item => item.message))
+        .toEqual([expect.stringContaining('exclusive authority module must use named runtime imports')]);
+    }
+    expect(inspect({ 'scripts/unowned-replay.ts': source, [target]: 'export {};' })
+      .map(item => item.message))
+      .toEqual([expect.stringContaining('exclusive authority module must use named runtime imports')]);
+  });
+
+  it('allows exactly the seven extracted genesis helpers and the V2 public entry points', () => {
+    expect(inspect({
+      [GENESIS_SETUP_ROOT]: `
+        export const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS = 1;
+        export function normalizeTrackerTransportJournalRootV9() {}
+        export function assertReservedTrackerTransportJournalRootV9() {}
+        export function normalizePegInCandidatePlan() {}
+        export function normalizeFrontierApplicationRunnerPlan() {}
+        export function waitForCanonicalConfirmation() {}
+        export function finalizeReceipt() {}
+      `,
+      [MANAGED_SETUP_V2]: `
+        export interface ExecuteSubstrateFederatedIsolatedDevnetManagedSetupV2Input {}
+        export function executeSubstrateFederatedIsolatedDevnetManagedSetupV2() {}
+      `,
+      [TRACKER_V2_CAMPAIGN_ROOT]: `
+        export type RunSubstrateFederatedIsolatedDevnetTrackerV2CampaignInput = unknown;
+        export function runSubstrateFederatedIsolatedDevnetTrackerV2CampaignRoot() {}
+        export type SubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt = unknown;
+        export function assertSubstrateFederatedIsolatedDevnetTrackerV2CampaignReceipt() {}
+      `,
+    })).toEqual([]);
+  });
+
+  it('permits only the reviewed V2 constant values to leave direct-call positions', () => {
+    const managed = `
+      import { PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION } from '../../peg-in-causal-admission-v2.js';
+      import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2
+      } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+      import { PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+        SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
+      } from '../../relayer-core/ergo-operational-transaction-lifecycle.js';
+      capture(PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_MAX_PENDING_BLOCKS_V2,
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MINT_RUNTIME_ACTIVATION_HEIGHT_V2,
+        PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+        SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE);
+    `;
+    const root = `
+      import { SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN
+      } from '../../substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
+      import { APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS
+      } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+      capture(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS);
+    `;
+    expect(inspect(staticAppFixture(MANAGED_SETUP_V2, managed))).toEqual([]);
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT, root))).toEqual([]);
+  });
+
+  it.each([
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Check', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'checkSubstrateFederatedIsolatedDevnetTrackerV2Transport', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'claimSubstrateFederatedIsolatedDevnetTrackerV2Transport', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'assertSubstrateFederatedIsolatedDevnetTrackerV2TransportReady', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2TransportJournal', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2TransportJournal', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle'],
+    ['substrate-federated-isolated-devnet-ergo-node-process-v1', 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2', 'substrate-federated-isolated-devnet-setup-check-execution-v2'],
+  ])('keeps the V2 admission capability %s#%s in its concrete owner', (module, symbol, owner) => {
+    const source = `import { ${symbol} } from './${module}.js'; ${symbol}();`;
+    const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
+    expect(inspect({ ...producer, [`${owner}.ts`]: source })).toEqual([]);
+    expect(inspect({ ...producer, 'other-admission-caller.ts': source }).map(item => item.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
+    ]);
+  });
+
+  it.each([
+    'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+    'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
+    'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2',
+  ])('keeps withdrawal orchestration %s in the owned campaign', symbol => {
+    const module = 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle';
+    const source = `import { ${symbol} } from '../../${module}.js'; ${symbol}();`;
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT, source))).toEqual([]);
+    expect(inspect({ [`${module}.ts`]: `export const ${symbol} = () => {};`,
+      'other-withdrawal-caller.ts': `import { ${symbol} } from './${module}.js'; ${symbol}();` })
+      .map(item => item.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
+    ]);
+  });
+
   it('classifies only physical architecture layers', () => {
     expect(classifyBridgeLayer('ergo-settlement-core/codec.ts')).toBe('ergo-settlement-core');
     expect(classifyBridgeLayer('profiles/substrate-grandpa-v1/statement.ts')).toBe('profiles');
@@ -248,6 +604,43 @@ describe('layer import rules', () => {
     );
   });
 
+  it.each([
+    ['../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
+      'runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3'],
+    ['../../substrate-federated-isolated-devnet-frontier-peg-out-application-runner-v1.js',
+      'assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance'],
+    ['../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+      'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance'],
+    ['./frontier-lab-proof-bound-application-signing-v1.js',
+      'signFrontierLabProofBoundApplicationV1'],
+    ['./frontier-lab-proof-bound-application-signing-v1.js',
+      'signFrontierLabProofBoundApplicationV2'],
+    ['../../substrate-federated-isolated-devnet-packet-producer-v1.js',
+      'createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4'],
+    ['../../substrate-federated-isolated-devnet-packet-producer-v1.js',
+      'assertSubstrateFederatedIsolatedDevnetPacketV3Provenance'],
+  ])('keeps the signed application capability %s#%s inside reviewed calls', (specifier, binding) => {
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
+    const target = specifier.startsWith('../../')
+      ? specifier.slice(6).replace(/\.js$/, '.ts')
+      : `apps/bridge-daemon/${specifier.slice(2).replace(/\.js$/, '.ts')}`;
+    const sources = { [target]: `export function ${binding}() {}` };
+    const importStatement = `import { ${binding} } from '${specifier}';`;
+    expect(inspect({ ...sources, [root]: `${importStatement} ${binding}();` })).toEqual([]);
+    for (const escape of [`export { ${binding} };`, `export const escaped = ${binding};`]) {
+      expect(inspect({ ...sources, [root]: `${importStatement} ${escape}` })
+        .map(value => value.message)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/restricted capability binding must not (?:be re-exported|escape its reviewed call)/),
+      ]));
+    }
+    expect(inspect({
+      ...sources,
+      [root]: `import { ${binding} as replacement } from '${specifier}'; replacement();`,
+    }).map(value => value.message)).toContain(
+      `${specifier.startsWith('../../') ? 'restricted capability import binding' : 'exclusive authority import'} must not be aliased: ${specifier}#${binding}`,
+    );
+  });
+
   it('reserves isolated signer and mining authority imports to exact owners', () => {
     const signerBinding =
       'substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts';
@@ -327,6 +720,37 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it('reserves fresh LAB owner creation and request binding to the canonical producer', () => {
+    const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
+    const create = 'createFrontierLabApplicationOwnerV1';
+    const bind = 'bindFrontierLabApplicationOwnerRequestV1';
+    const moduleSource = `export const ${create} = () => {}; export const ${bind} = () => {};`;
+    expect(inspect({
+      [ownerModule]: moduleSource,
+      'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts': `
+        import { ${create}, ${bind} } from '../adapters/frontier-lab-application-owner-v1.js';
+      `,
+    })).toEqual([]);
+    for (const binding of [create, bind]) {
+      expect(inspect({
+        [ownerModule]: moduleSource,
+        'unreviewed-owner.ts': `
+          import { ${binding} as issue } from './adapters/frontier-lab-application-owner-v1.js';
+        `,
+      }).map(violation => violation.message)).toEqual([
+        `exclusive authority import has the wrong owner: ./adapters/frontier-lab-application-owner-v1.js#${binding}`,
+      ]);
+    }
+    expect(inspect({
+      [ownerModule]: moduleSource,
+      'namespace-owner.ts': `
+        import * as custody from './adapters/frontier-lab-application-owner-v1.js';
+      `,
+    }).map(violation => violation.message)).toEqual([
+      'exclusive authority module must use named runtime imports: ./adapters/frontier-lab-application-owner-v1.js',
+    ]);
+  });
+
   it('reserves bootstrap request provenance issuance and claiming to V9 owners', () => {
     const bindingModule =
       'adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.ts';
@@ -369,6 +793,85 @@ describe('layer import rules', () => {
       `exclusive authority import has the wrong owner: ./adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js#${project}`,
       `exclusive authority import has the wrong owner: ./scripts/run-substrate-federated-isolated-devnet-bootstrap-worker-v1.js#${load}`,
     ]);
+  });
+
+  it('reserves fresh custody claiming to the campaign root without granting it creation authority', () => {
+    const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
+    const claim = 'claimFrontierLabApplicationOwnerRequestV1';
+    const create = 'createFrontierLabApplicationOwnerV1';
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const source = `export const ${claim} = () => {}; export const ${create} = () => {};`;
+    expect(inspect({
+      [ownerModule]: source,
+      [root]: `import { ${claim} } from '../../adapters/frontier-lab-application-owner-v1.js';`,
+    })).toEqual([]);
+    for (const importer of [
+      'scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts',
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts',
+    ]) {
+      const path = importer.startsWith('apps/') ? '../../' : '../';
+      expect(inspect({
+        [ownerModule]: source,
+        [importer]: `import { ${claim} as take } from '${path}adapters/frontier-lab-application-owner-v1.js';`,
+      }).map(value => value.message)).toContain(
+        `exclusive authority import has the wrong owner: ${path}adapters/frontier-lab-application-owner-v1.js#${claim}`,
+      );
+    }
+    expect(inspect({
+      [ownerModule]: source,
+      [root]: `import { ${create} } from '../../adapters/frontier-lab-application-owner-v1.js';`,
+    }).map(value => value.message)).toContain(
+      `exclusive authority import has the wrong owner: ../../adapters/frontier-lab-application-owner-v1.js#${create}`,
+    );
+  });
+
+  it.each(['signFrontierLabProofBoundApplicationV1', 'signFrontierLabProofBoundApplicationV2'])(
+    'reserves scoped LAB signing %s to the retained-packet root', compose => {
+    const ownerModule = 'adapters/frontier-lab-application-owner-v1.ts';
+    const sign = 'signFrontierLabApplicationCallsOnceV1';
+    const composition = 'apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.ts';
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-frontier-application-checkpoint-root-v3.ts';
+    const sources = {
+      [ownerModule]: `export const ${sign} = () => {};`,
+      [composition]: `import { ${sign} } from '../../adapters/frontier-lab-application-owner-v1.js'; export const ${compose} = () => {};`,
+    };
+    expect(inspect({
+      ...sources,
+      [root]: `import { ${compose} } from './frontier-lab-proof-bound-application-signing-v1.js';`,
+    })).toEqual([]);
+    for (const importer of [root, 'apps/bridge-daemon/unreviewed-lab-signing.ts']) {
+      expect(inspect({
+        ...sources,
+        [importer]: `import { ${sign} } from '../../adapters/frontier-lab-application-owner-v1.js';`,
+      }).map(value => value.message)).toContain(
+        `exclusive authority import has the wrong owner: ../../adapters/frontier-lab-application-owner-v1.js#${sign}`,
+      );
+    }
+    expect(inspect({
+      ...sources,
+      'unreviewed-lab-signing.ts': `import { ${compose} } from './apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.js';`,
+    }).map(value => value.message)).toContain(
+      'exclusive runtime module import has the wrong owner: ./apps/bridge-daemon/frontier-lab-proof-bound-application-signing-v1.js',
+    );
+    for (const escape of [`export { ${sign} };`, `export const rawSigner = ${sign};`]) {
+      expect(inspect({
+        ...sources,
+        [composition]: `import { ${sign} } from '../../adapters/frontier-lab-application-owner-v1.js'; ${escape}`,
+      }).map(value => value.message)).toEqual(expect.arrayContaining([
+        expect.stringMatching(/restricted capability binding must not (?:be re-exported|escape its reviewed call)/),
+      ]));
+    }
+    for (const specifier of [
+      '../../adapters/./frontier-lab-application-owner-v1.js',
+      '../../adapters/../adapters/frontier-lab-application-owner-v1.js',
+    ]) {
+      expect(inspect({
+        ...sources,
+        [composition]: `import { ${sign} } from '${specifier}'; export { ${sign} };`,
+      }).map(value => value.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${specifier}#${sign}`,
+      );
+    }
   });
 
   it('keeps the tracker attempt journal behind its two reviewed app owners', () => {
@@ -542,6 +1045,32 @@ describe('layer import rules', () => {
       `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js#${v2}`,
       `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js#${freshness}`,
     ]);
+  });
+
+  it.each([
+    ['substrate-federated-isolated-devnet-genesis-revalidator-v1', 'createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2'],
+    ['substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1', 'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2'],
+    ['substrate-federated-isolated-devnet-checked-submission-transport-v1', 'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2'],
+  ] as const)('keeps V3 genesis capability %s#%s inside the fixed root', (module, factory) => {
+    const root = 'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const target = `${module}.ts`;
+    const specifier = `../../${module}.js`;
+    expect(inspect({
+      [root]: `import { ${factory} } from '${specifier}'; ${factory}();`,
+      [target]: `export function ${factory}() {}`,
+    })).toEqual([]);
+    expect(inspect({
+      [root]: `import { ${factory} } from '${specifier}'; export const escaped = ${factory};`,
+      [target]: `export function ${factory}() {}`,
+    }).map(value => value.message)).toContain(
+      `restricted capability binding must not escape its reviewed call: ${specifier}#${factory}`,
+    );
+    expect(inspect({
+      'apps/bridge-daemon/unreviewed-genesis-root.ts': `import { ${factory} } from '${specifier}'; ${factory}();`,
+      [target]: `export function ${factory}() {}`,
+    }).map(value => value.message)).toContain(
+      `apps must not import an unclassified legacy module: ${target}`,
+    );
   });
 
   it('limits the isolated-devnet execution root to its reviewed broadcast bindings', () => {

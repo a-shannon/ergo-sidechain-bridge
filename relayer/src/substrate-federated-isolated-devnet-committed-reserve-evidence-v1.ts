@@ -7,11 +7,14 @@ import type {
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1,
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
@@ -19,11 +22,14 @@ import type {
 import type {
   SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
+import type { SubstrateFederatedIsolatedDevnetPegInCandidateV2 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
   SubstrateFederatedPooledReserveDepositV1Packet,
 } from './substrate-federated-pooled-reserve-deposit-v1.js';
+import type { SubstrateFederatedPooledReserveDepositV2Packet } from './substrate-federated-pooled-reserve-deposit-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
 
@@ -35,18 +41,25 @@ const RECEIPT_DIGEST_DOMAIN =
 const EVIDENCE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_COMMITTED_RESERVE_EVIDENCE_BYTES_V1';
 
+type RetainedDraft = Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
+  | SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2>;
+type RetainedPacket = Readonly<SubstrateFederatedPooledReserveDepositV1Packet
+  | SubstrateFederatedPooledReserveDepositV2Packet>;
+
 interface ReceiptMaterialV1 {
   readonly draft:
-    Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
+    RetainedDraft;
   readonly target:
     Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   readonly batch:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>;
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2 | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
   readonly candidate:
-    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1 | SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
   readonly observation:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
-  readonly packet: Readonly<SubstrateFederatedPooledReserveDepositV1Packet>;
+  readonly packet: RetainedPacket;
+  readonly readPacket: () => RetainedPacket;
+  readonly assertDraft: () => void;
 }
 
 const RECEIPTS = new WeakMap<object, Readonly<ReceiptMaterialV1>>();
@@ -109,23 +122,48 @@ export function collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV
       Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1> {
-  assertExactKeys(input, [
-    'batch',
-    'candidate',
-    'committedVaultObservation',
-    'draft',
-    'target',
-  ], 'isolated committed-reserve evidence input');
-  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(
-    input.draft,
-  );
-  const packet =
-    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1(
-      input.committedVaultObservation,
-      input.batch,
-      input.candidate,
-      input.target,
-    );
+  assertExactKeys(input, ['batch', 'candidate', 'committedVaultObservation', 'draft', 'target'],
+    'isolated committed-reserve evidence input');
+  input = Object.freeze({ ...input });
+  return collectEvidence(input, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(input.draft),
+  () => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1(
+    input.committedVaultObservation, input.batch, input.candidate, input.target,
+  ));
+}
+
+export function collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2(
+  input: Readonly<{
+    readonly draft: Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2>;
+    readonly target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    readonly batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    readonly candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+    readonly committedVaultObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1> {
+  assertExactKeys(input, ['batch', 'candidate', 'committedVaultObservation', 'draft', 'target'],
+    'isolated committed-reserve evidence input');
+  input = Object.freeze({ ...input });
+  return collectEvidence(input, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(input.draft),
+  () => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2(
+    input.committedVaultObservation, input.batch, input.candidate, input.target,
+  ));
+}
+
+function collectEvidence(
+  input: Readonly<{
+    readonly draft: RetainedDraft;
+    readonly target: ReceiptMaterialV1['target'];
+    readonly batch: ReceiptMaterialV1['batch'];
+    readonly candidate: ReceiptMaterialV1['candidate'];
+    readonly committedVaultObservation: ReceiptMaterialV1['observation'];
+  }>,
+  assertDraft: () => void,
+  readPacket: () => RetainedPacket,
+): Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1> {
+  assertDraft();
+  const packet = readPacket();
   assertExactLineage(input.draft, input.candidate, input.committedVaultObservation, packet);
 
   const collectorIdentity = currentCollectorIdentity();
@@ -246,6 +284,8 @@ export function collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV
     candidate: input.candidate,
     observation: input.committedVaultObservation,
     packet,
+    assertDraft,
+    readPacket,
   }));
   return receipt;
 }
@@ -254,10 +294,25 @@ export function consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceF
   receipt: Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>,
   draft: Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>,
 ): Readonly<FederatedPooledReserveSourceProofEvidenceV1> {
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft);
+  return consumeEvidenceForDraft(receipt, draft);
+}
+
+export function consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2(
+  receipt: Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>,
+  draft: Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2>,
+): Readonly<FederatedPooledReserveSourceProofEvidenceV1> {
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(draft);
+  return consumeEvidenceForDraft(receipt, draft);
+}
+
+function consumeEvidenceForDraft(
+  receipt: Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>,
+  draft: RetainedDraft,
+): Readonly<FederatedPooledReserveSourceProofEvidenceV1> {
   assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1Provenance(
     receipt,
   );
-  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft);
   const material = RECEIPTS.get(receipt);
   if (
     material === undefined
@@ -285,13 +340,9 @@ export function assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceRe
   }
   const receipt = value as Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
   const material = RECEIPTS.get(receipt)!;
-  const packet =
-    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1(
-      material.observation,
-      material.batch,
-      material.candidate,
-      material.target,
-    );
+  material.assertDraft();
+  const packet = material.readPacket();
+  assertExactLineage(material.draft, material.candidate, material.observation, packet);
   const { receiptDigestHex, ...body } = receipt;
   const collectorIdentity = currentCollectorIdentity();
   if (
@@ -311,10 +362,10 @@ export function assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceRe
 }
 
 function assertExactLineage(
-  draft: Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>,
-  candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>,
+  draft: RetainedDraft,
+  candidate: ReceiptMaterialV1['candidate'],
   observation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
-  packet: Readonly<SubstrateFederatedPooledReserveDepositV1Packet>,
+  packet: RetainedPacket,
 ): void {
   const transition = packet.transactions.reserveTransition;
   const path = observation.finalityPathHeaderIdsHex;
@@ -322,8 +373,7 @@ function assertExactLineage(
     draft.provenance.candidateDigestHex !== candidate.candidateDigestHex
     || draft.provenance.committedVaultObservationDigestHex
       !== observation.observationDigestHex
-    || draft.provenance.familyCompilerBindingDigestHex
-      !== packet.familyCompiler.bindingDigestHex
+    || !compilerBindingsMatch(draft, packet)
     || !sameHex(draft.statement.lineageProfileIdHex, packet.familyIdHex, 32)
     || !sameHex(draft.statement.sourceLockBoxIdHex, packet.boxes.sourceLock.boxId, 32)
     || !sameHex(draft.statement.reserveTransitionTransactionIdHex, transition.txId, 32)
@@ -366,6 +416,14 @@ function assertExactLineage(
   ) {
     throw new Error('isolated committed-reserve evidence checkpoint ancestry is stale or incomplete');
   }
+}
+
+function compilerBindingsMatch(draft: RetainedDraft, packet: RetainedPacket): boolean {
+  if (draft.version === 2) {
+    return canonicalJson(draft.provenance.familyCompiler) === canonicalJson(packet.familyCompiler);
+  }
+  return 'bindingDigestHex' in packet.familyCompiler
+    && draft.provenance.familyCompilerBindingDigestHex === packet.familyCompiler.bindingDigestHex;
 }
 
 function canonicalObjectHex(value: unknown): string {

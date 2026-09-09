@@ -4,6 +4,7 @@ import {
 } from './peg-in-causal-admission-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1,
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1,
   type SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
@@ -13,8 +14,12 @@ import type {
 import type {
   SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
+import type { SubstrateFederatedIsolatedDevnetPegInCandidateV2 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV1Packet } from './substrate-federated-pooled-reserve-deposit-v1.js';
+import type { SubstrateFederatedPooledReserveDepositV2Packet } from './substrate-federated-pooled-reserve-deposit-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { sha256CanonicalJson } from './strict-json.js';
 import {
@@ -30,6 +35,8 @@ import {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-mint-reservation-draft.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V2_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-mint-reservation-draft.v2' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX =
   deriveValidityApplicationPooledReserveErgoDepositFinalityPolicyIdV1Hex({
     version: 1,
@@ -43,6 +50,9 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HE
 const DRAFT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V1';
 const DRAFTS = new WeakSet<object>();
+const DRAFT_V2_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V2';
+const DRAFTS_V2 = new WeakSet<object>();
 
 export interface SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1 {
   readonly schema:
@@ -82,6 +92,49 @@ export interface SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1 {
   readonly draftDigestHex: string;
 }
 
+export interface SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2
+  extends Omit<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+    'schema' | 'version' | 'provenance'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V2_SCHEMA;
+  readonly version: 2;
+  readonly provenance: Readonly<{
+    readonly candidateDigestHex: string;
+    readonly committedVaultObservationDigestHex: string;
+    readonly familyCompiler: SubstrateFederatedPooledReserveDepositV2Packet['familyCompiler'];
+    readonly exactSameProcessCandidateAndObservationBound: true;
+  }>;
+}
+
+export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(
+  input: Readonly<{
+    readonly batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    readonly target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    readonly candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+    readonly committedVaultObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2> {
+  input = Object.freeze({ ...input });
+  assertExactKeys(input, ['batch', 'target', 'candidate', 'committedVaultObservation'],
+    'isolated devnet mint-reservation draft input');
+  const packet = assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2(
+    input.committedVaultObservation, input.batch, input.candidate, input.target,
+  );
+  const body = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V2_SCHEMA,
+    version: 2 as const,
+    ...buildDraftStatement(input.committedVaultObservation, packet),
+    provenance: {
+      candidateDigestHex: input.candidate.candidateDigestHex,
+      committedVaultObservationDigestHex: input.committedVaultObservation.observationDigestHex,
+      familyCompiler: { ...packet.familyCompiler },
+      exactSameProcessCandidateAndObservationBound: true as const,
+    },
+  });
+  const draft = deepFreeze({ ...body, draftDigestHex: sha256CanonicalJson(body, DRAFT_V2_DIGEST_DOMAIN) });
+  DRAFTS_V2.add(draft);
+  return draft;
+}
+
 export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(
   input: Readonly<{
     readonly batch:
@@ -94,6 +147,7 @@ export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
       Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1> {
+  input = Object.freeze({ ...input });
   assertExactKeys(input, [
     'batch',
     'target',
@@ -107,6 +161,26 @@ export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
       input.candidate,
       input.target,
     );
+  const body = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V1_SCHEMA,
+    version: 1 as const,
+    ...buildDraftStatement(input.committedVaultObservation, packet),
+    provenance: {
+      candidateDigestHex: input.candidate.candidateDigestHex,
+      committedVaultObservationDigestHex: input.committedVaultObservation.observationDigestHex,
+      familyCompilerBindingDigestHex: packet.familyCompiler.bindingDigestHex,
+      exactSameProcessCandidateAndObservationBound: true as const,
+    },
+  });
+  const draft = deepFreeze({ ...body, draftDigestHex: sha256CanonicalJson(body, DRAFT_DIGEST_DOMAIN) });
+  DRAFTS.add(draft);
+  return draft;
+}
+
+function buildDraftStatement(
+  observation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV1Packet | SubstrateFederatedPooledReserveDepositV2Packet>,
+) {
   const lineageProfileIdHex = canonicalV4Hex(
     packet.familyIdHex,
     32,
@@ -165,18 +239,18 @@ export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
         SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
       inclusionHeaderIdHex:
         canonicalV4Hex(
-          input.committedVaultObservation.confirmationHeaderIdHex,
+          observation.confirmationHeaderIdHex,
           32,
           'inclusion header ID',
         ),
-      inclusionHeight: input.committedVaultObservation.confirmationHeight,
+      inclusionHeight: observation.confirmationHeight,
       targetHeaderIdHex:
         canonicalV4Hex(
-          input.committedVaultObservation.finalityTargetHeaderIdHex,
+          observation.finalityTargetHeaderIdHex,
           32,
           'finality target header ID',
         ),
-      targetHeight: input.committedVaultObservation.finalityTargetHeight,
+      targetHeight: observation.finalityTargetHeight,
       requiredSuccessorDepth:
         SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1,
     });
@@ -185,10 +259,7 @@ export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
       encodedStatement,
     ),
   );
-  const body = deepFreeze({
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_MINT_RESERVATION_DRAFT_V1_SCHEMA,
-    version: 1 as const,
+  return deepFreeze({
     status: 'canonical_statement_waiting_for_source_proof' as const,
     statement,
     statementHex: encodedStatement,
@@ -197,14 +268,6 @@ export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
         statement,
       ),
     reservationKeyHex: statement.mintIdentityHex,
-    provenance: {
-      candidateDigestHex: input.candidate.candidateDigestHex,
-      committedVaultObservationDigestHex:
-        input.committedVaultObservation.observationDigestHex,
-      familyCompilerBindingDigestHex:
-        packet.familyCompiler.bindingDigestHex,
-      exactSameProcessCandidateAndObservationBound: true as const,
-    },
     boundary: {
       exactCommittedReserveBound: true as const,
       exactFinalityTargetBound: true as const,
@@ -229,12 +292,18 @@ export function buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
       'No source proof, runtime reservation, or mint has been produced.',
     ] as const,
   });
-  const draft = deepFreeze({
-    ...body,
-    draftDigestHex: sha256CanonicalJson(body, DRAFT_DIGEST_DOMAIN),
-  });
-  DRAFTS.add(draft);
-  return draft;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2> {
+  if (value === null || typeof value !== 'object' || !DRAFTS_V2.has(value)) {
+    throw new Error('isolated devnet V2 mint-reservation draft lacks same-process provenance');
+  }
+  const { draftDigestHex, ...body } = value as Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2>;
+  if (draftDigestHex !== sha256CanonicalJson(body, DRAFT_V2_DIGEST_DOMAIN)) {
+    throw new Error('isolated devnet V2 mint-reservation draft digest changed');
+  }
 }
 
 export function assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(

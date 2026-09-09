@@ -63,6 +63,7 @@ const boundary = vi.hoisted(() => {
     checkResponseDigestHex,
     nodeOrigin,
     signedCandidate,
+    issuedSignedCandidate: signedCandidate,
     checkedHandle,
     authorizer,
     sourceLockAuthorizer,
@@ -81,6 +82,18 @@ const boundary = vi.hoisted(() => {
 
 const node = vi.hoisted(() => ({
   post: vi.fn(),
+}));
+
+const genesisBoundary = vi.hoisted(() => ({
+  authorizerV2: Object.freeze({
+    schema: 'e2s.substrate-federated-isolated-devnet-genesis-broadcast-authorizer.v2',
+  }),
+  authorizationArtifactV2: Object.freeze({ role: 'lab-authorization-v2' }),
+  events: [] as string[],
+  assertAuthorizerV1: vi.fn(),
+  assertAuthorizerV2: vi.fn(),
+  assertAuthorizationV1: vi.fn(),
+  assertAuthorizationV2: vi.fn(),
 }));
 
 const journalBoundary = vi.hoisted(() => ({
@@ -127,30 +140,14 @@ const trackerBoundary = vi.hoisted(() => ({
 vi.mock(
   './substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js',
   () => ({
-    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1: (
-      value: unknown,
-      target: unknown,
-    ) => {
-      if (
-        value !== boundary.authorizer
-        || target !== processBoundary.target
-      ) {
-        throw new Error('synthetic broadcast authorizer provenance is missing');
-      }
-    },
-    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1: (
-      value: unknown,
-      artifact: unknown,
-      expectation: Readonly<{ authorizationDigestHex: string }>,
-    ) => {
-      if (
-        value !== boundary.authorizer
-        || artifact !== boundary.authorizationArtifact
-        || expectation.authorizationDigestHex !== AUTHORIZATION_DIGEST
-      ) {
-        throw new Error('synthetic broadcast authorization is missing');
-      }
-    },
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1:
+      genesisBoundary.assertAuthorizerV1,
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2:
+      genesisBoundary.assertAuthorizerV2,
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV1:
+      genesisBoundary.assertAuthorizationV1,
+    assertSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizationArtifactV2:
+      genesisBoundary.assertAuthorizationV2,
   }),
 );
 
@@ -263,11 +260,13 @@ const processBoundary = vi.hoisted(() => ({
 
 vi.mock('./fleet-signer.js', () => ({
   assertLocalWasmSignedCheckCandidateProvenance: (value: unknown) => {
-    if (value !== boundary.signedCandidate) {
+    genesisBoundary.events.push('signed-candidate');
+    if (value !== boundary.issuedSignedCandidate) {
       throw new Error('synthetic signed candidate provenance is missing');
     }
   },
   assertLocalWasmCheckedSubmissionHandleV1Provenance: (value: unknown) => {
+    genesisBoundary.events.push('checked-handle');
     if (value !== boundary.checkedHandle || boundary.consumed) {
       throw new Error('synthetic checked handle provenance is missing');
     }
@@ -325,8 +324,10 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA,
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+  createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic as projectDiagnostic,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1,
@@ -341,6 +342,8 @@ import {
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import {
   executeSubstrateFederatedLocalDevnetGenesisV1,
+  assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1,
+  type SubstrateFederatedLocalDevnetGenesisDurableAttempt,
   type SubstrateFederatedLocalDevnetGenesisExecutionPorts,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 
@@ -359,6 +362,40 @@ const TRACKER_SUBMISSION_RESPONSE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V1';
 
 beforeEach(() => {
+  genesisBoundary.events.length = 0;
+  boundary.issuedSignedCandidate = boundary.signedCandidate;
+  for (const version of [1, 2] as const) {
+    const authorizer = version === 1
+      ? boundary.authorizer : genesisBoundary.authorizerV2;
+    const artifact = version === 1
+      ? boundary.authorizationArtifact : genesisBoundary.authorizationArtifactV2;
+    const authorizerGuard = version === 1
+      ? genesisBoundary.assertAuthorizerV1 : genesisBoundary.assertAuthorizerV2;
+    const artifactGuard = version === 1
+      ? genesisBoundary.assertAuthorizationV1 : genesisBoundary.assertAuthorizationV2;
+    authorizerGuard.mockReset();
+    authorizerGuard.mockImplementation((value: unknown, target: unknown) => {
+      genesisBoundary.events.push(`authorizer-v${version}`);
+      if (value !== authorizer || target !== processBoundary.target) {
+        throw new Error('synthetic broadcast authorizer provenance is missing');
+      }
+    });
+    artifactGuard.mockReset();
+    artifactGuard.mockImplementation((
+      value: unknown,
+      authorizationArtifact: unknown,
+      expectation: Readonly<{ authorizationDigestHex: string }>,
+    ) => {
+      genesisBoundary.events.push(`authorization-v${version}`);
+      if (
+        value !== authorizer
+        || authorizationArtifact !== artifact
+        || expectation.authorizationDigestHex !== AUTHORIZATION_DIGEST
+      ) {
+        throw new Error('synthetic broadcast authorization is missing');
+      }
+    });
+  }
   processBoundary.processBindingDigestHex = '11'.repeat(32);
   processBoundary.reconciliationIdentityDigestHex = '10'.repeat(32);
   processBoundary.reservationFreshnessProcessBindingDigestHex = '19'.repeat(32);
@@ -377,6 +414,7 @@ beforeEach(() => {
       executionTargetIdentityDigestHex: string;
     }>,
   ) => {
+    genesisBoundary.events.push('execution-binding');
     if (
       value !== boundary.checkedHandle
       || !Object.isFrozen(binding)
@@ -399,12 +437,13 @@ beforeEach(() => {
   ) => {
     if (
       handle !== boundary.checkedHandle
-      || signedCandidate !== boundary.signedCandidate
+      || signedCandidate !== boundary.issuedSignedCandidate
       || boundary.consumed
     ) {
       throw new Error('synthetic checked handle is unavailable');
     }
     boundary.consumed = true;
+    genesisBoundary.events.push('consume');
     trackerBoundary.events.push('consume');
     await trackerBoundary.beforeCheckedCallback();
     return await consume(boundary.signedTransaction);
@@ -552,13 +591,13 @@ function ports(overrides: Readonly<{
   signedTransactionDigestHex?: string;
   checkResponseDigestHex?: string;
   authorizationArtifact?: object;
-}> = {}): SubstrateFederatedLocalDevnetGenesisExecutionPorts {
+}> = {}, version: 1 | 2 = 1): SubstrateFederatedLocalDevnetGenesisExecutionPorts {
   return {
     signer: {
       sign: async () => ({
         signedTransactionDigestHex: overrides.signedTransactionDigestHex
           ?? boundary.signedTransactionDigestHex,
-        signerArtifact: boundary.signedCandidate,
+        signerArtifact: boundary.issuedSignedCandidate,
       }),
     },
     checker: {
@@ -587,7 +626,8 @@ function ports(overrides: Readonly<{
       authorize: () => ({
         authorizationDigestHex: AUTHORIZATION_DIGEST,
         authorizationArtifact: overrides.authorizationArtifact
-          ?? boundary.authorizationArtifact,
+          ?? (version === 1
+            ? boundary.authorizationArtifact : genesisBoundary.authorizationArtifactV2),
       }),
     },
     journal: {
@@ -605,10 +645,11 @@ function ports(overrides: Readonly<{
         throw new Error('not-found transaction cannot be confirmed');
       },
     },
-    transport:
-      createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1(
+    transport: (version === 1
+      ? createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1
+      : createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2)(
         processBoundary.target,
-        boundary.authorizer as any,
+        (version === 1 ? boundary.authorizer : genesisBoundary.authorizerV2) as any,
       ),
     confirmationObserver: {
       observe: async () => ({
@@ -629,7 +670,7 @@ async function execute(overrides: Readonly<{
   signedTransactionDigestHex?: string;
   checkResponseDigestHex?: string;
   authorizationArtifact?: object;
-}> = {}) {
+}> = {}, version: 1 | 2 = 1, executionPorts = ports(overrides, version)) {
   return await executeSubstrateFederatedLocalDevnetGenesisV1({
     role: 'tracker',
     planDigestHex: PLAN_DIGEST,
@@ -640,8 +681,335 @@ async function execute(overrides: Readonly<{
     attemptedAtHeight: 720,
     nodeOrigin: boundary.nodeOrigin,
     unsignedTransaction: Object.freeze({ inputs: [{ boxId: SOURCE_BOX_ID }] }),
-  }, ports(overrides));
+  }, executionPorts);
 }
+
+// Issue real lifecycle provenance without exercising transport during setup.
+async function genesisAttempt(
+  version: 1 | 2,
+  overrides: Parameters<typeof execute>[0] = {},
+) {
+  const executionPorts = ports(overrides, version);
+  let captured: SubstrateFederatedLocalDevnetGenesisDurableAttempt | undefined;
+  await execute(overrides, version, {
+    ...executionPorts,
+    transport: {
+      submit: async attempt => {
+        assertSubstrateFederatedLocalDevnetGenesisDurableAttemptV1(attempt);
+        captured = attempt;
+        genesisBoundary.events.push('durable-attempt');
+        return {
+          status: 'ambiguous',
+          submittedTxId: null,
+          responseDigestHex: 'ab'.repeat(32),
+        };
+      },
+    },
+  });
+  if (!captured) throw new Error('synthetic setup did not issue a durable attempt');
+  return { transport: executionPorts.transport, attempt: captured };
+}
+
+const GENESIS_RESPONSE_PROFILES = [
+  {
+    version: 1,
+    schema: 'e2s.substrate-federated-isolated-devnet-checked-submission-transport.v1',
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V1',
+  },
+  {
+    version: 2,
+    schema: 'e2s.substrate-federated-isolated-devnet-checked-submission-transport.v2',
+    domain: 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V2',
+  },
+] as const;
+
+describe.each(GENESIS_RESPONSE_PROFILES)(
+  'fixed genesis checked transport V$version',
+  ({ version, schema, domain }) => {
+    const factory = version === 1
+      ? createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1
+      : createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2;
+    const authorizer = version === 1
+      ? boundary.authorizer : genesisBoundary.authorizerV2;
+    const artifact = version === 1
+      ? boundary.authorizationArtifact : genesisBoundary.authorizationArtifactV2;
+    const otherAuthorizer = version === 1
+      ? genesisBoundary.authorizerV2 : boundary.authorizer;
+    const otherArtifact = version === 1
+      ? genesisBoundary.authorizationArtifactV2 : boundary.authorizationArtifact;
+    const authorizerGuard = version === 1
+      ? genesisBoundary.assertAuthorizerV1 : genesisBoundary.assertAuthorizerV2;
+    const artifactGuard = version === 1
+      ? genesisBoundary.assertAuthorizationV1 : genesisBoundary.assertAuthorizationV2;
+    const otherAuthorizerGuard = version === 1
+      ? genesisBoundary.assertAuthorizerV2 : genesisBoundary.assertAuthorizerV1;
+    const otherArtifactGuard = version === 1
+      ? genesisBoundary.assertAuthorizationV2 : genesisBoundary.assertAuthorizationV1;
+
+    function expectNoConsumptionOrPost() {
+      expect(boundary.consume).not.toHaveBeenCalled();
+      expect(trackerBoundary.beforeCheckedCallback).not.toHaveBeenCalled();
+      expect(node.post).not.toHaveBeenCalled();
+    }
+
+    function expectedResponseDigest(
+      outcome: string,
+      httpStatus: number | null,
+      observedTxId: string | null,
+    ) {
+      return sha256CanonicalJson({
+        schema,
+        outcome,
+        nodeOrigin: 'http://127.0.0.1:9051',
+        path: '/transactions',
+        method: 'POST',
+        httpStatus,
+        observedTxId,
+        expectedTxId: boundary.expectedTxId,
+        durableAttemptDigestHex: ATTEMPT_DIGEST,
+        authorizationDigestHex: AUTHORIZATION_DIGEST,
+        processBindingDigestHex: '11'.repeat(32),
+        reconciliationIdentityDigestHex: '10'.repeat(32),
+        signedTransactionDigestHex: boundary.signedTransactionDigestHex,
+        signedTransactionBytesSha256Hex: boundary.signedTransactionBytesSha256Hex,
+        signedTransactionBytesLength: 321,
+        checkResponseDigestHex: boundary.checkResponseDigestHex,
+      }, domain);
+    }
+
+    it('selects only its exact guards, digest profile and credential-free one-shot POST', async () => {
+      node.post.mockImplementation(async () => {
+        genesisBoundary.events.push('post');
+        return { status: 200, data: boundary.expectedTxId };
+      });
+      const { transport, attempt } = await genesisAttempt(version);
+
+      const result = await transport.submit(attempt);
+
+      expect(result).toEqual({
+        status: 'accepted',
+        submittedTxId: boundary.expectedTxId,
+        responseDigestHex: expectedResponseDigest('accepted', 200, boundary.expectedTxId),
+      });
+      expect(projectDiagnostic(result)).toEqual({ outcome: 'accepted', httpStatus: 200,
+        expectedTxId: boundary.expectedTxId, durableAttemptDigestHex: ATTEMPT_DIGEST,
+        responseDigestHex: expectedResponseDigest('accepted', 200, boundary.expectedTxId) });
+      expect(Object.isFrozen(projectDiagnostic(result))).toBe(true);
+      expect(projectDiagnostic({ ...result })).toBeNull();
+      expect(authorizerGuard).toHaveBeenCalledExactlyOnceWith(
+        authorizer, processBoundary.target,
+      );
+      expect(artifactGuard).toHaveBeenCalledExactlyOnceWith(authorizer, artifact, {
+        revalidated: attempt.candidate.authorization.revalidated,
+        preTransportEvidence: attempt.candidate.authorization.preTransportEvidence,
+        authorizationDigestHex: AUTHORIZATION_DIGEST,
+      });
+      expect(otherAuthorizerGuard).not.toHaveBeenCalled();
+      expect(otherArtifactGuard).not.toHaveBeenCalled();
+      expect(genesisBoundary.events).toEqual([
+        `authorizer-v${version}`,
+        'durable-attempt',
+        `authorization-v${version}`,
+        'signed-candidate',
+        'checked-handle',
+        'execution-binding',
+        'consume',
+        'post',
+      ]);
+      expect(boundary.consume).toHaveBeenCalledExactlyOnceWith(
+        boundary.checkedHandle, boundary.signedCandidate, expect.any(Function),
+      );
+      expect(node.post).toHaveBeenCalledExactlyOnceWith(
+        'http://127.0.0.1:9051/transactions', boundary.signedTransaction, {
+          headers: { 'Content-Type': 'application/json' },
+          maxRedirects: 0,
+          proxy: false,
+          timeout: 30_000,
+          maxContentLength: 1_024,
+        },
+      );
+      expect(node.post.mock.calls[0]?.[1]).toBe(boundary.signedTransaction);
+      await expect(transport.submit(attempt)).rejects.toThrow(/checked handle provenance/u);
+      expect(boundary.consume).toHaveBeenCalledTimes(1);
+      expect(node.post).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['inverse-version', (): unknown => otherAuthorizer],
+      ['copied', (): unknown => Object.freeze({ ...authorizer })],
+      ['missing', (): unknown => undefined],
+    ] as const)('rejects a %s authorizer at the factory before any callback', (_name, value) => {
+      expect(() => factory(processBoundary.target, value() as never))
+        .toThrow(/authorizer provenance/u);
+      expect(genesisBoundary.events).toEqual([`authorizer-v${version}`]);
+      expect(authorizerGuard).toHaveBeenCalledTimes(1);
+      expect(otherAuthorizerGuard).not.toHaveBeenCalled();
+      expect(artifactGuard).not.toHaveBeenCalled();
+      expect(otherArtifactGuard).not.toHaveBeenCalled();
+      expectNoConsumptionOrPost();
+    });
+
+    it.each([
+      ['inverse-version', () => otherArtifact],
+      ['copied', () => Object.freeze({ ...artifact })],
+    ] as const)('rejects a %s authorization artifact before handle inspection', async (_name, value) => {
+      const { transport, attempt } = await genesisAttempt(version, {
+        authorizationArtifact: value(),
+      });
+      await expect(transport.submit(attempt)).rejects.toThrow(/broadcast authorization/u);
+      expect(genesisBoundary.events).toEqual([
+        `authorizer-v${version}`, 'durable-attempt', `authorization-v${version}`,
+      ]);
+      expect(artifactGuard).toHaveBeenCalledTimes(1);
+      expect(otherArtifactGuard).not.toHaveBeenCalled();
+      expectNoConsumptionOrPost();
+    });
+
+    it('rejects missing authorization before durable issuance or transport', async () => {
+      const executionPorts = ports({}, version);
+      const reserve = vi.fn(executionPorts.journal.reserve);
+      const submit = vi.fn(executionPorts.transport.submit);
+      await expect(execute({}, version, {
+        ...executionPorts,
+        broadcastAuthorizer: {
+          authorize: () => ({
+            authorizationDigestHex: AUTHORIZATION_DIGEST,
+            authorizationArtifact: undefined as never,
+          }),
+        },
+        journal: { ...executionPorts.journal, reserve },
+        transport: { submit },
+      })).rejects.toThrow(/authorization artifact must be an opaque object/u);
+      expect(reserve).not.toHaveBeenCalled();
+      expect(submit).not.toHaveBeenCalled();
+      expectNoConsumptionOrPost();
+    });
+
+    it.each([
+      ['process', () => { processBoundary.processBindingDigestHex = 'e1'.repeat(32); }],
+      ['target identity', () => { processBoundary.reconciliationIdentityDigestHex = 'e2'.repeat(32); }],
+    ] as const)('rejects %s drift after construction before authorization or consumption', async (_name, change) => {
+      const { transport, attempt } = await genesisAttempt(version);
+      change();
+      await expect(transport.submit(attempt)).rejects.toThrow(/process binding changed/u);
+      expect(artifactGuard).not.toHaveBeenCalled();
+      expectNoConsumptionOrPost();
+    });
+
+    it.each([
+      ['process', () => { boundary.handleProcessBindingDigestHex = 'e3'.repeat(32); }],
+      ['target identity', () => { boundary.handleExecutionTargetIdentityDigestHex = 'e4'.repeat(32); }],
+    ] as const)('rejects a checked handle from a different %s', async (_name, change) => {
+      const { transport, attempt } = await genesisAttempt(version);
+      change();
+      await expect(transport.submit(attempt)).rejects.toThrow(/execution binding changed/u);
+      expect(artifactGuard).toHaveBeenCalledTimes(1);
+      expect(boundary.assertExecutionBinding).toHaveBeenCalledTimes(1);
+      expectNoConsumptionOrPost();
+    });
+
+    it.each([
+      ['signedTransactionDigestHex', 'e5'.repeat(32)],
+      ['signedTransactionBytesSha256Hex', 'e6'.repeat(32)],
+      ['signedTransactionBytesLength', 322],
+    ] as const)('rejects isolated signed-candidate %s drift', async (field, value) => {
+      // The signer double recognizes this candidate so the real byte-binding check decides.
+      boundary.issuedSignedCandidate = Object.freeze({
+        ...boundary.signedCandidate, [field]: value,
+      });
+      const { transport, attempt } = await genesisAttempt(version);
+      await expect(transport.submit(attempt)).rejects.toThrow(/binding changed before submission/u);
+      expect(boundary.assertExecutionBinding).toHaveBeenCalledTimes(1);
+      expectNoConsumptionOrPost();
+    });
+
+    it.each([
+      'signedTransactionBytesSha256Hex', 'signedTransactionBytesLength',
+    ] as const)('rejects missing exact-byte field %s', async field => {
+      boundary.issuedSignedCandidate = Object.freeze({
+        ...boundary.signedCandidate, [field]: undefined,
+      }) as unknown as typeof boundary.signedCandidate;
+      const { transport, attempt } = await genesisAttempt(version);
+      await expect(transport.submit(attempt)).rejects.toThrow(/requires exact signed bytes/u);
+      expectNoConsumptionOrPost();
+    });
+
+    it('rejects a handle consumed after authorization without invoking its callback', async () => {
+      const { transport, attempt } = await genesisAttempt(version);
+      boundary.consumed = true;
+      await expect(transport.submit(attempt)).rejects.toThrow(/checked handle provenance/u);
+      expect(artifactGuard).toHaveBeenCalledTimes(1);
+      expectNoConsumptionOrPost();
+    });
+
+    it.each(['copied attempt', 'copied artifact', 'missing artifact'] as const)(
+      'rejects %s durability before authorization or handle consumption', async kind => {
+        const { transport, attempt } = await genesisAttempt(version);
+        const copy = kind === 'copied attempt' ? { ...attempt } : {
+          ...attempt,
+          durableArtifact: kind === 'copied artifact'
+            ? Object.freeze({ ...attempt.durableArtifact }) : undefined,
+        };
+        await expect(transport.submit(Object.freeze(copy) as never))
+          .rejects.toThrow(/durable attempt lacks process provenance/u);
+        expect(artifactGuard).not.toHaveBeenCalled();
+        expectNoConsumptionOrPost();
+      },
+    );
+
+    it('rejects missing journal durability before transport is invoked', async () => {
+      const executionPorts = ports({}, version);
+      const submit = vi.fn(executionPorts.transport.submit);
+      await expect(execute({}, version, {
+        ...executionPorts,
+        journal: {
+          ...executionPorts.journal,
+          reserve: () => ({
+            durableAttemptDigestHex: ATTEMPT_DIGEST,
+            reconciliationIdentityDigestHex: '10'.repeat(32),
+            durableArtifact: undefined as never,
+          }),
+        },
+        transport: { submit },
+      })).rejects.toThrow(/durable attempt artifact must be an opaque object/u);
+      expect(submit).not.toHaveBeenCalled();
+      expectNoConsumptionOrPost();
+    });
+
+    it.each([
+      ['wrong ID', 'ambiguous_success_response', 200, 'ff'.repeat(32)],
+      ['no response', 'ambiguous_no_response', null, null],
+      ['HTTP 400', 'ambiguous_http_response', 400, null],
+      ['HTTP 429', 'ambiguous_http_response', 429, null],
+      ['HTTP 500', 'ambiguous_http_response', 500, null],
+    ] as const)('keeps %s ambiguous with its exact digest and never retries', async (_name, outcome, status, observedTxId) => {
+      node.post.mockImplementation(async () => {
+        genesisBoundary.events.push('post');
+        if (observedTxId) return { status, data: observedTxId };
+        throw status === null
+          ? { isAxiosError: true, code: 'ETIMEDOUT' }
+          : { isAxiosError: true, response: { status } };
+      });
+      const { transport, attempt } = await genesisAttempt(version);
+      const result = await transport.submit(attempt);
+      expect(result).toEqual({
+        status: 'ambiguous',
+        submittedTxId: null,
+        responseDigestHex: expectedResponseDigest(outcome, status, observedTxId),
+      });
+      expect(projectDiagnostic(result)).toEqual({ outcome, httpStatus: status,
+        expectedTxId: boundary.expectedTxId, durableAttemptDigestHex: ATTEMPT_DIGEST,
+        responseDigestHex: expectedResponseDigest(outcome, status, observedTxId) });
+      expect(Object.isFrozen(projectDiagnostic(result))).toBe(true);
+      expect(projectDiagnostic({ ...result })).toBeNull();
+      expect(genesisBoundary.events.slice(-2)).toEqual(['consume', 'post']);
+      await expect(transport.submit(attempt)).rejects.toThrow(/checked handle provenance/u);
+      expect(boundary.consume).toHaveBeenCalledTimes(1);
+      expect(trackerBoundary.beforeCheckedCallback).toHaveBeenCalledTimes(1);
+      expect(node.post).toHaveBeenCalledTimes(1);
+    });
+  },
+);
 
 describe('isolated devnet checked submission transport V1', () => {
   it('claims the durable tracker attempt before one exact loopback POST', async () => {

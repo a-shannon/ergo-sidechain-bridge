@@ -10,6 +10,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
+  bindFrontierLabApplicationOwnerRequestV1,
+  createFrontierLabApplicationOwnerV1,
+  disposeFrontierLabApplicationOwnerV1,
+  type FrontierLabApplicationOwnerV1,
+} from '../adapters/frontier-lab-application-owner-v1.js';
+import {
   canonicalPathIdentity,
   isPathInside,
   readBoundedRegularFile,
@@ -24,6 +30,7 @@ import {
 } from '../substrate-federated-authority-safe-devnet-observation-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
 } from '../substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetFrontierLabOwnerBindingV2,
@@ -78,14 +85,112 @@ const ARGUMENTS = Object.freeze([
 
 type ArgumentName = typeof ARGUMENTS[number];
 
+const FRESH_OWNER_ARGUMENTS = ARGUMENTS.filter(name =>
+  name !== '--bridge-owner-address' && name !== '--signed-legacy-owner-mint-transaction');
+
 export interface SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result {
   readonly status: 'canonical_isolated_bootstrap_request_created';
   readonly requestSha256Hex: string;
   readonly expectedHeadCommitSha1Hex: string;
 }
 
+export interface SubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1 {
+  readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+  readonly createRequest: (argv: readonly string[]) =>
+    Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result>;
+  readonly dispose: () => void;
+}
+
+/** Retain one synthetic owner while its owner-dependent genesis is calibrated. */
+export async function createSubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1():
+Promise<Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1>> {
+  const owner = await createFrontierLabApplicationOwnerV1(
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
+  );
+  let state: 'fresh' | 'consumed' | 'closed' = 'fresh';
+  const dispose = (): void => {
+    if (state === 'closed') return;
+    state = 'closed';
+    disposeFrontierLabApplicationOwnerV1(owner);
+  };
+  return Object.freeze({
+    owner,
+    createRequest: (argv: readonly string[]) => {
+      if (state !== 'fresh') {
+        throw new Error('fresh-owner bootstrap session is already consumed or disposed');
+      }
+      state = 'consumed';
+      try {
+        const values = parseFreshOwnerArguments(argv);
+        values.set('--bridge-owner-address', owner.ownerAddressHex);
+        values.set('--signed-legacy-owner-mint-transaction', owner.signedLegacyOwnerMintTransactionHex);
+        return createCanonicalBootstrapRequest(
+          ARGUMENTS.flatMap(name => [name, values.get(name)!]), owner,
+        );
+      } catch (error) {
+        dispose();
+        throw error;
+      }
+    },
+    dispose,
+  });
+}
+
+/**
+ * Same-process request creation. The caller retains and finally disposes owner
+ * custody; serializing this return value cannot transfer it to a child worker.
+ * A post-publication failure can leave a public file, never usable custody;
+ * abandon that request and retry with a fresh output path.
+ */
+export async function createSubstrateFederatedIsolatedDevnetBootstrapRequestWithFreshOwnerV1(
+  argv: readonly string[],
+): Promise<Readonly<{
+  requestCreation: Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result>;
+  owner: Readonly<FrontierLabApplicationOwnerV1>;
+}>> {
+  const snapshot = Object.freeze([...argv]);
+  parseFreshOwnerArguments(snapshot);
+  const session = await createSubstrateFederatedIsolatedDevnetBootstrapRequestOwnerSessionV1();
+  try {
+    return Object.freeze({ requestCreation: session.createRequest(snapshot), owner: session.owner });
+  } catch (error) {
+    session.dispose();
+    throw error;
+  }
+}
+
+function parseFreshOwnerArguments(argv: readonly string[]): Map<ArgumentName, string> {
+  if (argv.length !== FRESH_OWNER_ARGUMENTS.length * 2) {
+    throw new Error('fresh-owner bootstrap request arguments are invalid');
+  }
+  const values = new Map<ArgumentName, string>();
+  for (const [index, name] of FRESH_OWNER_ARGUMENTS.entries()) {
+    const value = argv[index * 2 + 1];
+    if (argv[index * 2] !== name || typeof value !== 'string'
+      || value.length === 0 || value.startsWith('--')) {
+      throw new Error('fresh-owner bootstrap request arguments are invalid');
+    }
+    values.set(name, value);
+  }
+  if (values.get('--expected-chain-id') !== '42') {
+    throw new Error('fresh-owner bootstrap request requires the LAB chain ID 42');
+  }
+  assertSubstrateFederatedIsolatedDevnetFrontierLabApplicationV1({
+    bridgeAddressHex: values.get('--bridge-address')!,
+    tokenAddressHex: values.get('--token-address')!,
+  });
+  return values;
+}
+
 export function createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgumentsV1(
   argv: readonly string[],
+): Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result> {
+  return createCanonicalBootstrapRequest(argv);
+}
+
+function createCanonicalBootstrapRequest(
+  argv: readonly string[],
+  owner?: Readonly<FrontierLabApplicationOwnerV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCreationV1Result> {
   const args = parseArguments(argv);
   assertRequestPublicationBindings(args.request);
@@ -135,6 +240,9 @@ export function createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgume
     ) {
       throw new Error('canonical bootstrap request output identity changed');
     }
+    if (owner !== undefined) {
+      bindFrontierLabApplicationOwnerRequestV1(owner, bytes, requestSha256Hex);
+    }
     linkSync(stagingPath, outputPath);
     publicationCommitted = true;
     const published = readBoundedRegularFile(
@@ -151,6 +259,10 @@ export function createSubstrateFederatedIsolatedDevnetBootstrapRequestFromArgume
     }
   } catch (error) {
     executionError = error;
+    if (owner !== undefined && publicationCommitted) {
+      // Never unlink a final pathname that could now identify a replacement.
+      throw new Error('fresh-owner request publication committed but verification failed; abandon it and use a fresh output path');
+    }
     throw error;
   } finally {
     let cleanupError: unknown;

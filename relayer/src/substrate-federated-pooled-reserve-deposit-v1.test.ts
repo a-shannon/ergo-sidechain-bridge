@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { canonicalJson } from './strict-json.js';
 
 import { getPooledReserveEmptyDigest } from './avl-bridge.js';
 import {
@@ -59,6 +61,28 @@ describe('substrate federated pooled-reserve deposit V1', () => {
     );
 
     expect(second).toEqual(first);
+    // Independent replay of the fixture against the builder at 117359678fefcc71dc9e3ff946918ae48da06b02.
+    expect(createHash('sha256').update(canonicalJson(first)).digest('hex'))
+      .toBe('0fb03452e407a882e98b05d00869ee50135fd929bb33508c1ccd2564ea496aad');
+    const wasmModule = await import('ergo-lib-wasm-nodejs');
+    const wasm = wasmModule.default ?? wasmModule;
+    const expectedTransactions = {
+      sourceLockCreation: ['150aaac14aa0888e4cb848bc36f93f35448a51a4d4a01e949ca20f72b4bf145e',
+        'bdb35315f55836638145218df25c4fc03a70c86a5fed5c824e485c314fcea744'],
+      reserveTransition: ['d02e33176ae10eaf1d0fd74c22053af9315b115401e145b89268a8a5bc972062',
+        'a44f1db2e01b67d895f081f150f34333295503687858722ebc5255b6bd391778'],
+    };
+    for (const name of ['sourceLockCreation', 'reserveTransition'] as const) {
+      const tx = first.transactions[name];
+      const unsigned = wasm.UnsignedTransaction.from_json(JSON.stringify(tx.eip12Tx));
+      // from_unsigned_tx consumes the unsigned WASM handle; no signing is performed.
+      const proofless = wasm.Transaction.from_unsigned_tx(unsigned, tx.eip12Tx.inputs.map(() => new Uint8Array()));
+      try {
+        expect(tx.txId).toBe(expectedTransactions[name][0]);
+        expect(createHash('sha256').update(proofless.sigma_serialize_bytes()).digest('hex'))
+          .toBe(expectedTransactions[name][1]);
+      } finally { proofless.free(); }
+    }
     assertSubstrateFederatedPooledReserveDepositV1Packet(first);
     expect(first.trustModel).toBe('federated_non_trustless');
     expect(first.familyCompiler).toEqual({

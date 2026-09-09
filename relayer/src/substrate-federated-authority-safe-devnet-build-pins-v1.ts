@@ -543,6 +543,7 @@ function inspectExactSource(
     bridgeRoot: input.bridgeRoot,
     frontierSourcePath: input.frontierSourcePath,
     requireFrontierCheckout: true,
+    frontierCheckoutBytePolicy: 'raw',
     requireErgoCheckout: false,
     gitExecutablePath: input.gitExecutablePath,
   });

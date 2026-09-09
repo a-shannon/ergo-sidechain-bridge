@@ -55,12 +55,16 @@ describe('isolated devnet Ergo node build V1', () => {
       projectSbtVersion: '1.11.1',
       buildProcessRunner: 'reviewed-windows-job-object-v1',
       windowsJobProcessRunnerSha256Hex:
-        'c7ab6ff55e275eb4e1298b1bcc6ce57d1e7cb7b0f0eb4c47f41c61f3895f9f6e',
+        '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627',
       buildTimeoutMs: 900_000,
       buildTerminationGraceMs: 10_000,
       buildMaxOutputBytes: 33_554_432,
     });
     expect(JSON.stringify(lock)).not.toMatch(/[A-Za-z]:[\\/]/u);
+    expect(() => assertSubstrateFederatedIsolatedDevnetWindowsJobProcessRunnerV1(
+      resolve(import.meta.dirname, 'scripts', 'windows-job-process.ps1'),
+      lock.windowsJobProcessRunnerSha256Hex,
+    )).not.toThrow();
   });
 
   it('rejects every pre-existing assembly name regardless of entry type or size', () => {

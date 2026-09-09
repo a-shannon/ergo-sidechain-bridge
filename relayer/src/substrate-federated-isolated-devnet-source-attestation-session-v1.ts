@@ -46,19 +46,26 @@ import {
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
+  type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
+  consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2,
   type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance,
   deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1,
+  deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV2,
   type SubstrateFederatedIsolatedDevnetLaunchStatementV1,
+  type SubstrateFederatedIsolatedDevnetLaunchStatementV2,
   type SubstrateFederatedIsolatedDevnetLaunchSignatureV1,
   type SubstrateFederatedIsolatedDevnetTargetDescriptorV1,
+  type SubstrateFederatedIsolatedDevnetTargetDescriptorV2,
 } from './substrate-federated-isolated-devnet-launch-v1.js';
 import {
   SUBSTRATE_FEDERATED_SETTLEMENT_FAMILY_V1_SCHEMA,
@@ -182,6 +189,7 @@ export interface SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 {
   readonly signLaunchStatement: (
     statement: Readonly<
       SubstrateFederatedIsolatedDevnetLaunchStatementV1
+      | SubstrateFederatedIsolatedDevnetLaunchStatementV2
     >,
   ) => readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
   readonly produceSettlementFamilyMintSourceProof: (
@@ -327,7 +335,8 @@ export interface SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1 {
 
 export interface ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input {
   readonly draft:
-    Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1>;
+    Readonly<SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
+      | SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2>;
   readonly evidenceReceipt:
     Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
   readonly issuedAtNativeHeight: string | number | bigint;
@@ -789,7 +798,8 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   let state: 'open' | 'disposed' = 'open';
   let launchSigningStarted = false;
   let signedTarget:
-    Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1> | undefined;
+    Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+      | SubstrateFederatedIsolatedDevnetTargetDescriptorV2> | undefined;
   let mintProofProduced = false;
   let checkpointAttestationProduced = false;
   const session = Object.freeze({
@@ -797,15 +807,17 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     signLaunchStatement: (
       statement: Readonly<
         SubstrateFederatedIsolatedDevnetLaunchStatementV1
+        | SubstrateFederatedIsolatedDevnetLaunchStatementV2
       >,
     ) => {
       assertOpen(state);
       if (launchSigningStarted) {
         throw new Error('isolated-devnet launch attestation is already signed');
       }
-      assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance(
-        statement,
-      );
+      assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(statement);
+      const deriveDigest = statement.version === 2
+        ? deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV2
+        : deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1;
       const federation = statement.target.federation;
       if (
         federation.sourceAttestationKeySetDigestHex
@@ -822,7 +834,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         throw new Error('isolated-devnet launch statement targets a different profile');
       }
       const digestHex =
-        deriveSubstrateFederatedIsolatedDevnetLaunchAttestationDigestV1({
+        deriveDigest({
           statementDigestHex: statement.statementDigestHex,
           sourceAttestationKeySetDigestHex:
             federation.sourceAttestationKeySetDigestHex,
@@ -868,21 +880,36 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         ],
         'isolated-devnet settlement-family mint source-proof input',
       );
-      const draft = proofInput.draft as Readonly<
-        SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
-      >;
-      assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(
-        draft,
-      );
+      const draft = proofInput.draft;
       const evidenceReceipt = proofInput.evidenceReceipt as Readonly<
         SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1
       >;
-      const evidence =
-        consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(
-          evidenceReceipt,
-          draft,
-        );
       const target = signedTarget;
+      let evidence: Readonly<FederatedPooledReserveSourceProofEvidenceV1>;
+      if (target.version === 2) {
+        assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2(draft);
+        const compiler = draft.provenance.familyCompiler;
+        const exactCompilerBindings = [
+          [compiler.trackerRequestDigestHex, target.compiler.trackerRequestDigestHex, 'tracker request'],
+          [compiler.trackerReceiptDigestHex, target.compiler.trackerReceiptDigestHex, 'tracker receipt'],
+          [compiler.familyRequestDigestHex, target.compiler.familyRequestDigestHex, 'family request'],
+          [compiler.familyReceiptDigestHex, target.compiler.familyReceiptDigestHex, 'family receipt'],
+          [compiler.compilerLockDigestHex, target.compiler.familyCompilerLockDigestHex, 'family compiler lock'],
+        ] as const;
+        for (const [actual, expected, label] of exactCompilerBindings) {
+          if (fixedHex(actual, 32, label) !== fixedHex(expected, 32, label)) {
+            throw new Error(`isolated-devnet mint source-proof ${label} compiler binding differs from signed target`);
+          }
+        }
+        evidence = consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2(
+          evidenceReceipt, draft,
+        );
+      } else {
+        assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1(draft);
+        evidence = consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(
+          evidenceReceipt, draft,
+        );
+      }
       const familyDerivation = deriveRuntimeProfileForSettlementFamily(
         target,
         draft,
@@ -1710,9 +1737,11 @@ function deriveRuntimeProfileForDraft(
 }
 
 function deriveRuntimeProfileForSettlementFamily(
-  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
+    | SubstrateFederatedIsolatedDevnetTargetDescriptorV2>,
   draft: Readonly<
     SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1
+    | SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2
   >,
   binding: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationBindingV2>,
   federatedMintProfile: Readonly<FederatedPooledReserveSourceProofProfileV1>,

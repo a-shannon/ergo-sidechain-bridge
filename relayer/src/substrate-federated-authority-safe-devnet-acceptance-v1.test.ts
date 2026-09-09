@@ -216,6 +216,10 @@ describe('Substrate federated authority-safe devnet acceptance V1', () => {
     const result = await acceptSubstrateFederatedAuthoritySafeDevnetV1(input());
 
     expect(result.status).toBe('isolated_exact_authority_safe_target_accepted');
+    expect(mocks.inspectBaseline).toHaveBeenCalledTimes(3);
+    for (const [inspection] of mocks.inspectBaseline.mock.calls) {
+      expect(inspection.frontierCheckoutBytePolicy).toBe('raw');
+    }
     expect(result.source).toMatchObject({
       frontierCommit: FRONTIER_COMMIT,
       frontierPatchSha256Hex: FRONTIER_PATCH_SHA256,

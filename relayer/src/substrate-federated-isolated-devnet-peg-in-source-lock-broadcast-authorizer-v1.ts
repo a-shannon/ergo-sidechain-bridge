@@ -24,6 +24,10 @@ import {
   type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import {
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
   type SubstrateFederatedRewardInputDiscoveryV2,
@@ -32,6 +36,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1,
   type SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_SOURCE_LOCK_BROADCAST_AUTHORIZER_V1_SCHEMA =
@@ -70,9 +75,12 @@ interface AuthorizerMaterialV1 {
   readonly binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
   readonly batch:
-    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>;
+    Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+      | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
   readonly candidate:
-    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1
+      | SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  readonly assertCandidate: () => DepositPacket;
   readonly executionCheck:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1>;
   readonly postCheck:
@@ -93,6 +101,11 @@ interface AuthorizationMaterialV1 {
 const AUTHORIZERS = new WeakMap<object, AuthorizerMaterialV1>();
 const AUTHORIZATIONS = new WeakMap<object, AuthorizationMaterialV1>();
 
+type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+type AuthorizerInput = Pick<AuthorizerMaterialV1,
+  'target' | 'batch' | 'candidate' | 'executionCheck' | 'postCheck' | 'preTransport'>;
+
 export function createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(
   input: Readonly<{
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
@@ -108,13 +121,32 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAu
       Readonly<SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1>;
   }>,
 ): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target } = retained;
+  return createAuthorizer(retained, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(candidate, batch, target));
+}
+
+/** V2 provenance; the authorization still binds the exact generic source-lock operation. */
+export function createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2(
+  input: Readonly<Omit<AuthorizerInput, 'batch' | 'candidate'> & {
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target } = retained;
+  return createAuthorizer(retained, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target));
+}
+
+function createAuthorizer(
+  input: Readonly<AuthorizerInput>,
+  assertCandidate: () => DepositPacket,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
-  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
-    input.candidate,
-    input.batch,
-    input.target,
-  );
+  const packet = assertCandidate();
   const checkBinding =
     assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1(
       input.executionCheck,
@@ -236,6 +268,7 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAu
     binding,
     batch: input.batch,
     candidate: input.candidate,
+    assertCandidate,
     executionCheck: input.executionCheck,
     postCheck: input.postCheck,
     preTransport: input.preTransport,
@@ -315,11 +348,7 @@ function assertAuthorizer(
   ) {
     throw new Error('isolated source-lock authorizer process binding changed');
   }
-  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
-    material.candidate,
-    material.batch,
-    material.target,
-  );
+  material.assertCandidate();
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1(
     material.executionCheck,
     material.target,

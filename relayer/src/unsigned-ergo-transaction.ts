@@ -58,11 +58,15 @@ export async function normalizeEip12Box(box: unknown, label: string): Promise<Ei
   } catch (error: any) {
     throw new Error(`${label} is not a valid EIP-12 box: ${error?.message ?? String(error)}`);
   }
-  const canonical = parsed.to_js_eip12() as Eip12Box;
-  if (canonical.boxId.toLowerCase() !== normalized.boxId) {
-    throw new Error(`${label} boxId does not match its serialized box contents`);
+  try {
+    const canonical = parsed.to_js_eip12() as Eip12Box;
+    if (canonical.boxId.toLowerCase() !== normalized.boxId) {
+      throw new Error(`${label} boxId does not match its serialized box contents`);
+    }
+    return canonical;
+  } finally {
+    parsed.free();
   }
-  return canonical;
 }
 
 export async function normalizeErgoTreeHex(

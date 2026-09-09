@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
+  assertCandidateV2: vi.fn(),
   assertExecutionCheck: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
@@ -17,6 +18,9 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV1:
     mocks.assertCandidate,
+}));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
 }));
 vi.mock(
   './substrate-federated-isolated-devnet-reward-input-discovery-v1.js',
@@ -47,7 +51,9 @@ vi.mock('./fleet-signer.js', () => ({
 
 import {
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1,
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+  createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2,
 } from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
 import {
   admitErgoOperationalTransaction,
@@ -146,14 +152,20 @@ function ownedObservation(value: ReturnType<typeof observation>) {
   return owned;
 }
 
-function fixture() {
+function fixture(
+  create: typeof createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1
+    | typeof createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2
+    = createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1,
+  candidate: object = CANDIDATE,
+  batch: object = BATCH,
+) {
   const postCheck = ownedObservation(observation('31', 100));
   const preTransport = ownedObservation(observation('32', 101));
   const authorizer =
-    createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1({
+    create({
       target: TARGET as never,
-      batch: BATCH as never,
-      candidate: CANDIDATE as never,
+      batch: batch as never,
+      candidate: candidate as never,
       executionCheck: CHECK as never,
       postCheck: postCheck as never,
       preTransport: preTransport as never,
@@ -218,6 +230,92 @@ beforeEach(() => {
       throw new Error('owned reward-input discovery lacks target provenance');
     }
     return material.observation;
+  });
+});
+
+describe('isolated source-lock V2 authorization boundary (mocked provenance and check fields)', () => {
+  const candidateV2 = Object.freeze({ ...CANDIDATE, version: 2 });
+  const batchV3 = Object.freeze({ ...BATCH, version: 3 });
+  const create = createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV2;
+  const input = () => ({
+    target: TARGET as never, batch: batchV3 as never, candidate: candidateV2 as never,
+    executionCheck: CHECK as never,
+    postCheck: ownedObservation(observation('31', 100)) as never,
+    preTransport: ownedObservation(observation('32', 101)) as never,
+  });
+
+  beforeEach(() => {
+    mocks.assertCandidateV2.mockImplementation((candidate, batch, target) => {
+      if (candidate !== candidateV2 || batch !== batchV3 || target !== TARGET) {
+        throw new Error('V2 candidate provenance missing');
+      }
+      return PACKET;
+    });
+  });
+
+  it('authorizes the exact V2 candidate once while retaining generic V1 artifact semantics', () => {
+    const { authorizer, revalidated } = fixture(create, candidateV2, batchV3);
+    const evidence = authorizer.authorize(revalidated as never);
+    expect(evidence.authorizationArtifact).toMatchObject({ version: 1, expectedTxId: TX_ID });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(
+      authorizer, { revalidated, ...evidence } as never,
+    )).not.toThrow();
+    expect(() => authorizer.authorize(revalidated as never)).toThrow(/one-shot/);
+    expect(mocks.assertCandidate).not.toHaveBeenCalled();
+    expect(mocks.assertCandidateV2).toHaveBeenCalledWith(candidateV2, batchV3, TARGET);
+  });
+
+  it.each(['V1 candidate', 'copied candidate', 'V1 setup', 'copied target', 'copied check', 'copied postcheck'] as const)(
+    'rejects %s before creating V2 authorization authority', fault => {
+      const supplied = input();
+      if (fault === 'V1 candidate') supplied.candidate = CANDIDATE as never;
+      if (fault === 'copied candidate') supplied.candidate = { ...candidateV2 } as never;
+      if (fault === 'V1 setup') supplied.batch = BATCH as never;
+      if (fault === 'copied target') supplied.target = { ...TARGET } as never;
+      if (fault === 'copied check') supplied.executionCheck = { ...CHECK } as never;
+      if (fault === 'copied postcheck') supplied.postCheck = { ...ownedObservation(observation('31', 100)) } as never;
+      expect(() => create(supplied)).toThrow(/provenance/);
+    },
+  );
+
+  it('keeps the old entrypoint strictly V1', () => {
+    expect(() => createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(input()))
+      .toThrow(/candidate provenance/);
+    expect(mocks.assertCandidateV2).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the retained V2 guard when authorizing', () => {
+    const { authorizer, revalidated } = fixture(create, candidateV2, batchV3);
+    mocks.assertCandidateV2.mockImplementation(() => { throw new Error('V2 candidate revoked'); });
+    expect(() => authorizer.authorize(revalidated as never)).toThrow(/V2 candidate revoked/);
+  });
+
+  it('reads getter-backed candidate and target slots once for the retained guard', () => {
+    let candidateReads = 0;
+    let targetReads = 0;
+    const supplied = {
+      ...input(),
+      get candidate() { return (++candidateReads === 1 ? candidateV2 : { ...candidateV2 }) as never; },
+      get target() { return (++targetReads === 1 ? TARGET : { ...TARGET }) as never; },
+    };
+    const authorizer = create(supplied);
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(authorizer, TARGET as never))
+      .not.toThrow();
+    expect(candidateReads).toBe(1);
+    expect(targetReads).toBe(1);
+  });
+
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'rejects retained %s drift before authorization', field => {
+      const { authorizer, revalidated } = fixture(create, candidateV2, batchV3);
+      mocks.assertTarget.mockReturnValue({ ...BINDING, [field]: hex('ee') });
+      expect(() => authorizer.authorize(revalidated as never)).toThrow(/binding changed/);
+    },
+  );
+
+  it('rejects a backwards V2 pre-transport observation', () => {
+    expect(() => create({ ...input(), preTransport: ownedObservation(observation('32', 99)) as never }))
+      .toThrow(/moved backwards/);
   });
 });
 

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertObservation: vi.fn(),
+  assertObservationV2: vi.fn(),
   drafts: new WeakSet<object>(),
   packet: undefined as any,
   observation: undefined as any,
@@ -10,14 +11,18 @@ const mocks = vi.hoisted(() => ({
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js',
   () => ({
+    SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1: 10,
     assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV1:
       mocks.assertObservation,
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2:
+      mocks.assertObservationV2,
   }),
 );
 
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js',
-  () => ({
+  async importOriginal => ({
+    ...await importOriginal<typeof import('./substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js')>(),
     assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1:
       vi.fn((value: unknown) => {
         if (value === null || typeof value !== 'object' || !mocks.drafts.has(value)) {
@@ -31,18 +36,35 @@ import {
   assertSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1Provenance,
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
+  collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV2 as collectV2,
+  consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2 as consumeV2,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import { buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as buildDraftV2 }
+  from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 
 const h32 = (byte: string): string => `0x${byte.repeat(32)}`;
 const BATCH = Object.freeze({ role: 'batch' });
 const TARGET = Object.freeze({ role: 'target' });
 const CANDIDATE = Object.freeze({ candidateDigestHex: h32('11') });
+const CANDIDATE_V2 = Object.freeze({ version: 2, candidateDigestHex: h32('71') });
+const COMPILER_V2 = Object.freeze({
+  trackerRequestDigestHex: h32('72'), trackerReceiptDigestHex: h32('73'),
+  familyRequestDigestHex: h32('74'), familyReceiptDigestHex: h32('75'),
+  compilerLockDigestHex: h32('76'),
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.drafts = new WeakSet<object>();
   mocks.packet = packet();
   mocks.observation = observation();
+  mocks.assertObservationV2.mockImplementation((observed, batch, candidate, target) => {
+    if (observed !== mocks.observation || batch !== BATCH || candidate !== CANDIDATE_V2 || target !== TARGET) {
+      throw new Error('committed-vault V2 candidate provenance missing');
+    }
+    return mocks.packet;
+  });
   mocks.assertObservation.mockImplementation(
     (observed, batch, candidate, target) => {
       if (
@@ -233,6 +255,132 @@ function collect(draft: ReturnType<typeof mintDraft>) {
     committedVaultObservation: mocks.observation as never,
   });
 }
+
+function v2Input() {
+  mocks.packet = Object.freeze({ ...packet(), version: 2, familyCompiler: COMPILER_V2,
+    sourceIntentHex: encodePegInSourceIntentV2Hex({
+      formatVersion: 2, sourceNetworkIdHex: h32('01'), sidechainIdHex: h32('02'),
+      bridgeAddressHex: `0x${'03'.repeat(20)}`, tokenAddressHex: `0x${'04'.repeat(20)}`,
+      settlementProfileIdHex: h32('05'), admissionProfileIdHex: mocks.packet.familyIdHex,
+      sourceAssetIdHex: h32('00'), amountNanoErg: '10000000', recipientAddressHex: `0x${'06'.repeat(20)}`,
+    }),
+  });
+  const observed = { batch: BATCH as never, target: TARGET as never,
+    candidate: CANDIDATE_V2 as never, committedVaultObservation: mocks.observation as never };
+  return { ...observed, draft: buildDraftV2(observed) };
+}
+
+describe('isolated-devnet committed-reserve evidence collector V2', () => {
+  it('collects generic V1 evidence from a real V2 draft and consumes it exactly once', () => {
+    const input = v2Input();
+    const receipt = collectV2(input);
+    expect(receipt).toMatchObject({
+      schema: 'e2s.substrate-federated-isolated-devnet-committed-reserve-evidence.v1', version: 1,
+      mintReservationDraftDigestHex: input.draft.draftDigestHex,
+      candidateDigestHex: CANDIDATE_V2.candidateDigestHex,
+      boundaries: { mintAuthorized: false, fundsAuthorityEstablished: false, ergoPowAuthenticated: false },
+    });
+    expect(decodeCanonicalObject(receipt.evidence.sourceLockBoxCanonicalHex).box)
+      .toEqual(mocks.packet.boxes.sourceLock);
+    expect(decodeCanonicalObject(receipt.evidence.reserveTransitionTransactionCanonicalHex).transaction)
+      .toEqual(mocks.packet.transactions.reserveTransition.eip12Tx);
+    expect(consumeV2(receipt, input.draft)).toBe(receipt.evidence);
+    expect(() => consumeV2(receipt, input.draft)).toThrow(/already consumed/);
+  });
+
+  it.each(Object.keys(COMPILER_V2) as Array<keyof typeof COMPILER_V2>)(
+    'rejects isolated compiler lineage mismatch: %s', field => {
+      const input = v2Input();
+      mocks.packet = { ...mocks.packet, familyCompiler: { ...COMPILER_V2, [field]: h32('ff') } };
+      expect(() => collectV2(input)).toThrow(/lineage|compiler/);
+    },
+  );
+
+  it.each(['batch', 'target', 'candidate', 'committedVaultObservation', 'draft'] as const)(
+    'rejects copied collection input %s', field => {
+      const input = v2Input();
+      expect(() => collectV2({ ...input, [field]: structuredClone(input[field]) } as never))
+        .toThrow(/provenance/);
+    },
+  );
+
+  it('rejects a different real draft with identical public bytes without consuming the owner receipt', () => {
+    const input = v2Input();
+    const receipt = collectV2(input);
+    const other = buildDraftV2({ batch: input.batch, target: input.target, candidate: input.candidate,
+      committedVaultObservation: input.committedVaultObservation });
+    expect(other).toEqual(input.draft);
+    expect(other).not.toBe(input.draft);
+    expect(() => consumeV2(receipt, other)).toThrow(/different mint-reservation draft/);
+    expect(consumeV2(receipt, input.draft)).toBe(receipt.evidence);
+  });
+
+  it.each(['copy', 'packet-replaced', 'candidate-revoked'] as const)(
+    'revalidates retained receipt identity at consumption: %s', fault => {
+      const input = v2Input();
+      const receipt = collectV2(input);
+      if (fault === 'packet-replaced') mocks.packet = { ...mocks.packet };
+      if (fault === 'candidate-revoked') mocks.assertObservationV2.mockImplementation(() => {
+        throw new Error('candidate provenance revoked');
+      });
+      expect(() => consumeV2(fault === 'copy' ? structuredClone(receipt) : receipt, input.draft))
+        .toThrow(/provenance|changed/);
+    },
+  );
+
+  it('rejects both cross-version collectors and consumers despite the shared receipt schema', () => {
+    const legacyDraft = mintDraft();
+    const legacyReceipt = collect(legacyDraft);
+    const legacyPacket = mocks.packet;
+    const input = v2Input();
+    const receipt = collectV2(input);
+    expect(() => collectV2({ ...input, draft: legacyDraft as never })).toThrow(/provenance|version/);
+    expect(() => collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1(input as never))
+      .toThrow(/provenance|version/);
+    expect(() => consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(receipt, input.draft as never))
+      .toThrow(/provenance|version/);
+    expect(() => consumeV2(receipt, legacyDraft as never)).toThrow(/provenance|version/);
+    expect(consumeV2(receipt, input.draft)).toBe(receipt.evidence);
+    mocks.packet = legacyPacket;
+    expect(() => consumeV2(legacyReceipt, legacyDraft as never)).toThrow(/provenance|version/);
+    expect(() => consumeV2(legacyReceipt, input.draft)).toThrow(/different|version|provenance/);
+    expect(consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1(legacyReceipt, legacyDraft as never))
+      .toBe(legacyReceipt.evidence);
+  });
+});
+
+describe.each([1, 2] as const)('collector V%s original input descriptors', version => {
+  function validInput() {
+    return version === 2 ? v2Input() : {
+      draft: mintDraft(), batch: BATCH, target: TARGET, candidate: CANDIDATE,
+      committedVaultObservation: mocks.observation,
+    };
+  }
+
+  const collector = version === 2 ? collectV2 : collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1;
+
+  it.each(['batch', 'candidate', 'committedVaultObservation', 'draft', 'target'] as const)(
+    'rejects the original %s getter without invoking it', field => {
+      const input = validInput();
+      const getter = vi.fn(() => input[field]);
+      const supplied = { ...input };
+      Object.defineProperty(supplied, field, { enumerable: true, get: getter });
+      expect(() => collector(supplied as never)).toThrow(/must contain exactly|data fields/);
+      expect(getter).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an extra non-enumerable own property before snapshotting', () => {
+    const input = validInput();
+    Object.defineProperty(input, 'extra', { value: true, enumerable: false });
+    expect(() => collector(input as never)).toThrow(/must contain exactly|data fields/);
+  });
+
+  it.each(['custom-prototype', 'null-prototype'] as const)('rejects %s input rather than laundering it through a spread', kind => {
+    const input = Object.assign(Object.create(kind === 'null-prototype' ? null : { inherited: true }), validInput());
+    expect(() => collector(input as never)).toThrow(/plain object/);
+  });
+});
 
 function mintDraft(digestByte = '31') {
   const value = Object.freeze({

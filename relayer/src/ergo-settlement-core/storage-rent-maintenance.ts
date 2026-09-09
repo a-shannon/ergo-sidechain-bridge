@@ -115,6 +115,13 @@ export const STORAGE_RENT_SURFACE_INVENTORY = Object.freeze([
     'every successor binds a federation-authorized checkpoint and tracker transition',
   ),
   surface(
+    'substrate-federated-spv-tracker-v2',
+    'SPVTrackerSubstrateFederatedV2.es',
+    'candidate',
+    'semantic-transition-only',
+    'every successor binds a federation-authorized checkpoint and absolute-height anchor admission',
+  ),
+  surface(
     'double-unlock-prevention-v1',
     'DoubleUnlockPrevention.es',
     'active-compatibility',

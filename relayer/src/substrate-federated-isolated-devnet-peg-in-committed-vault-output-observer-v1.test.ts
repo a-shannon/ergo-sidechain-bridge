@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
+  assertCandidateV2: vi.fn(),
   assertConfirmation: vi.fn(),
   reobserveConfirmation: vi.fn(),
   assertTarget: vi.fn(),
@@ -36,6 +37,9 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV1:
     mocks.assertCandidate,
 }));
+vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
+}));
 vi.mock('./substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1:
     mocks.assertConfirmation,
@@ -52,6 +56,8 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1,
   observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1,
+  observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV2,
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import {
   buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
@@ -271,6 +277,156 @@ beforeEach(() => {
   mocks.getBlockHeaderById.mockImplementation(
     (_origin: string, headerId: string) => headers.get(headerId) ?? null,
   );
+});
+
+describe('isolated committed-vault V2 candidate boundary (mocked provenance and node fields)', () => {
+  const candidateV2 = Object.freeze({ ...CANDIDATE, version: 2 });
+  const batchV3 = Object.freeze({ ...BATCH, version: 3 });
+  const input = () => ({
+    target: TARGET as never, batch: batchV3 as never,
+    candidate: candidateV2 as never, confirmation: CONFIRMATION as never,
+  });
+  const observe = observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV2;
+  const assertBound = assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2;
+
+  beforeEach(() => {
+    mocks.assertCandidateV2.mockImplementation((candidate, batch, target) => {
+      if (candidate !== candidateV2 || batch !== batchV3 || target !== TARGET) {
+        throw new Error('V2 candidate provenance missing');
+      }
+      return PACKET;
+    });
+  });
+
+  it('retains V1 observation semantics with an exact V2 candidate and V3 setup binding', async () => {
+    const observation = await observe(input());
+    expect(observation.version).toBe(1);
+    expect(observation.schema).toBe(
+      'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-output-observation.v1',
+    );
+    expect(() => assertBound(observation, batchV3 as never, candidateV2 as never, TARGET as never)).not.toThrow();
+    expect(mocks.assertCandidate).not.toHaveBeenCalled();
+    expect(mocks.assertCandidateV2).toHaveBeenCalledWith(candidateV2, batchV3, TARGET);
+  });
+
+  it.each(['V1 candidate', 'copied candidate', 'V1 setup', 'copied target'] as const)(
+    'rejects %s at entry before reading node fields', async fault => {
+      const supplied = input();
+      if (fault === 'V1 candidate') supplied.candidate = CANDIDATE as never;
+      if (fault === 'copied candidate') supplied.candidate = { ...candidateV2 } as never;
+      if (fault === 'V1 setup') supplied.batch = BATCH as never;
+      if (fault === 'copied target') supplied.target = { ...TARGET } as never;
+      await expect(observe(supplied)).rejects.toThrow(/provenance/);
+      expect(mocks.getBox).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the old entrypoint strictly V1', async () => {
+    await expect(observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1(input())).rejects.toThrow(/candidate provenance/);
+    expect(mocks.assertCandidateV2).not.toHaveBeenCalled();
+    expect(mocks.getBox).not.toHaveBeenCalled();
+  });
+
+  it.each(['candidate', 'batch', 'copied observation', 'V1 observation'] as const)(
+    'rejects %s substitution even when packet bytes agree', async fault => {
+      const observation = fault === 'V1 observation'
+        ? await observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1({
+          target: TARGET as never, batch: BATCH as never,
+          candidate: CANDIDATE as never, confirmation: CONFIRMATION as never,
+        })
+        : await observe(input());
+      const otherCandidate = Object.freeze({ ...candidateV2 });
+      const otherBatch = Object.freeze({ ...batchV3 });
+      // Model a separately valid identity with identical packet bytes.
+      mocks.assertCandidateV2.mockImplementation((candidate, batch, target) => {
+        if (![candidateV2, otherCandidate].includes(candidate)
+          || ![batchV3, otherBatch].includes(batch) || target !== TARGET) {
+          throw new Error('V2 candidate provenance missing');
+        }
+        return PACKET;
+      });
+      expect(() => assertBound(
+        fault === 'copied observation' ? { ...observation } : observation,
+        (fault === 'batch' ? otherBatch : batchV3) as never,
+        (fault === 'candidate' ? otherCandidate : candidateV2) as never,
+        TARGET as never,
+      )).toThrow(/provenance|candidate|binding/);
+    },
+  );
+
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'rejects %s drift during asynchronous output normalization', async field => {
+      mocks.normalizeBox.mockImplementationOnce(async value => {
+        mocks.assertTarget.mockReturnValue({ ...BINDING, [field]: hex('ee') });
+        return value;
+      });
+      await expect(observe(input())).rejects.toThrow(/target changed|binding|provenance/);
+    },
+  );
+
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'rejects %s drift when consuming a retained observation', async field => {
+      const observation = await observe(input());
+      mocks.assertTarget.mockReturnValue({ ...BINDING, [field]: hex('ee') });
+      expect(() => assertBound(observation, batchV3 as never, candidateV2 as never, TARGET as never))
+        .toThrow(/provenance|binding/);
+    },
+  );
+
+  it('rechecks candidate provenance after asynchronous node reads', async () => {
+    mocks.normalizeBox.mockImplementationOnce(async value => {
+      mocks.assertCandidateV2.mockImplementation(() => { throw new Error('V2 candidate revoked after read'); });
+      return value;
+    });
+    await expect(observe(input())).rejects.toThrow(/V2 candidate revoked after read/);
+  });
+
+  it('retains the original outer input tuple across asynchronous reads', async () => {
+    const supplied = input();
+    mocks.normalizeBox.mockImplementationOnce(async value => {
+      supplied.candidate = { ...candidateV2 } as never;
+      supplied.batch = { ...batchV3 } as never;
+      supplied.target = { ...TARGET } as never;
+      return value;
+    });
+    const observation = await observe(supplied);
+    expect(() => assertBound(observation, batchV3 as never, candidateV2 as never, TARGET as never)).not.toThrow();
+    for (const call of mocks.assertCandidateV2.mock.calls) {
+      expect(call).toEqual([candidateV2, batchV3, TARGET]);
+      expect(call[0]).toBe(candidateV2);
+      expect(call[1]).toBe(batchV3);
+      expect(call[2]).toBe(TARGET);
+    }
+  });
+
+  it('reads getter-backed candidate and target slots once into the retained snapshot', async () => {
+    let candidateReads = 0;
+    let targetReads = 0;
+    const supplied = {
+      ...input(),
+      get candidate() { return (++candidateReads === 1 ? candidateV2 : { ...candidateV2 }) as never; },
+      get target() { return (++targetReads === 1 ? TARGET : { ...TARGET }) as never; },
+    };
+    const observation = await observe(supplied);
+    expect(() => assertBound(observation, batchV3 as never, candidateV2 as never, TARGET as never)).not.toThrow();
+    expect(candidateReads).toBe(1);
+    expect(targetReads).toBe(1);
+  });
+
+  it('rejects a different packet returned by the post-read candidate guard', async () => {
+    mocks.normalizeBox.mockImplementationOnce(async value => {
+      mocks.assertCandidateV2.mockReturnValue({ ...PACKET });
+      return value;
+    });
+    await expect(observe(input())).rejects.toThrow(/target changed/);
+  });
+
+  it('rejects copied canonical confirmation authority on the V2 route', async () => {
+    await expect(observe({
+      ...input(), confirmation: { ...CONFIRMATION, observerArtifact: { ...CONFIRMATION.observerArtifact } } as never,
+    })).rejects.toThrow(/confirmation provenance/);
+    expect(mocks.getBox).not.toHaveBeenCalled();
+  });
 });
 
 describe('isolated committed-vault output observer V1', () => {

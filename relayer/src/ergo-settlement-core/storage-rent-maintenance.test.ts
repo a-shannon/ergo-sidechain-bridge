@@ -89,6 +89,13 @@ describe('storage-rent surface inventory', () => {
         refreshMode: 'semantic-transition-only',
       }),
       expect.objectContaining({
+        surfaceId: 'substrate-federated-spv-tracker-v2',
+        contractFile: 'SPVTrackerSubstrateFederatedV2.es',
+        profile: 'candidate',
+        refreshMode: 'semantic-transition-only',
+        neutralMaintenanceEligible: false,
+      }),
+      expect.objectContaining({
         contractFile: 'DoubleUnlockPreventionSubstrateFederatedV1.es',
         refreshMode: 'semantic-transition-only',
       }),
@@ -105,6 +112,26 @@ describe('storage-rent surface inventory', () => {
 });
 
 describe('storage-rent projection', () => {
+  it('does not authorize neutral maintenance for an aged federated V2 tracker', () => {
+    const report = projectStorageRent({
+      surfaceId: 'substrate-federated-spv-tracker-v2',
+      currentHeight: ERGO_STORAGE_PERIOD_BLOCKS,
+      creationHeight: 0,
+      serializedSizeBytes: 105,
+      valueNanoErg: 200_000_000,
+      storageFeeFactorNanoErgPerByte: STORAGE_FEE_FACTOR,
+      parameterObservedAtHeight: ERGO_STORAGE_PERIOD_BLOCKS,
+      parameterSourceId: 'fixture.parameters.v1',
+    });
+
+    expect(report).toMatchObject({
+      contractFile: 'SPVTrackerSubstrateFederatedV2.es',
+      ageRisk: 'rent_eligible',
+      refreshMode: 'semantic-transition-only',
+      neutralMaintenanceEligible: false,
+    });
+  });
+
   it('uses canonical serialized bytes and an explicitly observed fee factor', () => {
     const report = projectStorageRent({
       surfaceId: LEGACY_SPV_TRACKER_STORAGE_RENT_PROFILE,

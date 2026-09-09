@@ -930,6 +930,115 @@ describe('consensus source baseline', () => {
     }
   });
 
+  it.each([
+    ['unpatched.rs', 'unmodified'],
+    ['patched.rs', 'modified'],
+    ['added.rs', 'added'],
+    ['Cargo.toml', 'modified'],
+    ['Cargo.lock', 'modified'],
+  ])('keeps raw build identity for %s distinct from controlled CRLF identity', async (path, state) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-build-checkout-'));
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: root, encoding: 'utf8', windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const blobId = (bytes: Buffer) => createHash('sha1')
+      .update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
+    const original = 'original\n';
+    const expected = Buffer.from(state === 'unmodified' ? original : 'patched\n');
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      git('config', 'core.autocrlf', 'false');
+      writeFileSync(resolve(root, 'README.md'), 'fixture\n');
+      if (state !== 'added') writeFileSync(resolve(root, path), original);
+      git('add', 'README.md', ...(state === 'added' ? [] : [path]));
+      git('commit', '--quiet', '-m', 'fixture');
+      writeFileSync(resolve(root, path), expected);
+      const before = baseline.inspectRawCheckout(root, [path], undefined, 'raw');
+      expect(before.blobs[path]).toBe(blobId(expected));
+
+      const materialized = Buffer.from(expected.toString().replaceAll('\n', '\r\n'));
+      writeFileSync(resolve(root, path), materialized);
+      const compatible = baseline.inspectRawCheckout(root, [path]);
+      const exact = baseline.inspectRawCheckout(root, [path], undefined, 'raw');
+      expect(compatible.blobs[path]).toBe(blobId(expected));
+      expect(exact.blobs[path]).toBe(blobId(materialized));
+      expect(exact.blobs[path]).not.toBe(before.blobs[path]);
+      if (state === 'unmodified') {
+        expect(compatible.status).toBe('');
+        expect(exact.status).toBe(` M ${path}`);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards raw policy through the real baseline entry point', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-policy-forwarding-'));
+    const source = resolve(root, 'frontier');
+    const bridge = resolve(root, 'bridge');
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: source, encoding: 'utf8', windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      mkdirSync(source);
+      mkdirSync(resolve(bridge, 'sources'), { recursive: true });
+      const files = ['Cargo.lock', 'rust-toolchain.toml',
+        'template/node/Cargo.toml', 'template/runtime/Cargo.toml'];
+      for (const path of files) {
+        mkdirSync(dirname(resolve(source, path)), { recursive: true });
+        writeFileSync(resolve(source, path), 'source input\n');
+      }
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      git('config', 'core.autocrlf', 'false');
+      git('add', ...files);
+      git('commit', '--quiet', '-m', 'fixture');
+      const blob = git('rev-parse', 'HEAD:Cargo.lock').trim();
+      writeFileSync(resolve(bridge, 'sources', 'consensus-source-lock.json'),
+        JSON.stringify({ frontier: {
+          commit: git('rev-parse', 'HEAD').trim(), files: [],
+          cargoLockBlob: blob, rustToolchainBlob: blob,
+          nodeManifestBlob: blob, runtimeManifestBlob: blob,
+        } }));
+      const inspect = (frontierCheckoutBytePolicy?: string) =>
+        baseline.inspectConsensusSourceBaseline({
+          worktreeRoot: bridge, bridgeRoot: bridge, frontierSourcePath: source,
+          requireFrontierCheckout: true, requireErgoCheckout: false,
+          frontierCheckoutBytePolicy,
+        });
+      // This fixture isolates checkout validation; release inputs are absent.
+      const exactLf = inspect('raw');
+      expect(exactLf.checks.lockBindingsValidated).toBe(false);
+      expect(exactLf.checks.frontierCheckoutValidated).toBe(true);
+      writeFileSync(resolve(source, 'Cargo.lock'), 'source input\r\n');
+      expect(inspect().checks.frontierCheckoutValidated).toBe(true);
+      const exactCrLf = inspect('raw');
+      expect(exactCrLf.checks.frontierCheckoutValidated).toBe(false);
+      expect(exactCrLf.errors).toContain('Frontier Cargo.lock does not match the source lock');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unknown checkout byte policy before reading a checkout', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    expect(() => baseline.inspectRawCheckout('absent-source', [], undefined, 'unknown'))
+      .toThrow(/checkout byte policy/);
+  });
+
   it('detects raw checkout and index drift even when a Git clean filter rewrites the blob identity', async () => {
     const baseline = await loadBaselineModule();
     expect(baseline, 'consensus-source-baseline module').toBeDefined();

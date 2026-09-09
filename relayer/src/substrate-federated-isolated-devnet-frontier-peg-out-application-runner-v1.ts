@@ -36,6 +36,14 @@ import {
   type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceReceiptV1,
 } from './substrate-federated-isolated-devnet-frontier-peg-out-application-evidence-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV2ConsumerConstruction,
+  consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV2,
+  type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceReceiptV2,
+} from './substrate-federated-isolated-devnet-frontier-peg-out-application-evidence-v2.js';
+import {
+  inspectFrontierLabApplicationSignedTransactionsV1,
+} from './substrate-federated-isolated-devnet-frontier-application-transactions-v1.js';
+import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1,
 } from './substrate-federated-isolated-devnet-frontier-lab-application-v1.js';
@@ -65,6 +73,8 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RU
   'e2s.substrate-federated-isolated-devnet-frontier-peg-out-application-runner.v1' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-frontier-peg-out-application-runner.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-frontier-peg-out-application-runner.v3' as const;
 
 export function inspectSubstrateFederatedIsolatedDevnetFrontierApplicationPatchGitLockV1(
   bridgeRoot: string,
@@ -97,6 +107,10 @@ const RECEIPT_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V1';
 const RECEIPT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V2';
+const RECEIPT_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V3';
+const SIGNED_CARGO_TEST_NAME =
+  'bridge_federated_lab_reservation_tests::federated_lab_signed_application_burn_produces_exact_commitment' as const;
 const CARGO_TEST_NAME =
   'bridge_federated_lab_reservation_tests::federated_lab_application_burn_produces_exact_commitment_and_conserves_supply' as const;
 const DYNAMIC_SOURCE_PROOF_ENVELOPE_ENV =
@@ -117,6 +131,10 @@ const CARGO_ARGUMENTS = Object.freeze([
   '--exact',
   '--nocapture',
 ] as const);
+const SIGNED_CARGO_ARGUMENTS = Object.freeze([
+  ...CARGO_ARGUMENTS.slice(0, 8), SIGNED_CARGO_TEST_NAME,
+  '--', '--exact', '--ignored', '--nocapture',
+]);
 const CANONICAL_FRONTIER_PATCH_SHA256 =
   'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634';
 const APPLICATION_OVERLAY_PATCH_SHA256 =
@@ -125,6 +143,10 @@ const OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256 =
   'ff7857d14f50fc39f9f6679087fe574380a0c88026d58082b6fa5e781e86a962';
 const OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256 =
   'd4cd785d764ed70c25e324a3250dc0bb34db5322a9385b9c11ad1cdaf34f64d0';
+const SIGNED_APPLICATION_OVERLAY_PATCH_SHA256 =
+  '921d1488b78f8123b1772d20d88da00670140e70b7a1a763381e1158416250dd';
+const SIGNED_OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256 =
+  'f3e8472eb0f642c1107c352fe46c60573274f7c268505153223b304efa6936cb';
 const EXPECTED_OWNER_ADDRESS =
   '0xf24ff3a9cf04c71dbc94d0b566f7a27b94566cac';
 const EXPECTED_MINT_AMOUNT_NANO_ERG = '15000000';
@@ -142,6 +164,10 @@ const V2_RECEIPTS = new WeakMap<
   }>
 >();
 const ACTIVE_SOURCE_DIRECTORIES = new Set<string>();
+const V3_RECEIPTS = new WeakMap<object, Readonly<{
+  mintSourceProofReceipt: Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2>;
+  executionResult: Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2>;
+}>>();
 
 export type RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input =
   SubstrateFederatedIsolatedDevnetFrontierApplicationPreflightV1Input;
@@ -151,6 +177,17 @@ export interface RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRun
   readonly mintSourceProofReceipt:
     Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2>;
 }
+
+export interface RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3Input
+  extends RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2Input {
+  readonly ergoRecipientPublicKeyHex: string;
+  readonly signedTransactions: Readonly<Record<'mint' | 'approval' | 'pegOut', string>>;
+}
+
+type SignedApplicationInput = Pick<
+  RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3Input,
+  'mintSourceProofReceipt' | 'ergoRecipientPublicKeyHex' | 'signedTransactions'
+>;
 
 export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1 {
   readonly schema:
@@ -269,6 +306,45 @@ export interface SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunner
   readonly receiptDigestHex: string;
 }
 
+export type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2 =
+  Readonly<Omit<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV1,
+    'applicationEvidence' | 'source' | 'execution' | 'boundary'> & {
+    applicationEvidence: Readonly<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceReceiptV2>;
+    source: SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV1['source'] & {
+      readonly signedApplicationOverlayPatchSha256: string;
+    };
+    execution: Omit<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV1['execution'], 'cargoTestName'> & {
+      readonly cargoTestName: typeof SIGNED_CARGO_TEST_NAME;
+    };
+    boundary: Omit<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV1['boundary'], 'deterministicSyntheticAccountOnly'> & {
+      readonly deterministicSyntheticAccountOnly: false;
+      readonly freshSyntheticOwnerSignedCallsOnly: true;
+    };
+  }>;
+
+export type SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3 =
+  Readonly<Omit<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2,
+    'schema' | 'version' | 'status' | 'executionResult' | 'boundary' | 'checks'> & {
+    schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V3_SCHEMA;
+    version: 3;
+    status: 'same_process_mint_proof_bound_signed_application_burn_executed';
+    executionResult: SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2;
+    signedApplication: Readonly<{
+      ownerAddressHex: string;
+      ergoRecipientPublicKeyHex: string;
+      transactionHashes: Readonly<Record<'mint' | 'approval' | 'pegOut', string>>;
+    }>;
+    checks: SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV2['checks'] & {
+      readonly exactSignedCallsAndRecipientBound: true;
+      readonly signedApplicationOverlayBound: true;
+    };
+    boundary: SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2['boundary'] & {
+      readonly processProvenMintSourceProofBound: true;
+      readonly packetMintContinuationBound: false;
+      readonly checkpointAttestationEstablished: false;
+    };
+  }>;
+
 export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1(
   input: Readonly<
     RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input
@@ -346,6 +422,51 @@ export async function runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicati
     return buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1(
       executionResult,
     );
+  } finally {
+    ACTIVE_SOURCE_DIRECTORIES.delete(sourceIdentity);
+  }
+}
+
+export function preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3Input>,
+): Readonly<RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3Input> {
+  exactRecord(input, [
+    'cargoDependencyCacheDirectory', 'cargoExecutablePath',
+    'ergoRecipientPublicKeyHex', 'frontierSourceDirectory', 'gitExecutablePath',
+    'mintSourceProofReceipt', 'offline', 'rustcExecutablePath',
+    'signedTransactions', 'temporaryDirectoryRoot',
+  ], 'Frontier peg-out application V3 runner input');
+  const { ergoRecipientPublicKeyHex, signedTransactions, ...legacyPlan } = input;
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
+    input.mintSourceProofReceipt,
+  );
+  inspectFrontierLabApplicationSignedTransactionsV1({
+    mintReservationStatementHex: input.mintSourceProofReceipt.request.statementHex,
+    ergoRecipientPublicKeyHex,
+  }, signedTransactions);
+  const plan = preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV2(legacyPlan);
+  return Object.freeze({
+    ...plan, ergoRecipientPublicKeyHex,
+    signedTransactions: Object.freeze({ ...signedTransactions }),
+  });
+}
+
+export async function runSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3Input>,
+  completionDeadline: number | undefined = undefined,
+): Promise<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3> {
+  const deadline = requireCompletionDeadline(completionDeadline);
+  const plan = preflightSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV3(input);
+  const sourceIdentity = pathIdentity(plan.frontierSourceDirectory);
+  if (ACTIVE_SOURCE_DIRECTORIES.has(sourceIdentity)) {
+    throw new Error('Frontier peg-out application runner source is already active');
+  }
+  const authorityEnvironment =
+    buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3(plan);
+  ACTIVE_SOURCE_DIRECTORIES.add(sourceIdentity);
+  try {
+    const executionResult = await executeRunner(plan, deadline, authorityEnvironment, plan);
+    return bindSignedApplicationRunnerReceiptV3(plan, executionResult, authorityEnvironment);
   } finally {
     ACTIVE_SOURCE_DIRECTORIES.delete(sourceIdentity);
   }
@@ -446,14 +567,50 @@ export function assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationR
   }
 }
 
+export function assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3Provenance(
+  value: unknown,
+): asserts value is SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3 {
+  const material = value !== null && typeof value === 'object'
+    ? V3_RECEIPTS.get(value) : undefined;
+  if (material === undefined) {
+    throw new Error('Frontier peg-out application V3 runner receipt lacks process provenance');
+  }
+  const receipt = value as SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3;
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(material.mintSourceProofReceipt);
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV2ConsumerConstruction(
+    receipt.executionResult.applicationEvidence,
+  );
+  if (receipt.executionResult !== material.executionResult
+    || receipt.mintSourceProof.receiptDigestHex !== material.mintSourceProofReceipt.receiptDigestHex) {
+    throw new Error('Frontier peg-out application V3 runner binding changed');
+  }
+  const { receiptDigestHex, ...body } = receipt;
+  if (sha256CanonicalJson(body, RECEIPT_V3_DIGEST_DOMAIN) !== receiptDigestHex) {
+    throw new Error('Frontier peg-out application V3 runner receipt changed');
+  }
+}
+
+async function executeRunner(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input>,
+  completionDeadline: number,
+  authorityEnvironment: Readonly<Record<string, string>>,
+): Promise<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV1>;
+async function executeRunner(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input>,
+  completionDeadline: number,
+  authorityEnvironment: Readonly<Record<string, string>>,
+  signedInput: Readonly<SignedApplicationInput>,
+): Promise<SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2>;
 async function executeRunner(
   input: Readonly<
     RunSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerV1Input
   >,
   completionDeadline: number,
   authorityEnvironment: Readonly<Record<string, string>>,
+  signedInput?: Readonly<SignedApplicationInput>,
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV1
+  | SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2
 >> {
   const bridgeRoot = resolveBridgeRoot();
   const repositoryRoot = resolveRepositoryRoot(bridgeRoot);
@@ -477,6 +634,17 @@ async function executeRunner(
   );
   const canonicalFrontierPatchBytes = readFileSync(canonicalPatchPath);
   const applicationEvidenceOverlayPatchBytes = readFileSync(overlayPatchPath);
+  const signedOverlayPatchPath = signedInput === undefined ? undefined : requireRegularFile(
+    path.join(bridgeRoot, 'sources', 'frontier', '0003-federated-lab-signed-application-calls.patch'),
+    'Frontier signed application overlay',
+  );
+  const signedApplicationOverlayPatchBytes = signedOverlayPatchPath === undefined
+    ? undefined : readFileSync(signedOverlayPatchPath);
+  if (signedApplicationOverlayPatchBytes !== undefined
+    && sha256Bytes(signedApplicationOverlayPatchBytes) !== SIGNED_APPLICATION_OVERLAY_PATCH_SHA256) {
+    throw new Error('Frontier signed application overlay patch bytes changed');
+  }
+  const cargoArguments = signedInput === undefined ? CARGO_ARGUMENTS : SIGNED_CARGO_ARGUMENTS;
   if (
     sha256Bytes(canonicalFrontierPatchBytes) !== CANONICAL_FRONTIER_PATCH_SHA256
     || sha256Bytes(applicationEvidenceOverlayPatchBytes)
@@ -535,11 +703,14 @@ async function executeRunner(
   const executionInputDigestHex = sha256CanonicalJson({
     authorityEnvironment,
     baselineReportDigestHex,
-    cargoArguments: CARGO_ARGUMENTS,
+    cargoArguments,
     canonicalFrontierPatchSha256: CANONICAL_FRONTIER_PATCH_SHA256,
     applicationOverlayPatchSha256: APPLICATION_OVERLAY_PATCH_SHA256,
+    ...(signedInput === undefined ? {} : {
+      signedApplicationOverlayPatchSha256: SIGNED_APPLICATION_OVERLAY_PATCH_SHA256,
+    }),
     toolchainDigestHex,
-  }, RECEIPT_DIGEST_DOMAIN);
+  }, signedInput === undefined ? RECEIPT_DIGEST_DOMAIN : RECEIPT_V3_DIGEST_DOMAIN);
 
   await runExactGitApply({
     args: ['apply', '--check', '--whitespace=nowarn', overlayPatchPath],
@@ -570,49 +741,102 @@ async function executeRunner(
       throw new Error('overlay-applied Frontier runtime source bytes changed');
     }
 
-    const workspace = createPinnedLocalNativeBuildWorkspace(undefined, {
-      sharedCargoHomeRoot: input.cargoDependencyCacheDirectory,
-      temporaryDirectoryRoot: input.temporaryDirectoryRoot,
-    });
+    const intermediateNodeBytes = readFileSync(overlaySourcePath);
+    let signedOverlayApplicationAttempted = false;
     try {
-      assertCargoConfigurationIsolated(
-        input.frontierSourceDirectory,
-        workspace.cargoHomePath,
-      );
-      const result = await runBoundedProcess({
-        executablePath: input.cargoExecutablePath,
-        args: [...CARGO_ARGUMENTS],
-        cwd: input.frontierSourceDirectory,
-        env: buildCargoEnvironment({
-          authorityEnvironment,
-          cargoExecutablePath: input.cargoExecutablePath,
-          cargoHomeDirectory: workspace.cargoHomePath,
-          cargoTargetDirectory: workspace.buildTargetPath,
-          frontierSourceDirectory: input.frontierSourceDirectory,
-          rustTarget: toolsBefore.rustTarget,
-          rustcExecutablePath: input.rustcExecutablePath,
+      if (signedOverlayPatchPath !== undefined) {
+        await runExactGitApply({
+          args: ['apply', '--check', '--whitespace=nowarn', signedOverlayPatchPath],
+          gitExecutablePath: input.gitExecutablePath,
+          sourceDirectory: input.frontierSourceDirectory,
           temporaryDirectoryRoot: input.temporaryDirectoryRoot,
-        }),
-        timeoutMs: remainingCargoBudgetMs(completionDeadline),
-        maxOutputBytes: 32 * 1024 * 1024,
-        maxStdoutBytes: 16 * 1024 * 1024,
-        maxStderrBytes: 16 * 1024 * 1024,
-        label: 'Frontier peg-out application Cargo runner',
+          label: 'Frontier signed application overlay preflight',
+        });
+        signedOverlayApplicationAttempted = true;
+        await runExactGitApply({
+          args: ['apply', '--whitespace=nowarn', signedOverlayPatchPath],
+          gitExecutablePath: input.gitExecutablePath,
+          sourceDirectory: input.frontierSourceDirectory,
+          temporaryDirectoryRoot: input.temporaryDirectoryRoot,
+          label: 'Frontier signed application overlay application',
+        });
+        if (sha256LfNormalized(readFileSync(overlaySourcePath))
+          !== SIGNED_OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256
+          || sha256LfNormalized(readFileSync(overlayRuntimeSourcePath))
+            !== OVERLAY_APPLIED_RUNTIME_SOURCE_LF_SHA256) {
+          throw new Error('signed overlay-applied Frontier source bytes changed');
+        }
+      }
+      const workspace = createPinnedLocalNativeBuildWorkspace(undefined, {
+        sharedCargoHomeRoot: input.cargoDependencyCacheDirectory,
+        temporaryDirectoryRoot: input.temporaryDirectoryRoot,
       });
-      stdout = result.stdout;
-      stderr = result.stderr;
-      assertExactCargoTestPassed(stdout, stderr);
-      const dynamicSourceProofEnvelopeHex =
-        authorityEnvironment[DYNAMIC_SOURCE_PROOF_ENVELOPE_ENV];
-      if (dynamicSourceProofEnvelopeHex !== undefined) {
-        assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2(
-          stdout,
-          stderr,
-          dynamicSourceProofEnvelopeHex,
+      try {
+        assertCargoConfigurationIsolated(
+          input.frontierSourceDirectory,
+          workspace.cargoHomePath,
         );
+        const result = await runBoundedProcess({
+          executablePath: input.cargoExecutablePath,
+          args: [...cargoArguments],
+          cwd: input.frontierSourceDirectory,
+          env: buildCargoEnvironment({
+            authorityEnvironment,
+            cargoExecutablePath: input.cargoExecutablePath,
+            cargoHomeDirectory: workspace.cargoHomePath,
+            cargoTargetDirectory: workspace.buildTargetPath,
+            frontierSourceDirectory: input.frontierSourceDirectory,
+            rustTarget: toolsBefore.rustTarget,
+            rustcExecutablePath: input.rustcExecutablePath,
+            temporaryDirectoryRoot: input.temporaryDirectoryRoot,
+          }),
+          timeoutMs: remainingCargoBudgetMs(completionDeadline),
+          maxOutputBytes: 32 * 1024 * 1024,
+          maxStdoutBytes: 16 * 1024 * 1024,
+          maxStderrBytes: 16 * 1024 * 1024,
+          label: 'Frontier peg-out application Cargo runner',
+        });
+        stdout = result.stdout;
+        stderr = result.stderr;
+        assertExactCargoTestPassed(stdout, stderr,
+          signedInput === undefined ? CARGO_TEST_NAME : SIGNED_CARGO_TEST_NAME);
+        const dynamicSourceProofEnvelopeHex =
+          authorityEnvironment[DYNAMIC_SOURCE_PROOF_ENVELOPE_ENV];
+        if (dynamicSourceProofEnvelopeHex !== undefined) {
+          assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationDynamicSourceProofMarkerV2(
+            stdout,
+            stderr,
+            dynamicSourceProofEnvelopeHex,
+          );
+        }
+      } finally {
+        workspace.cleanup();
       }
     } finally {
-      workspace.cleanup();
+      // Restore the signed overlay to 0002 before the outer 0002 restoration.
+      if (signedOverlayApplicationAttempted && signedOverlayPatchPath !== undefined) {
+        await restoreExactSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationSourceV1({
+          sourcePath: overlaySourcePath,
+          originalSourceBytes: intermediateNodeBytes,
+          expectedAppliedSourceLfSha256: SIGNED_OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256,
+          reverseOverlay: async () => {
+            await runExactGitApply({
+              args: ['apply', '--reverse', '--check', '--whitespace=nowarn', signedOverlayPatchPath],
+              gitExecutablePath: input.gitExecutablePath,
+              sourceDirectory: input.frontierSourceDirectory,
+              temporaryDirectoryRoot: input.temporaryDirectoryRoot,
+              label: 'Frontier signed application overlay reversal preflight',
+            });
+            await runExactGitApply({
+              args: ['apply', '--reverse', '--whitespace=nowarn', signedOverlayPatchPath],
+              gitExecutablePath: input.gitExecutablePath,
+              sourceDirectory: input.frontierSourceDirectory,
+              temporaryDirectoryRoot: input.temporaryDirectoryRoot,
+              label: 'Frontier signed application overlay reversal',
+            });
+          },
+        });
+      }
     }
   } finally {
     if (overlayApplicationAttempted) {
@@ -689,17 +913,7 @@ async function executeRunner(
     throw new Error('Frontier peg-out application runner source changed');
   }
 
-  const applicationEvidence =
-    consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV1({
-      stdout,
-      canonicalFrontierPatchBytes,
-      applicationEvidenceOverlayPatchBytes,
-    });
-  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV1ConsumerConstruction(
-    applicationEvidence,
-  );
-  return deepFreeze({
-    applicationEvidence,
+  const common = deepFreeze({
     source: {
       baselineReportDigestHex,
       canonicalFrontierPatchSha256: CANONICAL_FRONTIER_PATCH_SHA256,
@@ -766,6 +980,44 @@ async function executeRunner(
       'No signing, submission, broadcast, funds authority, Gate 5 closure, trustless status or production readiness follows.',
     ] as const,
   });
+  if (signedInput !== undefined && signedApplicationOverlayPatchBytes !== undefined) {
+    const inspected = inspectFrontierLabApplicationSignedTransactionsV1({
+      mintReservationStatementHex: signedInput.mintSourceProofReceipt.request.statementHex,
+      ergoRecipientPublicKeyHex: signedInput.ergoRecipientPublicKeyHex,
+    }, signedInput.signedTransactions);
+    const applicationEvidence = consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV2({
+      stdout, canonicalFrontierPatchBytes, applicationEvidenceOverlayPatchBytes,
+      signedApplicationOverlayPatchBytes,
+      expected: {
+        ownerAddressHex: inspected.plan.ownerAddressHex,
+        ergoRecipientPublicKeyHex: signedInput.ergoRecipientPublicKeyHex,
+        transactionHashes: inspected.transactionHashes,
+      },
+    });
+    assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV2ConsumerConstruction(applicationEvidence);
+    return deepFreeze({
+      ...common, applicationEvidence,
+      source: {
+        ...common.source,
+        signedApplicationOverlayPatchSha256: SIGNED_APPLICATION_OVERLAY_PATCH_SHA256,
+        overlayAppliedNodeSourceLfSha256: SIGNED_OVERLAY_APPLIED_NODE_SOURCE_LF_SHA256,
+      },
+      execution: { ...common.execution, cargoTestName: SIGNED_CARGO_TEST_NAME },
+      boundary: {
+        ...common.boundary, deterministicSyntheticAccountOnly: false as const,
+        freshSyntheticOwnerSignedCallsOnly: true as const,
+      },
+      limitations: [
+        'The result is one source-locked in-memory Frontier TestClient execution of externally signed synthetic LAB calls.',
+        ...common.limitations.slice(1),
+      ],
+    });
+  }
+  const applicationEvidence = consumeSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV1({
+    stdout, canonicalFrontierPatchBytes, applicationEvidenceOverlayPatchBytes,
+  });
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV1ConsumerConstruction(applicationEvidence);
+  return deepFreeze({ applicationEvidence, ...common });
 }
 
 function buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV1(
@@ -833,6 +1085,13 @@ export function buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAu
     SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2
   >,
 ): Readonly<Record<string, string>> {
+  return buildDynamicAuthorityEnvironment(mintSourceProofReceipt, EXPECTED_OWNER_ADDRESS);
+}
+
+function buildDynamicAuthorityEnvironment(
+  mintSourceProofReceipt: Readonly<SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2>,
+  expectedOwnerAddress: string,
+): Readonly<Record<string, string>> {
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(
     mintSourceProofReceipt,
   );
@@ -876,7 +1135,7 @@ export function buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAu
       !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_BRIDGE_ADDRESS_V1
     || sourceIntent.tokenAddressHex
       !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_LAB_TOKEN_ADDRESS_V1
-    || sourceIntent.recipientAddressHex !== EXPECTED_OWNER_ADDRESS
+    || sourceIntent.recipientAddressHex !== expectedOwnerAddress
     || sourceIntent.amountNanoErg.toString() !== EXPECTED_MINT_AMOUNT_NANO_ERG
   ) {
     throw new Error(
@@ -918,6 +1177,115 @@ export function buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAu
     BRIDGE_LAB_FEDERATED_MINT_SOURCE_PROOF_ENVELOPE_V4_HEX:
       sourceProofEnvelopeScaleHex,
   });
+}
+
+export function buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3(
+  input: Readonly<SignedApplicationInput>,
+): Readonly<Record<string, string>> {
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance(input.mintSourceProofReceipt);
+  const inspected = inspectFrontierLabApplicationSignedTransactionsV1({
+    mintReservationStatementHex: input.mintSourceProofReceipt.request.statementHex,
+    ergoRecipientPublicKeyHex: input.ergoRecipientPublicKeyHex,
+  }, input.signedTransactions);
+  return deepFreeze({
+    ...buildDynamicAuthorityEnvironment(input.mintSourceProofReceipt, inspected.plan.ownerAddressHex),
+    BRIDGE_LAB_SIGNED_MINT_V1_HEX: input.signedTransactions.mint,
+    BRIDGE_LAB_SIGNED_APPROVAL_V1_HEX: input.signedTransactions.approval,
+    BRIDGE_LAB_SIGNED_PEG_OUT_V1_HEX: input.signedTransactions.pegOut,
+    BRIDGE_LAB_ERGO_RECIPIENT_PUBLIC_KEY_V1_HEX: input.ergoRecipientPublicKeyHex,
+  });
+}
+
+function bindSignedApplicationRunnerReceiptV3(
+  input: Readonly<SignedApplicationInput>,
+  executionResult: SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationExecutionResultV2,
+  authorityEnvironment: Readonly<Record<string, string>>,
+): SubstrateFederatedIsolatedDevnetFrontierPegOutApplicationRunnerReceiptV3 {
+  const expectedEnvironment =
+    buildSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationAuthorityEnvironmentV3(input);
+  const actual = exactRecord(authorityEnvironment, Object.keys(expectedEnvironment), 'signed application environment');
+  if (Object.entries(expectedEnvironment).some(([key, value]) => actual[key] !== value)) {
+    throw new Error('signed application execution environment changed');
+  }
+  const expectedExecutionInputDigestHex = sha256CanonicalJson({
+    authorityEnvironment: expectedEnvironment,
+    baselineReportDigestHex: executionResult.source.baselineReportDigestHex,
+    cargoArguments: SIGNED_CARGO_ARGUMENTS,
+    canonicalFrontierPatchSha256: CANONICAL_FRONTIER_PATCH_SHA256,
+    applicationOverlayPatchSha256: APPLICATION_OVERLAY_PATCH_SHA256,
+    signedApplicationOverlayPatchSha256: SIGNED_APPLICATION_OVERLAY_PATCH_SHA256,
+    toolchainDigestHex: executionResult.tools.toolchainDigestHex,
+  }, RECEIPT_V3_DIGEST_DOMAIN);
+  if (executionResult.execution.executionInputDigestHex !== expectedExecutionInputDigestHex) {
+    throw new Error('Frontier execution did not commit the exact signed application and mint proof');
+  }
+  const proof = input.mintSourceProofReceipt;
+  const inspected = inspectFrontierLabApplicationSignedTransactionsV1({
+    mintReservationStatementHex: proof.request.statementHex,
+    ergoRecipientPublicKeyHex: input.ergoRecipientPublicKeyHex,
+  }, input.signedTransactions);
+  const intent = decodePegInSourceIntentV2Hex(
+    decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(proof.request.statementHex).sourceIntentHex,
+  );
+  const evidence = executionResult.applicationEvidence;
+  assertSubstrateFederatedIsolatedDevnetFrontierPegOutApplicationEvidenceV2ConsumerConstruction(evidence);
+  if (evidence.execution.sidechainIdHex !== intent.sidechainIdHex
+    || evidence.application.ownerAddressHex !== inspected.plan.ownerAddressHex
+    || evidence.application.bridgeAddressHex !== intent.bridgeAddressHex
+    || evidence.application.tokenAddressHex !== intent.tokenAddressHex
+    || evidence.conservation.supplyBeforeNanoErg !== intent.amountNanoErg.toString()
+    || evidence.signedApplication.ergoRecipientPublicKeyHex !== input.ergoRecipientPublicKeyHex
+    || (['mint', 'approval', 'pegOut'] as const).some(role =>
+      evidence.signedApplication.transactionHashes[role] !== inspected.transactionHashes[role])) {
+    throw new Error('Frontier signed application execution differs from the exact mint proof or signed calls');
+  }
+  const body = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_FRONTIER_PEG_OUT_APPLICATION_RUNNER_V3_SCHEMA,
+    version: 3 as const,
+    status: 'same_process_mint_proof_bound_signed_application_burn_executed' as const,
+    executionResult,
+    mintSourceProof: {
+      receiptDigestHex: canonicalSha256Hex(proof.receiptDigestHex, 'mint source-proof receipt digest'),
+      targetDescriptorDigestHex: canonicalSha256Hex(proof.targetDescriptorDigestHex, 'mint source-proof target descriptor digest'),
+      mintReservationDraftDigestHex: canonicalSha256Hex(proof.mintReservationDraftDigestHex, 'mint-reservation draft digest'),
+      mintReservationStatementIdHex: inspected.plan.mintReservationStatementIdHex,
+      mintIdentityHex: inspected.plan.mintIdentityHex,
+      sourceProofProfileIdHex: canonicalPrefixedHex(proof.sourceProofProfileIdHex, 'source-proof profile ID', 32),
+      sourceProofEnvelopeSha256Hex: canonicalSha256Hex(proof.sourceProofEnvelopeSha256Hex, 'source-proof envelope SHA-256'),
+    },
+    signedApplication: {
+      ownerAddressHex: inspected.plan.ownerAddressHex,
+      ergoRecipientPublicKeyHex: input.ergoRecipientPublicKeyHex,
+      transactionHashes: inspected.transactionHashes,
+    },
+    checks: {
+      exactMintSourceProofReceiptObjectBound: true as const,
+      exactDynamicProfileStatementAndProofEnvironmentBound: true as const,
+      runnerExecutionInputCommitsDynamicEnvironment: true as const,
+      exactDynamicSourceProofExecutionMarkerBound: true as const,
+      applicationMatchesMintSourceIntent: true as const,
+      mintAmountAndRecipientMatchApplicationExecution: true as const,
+      mintSourceProofReceiptRevalidatedAfterExecution: true as const,
+      exactExecutionResultObjectBound: true as const,
+      exactSignedCallsAndRecipientBound: true as const,
+      signedApplicationOverlayBound: true as const,
+    },
+    boundary: {
+      ...executionResult.boundary,
+      processProvenMintSourceProofBound: true as const,
+      packetMintContinuationBound: false as const,
+      checkpointAttestationEstablished: false as const,
+    },
+    limitations: [
+      'The runner consumes a process-produced mint proof and exact signed LAB calls, not the retained packet or owner custody.',
+      ...executionResult.limitations,
+    ],
+  });
+  const receipt = deepFreeze({
+    ...body, receiptDigestHex: sha256CanonicalJson(body, RECEIPT_V3_DIGEST_DOMAIN),
+  });
+  V3_RECEIPTS.set(receipt, Object.freeze({ mintSourceProofReceipt: proof, executionResult }));
+  return receipt;
 }
 
 function bindDynamicMintProofToApplicationRunnerReceiptV2(
@@ -1490,9 +1858,9 @@ function assertCargoConfigurationIsolated(
   }
 }
 
-function assertExactCargoTestPassed(stdout: string, stderr: string): void {
+function assertExactCargoTestPassed(stdout: string, stderr: string, testName: string): void {
   const output = `${stdout}\n${stderr}`.replaceAll('\r\n', '\n');
-  const escaped = CARGO_TEST_NAME.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const escaped = testName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
   const passes = output.match(
     new RegExp(`^test ${escaped} \\.\\.\\. ok$`, 'gmu'),
   ) ?? [];

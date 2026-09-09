@@ -146,9 +146,15 @@ import {
 } from '../../substrate-federated-isolated-devnet-packet-producer-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
+  projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1,
   type SubstrateFederatedIsolatedDevnetBootstrapRequestBindingV1,
   type SubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1,
 } from '../../adapters/substrate-federated-isolated-devnet-bootstrap-request-binding-v1.js';
+import {
+  claimFrontierLabApplicationOwnerRequestV1,
+  disposeFrontierLabApplicationOwnerV1,
+  type FrontierLabApplicationOwnerV1,
+} from '../../adapters/frontier-lab-application-owner-v1.js';
 import {
   collectSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceV1,
   type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
@@ -220,10 +226,13 @@ import type {
   SubstrateFederatedIsolatedDevnetPegInSourceLockExecutionCheckV1,
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
   SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1,
   SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2,
   SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt,
 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1,
   assertSubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2,
   assertSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1,
@@ -243,9 +252,23 @@ import {
 } from '../../substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
+  createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
+  submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import {
+  authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  type SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1,
+} from '../../substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
 import {
   submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1,
 } from './substrate-federated-isolated-devnet-tracker-checked-transport-v1.js';
@@ -284,7 +307,11 @@ import {
 } from '../../substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1,
+  assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2,
   createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+  createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
+  type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1,
+  type SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2,
 } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
@@ -293,10 +320,12 @@ import {
 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV1,
+  createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2,
 } from '../../substrate-federated-isolated-devnet-genesis-revalidator-v1.js';
 import {
   createSubstrateFederatedLocalDevnetGenesisJournalV1,
   type SubstrateFederatedLocalDevnetGenesisJournalV1,
+  type SubstrateFederatedLocalDevnetGenesisJournalStateV1,
 } from '../../substrate-federated-local-devnet-genesis-journal-v1.js';
 import {
   createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1,
@@ -422,7 +451,7 @@ const OBSERVED_TRACKER_V2_CONTEXT_MINIMUM_TIP_HEIGHT = 11;
 const ACTION_COMPLETION_BUDGET_MS =
   (MAX_CONFIRMATION_WINDOWS * TRANSACTION_CONFIRMATION_BUDGET_MS)
   + NON_CONFIRMATION_ACTION_BUDGET_MS;
-const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS =
+export const APPLICATION_CHECKPOINT_ACTION_COMPLETION_BUDGET_MS =
   (
     (MAX_CONFIRMATION_WINDOWS
       + APPLICATION_CHECKPOINT_ADDITIONAL_CONFIRMATION_WINDOWS)
@@ -2410,6 +2439,96 @@ interface PegInCandidatePlanV1 {
  * The only static FED-6-LAB root that may connect checked setup candidates to
  * the local `/transactions` transport. It accepts no replaceable runtime port.
  */
+type GenesisExecutionBatch = Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2
+  | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+type GenesisExecutionAuthorizer = Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1
+  | SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>;
+
+/** Execute the exact retained fee funding; the caller owns target and journal lifetime. */
+export async function executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  checked: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>;
+  state: SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1;
+}>) {
+  const { target, checked, state } = input;
+  const authorization = await authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(checked, target);
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, authorization.genesisHeaderIdHex);
+  const attempt = reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(authorization, state);
+  const submission = await submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(target, attempt);
+  const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, submission);
+  const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+    performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
+    'tracker-fee-funding');
+  const confirmed = await confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, confirmation);
+  return Object.freeze({
+    expectedTxId: attempt.expectedTxId,
+    durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+    transportStatus: submission.status,
+    journalDigestHex: finalized.journalDigestHex,
+    confirmationDigestHex: confirmation.observationDigestHex,
+    confirmationHeight: confirmed.confirmationHeight,
+    confirmationHeaderIdHex: confirmed.confirmationHeaderId,
+    feeInputBox: checked.transaction.outputs[0]!,
+  });
+}
+
+/** Execute the distinct retained withdrawal fee funding; the caller owns target and journal lifetime. */
+export async function executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  checked: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>;
+  state: SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1;
+}>) {
+  const { target, checked, state } = input;
+  const authorization = await authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(checked, target);
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, authorization.genesisHeaderIdHex);
+  const attempt = reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(authorization, state);
+  const submission = await submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(target, attempt);
+  const finalized = finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(attempt, submission);
+  const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+    performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
+    'withdrawal-fee-funding');
+  const confirmed = await confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(attempt, confirmation);
+  return Object.freeze({
+    expectedTxId: attempt.expectedTxId,
+    durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+    transportStatus: submission.status,
+    journalDigestHex: finalized.journalDigestHex,
+    confirmationDigestHex: confirmation.observationDigestHex,
+    confirmationHeight: confirmed.confirmationHeight,
+    confirmationHeaderIdHex: confirmed.confirmationHeaderId,
+    feeInputBox: checked.transaction.outputs[0]!,
+  });
+}
+
+/** Execute retained V3 genesis only; the caller owns target and journal lifetime. */
+export async function executeSubstrateFederatedIsolatedDevnetGenesisBatchV3(input: Readonly<{
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+  state: SubstrateFederatedLocalDevnetGenesisJournalStateV1;
+  markerDirectory: string;
+}>): Promise<SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions']> {
+  const { target, batch, state, markerDirectory } = input;
+  const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(batch, target);
+  assertCanonicalBatch(batch);
+  const completionDeadline = performance.now() + ACTION_COMPLETION_BUDGET_MS;
+  assertManagedActionDeadline(completionDeadline, 'V3 genesis composition');
+  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+    target, batch.request.target.genesisHeaderIdHex,
+  );
+  const revalidator = createSubstrateFederatedIsolatedDevnetGenesisRevalidatorV2(target, batch);
+  const authorizer = createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2(
+    target, batch, revalidator, observer,
+  );
+  const transport = createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2(target, authorizer);
+  const journal = createSubstrateFederatedLocalDevnetGenesisJournalV1({
+    state, markerDirectory, reconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
+  });
+  return await executeOrderedGenesisTransactions(
+    batch, target, observer, revalidator, authorizer, transport, journal,
+    completionDeadline, () => {}, 2,
+  );
+}
+
 export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
   input:
     Readonly<RunSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Input>,
@@ -4320,7 +4439,7 @@ const TRACKER_TRANSPORT_SENSITIVE_PATH_PATTERN =
 const TRACKER_TRANSPORT_ATTEMPT_DIRECTORY =
   'tracker-transport-attempt' as const;
 
-function normalizeTrackerTransportJournalRootV9(value: unknown): string {
+export function normalizeTrackerTransportJournalRootV9(value: unknown): string {
   if (
     typeof value !== 'string'
     || value.length === 0
@@ -4399,7 +4518,7 @@ function normalizeTrackerTransportJournalRootV9(value: unknown): string {
   return assertReservedTrackerTransportJournalRootV9(ownedRoot);
 }
 
-function assertReservedTrackerTransportJournalRootV9(value: string): string {
+export function assertReservedTrackerTransportJournalRootV9(value: string): string {
   const requested = resolve(value);
   const status = lstatSync(requested);
   const canonical = realpathSync(requested);
@@ -4674,7 +4793,7 @@ function assertTrackerTransportResponseClassificationBindingV11(
   }
 }
 
-function projectTrackerCanonicalConfirmationFailureDiagnosticV1(
+export function projectTrackerCanonicalConfirmationFailureDiagnosticV1(
   value: unknown,
 ): Readonly<
   SubstrateFederatedIsolatedDevnetTrackerCanonicalConfirmationFailureDiagnosticV1
@@ -4736,8 +4855,8 @@ function projectDirectOrPrimaryAggregateFailureV1<T>(
     if (
       errorsDescriptor === undefined
       || !('value' in errorsDescriptor)
-      || !Array.isArray(errorsDescriptor.value)
       || isProxy(errorsDescriptor.value)
+      || !Array.isArray(errorsDescriptor.value)
     ) {
       return null;
     }
@@ -4765,6 +4884,13 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
 ): Promise<Readonly<
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10
 >> {
+  return runTrackerTransportCampaignWithOwnerPolicy(input, false);
+}
+
+async function runTrackerTransportCampaignWithOwnerPolicy(
+  input: Readonly<RunSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Input>,
+  requireFreshApplicationOwner: boolean,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10>> {
   const trackerTransportJournalRoot =
     normalizeTrackerTransportJournalRootV9(input.trackerTransportJournalRoot);
   const requestCampaignBinding =
@@ -4784,6 +4910,18 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
     temporaryDirectoryRoot: applicationRunner.temporaryDirectoryRoot,
     sharedCargoHomeRoot: applicationRunner.cargoDependencyCacheDirectory,
   });
+  let applicationOwner: Readonly<{
+    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+    readonly requestSha256Hex: string;
+  }> | undefined;
+  if (requireFreshApplicationOwner) {
+    const requestSha256Hex =
+      projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1(requestCampaignBinding);
+    applicationOwner = Object.freeze({
+      owner: claimFrontierLabApplicationOwnerRequestV1(requestSha256Hex),
+      requestSha256Hex,
+    });
+  }
   const execution = await runManagedCampaign(
     input,
     pegInPlan,
@@ -4795,6 +4933,7 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       requestBinding: requestCampaignBinding,
       journalRoot: trackerTransportJournalRoot,
     }),
+    applicationOwner,
   ).catch(error => {
     if (
       projectSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignFailureV10(
@@ -4808,6 +4947,8 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
       'ergo node build',
       error,
     );
+  }).finally(() => {
+    if (applicationOwner !== undefined) disposeFrontierLabApplicationOwnerV1(applicationOwner.owner);
   });
   const material = execution.trackerReservationFreshness;
   if (material === undefined || material.transport === undefined) {
@@ -4948,8 +5089,8 @@ export function assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampa
 }
 
 /**
- * Project the exact V10 execution and its process-local response
- * classification without changing the historical durable outcome or receipt.
+ * Require fresh same-process application custody, then project the exact
+ * transport result without changing the historical durable outcome or receipt.
  */
 export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11(
   input: Readonly<
@@ -4959,8 +5100,8 @@ export async function runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCa
   SubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11
 >> {
   const legacy =
-    await runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10(
-      input,
+    await runTrackerTransportCampaignWithOwnerPolicy(
+      input, true,
     );
   assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
     legacy.receipt,
@@ -5176,6 +5317,10 @@ async function runManagedCampaign(
       Readonly<SubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1>;
     readonly journalRoot: string;
   }> | undefined = undefined,
+  applicationOwner: Readonly<{
+    readonly owner: Readonly<FrontierLabApplicationOwnerV1>;
+    readonly requestSha256Hex: string;
+  }> | undefined = undefined,
 ): Promise<Readonly<ManagedCampaignExecutionV1>> {
   const applicationCheckpointAction =
     isApplicationCheckpointAction(pegInAction);
@@ -5232,6 +5377,7 @@ async function runManagedCampaign(
     packetSession = applicationCheckpointAction
       ? createSubstrateFederatedIsolatedDevnetFrontierApplicationCheckpointContinuationV3(
         setupSession.signer,
+        applicationOwner,
       )
       : pegInAction === 'consume-mint-proof'
         ? createSubstrateFederatedIsolatedDevnetPacketContinuationSessionV2(
@@ -6430,80 +6576,9 @@ async function executeManagedSetupAction(
       reconciliationIdentityDigestHex:
         targetBinding.executionTargetIdentityDigestHex,
     });
-    const transactions: SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'][number][] = [];
-    for (let ordinal = 0; ordinal < batch.orderedTransactions.length; ordinal += 1) {
-      const transaction = batch.orderedTransactions[ordinal]!;
-      const role = coreRole(transaction.issuance.role);
-      if (role !== ROLE_ORDER[ordinal]) {
-        throw new Error('isolated genesis execution role order changed');
-      }
-      setManagedPhase('genesis setup execution admission');
-      const execution = await executeSubstrateFederatedLocalDevnetGenesisV1(
-        executionInput(batch, transaction, role),
-        executionPorts(
-          batch,
-          transaction,
-          role,
-          revalidator,
-          authorizer,
-          journal,
-          transport,
-          observer,
-          completionDeadline,
-          setManagedPhase,
-        ),
-      );
-      setManagedPhase('genesis setup execution result validation');
-      assertTransportExecution(execution, role, transaction);
-      setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role));
-      let confirmation:
-        Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
-      try {
-        confirmation = await waitForCanonicalConfirmation(
-          observer,
-          transaction.issuance.unsignedTransactionIdHex,
-          completionDeadline,
-          `setup:${role}`,
-        );
-      } catch (error) {
-        setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role, error));
-        throw error;
-      }
-      setManagedPhase('genesis setup durable reconciliation');
-      const reconciliation = await journal.reconcileActive(observer);
-      if (
-        execution.confirmationStatus === 'confirmed'
-          ? reconciliation !== 'none'
-          : reconciliation !== 'confirmed'
-      ) {
-        throw new Error('isolated genesis durable reconciliation changed');
-      }
-      setManagedPhase('genesis setup confirmation acknowledgement');
-      authorizer.acknowledgeCanonicalConfirmation(role, confirmation);
-      transactions.push(Object.freeze({
-        ordinal: ordinal as 0 | 1 | 2,
-        role,
-        expectedTxId: execution.expectedTxId,
-        transportStatus: execution.status,
-        durableAttemptDigestHex: execution.durableAttemptDigestHex,
-        journalDigestHex: execution.journalDigestHex,
-        confirmationDigestHex: confirmation.observationDigestHex,
-        confirmationHeight: confirmation.confirmationHeight!,
-        confirmationHeaderIdHex: confirmation.confirmationHeaderIdHex!,
-      }));
-    }
-    setManagedPhase('genesis setup finalization');
-    assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
-      authorizer,
-      target,
-    );
-    if (await journal.revalidateConfirmed(observer) !== ROLE_ORDER.length) {
-      throw new Error('isolated genesis confirmed attempt count changed');
-    }
-    let finalTransactions = await refreshCanonicalReceiptConfirmations(
-      transactions,
-      observer,
-      completionDeadline,
+    let finalTransactions = await executeOrderedGenesisTransactions(
+      batch, target, observer, revalidator, authorizer, transport, journal,
+      completionDeadline, setManagedPhase, 1,
     );
     let pegIn:
       SubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Receipt['pegIn']
@@ -8220,8 +8295,74 @@ function assertManagedCampaignBindings(
   }
 }
 
+async function executeOrderedGenesisTransactions(
+  batch: GenesisExecutionBatch,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  observer: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  revalidator: SubstrateFederatedLocalDevnetGenesisExecutionPorts['revalidator'],
+  authorizer: GenesisExecutionAuthorizer,
+  transport: SubstrateFederatedLocalDevnetGenesisExecutionPorts['transport'],
+  journal: Readonly<SubstrateFederatedLocalDevnetGenesisJournalV1>,
+  completionDeadline: number,
+  setManagedPhase: (phase: ManagedCampaignPhaseV1) => void,
+  version: 1 | 2,
+): Promise<SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions']> {
+  const transactions: SubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1Receipt['transactions'][number][] = [];
+  for (let ordinal = 0; ordinal < batch.orderedTransactions.length; ordinal += 1) {
+    const transaction = batch.orderedTransactions[ordinal]!;
+    const role = coreRole(transaction.issuance.role);
+    if (role !== ROLE_ORDER[ordinal]) throw new Error('isolated genesis execution role order changed');
+    setManagedPhase('genesis setup execution admission');
+    const execution = await executeSubstrateFederatedLocalDevnetGenesisV1(
+      executionInput(batch, transaction, role),
+      executionPorts(batch, transaction, role, revalidator, authorizer, journal,
+        transport, observer, completionDeadline, setManagedPhase),
+    );
+    setManagedPhase('genesis setup execution result validation');
+    assertTransportExecution(execution, role, transaction);
+    setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role));
+    let confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+    try {
+      confirmation = await waitForCanonicalConfirmation(observer,
+        transaction.issuance.unsignedTransactionIdHex, completionDeadline, `setup:${role}`);
+    } catch (error) {
+      setManagedPhase(genesisSetupCanonicalConfirmationPhaseV1(role, error));
+      throw error;
+    }
+    setManagedPhase('genesis setup durable reconciliation');
+    const reconciliation = await journal.reconcileActive(observer);
+    if (execution.confirmationStatus === 'confirmed'
+      ? reconciliation !== 'none' : reconciliation !== 'confirmed') {
+      throw new Error('isolated genesis durable reconciliation changed');
+    }
+    setManagedPhase('genesis setup confirmation acknowledgement');
+    authorizer.acknowledgeCanonicalConfirmation(role, confirmation);
+    transactions.push(Object.freeze({
+      ordinal: ordinal as 0 | 1 | 2, role,
+      expectedTxId: execution.expectedTxId, transportStatus: execution.status,
+      durableAttemptDigestHex: execution.durableAttemptDigestHex,
+      journalDigestHex: execution.journalDigestHex,
+      confirmationDigestHex: confirmation.observationDigestHex,
+      confirmationHeight: confirmation.confirmationHeight!,
+      confirmationHeaderIdHex: confirmation.confirmationHeaderIdHex!,
+    }));
+  }
+  setManagedPhase('genesis setup finalization');
+  if (version === 2) {
+    assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV2(
+      authorizer as Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2>, target);
+  } else {
+    assertSubstrateFederatedIsolatedDevnetGenesisSetupConfirmedV1(
+      authorizer as Readonly<SubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1>, target);
+  }
+  if (await journal.revalidateConfirmed(observer) !== ROLE_ORDER.length) {
+    throw new Error('isolated genesis confirmed attempt count changed');
+  }
+  return await refreshCanonicalReceiptConfirmations(transactions, observer, completionDeadline);
+}
+
 function executionInput(
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  batch: GenesisExecutionBatch,
   transaction:
     Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2>,
   role: SubstrateFederatedLocalDevnetGenesisRole,
@@ -8229,7 +8370,7 @@ function executionInput(
   const issuance = transaction.issuance;
   if (
     issuance.predictedStateOutput.creationHeight
-      !== batch.request.target.preSetupAnchor.height
+      !== expectedGenesisCreationHeight(batch)
   ) {
     throw new Error('isolated genesis creation height differs from its anchor');
   }
@@ -8240,14 +8381,14 @@ function executionInput(
     expectedTxId: issuance.unsignedTransactionIdHex,
     sourceBoxId: issuance.genesisInputBoxIdHex,
     inputBoxIds: [issuance.genesisInputBoxIdHex],
-    attemptedAtHeight: issuance.predictedStateOutput.creationHeight,
+    attemptedAtHeight: batch.request.target.preSetupAnchor.height,
     nodeOrigin: SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
     unsignedTransaction: issuance.unsignedTransactionBody,
   } as const;
 }
 
 function executionPorts(
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  batch: GenesisExecutionBatch,
   transaction:
     Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2>,
   role: SubstrateFederatedLocalDevnetGenesisRole,
@@ -8363,7 +8504,7 @@ function executionPorts(
 
 function assertAdmissionMatchesTransaction(
   admission: SubstrateFederatedLocalDevnetGenesisAdmission,
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  batch: GenesisExecutionBatch,
   transaction:
     Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionTransactionV2>,
   role: SubstrateFederatedLocalDevnetGenesisRole,
@@ -8379,7 +8520,7 @@ function assertAdmissionMatchesTransaction(
     || admission.inputBoxIds.length !== 1
     || admission.inputBoxIds[0] !== issuance.genesisInputBoxIdHex
     || admission.attemptedAtHeight
-      !== issuance.predictedStateOutput.creationHeight
+      !== batch.request.target.preSetupAnchor.height
     || admission.nodeOrigin
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN
     || admission.unsignedTransaction !== issuance.unsignedTransactionBody
@@ -8438,7 +8579,7 @@ function projectTrackerTransportCanonicalConfirmationV9(
   });
 }
 
-async function waitForCanonicalConfirmation(
+export async function waitForCanonicalConfirmation(
   observer:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
   expectedTxId: string,
@@ -8785,8 +8926,17 @@ async function refreshCanonicalReceiptConfirmations(
   return Object.freeze(refreshed);
 }
 
+function expectedGenesisCreationHeight(batch: GenesisExecutionBatch): number {
+  // V3 issues into the next block; admission still uses the already observed tip.
+  const height = batch.request.target.preSetupAnchor.height + (batch.request.version === 3 ? 1 : 0);
+  if (!Number.isSafeInteger(height) || height < 1 || height > 2_147_483_647) {
+    throw new Error('isolated genesis creation height exceeds signed Int range');
+  }
+  return height;
+}
+
 function assertCanonicalBatch(
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV2>,
+  batch: GenesisExecutionBatch,
 ): void {
   if (
     batch.orderedTransactions.length !== ROLE_ORDER.length
@@ -8794,7 +8944,7 @@ function assertCanonicalBatch(
       coreRole(transaction.issuance.role) !== ROLE_ORDER[index]
       || transaction.issuance.ordinal !== index
       || transaction.issuance.predictedStateOutput.creationHeight
-        !== batch.request.target.preSetupAnchor.height
+        !== expectedGenesisCreationHeight(batch)
     )
   ) {
     throw new Error('isolated genesis execution batch order or anchor changed');
@@ -8903,7 +9053,7 @@ function assertNoLocalPathValue(value: unknown): void {
   }
 }
 
-function normalizePegInCandidatePlan(
+export function normalizePegInCandidatePlan(
   input:
     Readonly<RunSubstrateFederatedIsolatedDevnetPegInCandidateExecutionRootV1Input['pegIn']>,
 ): Readonly<PegInCandidatePlanV1> {
@@ -8947,7 +9097,7 @@ function normalizeFrontierMintProofConsumerPlan(
   );
 }
 
-function normalizeFrontierApplicationRunnerPlan(
+export function normalizeFrontierApplicationRunnerPlan(
   input:
     Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3>,
 ): Readonly<SubstrateFederatedIsolatedDevnetFrontierApplicationRunnerPlanV3> {
@@ -8997,7 +9147,7 @@ function normalizeFrontierApplicationRunnerPlan(
   );
 }
 
-function finalizeReceipt<T extends object>(
+export function finalizeReceipt<T extends object>(
   body: T,
   digestDomain: string,
 ): Readonly<T & { readonly receiptDigestHex: string }> {

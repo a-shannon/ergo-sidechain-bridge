@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
@@ -13,12 +14,21 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  afterEach,
   beforeEach,
   describe,
   expect,
   it,
   vi,
 } from 'vitest';
+import { canonicalJson } from '../../ergo-settlement-core/strict-json.js';
+import {
+  assertFrontierLabApplicationOwnerClaimV1,
+  bindFrontierLabApplicationOwnerRequestV1,
+  createFrontierLabApplicationOwnerV1,
+  disposeFrontierLabApplicationOwnerV1,
+  type FrontierLabApplicationOwnerV1,
+} from '../../adapters/frontier-lab-application-owner-v1.js';
 
 import {
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestFromAnchorV1,
@@ -64,6 +74,7 @@ const mocked = vi.hoisted(() => ({
   packetV2Assert: vi.fn(),
   packetRelayerLineageClaim: vi.fn(),
   requestBindingClaim: vi.fn(),
+  requestBindingDigest: vi.fn(),
   mintDraftBuild: vi.fn(),
   evidenceCollect: vi.fn(),
   frontierConsumerPreflight: vi.fn(),
@@ -223,6 +234,8 @@ vi.mock(
   () => ({
     claimSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingV1:
       mocked.requestBindingClaim,
+    projectSubstrateFederatedIsolatedDevnetBootstrapRequestCampaignBindingDigestV1:
+      mocked.requestBindingDigest,
   }),
 );
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', () => ({
@@ -561,8 +574,36 @@ describe('isolated devnet genesis setup execution root V1', () => {
     finalize: ReturnType<typeof vi.fn>;
   }>;
 
+  const owners: Readonly<FrontierLabApplicationOwnerV1>[] = [];
+  afterEach(() => {
+    for (const owner of owners.splice(0)) disposeFrontierLabApplicationOwnerV1(owner);
+  });
+
+  async function retainCampaignOwner() {
+    const bridgeAddress = `0x${'31'.repeat(20)}`;
+    const owner = await createFrontierLabApplicationOwnerV1(bridgeAddress);
+    owners.push(owner);
+    const bytes = Buffer.from(`${canonicalJson({
+      schema: 'e2s.substrate-federated-isolated-devnet-bootstrap-command-request.v1',
+      version: 1,
+      sourceTarget: {
+        expectedChainId: '42', bridgeAddress,
+        bridgeOwnerAddress: owner.ownerAddressHex,
+        signedLegacyOwnerMintTransactionHex: owner.signedLegacyOwnerMintTransactionHex,
+      },
+    })}\n`);
+    const requestSha256Hex = createHash('sha256').update(bytes).digest('hex');
+    bindFrontierLabApplicationOwnerRequestV1(owner, bytes, requestSha256Hex);
+    mocked.requestBindingDigest.mockImplementation(binding => {
+      if (binding !== TRACKER_TRANSPORT_REQUEST_CAMPAIGN_BINDING) throw new Error('wrong campaign binding');
+      return requestSha256Hex;
+    });
+    return Object.freeze({ owner, requestSha256Hex });
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mocked.requestBindingDigest.mockReturnValue('ff'.repeat(32));
     mocked.nodeStartupPhase.mockReturnValue(null);
     order = [];
     currentBatch = setupBatch();
@@ -4444,6 +4485,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
   });
 
   it('projects the exact V10 transport result and process-local response classification as V11', async () => {
+    const custody = await retainCampaignOwner();
     const journalRoot = mkdtempSync(
       join(tmpdir(), 'e2s-tracker-transport-root-v11-'),
     );
@@ -4518,6 +4560,11 @@ describe('isolated devnet genesis setup execution root V1', () => {
       ).toMatch(/^[0-9a-f]{64}$/u);
       expect(mocked.trackerTransportSubmit).toHaveBeenCalledTimes(1);
       expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
+      expect(mocked.applicationCheckpointContinuation.mock.calls[0]?.[1]).toEqual(custody);
+      expect(mocked.applicationCheckpointContinuation.mock.calls[0]?.[1].owner).toBe(custody.owner);
+      expect(mocked.requestBindingDigest).toHaveBeenCalledWith(TRACKER_TRANSPORT_REQUEST_CAMPAIGN_BINDING);
+      expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+        .toThrow(/live process custody/);
       assertSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV10Provenance(
         result.receipt.legacyV10Receipt,
       );
@@ -4542,6 +4589,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
   ] as const)(
     'rejects V11 response classification %s after exactly one V10 attempt',
     async mode => {
+      await retainCampaignOwner();
       const journalRoot = mkdtempSync(
         join(tmpdir(), 'e2s-tracker-transport-root-v11-negative-'),
       );
@@ -4585,6 +4633,59 @@ describe('isolated devnet genesis setup execution root V1', () => {
         expect(trackerTransportJournal.finalize).toHaveBeenCalledTimes(1);
       } finally {
         rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['missing', 'different-request', 'disposed'] as const)(
+    'rejects V11 %s custody before building or starting nodes', async fault => {
+      if (fault !== 'missing') {
+        const custody = await retainCampaignOwner();
+        if (fault === 'disposed') disposeFrontierLabApplicationOwnerV1(custody.owner);
+        else mocked.requestBindingDigest.mockReturnValueOnce('ff'.repeat(32));
+      }
+      const journalRoot = mkdtempSync(join(tmpdir(), 'e2s-custody-absent-'));
+      try {
+        await expect(runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11({
+          ...(pegInApplicationCheckpointRootInput() as any), trackerTransportJournalRoot: journalRoot,
+        })).rejects.toThrow(/no unclaimed live owner custody/);
+        expect(mocked.build).not.toHaveBeenCalled();
+        expect(mocked.process).not.toHaveBeenCalled();
+        expect(mocked.applicationCheckpointContinuation).not.toHaveBeenCalled();
+        expect(mocked.trackerTransportSubmit).not.toHaveBeenCalled();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each(['build', 'continuation'] as const)(
+    'disposes claimed V11 custody after %s failure and refuses a retry', async fault => {
+      const custody = await retainCampaignOwner();
+      if (fault === 'build') mocked.build.mockRejectedValueOnce(new Error('injected build failure'));
+      else mocked.applicationCheckpointContinuation.mockImplementationOnce(() => {
+        throw new Error('injected continuation failure');
+      });
+      const journalRoot = mkdtempSync(join(tmpdir(), 'e2s-custody-terminal-'));
+      const retryJournalRoot = mkdtempSync(join(tmpdir(), 'e2s-custody-retry-'));
+      const input = { ...(pegInApplicationCheckpointRootInput() as any), trackerTransportJournalRoot: journalRoot };
+      try {
+        await expect(runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11(input))
+          .rejects.toThrow();
+        expect(mocked.build).toHaveBeenCalledTimes(1);
+        expect(() => assertFrontierLabApplicationOwnerClaimV1(custody.owner, custody.requestSha256Hex))
+          .toThrow(/live process custody/);
+        await expect(runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11(input))
+          .rejects.toThrow(/journal root must be empty/);
+        await expect(runSubstrateFederatedIsolatedDevnetPegInTrackerTransportCampaignRootV11({
+          ...input, trackerTransportJournalRoot: retryJournalRoot,
+        }))
+          .rejects.toThrow(/no unclaimed live owner custody/);
+        expect(mocked.build).toHaveBeenCalledTimes(1);
+        expect(mocked.trackerTransportSubmit).not.toHaveBeenCalled();
+      } finally {
+        rmSync(journalRoot, { recursive: true, force: true });
+        rmSync(retryJournalRoot, { recursive: true, force: true });
       }
     },
   );

@@ -20,11 +20,13 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
-import type {
-  SubstrateFederatedPooledReserveDepositV1Packet,
-} from './substrate-federated-pooled-reserve-deposit-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   normalizeEip12Box,
@@ -92,13 +94,14 @@ const OBSERVATIONS = new WeakMap<
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
     binding:
       Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
-    batch:
-      Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>;
-    candidate:
-      Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
-    packet: Readonly<SubstrateFederatedPooledReserveDepositV1Packet>;
+    batch: object;
+    candidate: object;
+    packet: DepositPacket;
   }>
 >();
+
+type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
 
 export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV1(
   input: Readonly<{
@@ -111,13 +114,40 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
       Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
   }>,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target } = retained;
+  return observeOutputs(retained, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(candidate, batch, target));
+}
+
+export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputsV2(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target } = retained;
+  return observeOutputs(retained, () =>
+    assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target));
+}
+
+async function observeOutputs(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+      | SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1
+      | SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+    confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
+  }>,
+  assertCandidate: () => DepositPacket,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
-  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
-    input.candidate,
-    input.batch,
-    input.target,
-  );
+  const packet = assertCandidate();
   const expectedTxId = packet.transactions.reserveTransition.txId;
   const confirmation =
     normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(
@@ -270,6 +300,7 @@ export async function observeSubstrateFederatedIsolatedDevnetPegInCommittedVault
     current.processBindingDigestHex !== binding.processBindingDigestHex
     || current.executionTargetIdentityDigestHex
       !== binding.executionTargetIdentityDigestHex
+    || assertCandidate() !== packet
   ) {
     throw new Error(
       'isolated committed-vault output target changed during observation',
@@ -346,7 +377,7 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputO
   candidate:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-): Readonly<SubstrateFederatedPooledReserveDepositV1Packet> {
+): ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1> {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
     observation,
     target,
@@ -366,6 +397,22 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputO
     throw new Error(
       'isolated committed-vault output observation does not bind the exact candidate',
     );
+  }
+  return packet;
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationForCandidateV2(
+  observation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>,
+  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>,
+  candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2> {
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, target);
+  const material = OBSERVATIONS.get(observation);
+  const packet = assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target);
+  if (material === undefined || material.batch !== batch
+    || material.candidate !== candidate || material.packet !== packet) {
+    throw new Error('isolated committed-vault output observation does not bind the exact V2 candidate');
   }
   return packet;
 }

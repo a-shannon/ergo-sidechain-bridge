@@ -86,6 +86,24 @@ describe('standalone consensus-source build workflow', () => {
     );
   });
 
+  it.each([
+    ['missing', ''],
+    ['disabled', '    timeout-minutes: 0'],
+    ['previous ceiling', '    timeout-minutes: 120'],
+    ['unreviewed larger ceiling', '    timeout-minutes: 360'],
+    ['string value', '    timeout-minutes: "240"'],
+  ])('rejects a %s public-audit job budget', (_name, replacement) => {
+    const mutatedWorkflow = workflowText.replace('    timeout-minutes: 240', replacement);
+    expect(mutatedWorkflow).not.toBe(workflowText);
+    const result = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
+
+    expect(result.errors).toEqual(replacement === '' ? [
+      'public audit job timeout must be 240 minutes',
+      'public audit job may contain only its defaults, name, runner, timeout, and exact steps',
+    ] : ['public audit job timeout must be 240 minutes']);
+    expect(result.checks.exactCommandGraphValid).toBe(false);
+  });
+
   it('binds exact trigger coverage and rejects decoded target triggers', () => {
     const missingSourceCoverage = validateStandaloneConsensusBuildWorkflow(
       workflowText.replace('      - "sources/**"\n', ''),

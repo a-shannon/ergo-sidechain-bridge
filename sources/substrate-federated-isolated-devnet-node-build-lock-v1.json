@@ -17,7 +17,7 @@
     "assembly"
   ],
   "buildProcessRunner": "reviewed-windows-job-object-v1",
-  "windowsJobProcessRunnerSha256": "c7ab6ff55e275eb4e1298b1bcc6ce57d1e7cb7b0f0eb4c47f41c61f3895f9f6e",
+  "windowsJobProcessRunnerSha256": "47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627",
   "buildTimeoutMs": 900000,
   "buildTerminationGraceMs": 10000,
   "buildMaxOutputBytes": 33554432,

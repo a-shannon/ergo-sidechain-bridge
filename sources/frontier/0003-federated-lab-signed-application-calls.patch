@@ -1,0 +1,954 @@
+diff --git a/template/node/src/bridge_federated_lab_reservation_tests.rs b/template/node/src/bridge_federated_lab_reservation_tests.rs
+index e12d8b6538b6fca0bbf35d93dfff4dbf44a54227..3abd4f7b7580904266f9df4da59fbe2e237a6c08 100644
+--- a/template/node/src/bridge_federated_lab_reservation_tests.rs
++++ b/template/node/src/bridge_federated_lab_reservation_tests.rs
+@@ -54,6 +54,7 @@ use lab_runtime::{
+ 		PooledReserveMintReservationRuntimeProfileV4,
+ 		PooledReserveMintReservationSourceProofEnvelopeV4,
+ 		PooledReserveMintReservationStatementBytesV4,
++		ReferenceFederatedPooledReserveSourceProofProfileV1,
+ 		FEDERATED_POOLED_RESERVE_SOURCE_PROOF_FORMAT_VERSION_V1,
+ 		POOLED_RESERVE_MINT_RESERVATION_FORMAT_VERSION_V4,
+ 	},
+@@ -518,16 +519,53 @@ fn federated_lab_direct_parent_mint_is_atomic_and_rejects_unreserved_sibling() {
+ 
+ #[test]
+ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply() {
+-	let fixture = activated_fixture();
++	run_application_burn(None);
++}
++
++#[test]
++#[ignore = "requires exact externally signed calls and a bound source-proof envelope"]
++fn federated_lab_signed_application_burn_produces_exact_commitment() {
++	reject_reference_application_authority(
++		&LabFederatedPooledReserveSourceProofProfileV1::profile().signer_public_keys,
++	)
++	.expect("dynamic application authority must exclude public fixture keys");
++	let deployer = evm_address(H256::from(EVM_SECRET));
++	let statement = reservation_statement_from_environment(
++		contract_address(deployer, 1),
++		contract_address(deployer, 0),
++	);
++	// The dynamic consumer must not fall back to the public source-proof fixture.
++	assert!(env::var(SOURCE_PROOF_ENVELOPE_ENV).is_ok());
++	let mint = env::var("BRIDGE_LAB_SIGNED_MINT_V1_HEX").expect("signed mint is required");
++	let approval =
++		env::var("BRIDGE_LAB_SIGNED_APPROVAL_V1_HEX").expect("signed approval is required");
++	let peg_out = env::var("BRIDGE_LAB_SIGNED_PEG_OUT_V1_HEX").expect("signed peg-out is required");
++	let recipient = env::var("BRIDGE_LAB_ERGO_RECIPIENT_PUBLIC_KEY_V1_HEX")
++		.expect("Ergo recipient public key is required");
++	let calls =
++		decode_signed_application_calls(&statement, [&mint, &approval, &peg_out], &recipient)
++			.expect("exact fresh-owner application calls must validate");
++	run_application_burn(Some(calls));
++}
++
++fn run_application_burn(signed_calls: Option<SignedApplicationCalls>) {
++	let fixture = activate_fixture(unactivated_fixture_for_owner(
++		signed_calls.as_ref().map(|calls| calls.owner),
++	));
+ 	let validated = validate_pooled_reserve_mint_reservation_statement_v4(&fixture.statement)
+ 		.expect("LAB reservation statement is canonical");
++	if let Some(calls) = &signed_calls {
++		assert_eq!(calls.statement_id, validated.statement_id);
++	}
+ 	let mint_identity = validated.statement.mint_identity;
+ 	let bridge_address = validated.statement.source_intent.bridge_address;
+ 	let token_address = validated.statement.source_intent.token_address;
+ 	let recipient = validated.statement.source_intent.recipient;
+ 	let amount = validated.statement.source_intent.amount;
+ 	let evm_secret = H256::from(EVM_SECRET);
+-	let evm_owner = evm_address(evm_secret);
++	let evm_owner = signed_calls
++		.as_ref()
++		.map_or_else(|| evm_address(evm_secret), |calls| calls.owner);
+ 	assert_eq!(
+ 		recipient, evm_owner,
+ 		"LAB burn requires the process-owned recipient"
+@@ -537,6 +575,14 @@ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply
+ 		"LAB burn amount must satisfy the reviewed bridge minimum",
+ 	);
+ 
++	let reservation_signer = fixture
++		.client
++		.runtime_api()
++		.account_basic(
++			fixture.client.usage_info().chain.best_hash,
++			evm_address(evm_secret),
++		)
++		.expect("LAB reservation signer nonce is available");
+ 	import_built_block(
+ 		&fixture.client,
+ 		vec![
+@@ -544,7 +590,7 @@ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply
+ 			signed_extrinsic(
+ 				&fixture.client,
+ 				&fixture.signer,
+-				4,
++				reservation_signer.nonce.low_u32(),
+ 				reservation_call(fixture.statement.clone(), fixture.proof.clone()),
+ 			),
+ 		],
+@@ -556,19 +602,25 @@ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply
+ 		.runtime_api()
+ 		.account_basic(reserved.best_hash, evm_owner)
+ 		.expect("LAB EVM owner query succeeds");
+-	let mint_transaction = signed_legacy_transaction(
+-		evm_secret,
+-		owner.nonce.low_u64(),
+-		TransactionAction::Call(bridge_address),
+-		abi_call(
+-			b"mintSERG(address,uint256,bytes32)",
+-			&[
+-				H256::from(recipient),
+-				H256::from_low_u64_be(amount),
+-				mint_identity,
+-			],
+-		),
++	let mint_transaction = signed_calls.as_ref().map_or_else(
++		|| {
++			signed_legacy_transaction(
++				evm_secret,
++				owner.nonce.low_u64(),
++				TransactionAction::Call(bridge_address),
++				abi_call(
++					b"mintSERG(address,uint256,bytes32)",
++					&[
++						H256::from(recipient),
++						H256::from_low_u64_be(amount),
++						mint_identity,
++					],
++				),
++			)
++		},
++		|calls| calls.transactions[0].clone(),
+ 	);
++	let mint_transaction_hash = mint_transaction.hash();
+ 	import_built_block(
+ 		&fixture.client,
+ 		vec![
+@@ -578,6 +630,21 @@ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply
+ 	);
+ 	let minted = fixture.client.usage_info().chain;
+ 	assert_eq!(minted.best_number, 6);
++	assert_successful_ethereum_calls(&fixture.client, minted.best_hash, &[mint_transaction_hash]);
++	let consumed = storage_at(
++		&fixture.client,
++		minted.best_hash,
++		&StorageKey(
++			ConsumedPooledReserveMintReservationsV4::<Runtime>::hashed_key_for(mint_identity)
++				.to_vec(),
++		),
++	)
++	.expect("exact signed mint consumes its reservation");
++	let consumed = ConsumedPooledReserveMintReservationV4::decode(&mut &consumed[..])
++		.expect("consumed reservation decodes");
++	assert_eq!(consumed.statement_id, validated.statement_id);
++	assert_eq!(consumed.mint_identity, mint_identity);
++	assert_eq!(consumed.transaction_hash, mint_transaction_hash);
+ 	let supply_call = abi_call(b"totalSupply()", &[]);
+ 	let user_balance_call = abi_call(b"balanceOf(address)", &[H256::from(recipient)]);
+ 	assert_eq!(
+@@ -606,30 +673,44 @@ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply
+ 		.runtime_api()
+ 		.account_basic(minted.best_hash, evm_owner)
+ 		.expect("LAB EVM owner query succeeds after mint");
+-	let approve_transaction = signed_legacy_transaction(
+-		evm_secret,
+-		account_after_mint.nonce.low_u64(),
+-		TransactionAction::Call(token_address),
+-		abi_call(
+-			b"approve(address,uint256)",
+-			&[H256::from(bridge_address), H256::from_low_u64_be(amount)],
+-		),
++	let approve_transaction = signed_calls.as_ref().map_or_else(
++		|| {
++			signed_legacy_transaction(
++				evm_secret,
++				account_after_mint.nonce.low_u64(),
++				TransactionAction::Call(token_address),
++				abi_call(
++					b"approve(address,uint256)",
++					&[H256::from(bridge_address), H256::from_low_u64_be(amount)],
++				),
++			)
++		},
++		|calls| calls.transactions[1].clone(),
+ 	);
+-	let recipient_public_key = [
+-		0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce, 0x87,
+-		0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81, 0x5b, 0x16,
+-		0xf8, 0x17, 0x98,
+-	];
+-	let peg_out_transaction = signed_legacy_transaction(
+-		evm_secret,
+-		account_after_mint.nonce.low_u64() + 1,
+-		TransactionAction::Call(bridge_address),
+-		abi_call_with_dynamic_bytes(
+-			b"pegOut(uint256,bytes)",
+-			H256::from_low_u64_be(amount),
+-			&recipient_public_key,
+-		),
++	let recipient_public_key = signed_calls.as_ref().map_or(
++		[
++			0x02, 0x79, 0xbe, 0x66, 0x7e, 0xf9, 0xdc, 0xbb, 0xac, 0x55, 0xa0, 0x62, 0x95, 0xce,
++			0x87, 0x0b, 0x07, 0x02, 0x9b, 0xfc, 0xdb, 0x2d, 0xce, 0x28, 0xd9, 0x59, 0xf2, 0x81,
++			0x5b, 0x16, 0xf8, 0x17, 0x98,
++		],
++		|calls| calls.recipient_public_key,
++	);
++	let peg_out_transaction = signed_calls.as_ref().map_or_else(
++		|| {
++			signed_legacy_transaction(
++				evm_secret,
++				account_after_mint.nonce.low_u64() + 1,
++				TransactionAction::Call(bridge_address),
++				abi_call_with_dynamic_bytes(
++					b"pegOut(uint256,bytes)",
++					H256::from_low_u64_be(amount),
++					&recipient_public_key,
++				),
++			)
++		},
++		|calls| calls.transactions[2].clone(),
+ 	);
++	let approval_transaction_hash = approve_transaction.hash();
+ 	let peg_out_transaction_hash = peg_out_transaction.hash();
+ 	import_built_block(
+ 		&fixture.client,
+@@ -641,6 +722,37 @@ fn federated_lab_application_burn_produces_exact_commitment_and_conserves_supply
+ 	);
+ 	let burned = fixture.client.usage_info().chain;
+ 	assert_eq!(burned.best_number, 7);
++	assert_successful_ethereum_calls(
++		&fixture.client,
++		burned.best_hash,
++		&[approval_transaction_hash, peg_out_transaction_hash],
++	);
++	if signed_calls.is_some() {
++		assert_eq!(owner.nonce, U256::zero());
++		assert_eq!(account_after_mint.nonce, U256::one());
++		assert_eq!(
++			fixture
++				.client
++				.runtime_api()
++				.account_basic(burned.best_hash, evm_owner)
++				.expect("fresh owner nonce is available")
++				.nonce,
++			U256::from(3)
++		);
++		println!("bridge-lab-signed-application-format=1");
++		println!(
++			"bridge-lab-signed-application-owner=0x{}",
++			hex::encode(evm_owner)
++		);
++		println!(
++			"bridge-lab-signed-application-mint-hash=0x{}",
++			hex::encode(mint_transaction_hash)
++		);
++		println!(
++			"bridge-lab-signed-application-approval-hash=0x{}",
++			hex::encode(approval_transaction_hash)
++		);
++	}
+ 	let ethereum_block = fixture
+ 		.client
+ 		.runtime_api()
+@@ -991,7 +1103,488 @@ fn federated_lab_reservation_rejects_missing_stale_and_mismatched_authority_inpu
+ 	);
+ }
+ 
++struct SignedApplicationCalls {
++	statement_id: H256,
++	owner: H160,
++	recipient_public_key: [u8; 33],
++	transactions: [Transaction; 3],
++}
++
++fn reject_reference_application_authority(keys: &[[u8; 32]]) -> Result<(), &'static str> {
++	let reference = ReferenceFederatedPooledReserveSourceProofProfileV1::profile();
++	if keys
++		.iter()
++		.any(|key| reference.signer_public_keys.contains(key))
++	{
++		return Err("public fixture authority");
++	}
++	Ok(())
++}
++
++#[test]
++fn federated_lab_signed_calls_reject_reference_authority() {
++	let reference = ReferenceFederatedPooledReserveSourceProofProfileV1::profile();
++	assert_eq!(
++		reject_reference_application_authority(&reference.signer_public_keys),
++		Err("public fixture authority")
++	);
++	// Reject each published key, including a mixed set with a non-reference majority.
++	for key in &reference.signer_public_keys {
++		assert_eq!(
++			reject_reference_application_authority(&[[7; 32], *key, [8; 32]]),
++			Err("public fixture authority")
++		);
++	}
++	assert_eq!(
++		reject_reference_application_authority(&[[7; 32], [8; 32]]),
++		Ok(())
++	);
++}
++
++#[test]
++fn federated_lab_signed_calls_bind_complete_application() {
++	let secret = H256::repeat_byte(7);
++	let owner = evm_address(secret);
++	let deployer = evm_address(H256::from(EVM_SECRET));
++	let bridge = contract_address(deployer, 1);
++	let token = contract_address(deployer, 0);
++	let base = reservation_statement_from_environment(bridge, token);
++	let statement_for = |bridge: H160, token: H160, owner: H160, amount: u64| {
++		let mut bytes = base.to_vec();
++		bytes[98..118].copy_from_slice(bridge.as_bytes());
++		bytes[118..138].copy_from_slice(token.as_bytes());
++		bytes[234..242].copy_from_slice(&amount.to_be_bytes());
++		bytes[242..262].copy_from_slice(owner.as_bytes());
++		bytes[487..495].copy_from_slice(&amount.to_be_bytes());
++		let intent_id = domain_hash(b"E2S_PEG_IN_SOURCE_INTENT_V2", &bytes[33..262]);
++		bytes[262..294].copy_from_slice(intent_id.as_bytes());
++		let statement: PooledReserveMintReservationStatementBytesV4 =
++			bytes.try_into().expect("fixed statement");
++		validate_pooled_reserve_mint_reservation_statement_v4(&statement)
++			.expect("self-consistent changed statement");
++		statement
++	};
++	let statement = statement_for(bridge, token, owner, 15_000_000);
++	let validated =
++		validate_pooled_reserve_mint_reservation_statement_v4(&statement).expect("canonical");
++	let point = libsecp256k1::PublicKey::from_secret_key(
++		&libsecp256k1::SecretKey::parse_slice(H256::repeat_byte(8).as_bytes())
++			.expect("synthetic fixture"),
++	)
++	.serialize_compressed();
++	let point_hex = format!("0x{}", hex::encode(point));
++	let data = [
++		abi_call(
++			b"mintSERG(address,uint256,bytes32)",
++			&[
++				H256::from(owner),
++				H256::from_low_u64_be(15_000_000),
++				validated.statement.mint_identity,
++			],
++		),
++		abi_call(
++			b"approve(address,uint256)",
++			&[H256::from(bridge), H256::from_low_u64_be(15_000_000)],
++		),
++		abi_call_with_dynamic_bytes(
++			b"pegOut(uint256,bytes)",
++			H256::from_low_u64_be(15_000_000),
++			&point,
++		),
++	];
++	let targets = [bridge, token, bridge];
++	let sign_call = |index: usize, input: Vec<u8>| {
++		let Transaction::Legacy(tx) = signed_legacy_transaction(
++			secret,
++			index as u64,
++			TransactionAction::Call(targets[index]),
++			input,
++		) else {
++			panic!("legacy");
++		};
++		format!("0x{}", hex::encode(rlp::encode(&tx)))
++	};
++	let calls = [
++		sign_call(0, data[0].clone()),
++		sign_call(1, data[1].clone()),
++		sign_call(2, data[2].clone()),
++	];
++	let check = |statement: &PooledReserveMintReservationStatementBytesV4,
++	             calls: &[String; 3],
++	             point: &str| {
++		decode_signed_application_calls(statement, [&calls[0], &calls[1], &calls[2]], point)
++			.map(|_| ())
++	};
++	assert_eq!(check(&statement, &calls, &point_hex), Ok(()));
++	for forbidden in [deployer, bridge, token] {
++		assert_eq!(
++			check(
++				&statement_for(bridge, token, forbidden, 15_000_000),
++				&calls,
++				&point_hex
++			),
++			Err("fresh owner")
++		);
++	}
++	for changed in [
++		statement_for(H160::repeat_byte(8), token, owner, 15_000_000),
++		statement_for(bridge, H160::repeat_byte(8), owner, 15_000_000),
++		statement_for(bridge, token, owner, 15_000_001),
++	] {
++		assert_eq!(
++			check(&changed, &calls, &point_hex),
++			Err("LAB application profile")
++		);
++	}
++	assert_eq!(
++		check(&statement, &calls, &format!("0x02{}", "00".repeat(32))),
++		Err("recipient point")
++	);
++	for (left, right) in [(0, 1), (0, 2), (1, 2)] {
++		let mut swapped = calls.clone();
++		swapped.swap(left, right);
++		assert_eq!(check(&statement, &swapped, &point_hex), Err("nonce"));
++	}
++	for index in 0..3 {
++		// Re-sign each mutation so only the complete-calldata binding rejects it.
++		for offset in 0..data[index].len() {
++			let mut changed_data = data[index].clone();
++			changed_data[offset] ^= 1;
++			let mut changed = calls.clone();
++			changed[index] = sign_call(index, changed_data);
++			assert_eq!(
++				check(&statement, &changed, &point_hex),
++				Err("calldata"),
++				"role {index}, byte {offset}"
++			);
++		}
++	}
++}
++
++fn canonical_application_hex(
++	encoded: &str,
++	min: usize,
++	max: usize,
++) -> Result<Vec<u8>, &'static str> {
++	let payload = encoded.strip_prefix("0x").ok_or("hex prefix")?;
++	if payload.len() < min * 2
++		|| payload.len() > max * 2
++		|| payload.len() % 2 != 0
++		|| !payload
++			.bytes()
++			.all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
++	{
++		return Err("bounded canonical hex");
++	}
++	hex::decode(payload).map_err(|_| "hex bytes")
++}
++
++fn decode_signed_application_calls(
++	statement: &PooledReserveMintReservationStatementBytesV4,
++	encoded: [&str; 3],
++	ergo_recipient: &str,
++) -> Result<SignedApplicationCalls, &'static str> {
++	let validated = validate_pooled_reserve_mint_reservation_statement_v4(statement)
++		.map_err(|_| "canonical reservation")?;
++	let intent = &validated.statement.source_intent;
++	let deployer = evm_address(H256::from(EVM_SECRET));
++	if intent.bridge_address != contract_address(deployer, 1)
++		|| intent.token_address != contract_address(deployer, 0)
++		|| intent.amount != MINIMUM_PEG_OUT_NANO_ERG + BRIDGE_FEE_NANO_ERG
++	{
++		return Err("LAB application profile");
++	}
++	if intent.recipient == H160::zero()
++		|| intent.recipient == deployer
++		|| intent.recipient == intent.bridge_address
++		|| intent.recipient == intent.token_address
++	{
++		return Err("fresh owner");
++	}
++	let recipient_public_key: [u8; 33] = canonical_application_hex(ergo_recipient, 33, 33)?
++		.try_into()
++		.map_err(|_| "recipient length")?;
++	let point = libsecp256k1::PublicKey::parse_slice(&recipient_public_key, None)
++		.map_err(|_| "recipient point")?;
++	if point.serialize_compressed() != recipient_public_key {
++		return Err("compressed recipient");
++	}
++	let data = [
++		abi_call(
++			b"mintSERG(address,uint256,bytes32)",
++			&[
++				H256::from(intent.recipient),
++				H256::from_low_u64_be(intent.amount),
++				validated.statement.mint_identity,
++			],
++		),
++		abi_call(
++			b"approve(address,uint256)",
++			&[
++				H256::from(intent.bridge_address),
++				H256::from_low_u64_be(intent.amount),
++			],
++		),
++		abi_call_with_dynamic_bytes(
++			b"pegOut(uint256,bytes)",
++			H256::from_low_u64_be(intent.amount),
++			&recipient_public_key,
++		),
++	];
++	let targets = [
++		intent.bridge_address,
++		intent.token_address,
++		intent.bridge_address,
++	];
++	let mut calls = Vec::with_capacity(3);
++	for index in 0..3 {
++		calls.push(decode_signed_application_transaction(
++			encoded[index],
++			intent.recipient,
++			index as u64,
++			targets[index],
++			&data[index],
++		)?);
++	}
++	Ok(SignedApplicationCalls {
++		statement_id: validated.statement_id,
++		owner: intent.recipient,
++		recipient_public_key,
++		transactions: calls.try_into().map_err(|_| "three calls")?,
++	})
++}
++
++fn decode_signed_application_transaction(
++	encoded: &str,
++	owner: H160,
++	nonce: u64,
++	target: H160,
++	data: &[u8],
++) -> Result<Transaction, &'static str> {
++	let bytes = canonical_application_hex(encoded, 1, 1024)?;
++	let tx: LegacyTransaction = rlp::decode(&bytes).map_err(|_| "legacy transaction")?;
++	if rlp::encode(&tx).as_ref() != bytes.as_slice() {
++		return Err("canonical RLP");
++	}
++	if !tx.signature.is_low_s() {
++		return Err("low s");
++	}
++	if tx.signature.chain_id() != Some(TEST_CHAIN_ID) {
++		return Err("chain id");
++	}
++	if tx.nonce != U256::from(nonce) {
++		return Err("nonce");
++	}
++	if tx.gas_price != U256::from(TEST_GAS_PRICE) {
++		return Err("gas price");
++	}
++	if tx.gas_limit != U256::from(TEST_GAS_LIMIT) {
++		return Err("gas limit");
++	}
++	if tx.value != U256::zero() {
++		return Err("value");
++	}
++	if tx.action != TransactionAction::Call(target) {
++		return Err("destination");
++	}
++	if tx.input != data {
++		return Err("calldata");
++	}
++	let mut signature = [0u8; 64];
++	signature[..32].copy_from_slice(tx.signature.r().as_bytes());
++	signature[32..].copy_from_slice(tx.signature.s().as_bytes());
++	let signature =
++		libsecp256k1::Signature::parse_standard_slice(&signature).map_err(|_| "signature")?;
++	let recovery =
++		libsecp256k1::RecoveryId::parse(tx.signature.standard_v()).map_err(|_| "recovery id")?;
++	let message = libsecp256k1::Message::parse(tx.clone().to_message().hash().as_fixed_bytes());
++	let public = libsecp256k1::recover(&message, &signature, &recovery)
++		.map_err(|_| "signature recovery")?
++		.serialize();
++	if H160::from_slice(&keccak_256(&public[1..])[12..]) != owner {
++		return Err("signer");
++	}
++	Ok(Transaction::Legacy(tx))
++}
++
++fn fresh_owner_gas_budget() -> U256 {
++	U256::from(TEST_GAS_PRICE) * U256::from(TEST_GAS_LIMIT) * U256::from(3)
++}
++
++#[test]
++fn federated_lab_signed_calls_reject_single_field_changes() {
++	let secret = H256::repeat_byte(7);
++	let owner = evm_address(secret);
++	let target = contract_address(evm_address(H256::from(EVM_SECRET)), 1);
++	let data = abi_call(
++		b"mintSERG(address,uint256,bytes32)",
++		&[
++			H256::from(owner),
++			H256::from_low_u64_be(15_000_000),
++			H256::repeat_byte(9),
++		],
++	);
++	for nonce in 0..3 {
++		let base = LegacyTransactionMessage {
++			nonce: U256::from(nonce),
++			gas_price: U256::from(TEST_GAS_PRICE),
++			gas_limit: U256::from(TEST_GAS_LIMIT),
++			action: TransactionAction::Call(target),
++			value: U256::zero(),
++			input: data.clone(),
++			chain_id: Some(TEST_CHAIN_ID),
++		};
++		let check = |message: LegacyTransactionMessage, key: H256| {
++			let transaction = sign_legacy_message(message, key);
++			let encoded = format!("0x{}", hex::encode(rlp::encode(&transaction)));
++			decode_signed_application_transaction(&encoded, owner, nonce, target, &data)
++		};
++		assert!(check(base.clone(), secret).is_ok());
++		assert_eq!(check(base.clone(), H256::repeat_byte(8)), Err("signer"));
++		let mut wrong = base.clone();
++		wrong.chain_id = Some(TEST_CHAIN_ID + 1);
++		assert_eq!(check(wrong, secret), Err("chain id"));
++		let mut wrong = base.clone();
++		wrong.chain_id = None;
++		assert_eq!(check(wrong, secret), Err("chain id"));
++		let mut wrong = base.clone();
++		wrong.nonce += U256::one();
++		assert_eq!(check(wrong, secret), Err("nonce"));
++		let mut wrong = base.clone();
++		wrong.gas_price += U256::one();
++		assert_eq!(check(wrong, secret), Err("gas price"));
++		let mut wrong = base.clone();
++		wrong.gas_limit += U256::one();
++		assert_eq!(check(wrong, secret), Err("gas limit"));
++		let mut wrong = base.clone();
++		wrong.value = U256::one();
++		assert_eq!(check(wrong, secret), Err("value"));
++		let mut wrong = base.clone();
++		wrong.action = TransactionAction::Create;
++		assert_eq!(check(wrong, secret), Err("destination"));
++		let mut wrong = base.clone();
++		wrong.action = TransactionAction::Call(owner);
++		assert_eq!(check(wrong, secret), Err("destination"));
++		for index in 0..data.len() {
++			let mut wrong = base.clone();
++			wrong.input[index] ^= 1;
++			assert_eq!(
++				check(wrong, secret),
++				Err("calldata"),
++				"nonce {nonce}, byte {index}"
++			);
++		}
++		let mut wrong = base.clone();
++		wrong.input.push(0);
++		assert_eq!(check(wrong, secret), Err("calldata"));
++	}
++}
++
++#[test]
++fn federated_lab_signed_calls_reject_signature_and_encoding_aliases() {
++	let secret = H256::repeat_byte(7);
++	let owner = evm_address(secret);
++	let target = H160::repeat_byte(9);
++	let data = vec![1, 2, 3, 4];
++	for nonce in 0..3 {
++		let Transaction::Legacy(base) =
++			signed_legacy_transaction(secret, nonce, TransactionAction::Call(target), data.clone())
++		else {
++			panic!("legacy fixture");
++		};
++		let check = |bytes: &[u8]| {
++			decode_signed_application_transaction(
++				&format!("0x{}", hex::encode(bytes)),
++				owner,
++				nonce,
++				target,
++				&data,
++			)
++		};
++		let encoded = rlp::encode(&base);
++		assert!(check(&encoded).is_ok());
++		let mut trailing = encoded.to_vec();
++		trailing.push(0);
++		assert!(rlp::decode::<LegacyTransaction>(&trailing).is_err());
++		assert_eq!(check(&trailing), Err("legacy transaction"));
++		let mut high_s = base.clone();
++		let order = U256::from_big_endian(&hex_literal::hex!(
++			"fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"
++		));
++		let s = order - U256::from_big_endian(base.signature.s().as_bytes());
++		high_s.signature = TransactionSignature::new(
++			TEST_CHAIN_ID * 2 + 35 + u64::from(base.signature.standard_v() ^ 1),
++			*base.signature.r(),
++			H256::from(s.to_big_endian()),
++		)
++		.expect("high-s alias remains recoverable");
++		assert_eq!(check(&rlp::encode(&high_s)), Err("low s"));
++		let original = rlp::Rlp::new(&encoded);
++		let mut alias = RlpStream::new_list(9);
++		for index in 0..9 {
++			if index == 4 {
++				alias.append_raw(&[0], 1);
++			} else {
++				alias.append_raw(original.at(index).expect("field").as_raw(), 1);
++			}
++		}
++		assert!(
++			check(&alias.out()).is_err(),
++			"nonminimal zero value must reject"
++		);
++		let mut typed = vec![2];
++		typed.extend_from_slice(&encoded);
++		assert!(check(&typed).is_err());
++		assert!(check(&encoded[..encoded.len() - 1]).is_err());
++		assert!(check(&vec![0; 1025]).is_err());
++		assert!(decode_signed_application_transaction(
++			&format!("0x{}", hex::encode(&encoded).to_uppercase()),
++			owner,
++			nonce,
++			target,
++			&data
++		)
++		.is_err());
++	}
++}
++
++fn assert_successful_ethereum_calls(client: &Arc<TestClient>, block: H256, hashes: &[H256]) {
++	let ethereum = client
++		.runtime_api()
++		.current_block(block)
++		.expect("Ethereum block query succeeds")
++		.expect("Ethereum block exists");
++	let statuses = client
++		.runtime_api()
++		.current_transaction_statuses(block)
++		.expect("Ethereum statuses query succeeds")
++		.expect("Ethereum statuses exist");
++	let receipts = client
++		.runtime_api()
++		.current_receipts(block)
++		.expect("Ethereum receipts query succeeds")
++		.expect("Ethereum receipts exist");
++	assert_eq!(ethereum.transactions.len(), hashes.len());
++	assert_eq!(statuses.len(), hashes.len());
++	assert_eq!(receipts.len(), hashes.len());
++	for (index, hash) in hashes.iter().enumerate() {
++		assert_eq!(ethereum.transactions[index].hash(), *hash);
++		assert_eq!(statuses[index].transaction_hash, *hash);
++		assert_eq!(statuses[index].transaction_index as usize, index);
++		let data = match &receipts[index] {
++			pallet_ethereum::Receipt::Legacy(data) => data,
++			_ => panic!("exact legacy receipt required"),
++		};
++		assert_eq!(data.status_code, 1);
++		assert_eq!(data.logs, statuses[index].logs);
++	}
++}
++
+ fn unactivated_fixture() -> ReservationFixture {
++	unactivated_fixture_for_owner(None)
++}
++
++fn unactivated_fixture_for_owner(fresh_owner: Option<H160>) -> ReservationFixture {
+ 	let signer = ecdsa::Pair::from_seed_slice(&ALITH_SECRET).expect("Alith fixture key is valid");
+ 	let client = test_client();
+ 	assert_eq!(AccountId::from(signer.public()), alith_account());
+@@ -1031,22 +1624,104 @@ fn unactivated_fixture() -> ReservationFixture {
+ 			)),
+ 		],
+ 	);
+-	import_built_block(
+-		&client,
+-		vec![
+-			timestamp_extrinsic(18_000),
+-			ethereum_extrinsic(signed_legacy_transaction(
+-				evm_secret,
+-				2,
+-				TransactionAction::Call(token_address),
+-				abi_call(b"transferOwnership(address)", &[H256::from(bridge_address)]),
+-			)),
+-		],
+-	);
++	let mut setup = vec![
++		timestamp_extrinsic(18_000),
++		ethereum_extrinsic(signed_legacy_transaction(
++			evm_secret,
++			2,
++			TransactionAction::Call(token_address),
++			abi_call(b"transferOwnership(address)", &[H256::from(bridge_address)]),
++		)),
++	];
++	if let Some(owner) = fresh_owner {
++		assert!(
++			owner != H160::zero()
++				&& owner != evm_owner
++				&& owner != bridge_address
++				&& owner != token_address
++		);
++		let before = client.usage_info().chain.best_hash;
++		let account = client
++			.runtime_api()
++			.account_basic(before, owner)
++			.expect("fresh owner prestate is available");
++		assert_eq!(account.nonce, U256::zero());
++		assert_eq!(account.balance, U256::zero());
++		assert!(client
++			.runtime_api()
++			.account_code_at(before, owner)
++			.expect("fresh owner code is available")
++			.is_empty());
++		setup.push(ethereum_extrinsic(signed_legacy_transaction(
++			evm_secret,
++			3,
++			TransactionAction::Call(bridge_address),
++			abi_call(b"transferOwnership(address)", &[H256::from(owner)]),
++		)));
++		setup.push(ethereum_extrinsic(signed_legacy_value_transaction(
++			evm_secret,
++			4,
++			TransactionAction::Call(owner),
++			Vec::new(),
++			fresh_owner_gas_budget(),
++		)));
++	}
++	let setup_hashes = setup
++		.iter()
++		.filter_map(|extrinsic| match &extrinsic.0.function {
++			RuntimeCall::Ethereum(pallet_ethereum::Call::transact { transaction }) => {
++				Some(transaction.hash())
++			}
++			_ => None,
++		})
++		.collect::<Vec<_>>();
++	let setup_block = import_built_block(&client, setup);
++	assert_successful_ethereum_calls(&client, setup_block, &setup_hashes);
+ 
+ 	let deployed = client.usage_info().chain;
+ 	assert_eq!(deployed.best_number, 3);
+ 	let statement = reservation_statement_from_environment(bridge_address, token_address);
++	if let Some(owner) = fresh_owner {
++		let validated = validate_pooled_reserve_mint_reservation_statement_v4(&statement)
++			.expect("fresh owner statement is canonical");
++		assert_eq!(validated.statement.source_intent.recipient, owner);
++		assert_eq!(
++			evm_view(
++				&client,
++				setup_block,
++				owner,
++				bridge_address,
++				abi_call(b"owner()", &[])
++			),
++			U256::from_big_endian(owner.as_bytes())
++		);
++		assert_eq!(
++			evm_view(
++				&client,
++				setup_block,
++				owner,
++				token_address,
++				abi_call(b"owner()", &[])
++			),
++			U256::from_big_endian(bridge_address.as_bytes())
++		);
++		assert_eq!(
++			evm_view(
++				&client,
++				setup_block,
++				owner,
++				token_address,
++				abi_call(b"totalSupply()", &[])
++			),
++			U256::zero()
++		);
++		let account = client
++			.runtime_api()
++			.account_basic(setup_block, owner)
++			.expect("funded fresh owner is available");
++		assert_eq!(account.nonce, U256::zero());
++		assert_eq!(account.balance, fresh_owner_gas_budget());
++	}
+ 	let bridge_runtime_code = client
+ 		.runtime_api()
+ 		.account_code_at(deployed.best_hash, bridge_address)
+@@ -1078,7 +1753,19 @@ fn unactivated_fixture() -> ReservationFixture {
+ }
+ 
+ fn activated_fixture() -> ReservationFixture {
+-	let fixture = unactivated_fixture();
++	activate_fixture(unactivated_fixture())
++}
++
++fn activate_fixture(fixture: ReservationFixture) -> ReservationFixture {
++	let signer_nonce = fixture
++		.client
++		.runtime_api()
++		.account_basic(
++			fixture.client.usage_info().chain.best_hash,
++			evm_address(H256::from(EVM_SECRET)),
++		)
++		.expect("LAB activation signer nonce is available")
++		.nonce;
+ 	let activate = RuntimeCall::Sudo(pallet_sudo::Call::sudo {
+ 		call: Box::new(RuntimeCall::BridgeCommitment(
+ 			BridgeCommitmentCall::activate_pooled_reserve_mint_reservation_profile_v4 {
+@@ -1090,7 +1777,12 @@ fn activated_fixture() -> ReservationFixture {
+ 		&fixture.client,
+ 		vec![
+ 			timestamp_extrinsic(24_000),
+-			signed_extrinsic(&fixture.client, &fixture.signer, 3, activate),
++			signed_extrinsic(
++				&fixture.client,
++				&fixture.signer,
++				signer_nonce.low_u32(),
++				activate,
++			),
+ 		],
+ 	);
+ 	let chain = fixture.client.usage_info().chain;
+@@ -1274,36 +1966,50 @@ fn signed_legacy_transaction(
+ 	nonce: u64,
+ 	action: TransactionAction,
+ 	input: Vec<u8>,
++) -> Transaction {
++	signed_legacy_value_transaction(secret, nonce, action, input, U256::zero())
++}
++
++fn signed_legacy_value_transaction(
++	secret: H256,
++	nonce: u64,
++	action: TransactionAction,
++	input: Vec<u8>,
++	value: U256,
+ ) -> Transaction {
+ 	let message = LegacyTransactionMessage {
+ 		nonce: U256::from(nonce),
+ 		gas_price: U256::from(TEST_GAS_PRICE),
+ 		gas_limit: U256::from(TEST_GAS_LIMIT),
+ 		action,
+-		value: U256::zero(),
++		value,
+ 		input: input.clone(),
+ 		chain_id: Some(TEST_CHAIN_ID),
+ 	};
++	Transaction::Legacy(sign_legacy_message(message, secret))
++}
++
++fn sign_legacy_message(message: LegacyTransactionMessage, secret: H256) -> LegacyTransaction {
+ 	let signing_message = libsecp256k1::Message::parse(message.hash().as_fixed_bytes());
+ 	let secret_key = libsecp256k1::SecretKey::parse_slice(secret.as_bytes())
+ 		.expect("valid deterministic LAB EVM fixture key");
+ 	let (signature, recovery_id) = libsecp256k1::sign(&signing_message, &secret_key);
+ 	let signature = signature.serialize();
+ 	let signature = TransactionSignature::new(
+-		recovery_id.serialize() as u64 % 2 + TEST_CHAIN_ID * 2 + 35,
++		recovery_id.serialize() as u64 % 2 + message.chain_id.map_or(27, |chain| chain * 2 + 35),
+ 		H256::from_slice(&signature[..32]),
+ 		H256::from_slice(&signature[32..]),
+ 	)
+ 	.expect("valid deterministic LAB EVM transaction signature");
+-	Transaction::Legacy(LegacyTransaction {
++	LegacyTransaction {
+ 		nonce: message.nonce,
+ 		gas_price: message.gas_price,
+ 		gas_limit: message.gas_limit,
+ 		action: message.action,
+ 		value: message.value,
+-		input,
++		input: message.input,
+ 		signature,
+-	})
++	}
+ }
+ 
+ fn contract_address(sender: H160, nonce: u64) -> H160 {

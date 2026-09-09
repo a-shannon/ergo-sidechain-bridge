@@ -353,6 +353,10 @@ describe('broadcast surface isolation', () => {
     const sources = productionSources();
     const executionRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const managedSetupV2 =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts';
+    const trackerCampaignV2 =
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts';
     const trackerCheckWorkerFile =
       'scripts/run-substrate-federated-isolated-devnet-peg-in-observed-anchor-tracker-check-campaign-worker-v6.ts';
     const authorizerFile =
@@ -447,12 +451,20 @@ describe('broadcast surface isolation', () => {
     )).toEqual([executionRoot, transportFile]);
     expect(filesImporting(
       sources,
-      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
     )).toEqual([executionRoot]);
     expect(filesContainingIdentifier(
       sources,
-      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+      'createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV2',
     )).toEqual([executionRoot, transportFile]);
+    expect(filesImporting(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    )).toEqual([executionRoot, managedSetupV2]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1',
+    )).toEqual([executionRoot, managedSetupV2, transportFile]);
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
@@ -461,6 +473,26 @@ describe('broadcast surface isolation', () => {
       sources,
       'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV1',
     )).toEqual([executionRoot, authorizerFile]);
+    expect(filesImporting(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
+    )).toEqual([executionRoot]);
+    expect(filesContainingIdentifier(
+      sources,
+      'createSubstrateFederatedIsolatedDevnetGenesisBroadcastAuthorizerV2',
+    )).toEqual([executionRoot, authorizerFile]);
+    expect(filesImporting(sources, 'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3'))
+      .toEqual([managedSetupV2]);
+    expect(filesContainingIdentifier(sources, 'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3'))
+      .toEqual([executionRoot, managedSetupV2]);
+    expect(filesImporting(sources, 'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1'))
+      .toEqual([managedSetupV2]);
+    for (const name of [
+      'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+      'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+    ]) {
+      expect(filesImporting(sources, name)).toEqual([trackerCampaignV2]);
+    }
     expect(filesImporting(
       sources,
       'createSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1',
@@ -472,7 +504,7 @@ describe('broadcast surface isolation', () => {
     expect(filesImporting(
       sources,
       'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
-    )).toEqual([executionRoot]);
+    )).toEqual([executionRoot, managedSetupV2]);
     expect(filesImporting(
       sources,
       'runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1',
