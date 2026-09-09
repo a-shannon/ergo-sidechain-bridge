@@ -65,6 +65,17 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV
     Readonly<SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): Readonly<SubstrateFederatedRewardInputDiscoveryV2> {
+  return validateSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(owned, target).observation;
+}
+
+/** Return the binding checked in this call, never a retained live verdict. */
+export function validateSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(
+  owned: Readonly<SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<{
+  observation: Readonly<SubstrateFederatedRewardInputDiscoveryV2>;
+  processBinding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+}> {
   const material = OWNED_DISCOVERIES.get(owned);
   const current =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
@@ -84,5 +95,5 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV
     throw new Error('owned reward-input discovery lacks target provenance');
   }
   assertSubstrateFederatedRewardInputDiscoveryV2Provenance(owned.observation);
-  return owned.observation;
+  return Object.freeze({ observation: owned.observation, processBinding: current });
 }

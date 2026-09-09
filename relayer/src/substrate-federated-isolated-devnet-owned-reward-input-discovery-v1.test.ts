@@ -18,6 +18,7 @@ vi.mock('./substrate-federated-isolated-devnet-reward-input-discovery-v1.js', ()
 
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1,
+  validateSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 as validate,
   discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
 } from './substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
 
@@ -46,6 +47,31 @@ beforeEach(() => {
 });
 
 describe('owned reward-input discovery V1', () => {
+  it('returns the exact current binding and rechecks it on every validation', async () => {
+    const owned = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(SIGNER as never, TARGET as never);
+    mocks.assertTarget.mockClear();
+    const first = validate(owned, TARGET as never);
+    expect(first.observation).toBe(OBSERVATION);
+    expect(first.processBinding).toBe(BINDING);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(mocks.assertTarget).toHaveBeenCalledTimes(1);
+    const freshBinding = Object.freeze({ ...BINDING });
+    mocks.assertTarget.mockReturnValueOnce(freshBinding);
+    expect(validate(owned, TARGET as never).processBinding).toBe(freshBinding);
+    expect(mocks.assertTarget).toHaveBeenCalledTimes(2);
+    mocks.assertTarget.mockImplementationOnce(() => { throw new Error('target stopped'); });
+    expect(() => validate(owned, TARGET as never)).toThrow('target stopped');
+    expect(mocks.assertTarget).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'rejects current %s drift instead of returning a saved binding', async field => {
+      const owned = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(SIGNER as never, TARGET as never);
+      mocks.assertTarget.mockReturnValueOnce({ ...BINDING, [field]: hex('3') });
+      expect(() => validate(owned, TARGET as never)).toThrow('target provenance');
+    },
+  );
+
   it('binds an observation produced while the exact target stays active', async () => {
     const owned =
       await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(

@@ -13,20 +13,25 @@ const boundary = vi.hoisted(() => ({
   reads: [] as { origin: string; method: string; height?: number }[],
   onRead: undefined as undefined | (() => void),
   onCompiledAssert: undefined as undefined | (() => void),
+  validations: 0,
 }));
 vi.mock('./substrate-federated-observed-genesis-v1.js', () => ({
-  assertObservedSubstrateFederatedGenesisV1(value: object, target: object) {
+  validateObservedSubstrateFederatedGenesisV1(value: object, target: object) {
     if (boundary.compiled.get(value) !== target) throw new Error('stub compiler provenance');
     if (!boundary.setupActive) throw new Error('stub setup disposed');
     if (!boundary.sourceActive) throw new Error('stub source disposed');
     if (!boundary.targetActive) throw new Error('stub target disposed');
+    if (!boundary.targets.has(target)) throw new Error('stub target not owned');
+    boundary.validations += 1;
     boundary.onCompiledAssert?.();
+    return { compiled: value, processBinding: {
+      processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: '82'.repeat(32),
+    } };
   },
 }));
 vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
-  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target: object) {
-    if (!boundary.targets.has(target) || !boundary.targetActive) throw new Error('stub target not owned');
-    return { processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: '82'.repeat(32) };
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1() {
+    throw new Error('request repeated the already checked target traversal');
   },
 }));
 vi.mock('./authenticated-spv-tracker-read-only-node-client.js', async importOriginal => ({
@@ -78,6 +83,7 @@ beforeEach(async () => {
   boundary.tip = boundary.anchor = '72'.repeat(32); boundary.height = boundary.anchorHeight = 120;
   boundary.onRead = undefined; boundary.reads.length = 0;
   boundary.onCompiledAssert = undefined;
+  boundary.validations = 0;
   boundary.boxes.clear(); boundary.binary.clear();
   const base: Eip12Box = {
     boxId: '8f25f8b850290c20b9f3568eba3604bee2f4e2d7167c7ea68f2943997ea742a5',
@@ -128,6 +134,18 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('native FED setup request with stubbed compiler custody and node reads', () => {
+  it('uses one current compiled-target traversal per synchronous source assertion', async () => {
+    const request = await build(input);
+    boundary.validations = 0;
+    assertRequest(request, input.target);
+    expect(boundary.validations).toBe(1);
+    assertRequest(request, input.target);
+    expect(boundary.validations).toBe(2);
+    boundary.processDigest = '83'.repeat(32);
+    expect(() => assertRequest(request, input.target)).toThrow('compiler or process binding drifted');
+    expect(boundary.validations).toBe(3);
+  });
+
   it('freezes real WASM bytes under a distinct native identity with every authority flag false', async () => {
     const request = await build(input);
     expect(assertRequest(request, input.target)).toBeUndefined();

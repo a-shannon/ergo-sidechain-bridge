@@ -13,9 +13,10 @@ import {
   assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance,
   type SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
-import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+  SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import {
-  assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1,
+  validateSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1,
   type SubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1,
 } from './substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
 import {
@@ -47,7 +48,7 @@ export type ObservedSubstrateFederatedGenesisV1 = Awaited<ReturnType<typeof comp
 
 const COMPILED_GENESIS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
-  assertCustody: () => void;
+  assertCustody: () => Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
 }>>();
 
 /** Compile one candidate and its unsigned Ergo issuance transactions from live
@@ -62,11 +63,11 @@ export async function compileObservedSubstrateFederatedGenesisV1(
     'operatorAddressHex', 'bridgeAddressHex', 'tokenAddressHex', 'runtimeWasm',
     'expectedRuntimeWasmSha256Hex', 'endowments']);
   const assertCustody = () => {
-    assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedDiscovery, target);
+    const { processBinding } = validateSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedDiscovery, target);
     assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setupSigner);
-    return readSubstrateFederatedGenesisProfilesFromSessionV2(sourceSession);
+    return { processBinding, profiles: readSubstrateFederatedGenesisProfilesFromSessionV2(sourceSession) };
   };
-  const profiles = assertCustody();
+  const { profiles } = assertCustody();
   const discovery = ownedDiscovery.observation;
   assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(history);
   if (profiles.checkpointProfile.ergoAdmissionThreshold !== 1
@@ -176,8 +177,9 @@ export async function compileObservedSubstrateFederatedGenesisV1(
     targetNodeAcceptanceEstablished: false as const, issuanceEstablished: false as const });
   const result = Object.freeze({ preparation, familyCompilerInput, familyReceipt, candidate, discovery, history, issuance });
   COMPILED_GENESIS.set(result, Object.freeze({ target, assertCustody: () => {
-    assertCustody();
+    const { processBinding } = assertCustody();
     assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(history);
+    return processBinding;
   } }));
   return result;
 }
@@ -186,11 +188,23 @@ export function assertObservedSubstrateFederatedGenesisV1(
   value: unknown,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): asserts value is Readonly<ObservedSubstrateFederatedGenesisV1> {
+  validateObservedSubstrateFederatedGenesisV1(value, target);
+}
+
+/** One complete current-target traversal per synchronous compiler validation. */
+export function validateObservedSubstrateFederatedGenesisV1(
+  value: unknown,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<{
+  compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
+  processBinding: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+}> {
   const retained = value !== null && typeof value === 'object' ? COMPILED_GENESIS.get(value) : undefined;
   if (retained === undefined || retained.target !== target) {
     throw new Error('observed FED genesis lacks exact compiler and target provenance');
   }
-  retained.assertCustody();
+  const processBinding = retained.assertCustody();
+  return Object.freeze({ compiled: value as Readonly<ObservedSubstrateFederatedGenesisV1>, processBinding });
 }
 
 function freezeData<T>(value: T): Readonly<T> {

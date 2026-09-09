@@ -11,16 +11,13 @@ import {
   type SubstrateFederatedGenesisNodeSource,
   type SubstrateFederatedGenesisTargetProfileV1,
 } from './substrate-federated-genesis-observation-v1.js';
-import {
-  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
-  type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
-} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import type {
   SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2,
   SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 import {
-  assertObservedSubstrateFederatedGenesisV1,
+  validateObservedSubstrateFederatedGenesisV1,
   type ObservedSubstrateFederatedGenesisV1,
 } from './substrate-federated-observed-genesis-v1.js';
 
@@ -188,8 +185,7 @@ export async function reobserveSubstrateFederatedNativeGenesisSetupCheckRequestV
 }
 
 function sourceBindings(compiled: Compiled, target: Target) {
-  assertObservedSubstrateFederatedGenesisV1(compiled, target);
-  const process = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const { processBinding: process } = validateObservedSubstrateFederatedGenesisV1(compiled, target);
   if (target.primaryNodeOrigin !== PRIMARY || target.witnessNodeOrigin !== WITNESS
     || compiled.discovery.sources.primaryNodeOrigin !== PRIMARY
     || compiled.discovery.sources.witnessNodeOrigin !== WITNESS

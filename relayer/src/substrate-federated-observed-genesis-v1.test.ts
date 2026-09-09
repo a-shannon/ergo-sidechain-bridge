@@ -7,11 +7,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 // Custody, profile encoding, tracked templates and both JVM compilers stay real.
 const observations = vi.hoisted(() => ({
   owned: new WeakMap<object, object>(), history: new WeakSet<object>(), active: true,
+  validations: 0,
+  binding: Object.freeze({ processBindingDigestHex: '74'.repeat(32), executionTargetIdentityDigestHex: '75'.repeat(32) }),
 }));
 vi.mock('./substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
-  assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1: (value: any, target: object) => {
+  validateSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1: (value: any, target: object) => {
     if (!observations.active || observations.owned.get(value) !== target) throw new Error('owned observation inactive or unproven');
-    return value.observation;
+    observations.validations += 1;
+    return { observation: value.observation, processBinding: observations.binding };
   },
 }));
 vi.mock('./substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', () => ({
@@ -20,7 +23,8 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', ()
   },
 }));
 
-import { assertObservedSubstrateFederatedGenesisV1, compileObservedSubstrateFederatedGenesisV1, type CompileObservedSubstrateFederatedGenesisV1Input } from './substrate-federated-observed-genesis-v1.js';
+import { assertObservedSubstrateFederatedGenesisV1, validateObservedSubstrateFederatedGenesisV1,
+  compileObservedSubstrateFederatedGenesisV1, type CompileObservedSubstrateFederatedGenesisV1Input } from './substrate-federated-observed-genesis-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import * as trackerCompiler from './substrate-federated-tracker-jvm-compiler-v2.js';
@@ -84,6 +88,8 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   observations.active = true;
+  observations.validations = 0;
+  observations.binding = Object.freeze({ processBindingDigestHex: '74'.repeat(32), executionTargetIdentityDigestHex: '75'.repeat(32) });
   setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
   source = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
     ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [setup.signer.publicKeyHex],
@@ -181,9 +187,20 @@ describe('observed FED genesis compilation', () => {
       expect(readSubstrateFederatedGenesisProfilesFromSessionV2(source).checkpointProfile).toEqual(result.preparation.checkpointProfile);
       expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).toHaveBeenCalledTimes(1);
       expect(familyCompiler.compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2).toHaveBeenCalledTimes(1);
+      observations.validations = 0;
+      const checked = validateObservedSubstrateFederatedGenesisV1(result, expectedTarget);
+      expect(checked.compiled).toBe(result);
+      expect(checked.processBinding).toBe(observations.binding);
+      expect(observations.validations).toBe(1);
+      expect(Object.isFrozen(checked)).toBe(true);
+      const previousBinding = observations.binding;
+      observations.binding = Object.freeze({ ...previousBinding });
+      expect(validateObservedSubstrateFederatedGenesisV1(result, expectedTarget).processBinding).toBe(observations.binding);
+      expect(observations.validations).toBe(2);
+      expect(checked.processBinding).toBe(previousBinding);
       // This join retains real compiler provenance; only node observation/custody are doubled.
-      vi.spyOn(ownedTarget, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
-        .mockReturnValue({ processBindingDigestHex: '74'.repeat(32), executionTargetIdentityDigestHex: '75'.repeat(32) });
+      const targetAssertion = vi.spyOn(ownedTarget, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
+        .mockReturnValue(observations.binding);
       vi.spyOn(genesisObservation, 'observeSubstrateFederatedGenesisV1').mockImplementation(async profile => ({
         status: 'AGREED', observedAt: new Date().toISOString(), reportDigestHex: '76'.repeat(32),
         target: { ...expectedDiscovery.target },
@@ -202,6 +219,7 @@ describe('observed FED genesis compilation', () => {
         getBlockHeaderIdsAtHeight: async () => [expectedDiscovery.target.tipHeaderIdHex],
       } as never);
       const request = await buildSubstrateFederatedNativeGenesisSetupCheckRequestV1({ compiled: result, target: expectedTarget });
+      expect(targetAssertion).not.toHaveBeenCalled();
       expect(request.sourceBindings.familyIdHex).toBe(result.candidate.familyIdHex);
       expect(request.sourceBindings.runtimeProfileIdHex).toBe(result.candidate.runtimeProfileIdHex);
       expect(request.sourceBindings.trackerCompilerReceiptDigestHex).toBe(result.familyCompilerInput.trackerReceipt.receiptDigestHex);
