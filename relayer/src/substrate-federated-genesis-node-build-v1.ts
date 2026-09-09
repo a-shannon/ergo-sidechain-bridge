@@ -23,9 +23,9 @@ const BASE = '75329a2df49e2cc7981485392c31160929d1bd48';
 const PATCHES = [
   ['0001-bridge-runtime-commitment.patch', 'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634'],
   ['0004-federated-genesis-initialization.patch', 'b3688c77c1a6a2b85b95367057572f053056fa11ee31ac291373571717dd7331'],
-  ['0005-federated-genesis-node.patch', 'ff24b3ca5063371462c8257cfd9018e586824f33b0965a4a5025b41dd84c61ce'],
+  ['0005-federated-genesis-node.patch', '906b9deabcc15214469414482f36f0fe41f038da18130646c184513aa131f4a3'],
 ] as const;
-const SOURCE_TREE = 'bdd5aeb8cceef1c487479e482e033b9eac1d1455';
+const SOURCE_TREE = '97cf80cd71f230858a20e318696ea2133be71323';
 const CARGO_ARGS = ['build', '--offline', '--locked', '-p', 'frontier-template-node',
   '--no-default-features', '--features', 'bridge-federated-v4-genesis-node'] as const;
 const WASM_PATH = 'debug/wbuild/frontier-template-v4-fed-genesis-runtime/frontier_template_v4_fed_genesis_runtime.wasm';

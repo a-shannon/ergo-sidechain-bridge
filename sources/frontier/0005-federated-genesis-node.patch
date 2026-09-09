@@ -467,3 +467,194 @@ index 4598400d7c479de8f9a922072e51d8d8cd939b51..eb8ccebe8e5f0a7f45243b45c258b94d
  mod bridge_atomicity_tests;
  #[cfg(all(test, feature = "bridge-federated-v4-lab-runtime"))]
  mod bridge_federated_lab_reservation_tests;
+diff --git a/template/node/src/service.rs b/template/node/src/service.rs
+index afe0ef7111859d26f30e72667c4014316d1a408e..59d75806965238e0bdf433c38d3a685efb039780 100644
+--- a/template/node/src/service.rs
++++ b/template/node/src/service.rs
+@@ -659,6 +659,50 @@ where
+ 	Ok(task_manager)
+ }
+ 
++fn manual_seal_inherent_data_providers(
++	_target_gas_price: u64,
++) -> impl sp_inherents::InherentDataProvider {
++	thread_local!(static TIMESTAMP: RefCell<u64> = const { RefCell::new(0) });
++
++	/// Provide a mock duration starting at 0 in millisecond for timestamp inherent.
++	/// Each call will increment timestamp by slot_duration making Aura think time has passed.
++	struct MockTimestampInherentDataProvider;
++
++	#[async_trait::async_trait]
++	impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
++		async fn provide_inherent_data(
++			&self,
++			inherent_data: &mut sp_inherents::InherentData,
++		) -> Result<(), sp_inherents::Error> {
++			TIMESTAMP.with(|x| {
++				*x.borrow_mut() += crate::selected_runtime::SLOT_DURATION;
++				inherent_data.put_data(sp_timestamp::INHERENT_IDENTIFIER, &*x.borrow())
++			})
++		}
++
++		async fn try_handle_error(
++			&self,
++			_identifier: &sp_inherents::InherentIdentifier,
++			_error: &[u8],
++		) -> Option<Result<(), sp_inherents::Error>> {
++			// The pallet never reports error.
++			None
++		}
++	}
++
++	let timestamp = MockTimestampInherentDataProvider;
++	#[cfg(feature = "bridge-federated-v4-genesis-runtime")]
++	{
++		// FED uses BaseFee, not DynamicFee. Manual seal counts every data entry.
++		(timestamp,)
++	}
++	#[cfg(not(feature = "bridge-federated-v4-genesis-runtime"))]
++	{
++		let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(_target_gas_price));
++		(timestamp, dynamic_fee)
++	}
++}
++
+ fn run_manual_seal_authorship<B, RA, HF>(
+ 	eth_config: &EthConfiguration,
+ 	sealing: Sealing,
+@@ -688,40 +732,9 @@ where
+ 		telemetry.as_ref().map(|x| x.handle()),
+ 	);
+ 
+-	thread_local!(static TIMESTAMP: RefCell<u64> = const { RefCell::new(0) });
+-
+-	/// Provide a mock duration starting at 0 in millisecond for timestamp inherent.
+-	/// Each call will increment timestamp by slot_duration making Aura think time has passed.
+-	struct MockTimestampInherentDataProvider;
+-
+-	#[async_trait::async_trait]
+-	impl sp_inherents::InherentDataProvider for MockTimestampInherentDataProvider {
+-		async fn provide_inherent_data(
+-			&self,
+-			inherent_data: &mut sp_inherents::InherentData,
+-		) -> Result<(), sp_inherents::Error> {
+-			TIMESTAMP.with(|x| {
+-				*x.borrow_mut() += crate::selected_runtime::SLOT_DURATION;
+-				inherent_data.put_data(sp_timestamp::INHERENT_IDENTIFIER, &*x.borrow())
+-			})
+-		}
+-
+-		async fn try_handle_error(
+-			&self,
+-			_identifier: &sp_inherents::InherentIdentifier,
+-			_error: &[u8],
+-		) -> Option<Result<(), sp_inherents::Error>> {
+-			// The pallet never reports error.
+-			None
+-		}
+-	}
+-
+ 	let target_gas_price = eth_config.target_gas_price;
+-	let create_inherent_data_providers = move |_, ()| async move {
+-		let timestamp = MockTimestampInherentDataProvider;
+-		let dynamic_fee = fp_dynamic_fee::InherentDataProvider(U256::from(target_gas_price));
+-		Ok((timestamp, dynamic_fee))
+-	};
++	let create_inherent_data_providers =
++		move |_, ()| async move { Ok(manual_seal_inherent_data_providers(target_gas_price)) };
+ 
+ 	let manual_seal = match sealing {
+ 		Sealing::Manual => future::Either::Left(sc_consensus_manual_seal::run_manual_seal(
+@@ -756,6 +769,92 @@ where
+ 	Ok(())
+ }
+ 
++#[cfg(all(test, feature = "bridge-federated-v4-genesis-runtime"))]
++mod federated_manual_seal_tests {
++	use scale_codec::{Decode, Encode};
++	use sp_inherents::{InherentData, InherentDataProvider};
++
++	use super::manual_seal_inherent_data_providers;
++	use crate::selected_runtime as runtime;
++
++	fn service_data(gas_price: u64) -> InherentData {
++		futures::executor::block_on(
++			manual_seal_inherent_data_providers(gas_price).create_inherent_data(),
++		)
++		.unwrap()
++	}
++
++	fn generated(data: &InherentData) -> Vec<runtime::UncheckedExtrinsic> {
++		sp_io::TestExternalities::default().execute_with(|| {
++			let encoded =
++				runtime::api::dispatch("BlockBuilder_inherent_extrinsics", &data.encode()).unwrap();
++			let mut bytes = &encoded[..];
++			let extrinsics = Vec::<runtime::UncheckedExtrinsic>::decode(&mut bytes).unwrap();
++			assert!(bytes.is_empty());
++			extrinsics
++		})
++	}
++
++	#[test]
++	fn service_provider_matches_runtime_count_and_preserves_clock() {
++		std::thread::spawn(|| {
++			let first = service_data(1_000_000_000);
++			assert_eq!(first.len(), 1);
++			assert_eq!(
++				first
++					.get_data::<u64>(&sp_timestamp::INHERENT_IDENTIFIER)
++					.unwrap(),
++				Some(runtime::SLOT_DURATION),
++			);
++			let extrinsics = generated(&first);
++			assert_eq!(extrinsics.len(), first.len());
++			assert_eq!(hex::encode(extrinsics[0].encode()), "14050100c15d");
++			let second = service_data(1_000_000_000);
++			assert_eq!(
++				second
++					.get_data::<u64>(&sp_timestamp::INHERENT_IDENTIFIER)
++					.unwrap(),
++				Some(2 * runtime::SLOT_DURATION),
++			);
++			assert_eq!(generated(&second).len(), second.len());
++		})
++		.join()
++		.unwrap();
++	}
++
++	#[test]
++	fn obsolete_dynamic_fee_entry_reproduces_the_count_collision() {
++		let mut data = service_data(1_000_000_000);
++		let extrinsics = generated(&data);
++		assert_eq!(data.len(), extrinsics.len());
++		data.put_data(
++			fp_dynamic_fee::INHERENT_IDENTIFIER,
++			&sp_core::U256::from(1_000_000_000u64),
++		)
++		.unwrap();
++		assert_eq!(generated(&data).encode(), extrinsics.encode());
++		// SDK manual seal compares these counts before import when create_empty=false.
++		assert_eq!(data.len(), extrinsics.len() + 1);
++	}
++
++	#[test]
++	fn gas_price_never_adds_an_unconsumed_fed_inherent() {
++		for gas_price in [0, 1_000_000_000, u64::MAX] {
++			let data = service_data(gas_price);
++			assert_eq!(data.len(), 1);
++			assert!(data
++				.get_data::<u64>(&sp_timestamp::INHERENT_IDENTIFIER)
++				.unwrap()
++				.is_some());
++			assert!(data
++				.get_data::<sp_core::U256>(&fp_dynamic_fee::INHERENT_IDENTIFIER)
++				.unwrap()
++				.is_none());
++			assert_eq!(generated(&data).len(), data.len());
++		}
++	}
++}
++
+ pub async fn build_full(
+ 	config: Configuration,
+ 	eth_config: EthConfiguration,

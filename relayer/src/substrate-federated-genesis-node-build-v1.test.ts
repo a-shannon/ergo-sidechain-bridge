@@ -26,7 +26,7 @@ import { encodeFederatedPooledReserveSourceProofProfileScaleV1Hex } from './subs
 const bridgeRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sourceBytes = Buffer.from('[package]\nname="reviewed-fixture"\n');
 const blob = createHash('sha1').update(`blob ${sourceBytes.length}\0`).update(sourceBytes).digest('hex');
-const tree = 'bdd5aeb8cceef1c487479e482e033b9eac1d1455';
+const tree = '97cf80cd71f230858a20e318696ea2133be71323';
 const wasm = Buffer.from('0061736d01000000', 'hex');
 let root: string;
 let input: BuildSubstrateFederatedGenesisNodeV1Input;
