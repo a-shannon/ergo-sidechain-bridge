@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import axios from 'axios';
-import { Mnemonic, SigningKey } from 'ethers';
+import { Mnemonic, SigningKey, HDNodeWallet, Transaction, Interface } from 'ethers';
 import blakejs from 'blakejs';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
@@ -64,6 +64,9 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { sha256CanonicalJson } from './strict-json.js';
 import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
+import { executeFrontierNativeProofBoundReservationAndMintV1 } from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
+import { encodeFederatedNativeMintExtrinsicV1Hex } from './federated-native-mint-runtime-state-v1.js';
+import { encodePooledReserveMintReservationPendingV4ScaleHex } from './pooled-reserve-mint-reservation-runtime-state-v4.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertSigner }
   from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
@@ -352,10 +355,13 @@ describe('native FED managed setup session', () => {
   let privateSession: Awaited<ReturnType<typeof execution.createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2>>;
   let compiled: compiledGenesis.ObservedSubstrateFederatedGenesisV1;
   let sessionMnemonic: string;
+  let nativeMintRecipient: string;
+  let mintOperator: ReturnType<typeof createFederatedGenesisOperatorV1> | undefined;
   beforeEach(async () => {
     const create = execution.createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2;
     const fromEntropy = Mnemonic.fromEntropy;
     sessionMnemonic = '';
+    nativeMintRecipient = '89'.repeat(20); mintOperator = undefined;
     vi.spyOn(Mnemonic, 'fromEntropy').mockImplementationOnce((...args) => {
       const result = fromEntropy(...args);
       sessionMnemonic = result.phrase;
@@ -385,7 +391,7 @@ describe('native FED managed setup session', () => {
       return request;
     });
   });
-  afterEach(() => { session?.dispose(); sessionMnemonic = ''; });
+  afterEach(() => { session?.dispose(); sessionMnemonic = ''; if (mintOperator) disposeFederatedGenesisOperatorV1(mintOperator); });
 
   // Deposit semantics and JVM contract evaluation have their own matrices.
   // Here canonical transaction materialization, root signatures, check-byte
@@ -419,7 +425,7 @@ describe('native FED managed setup session', () => {
       sidechainIdHex: '87'.repeat(32), bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20),
       settlementProfileIdHex: '88'.repeat(32), admissionProfileIdHex: family.profile.familyIdHex,
       sourceAssetIdHex: '00'.repeat(32), amountNanoErg: sourceLockCreation.outputs[0]!.value,
-      recipientAddressHex: '89'.repeat(20) };
+      recipientAddressHex: nativeMintRecipient };
     const packet = freezeFixture({ schema: 'e2s.substrate-federated-pooled-reserve-deposit.v2', version: 2,
       familyIdHex: family.profile.familyIdHex, familyCompiler: {
         trackerRequestDigestHex: family.trackerCompilerRequestDigestHex,
@@ -927,8 +933,8 @@ describe('native FED managed setup session', () => {
       lineageProfileIdHex: `0x${compiled.familyReceipt.profile.familyIdHex}`,
       sourceNetworkIdHex: `0x${request.target.genesisHeaderIdHex}`, sidechainIdHex: `0x${'87'.repeat(32)}`,
       bridgeAddressHex: `0x${'33'.repeat(20)}`, tokenAddressHex: `0x${'44'.repeat(20)}`,
-      bridgeRuntimeCodeSha256Hex: `0x${'91'.repeat(32)}`, bridgeRuntimeCodeBytes: 100,
-      tokenRuntimeCodeSha256Hex: `0x${'92'.repeat(32)}`, tokenRuntimeCodeBytes: 200,
+      bridgeRuntimeCodeSha256Hex: `0x${createHash('sha256').update(Buffer.alloc(100, 0x60)).digest('hex')}`, bridgeRuntimeCodeBytes: 100,
+      tokenRuntimeCodeSha256Hex: `0x${createHash('sha256').update(Buffer.alloc(200, 0x60)).digest('hex')}`, tokenRuntimeCodeBytes: 200,
       settlementProfileIdHex: `0x${'88'.repeat(32)}`,
       ergoDepositFinalityPolicyIdHex: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
       sourceProofSystemIdHex: source.binding.federatedMintProfile.proofSystemIdHex,
@@ -936,7 +942,11 @@ describe('native FED managed setup session', () => {
       activationHeight: '0', maxPendingBlocks: 64 });
     const runtimeProfile = decodeRuntimeProfile(runtimeProfileScaleHex);
     // Genesis compilation is a double; draft/evidence custody, codecs and threshold signatures are real.
-    Object.assign(compiled, { preparation: { checkpointProfile: profiles.checkpointProfile },
+    Object.assign(compiled, { preparation: { checkpointProfile: profiles.checkpointProfile, evmChainId: '4242',
+      application: { sourceNetworkIdHex: runtimeProfile.sourceNetworkIdHex.slice(2), sidechainIdHex: runtimeProfile.sidechainIdHex.slice(2),
+        bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20), settlementProfileIdHex: '88'.repeat(32),
+        bridgeRuntimeCodeSha256Hex: runtimeProfile.bridgeRuntimeCodeSha256Hex.slice(2), bridgeRuntimeCodeBytes: 100,
+        tokenRuntimeCodeSha256Hex: runtimeProfile.tokenRuntimeCodeSha256Hex.slice(2), tokenRuntimeCodeBytes: 200 } },
       candidate: Object.freeze({ runtimeProfile, runtimeProfileScaleHex,
         runtimeProfileIdHex: runtimeProfileId(runtimeProfile), genesisJsonSha256Hex: '93'.repeat(32) }) });
     boundary.custody = () => { assertSigner(session.signer); readSourceProfiles(source); };
@@ -991,7 +1001,7 @@ describe('native FED managed setup session', () => {
     const runtime = Buffer.from('0061736d01000000', 'hex');
     Object.assign(compiled, { preparation: { ...compiled.preparation,
       operatorAddressHex: operator.addressHex, launchDomainHex: operator.launchDomainHex,
-      application: { sourceRuntimeCodeSha256Hex: createHash('sha256').update(runtime).digest('hex'),
+      application: { ...compiled.preparation.application, sourceRuntimeCodeSha256Hex: createHash('sha256').update(runtime).digest('hex'),
         sourceRuntimeCodeBytes: runtime.length } } });
     const frontierTarget = Object.freeze({ primaryRpcUrl: 'http://127.0.0.1:19955',
       witnessRpcUrl: 'http://127.0.0.1:19956', genesisJsonSha256Hex: compiled.candidate.genesisJsonSha256Hex,
@@ -1101,7 +1111,7 @@ describe('native FED managed setup session', () => {
             } else if (method === 'author_pendingExtrinsics' && submitted) result = sealed ? [] : [extrinsic];
             else if (sealed && method === 'chain_getBlockHash') result = params[0] === 0 ? observed.fields.expectedGenesisHashHex : blockHash;
             else if (sealed && method === 'chain_getHeader') result = header;
-            else if (sealed && method === 'chain_getBlock') result = { block: { header, extrinsics: ['0x1004010028', extrinsic] } };
+            else if (sealed && method === 'chain_getBlock') result = { block: { header, extrinsics: ['0x1005010028', extrinsic] } };
             else if (sealed && method === 'state_getStorage') result = defect === 'pending drift' && params[0] === keys.pendingReservationStorageKeyHex
               ? '0x04' : state[params[0]] ?? null;
             else return genesisRpc(url, init);
@@ -1128,6 +1138,120 @@ describe('native FED managed setup session', () => {
           if (defect === 'after submission') expect(sealed).toBe(false);
           expect(readdirSync(directory)).toHaveLength(signed ? 1 : 0);
         } finally { disposeFederatedGenesisOperatorV1(operator); rmSync(directory, { recursive: true, force: true }); }
+      });
+    });
+
+  it.each(['none', 'chain mismatch', 'recipient mismatch', 'missing scope', 'after mint signing', 'after mint submission',
+    'after mint sealing', 'consumed statement', 'consumed identity', 'consumed height', 'consumed Ethereum block', 'consumed transaction', 'consumed event'])
+    ('composes native reservation and mint from the retained reserve proof with %s', async defect => {
+      const operator = mintOperator = createFederatedGenesisOperatorV1();
+      if (defect !== 'recipient mismatch') nativeMintRecipient = operator.addressHex;
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const observed = reservationTarget(operator);
+        const proof = produceNativeMintProof(source, proofInput);
+        const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
+        const digest = (bytes: Uint8Array) => `0x${Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')}`;
+        const raw = (hex: string) => Buffer.from(hex.slice(2), 'hex');
+        const pending = encodePooledReserveMintReservationPendingV4ScaleHex({ profileIdHex: proof.runtimeProfileIdHex,
+          statementHex: proof.request.statementHex, statementIdHex: proof.mintReservationStatementIdHex, mintIdentityHex: proof.mintIdentityHex,
+          sourceStatementBytesDigestHex: digest(raw(proof.request.statementHex)), sourceProofSystemIdHex: proof.request.runtimeProfile.sourceProofSystemIdHex,
+          sourceProofProfileIdHex: proof.sourceProofProfileIdHex, sourceProofIssuedAtNativeHeight: proof.result.issuedAtNativeHeight,
+          sourceProofRequestDigestHex: proof.requestDigestHex, sourceProofResultIdHex: proof.signatureVerification.resultIdHex,
+          sourceProofDigestHex: digest(Buffer.concat([Buffer.from('E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_ENVELOPE_V1', 'ascii'),
+            raw(proof.signatureVerification.resultIdHex), raw(proof.signatureVerification.signatureSetDigestHex)])),
+          reservedAtNativeHeight: '1', expiresAtNativeHeight: proof.result.expiresAtNativeHeight });
+        const state: Record<string, string | null> = { ...observed.fields.expectedStorage,
+          [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`, [keys.pendingReservationStorageKeyHex]: pending };
+        const parent = `0x${'a1'.repeat(32)}`, child = `0x${'a2'.repeat(32)}`, ethParent = `0x${'a3'.repeat(32)}`, ethChild = `0x${'a4'.repeat(32)}`;
+        const bridge = `0x${'33'.repeat(20)}`, token = `0x${'44'.repeat(20)}`, recipient = `0x${operator.addressHex}`, amount = 20000000n;
+        const abi = new Interface(['function owner() view returns(address)', 'function sergToken() view returns(address)',
+          'function paused() view returns(bool)', 'function totalSupply() view returns(uint256)', 'function balanceOf(address) view returns(uint256)',
+          'function processedPegIns(bytes32) view returns(bool)', 'function mintSERG(address,uint256,bytes32)',
+          'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)']);
+        let height = 0, reservationSubmitted = false, mintSubmitted = false, nativeCall = '', mintCall = '', txHash = '', consumed = '';
+        const genesisRpc = observed.fetcher.getMockImplementation()!;
+        observed.fetcher.mockImplementation(async (url, init) => {
+          const { method, params } = JSON.parse(init.body as string);
+          let result: unknown;
+          if (method === 'author_submitExtrinsic') { reservationSubmitted = true; nativeCall = params[0]; result = digest(raw(nativeCall)); }
+          else if (method === 'eth_sendRawTransaction') {
+            const tx = Transaction.from(params[0]); expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(1);
+            expect(tx.from?.toLowerCase()).toBe(recipient);
+            expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [recipient, amount, proof.mintIdentityHex]));
+            mintSubmitted = true; txHash = tx.hash!; mintCall = encodeFederatedNativeMintExtrinsicV1Hex(params[0]); result = txHash;
+            if (defect === 'after mint submission') source.dispose();
+          } else if (method === 'engine_createBlock') {
+            expect(params).toEqual([false, false, height === 0 ? observed.fields.expectedGenesisHashHex : parent]);
+            height++; result = { hash: height === 1 ? parent : child };
+            if (height === 2) {
+              const heightBytes = Buffer.alloc(8); heightBytes.writeBigUInt64LE(2n);
+              const eventBytes = Buffer.alloc(4); eventBytes.writeUInt32LE(1);
+              const bytes = Buffer.concat([Buffer.from([4]), raw(proof.runtimeProfileIdHex), raw(proof.mintReservationStatementIdHex),
+                raw(proof.mintIdentityHex), heightBytes, raw(ethChild), raw(txHash), eventBytes]);
+              expect(bytes).toHaveLength(173);
+              const offsets: Record<string, number> = { 'consumed statement': 33, 'consumed identity': 65, 'consumed height': 97,
+                'consumed Ethereum block': 105, 'consumed transaction': 137, 'consumed event': 169 };
+              if (Object.hasOwn(offsets, defect)) bytes[offsets[defect]] ^= 1;
+              consumed = `0x${bytes.toString('hex')}`;
+              if (defect === 'after mint sealing') source.dispose();
+            }
+          } else if (method === 'author_pendingExtrinsics') result = height === 0 && reservationSubmitted ? [nativeCall]
+            : height === 1 && mintSubmitted ? [mintCall] : [];
+          else if (height === 0) return genesisRpc(url, init);
+          else if (method === 'chain_getBlockHash') result = params[0] === 0 ? observed.fields.expectedGenesisHashHex
+            : params[0] === 1 ? parent : height === 1 ? parent : child;
+          else if (method === 'chain_getHeader') result = { number: `0x${height}` };
+          else if (method === 'chain_getBlock') result = { block: { header: {
+            parentHash: params[0] === parent ? observed.fields.expectedGenesisHashHex : parent, number: params[0] === parent ? '0x1' : '0x2',
+            stateRoot: `0x${'a5'.repeat(32)}`, extrinsicsRoot: `0x${'a6'.repeat(32)}`, digest: { logs: [] } },
+            extrinsics: ['0x1005010028', params[0] === parent ? nativeCall : mintCall] } };
+          else if (method === 'state_getStorage') {
+            const at = params[1] === parent ? 1 : 2, account = raw(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(at);
+            result = params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
+              : at === 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
+                : at === 2 && params[0] === keys.pendingReservationStorageKeyHex ? null
+                  : at === 2 && params[0] === keys.consumedReservationStorageKeyHex ? consumed : state[params[0]] ?? null;
+          } else if (method === 'eth_chainId') result = '0x1092';
+          else if (method === 'eth_getBlockByNumber') result = { number: params[0], hash: params[0] === '0x1' ? ethParent : ethChild,
+            transactions: params[0] === '0x1' ? [] : [txHash] };
+          else if (method === 'eth_getBlockByHash') result = { number: params[0] === ethParent ? '0x1' : '0x2', hash: params[0],
+            transactions: params[0] === ethParent ? [] : [txHash] };
+          else if (method === 'eth_getTransactionCount') result = params[1].blockHash === ethParent ? '0x1' : '0x2';
+          else if (method === 'eth_getCode') result = `0x${'60'.repeat(params[0] === bridge ? 100 : 200)}`;
+          else if (method === 'eth_call') {
+            const name = abi.parseTransaction({ data: params[0].data })!.name, minted = params[1].blockHash === ethChild;
+            result = abi.encodeFunctionResult(name, [name === 'owner' ? params[0].to === bridge ? recipient : bridge
+              : name === 'sergToken' ? token : name === 'paused' ? false : name === 'processedPegIns' ? minted : minted ? amount : 0n]);
+          } else if (method === 'eth_getTransactionReceipt') result = { transactionHash: txHash, blockHash: ethChild, blockNumber: '0x2',
+            transactionIndex: '0x0', status: '0x1', from: recipient, to: bridge,
+            logs: [ { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [`0x${'00'.repeat(20)}`, recipient, amount]) },
+              { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegIn')!, [recipient, amount, proof.mintIdentityHex]) } ].map((log, index) => ({ ...log,
+              transactionHash: txHash, blockHash: ethChild, blockNumber: '0x2', transactionIndex: '0x0', logIndex: `0x${index}`, removed: false })) };
+          else throw new Error(`unexpected composed mint RPC ${method}`);
+          return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+        });
+        if (defect === 'chain mismatch') Object.assign(compiled.preparation, { evmChainId: '42' });
+        if (defect === 'after mint signing') {
+          const original = HDNodeWallet.prototype.signTransaction;
+          vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(async function (this: HDNodeWallet, tx) {
+            const result = await original.call(this, tx); source.dispose(); return result;
+          });
+        }
+        const directory = mkdtempSync(join(tmpdir(), 'bridge-native-composed-mint-'));
+        try {
+          const input = { signing: { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target, ...observed.fields },
+            attemptDirectory: directory, broadcastScope: 'fed-native-local-synthetic-reservation-and-mint-only' as const };
+          if (defect === 'missing scope') (input as any).broadcastScope = 'fed-native-local-synthetic-reservation-only';
+          if (defect === 'none') expect(await executeFrontierNativeProofBoundReservationAndMintV1(input)).toMatchObject({
+            mintExecuted: true, runtimeReservationConsumed: true, sourceFinalityEstablished: false, trustless: false,
+            amountNanoErg: '20000000', recipientAddressHex: recipient, mintIdentityHex: proof.mintIdentityHex,
+            transactionHashHex: txHash, consumedReservationScaleHex: consumed });
+          else await expect(executeFrontierNativeProofBoundReservationAndMintV1(input)).rejects.toThrow(/scope|differs|disposed/);
+          if (['chain mismatch', 'recipient mismatch', 'missing scope'].includes(defect)) expect(reservationSubmitted).toBe(false);
+          if (['chain mismatch', 'recipient mismatch', 'missing scope', 'after mint signing'].includes(defect)) expect(mintSubmitted).toBe(false);
+          if (defect === 'after mint submission') expect(height).toBe(1);
+          if (defect === 'none') expect(readdirSync(directory).sort()).toEqual(['native-mint-attempt.json', 'native-reservation-attempt.json']);
+        } finally { rmSync(directory, { recursive: true, force: true }); }
       });
     });
 

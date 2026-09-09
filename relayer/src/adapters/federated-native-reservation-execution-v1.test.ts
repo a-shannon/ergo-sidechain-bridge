@@ -38,7 +38,7 @@ beforeEach(() => {
   account = `0x${bytes.toString('hex')}`;
   header = { parentHash: GENESIS, number: '0x1', stateRoot: `0x${'55'.repeat(32)}`,
     extrinsicsRoot: `0x${'66'.repeat(32)}`, digest: { logs: [] } };
-  extrinsics = ['0x1004010028', EXTRINSIC];
+  extrinsics = ['0x1005010028', EXTRINSIC];
   authorize = vi.fn();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
     expect([PRIMARY, WITNESS]).toContain(url); expect(init.redirect).toBe('error'); expect(init.method).toBe('POST');
@@ -200,10 +200,16 @@ describe('fixed local native reservation execution', () => {
     expect(calls.filter(call => call.method === 'author_submitExtrinsic')).toHaveLength(1);
   });
 
+  it.each(['04', '84', '85', '06'])('rejects non-producer timestamp preamble %s', async preamble => {
+    const input = await sealed();
+    extrinsics[0] = `0x10${preamble}010028`;
+    await expect(observe(input, authorize)).rejects.toThrow(/exact exclusive call/);
+  });
+
   it.each(['fc', '0101', 'fdff', '02000100', 'feffffff', '0300000040', '0b0068e5cf8b01', '13ffffffffffffffff'])
     ('accepts canonical timestamp compact bytes %s', async compact => {
       const input = await sealed();
-      const body = Buffer.from(`040100${compact}`, 'hex');
+      const body = Buffer.from(`050100${compact}`, 'hex');
       extrinsics[0] = `0x${Buffer.concat([Buffer.from([body.length * 4]), body]).toString('hex')}`;
       expect((await observe(input, authorize)).blockHashHex).toBe(BLOCK);
     });
@@ -212,7 +218,7 @@ describe('fixed local native reservation execution', () => {
     '17ffffffffffffffffff', '010100', '030000004000'])
     ('rejects truncated, nonminimal or oversized timestamp %s at inclusion', async compact => {
       const input = await sealed();
-      const body = Buffer.from(`040100${compact}`, 'hex');
+      const body = Buffer.from(`050100${compact}`, 'hex');
       extrinsics[0] = `0x${Buffer.concat([Buffer.from([body.length * 4]), body]).toString('hex')}`;
       await expect(observe(input, authorize)).rejects.toThrow(/exact exclusive call/);
     });

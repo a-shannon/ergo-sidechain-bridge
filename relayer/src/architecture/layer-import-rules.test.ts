@@ -161,10 +161,10 @@ describe('layer import rules', () => {
       .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
   });
 
-  it('restricts native reservation signing to its proof-bound composition, not the target root', () => {
+  it.each(['signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1'])
+    ('restricts %s to its proof-bound composition, not the target root', binding => {
     const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
     const specifier = FEDERATED_GENESIS_OPERATOR_SPECIFIER;
-    const binding = 'signFederatedGenesisReservationV1';
     const declaration = `import { ${binding} } from '${specifier}';`;
     expect(inspect(staticAppFixture(composition, `${declaration} ${binding}({}, {});`))).toEqual([]);
     for (const escape of [`const escaped = ${binding};`, `capture(${binding});`,
@@ -206,7 +206,9 @@ describe('layer import rules', () => {
   });
 
   it.each(['reserveFederatedNativeReservationAttemptV1', 'submitFederatedNativeReservationV1',
-    'sealFederatedNativeReservationV1', 'observeFederatedNativeReservationInclusionV1'])
+    'sealFederatedNativeReservationV1', 'observeFederatedNativeReservationInclusionV1',
+    'observeFederatedNativeMintParentV1', 'reserveFederatedNativeMintAttemptV1', 'submitFederatedNativeMintV1',
+    'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1'])
     ('keeps native execution capability in its proof-bound consumer: %s', binding => {
       const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
       const specifier = '../../adapters/federated-native-reservation-execution-v1.js';

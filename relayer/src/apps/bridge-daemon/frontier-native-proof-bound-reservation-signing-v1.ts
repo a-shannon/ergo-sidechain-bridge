@@ -1,12 +1,19 @@
 import {
-  assertFederatedGenesisOperatorV1, signFederatedGenesisReservationV1,
+  assertFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
   type FederatedGenesisOperatorV1,
 } from '../../adapters/federated-genesis-operator-v1.js';
 import { observeFederatedGenesisReservationTargetV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
 import {
   reserveFederatedNativeReservationAttemptV1, submitFederatedNativeReservationV1,
   sealFederatedNativeReservationV1, observeFederatedNativeReservationInclusionV1,
+  observeFederatedNativeMintParentV1, reserveFederatedNativeMintAttemptV1, submitFederatedNativeMintV1,
+  sealFederatedNativeMintV1, observeFederatedNativeMintInclusionV1, observeFederatedNativeMintStateV1,
 } from '../../adapters/federated-native-reservation-execution-v1.js';
+import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
+  from '../../validity-application-pooled-reserve-mint-reservation-v4.js';
+import { decodePegInSourceIntentV2Hex } from '../../peg-in-causal-admission-v2.js';
+import { encodeFederatedNativeMintConsumedV4ScaleHex, encodeFederatedNativeMintExtrinsicV1Hex }
+  from '../../federated-native-mint-runtime-state-v1.js';
 import {
   derivePooledReserveMintReservationRuntimeStorageKeysV4, encodePooledReserveMintReservationPendingV4ScaleHex,
 } from '../../pooled-reserve-mint-reservation-runtime-state-v4.js';
@@ -53,6 +60,70 @@ export async function executeFrontierNativeProofBoundReservationV1(input: Readon
   const { attemptDirectory, broadcastScope } = input;
   if (broadcastScope !== 'fed-native-local-synthetic-reservation-only') throw new Error('native reservation broadcast scope is absent');
   const retained = capture(input.signing);
+  return (await executeReservation(retained, attemptDirectory)).result;
+}
+
+/** The same retained proof and custody cross reservation and mint; no owner-mint fallback. */
+export async function executeFrontierNativeProofBoundReservationAndMintV1(input: Readonly<{
+  signing: Readonly<SigningInput>;
+  attemptDirectory: string;
+  broadcastScope: 'fed-native-local-synthetic-reservation-and-mint-only';
+}>) {
+  exact(input, ['signing', 'attemptDirectory', 'broadcastScope']);
+  const { attemptDirectory, broadcastScope } = input;
+  if (broadcastScope !== 'fed-native-local-synthetic-reservation-and-mint-only') throw new Error('native mint broadcast scope is absent');
+  const retained = capture(input.signing);
+  retained.assertCurrent();
+  const { operator, proof, compiled } = retained.input;
+  const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(proof.request.statementHex);
+  const intent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
+  const app = compiled.preparation.application;
+  if (compiled.preparation.evmChainId !== '4242' || intent.recipientAddressHex !== `0x${operator.addressHex}`
+    || intent.bridgeAddressHex !== `0x${app.bridgeAddressHex}` || intent.tokenAddressHex !== `0x${app.tokenAddressHex}`
+    || intent.sourceNetworkIdHex !== `0x${app.sourceNetworkIdHex}` || intent.sidechainIdHex !== `0x${app.sidechainIdHex}`
+    || intent.settlementProfileIdHex !== `0x${app.settlementProfileIdHex}` || intent.sourceAssetIdHex !== `0x${'00'.repeat(32)}`
+    || statement.mintIdentityHex !== proof.mintIdentityHex || BigInt(proof.result.expiresAtNativeHeight) <= 2n) {
+    throw new Error('native mint intent differs from the retained FED application or child-block window');
+  }
+  const reservation = await executeReservation(retained, attemptDirectory);
+  const context = Object.freeze({ reservation: reservation.observation,
+    bridgeAddressHex: intent.bridgeAddressHex, tokenAddressHex: intent.tokenAddressHex,
+    recipientAddressHex: intent.recipientAddressHex, amountNanoErg: String(intent.amountNanoErg), mintIdentityHex: proof.mintIdentityHex,
+    bridgeCodeSha256Hex: app.bridgeRuntimeCodeSha256Hex, bridgeCodeBytes: app.bridgeRuntimeCodeBytes,
+    tokenCodeSha256Hex: app.tokenRuntimeCodeSha256Hex, tokenCodeBytes: app.tokenRuntimeCodeBytes });
+  const authorize = () => { retained.assertCurrent(); };
+  const parent = await observeFederatedNativeMintParentV1(context, authorize);
+  retained.assertCurrent();
+  const signed = await signFederatedGenesisMintV1(operator, { nonce: parent.nonce,
+    bridgeAddressHex: intent.bridgeAddressHex, recipientAddressHex: intent.recipientAddressHex,
+    amountNanoErg: context.amountNanoErg, mintIdentityHex: proof.mintIdentityHex });
+  retained.assertCurrent();
+  const attempt = reserveFederatedNativeMintAttemptV1(attemptDirectory, context, {
+    transactionHashHex: signed.transactionHashHex, signedTransactionHex: signed.signedTransactionHex,
+    nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(signed.signedTransactionHex),
+  });
+  await submitFederatedNativeMintV1(attempt, authorize);
+  retained.assertCurrent();
+  await sealFederatedNativeMintV1(attempt, authorize);
+  retained.assertCurrent();
+  const minted = await observeFederatedNativeMintInclusionV1(attempt, authorize);
+  retained.assertCurrent();
+  const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
+  const consumed = encodeFederatedNativeMintConsumedV4ScaleHex({ profileIdHex: proof.runtimeProfileIdHex,
+    statementIdHex: proof.mintReservationStatementIdHex, mintIdentityHex: proof.mintIdentityHex,
+    consumedAtNativeHeight: '2', executionBlockHashHex: minted.ethereumBlockHashHex,
+    transactionHashHex: minted.transactionHashHex, eventIndex: minted.eventIndex });
+  await observeFederatedNativeMintStateV1(attempt, { ...reservation.observation.expectedStorage,
+    [keys.pendingKeysStorageKeyHex]: '0x00', [keys.pendingReservationStorageKeyHex]: null,
+    [keys.consumedReservationStorageKeyHex]: consumed }, authorize);
+  retained.assertCurrent();
+  return Object.freeze({ ...minted, mintIdentityHex: proof.mintIdentityHex, amountNanoErg: context.amountNanoErg,
+    recipientAddressHex: intent.recipientAddressHex, sourceProofReceiptDigestHex: proof.receiptDigestHex,
+    consumedReservationScaleHex: consumed, runtimeReservationConsumed: true as const, mintExecuted: true as const,
+    sourceFinalityEstablished: false as const, trustless: false as const });
+}
+
+async function executeReservation(retained: ReturnType<typeof capture>, attemptDirectory: string) {
   retained.assertCurrent();
   const { proof, operator } = retained.input;
   // This consumer seals the first native block, not an arbitrary-height reservation.
@@ -81,7 +152,7 @@ export async function executeFrontierNativeProofBoundReservationV1(input: Readon
   retained.assertCurrent();
   const blockHashHex = await sealFederatedNativeReservationV1(attempt, authorize);
   retained.assertCurrent();
-  const observed = await observeFederatedNativeReservationInclusionV1({ attempt, blockHashHex,
+  const observation = Object.freeze({ attempt, blockHashHex,
     expectedStorage: {
       [keys.runtimeCodeStorageKeyHex]: retained.input.expectedStorage[keys.runtimeCodeStorageKeyHex]!,
       [keys.currentProfileStorageKeyHex]: proof.runtimeProfileScaleHex, [keys.enforcementStorageKeyHex]: '0x01',
@@ -91,11 +162,13 @@ export async function executeFrontierNativeProofBoundReservationV1(input: Readon
       '0x5c0d1176a568c1f92944340dbfed9e9c530ebca703c85910e7164cb7d1c9e47b': null,
     }, operatorStorageKeyHex: operator.nativeFunding.storageKeyHex,
     originalOperatorAccountHex: operator.nativeFunding.accountInfoScaleHex,
-  }, authorize);
+  });
+  const observed = await observeFederatedNativeReservationInclusionV1(observation, authorize);
   retained.assertCurrent();
-  return Object.freeze({ ...observed, pendingReservationScaleHex: pending,
+  const result = Object.freeze({ ...observed, pendingReservationScaleHex: pending,
     sourceProofReceiptDigestHex: proof.receiptDigestHex, mintIdentityHex: proof.mintIdentityHex,
     runtimeProfileIdHex: proof.runtimeProfileIdHex, runtimeReservationObserved: true as const, mintExecuted: false as const });
+  return { result, observation };
 }
 
 function capture(input: Readonly<SigningInput>) {

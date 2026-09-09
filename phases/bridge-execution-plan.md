@@ -221,9 +221,15 @@ establish deployment safety or independent operator custody.
   local nodes. Ambiguous submissions retain their hold without retry.
   Component tests use actual synthetic signatures and journal storage with
   simulated node responses; a fresh-node reservation is not yet demonstrated.
-  The parent-state mint consumer and its root caller remain unconnected.
-  Connect native reservation and operational mint inside the same lifetime
-  before running the fresh campaign. An issuance receipt is not mint authority.
+  The combined proof-bound reservation/mint consumer now retains that exact
+  parent and custody through a chain-4242, nonce-one Ethereum call. It rechecks
+  both parent views before transport, holds ambiguous attempts, and verifies
+  the exact native child call, Ethereum receipt/events, supply and recipient
+  balance, processed mint identity and complete consumed V4 record. Native and
+  Ethereum block hashes remain distinct. Component tests use real signatures
+  and durable journals with simulated RPC; the root caller and fresh-node run
+  remain open. Connect this consumer inside the same managed lifetime before
+  running the fresh campaign. An issuance receipt is not mint authority.
   The old source locks and withdrawal campaign retain their original scope.
 
 ## Critical Path
@@ -268,7 +274,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
 | FED running-target binding | Active; native issuance, deposit-to-reserve evidence and height-zero source attestation are component-composed | Connect the native proof to reservation and operational mint inside the target root's retained lifetime. Keep request freshness at checking separate from each later action's fresh observation, and reject disposed or cross-profile custody. Neither the historical V3 G1dA request nor the block-4 LAB launch supplies native identity. The target owner retains the closed journal with its build artifacts, including unresolved attempts. Run the fresh campaign only once these consumers are connected |
-| Native reservation and mint caller | Reservation execution is component-composed; parent-state mint remains open | Connect the matching Ethereum mint to the exact reservation observed in its parent block, with a freshly observed operator nonce. Verify supply, balance, replay and consumed reservation. Preserve the separate local broadcast authorization and unresolved-attempt hold. Reject duplicate, absent-commitment, wrong-binding and unreserved-sibling cases. Keep transaction-pool rejection separate from whole-block rejection |
+| Native reservation and mint caller | Combined reservation and parent-state mint are component-composed; target root and fresh-node execution remain open | Call the combined consumer from retained target custody. Verify the first native reservation and chain-4242 nonce-one mint with actual RPC, exact token deltas and consumed V4 state. Preserve separate broadcast authorization and unresolved-attempt holds. Retain duplicate, absent-commitment, wrong-binding and unreserved-sibling runtime negatives. Keep transaction-pool rejection separate from whole-block rejection |
 | Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
 
 ### Operational Mint Bootstrap Decision

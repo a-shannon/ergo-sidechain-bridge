@@ -207,6 +207,9 @@ const FEDERATED_NATIVE_RESERVATION_SIGNING = 'apps/bridge-daemon/frontier-native
 const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
 const FEDERATED_NATIVE_RESERVATION_EXECUTION = 'adapters/federated-native-reservation-execution-v1.ts';
 const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['validity-application-pooled-reserve-mint-reservation-v4.ts', new Set(['decodeValidityApplicationPooledReserveMintReservationStatementV4Hex'])],
+  ['peg-in-causal-admission-v2.ts', new Set(['decodePegInSourceIntentV2Hex'])],
+  ['federated-native-mint-runtime-state-v1.ts', new Set(['encodeFederatedNativeMintConsumedV4ScaleHex', 'encodeFederatedNativeMintExtrinsicV1Hex'])],
   ['pooled-reserve-mint-reservation-runtime-state-v4.ts', new Set([
     'derivePooledReserveMintReservationRuntimeStorageKeysV4', 'encodePooledReserveMintReservationPendingV4ScaleHex',
   ])],
@@ -226,13 +229,15 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
   ['../../adapters/federated-native-reservation-execution-v1.js', new Set([
     'reserveFederatedNativeReservationAttemptV1', 'submitFederatedNativeReservationV1',
     'sealFederatedNativeReservationV1', 'observeFederatedNativeReservationInclusionV1',
+    'observeFederatedNativeMintParentV1', 'reserveFederatedNativeMintAttemptV1', 'submitFederatedNativeMintV1',
+    'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1',
   ])],
   ['../../adapters/federated-genesis-target-observation-v1.js', new Set(['observeFederatedGenesisReservationTargetV1'])],
   ...[...REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS].map(
     ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
   ),
   ['../../adapters/federated-genesis-operator-v1.js', new Set([
-    'assertFederatedGenesisOperatorV1', 'signFederatedGenesisReservationV1', 'FederatedGenesisOperatorV1',
+    'assertFederatedGenesisOperatorV1', 'signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'FederatedGenesisOperatorV1',
   ])],
 ]);
 
@@ -1503,6 +1508,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     'signFrontierNativeProofBoundReservationV1', 'executeFrontierNativeProofBoundReservationV1',
+    'executeFrontierNativeProofBoundReservationAndMintV1',
   ])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
@@ -1748,16 +1754,24 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['signFederatedGenesisReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Map([
     ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['executeFrontierNativeProofBoundReservationAndMintV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
   [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Map([
     ['reserveFederatedNativeReservationAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['submitFederatedNativeReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['sealFederatedNativeReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['observeFederatedNativeReservationInclusionV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['observeFederatedNativeMintParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['reserveFederatedNativeMintAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['submitFederatedNativeMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['sealFederatedNativeMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['observeFederatedNativeMintInclusionV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['observeFederatedNativeMintStateV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Map([
     ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],

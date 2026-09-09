@@ -1,12 +1,87 @@
-import { HDNodeWallet, Wallet, SigningKey, keccak256, recoverAddress } from 'ethers';
+import { HDNodeWallet, Wallet, SigningKey, Interface, Transaction, keccak256, recoverAddress } from 'ethers';
 import blakejs from 'blakejs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createFederatedGenesisOperatorV1, assertFederatedGenesisOperatorV1,
-  disposeFederatedGenesisOperatorV1, signFederatedGenesisReservationV1,
+  disposeFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
 } from './federated-genesis-operator-v1.js';
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('FED parent-reservation mint signing', () => {
+  const native = { genesisHashHex: `0x${'62'.repeat(32)}`, nonce: 0,
+    statementHex: `0x04${'37'.repeat(602)}`, sourceProofEnvelopeScaleHex: `0x04${'53'.repeat(622)}` };
+  const abi = new Interface(['function mintSERG(address,uint256,bytes32)']);
+  const mint = (owner: ReturnType<typeof createFederatedGenesisOperatorV1>) => ({ nonce: 1,
+    bridgeAddressHex: `0x${'33'.repeat(20)}`, recipientAddressHex: `0x${owner.addressHex}`,
+    amountNanoErg: '15000000', mintIdentityHex: `0x${'64'.repeat(32)}` });
+
+  it('signs one exact chain-4242 nonce-one call and retains custody for the next lifecycle consumer', async () => {
+    const owner = createFederatedGenesisOperatorV1();
+    try {
+      signFederatedGenesisReservationV1(owner, native);
+      const input = mint(owner), result = await signFederatedGenesisMintV1(owner, input);
+      const tx = Transaction.from(result.signedTransactionHex);
+      expect(tx.hash).toBe(result.transactionHashHex);
+      expect(tx.from?.toLowerCase()).toBe(input.recipientAddressHex);
+      expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(1); expect(tx.type).toBe(0);
+      expect(tx.to?.toLowerCase()).toBe(input.bridgeAddressHex); expect(tx.value).toBe(0n);
+      expect(tx.gasPrice).toBe(1000000000n); expect(tx.gasLimit).toBe(5000000n);
+      expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [input.recipientAddressHex, input.amountNanoErg, input.mintIdentityHex]));
+      assertFederatedGenesisOperatorV1(owner);
+      await expect(signFederatedGenesisMintV1(owner, input)).rejects.toThrow(/unused/);
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['before reservation', 'copy', 'disposed', 'null', 'accessor', 'extra', 'symbol', 'missing',
+    'nonce zero', 'nonce two', 'recipient', 'bridge zero', 'bridge alias', 'amount zero', 'amount leading zero',
+    'amount overflow', 'mint zero', 'mint uppercase'])('rejects %s before Ethereum signing', async fault => {
+    const owner = createFederatedGenesisOperatorV1();
+    try {
+      if (fault !== 'before reservation') signFederatedGenesisReservationV1(owner, native);
+      const input: any = mint(owner);
+      if (fault === 'disposed') disposeFederatedGenesisOperatorV1(owner);
+      if (fault === 'accessor') Object.defineProperty(input, 'nonce', { enumerable: true, get() { throw new Error('getter executed'); } });
+      if (fault === 'extra') input.chainId = 42;
+      if (fault === 'symbol') input[Symbol('extra')] = true;
+      if (fault === 'missing') delete input.mintIdentityHex;
+      if (fault === 'nonce zero') input.nonce = 0;
+      if (fault === 'nonce two') input.nonce = 2;
+      if (fault === 'recipient') input.recipientAddressHex = `0x${'55'.repeat(20)}`;
+      if (fault === 'bridge zero') input.bridgeAddressHex = `0x${'00'.repeat(20)}`;
+      if (fault === 'bridge alias') input.bridgeAddressHex = input.recipientAddressHex;
+      if (fault === 'amount zero') input.amountNanoErg = '0';
+      if (fault === 'amount leading zero') input.amountNanoErg = '015000000';
+      if (fault === 'amount overflow') input.amountNanoErg = '9223372036854775808';
+      if (fault === 'mint zero') input.mintIdentityHex = `0x${'00'.repeat(32)}`;
+      if (fault === 'mint uppercase') input.mintIdentityHex = `0x${'AB'.repeat(32)}`;
+      const sign = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
+      await expect(signFederatedGenesisMintV1(fault === 'copy' ? { ...owner } : owner, fault === 'null' ? null as never : input))
+        .rejects.toThrow(/custody|unused|own-data|scope/);
+      expect(sign).not.toHaveBeenCalled();
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['failure', 'disposal', 'nonce', 'chain', 'signer', 'concurrent'])('contains %s during Ethereum signing', async fault => {
+    const owner = createFederatedGenesisOperatorV1();
+    signFederatedGenesisReservationV1(owner, native);
+    const original = HDNodeWallet.prototype.signTransaction;
+    const other = Wallet.createRandom();
+    let concurrent: Promise<unknown> | undefined;
+    vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(async function (this: HDNodeWallet, tx) {
+      if (fault === 'failure') throw new Error('synthetic signer failure');
+      if (fault === 'disposal') disposeFederatedGenesisOperatorV1(owner);
+      if (fault === 'concurrent') concurrent = expect(signFederatedGenesisMintV1(owner, mint(owner))).rejects.toThrow(/unused/);
+      return original.call(fault === 'signer' ? other : this, { ...tx,
+        ...(fault === 'nonce' ? { nonce: 0 } : {}), ...(fault === 'chain' ? { chainId: 42 } : {}) });
+    });
+    try {
+      if (fault === 'concurrent') { await signFederatedGenesisMintV1(owner, mint(owner)); await concurrent; assertFederatedGenesisOperatorV1(owner); }
+      else { await expect(signFederatedGenesisMintV1(owner, mint(owner))).rejects.toThrow(/failure|custody|exact transaction/);
+        expect(() => assertFederatedGenesisOperatorV1(owner)).toThrow(/custody/); }
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+});
 
 describe('FED genesis operator custody', () => {
   it('creates distinct public handles without signing or connecting', () => {

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { Wallet, keccak256, recoverAddress, type HDNodeWallet } from 'ethers';
+import { Interface, Transaction, Wallet, keccak256, recoverAddress, type HDNodeWallet } from 'ethers';
 import blakejs from 'blakejs';
 
 const SYSTEM_ACCOUNT_PREFIX = '26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da9';
@@ -17,6 +17,48 @@ export interface FederatedGenesisOperatorV1 {
 
 const owners = new WeakMap<object, HDNodeWallet>();
 const reservationSigners = new WeakSet<object>();
+const mintSigners = new WeakSet<object>();
+const mintAbi = new Interface(['function mintSERG(address recipient,uint256 amount,bytes32 mintIdentity)']);
+
+/** The proof-bound app must establish parent-state eligibility; this adapter only signs. */
+export async function signFederatedGenesisMintV1(owner: Readonly<FederatedGenesisOperatorV1>, input: Readonly<{
+  nonce: number; bridgeAddressHex: string; recipientAddressHex: string; amountNanoErg: string; mintIdentityHex: string;
+}>) {
+  assertFederatedGenesisOperatorV1(owner);
+  if (!reservationSigners.has(owner) || mintSigners.has(owner)) throw new Error('FED mint signing requires its unused post-reservation slot');
+  const fields = ['nonce', 'bridgeAddressHex', 'recipientAddressHex', 'amountNanoErg', 'mintIdentityHex'];
+  if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
+    || Reflect.ownKeys(input).length !== fields.length || fields.some(key => {
+      const property = Object.getOwnPropertyDescriptor(input, key);
+      return !property?.enumerable || !Object.hasOwn(property, 'value');
+    })) throw new Error('FED mint signing requires exact own-data fields');
+  const { nonce, bridgeAddressHex, recipientAddressHex, amountNanoErg, mintIdentityHex } = input;
+  if (!Number.isSafeInteger(nonce) || nonce !== 1
+    || typeof bridgeAddressHex !== 'string' || !/^0x[0-9a-f]{40}$/.test(bridgeAddressHex) || /^0x0+$/.test(bridgeAddressHex)
+    || recipientAddressHex !== `0x${owner.addressHex}` || bridgeAddressHex === recipientAddressHex
+    || typeof amountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(amountNanoErg)
+    || BigInt(amountNanoErg) > 0x7fff_ffff_ffff_ffffn
+    || typeof mintIdentityHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(mintIdentityHex) || /^0x0+$/.test(mintIdentityHex)) {
+    throw new Error('FED mint signing differs from its first-block operator scope');
+  }
+  const transaction = Object.freeze({ type: 0, chainId: 4242, nonce, to: bridgeAddressHex,
+    gasPrice: 1_000_000_000n, gasLimit: 5_000_000n, value: 0n,
+    data: mintAbi.encodeFunctionData('mintSERG', [recipientAddressHex, amountNanoErg, mintIdentityHex]) });
+  mintSigners.add(owner);
+  try {
+    const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
+    assertFederatedGenesisOperatorV1(owner);
+    const parsed = Transaction.from(signedTransactionHex);
+    if (parsed.serialized !== signedTransactionHex || parsed.signature === null || !parsed.signature.isValid()
+      || parsed.signature.networkV === null || parsed.from?.toLowerCase() !== recipientAddressHex
+      || parsed.type !== 0 || parsed.chainId !== 4242n || parsed.nonce !== nonce
+      || parsed.to?.toLowerCase() !== bridgeAddressHex || parsed.data !== transaction.data
+      || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
+      throw new Error('FED mint signature differs from its exact transaction');
+    }
+    return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce });
+  } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+}
 
 export interface FederatedGenesisReservationInputV1 {
   readonly genesisHashHex: string;
