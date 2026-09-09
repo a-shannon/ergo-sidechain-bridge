@@ -73,7 +73,8 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe devnet proce
     expect(occupied.listening).toBe(true);
   }, 45_000);
 
-  // This path composes two independently bounded 30-second Windows probes.
+  // The manager owns the bounded Windows probes and awaits process cleanup.
+  // A competing Vitest deadline must not detach that cleanup.
   it('continues past an exact empty listener result before process launch', async () => {
     const allocated = await allocatePorts(6);
     const ports = allocated.map(server => portOf(server));
@@ -91,7 +92,7 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe devnet proce
       primaryPrometheusPort: ports[4]!,
       witnessPrometheusPort: ports[5]!,
     }, async () => 'unreachable')).rejects.toThrow(/primary process exited unexpectedly/);
-  }, 75_000);
+  }, 0);
 
   it('fails closed while targeting the requested Windows listener ports', () => {
     const source = readFileSync(new URL(

@@ -22,7 +22,8 @@ when their exact boundary is reached; do not discard their safety obligations.
 | **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. The local tracker-to-payout campaign passed; operational mint integration and composed two-way recovery remain open |
 | **WP-06-STARK / Gate 5** | An Ergo-verifiable trustless upgrade | An activated verifier checks the separately versioned statement and finality semantics before value release | Frozen pending a compatible activated target. Not a prerequisite for the federated reference |
 
-Neither track currently supports a production-ready or mainnet-ready claim.
+Both tracks remain research work; neither supports production use or
+deployment with real funds.
 Public research-alpha availability, local simulations and green CI do not
 establish deployment safety or independent operator custody.
 

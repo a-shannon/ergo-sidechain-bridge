@@ -529,9 +529,11 @@ describe('pinned local native verifier build conformance', () => {
     expect(result.stderrBytes).toEqual(Buffer.alloc(0));
   }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
 
-  it.each(['stdout', 'stderr'] as const)(
-    'retains every byte of multi-megabyte %s writes across pipe buffers',
-    async channel => {
+  it.each((['stdout', 'stderr'] as const).flatMap(channel =>
+    [1, 2, 3, 4].map(repetition => ({ channel, repetition })),
+  ))(
+    'retains every byte of multi-megabyte $channel writes across pipe buffers (repetition $repetition)',
+    async ({ channel }) => {
       const size = 3_952_928;
       const expected = Buffer.alloc(size);
       for (let index = 0; index < size; index += 1) {
@@ -543,30 +545,42 @@ describe('pinned local native verifier build conformance', () => {
         "const fs = require('fs');",
         `const bytes = Buffer.alloc(${size});`,
         'for (let i = 0; i < bytes.length; i++) bytes[i] = 32 + (i * 31) % 95;',
-        'let offset = 0;',
-        'while (offset < bytes.length) {',
-        `  const written = fs.writeSync(${descriptor}, bytes, offset,`,
-        '    Math.min(131072, bytes.length - offset));',
-        "  if (written <= 0) throw new Error('output did not progress');",
-        '  offset += written;',
-        '}',
+        '(async () => {',
+        '  let offset = 0;',
+        '  let stalledWrites = 0;',
+        '  while (offset < bytes.length) {',
+        '    const requested = Math.min(131072, bytes.length - offset);',
+        '    const written = await new Promise((resolve, reject) => {',
+        `      fs.write(${descriptor}, bytes, offset, requested, (error, count) =>`,
+        '        error ? reject(error) : resolve(count));',
+        '    });',
+        '    if (!Number.isInteger(written) || written < 0 || written > requested)',
+        "      throw new Error('invalid output write count');",
+        '    if (written === 0) {',
+        '      if (++stalledWrites >= 16)',
+        "        throw new Error('output did not progress');",
+        '      await new Promise(resolve => setImmediate(resolve));',
+        '      continue;',
+        '    }',
+        '    stalledWrites = 0;',
+        '    offset += written;',
+        '  }',
+        '})().catch(error => { console.error(error); process.exitCode = 1; });',
       ].join('\n');
-      for (let repetition = 0; repetition < 4; repetition += 1) {
-        const result = await runBoundedProcess({
-          executablePath: process.execPath,
-          args: ['-e', producer],
-          cwd: bridgeRoot,
-          env: minimalTestProcessEnvironment(),
-          timeoutMs: 5_000,
-          maxOutputBytes: size,
-          label: `test exact ${channel} forwarding`,
-        });
-        const actual = channel === 'stdout' ? result.stdoutBytes : result.stderrBytes;
-        const other = channel === 'stdout' ? result.stderrBytes : result.stdoutBytes;
-        expect(actual.length).toBe(size);
-        expect(createHash('sha256').update(actual).digest('hex')).toBe(expectedDigest);
-        expect(other.length).toBe(0);
-      }
+      const result = await runBoundedProcess({
+        executablePath: process.execPath,
+        args: ['-e', producer],
+        cwd: bridgeRoot,
+        env: minimalTestProcessEnvironment(),
+        timeoutMs: 5_000,
+        maxOutputBytes: size,
+        label: `test exact ${channel} forwarding`,
+      });
+      const actual = channel === 'stdout' ? result.stdoutBytes : result.stderrBytes;
+      const other = channel === 'stdout' ? result.stderrBytes : result.stdoutBytes;
+      expect(actual.length).toBe(size);
+      expect(createHash('sha256').update(actual).digest('hex')).toBe(expectedDigest);
+      expect(other.length).toBe(0);
     },
     PROCESS_LIFECYCLE_TEST_TIMEOUT_MS,
   );

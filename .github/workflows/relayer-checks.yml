@@ -47,7 +47,8 @@ jobs:
   audit-alpha:
     name: Public-audit candidate gate
     runs-on: windows-latest
-    timeout-minutes: 120
+    # The full serial suite includes fresh process-custody provisioning matrices.
+    timeout-minutes: 240
     defaults:
       run:
         shell: pwsh
