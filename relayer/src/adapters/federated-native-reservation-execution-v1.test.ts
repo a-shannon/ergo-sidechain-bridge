@@ -79,6 +79,70 @@ async function sealed() {
 }
 
 describe('fixed local native reservation execution', () => {
+  it.each([false, true])('retains a native seal RPC error code without exposing server text (data=%s)', async withData => {
+    const attempt = reserve(directory, candidate);
+    await submit(attempt, authorize);
+    const hold = readFileSync(join(directory, 'native-reservation-attempt.json'), 'utf8');
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const response = await originalFetch(url, init);
+      if (JSON.parse(init.body as string).method !== 'engine_createBlock') return response;
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1,
+        error: { code: -32603, message: 'untrusted node diagnostic',
+          ...(withData ? { data: { detail: 'untrusted response data' } } : {}) } }));
+    }));
+    const error = await seal(attempt, authorize).catch(error => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe('native reservation RPC engine_createBlock rejected (code -32603); attempt remains held');
+    expect(error.message).not.toMatch(/untrusted/);
+    expect(error.cause).toBeUndefined();
+    await expect(seal(attempt, authorize)).rejects.toThrow(/not available/);
+    await expect(submit(attempt, authorize)).rejects.toThrow(/consumed/);
+    await expect(observe({ attempt, blockHashHex: BLOCK, expectedStorage: storage,
+      operatorStorageKeyHex: ACCOUNT, originalOperatorAccountHex: originalAccount }, authorize)).rejects.toThrow(/not sealed/);
+    expect(calls.filter(call => call.method === 'engine_createBlock')).toHaveLength(1);
+    expect(calls.filter(call => call.method === 'author_submitExtrinsic')).toHaveLength(1);
+    expect(readFileSync(join(directory, 'native-reservation-attempt.json'), 'utf8')).toBe(hold);
+  });
+
+  it.each(['wrong id', 'wrong version', 'result and error', 'extra envelope field', 'extra error field',
+    'missing code', 'string code', 'fractional code', 'code overflow', 'code underflow', 'missing message',
+    'non-string message', 'null error', 'array error', 'duplicate error key', 'duplicate code'])
+    ('rejects malformed RPC error %s without retry or inclusion', async defect => {
+      const attempt = reserve(directory, candidate); await submit(attempt, authorize);
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+        const response = await originalFetch(url, init);
+        if (JSON.parse(init.body as string).method !== 'engine_createBlock') return response;
+        const error: any = { code: -32603, message: 'fixture rejection' };
+        const payload: any = { jsonrpc: '2.0', id: 1, error };
+        if (defect === 'wrong id') payload.id = 2;
+        if (defect === 'wrong version') payload.jsonrpc = '1.0';
+        if (defect === 'result and error') payload.result = { hash: BLOCK };
+        if (defect === 'extra envelope field') payload.other = true;
+        if (defect === 'extra error field') error.other = true;
+        if (defect === 'missing code') delete error.code;
+        if (defect === 'string code') error.code = '-32603';
+        if (defect === 'fractional code') error.code = -32603.5;
+        if (defect === 'code overflow') error.code = 2147483648;
+        if (defect === 'code underflow') error.code = -2147483649;
+        if (defect === 'missing message') delete error.message;
+        if (defect === 'non-string message') error.message = 1;
+        if (defect === 'null error') payload.error = null;
+        if (defect === 'array error') payload.error = [];
+        let text = JSON.stringify(payload);
+        if (defect === 'duplicate error key') text = text.replace('"error":', '"error":null,"error":');
+        if (defect === 'duplicate code') text = text.replace('"code":', '"code":-1,"code":');
+        return new Response(text);
+      }));
+      await expect(seal(attempt, authorize)).rejects.toThrow(/own-data|envelope mismatch|malformed|object required|duplicate/i);
+      await expect(seal(attempt, authorize)).rejects.toThrow(/not available/);
+      await expect(observe({ attempt, blockHashHex: BLOCK, expectedStorage: storage,
+        operatorStorageKeyHex: ACCOUNT, originalOperatorAccountHex: originalAccount }, authorize)).rejects.toThrow(/not sealed/);
+      expect(calls.filter(call => call.method === 'engine_createBlock')).toHaveLength(1);
+      expect(calls.filter(call => call.method === 'author_submitExtrinsic')).toHaveLength(1);
+    });
+
   it('persists before one submission, seals without finalization and observes exact paired state', async () => {
     const input = await sealed();
     expect(await observe(input, authorize)).toEqual({ blockHashHex: BLOCK, blockHeight: 1, extrinsicIndex: 1,

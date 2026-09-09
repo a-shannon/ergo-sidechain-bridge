@@ -118,6 +118,29 @@ async function execute(attempt: Awaited<ReturnType<typeof prepare>>) {
 }
 
 describe('native FED mint execution consumer', () => {
+  it.each(['eth_call', 'eth_sendRawTransaction', 'engine_createBlock'])
+    ('holds the mint attempt after a standard %s error without exposing server detail', async selectedMethod => {
+      const attempt = await prepare();
+      const hold = readFileSync(join(directory, 'native-mint-attempt.json'), 'utf8');
+      const originalFetch = globalThis.fetch;
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+        const response = await originalFetch(url, init);
+        if (JSON.parse(init.body as string).method !== selectedMethod) return response;
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1,
+          error: { code: -32603, message: 'untrusted node diagnostic', data: { detail: 'untrusted response data' } } }));
+      }));
+      const error = await execute(attempt).catch(error => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe(`native reservation RPC ${selectedMethod} rejected (code -32603); attempt remains held`);
+      expect(error.cause).toBeUndefined();
+      await expect(submitFederatedNativeMintV1(attempt, authorize)).rejects.toThrow(/consumed/);
+      await expect(sealFederatedNativeMintV1(attempt, authorize)).rejects.toThrow(/not available/);
+      await expect(observeFederatedNativeMintInclusionV1(attempt, authorize)).rejects.toThrow(/not sealed/);
+      expect(calls.filter(method => method === 'eth_sendRawTransaction')).toHaveLength(selectedMethod === 'eth_call' ? 0 : 1);
+      expect(calls.filter(method => method === 'engine_createBlock')).toHaveLength(selectedMethod === 'engine_createBlock' ? 2 : 1);
+      expect(readFileSync(join(directory, 'native-mint-attempt.json'), 'utf8')).toBe(hold);
+    });
+
   for (const surface of ['parent hash', 'child hash', 'receipt']) {
     it.each(['delay', 'timeout', 'divergence', 'disposal'])(`contains ${surface} mapping %s without another write`, async defect => {
       const attempt = await prepare(); let observations = 0;

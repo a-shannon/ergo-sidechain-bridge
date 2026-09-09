@@ -538,7 +538,18 @@ async function rpc(url: string, method: string, params: readonly unknown[]): Pro
   const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
   assertNoDuplicateJsonKeys(text);
   const payload = record(JSON.parse(text));
-  exact(payload, ['jsonrpc', 'id', 'result']);
+  const hasError = Object.hasOwn(payload, 'error');
+  exact(payload, ['jsonrpc', 'id', hasError ? 'error' : 'result']);
   if (payload.jsonrpc !== '2.0' || payload.id !== 1) throw new Error('native reservation RPC envelope mismatch');
+  if (hasError) {
+    const error = record(payload.error);
+    exact(error, Object.hasOwn(error, 'data') ? ['code', 'message', 'data'] : ['code', 'message']);
+    if (typeof error.code !== 'number' || !Number.isInteger(error.code)
+      || error.code < -0x80000000 || error.code > 0x7fffffff || typeof error.message !== 'string') {
+      throw new Error('native reservation RPC error is malformed');
+    }
+    // Preserve the node's error code, never its arbitrary message/data or request bytes.
+    throw new Error(`native reservation RPC ${method} rejected (code ${error.code}); attempt remains held`);
+  }
   return payload.result;
 }
