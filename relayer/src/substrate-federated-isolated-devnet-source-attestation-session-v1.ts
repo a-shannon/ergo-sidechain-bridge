@@ -45,6 +45,9 @@ import {
   type FederatedPooledReserveSourceProofSignatureVerificationV1,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
+  assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1,
+  type SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
@@ -52,10 +55,15 @@ import {
   type SubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
+  consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1,
+  type SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1,
   consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV2,
   type SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
+  getSubstrateFederatedNativeGenesisAttestationContextV1,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance,
   assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance,
@@ -114,6 +122,15 @@ const V2_GENESIS_PROFILES = new WeakMap<object, () => Readonly<{
 }>>();
 const MINT_SOURCE_PROOF_RECEIPTS = new WeakSet<object>();
 const MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
+const NATIVE_MINT_PROOF_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_MINT_SOURCE_PROOF_V1';
+const NATIVE_MINT_PRODUCERS = new WeakMap<object, (
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input>,
+) => Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>>();
+const NATIVE_MINT_RECEIPTS = new WeakMap<object, Readonly<{
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
+  assertCurrent: () => void;
+}>>();
 const CHECKPOINT_ATTESTATION_RECEIPTS = new WeakSet<object>();
 const UINT64_MAX = 0xffff_ffff_ffff_ffffn;
 
@@ -345,6 +362,36 @@ export interface ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input {
     Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
   readonly issuedAtNativeHeight: string | number | bigint;
   readonly expiresAtNativeHeight: string | number | bigint;
+}
+
+export interface ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input {
+  readonly draftInputs: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>;
+  readonly draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
+  readonly evidenceReceipt: Readonly<SubstrateFederatedNativeGenesisCommittedReserveEvidenceReceiptV1>;
+  readonly issuedAtNativeHeight: string | number | bigint;
+  readonly expiresAtNativeHeight: string | number | bigint;
+}
+
+export interface SubstrateFederatedNativeGenesisMintSourceProofReceiptV1 extends Pick<
+  SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2,
+  'status' | 'sourceAttestationBindingDigestHex' | 'sourceEvidenceReceiptDigestHex'
+  | 'mintReservationDraftDigestHex' | 'mintReservationStatementIdHex' | 'mintIdentityHex'
+  | 'runtimeProfileScaleHex' | 'runtimeProfileIdHex' | 'sourceProofProfileIdHex'
+  | 'sourceProofProfileScaleHex' | 'requestDigestHex' | 'request' | 'result'
+  | 'signatureVerification' | 'proofBytesScaleHex' | 'sourceProofEnvelopeScaleHex'
+  | 'sourceProofEnvelopeSha256Hex' | 'boundary' | 'receiptDigestHex'> {
+  readonly schema: 'e2s.substrate-federated-native-genesis-mint-source-proof.v1';
+  readonly version: 1;
+  readonly provenance: SubstrateFederatedNativeGenesisPegInMintReservationDraftV1['provenance'];
+  readonly genesisJsonSha256Hex: string;
+  readonly checks: Readonly<{
+    exactOriginalDraftInputsBound: true;
+    exactRetainedGenesisProfileBound: true;
+    heightZeroProfileRequired: true;
+    exactSourceEvidenceReceiptBound: true;
+    exactThresholdSignatureSetVerified: true;
+    oneShotCapabilityConsumed: true;
+  }>;
 }
 
 export interface SubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2 {
@@ -801,6 +848,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   });
   let state: 'open' | 'disposed' = 'open';
   let launchSigningStarted = false;
+  let nativeMintSigningStarted = false;
   let signedTarget:
     Readonly<SubstrateFederatedIsolatedDevnetTargetDescriptorV1
       | SubstrateFederatedIsolatedDevnetTargetDescriptorV2> | undefined;
@@ -815,7 +863,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       >,
     ) => {
       assertOpen(state);
-      if (launchSigningStarted) {
+      if (launchSigningStarted || nativeMintSigningStarted) {
         throw new Error('isolated-devnet launch attestation is already signed');
       }
       assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(statement);
@@ -1292,7 +1340,121 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     }
     return Object.freeze({ checkpointProfile, mintProofProfile: mintProfileInput });
   });
+  NATIVE_MINT_PRODUCERS.set(session, input => {
+    assertOpen(state);
+    if (launchSigningStarted) throw new Error('native mint proof cannot use a LAB launch session');
+    if (mintProofProduced) throw new Error('native mint source-proof capability is already consumed');
+    exactRecord(input, ['draftInputs', 'draft', 'evidenceReceipt', 'issuedAtNativeHeight', 'expiresAtNativeHeight'],
+      'native mint source-proof input');
+    if (Reflect.ownKeys(input).length !== 5) throw new Error('native mint proof requires exact own-data fields');
+    assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(input.draft, input.draftInputs);
+    input = Object.freeze({ ...input, draftInputs: Object.freeze({ ...input.draftInputs }) });
+    const { draft, draftInputs, evidenceReceipt } = input;
+    const context = getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target);
+    const candidate = context.candidate;
+    const runtimeProfile = decodePooledReserveMintReservationRuntimeProfileV4ScaleHex(candidate.runtimeProfileScaleHex);
+    const runtimeProfileIdHex = derivePooledReserveMintReservationRuntimeProfileV4IdHex(runtimeProfile);
+    if (runtimeProfile.activationHeight !== '0'
+      || runtimeProfileIdHex !== candidate.runtimeProfileIdHex
+      || runtimeProfile.sourceProofProfileIdHex !== federatedMintProfile.proofProfileIdHex
+      || runtimeProfile.sourceProofSystemIdHex !== federatedMintProfile.proofSystemIdHex
+      || sha256CanonicalJson(context.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
+      throw new Error('native mint proof requires the exact retained height-zero federation profile');
+    }
+    const issued = uint64(input.issuedAtNativeHeight, 'native source-proof issue height');
+    const expires = uint64(input.expiresAtNativeHeight, 'native source-proof expiry height');
+    assertMintSourceProofWindow(issued, expires, 0n, BigInt(runtimeProfile.maxPendingBlocks),
+      BigInt(federatedMintProfile.maxValidityBlocks));
+    const assertCurrent = () => {
+      assertOpen(state);
+      assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draft, draftInputs);
+      const current = getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target);
+      if (current.candidate !== candidate
+        || sha256CanonicalJson(current.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
+        throw new Error('native mint proof retained genesis changed');
+      }
+    };
+    // The native and LAB mint routes share one signing budget, but not a launch identity.
+    nativeMintSigningStarted = true;
+    mintProofProduced = true;
+    try {
+      const evidence = consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1(evidenceReceipt, draft);
+      const request = deepFreeze({ runtimeProfile, statementHex: draft.statementHex,
+        evidence: canonicalEvidence(evidence), issuedAtNativeHeight: issued.toString(),
+        expiresAtNativeHeight: expires.toString() } satisfies FederatedPooledReserveSourceProofRequestV1);
+      const requestDigestHex = deriveFederatedPooledReserveSourceProofRequestDigestForProfileV1Hex(mintProfileInput, request);
+      const result = buildFederatedPooledReserveSourceProofResultFieldsForProfileV1(mintProfileInput, request);
+      const resultIdHex = deriveFederatedPooledReserveSourceProofResultIdForProfileV1Hex(mintProfileInput, request, result);
+      const attestationDigestHex = deriveFederatedPooledReserveSourceProofAttestationDigestV1Hex(resultIdHex);
+      assertCurrent();
+      const signatures = signThreshold(signers, attestationDigestHex).map(value => ({
+        signerPublicKeyHex: `0x${value.signerPublicKeyHex}`, signatureHex: `0x${value.signatureHex}`,
+      }));
+      const signatureVerification = verifyFederatedPooledReserveSourceProofSignaturesForProfileV1(
+        mintProfileInput, request, result, signatures);
+      if (result.requestDigestHex !== requestDigestHex || signatureVerification.resultIdHex !== resultIdHex
+        || signatureVerification.attestationDigestHex !== attestationDigestHex) {
+        throw new Error('native mint proof request/result/signature binding changed');
+      }
+      const envelope = { result, signatures: signatureVerification.signatures };
+      const proofBytesScaleHex = encodeFederatedPooledReserveSourceProofEnvelopeScaleForProfileV1Hex(
+        mintProfileInput, request, envelope);
+      const sourceProofEnvelopeScaleHex = encodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex(
+        mintProfileInput, request, envelope);
+      assertCurrent();
+      const body = deepFreeze({
+        schema: 'e2s.substrate-federated-native-genesis-mint-source-proof.v1' as const,
+        version: 1 as const, status: 'collected_federated_source_proof_produced' as const,
+        sourceAttestationBindingDigestHex: binding.bindingDigestHex,
+        sourceEvidenceReceiptDigestHex: evidenceReceipt.receiptDigestHex,
+        mintReservationDraftDigestHex: draft.draftDigestHex,
+        mintReservationStatementIdHex: draft.statementIdHex, mintIdentityHex: draft.reservationKeyHex,
+        provenance: draft.provenance, genesisJsonSha256Hex: candidate.genesisJsonSha256Hex,
+        runtimeProfileScaleHex: candidate.runtimeProfileScaleHex, runtimeProfileIdHex,
+        sourceProofProfileIdHex: federatedMintProfile.proofProfileIdHex,
+        sourceProofProfileScaleHex: binding.federatedMintProfileScaleHex,
+        requestDigestHex, request, result, signatureVerification, proofBytesScaleHex, sourceProofEnvelopeScaleHex,
+        sourceProofEnvelopeSha256Hex: createHash('sha256')
+          .update(Buffer.from(sourceProofEnvelopeScaleHex.slice(2), 'hex')).digest('hex'),
+        checks: { exactOriginalDraftInputsBound: true as const, exactRetainedGenesisProfileBound: true as const,
+          heightZeroProfileRequired: true as const, exactSourceEvidenceReceiptBound: true as const,
+          exactThresholdSignatureSetVerified: true as const, oneShotCapabilityConsumed: true as const },
+        boundary: mintSourceProofBoundaryV2(),
+      });
+      const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_MINT_PROOF_DOMAIN) });
+      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, draft, assertCurrent }));
+      return receipt;
+    } catch (error) {
+      signers = [];
+      state = 'disposed';
+      throw error;
+    }
+  });
   return session;
+}
+
+export function produceSubstrateFederatedNativeGenesisMintSourceProofV1(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input>,
+): Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1> {
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(session);
+  return NATIVE_MINT_PRODUCERS.get(session)!(input);
+}
+
+export function assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(
+  value: unknown,
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>,
+): asserts value is Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1> {
+  const retained = value !== null && typeof value === 'object' ? NATIVE_MINT_RECEIPTS.get(value) : undefined;
+  if (retained === undefined || retained.session !== session || retained.draft !== draft) {
+    throw new Error('native mint proof lacks exact session/draft provenance');
+  }
+  retained.assertCurrent();
+  const { receiptDigestHex, ...body } = value as Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>;
+  if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_MINT_PROOF_DOMAIN)) {
+    throw new Error('native mint proof receipt digest changed');
+  }
 }
 
 /** Public configuration only; requires retained custody not yet bound to a launch. */

@@ -10,6 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockIn
 // exact checked-byte custody are real; the HTTP checker is not a JVM oracle.
 const boundary = vi.hoisted(() => ({
   requests: new WeakMap<object, object>(), active: true, observe: vi.fn(), build: vi.fn(),
+  failSourceSignature: false, failSourceVerification: false,
   custody: undefined as (() => void) | undefined,
   assert(value: unknown, target?: object) {
     const retained = value !== null && typeof value === 'object' ? this.requests.get(value) : undefined;
@@ -19,6 +20,19 @@ const boundary = vi.hoisted(() => ({
     this.custody?.();
   },
 }));
+vi.mock('node:crypto', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return { ...actual,
+    sign: vi.fn((...args: Parameters<typeof actual.sign>) => {
+      if (boundary.failSourceSignature) throw new Error('injected native source signature failure');
+      return actual.sign(...args);
+    }),
+    verify: vi.fn((...args: Parameters<typeof actual.verify>) => {
+      if (boundary.failSourceVerification) return false;
+      return actual.verify(...args);
+    }),
+  };
+});
 vi.mock('./substrate-federated-native-genesis-setup-check-request-v1.js', () => ({
   buildSubstrateFederatedNativeGenesisSetupCheckRequestV1: (...args: unknown[]) => boundary.build(...args),
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1: (value: unknown, target?: object) => boundary.assert(value, target),
@@ -75,11 +89,29 @@ import {
   buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeMintDraft,
   assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as assertNativeMintDraft,
   assertSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV2 as assertLegacyMintDraft,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
 } from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
   collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 as collectNativeReserveEvidence,
   consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1 as consumeNativeReserveEvidence,
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 as createSourceSession,
+  readSubstrateFederatedGenesisProfilesFromSessionV2 as readSourceProfiles,
+  produceSubstrateFederatedNativeGenesisMintSourceProofV1 as produceNativeMintProof,
+  assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1 as assertNativeMintProof,
+  assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance as assertLegacyMintProof,
+  type ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input,
+} from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import {
+  decodePooledReserveMintReservationRuntimeProfileV4ScaleHex as decodeRuntimeProfile,
+  encodePooledReserveMintReservationRuntimeProfileV4ScaleHex as encodeRuntimeProfile,
+  derivePooledReserveMintReservationRuntimeProfileV4IdHex as runtimeProfileId,
+} from './pooled-reserve-mint-reservation-runtime-profile-v4-codec.js';
+import {
+  decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex as decodeSourceEnvelope,
+  verifyFederatedPooledReserveSourceProofSignaturesForProfileV1 as verifySourceSignatures,
+} from './substrate-federated-pooled-reserve-source-proof-v1.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -110,6 +142,8 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   boundary.active = true;
+  boundary.failSourceSignature = false;
+  boundary.failSourceVerification = false;
   boundary.custody = undefined;
   boundary.observe.mockReset();
   boundary.build.mockReset();
@@ -869,6 +903,169 @@ describe('native FED managed setup session', () => {
       expect(() => consumeNativeReserveEvidence(receipt, draft)).toThrow(/consumed/);
       expect(post).toHaveBeenCalledTimes(2);
       expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+    });
+  });
+
+  async function withNativeMintProof(runTest: (context: {
+    source: ReturnType<typeof createSourceSession>;
+    proofInput: ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input;
+    post: MockInstance;
+  }) => Promise<void>) {
+    const source = createSourceSession({ ergoAdmissionThreshold: 1,
+      ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] });
+    const profiles = readSourceProfiles(source);
+    const runtimeProfileScaleHex = encodeRuntimeProfile({ formatVersion: 4,
+      lineageProfileIdHex: `0x${compiled.familyReceipt.profile.familyIdHex}`,
+      sourceNetworkIdHex: `0x${request.target.genesisHeaderIdHex}`, sidechainIdHex: `0x${'87'.repeat(32)}`,
+      bridgeAddressHex: `0x${'33'.repeat(20)}`, tokenAddressHex: `0x${'44'.repeat(20)}`,
+      bridgeRuntimeCodeSha256Hex: `0x${'91'.repeat(32)}`, bridgeRuntimeCodeBytes: 100,
+      tokenRuntimeCodeSha256Hex: `0x${'92'.repeat(32)}`, tokenRuntimeCodeBytes: 200,
+      settlementProfileIdHex: `0x${'88'.repeat(32)}`,
+      ergoDepositFinalityPolicyIdHex: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
+      sourceProofSystemIdHex: source.binding.federatedMintProfile.proofSystemIdHex,
+      sourceProofProfileIdHex: source.binding.federatedMintProfile.proofProfileIdHex,
+      activationHeight: '0', maxPendingBlocks: 64 });
+    const runtimeProfile = decodeRuntimeProfile(runtimeProfileScaleHex);
+    // Genesis compilation is a double; draft/evidence custody, codecs and threshold signatures are real.
+    Object.assign(compiled, { preparation: { checkpointProfile: profiles.checkpointProfile },
+      candidate: Object.freeze({ runtimeProfile, runtimeProfileScaleHex,
+        runtimeProfileIdHex: runtimeProfileId(runtimeProfile), genesisJsonSha256Hex: '93'.repeat(32) }) });
+    boundary.custody = () => { assertSigner(session.signer); readSourceProfiles(source); };
+    try {
+      await withNativeVault(async ({ input, post }) => {
+        const reserve = await executeNativeVault(input);
+        const draftInputs = { target, batch: input.batch, packet: input.packet,
+          committedVaultObservation: reserve.outputObservation };
+        const draft = buildNativeMintDraft(draftInputs);
+        const evidenceReceipt = collectNativeReserveEvidence({ ...draftInputs, draft });
+        await runTest({ source, proofInput: { draftInputs, draft, evidenceReceipt,
+          issuedAtNativeHeight: '0', expiresAtNativeHeight: '32' }, post });
+      });
+    } finally { source.dispose(); }
+  }
+
+  it('produces the native height-zero proof from the composed confirmed reserve and retained federation', async () => {
+    await withNativeMintProof(async ({ source, proofInput, post }) => {
+      const receipt = produceNativeMintProof(source, proofInput);
+      assertNativeMintProof(receipt, source, proofInput.draft);
+      const profiles = readSourceProfiles(source);
+      const verified = verifySourceSignatures(profiles.mintProofProfile, receipt.request, receipt.result,
+        receipt.signatureVerification.signatures);
+      const decoded = decodeSourceEnvelope(profiles.mintProofProfile, receipt.request, receipt.sourceProofEnvelopeScaleHex);
+      expect(verified.resultIdHex).toBe(receipt.signatureVerification.resultIdHex);
+      expect(verified.signatures).toHaveLength(2);
+      expect(decoded.proofProfileIdHex).toBe(source.binding.federatedMintProfile.proofProfileIdHex);
+      expect(receipt.runtimeProfileScaleHex).toBe(compiled.candidate.runtimeProfileScaleHex);
+      expect(receipt.request.runtimeProfile.activationHeight).toBe('0');
+      expect(receipt.request.statementHex).toBe(proofInput.draft.statementHex);
+      expect(receipt.request.evidence).toEqual(proofInput.evidenceReceipt.evidence);
+      expect(receipt.provenance).toEqual(proofInput.draft.provenance);
+      expect(receipt.boundary.sourceCanonicalityIndependentlyVerified).toBe(false);
+      expect(receipt.boundary.runtimeReservationWritten).toBe(false);
+      expect(receipt.boundary.mintExecuted).toBe(false);
+      expect(receipt.boundary.broadcastAuthorized).toBe(false);
+      expect(receipt.boundary.fundsAuthorityEstablished).toBe(false);
+      expect(() => assertLegacyMintProof(receipt)).toThrow(/provenance/);
+      expect(() => consumeNativeReserveEvidence(proofInput.evidenceReceipt, proofInput.draft)).toThrow(/consumed/);
+      expect(() => produceNativeMintProof(source, proofInput)).toThrow(/consumed/);
+      expect(() => source.signLaunchStatement({} as never)).toThrow(/already signed/);
+      execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(proofInput.draftInputs.batch, target);
+      expect(post).toHaveBeenCalledTimes(2);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
+      source.dispose();
+      expect(() => assertNativeMintProof(receipt, source, proofInput.draft)).toThrow(/disposed/);
+    });
+  });
+
+  it.each(['draft clone', 'batch clone', 'target clone', 'packet clone', 'observation clone',
+    'extra field', 'accessor', 'symbol', 'negative issue', 'unsafe issue', 'expiry overflow', 'empty window', 'long window'])
+    ('rejects native mint preflight %s before consuming the evidence', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const changed: any = { ...proofInput, draftInputs: { ...proofInput.draftInputs } };
+        if (fault === 'draft clone') changed.draft = { ...proofInput.draft };
+        if (fault === 'batch clone') changed.draftInputs.batch = { ...proofInput.draftInputs.batch };
+        if (fault === 'target clone') changed.draftInputs.target = { ...target };
+        if (fault === 'packet clone') changed.draftInputs.packet = { ...proofInput.draftInputs.packet };
+        if (fault === 'observation clone') changed.draftInputs.committedVaultObservation = { ...proofInput.draftInputs.committedVaultObservation };
+        if (fault === 'extra field') changed.runtimeProfile = compiled.candidate.runtimeProfile;
+        if (fault === 'accessor') Object.defineProperty(changed, 'draft', { enumerable: true, get() { throw new Error('getter executed'); } });
+        if (fault === 'symbol') changed[Symbol('extra')] = true;
+        if (fault === 'negative issue') changed.issuedAtNativeHeight = '-1';
+        if (fault === 'unsafe issue') changed.issuedAtNativeHeight = Number.MAX_SAFE_INTEGER + 1;
+        if (fault === 'expiry overflow') changed.expiresAtNativeHeight = '18446744073709551616';
+        if (fault === 'empty window') changed.expiresAtNativeHeight = '0';
+        if (fault === 'long window') changed.expiresAtNativeHeight = '65';
+        expect(() => produceNativeMintProof(source, changed)).toThrow(/provenance|original inputs|exactly|own-data|uint64|profile bounds/);
+        const receipt = produceNativeMintProof(source, proofInput);
+        assertNativeMintProof(receipt, source, proofInput.draft);
+      });
+    });
+
+  it.each(['activationHeight', 'profile ID', 'source profile', 'source system', 'checkpoint federation'])
+    ('rejects a different retained native %s before signing', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const original = compiled.candidate;
+        const originalPreparation = compiled.preparation;
+        const profile = { ...original.runtimeProfile };
+        if (fault === 'activationHeight') profile.activationHeight = '4';
+        if (fault === 'source profile') profile.sourceProofProfileIdHex = `0x${'fe'.repeat(32)}`;
+        if (fault === 'source system') profile.sourceProofSystemIdHex = `0x${'fe'.repeat(32)}`;
+        Object.assign(compiled, { candidate: { ...original, runtimeProfileScaleHex: encodeRuntimeProfile(profile),
+          runtimeProfileIdHex: fault === 'profile ID' ? `0x${'fe'.repeat(32)}` : runtimeProfileId(profile) } });
+        if (fault === 'checkpoint federation') Object.assign(compiled, { preparation: {
+          checkpointProfile: { ...originalPreparation.checkpointProfile, ergoAdmissionThreshold: 2 } } });
+        expect(() => produceNativeMintProof(source, proofInput)).toThrow(/height-zero federation profile/);
+        Object.assign(compiled, { candidate: original, preparation: originalPreparation });
+        expect(() => produceNativeMintProof(source, proofInput)).not.toThrow();
+      });
+    });
+
+  it.each(['receipt clone', 'different draft', 'consumed receipt', 'source disposal', 'setup disposal'])
+    ('rejects native signing with %s', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const changed = { ...proofInput };
+        if (fault === 'receipt clone') changed.evidenceReceipt = { ...proofInput.evidenceReceipt };
+        if (fault === 'different draft') changed.draft = buildNativeMintDraft(proofInput.draftInputs);
+        if (fault === 'consumed receipt') consumeNativeReserveEvidence(proofInput.evidenceReceipt, proofInput.draft);
+        if (fault === 'source disposal') source.dispose();
+        if (fault === 'setup disposal') session.dispose();
+        expect(() => produceNativeMintProof(source, changed)).toThrow(/provenance|different|consumed|disposed|inactive/);
+        expect(() => produceNativeMintProof(source, proofInput)).toThrow(/disposed|inactive/);
+      });
+    });
+
+  it.each(['receipt clone', 'session clone', 'draft clone', 'genesis replacement', 'setup disposal'])
+    ('rejects native proof continuation after %s', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const receipt = produceNativeMintProof(source, proofInput);
+        if (fault === 'genesis replacement') Object.assign(compiled, { candidate: { ...compiled.candidate } });
+        if (fault === 'setup disposal') session.dispose();
+        expect(() => assertNativeMintProof(fault === 'receipt clone' ? { ...receipt } : receipt,
+          fault === 'session clone' ? { ...source } : source,
+          fault === 'draft clone' ? { ...proofInput.draft } : proofInput.draft)).toThrow(/provenance|changed|inactive/);
+      });
+    });
+
+  it.each(['signature', 'verification'])('revokes native source custody after %s failure', async fault => {
+    await withNativeMintProof(async ({ source, proofInput, post }) => {
+      if (fault === 'signature') boundary.failSourceSignature = true;
+      else boundary.failSourceVerification = true;
+      expect(() => produceNativeMintProof(source, proofInput)).toThrow(/signature failure|signature is invalid/);
+      expect(() => readSourceProfiles(source)).toThrow(/disposed/);
+      expect(() => produceNativeMintProof(source, proofInput)).toThrow(/disposed/);
+      expect(post).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('rejects an unrelated source session without consuming the original native proof capability', async () => {
+    await withNativeMintProof(async ({ source, proofInput }) => {
+      const other = createSourceSession({ ergoAdmissionThreshold: 1,
+        ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] });
+      try {
+        expect(() => produceNativeMintProof(other, proofInput)).toThrow(/height-zero federation profile/);
+        expect(() => produceNativeMintProof({ ...source }, proofInput)).toThrow(/provenance/);
+        expect(() => produceNativeMintProof(source, proofInput)).not.toThrow();
+      } finally { other.dispose(); }
     });
   });
 

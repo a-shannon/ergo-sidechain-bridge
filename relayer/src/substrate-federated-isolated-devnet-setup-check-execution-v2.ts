@@ -2496,6 +2496,16 @@ export function getSubstrateFederatedNativeGenesisSetupCompilerInputV1(
     familyTemplates: structuredClone(compiled.familyCompilerInput.templates) });
 }
 
+export function getSubstrateFederatedNativeGenesisAttestationContextV1(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  const compiled = NATIVE_EXECUTION_BATCHES.get(batch)!.compiled;
+  return Object.freeze({ candidate: compiled.candidate,
+    checkpointProfile: compiled.preparation.checkpointProfile });
+}
+
 // Only the session can pair a pre-check process binding with its own result.
 function promoteSetupExecutionBatchV3(
   result: Readonly<FixedSetupCheckRunV3>,

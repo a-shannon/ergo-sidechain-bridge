@@ -114,6 +114,7 @@ import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   readSubstrateFederatedGenesisProfilesFromSessionV2,
+  produceSubstrateFederatedNativeGenesisMintSourceProofV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -513,6 +514,13 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
         value.signerPublicKeyHex.slice(2)
       ));
 
+    session.dispose();
+  });
+
+  it('rejects native proof signing once the same session attests a LAB launch', () => {
+    const session = sessionV2();
+    signLaunch(session);
+    expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofV1(session, {} as never)).toThrow(/LAB launch/);
     session.dispose();
   });
 
