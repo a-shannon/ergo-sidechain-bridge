@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import axios from 'axios';
-import { Mnemonic } from 'ethers';
+import { Mnemonic, SigningKey } from 'ethers';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 // Request provenance and observations are component doubles. WASM signing and
@@ -112,6 +112,11 @@ import {
   decodePooledReserveMintReservationSourceProofEnvelopeV4ScaleForProfileV1Hex as decodeSourceEnvelope,
   verifyFederatedPooledReserveSourceProofSignaturesForProfileV1 as verifySourceSignatures,
 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
+import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1 }
+  from './adapters/federated-genesis-operator-v1.js';
+import * as nativeOperator from './adapters/federated-genesis-operator-v1.js';
+import { signFrontierNativeProofBoundReservationV1 }
+  from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -974,6 +979,95 @@ describe('native FED managed setup session', () => {
       expect(helpers.ncheck).toHaveBeenCalledTimes(6);
       source.dispose();
       expect(() => assertNativeMintProof(receipt, source, proofInput.draft)).toThrow(/disposed/);
+    });
+  });
+
+  it('signs the exact native reservation from the composed reserve proof without mint or broadcast authority', async () => {
+    await withNativeMintProof(async ({ source, proofInput, post }) => {
+      const operator = createFederatedGenesisOperatorV1();
+      Object.assign(compiled, { preparation: { ...compiled.preparation,
+        operatorAddressHex: operator.addressHex, launchDomainHex: operator.launchDomainHex } });
+      try {
+        const proof = produceNativeMintProof(source, proofInput);
+        const signing = { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target,
+          genesisHashHex: `0x${'94'.repeat(32)}`, nonce: 0 };
+        const result = signFrontierNativeProofBoundReservationV1(signing);
+        expect(result.callScaleHex).toBe(`0x0c066d09${proof.request.statementHex.slice(2)}${proof.sourceProofEnvelopeScaleHex.slice(2)}`);
+        expect(result.sourceProofReceiptDigestHex).toBe(proof.receiptDigestHex);
+        expect(result.mintIdentityHex).toBe(proofInput.draft.reservationKeyHex);
+        expect(result.runtimeReservationEstablished).toBe(false);
+        expect(result.mintExecuted).toBe(false);
+        expect(result.broadcastAuthorized).toBe(false);
+        expect(() => signFrontierNativeProofBoundReservationV1(signing)).toThrow(/consumed/);
+        expect(post).toHaveBeenCalledTimes(2);
+      } finally { disposeFederatedGenesisOperatorV1(operator); }
+    });
+  });
+
+  it.each(['proof clone', 'draft clone', 'session clone', 'compiled clone', 'target clone', 'operator clone',
+    'operator identity', 'launch domain', 'genesis JSON', 'runtime profile', 'profile ID',
+    'source disposal', 'setup disposal', 'operator disposal', 'extra field', 'accessor', 'symbol'])
+    ('rejects native reservation composition with %s', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const operator = createFederatedGenesisOperatorV1();
+        Object.assign(compiled, { preparation: { ...compiled.preparation,
+          operatorAddressHex: operator.addressHex, launchDomainHex: operator.launchDomainHex } });
+        try {
+          const proof = produceNativeMintProof(source, proofInput);
+          const changed: any = { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target,
+            genesisHashHex: `0x${'94'.repeat(32)}`, nonce: 0 };
+          if (fault === 'proof clone') changed.proof = { ...proof };
+          if (fault === 'draft clone') changed.draft = { ...proofInput.draft };
+          if (fault === 'session clone') changed.sourceSession = { ...source };
+          if (fault === 'compiled clone') changed.compiled = { ...compiled };
+          if (fault === 'target clone') changed.target = { ...target };
+          if (fault === 'operator clone') changed.operator = { ...operator };
+          if (fault === 'operator identity') Object.assign(compiled.preparation, { operatorAddressHex: 'fe'.repeat(20) });
+          if (fault === 'launch domain') Object.assign(compiled.preparation, { launchDomainHex: 'fe'.repeat(32) });
+          if (fault === 'genesis JSON') Object.assign(compiled, { candidate: { ...compiled.candidate, genesisJsonSha256Hex: 'fe'.repeat(32) } });
+          if (fault === 'runtime profile') Object.assign(compiled, { candidate: { ...compiled.candidate, runtimeProfileScaleHex: '0xfe' } });
+          if (fault === 'profile ID') Object.assign(compiled, { candidate: { ...compiled.candidate, runtimeProfileIdHex: `0x${'fe'.repeat(32)}` } });
+          if (fault === 'source disposal') source.dispose();
+          if (fault === 'setup disposal') session.dispose();
+          if (fault === 'operator disposal') disposeFederatedGenesisOperatorV1(operator);
+          if (fault === 'extra field') changed.signature = 'supplied';
+          if (fault === 'accessor') Object.defineProperty(changed, 'proof', { enumerable: true,
+            get() { throw new Error('getter executed'); } });
+          if (fault === 'symbol') changed[Symbol('extra')] = true;
+          const adapterSign = vi.spyOn(nativeOperator, 'signFederatedGenesisReservationV1');
+          const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign');
+          expect(() => signFrontierNativeProofBoundReservationV1(changed))
+            .toThrow(/provenance|changed|inactive|disposed|custody|differs|own-data/);
+          expect(adapterSign).not.toHaveBeenCalled();
+          expect(primitiveSign).not.toHaveBeenCalled();
+        } finally { disposeFederatedGenesisOperatorV1(operator); }
+      });
+    });
+
+  it.each(['source', 'setup'])('withholds native reservation bytes after %s disposal during signing', async fault => {
+    await withNativeMintProof(async ({ source, proofInput, post }) => {
+      const operator = createFederatedGenesisOperatorV1();
+      Object.assign(compiled, { preparation: { ...compiled.preparation,
+        operatorAddressHex: operator.addressHex, launchDomainHex: operator.launchDomainHex } });
+      try {
+        const proof = produceNativeMintProof(source, proofInput);
+        const signing = { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target,
+          genesisHashHex: `0x${'94'.repeat(32)}`, nonce: 0 };
+        const sign = SigningKey.prototype.sign;
+        const primitiveSign = vi.spyOn(SigningKey.prototype, 'sign').mockImplementation(function (this: SigningKey, digest) {
+          if (fault === 'source') source.dispose(); else session.dispose();
+          return sign.call(this, digest);
+        });
+        expect(() => signFrontierNativeProofBoundReservationV1(signing)).toThrow(
+          fault === 'source' ? /disposed/ : /signer binding lacks active process provenance/);
+        expect(primitiveSign).toHaveBeenCalledTimes(1);
+        expect(() => nativeOperator.signFederatedGenesisReservationV1(operator, {
+          genesisHashHex: signing.genesisHashHex, nonce: 0, statementHex: proof.request.statementHex,
+          sourceProofEnvelopeScaleHex: proof.sourceProofEnvelopeScaleHex,
+        })).toThrow(/consumed/);
+        expect(primitiveSign).toHaveBeenCalledTimes(1);
+        expect(post).toHaveBeenCalledTimes(2);
+      } finally { disposeFederatedGenesisOperatorV1(operator); }
     });
   });
 

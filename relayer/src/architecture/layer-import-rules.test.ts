@@ -161,6 +161,45 @@ describe('layer import rules', () => {
       .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
   });
 
+  it('restricts native reservation signing to its proof-bound composition, not the target root', () => {
+    const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const specifier = FEDERATED_GENESIS_OPERATOR_SPECIFIER;
+    const binding = 'signFederatedGenesisReservationV1';
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(composition, `${declaration} ${binding}({}, {});`))).toEqual([]);
+    for (const escape of [`const escaped = ${binding};`, `capture(${binding});`,
+      `function expose() { return ${binding}; }`]) {
+      expect(inspect(staticAppFixture(composition, `${declaration} ${escape}`)).map(item => item.message))
+        .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    }
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}({}, {});`))
+      .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    for (const name of ['createFederatedGenesisOperatorV1', 'disposeFederatedGenesisOperatorV1']) {
+      expect(inspect(staticAppFixture(composition, `import { ${name} } from '${specifier}'; ${name}();`))
+        .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${name}`);
+    }
+    const proofSpecifier = '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+    expect(inspect(staticAppFixture(composition, `import { produceSubstrateFederatedNativeGenesisMintSourceProofV1 } from '${proofSpecifier}';`))
+      .map(item => item.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${proofSpecifier}#produceSubstrateFederatedNativeGenesisMintSourceProofV1`);
+  });
+
+  it.each([
+    ['node:crypto', "import { createPrivateKey } from 'SPECIFIER';"],
+    ['ethers', "import { Wallet } from 'SPECIFIER';"],
+    ['axios', "import client from 'SPECIFIER';"],
+    ['../../adapters/unreviewed.ts', "import { send } from 'SPECIFIER';"],
+    ['./unreviewed.ts', "import { run } from 'SPECIFIER';"],
+    ['../../ergo-settlement-core/unreviewed.ts', "import type { Input } from 'SPECIFIER';"],
+    ['ethers', "export { Wallet } from 'SPECIFIER';"],
+    ['axios', "const client = await import('SPECIFIER');"],
+  ])('closes native reservation composition imports: %s (%s)', (specifier, declaration) => {
+    const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const source = declaration.replace('SPECIFIER', specifier);
+    expect(inspect(staticAppFixture(composition, source)).map(item => item.message))
+      .toContain(`native reservation composition import is not allowlisted: ${specifier}`);
+  });
+
   it.each([
     "import * as owner from 'SPECIFIER';",
     "export * from 'SPECIFIER';",

@@ -195,6 +195,18 @@ establish deployment safety or independent operator custody.
   Component coverage uses real evidence collection, codecs and threshold
   signatures with simulated compiler and node observations. This does not
   establish Ergo PoW, native reservation acceptance or operational mint.
+  Local native reservation signing now connects the original
+  proof, draft and compiled genesis to retained operator custody. It encodes
+  only pallet 12 call 6 using the pinned AccountId20/EthereumSignature layout;
+  one-shot signing does not authorize transport. Its closed import list keeps
+  additional signing or transport capabilities out of the composition.
+  Component tests cover rejection before signing and custody disposal during
+  signing. This remains local signature evidence, not Rust/node acceptance.
+  Before consuming that one-shot signer, the native caller must observe the
+  exact owned Frontier genesis, runtime/profile and account nonce. Revalidate
+  those bindings immediately before transport; a returned transaction hash
+  does not establish inclusion or a pending reservation. Native submission,
+  inclusion and parent-state mint are still unconnected and unverified.
   Connect native reservation and operational mint inside the same lifetime
   before running the fresh campaign. An issuance receipt is not mint authority.
   The old source locks and withdrawal campaign retain their original scope.

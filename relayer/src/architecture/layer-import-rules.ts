@@ -203,7 +203,25 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
 const FEDERATED_GENESIS_TARGET_ROOT =
   'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
 const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
+const FEDERATED_NATIVE_RESERVATION_SIGNING = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
 const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
+const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['substrate-federated-isolated-devnet-source-attestation-session-v1.ts', new Set([
+    'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1',
+    'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2', 'SubstrateFederatedNativeGenesisMintSourceProofReceiptV1',
+  ])],
+  ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['SubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
+  ['substrate-federated-observed-genesis-v1.ts', new Set(['assertObservedSubstrateFederatedGenesisV1', 'ObservedSubstrateFederatedGenesisV1'])],
+  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set(['SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1'])],
+]);
+const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ...[...REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS].map(
+    ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
+  ),
+  ['../../adapters/federated-genesis-operator-v1.js', new Set([
+    'assertFederatedGenesisOperatorV1', 'signFederatedGenesisReservationV1', 'FederatedGenesisOperatorV1',
+  ])],
+]);
 
 // Exact source-reviewed bindings, never inferred from the root's source imports.
 const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
@@ -276,6 +294,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set(REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS.keys())],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set(REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS.keys())],
   ...[...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS].map(
     ([file, bindings]) => [file, new Set(bindings.keys())] as const,
@@ -401,6 +420,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS],
   [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS],
   ...REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS,
   [
@@ -975,6 +995,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS],
   [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
@@ -1467,6 +1488,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set(['signFrontierNativeProofBoundReservationV1'])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
   ])],
@@ -1652,6 +1674,7 @@ const CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS],
   [FEDERATED_GENESIS_TARGET_ROOT, REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
@@ -1707,8 +1730,12 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
 > = new Map([
   [FEDERATED_GENESIS_OPERATOR, new Map([
     ['createFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
-    ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['signFederatedGenesisReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+  ])],
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, new Map([
+    ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Map([
     ['observeFederatedGenesisTargetsV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
@@ -2068,7 +2095,8 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
-  [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+  [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
+  [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
@@ -2290,6 +2318,14 @@ function inspectFileRestrictedImportBindings(
     imported.value === null
       ? undefined
       : CAPABILITY_RESTRICTED_FILE_IMPORT_BINDINGS.get(file)?.get(imported.value);
+  if (file === FEDERATED_NATIVE_RESERVATION_SIGNING && !allowedBindings) {
+    return [{
+      file,
+      line: imported.line,
+      importSpecifier: imported.value,
+      message: `native reservation composition import is not allowlisted: ${imported.value}`,
+    }];
+  }
   if (!allowedBindings) return [];
 
   return inspectRestrictedImportBindings(file, imported, allowedBindings);
