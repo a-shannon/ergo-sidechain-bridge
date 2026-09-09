@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
   assertCandidateV2: vi.fn(),
   assertNativePacket: vi.fn(),
+  assertNativeReadCustody: vi.fn(),
   assertConfirmation: vi.fn(),
   reobserveConfirmation: vi.fn(),
   assertTarget: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1: mocks.assertNativeReadCustody,
 }));
 vi.mock('./substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1:
@@ -320,6 +322,7 @@ describe('native committed-vault observation (mocked packet custody, box codec a
       }
       return PACKET;
     });
+    mocks.assertNativeReadCustody.mockImplementation((...args) => mocks.assertNativePacket(...args));
     mocks.assertConfirmation.mockImplementation((artifact, identity, genesis, txId, confirmation) => {
       if (artifact !== REFRESHED_CONFIRMATION.observerArtifact
         || identity !== BINDING.executionTargetIdentityDigestHex || genesis !== GENESIS_ID
@@ -480,11 +483,36 @@ describe('native committed-vault observation (mocked packet custody, box codec a
     expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(3);
   });
 
+  it('allows closing confirmation to advance without repeating a stable output window', async () => {
+    tipSequence([stable, stable, advanced], [stable, stable, advanced]);
+    confirmationHeights(211, 212);
+    const observation = await observe(input());
+    expect(observation.observedTipHeight).toBe(211);
+    expect(observation.finalityTargetHeight).toBe(211);
+    expect(mocks.getBox).toHaveBeenCalledTimes(10);
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps full process checks outside ancestry walks while checking retained custody', async () => {
+    const calls = new Map<number, Set<number>>();
+    const headers = headerFixture();
+    mocks.getBlockHeaderById.mockImplementation((_origin, id) => {
+      const phase = mocks.reobserveConfirmation.mock.calls.length;
+      const counts = calls.get(phase) ?? new Set<number>();
+      counts.add(mocks.assertTarget.mock.calls.length);
+      calls.set(phase, counts);
+      return headers.get(id);
+    });
+    await observe(input());
+    expect([...calls.values()].map(counts => counts.size)).toEqual([1, 1]);
+    expect(mocks.assertNativeReadCustody.mock.calls.length).toBeGreaterThan(88);
+  });
+
   it('accepts mining advance between node output windows', async () => {
     tipSequence([stable, stable, advanced], [advanced]);
     confirmationHeights(211, 212);
     expect((await observe(input())).observedTipHeight).toBe(212);
-    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(4);
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(3);
   });
 
   it('accepts mining advance during finality reads only after a fresh output window', async () => {
@@ -499,7 +527,7 @@ describe('native committed-vault observation (mocked packet custody, box codec a
     confirmationHeights(211, 212, 213);
     await expect(observe(input())).rejects.toThrow(/within three windows/);
     expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(3);
-    expect(mocks.getBox).toHaveBeenCalledTimes(15);
+    expect(mocks.getBox).toHaveBeenCalledTimes(30);
   });
 
   it.each([
@@ -515,14 +543,122 @@ describe('native committed-vault observation (mocked packet custody, box codec a
     await expect(observe(input())).rejects.toThrow(/regressed|replaced|conflicting header/);
   });
 
-  it('rejects conflicting ancestry above the finality target from a previous window', async () => {
+  it('rejects conflicting ancestry above the finality target from a concurrent peer window', async () => {
     tipSequence([stable, advanced, later], [later]);
     confirmationHeights(211, 213);
     const headers = headerFixture();
     mocks.getBlockHeaderById.mockImplementation((_origin, id) => id === hex('22')
       ? { ...headers.get(id), parentId: hex('1d') } : headers.get(id));
     await expect(observe(input())).rejects.toThrow(/conflicting header/);
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([PRIMARY, WITNESS])('rejects replacement of the captured output tip on %s after confirmation', async replacedOrigin => {
+    tipSequence([advanced, advanced, later], [advanced, advanced, later]);
+    confirmationHeights(211, 213);
+    const headers = headerFixture();
+    mocks.getBlockHeaderById.mockImplementation((origin, id) =>
+      mocks.reobserveConfirmation.mock.calls.length === 2 && origin === replacedOrigin && id === hex('22')
+        ? { ...headers.get(id), parentId: hex('1d') } : headers.get(id));
+    await expect(observe(input())).rejects.toThrow(/conflicting header/);
+    expect(mocks.getBox).toHaveBeenCalledTimes(10);
     expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([PRIMARY, WITNESS])('does not hide a %s output failure behind peer mining', async failedOrigin => {
+    tipSequence(failedOrigin === PRIMARY ? [stable] : [stable, advanced],
+      failedOrigin === WITNESS ? [stable] : [stable, advanced]);
+    mocks.getBox.mockImplementation((origin, id) => {
+      if (origin === failedOrigin && id === SOURCE_ID) return { boxId: SOURCE_ID };
+      return id === SUCCESSOR_ID ? RESERVE_SUCCESSOR : null;
+    });
+    await expect(observe(input())).rejects.toThrow(/still reports a transition input/);
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
+    expect(mocks.getBox).toHaveBeenCalledTimes(10);
+  });
+
+  it.each(['output', 'closing'] as const)('drains the %s peer header read before surfacing a failure', async phase => {
+    const phaseCount = phase === 'output' ? 1 : 2;
+    const headers = headerFixture();
+    let release!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    mocks.getBlockHeaderById.mockImplementation(async (origin, id) => {
+      if (mocks.reobserveConfirmation.mock.calls.length === phaseCount && id === OBSERVED_TIP_ID) {
+        if (origin === PRIMARY) throw new Error('primary header read failed');
+        markStarted();
+        await held;
+      }
+      return headers.get(id);
+    });
+    let finished = false;
+    const result = observe(input()).then(() => { finished = true; return null; }, error => { finished = true; return error; });
+    await started;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(finished).toBe(false);
+    release();
+    expect(await result).toMatchObject({ message: 'primary header read failed' });
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(phaseCount);
+  });
+
+  it('drains all started box reads before surfacing a sibling failure', async () => {
+    let release!: () => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>(resolve => { markStarted = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    mocks.getBox.mockImplementation(async (origin, id) => {
+      if (origin === PRIMARY && id === SOURCE_ID) throw new Error('box read failed');
+      if (origin === PRIMARY && id === SUCCESSOR_ID) { markStarted(); await held; }
+      return id === SUCCESSOR_ID ? RESERVE_SUCCESSOR : null;
+    });
+    let finished = false;
+    const result = observe(input()).then(() => { finished = true; return null; }, error => { finished = true; return error; });
+    await started;
+    await new Promise<void>(resolve => setImmediate(resolve));
+    expect(finished).toBe(false);
+    release();
+    expect(await result).toMatchObject({ message: 'box read failed' });
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['output', 'closing'] as const)('retains full target validation after failed %s reads', async phase => {
+    const headers = headerFixture();
+    mocks.getBlockHeaderById.mockImplementation((origin, id) => {
+      if (mocks.reobserveConfirmation.mock.calls.length === (phase === 'output' ? 1 : 2)
+        && origin === PRIMARY && id === OBSERVED_TIP_ID) {
+        mocks.assertTarget.mockReturnValue({ ...BINDING, processBindingDigestHex: hex('ee') });
+        throw new Error('read failed');
+      }
+      return headers.get(id);
+    });
+    await expect(observe(input())).rejects.toThrow(/target or packet changed/);
+  });
+
+  it.each([PRIMARY, WITNESS])('rejects closing node %s behind confirmation while its peer reaches it', async laggingOrigin => {
+    confirmationHeights(211, 212);
+    tipSequence([stable, stable, laggingOrigin === PRIMARY ? stable : advanced],
+      [stable, stable, laggingOrigin === WITNESS ? stable : advanced]);
+    await expect(observe(input())).rejects.toThrow(/confirmation exceeds the closing tip/);
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(2);
+    expect(mocks.getBox).toHaveBeenCalledTimes(10);
+  });
+
+  it('keeps the complete 75-header tip-to-inclusion walk at the maximum allowed lag', async () => {
+    const headers = headerFixture();
+    let parentId = OBSERVED_TIP_ID;
+    for (let height = 212; height <= 275; height++) {
+      const id = height.toString(16).padStart(64, '0');
+      headers.set(id, { height, id, parentId });
+      parentId = id;
+    }
+    mocks.getBestHeader.mockReturnValue(tip(275, parentId));
+    mocks.getBlockHeaderById.mockImplementation((_origin, id) => headers.get(id));
+    confirmationHeights(275);
+    const observation = await observe(input());
+    expect(observation.finalityPathHeaderIdsHex).toHaveLength(11);
+    expect(observation.finalityTargetHeight).toBe(211);
+    expect(mocks.getBlockHeaderById).toHaveBeenCalledTimes(75 * 2 * 2);
   });
 
   it('rejects a fork not descending from the exact inclusion', async () => {

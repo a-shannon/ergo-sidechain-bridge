@@ -23,6 +23,7 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
   assertSubstrateFederatedNativeGenesisPegInPacketV1,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
@@ -401,11 +402,23 @@ function retainObservation(
 
 type NativeTip = Readonly<{ height: number; idHex: string }>;
 interface NativeWindow {
-  assertActive(): void;
+  assertReadCustody(): void;
   recordTip(client: AuthenticatedSpvTrackerReadOnlyNodeClient, tip: NativeTip): void;
   recordHeader(header: NativeTip & { readonly parentIdHex?: string }): void;
 }
 class NativeTipAdvance extends Error {}
+
+async function settleNativeReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(reads);
+  // Mining in one read must not hide a semantic failure in its sibling.
+  const failure = settled.find(result => result.status === 'rejected'
+    && !(result.reason instanceof NativeTipAdvance));
+  if (failure?.status === 'rejected') throw failure.reason;
+  return settled.map(result => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
+}
 
 export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1(
   input: Readonly<{
@@ -427,6 +440,19 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
       throw new Error('native committed-vault target or packet changed');
     }
   };
+  const assertReadCustody = () => {
+    if (assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(packet, batch, target) !== packet) {
+      throw new Error('native committed-vault read custody changed');
+    }
+  };
+  const readGroup = async <T>(read: () => Promise<T>): Promise<T> => {
+    assertActive();
+    try {
+      return await read();
+    } finally {
+      assertActive();
+    }
+  };
   assertActive();
   const confirmation = normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1(retained.confirmation);
   if (confirmation.status !== 'confirmed' || confirmation.confirmationHeight === null
@@ -440,14 +466,12 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
   );
   let prior = confirmation;
   const refresh = async () => {
-    assertActive();
-    const latest = await reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
+    const latest = await readGroup(() => reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1({
       artifact: prior.observerArtifact,
       expectedReconciliationIdentityDigestHex: binding.executionTargetIdentityDigestHex,
       expectedTargetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
       expectedTxId, priorConfirmation: prior,
-    });
-    assertActive();
+    }));
     if (latest.status !== 'confirmed' || latest.confirmationHeight === null
       || latest.confirmationHeaderIdHex === null
       || latest.confirmationHeight !== confirmation.confirmationHeight
@@ -466,7 +490,7 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
   const heights = new Map<string, number>();
   const parents = new Map<string, string>();
   const window: NativeWindow = {
-    assertActive,
+    assertReadCustody,
     recordHeader(header) {
       const known = headers.get(header.height);
       const height = heights.get(header.idHex);
@@ -499,27 +523,36 @@ export async function observeSubstrateFederatedNativeGenesisPegInCommittedVaultO
           packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId,
           packet.boxes.transitionFeeFunding.boxId, packet.boxes.reserveSuccessor,
           initial.confirmationHeight, initial.confirmationHeaderIdHex, label, window);
-      const primaryState = await observe(primary, 'primary');
-      const witnessState = await observe(witness, 'witness');
+      const [primaryState, witnessState] = await readGroup(() => settleNativeReads([
+        observe(primary, 'primary'), observe(witness, 'witness'),
+      ]));
+      if (!primaryState || !witnessState) throw new Error('native committed-vault output pair is incomplete');
       if (canonicalJson(primaryState.finality) !== canonicalJson(witnessState.finality)) {
         throw new Error('native committed-vault finality observations disagree');
       }
+      if ([primaryState, witnessState].some(state => initial.observedAtHeight > state.tip.height)) {
+        throw new Error('native committed-vault confirmation snapshot conflicts with output tip');
+      }
+      if (canonicalJson(primaryState.tip) !== canonicalJson(witnessState.tip)) throw new NativeTipAdvance();
       const latest = await refresh();
-      const primaryFinality = await observeStableFinality(primary,
-        latest.confirmationHeight, latest.confirmationHeaderIdHex, 'primary', window);
-      const witnessFinality = await observeStableFinality(witness,
-        latest.confirmationHeight, latest.confirmationHeaderIdHex, 'witness', window);
+      if (latest.observedAtHeight < primaryState.tip.height) {
+        throw new Error('native committed-vault confirmation snapshot conflicts with output tip');
+      }
+      // Closing confirmation may observe later mining. Each closing walk still
+      // crosses the captured output tip; the shared header ledger rejects its replacement.
+      const [primaryFinality, witnessFinality] = await readGroup(() => settleNativeReads([
+        observeStableFinality(primary, latest.confirmationHeight, latest.confirmationHeaderIdHex, 'primary', window),
+        observeStableFinality(witness, latest.confirmationHeight, latest.confirmationHeaderIdHex, 'witness', window),
+      ]));
+      if (!primaryFinality || !witnessFinality) throw new Error('native committed-vault finality pair is incomplete');
       if ([primaryFinality, witnessFinality].some(state =>
         canonicalJson(state.finality) !== canonicalJson(primaryState.finality))) {
         throw new Error('native committed-vault finality target changed');
       }
-      if (initial.observedAtHeight > primaryState.tip.height
-        || latest.observedAtHeight < primaryState.tip.height) {
-        throw new Error('native committed-vault confirmation snapshot conflicts with output tip');
+      if ([primaryFinality, witnessFinality].some(state => latest.observedAtHeight > state.tip.height)) {
+        throw new Error('native committed-vault confirmation exceeds the closing tip');
       }
-      if ([witnessState, primaryFinality, witnessFinality].some(state =>
-        canonicalJson(state.tip) !== canonicalJson(primaryState.tip))
-        || latest.observedAtHeight > primaryState.tip.height) {
+      if (canonicalJson(primaryFinality.tip) !== canonicalJson(witnessFinality.tip)) {
         throw new NativeTipAdvance();
       }
       assertActive();
@@ -653,32 +686,38 @@ async function observeNodeState(
   digestHex: string;
 }>> {
   for (let attempt = 0; attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS; attempt += 1) {
-    window?.assertActive();
+    window?.assertReadCustody();
     const tipBefore = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} pre-output tip`,
     );
-    window?.assertActive();
+    window?.assertReadCustody();
     window?.recordTip(client, tipBefore);
+    const boxReads = [sourceFundingBoxIdHex, reservePredecessorBoxIdHex, sourceLockBoxIdHex,
+      transitionFeeFundingBoxIdHex, expectedReserveSuccessor.boxId].map(id => {
+      if (!window) return client.getBoxByIdOrNull(id);
+      return (async () => {
+        window.assertReadCustody();
+        try {
+          return await client.getBoxByIdOrNull(id);
+        } finally {
+          window.assertReadCustody();
+        }
+      })();
+    });
     const [
       sourceFunding,
       reservePredecessor,
       sourceLock,
       transitionFeeFunding,
       rawReserveSuccessor,
-    ] = await Promise.all([
-      client.getBoxByIdOrNull(sourceFundingBoxIdHex),
-      client.getBoxByIdOrNull(reservePredecessorBoxIdHex),
-      client.getBoxByIdOrNull(sourceLockBoxIdHex),
-      client.getBoxByIdOrNull(transitionFeeFundingBoxIdHex),
-      client.getBoxByIdOrNull(expectedReserveSuccessor.boxId),
-    ]);
-    window?.assertActive();
+    ] = await (window ? settleNativeReads(boxReads) : Promise.all(boxReads));
+    window?.assertReadCustody();
     const tipAfter = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} post-output tip`,
     );
-    window?.assertActive();
+    window?.assertReadCustody();
     window?.recordTip(client, tipAfter);
     if (
       sourceFunding !== null
@@ -699,7 +738,7 @@ async function observeNodeState(
       rawReserveSuccessor,
       `isolated committed-vault ${label} reserve successor`,
     );
-    window?.assertActive();
+    window?.assertReadCustody();
     if (
       canonicalJson(reserveSuccessor)
         !== canonicalJson(expectedReserveSuccessor)
@@ -781,9 +820,9 @@ async function observeExactFinalityPath(
   }>> = [];
   let cursor = tip;
   while (cursor.height >= inclusionHeight) {
-    window?.assertActive();
+    window?.assertReadCustody();
     const raw = await client.getBlockHeaderById(cursor.idHex);
-    window?.assertActive();
+    window?.assertReadCustody();
     if (raw === null) {
       throw new Error(
         `isolated committed-vault ${label} finality header is unavailable`,
@@ -852,12 +891,12 @@ async function observeStableFinality(
     attempt < NODE_STATE_OBSERVATION_MAX_ATTEMPTS;
     attempt += 1
   ) {
-    window?.assertActive();
+    window?.assertReadCustody();
     const tipBefore = normalizeBestHeader(
       await client.getBestHeader(),
       `isolated committed-vault ${label} pre-finality tip`,
     );
-    window?.assertActive();
+    window?.assertReadCustody();
     window?.recordTip(client, tipBefore);
     const finality = await observeExactFinalityPath(
       client,
@@ -871,7 +910,7 @@ async function observeStableFinality(
       await client.getBestHeader(),
       `isolated committed-vault ${label} post-finality tip`,
     );
-    window?.assertActive();
+    window?.assertReadCustody();
     window?.recordTip(client, tipAfter);
     if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
       return Object.freeze({ tip: tipAfter, finality });
