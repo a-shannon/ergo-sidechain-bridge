@@ -2,6 +2,9 @@ import {
   assertFederatedGenesisOperatorV1, signFederatedGenesisReservationV1,
   type FederatedGenesisOperatorV1,
 } from '../../adapters/federated-genesis-operator-v1.js';
+import { observeFederatedGenesisReservationTargetV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
+import { assertOwnedFederatedGenesisDevnetTargetV1, type OwnedFederatedGenesisDevnetTargetV1 }
+  from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import {
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
@@ -22,32 +25,46 @@ interface SigningInput {
   readonly proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>;
   readonly compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
   readonly target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
-  readonly genesisHashHex: string;
-  readonly nonce: number;
+  readonly frontierTarget: Readonly<OwnedFederatedGenesisDevnetTargetV1>;
+  readonly expectedStorage: Readonly<Record<string, string>>;
+  readonly expectedGenesisHashHex: string;
 }
 
 /** Caller must reobserve the owned target before transport. A signature is not acceptance. */
-export function signFrontierNativeProofBoundReservationV1(input: Readonly<SigningInput>) {
-  const fields = ['operator', 'sourceSession', 'draft', 'proof', 'compiled', 'target', 'genesisHashHex', 'nonce'];
+export async function signFrontierNativeProofBoundReservationV1(input: Readonly<SigningInput>) {
+  const fields = ['operator', 'sourceSession', 'draft', 'proof', 'compiled', 'target', 'frontierTarget', 'expectedStorage', 'expectedGenesisHashHex'];
   if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
     || Object.getOwnPropertyNames(input).length !== fields.length || Object.getOwnPropertySymbols(input).length !== 0
     || fields.some(key => {
       const descriptor = Object.getOwnPropertyDescriptor(input, key);
       return !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value');
     })) throw new Error('native reservation composition requires exact own-data fields');
-  const { operator, sourceSession, draft, proof, compiled, target, genesisHashHex, nonce } = input;
+  const { operator, sourceSession, draft, proof, compiled, target, frontierTarget, expectedStorage, expectedGenesisHashHex } = input;
   const assertCurrent = () => {
     assertFederatedGenesisOperatorV1(operator);
     assertObservedSubstrateFederatedGenesisV1(compiled, target);
     assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(proof, sourceSession, draft);
+    assertOwnedFederatedGenesisDevnetTargetV1(frontierTarget);
     if (compiled.preparation.operatorAddressHex !== operator.addressHex
       || compiled.preparation.launchDomainHex !== operator.launchDomainHex
       || compiled.candidate.genesisJsonSha256Hex !== proof.genesisJsonSha256Hex
       || compiled.candidate.runtimeProfileScaleHex !== proof.runtimeProfileScaleHex
-      || compiled.candidate.runtimeProfileIdHex !== proof.runtimeProfileIdHex) {
+      || compiled.candidate.runtimeProfileIdHex !== proof.runtimeProfileIdHex
+      || frontierTarget.genesisJsonSha256Hex !== compiled.candidate.genesisJsonSha256Hex
+      || frontierTarget.primaryRpcUrl !== 'http://127.0.0.1:19955'
+      || frontierTarget.witnessRpcUrl !== 'http://127.0.0.1:19956') {
       throw new Error('native reservation proof differs from retained operator or genesis');
     }
   };
+  assertCurrent();
+  const { genesisHashHex, nonce } = await observeFederatedGenesisReservationTargetV1({
+    expectedStorage, expectedGenesisHashHex,
+    sourceRuntimeCodeSha256Hex: compiled.preparation.application.sourceRuntimeCodeSha256Hex,
+    sourceRuntimeCodeBytes: compiled.preparation.application.sourceRuntimeCodeBytes,
+    runtimeProfileScaleHex: compiled.candidate.runtimeProfileScaleHex,
+    operatorStorageKeyHex: operator.nativeFunding.storageKeyHex,
+    operatorAccountInfoHex: operator.nativeFunding.accountInfoScaleHex,
+  });
   assertCurrent();
   const signed = signFederatedGenesisReservationV1(operator, { genesisHashHex, nonce,
     statementHex: proof.request.statementHex, sourceProofEnvelopeScaleHex: proof.sourceProofEnvelopeScaleHex });

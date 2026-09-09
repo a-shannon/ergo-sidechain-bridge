@@ -185,6 +185,27 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['../../adapters/federated-genesis-target-observation-v1.js', 'observeFederatedGenesisReservationTargetV1'],
+    ['../../substrate-federated-authority-safe-devnet-process-v1.js', 'assertOwnedFederatedGenesisDevnetTargetV1'],
+  ])('keeps native target preflight at its reviewed call: %s#%s', (specifier, binding) => {
+    const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(composition, `${declaration} ${binding}({});`))).toEqual([]);
+    for (const escape of [`const escaped = ${binding};`, `capture(${binding});`, `function expose() { return ${binding}; }`]) {
+      expect(inspect(staticAppFixture(composition, `${declaration} ${escape}`)).map(item => item.message))
+        .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    }
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}({});`))
+      .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+  });
+
+  it('accepts the exact native target-observed signing composition', () => {
+    const file = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+    expect(inspect(staticAppFixture(file, source))).toEqual([]);
+  });
+
+  it.each([
     ['node:crypto', "import { createPrivateKey } from 'SPECIFIER';"],
     ['ethers', "import { Wallet } from 'SPECIFIER';"],
     ['axios', "import client from 'SPECIFIER';"],
@@ -1526,6 +1547,7 @@ describe('layer import rules', () => {
       `,
       [reviewedTarget]: 'export const processProducer = true;',
     }).map(violation => violation.message)).toEqual([
+      'exclusive authority module must use named runtime imports: ../../substrate-federated-authority-safe-devnet-process-v1.js',
       'restricted capability import must use reviewed named bindings: ../../substrate-federated-authority-safe-devnet-process-v1.js',
     ]);
 
@@ -1546,6 +1568,7 @@ describe('layer import rules', () => {
       `,
       [reviewedTarget]: 'export const processProducer = true;',
     }).map(violation => violation.message)).toEqual([
+      'exclusive authority module must use named runtime imports: ../../substrate-federated-authority-safe-devnet-process-v1.js',
       'restricted capability import must use reviewed named bindings: ../../substrate-federated-authority-safe-devnet-process-v1.js',
     ]);
 
@@ -1563,6 +1586,7 @@ describe('layer import rules', () => {
       [reviewedTarget]: 'export const processProducer = true;',
     }).map(violation => violation.message)).toEqual([
       `apps must not import an unclassified legacy module: ${reviewedTarget}`,
+      'exclusive authority module must use named runtime imports: ../../substrate-federated-authority-safe-devnet-process-v1.js',
     ]);
   });
 

@@ -50,6 +50,10 @@ const MAX_CHAIN_SPEC_BYTES = 16 * 1024 * 1024;
 const RECOVERY_LAG_BLOCKS = 2;
 const ACCEPTANCE_PROCESS_RECEIPTS = new WeakSet<object>();
 const FEDERATED_GENESIS_PROCESS_RECEIPTS = new WeakSet<object>();
+const FEDERATED_GENESIS_TARGETS = new WeakMap<
+  Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+  Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>
+>();
 const RECOVERY_PROCESS_RECEIPTS = new WeakSet<object>();
 const RECOVERY_RECEIPTS = new WeakSet<object>();
 const RECOVERY_TIMELINE_RECEIPTS = new WeakSet<object>();
@@ -104,6 +108,12 @@ export interface OwnedFederatedGenesisDevnetProcessV1Input
 export interface OwnedFederatedGenesisDevnetProcessV1Receipt
   extends Omit<OwnedAuthoritySafeDevnetProcessV1Receipt, 'schema'> {
   readonly schema: typeof SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA;
+}
+
+export interface OwnedFederatedGenesisDevnetTargetV1 {
+  readonly primaryRpcUrl: string;
+  readonly witnessRpcUrl: string;
+  readonly genesisJsonSha256Hex: string;
 }
 
 export interface OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
@@ -251,6 +261,7 @@ interface OwnedAuthoritySafeDevnetRecoveryOperationsV1 {
 }
 
 interface OwnedAuthoritySafeDevnetInternalOwnerV1 {
+  assertActive(): void;
   readonly endpoints: Readonly<{
     primaryRpcUrl: string;
     witnessRpcUrl: string;
@@ -317,7 +328,7 @@ export async function withOwnedAuthoritySafeDevnetProcessesV1<T>(
 /** Own two isolated FED nodes; typed-loader execution is not mint authority. */
 export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
   input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
-  action: (endpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>) => Promise<T>,
+  action: (target: Readonly<OwnedFederatedGenesisDevnetTargetV1>) => Promise<T>,
 ): Promise<Readonly<{ value: T; receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt> }>> {
   if (typeof action !== 'function') throw new Error('FED genesis owned-process action is required');
   const keys = ['nodeBinaryPath', 'expectedNodeBinarySha256Hex', 'genesisJsonBytes',
@@ -342,7 +353,29 @@ export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
     primaryP2pPort: captured.primaryP2pPort, witnessP2pPort: captured.witnessP2pPort,
     primaryPrometheusPort: captured.primaryPrometheusPort,
     witnessPrometheusPort: captured.witnessPrometheusPort,
-  }), owner => action(owner.endpoints), 'federated_genesis_observation');
+  }), async owner => {
+    const target: Readonly<OwnedFederatedGenesisDevnetTargetV1> = Object.freeze({
+      primaryRpcUrl: owner.endpoints.primaryRpcUrl,
+      witnessRpcUrl: owner.endpoints.witnessRpcUrl,
+      genesisJsonSha256Hex: captured.expectedGenesisJsonSha256Hex,
+    });
+    FEDERATED_GENESIS_TARGETS.set(target, owner);
+    try {
+      return await action(target);
+    } finally {
+      FEDERATED_GENESIS_TARGETS.delete(target);
+    }
+  }, 'federated_genesis_observation');
+}
+
+export function assertOwnedFederatedGenesisDevnetTargetV1(
+  target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+): void {
+  const owner = FEDERATED_GENESIS_TARGETS.get(target);
+  if (!owner) {
+    throw new Error('FED genesis target requires original active owned-process provenance');
+  }
+  owner.assertActive();
 }
 
 export async function exerciseOwnedAuthoritySafeDevnetRecoveryLifecycleV1(
@@ -962,6 +995,21 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     await assertConnectedRuntime();
 
     actionValue = await action(Object.freeze({
+      assertActive: () => {
+        const currentPrimary = requiredProcess(primary, 'primary');
+        const currentWitness = requiredProcess(witness, 'witness');
+        assertLive(currentPrimary, 'primary');
+        assertLive(currentWitness, 'witness');
+        assertChainSpecUnchanged(specPath, chainSpecSha256Hex);
+        assertListenerOwnership([
+          { pid: processId(currentPrimary, 'primary'), ports: [
+            primaryRpc.port,
+            input.primaryP2pPort,
+            input.primaryPrometheusPort,
+          ] },
+          { pid: processId(currentWitness, 'witness'), ports: witnessPorts },
+        ]);
+      },
       endpoints: Object.freeze({
         primaryRpcUrl: primaryRpc.url,
         witnessRpcUrl: witnessRpc.url,

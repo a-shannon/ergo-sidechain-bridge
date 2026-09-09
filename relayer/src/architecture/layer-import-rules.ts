@@ -206,6 +206,9 @@ const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
 const FEDERATED_NATIVE_RESERVATION_SIGNING = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
 const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
 const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
+    'assertOwnedFederatedGenesisDevnetTargetV1', 'OwnedFederatedGenesisDevnetTargetV1',
+  ])],
   ['substrate-federated-isolated-devnet-source-attestation-session-v1.ts', new Set([
     'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1',
     'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2', 'SubstrateFederatedNativeGenesisMintSourceProofReceiptV1',
@@ -215,6 +218,7 @@ const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, Readonly
   ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set(['SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1'])],
 ]);
 const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['../../adapters/federated-genesis-target-observation-v1.js', new Set(['observeFederatedGenesisReservationTargetV1'])],
   ...[...REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS].map(
     ([target, bindings]) => [`../../${target.replace(/\.ts$/, '.js')}`, bindings] as const,
   ),
@@ -1737,8 +1741,12 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Map([
     ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
+  ['substrate-federated-authority-safe-devnet-process-v1.ts', new Map([
+    ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+  ])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Map([
     ['observeFederatedGenesisTargetsV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['observeFederatedGenesisReservationTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   [
     'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
@@ -2097,7 +2105,7 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
 > = new Map([
   [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
-  [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+  [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
     new Set(['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts']),

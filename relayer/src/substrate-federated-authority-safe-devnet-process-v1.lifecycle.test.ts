@@ -28,6 +28,7 @@ vi.mock('./native-executable-pin.js', () => ({
 import {
   assertOwnedAuthoritySafeDevnetProcessV1Receipt,
   assertOwnedFederatedGenesisDevnetProcessV1Receipt,
+  assertOwnedFederatedGenesisDevnetTargetV1,
   withOwnedFederatedGenesisDevnetProcessesV1,
   assertOwnedAuthoritySafeDevnetRecoveryLifecycleV1Receipt,
   assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt,
@@ -36,6 +37,7 @@ import {
   exerciseOwnedAuthoritySafeDevnetRecoveryLifecycleV1,
   withOwnedAuthoritySafeDevnetProcessesV1,
   type OwnedAuthoritySafeDevnetProcessV1Input,
+  type OwnedFederatedGenesisDevnetTargetV1,
 } from './substrate-federated-authority-safe-devnet-process-v1.js';
 import {
   assertFrontierBackingReadAgreementSourcesSealed,
@@ -161,6 +163,7 @@ interface FakeBlock {
 let children: FakeChild[];
 let wrongListenerOwner: boolean;
 let wrongListenerAddress: boolean;
+let listenerDrift: { port: number; fault: 'owner' | 'address' | 'missing' } | undefined;
 let portProbeFailureAt: number | undefined;
 let portProbeCommands: string[];
 let wrongPeerIdentity: boolean;
@@ -190,6 +193,7 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     children = [];
     wrongListenerOwner = false;
     wrongListenerAddress = false;
+    listenerDrift = undefined;
     portProbeFailureAt = undefined;
     portProbeCommands = [];
     wrongPeerIdentity = false;
@@ -614,7 +618,12 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     const result = await withOwnedFederatedGenesisDevnetProcessesV1(value, async endpoints => {
       expect(children).toHaveLength(2);
       expect(children.every(child => child.alive)).toBe(true);
-      expect(Object.keys(endpoints).sort()).toEqual(['primaryRpcUrl', 'witnessRpcUrl']);
+      assertExactKeyShape(endpoints, {
+        primaryRpcUrl: true, witnessRpcUrl: true, genesisJsonSha256Hex: true,
+      });
+      expect(Object.isFrozen(endpoints)).toBe(true);
+      expect(endpoints.genesisJsonSha256Hex).toBe(value.expectedGenesisJsonSha256Hex);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(endpoints)).not.toThrow();
       expect(readFileSync(join(runtimeDirectory, 'authority-safe.json'))).toEqual(value.genesisJsonBytes);
       return { observed: true };
     });
@@ -633,6 +642,101 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt({ ...result.receipt })).toThrow(/provenance/);
     expect(() => assertOwnedAuthoritySafeDevnetProcessV1Receipt(result.receipt)).toThrow(/provenance/);
     expect(() => assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt(result.receipt)).toThrow(/provenance/);
+  });
+
+  it('retains the original captured FED genesis pin across asynchronous startup and action', async () => {
+    const value = federatedInput();
+    const expectedPin = value.expectedGenesisJsonSha256Hex;
+    const pending = withOwnedFederatedGenesisDevnetProcessesV1(value, async target => {
+      expect(target.genesisJsonSha256Hex).toBe(expectedPin);
+      expect(target.primaryRpcUrl).toBe(`http://127.0.0.1:${PORTS.primaryRpc}`);
+      expect(target.witnessRpcUrl).toBe(`http://127.0.0.1:${PORTS.witnessRpc}`);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      await Promise.resolve();
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return target;
+    });
+    value.expectedGenesisJsonSha256Hex = '11'.repeat(32);
+    value.genesisJsonBytes.fill(0);
+    value.primaryRpcUrl = 'http://127.0.0.1:1';
+    value.witnessRpcUrl = 'http://127.0.0.1:2';
+    const result = await pending;
+    expect(result.receipt.chainSpecSha256Hex).toBe(expectedPin);
+    expect(result.value.genesisJsonSha256Hex).toBe(expectedPin);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(result.value)).toThrow(/provenance/);
+  });
+
+  it('rejects copied FED targets without querying process state', async () => {
+    await withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      const probes = mocks.spawnSync.mock.calls.length;
+      for (const copy of [Object.freeze({ ...target }), JSON.parse(JSON.stringify(target))]) {
+        expect(() => assertOwnedFederatedGenesisDevnetTargetV1(copy)).toThrow(/provenance/);
+      }
+      expect(mocks.spawnSync.mock.calls.length).toBe(probes);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'observed';
+    });
+  });
+
+  it.each(['return', 'throw'] as const)('revokes the FED target before teardown after callback %s', async outcome => {
+    let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
+    let checkedDuringTeardown = false;
+    const failure = new Error('synthetic FED callback failure');
+    const pending = withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      retained = target;
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      const witness = children[1]!;
+      vi.mocked(witness.kill).mockImplementation(() => {
+        expect(children.every(child => child.alive)).toBe(true);
+        expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).toThrow(/provenance/);
+        checkedDuringTeardown = true;
+        exitChild(witness, 'SIGKILL');
+        return true;
+      });
+      if (outcome === 'throw') throw failure;
+      return target;
+    });
+    if (outcome === 'throw') await expect(pending).rejects.toBe(failure);
+    else expect((await pending).value).toBe(retained);
+    expect(checkedDuringTeardown).toBe(true);
+    expect(retained).toBeDefined();
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each(['primary', 'witness'] as const)('rejects the active FED target after %s process death', async role => {
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      exitChild(children.find(child => child.role === role)!);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
+        .toThrow(`${role} process exited unexpectedly`);
+      return 'observed';
+    })).rejects.toThrow(`${role} process exited unexpectedly`);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('rejects the active FED target after exact genesis bytes drift without a semantic change', async () => {
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      writeFileSync(join(runtimeDirectory, 'authority-safe.json'), JSON.stringify(typedGenesis(), null, 2));
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
+        .toThrow(/chain-spec file changed during target observation/);
+      return 'observed';
+    })).rejects.toThrow(/chain-spec file changed during target observation/);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each(Object.entries(PORTS).flatMap(([label, port]) =>
+    (['owner', 'address', 'missing'] as const).map(fault => ({ label, port, fault })),
+  ))('rejects the active FED target after $label listener $fault drift', async ({ port, fault }) => {
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      listenerDrift = { port, fault };
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
+        .toThrow(/listener is not exclusively loopback-owned/);
+      return 'observed';
+    })).rejects.toThrow(/listener is not exclusively loopback-owned/);
+    expect(children.every(child => !child.alive)).toBe(true);
   });
 
   it.each(['image', 'listener', 'peer', 'action', 'spec', 'cleanup'])('retains FED %s failure containment', async fault => {
@@ -1054,6 +1158,15 @@ function listenerRows(): Array<{
   }
   if (wrongListenerOwner && rows.length > 0) rows[0]!.OwningProcess = 49_999;
   if (wrongListenerAddress && rows.length > 0) rows[0]!.LocalAddress = '0.0.0.0';
+  if (listenerDrift) {
+    for (const row of rows.filter(row => row.LocalPort === listenerDrift!.port)) {
+      if (listenerDrift.fault === 'owner') row.OwningProcess = 49_999;
+      if (listenerDrift.fault === 'address') row.LocalAddress = '0.0.0.0';
+    }
+    if (listenerDrift.fault === 'missing') {
+      return rows.filter(row => row.LocalPort !== listenerDrift!.port);
+    }
+  }
   return rows;
 }
 

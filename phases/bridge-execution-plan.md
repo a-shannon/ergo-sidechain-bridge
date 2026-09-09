@@ -202,8 +202,15 @@ establish deployment safety or independent operator custody.
   additional signing or transport capabilities out of the composition.
   Component tests cover rejection before signing and custody disposal during
   signing. This remains local signature evidence, not Rust/node acceptance.
-  Before consuming that one-shot signer, the native caller must observe the
-  exact owned Frontier genesis, runtime/profile and account nonce. Revalidate
+  The native signer now observes both owned Frontier processes before using
+  its one-shot budget. The original callback-scoped target binds the exact
+  typed genesis; clones, expired custody, changed spec bytes, exited processes
+  and listener drift reject. Both nodes must retain the selected genesis,
+  exact compiled runtime/profile, enforcement, funded operator account and
+  empty pools. The nonce comes from that observed account, not a caller field.
+  Component tests cover changes during observation and disposal before or
+  during signing. These nodes use manual sealing without GRANDPA; their
+  agreement is local state observation, not cryptographic finality. Revalidate
   those bindings immediately before transport; a returned transaction hash
   does not establish inclusion or a pending reservation. Native submission,
   inclusion and parent-state mint are still unconnected and unverified.
