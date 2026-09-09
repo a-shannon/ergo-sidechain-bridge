@@ -627,6 +627,7 @@ describe('native FED managed setup session', () => {
     onConfirmation: (callback: (count: number) => number) => void;
     onBoxRead: (callback: (id: string, count: number) => void) => void;
     onTip: (callback: (origin: string, count: number) => { height: number; id: string }) => void;
+    onHeight: (callback: () => number) => void;
   }) => Promise<void>) {
     const fixture = await nativePegInFixture();
     const packet = await buildNativePegIn(fixture.input);
@@ -650,6 +651,7 @@ describe('native FED managed setup session', () => {
     let boxReadCallback = (_id: string, _count: number) => {};
     const tipCounts = new Map<string, number>();
     let tipCallback = (_origin: string, _count: number) => ({ height: 1020, id: '70'.repeat(32) });
+    let heightCallback = () => 1020;
     vi.spyOn(rewardDiscovery, 'discoverSubstrateFederatedRewardInputsV2').mockImplementation(async () => {
       fundingCallback(++fundingCount);
       const snapshot = freezeFixture(structuredClone(funding)); observations.add(snapshot); return snapshot as never;
@@ -664,7 +666,7 @@ describe('native FED managed setup session', () => {
     const headerId = (height: number): string => height === 1000 ? '71'.repeat(32)
       : height === 1020 ? '70'.repeat(32) : height.toString(16).padStart(64, '0');
     vi.spyOn(axios, 'create').mockImplementation(options => ({ get: async (path: string, config?: { responseType?: string }) => {
-      if (path === '/info') return { data: { network: 'devnet', fullHeight: 1020 } };
+      if (path === '/info') return { data: { network: 'devnet', fullHeight: heightCallback() } };
       const atHeight = /^\/blocks\/at\/(1000|1020)$/.exec(path);
       if (atHeight && config?.responseType === 'arraybuffer') {
         return { status: 200, data: Buffer.from(JSON.stringify([headerId(Number(atHeight[1]))])) };
@@ -679,7 +681,7 @@ describe('native FED managed setup session', () => {
       }
       const headerMatch = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(path);
       if (headerMatch) {
-        const height = Array.from({ length: 21 }, (_, index) => 1000 + index).find(value => headerId(value) === headerMatch[1]);
+        const height = Array.from({ length: 23 }, (_, index) => 1000 + index).find(value => headerId(value) === headerMatch[1]);
         if (height === undefined) throw new Error('unexpected source-lock fixture header');
         return { status: 200, data: Buffer.from(JSON.stringify({ height, id: headerId(height), parentId: headerId(height - 1) })) };
       }
@@ -722,7 +724,8 @@ describe('native FED managed setup session', () => {
       onFunding: callback => { fundingCallback = callback; }, onPost: callback => { postCallback = callback; },
       onConfirmation: callback => { confirmationCount = 0; confirmationCallback = callback; },
       onBoxRead: callback => { boxReadCount = 0; boxReadCallback = callback; },
-      onTip: callback => { tipCounts.clear(); tipCallback = callback; } }); }
+      onTip: callback => { tipCounts.clear(); tipCallback = callback; },
+      onHeight: callback => { heightCallback = callback; } }); }
     finally { state.close(); rmSync(directory, { recursive: true, force: true }); }
   }
 
@@ -862,6 +865,7 @@ describe('native FED managed setup session', () => {
     onConfirmation: (callback: (count: number) => number) => void;
     onBoxRead: (callback: (id: string, count: number) => void) => void;
     onTip: (callback: (origin: string, count: number) => { height: number; id: string }) => void;
+    onHeight: (callback: () => number) => void;
   }) => Promise<void>) {
     await withNativeSourceLock(async context => {
       const source = await executeNativeSourceLock(context.input);
@@ -1569,6 +1573,47 @@ describe('native FED managed setup session', () => {
       vi.mocked(helpers.ncheck).mockImplementation(async (...args) => ++calls === 2 ? null : check(...args));
       await expect(executeNativeVault(input)).rejects.toThrow(/fresh JVM check rejected/);
       expect(post).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.each(['descendant', 'fork'])('binds native reserve inputs to the %s after a fresh check', async branch => {
+    await withNativeVault(async ({ input, post, onTip, onHeight, onConfirmation }) => {
+      let advanced = false;
+      onHeight(() => advanced ? 1022 : 1020);
+      onConfirmation(() => advanced ? 22 : 20);
+      onTip(() => advanced ? { height: 1022, id: (1022).toString(16).padStart(64, '0') }
+        : { height: 1020, id: '70'.repeat(32) });
+      const check = vi.mocked(helpers.ncheck).getMockImplementation()!;
+      let checks = 0;
+      vi.mocked(helpers.ncheck).mockImplementation(async (...args) => {
+        const result = await check(...args);
+        if (++checks === 2) advanced = true;
+        return result;
+      });
+      const read = readOnlyNode.AuthenticatedSpvTrackerReadOnlyNodeClient.prototype.getBlockHeaderById;
+      const headers = vi.spyOn(readOnlyNode.AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBlockHeaderById')
+        .mockImplementation(async function(this: readOnlyNode.AuthenticatedSpvTrackerReadOnlyNodeClient, id) {
+          if (branch === 'fork' && advanced && id === 'ef'.repeat(32)) {
+            return { id, height: 1020, parentId: (1019).toString(16).padStart(64, '0') };
+          }
+          const value = await read.call(this, id);
+          return branch === 'fork' && advanced && id === (1021).toString(16).padStart(64, '0')
+            ? { ...(value as object), parentId: 'ef'.repeat(32) } : value;
+        });
+      if (branch === 'descendant') {
+        const result = await executeNativeVault(input);
+        expect(result.transportStatus).toBe('accepted');
+        expect(result.preTransportObservation.observedTipHeight).toBe(1022);
+        expect(input.state.getErgoOperationalTransactionAttempt(result.expectedTxId)?.status).toBe('confirmed');
+        expect(post).toHaveBeenCalledTimes(2);
+      } else {
+        await expect(executeNativeVault(input)).rejects.toThrow(/previously observed height/);
+        expect(headers).toHaveBeenCalledWith('ef'.repeat(32));
+        expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.reserveTransition.txId)).toBeNull();
+        expect(post).toHaveBeenCalledTimes(1);
+      }
+      expect(headers).toHaveBeenCalledWith((1022).toString(16).padStart(64, '0'));
+      expect(helpers.ncheck).toHaveBeenCalledTimes(6);
     });
   });
 

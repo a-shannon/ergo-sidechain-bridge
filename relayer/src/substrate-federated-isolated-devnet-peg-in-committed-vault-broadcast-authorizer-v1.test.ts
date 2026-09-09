@@ -3,6 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
   assertCandidateV2: vi.fn(),
+  assertNativePacket: vi.fn(),
+  assertReadCustody: vi.fn(),
+  assertNativeSource: vi.fn(),
   assertExecutionCheck: vi.fn(),
   assertHandleBinding: vi.fn(),
   assertHandle: vi.fn(),
@@ -12,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   assertTarget: vi.fn(),
   checkSignedTransaction: vi.fn(),
   normalizeEip12Box: vi.fn(),
+  readBox: vi.fn(),
+  readHeader: vi.fn(),
   boxes: new Map<string, unknown>(),
   tipCalls: new Map<string, number>(),
   tipResponses: new Map<
@@ -43,7 +48,11 @@ vi.mock('./authenticated-spv-tracker-read-only-node-client.js', () => ({
     }
 
     async getBoxByIdOrNull(boxId: string) {
-      return mocks.boxes.get(boxId) ?? null;
+      return mocks.readBox(this.origin, boxId);
+    }
+
+    async getBlockHeaderById(id: string) {
+      return mocks.readHeader(this.origin, id);
     }
   },
 }));
@@ -64,6 +73,8 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
 }));
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
+  assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1: mocks.assertReadCustody,
 }));
 vi.mock(
   './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js',
@@ -72,6 +83,7 @@ vi.mock(
       mocks.assertSourceLockObservation,
     assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2:
       mocks.assertSourceLockObservationV2,
+    assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1: mocks.assertNativeSource,
   }),
 );
 vi.mock(
@@ -95,6 +107,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2,
+  createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1,
 } from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
@@ -127,10 +140,10 @@ function box(boxId: string) {
   });
 }
 
-function fixture() {
+function fixture(heights: { source?: number; successor?: number } = {}) {
   const sourceFunding = box(hex('21'));
   const reservePredecessor = box(hex('22'));
-  const sourceLock = box(hex('23'));
+  const sourceLock = Object.freeze({ ...box(hex('23')), creationHeight: heights.source ?? 90 });
   const transitionFeeFunding = box(hex('24'));
   const reserveTransitionTxId = hex('25');
   const sourceLockTxId = hex('26');
@@ -147,6 +160,7 @@ function fixture() {
       reservePredecessor,
       sourceLock,
       transitionFeeFunding,
+      reserveSuccessor: Object.freeze({ ...box(hex('82')), creationHeight: heights.successor ?? 90 }),
     }),
     transactions: Object.freeze({
       sourceLockCreation: Object.freeze({ txId: sourceLockTxId }),
@@ -313,6 +327,277 @@ beforeEach(() => {
     if (binding !== BINDING) throw new Error('execution binding changed');
   });
   mocks.normalizeEip12Box.mockImplementation(async value => value);
+  mocks.readBox.mockImplementation(async (_origin, id) => mocks.boxes.get(id) ?? null);
+  mocks.readHeader.mockImplementation(async (_origin, id) => {
+    const height = Number.parseInt(id, 16);
+    return { id, height, parentId: (height - 1).toString(16).padStart(64, '0') };
+  });
+});
+
+describe('native committed-vault observation scheduling (mocked provenance and node fields)', () => {
+  const create = createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1;
+  const tipId = (height: number) => height.toString(16).padStart(64, '0');
+  function nativeFixture(heights: { source?: number; successor?: number } = {}) {
+    const f = fixture(heights);
+    const packet = f.input.candidate.depositPacket;
+    const batch = { ...f.input.batch, receipt: { receiptDigestHex: hex('81') }, targetBinding: BINDING };
+    const input = { ...f.input, packet, batch };
+    const assertPacket = (value: unknown, valueBatch: unknown, target: unknown) => {
+      if (value !== packet || valueBatch !== batch || target !== TARGET) throw new Error('native custody lost');
+      return packet;
+    };
+    mocks.assertNativePacket.mockImplementation(assertPacket);
+    mocks.assertReadCustody.mockImplementation(assertPacket);
+    mocks.assertNativeSource.mockImplementation((value, target, valueBatch, valuePacket) => {
+      if (value !== input.sourceLockObservation) throw new Error('native source observation lost');
+      assertPacket(valuePacket, valueBatch, target);
+    });
+    mocks.tipIdHex = tipId(mocks.tipHeight);
+    return { ...f, input };
+  }
+
+  it('keeps full provenance checks outside the native equal-tip read window', async () => {
+    const f = nativeFixture();
+    mocks.assertTarget.mockImplementation(() => {
+      mocks.tipIdHex = tipId(++mocks.tipHeight);
+      return BINDING;
+    });
+    const session = create(f.input as never);
+    await expect(session.revalidator.revalidate(f.checked as never)).resolves.toBeDefined();
+    expect(mocks.assertReadCustody).toHaveBeenCalled();
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a bounded descendant across one fresh JVM check with exact input rereads', async () => {
+    const f = nativeFixture();
+    mocks.checkSignedTransaction.mockImplementation(async () => {
+      mocks.tipHeight += 2;
+      mocks.tipIdHex = tipId(mocks.tipHeight);
+      return f.freshCheck;
+    });
+    const session = create(f.input as never);
+    await expect(session.revalidator.revalidate(f.checked as never)).resolves.toBeDefined();
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    for (const origin of [PRIMARY, WITNESS]) {
+      expect(mocks.readHeader).toHaveBeenCalledWith(origin, tipId(103));
+      expect(mocks.readHeader).toHaveBeenCalledWith(origin, tipId(102));
+      expect(mocks.readHeader).toHaveBeenCalledWith(origin, tipId(101));
+      expect(mocks.readBox.mock.calls.filter(([node]) => node === origin)).toHaveLength(8);
+    }
+  });
+
+  it.each([PRIMARY, WITNESS])('drains pending sibling reads on %s before reporting a native failure', async delayed => {
+    const f = nativeFixture();
+    let release!: () => void;
+    let started!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { started = resolve; });
+    let drained = false;
+    mocks.readBox.mockImplementation(async (origin, id) => {
+      if (origin === PRIMARY && id === f.input.packet.boxes.sourceFundingInput.boxId) throw new Error('fixture read failure');
+      if (origin === delayed && id === f.input.packet.boxes.sourceLock.boxId) {
+        started();
+        await pending;
+        drained = true;
+      }
+      return mocks.boxes.get(id) ?? null;
+    });
+    let settled = false;
+    const result = create(f.input as never).revalidator.revalidate(f.checked as never)
+      .then(() => undefined, error => { settled = true; return error; });
+    await entered;
+    await new Promise(resolve => setImmediate(resolve));
+    const settledWhilePending = settled;
+    release();
+    const error = await result;
+    expect(settledWhilePending).toBe(false);
+    expect(drained).toBe(true);
+    expect(error.message).toBe('fixture read failure');
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([64, 65])('enforces the %i-block post-check ancestry boundary', async advance => {
+    const f = nativeFixture();
+    mocks.checkSignedTransaction.mockImplementation(async () => {
+      mocks.tipHeight += advance;
+      mocks.tipIdHex = tipId(mocks.tipHeight);
+      return f.freshCheck;
+    });
+    const session = create(f.input as never);
+    const result = session.revalidator.revalidate(f.checked as never);
+    if (advance === 64) {
+      await expect(result).resolves.toBeDefined();
+      expect(mocks.readHeader).toHaveBeenCalledTimes(2 * 65);
+    } else {
+      await expect(result).rejects.toThrow(/bounded tip window/);
+      expect(mocks.readHeader).not.toHaveBeenCalled();
+      expect(() => session.takePreTransportObservation()).toThrow();
+    }
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { boundary: 'refund last valid', source: 90, successor: 10000, before: 10087, after: 10088, accepted: true },
+    { boundary: 'refund first invalid', source: 90, successor: 10000, before: 10088, after: 10089, accepted: false },
+    { boundary: 'successor last valid', source: 90, successor: 90, before: 188, after: 189, accepted: true },
+    { boundary: 'successor first invalid', source: 90, successor: 90, before: 189, after: 190, accepted: false },
+  ])('enforces native $boundary across the fresh JVM check', async test => {
+    const f = nativeFixture(test);
+    mocks.tipHeight = test.before; mocks.tipIdHex = tipId(test.before);
+    mocks.checkSignedTransaction.mockImplementation(async () => {
+      mocks.tipHeight = test.after; mocks.tipIdHex = tipId(test.after); return f.freshCheck;
+    });
+    const session = create(f.input as never);
+    const result = session.revalidator.revalidate(f.checked as never);
+    if (test.accepted) await expect(result).resolves.toBeDefined();
+    else {
+      await expect(result).rejects.toThrow(test.boundary.startsWith('refund') ? /refund timeout/ : /successor creation-height/);
+      expect(() => session.takePreTransportObservation()).toThrow();
+    }
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+  });
+
+  it.each([PRIMARY, WITNESS].flatMap(origin => [
+    ['missing', /must be an object/], ['height', /identity changed/], ['id', /identity changed/],
+    ['parent encoding', /parent must be/], ['fork', /previously observed height/],
+    ['historical ID', /historical header ID/], ['parent disagreement', /parent changed/],
+  ].filter(([fault]) => origin === PRIMARY || (fault !== 'fork' && fault !== 'historical ID'))
+    .map(([fault, expected]) => ({ origin, fault: fault as string, expected: expected as RegExp }))))
+    ('rejects $origin ancestry $fault without an authorization', async ({ origin, fault, expected }) => {
+      const f = nativeFixture();
+      mocks.checkSignedTransaction.mockImplementation(async () => {
+        mocks.tipHeight = 103; mocks.tipIdHex = tipId(103); return f.freshCheck;
+      });
+      mocks.readHeader.mockImplementation(async (node, id) => {
+        const height = Number.parseInt(id, 16);
+        const header = { id, height, parentId: tipId(height - 1) };
+        if ((node === origin || fault === 'fork' || fault === 'historical ID')
+          && height === (fault === 'parent disagreement' ? 101 : 102)) {
+          if (fault === 'missing') return null;
+          if (fault === 'height') header.height += 1;
+          if (fault === 'id') header.id = hex('ff');
+          if (fault === 'parent encoding') header.parentId = 'bad';
+          if (fault === 'fork') header.parentId = hex('ff');
+          if (fault === 'historical ID') header.parentId = tipId(103);
+          if (fault === 'parent disagreement') header.parentId = hex('ab');
+        }
+        // A competing history is self-consistent locally but conflicts with the prior tip.
+        if (id === hex('ff')) return { id, height: 101, parentId: tipId(100) };
+        if (fault === 'historical ID' && id === tipId(103)
+          && mocks.readHeader.mock.calls.filter(([n, h]) => n === node && h === id).length === 2) {
+          return { id, height: 101, parentId: tipId(100) };
+        }
+        return header;
+      });
+      const session = create(f.input as never);
+      await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(expected);
+      expect(() => session.takePreTransportObservation()).toThrow();
+      expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    });
+
+  it.each([102, 103])('checks the native successor minimum creation height %i', async successor => {
+    const f = nativeFixture({ successor });
+    const result = create(f.input as never).revalidator.revalidate(f.checked as never);
+    if (successor === 102) await expect(result).resolves.toBeDefined();
+    else await expect(result).rejects.toThrow(/successor creation-height/);
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(successor === 102 ? 1 : 0);
+  });
+
+  it.each([0x7fff_ffff, Number.MAX_SAFE_INTEGER])('rejects an unrepresentable upcoming height after tip %i', async height => {
+    const f = nativeFixture();
+    mocks.tipHeight = height; mocks.tipIdHex = tipId(height);
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(/upcoming evaluation height/);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each(['regression', 'replacement', 'reused ID'])('rejects post-JVM tip %s', async fault => {
+    const f = nativeFixture();
+    mocks.checkSignedTransaction.mockImplementation(async () => {
+      if (fault === 'regression') { mocks.tipHeight = 100; mocks.tipIdHex = tipId(100); }
+      if (fault === 'replacement') mocks.tipIdHex = hex('fe');
+      if (fault === 'reused ID') mocks.tipHeight = 102;
+      return f.freshCheck;
+    });
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never))
+      .rejects.toThrow(/regressed, replaced or reused/);
+    expect(mocks.readHeader).not.toHaveBeenCalled();
+  });
+
+  it.each(['sourceFundingInput', 'reservePredecessor', 'sourceLock', 'transitionFeeFunding'] as const)
+    ('rejects changed %s after JVM checking', async field => {
+      const f = nativeFixture();
+      mocks.checkSignedTransaction.mockImplementation(async () => {
+        const box = f.input.packet.boxes[field];
+        mocks.boxes.set(box.boxId, field === 'sourceFundingInput' ? box : { ...box, value: '1' });
+        return f.freshCheck;
+      });
+      await expect(create(f.input as never).revalidator.revalidate(f.checked as never))
+        .rejects.toThrow(/original source funding|input bytes changed/);
+    });
+
+  it.each(['box', 'normalization', 'ancestry'])('rejects lost read custody during %s awaits', async stage => {
+    const f = nativeFixture();
+    let active = true;
+    const assert = mocks.assertReadCustody.getMockImplementation()!;
+    mocks.assertReadCustody.mockImplementation((...args) => {
+      if (!active) throw new Error('fixture custody disposed');
+      return assert(...args);
+    });
+    const callback = stage === 'box' ? mocks.readBox : stage === 'normalization' ? mocks.normalizeEip12Box : mocks.readHeader;
+    const read = callback.getMockImplementation()!;
+    callback.mockImplementation(async (...args) => { const value = await read(...args); active = false; return value; });
+    if (stage === 'ancestry') mocks.checkSignedTransaction.mockImplementation(async () => {
+      mocks.tipHeight = 102; mocks.tipIdHex = tipId(102); return f.freshCheck;
+    });
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never))
+      .rejects.toThrow('fixture custody disposed');
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(stage === 'ancestry' ? 1 : 0);
+  });
+
+  it('retains the closing full source assertion after a short native read group', async () => {
+    const f = nativeFixture();
+    let observed = false;
+    const read = mocks.readBox.getMockImplementation()!;
+    mocks.readBox.mockImplementation(async (...args) => { const value = await read(...args); observed = true; return value; });
+    mocks.assertNativeSource.mockImplementation(() => { if (observed) throw new Error('fixture source provenance changed'); });
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never))
+      .rejects.toThrow('fixture source provenance changed');
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([PRIMARY, WITNESS])('retries a stable lagging %s observation as one paired window', async lagging => {
+    const f = nativeFixture();
+    for (const origin of [PRIMARY, WITNESS]) {
+      mocks.tipResponses.set(origin, (origin === lagging ? [101, 101, 102, 102] : [102, 102, 102, 102])
+        .map(height => ({ height, id: tipId(height) })));
+    }
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never)).resolves.toBeDefined();
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    expect(mocks.readBox).toHaveBeenCalledTimes(24);
+  });
+
+  it('bounds native paired retries without nested per-node attempts', async () => {
+    const f = nativeFixture();
+    for (const origin of [PRIMARY, WITNESS]) mocks.tipResponses.set(origin,
+      [101, 102, 103, 104, 105, 106].map(height => ({ height, id: tipId(height) })));
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never)).rejects.toThrow(/did not stabilize/);
+    expect(mocks.readBox).toHaveBeenCalledTimes(24);
+    expect(mocks.tipCalls.get(PRIMARY)).toBe(6);
+    expect(mocks.tipCalls.get(WITNESS)).toBe(6);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([PRIMARY, WITNESS])('does not hide %s invalid input behind a peer tip advance', async invalid => {
+    const f = nativeFixture();
+    const peer = invalid === PRIMARY ? WITNESS : PRIMARY;
+    mocks.tipResponses.set(peer, [101, 102].map(height => ({ height, id: tipId(height) })));
+    mocks.readBox.mockImplementation(async (origin, id) => origin === invalid && id === f.input.packet.boxes.sourceLock.boxId
+      ? { ...f.input.packet.boxes.sourceLock, value: '1' } : mocks.boxes.get(id) ?? null);
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never)).rejects.toThrow(/input bytes changed/);
+    expect(mocks.readBox).toHaveBeenCalledTimes(8);
+    expect(mocks.checkSignedTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe('isolated committed-vault V2 authorization boundary (mocked provenance and node fields)', () => {
