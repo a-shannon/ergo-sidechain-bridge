@@ -28,6 +28,7 @@ import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readS
 import { compileObservedSubstrateFederatedGenesisV1 } from '../../substrate-federated-observed-genesis-v1.js';
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1 } from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS } from '../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import { normalizeEip12Box } from '../../unsigned-ergo-transaction.js';
 import { buildSubstrateFederatedNativeGenesisPegInPacketV1 } from '../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 } from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
@@ -193,9 +194,9 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           };
           const previousTips = new Map<typeof primary, { height: number; id: string }>();
           const readTip = async (client: typeof primary) => {
-            assertActive();
+            assertCustody();
             const tip = record(await client.getBestHeader());
-            assertActive();
+            assertCustody();
             if (!Number.isSafeInteger(tip.height) || Number(tip.height) <= 0
               || typeof tip.id !== 'string' || !/^[0-9a-f]{64}$/.test(tip.id)) {
               throw new Error('FED native issuance requires a canonical output-observation tip');
@@ -218,27 +219,62 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           // Only observations retry. The three issued transactions remain one-shot.
           for (let attempt = 0; attempt < 3; attempt++) {
             await confirm();
-            const tip = await readTip(primary);
-            if (!sameTip(tip, await readTip(witness))) continue;
-            for (const [index, { transaction }] of compiled.issuance.orderedTransactions.entries()) {
+            assertActive();
+            // Stable visible tips bound these reads, not an atomic header/UTXO state.
+            const before = await settleReads([readTip(primary), readTip(witness)]);
+            const tip = before[0]!;
+            if (!sameTip(tip, before[1]!)) { assertActive(); continue; }
+            await settleReads(compiled.issuance.orderedTransactions.flatMap(({ transaction }, index) => {
               const expectedOutput = transaction.outputs[0]!;
-              for (const client of [primary, witness]) {
-                assertActive();
+              const receipt = transactions[index]!;
+              return [primary, witness].map(async client => {
+                assertCustody();
+                if (!Number.isSafeInteger(receipt.confirmationHeight) || receipt.confirmationHeight <= 0
+                  || tip.height - receipt.confirmationHeight < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS) {
+                  throw new Error('FED native issuance snapshot confirmation depth is insufficient');
+                }
                 const source = await client.getBoxByIdOrNull(batch.orderedTransactions[index]!.issuance.genesisInputBoxIdHex);
+                assertCustody();
                 if (source !== null) throw new Error('FED native issuance funding source remains unspent');
                 const rawOutput = await client.getBoxByIdOrNull(expectedOutput.boxId);
+                assertCustody();
                 if (rawOutput === null) throw new Error('FED native singleton output is unavailable');
                 const output = await normalizeEip12Box(rawOutput, 'FED native singleton output');
-                assertActive();
+                assertCustody();
                 if (canonicalJson(output) !== canonicalJson(expectedOutput) || output.creationHeight > tip.height) {
                   throw new Error('FED native singleton output differs from the compiled issuance');
                 }
-              }
-            }
+                const headers = await client.getBlockHeaderIdsAtHeight(receipt.confirmationHeight);
+                assertCustody();
+                if (headers.length !== 1 || headers[0] !== receipt.confirmationHeaderIdHex) {
+                  throw new Error('FED native issuance snapshot inclusion differs from its confirmed receipt');
+                }
+              });
+            }));
+            const [primaryAfter, witnessAfter] = await settleReads([readTip(primary), readTip(witness)]);
+            assertActive();
+            const primaryStable = sameTip(tip, primaryAfter!);
+            const witnessStable = sameTip(tip, witnessAfter!);
+            // Full confirmation brackets the window; inclusion is also checked
+            // inside it. Preserve its captured anchor across the closing check.
             await confirm();
-            const primaryStable = sameTip(tip, await readTip(primary));
-            const witnessStable = sameTip(tip, await readTip(witness));
-            if (primaryStable && witnessStable) { stableOutputs = true; break; }
+            if (!primaryStable || !witnessStable) continue;
+            const closingBefore = await settleReads([readTip(primary), readTip(witness)]);
+            if (!sameTip(closingBefore[0]!, closingBefore[1]!)) { assertActive(); continue; }
+            await settleReads([primary, witness].map(async client => {
+              assertCustody();
+              const headers = await client.getBlockHeaderIdsAtHeight(tip.height);
+              assertCustody();
+              if (headers.length !== 1 || headers[0] !== tip.id) {
+                throw new Error('FED native issuance captured output anchor changed after confirmation');
+              }
+            }));
+            const closingAfter = await settleReads([readTip(primary), readTip(witness)]);
+            assertActive();
+            if (sameTip(closingBefore[0]!, closingAfter[0]!)
+              && sameTip(closingBefore[0]!, closingAfter[1]!)) {
+              stableOutputs = true; break;
+            }
           }
           if (!stableOutputs) throw new Error('FED native issuance output-observation did not stabilize');
           if (await observeFederatedGenesisTargetsV1(expected) !== genesis) {
@@ -324,6 +360,16 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       finally { try { source?.dispose(); } finally { setup.dispose(); } }
     }
   }
+}
+
+async function settleReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(reads);
+  const values: T[] = [];
+  for (const result of settled) {
+    if (result.status === 'rejected') throw result.reason;
+    values.push(result.value);
+  }
+  return values;
 }
 
 function materializedStorage(text: string, profile: string, bridge: string, wasmHash: string): Readonly<Record<string, string>> {

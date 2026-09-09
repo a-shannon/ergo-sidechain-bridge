@@ -438,7 +438,7 @@ implements AuthenticatedSpvTrackerNodeSource {
 
 export function createBoundedAuthenticatedSpvTrackerReadOnlySource(
   nodeUrl: string,
-): AuthenticatedSpvTrackerNodeSource {
+): AuthenticatedSpvTrackerNodeSource & Pick<AuthenticatedSpvTrackerReadOnlyNodeClient, 'getBlockHeaderIdsAtHeight'> {
   return new AuthenticatedSpvTrackerReadOnlyNodeClient(nodeUrl);
 }
 

@@ -120,6 +120,8 @@ let journalState: StateTracker | undefined;
 let observeConfirmation: ReturnType<typeof vi.fn>;
 let readErgoBox: (origin: string, id: string) => unknown;
 let readErgoTip: (origin: string) => unknown;
+let readErgoInclusion: (origin: string, height: number) => unknown;
+let readErgoAnchor: (origin: string, height: number) => unknown;
 let retainedSetup: any;
 let frontierEndpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>;
 let frontierActive: boolean;
@@ -385,10 +387,26 @@ beforeEach(() => {
     return value ? structuredClone(value.transaction.outputs[0]) : null;
   };
   readErgoTip = () => ({ height: 120, id: '93'.repeat(32) });
+  readErgoInclusion = () => ['92'.repeat(32)];
+  const observedTips = new Map<string, Map<number, string>>();
+  readErgoAnchor = (origin, height) => [observedTips.get(origin)?.get(height)];
   mocked.source.mockImplementation(origin => {
     expect([target.primaryNodeOrigin, target.witnessNodeOrigin]).toContain(origin);
-    return { getBestHeader: async () => { assertCustodyActive(); return readErgoTip(origin); },
-      getBoxByIdOrNull: async (id: string) => { assertCustodyActive(); return readErgoBox(origin, id); } };
+    return { getBestHeader: async () => {
+      assertCustodyActive();
+      const tip: any = await readErgoTip(origin);
+      if (tip && typeof tip.height === 'number' && typeof tip.id === 'string') {
+        if (!observedTips.has(origin)) observedTips.set(origin, new Map());
+        observedTips.get(origin)!.set(tip.height, tip.id);
+      }
+      return tip;
+    },
+      getBoxByIdOrNull: async (id: string) => { assertCustodyActive(); return readErgoBox(origin, id); },
+      getBlockHeaderIdsAtHeight: async (height: number) => {
+        assertCustodyActive();
+        return receipts.some(receipt => receipt.confirmationHeight === height)
+          ? readErgoInclusion(origin, height) : readErgoAnchor(origin, height);
+      } };
   });
   mocked.environment.mockReturnValue({ bounded: 'environment stub' });
   mocked.pin.mockResolvedValue(undefined);
@@ -779,6 +797,16 @@ describe('fresh FED target composition', () => {
   it.each(['null', 'height', 'ID', 'witness disagreement', 'primary moved', 'witness moved', 'future output'])
     ('rejects %s output-observation tip', async fault => {
       let reads = 0;
+      if (fault === 'future output') {
+        const execute = mocked.execute.getMockImplementation()!;
+        mocked.execute.mockImplementationOnce(async value => {
+          const result = await execute(value);
+          for (const receipt of result) receipt.confirmationHeight = 80;
+          return result;
+        });
+        observeConfirmation.mockResolvedValue({ status: 'confirmed', confirmationHeight: 80,
+          confirmationHeaderIdHex: '92'.repeat(32) });
+      }
       readErgoTip = origin => {
         reads++;
         if (fault === 'null') return null;
@@ -834,6 +862,244 @@ describe('fresh FED target composition', () => {
     expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
   });
 
+  it('keeps full confirmation work outside the exact output snapshot', async () => {
+    let height = 120;
+    let tipReads = 0;
+    let inSnapshot = false;
+    const observe = observeConfirmation.getMockImplementation()!;
+    observeConfirmation.mockImplementation(async (...args) => {
+      expect(inSnapshot).toBe(false);
+      height++;
+      return observe(...args);
+    });
+    readErgoTip = () => {
+      tipReads++;
+      inSnapshot = tipReads < 4;
+      return { height, id: height.toString(16).padStart(64, '0') };
+    };
+    const assertBatch = mocked.batch.getMockImplementation()!;
+    mocked.batch.mockImplementation((...args) => {
+      expect(inSnapshot).toBe(false);
+      return assertBatch(...args);
+    });
+    const inclusion = vi.fn((origin: string, at: number) => {
+      expect(inSnapshot).toBe(true);
+      expect([target.primaryNodeOrigin, target.witnessNodeOrigin]).toContain(origin);
+      expect(at).toBe(100);
+      return ['92'.repeat(32)];
+    });
+    readErgoInclusion = inclusion;
+    const result = await runSubstrateFederatedGenesisTargetRootV1(input);
+    expect(result.operationalMintEstablished).toBe(true);
+    expect(inclusion).toHaveBeenCalledTimes(6);
+    expect(tipReads).toBe(8);
+    expect(observeConfirmation).toHaveBeenCalledTimes(6);
+    expect(mocked.execute).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
+  for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+    for (const role of ['tracker', 'duplicatePrevention', 'pooledReserve'] as const) {
+      it.each(['missing', 'replacement', 'ambiguous'])(
+        `rejects %s snapshot inclusion for ${role} on ${origin}`, async fault => {
+          const execute = mocked.execute.getMockImplementation()!;
+          mocked.execute.mockImplementationOnce(async value => {
+            const result = await execute(value);
+            for (const receipt of result) receipt.confirmationHeight = 100 + receipt.ordinal;
+            return result;
+          });
+          observeConfirmation.mockImplementation(async id => {
+            const receipt = receipts.find(value => value.expectedTxId === id)!;
+            return { status: 'confirmed', confirmationHeight: receipt.confirmationHeight,
+              confirmationHeaderIdHex: receipt.confirmationHeaderIdHex };
+          });
+          readErgoInclusion = (url, height) => {
+            const receipt = receipts.find(value => value.role === role)!;
+            if (url !== origin || height !== receipt.confirmationHeight) return ['92'.repeat(32)];
+            if (fault === 'missing') return [];
+            if (fault === 'replacement') return ['94'.repeat(32)];
+            if (fault === 'ambiguous') return ['92'.repeat(32), '94'.repeat(32)];
+            return ['92'.repeat(32)];
+          };
+          await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/snapshot inclusion|snapshot confirmation depth/);
+          expect(mocked.packet).not.toHaveBeenCalled();
+          expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
+        },
+      );
+    }
+  }
+
+  it.each(['tracker', 'duplicatePrevention', 'pooledReserve'] as const)('rejects insufficient snapshot depth for %s alone', async role => {
+    const execute = mocked.execute.getMockImplementation()!;
+    mocked.execute.mockImplementationOnce(async value => {
+      const result = await execute(value);
+      for (const receipt of result) receipt.confirmationHeight = receipt.role === role ? 111 : 100;
+      return result;
+    });
+    observeConfirmation.mockImplementation(async id => {
+      const receipt = receipts.find(value => value.expectedTxId === id)!;
+      return { status: 'confirmed', confirmationHeight: receipt.confirmationHeight,
+        confirmationHeaderIdHex: receipt.confirmationHeaderIdHex };
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/snapshot confirmation depth/);
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
+  it('binds distinct inclusion headers at the exact minimum snapshot depth', async () => {
+    const execute = mocked.execute.getMockImplementation()!;
+    mocked.execute.mockImplementationOnce(async value => {
+      const result = await execute(value);
+      for (const receipt of result) {
+        receipt.confirmationHeight = 108 + receipt.ordinal;
+        receipt.confirmationHeaderIdHex = (160 + receipt.ordinal).toString(16).repeat(32);
+      }
+      return result;
+    });
+    observeConfirmation.mockImplementation(async id => {
+      const receipt = receipts.find(value => value.expectedTxId === id)!;
+      return { status: 'confirmed', confirmationHeight: receipt.confirmationHeight,
+        confirmationHeaderIdHex: receipt.confirmationHeaderIdHex };
+    });
+    const inclusion = vi.fn((_origin: string, height: number) => [
+      receipts.find(receipt => receipt.confirmationHeight === height)!.confirmationHeaderIdHex,
+    ]);
+    readErgoInclusion = inclusion;
+    const result = await runSubstrateFederatedGenesisTargetRootV1(input);
+    expect(result.operationalMintEstablished).toBe(true);
+    for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+      for (const height of [108, 109, 110]) expect(inclusion).toHaveBeenCalledWith(origin, height);
+    }
+    expect(inclusion).toHaveBeenCalledTimes(6); assertDisposed();
+  });
+
+  it('drains a pending tip read before closing after its peer fails', async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    readErgoTip = async origin => {
+      if (origin === target.primaryNodeOrigin) return null;
+      enter();
+      await pending;
+      expect(active).toBe(true);
+      return { height: 120, id: '93'.repeat(32) };
+    };
+    const running = runSubstrateFederatedGenesisTargetRootV1(input);
+    let settled = false;
+    void running.then(() => { settled = true; }, () => { settled = true; });
+    const rejection = expect(running).rejects.toThrow('object required');
+    await entered;
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(active).toBe(true); expect(frontierActive).toBe(true);
+      expect(StateTracker.prototype.close).not.toHaveBeenCalled();
+    } finally { release(); }
+    await rejection;
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
+  for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+    it.each(['regression', 'same-height replacement', 'higher replacement branch', 'missing anchor', 'ambiguous anchor'])(
+      `rejects %s after closing confirmation on ${origin} with issuance blocks preserved`, async fault => {
+        let closed = false;
+        let confirmations = 0;
+        const observe = observeConfirmation.getMockImplementation()!;
+        observeConfirmation.mockImplementation(async (...args) => {
+          const value = await observe(...args);
+          if (++confirmations === 6) closed = true;
+          return value;
+        });
+        const read = readErgoTip;
+        readErgoTip = url => {
+          if (!closed) return read(url);
+          if (fault === 'higher replacement branch') return { height: 121, id: '94'.repeat(32) };
+          if (url === origin && fault === 'regression') return { height: 119, id: '94'.repeat(32) };
+          if (url === origin && fault === 'same-height replacement') return { height: 120, id: '94'.repeat(32) };
+          return read(url);
+        };
+        const anchor = readErgoAnchor;
+        readErgoAnchor = (url, height) => {
+          if (url !== origin) return anchor(url, height);
+          expect(height).toBe(120);
+          if (fault === 'missing anchor') return [];
+          if (fault === 'ambiguous anchor') return ['93'.repeat(32), '94'.repeat(32)];
+          return ['95'.repeat(32)];
+        };
+        await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/tip changed|captured output anchor changed/);
+        expect(confirmations).toBe(6);
+        expect(mocked.packet).not.toHaveBeenCalled();
+        expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
+      },
+    );
+  }
+
+  it('reobserves all outputs when mining advances during the final anchor check', async () => {
+    let reads = 0;
+    let boxes = 0;
+    readErgoTip = () => {
+      const advanced = ++reads > 6;
+      return { height: advanced ? 121 : 120, id: (advanced ? '94' : '93').repeat(32) };
+    };
+    const read = readErgoBox;
+    readErgoBox = (origin, id) => { boxes++; return read(origin, id); };
+    const result = await runSubstrateFederatedGenesisTargetRootV1(input);
+    expect(result.operationalMintEstablished).toBe(true);
+    expect(boxes).toBe(24);
+    expect(observeConfirmation).toHaveBeenCalledTimes(12);
+    expect(mocked.execute).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
+  it('drains a pending read before closing the target after another read fails', async () => {
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const read = readErgoBox;
+    readErgoBox = async (origin, id) => {
+      if (id === discovery.observation.genesisBoxIds.tracker) {
+        if (origin === target.primaryNodeOrigin) throw new Error('snapshot read failed');
+        enter();
+        await pending;
+        expect(active).toBe(true);
+      }
+      return read(origin, id);
+    };
+    const running = runSubstrateFederatedGenesisTargetRootV1(input);
+    let settled = false;
+    void running.then(() => { settled = true; }, () => { settled = true; });
+    const rejection = expect(running).rejects.toThrow('snapshot read failed');
+    await entered;
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(settled).toBe(false);
+      expect(active).toBe(true); expect(frontierActive).toBe(true);
+      expect(StateTracker.prototype.close).not.toHaveBeenCalled();
+    } finally { release(); }
+    await rejection;
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
+  it.each(['batch', 'Ergo target', 'Frontier target'])('rejects %s invalidation during provisional output reads', async fault => {
+    const read = readErgoBox;
+    let changed = false;
+    readErgoBox = (origin, id) => {
+      const result = read(origin, id);
+      if (!changed) {
+        changed = true;
+        if (fault === 'batch') batchActive = false;
+        if (fault === 'Ergo target') active = false;
+        if (fault === 'Frontier target') frontierActive = false;
+      }
+      return result;
+    };
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow();
+    expect(mocked.packet).not.toHaveBeenCalled();
+    expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
+  });
+
   for (const node of ['primary', 'witness'] as const) {
     it.each(['regression', 'replacement'])(`rejects cross-window %s on ${node}`, async fault => {
       let reads = 0;
@@ -847,7 +1113,7 @@ describe('fresh FED target composition', () => {
         return { height: 121, id: '94'.repeat(32) };
       };
       await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/output-observation tip changed/);
-      expect(reads).toBe(node === 'primary' ? 5 : 6);
+      expect(reads).toBe(6);
       expect(mocked.check).toHaveBeenCalledOnce(); expect(mocked.execute).toHaveBeenCalledOnce();
       expect(StateTracker.prototype.close).toHaveBeenCalledOnce(); assertDisposed();
     });
