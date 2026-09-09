@@ -12,6 +12,7 @@ const boundary = vi.hoisted(() => ({
   anchor: '72'.repeat(32), anchorHeight: 120,
   reads: [] as { origin: string; method: string; height?: number }[],
   onRead: undefined as undefined | (() => void),
+  onCompiledAssert: undefined as undefined | (() => void),
 }));
 vi.mock('./substrate-federated-observed-genesis-v1.js', () => ({
   assertObservedSubstrateFederatedGenesisV1(value: object, target: object) {
@@ -19,6 +20,7 @@ vi.mock('./substrate-federated-observed-genesis-v1.js', () => ({
     if (!boundary.setupActive) throw new Error('stub setup disposed');
     if (!boundary.sourceActive) throw new Error('stub source disposed');
     if (!boundary.targetActive) throw new Error('stub target disposed');
+    boundary.onCompiledAssert?.();
   },
 }));
 vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
@@ -75,6 +77,7 @@ beforeEach(async () => {
   boundary.network = 'devnet'; boundary.genesis = '71'.repeat(32);
   boundary.tip = boundary.anchor = '72'.repeat(32); boundary.height = boundary.anchorHeight = 120;
   boundary.onRead = undefined; boundary.reads.length = 0;
+  boundary.onCompiledAssert = undefined;
   boundary.boxes.clear(); boundary.binary.clear();
   const base: Eip12Box = {
     boxId: '8f25f8b850290c20b9f3568eba3604bee2f4e2d7167c7ea68f2943997ea742a5',
@@ -250,6 +253,14 @@ describe('native FED setup request with stubbed compiler custody and node reads'
     expect(() => assertRequest(request)).toThrow('freshness window');
     const reads = boundary.reads.length;
     await expect(reobserve(request)).rejects.toThrow('freshness window');
+    expect(boundary.reads).toHaveLength(reads);
+  });
+  it('rejects when source validation itself crosses the fixed freshness deadline', async () => {
+    const request = await build(input);
+    vi.setSystemTime(new Date(NOW.getTime() + 59_999));
+    boundary.onCompiledAssert = () => vi.setSystemTime(new Date(NOW.getTime() + 60_001));
+    const reads = boundary.reads.length;
+    expect(() => assertRequest(request)).toThrow('freshness window');
     expect(boundary.reads).toHaveLength(reads);
   });
   it('rejects clock regression', async () => {

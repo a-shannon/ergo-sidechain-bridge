@@ -1291,9 +1291,14 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           ) {
             throw new Error('isolated Ergo execution processes are not active');
           }
-          assertOwnedNodeIdentity(input, runtime, primary);
-          assertOwnedNodeIdentity(input, runtime, witness);
-          assertOwnedListenerBindings(primary, witness);
+          assertLive(primary);
+          assertLive(witness);
+          const observed = observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1(
+            processId(primary), processId(witness),
+          );
+          assertOwnedNodeIdentity(input, runtime, primary, observed.primaryExecutablePath);
+          assertOwnedNodeIdentity(input, runtime, witness, observed.witnessExecutablePath);
+          assertOwnedListenerBindings(primary, witness, observed.listeners);
           recheckRuntimeFiles(input, runtime);
         };
         OWNED_EXECUTION_TARGET_BINDINGS.set(target, Object.freeze({
@@ -3812,10 +3817,11 @@ function assertOwnedNodeIdentity(
   input: Readonly<NormalizedProcessInput>,
   runtime: Readonly<RuntimeLayout>,
   node: Readonly<OwnedNode>,
+  observedExecutablePath?: string,
 ): void {
   assertLive(node);
   const pid = processId(node);
-  const runningPath = windowsRunningExecutablePath(pid);
+  const runningPath = observedExecutablePath ?? windowsRunningExecutablePath(pid);
   if (runningPath.toLowerCase() !== input.javaExecutablePath.toLowerCase()) {
     throw new Error(`isolated Ergo ${node.role} process image differs from Java`);
   }
@@ -3834,12 +3840,13 @@ function assertOwnedNodeIdentity(
 function assertOwnedListenerBindings(
   primary: Readonly<OwnedNode>,
   witness: Readonly<OwnedNode>,
+  observedListeners?: readonly ListenerBinding[],
 ): void {
   const expected = new Map<number, ReadonlySet<number>>([
     [processId(primary), new Set([PRIMARY_REST_PORT, PRIMARY_P2P_PORT])],
     [processId(witness), new Set([WITNESS_REST_PORT, WITNESS_P2P_PORT])],
   ]);
-  const bindings = windowsProcessListenerBindings([...expected.keys()]);
+  const bindings = observedListeners ?? windowsProcessListenerBindings([...expected.keys()]);
   for (const binding of bindings) {
     if (
       !expected.get(binding.pid)?.has(binding.localPort)
@@ -4003,6 +4010,74 @@ function windowsRunningExecutablePath(pid: number): string {
     throw new Error('Windows process image inspection failed');
   }
   return canonicalRegularFile(result.stdout.trim(), 'running Java process image');
+}
+
+/** Fresh read-only observations, not an atomic snapshot or process/funds authority. */
+export function observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1(
+  primaryPid: number,
+  witnessPid: number,
+): Readonly<{
+  primaryExecutablePath: string;
+  witnessExecutablePath: string;
+  listeners: readonly Readonly<ListenerBinding>[];
+}> {
+  const pids = [primaryPid, witnessPid];
+  if (primaryPid === witnessPid
+    || pids.some(pid => !Number.isSafeInteger(pid) || pid <= 0 || pid > 0xffff_ffff)) {
+    throw new Error('Windows process pair requires two distinct process IDs');
+  }
+  const script = [
+    '$ErrorActionPreference="Stop"',
+    `$pids=@(${pids.join(',')})`,
+    '$images=@(Get-Process -Id $pids -ErrorAction Stop | Select-Object Id,Path)',
+    'try { $rows=@(Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction Stop '
+      + '| Select-Object LocalAddress,LocalPort,OwningProcess) } '
+      + 'catch { if ($_.FullyQualifiedErrorId '
+      + '-like "CmdletizationQuery_NotFound,Get-NetTCPConnection*") '
+      + '{ $rows=@() } else { throw } }',
+    'ConvertTo-Json -Compress -Depth 3 -InputObject @{images=$images; listeners=$rows}',
+  ].join('; ');
+  const result = spawnSync(windowsPowerShellPath(),
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+      cwd: resolve(process.env.SystemRoot ?? process.env.WINDIR!),
+      env: minimalEnvironment(), encoding: 'utf8', timeout: 10_000,
+      maxBuffer: 256 * 1024, windowsHide: true,
+    });
+  if (result.error || result.signal !== null || result.status !== 0 || result.stderr.trim() !== '') {
+    throw new Error('Windows process pair inspection failed');
+  }
+  const parsed: unknown = JSON.parse(result.stdout);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Windows process pair output is malformed');
+  }
+  const body = parsed as Record<string, unknown>;
+  if (!Array.isArray(body.images) || body.images.length !== 2 || !Array.isArray(body.listeners)) {
+    throw new Error('Windows process pair output is malformed');
+  }
+  const images = new Map<number, string>();
+  for (const row of body.images) {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)
+      || typeof row.Id !== 'number' || !pids.includes(row.Id) || images.has(row.Id)
+      || typeof row.Path !== 'string' || row.Path.trim() === '') {
+      throw new Error('Windows process pair image row is malformed');
+    }
+    images.set(row.Id, canonicalRegularFile(row.Path.trim(), 'running Java process image'));
+  }
+  const listeners = body.listeners.map((row: unknown) => {
+    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
+      throw new Error('Windows process pair listener row is malformed');
+    }
+    const record = row as Record<string, unknown>;
+    const { LocalAddress: localAddress, LocalPort: localPort, OwningProcess: pid } = record;
+    if (typeof localAddress !== 'string' || typeof localPort !== 'number'
+      || !Number.isSafeInteger(localPort) || localPort <= 0 || localPort > 65_535
+      || typeof pid !== 'number' || !pids.includes(pid)) {
+      throw new Error('Windows process pair listener row is malformed');
+    }
+    return Object.freeze({ pid, localAddress, localPort });
+  });
+  return Object.freeze({ primaryExecutablePath: images.get(primaryPid)!,
+    witnessExecutablePath: images.get(witnessPid)!, listeners: Object.freeze(listeners) });
 }
 
 function windowsPowerShellPath(): string {
