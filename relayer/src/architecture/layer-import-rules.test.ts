@@ -205,6 +205,21 @@ describe('layer import rules', () => {
     expect(inspect(staticAppFixture(file, source))).toEqual([]);
   });
 
+  it.each(['reserveFederatedNativeReservationAttemptV1', 'submitFederatedNativeReservationV1',
+    'sealFederatedNativeReservationV1', 'observeFederatedNativeReservationInclusionV1'])
+    ('keeps native execution capability in its proof-bound consumer: %s', binding => {
+      const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+      const specifier = '../../adapters/federated-native-reservation-execution-v1.js';
+      const declaration = `import { ${binding} } from '${specifier}';`;
+      expect(inspect(staticAppFixture(composition, `${declaration} ${binding}({});`))).toEqual([]);
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}({});`))
+        .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+      for (const use of [`capture(${binding});`, `const escaped = ${binding};`, `export { ${binding} };`]) {
+        expect(inspect(staticAppFixture(composition, `${declaration} ${use}`)).map(item => item.message))
+          .toContainEqual(expect.stringMatching(/restricted capability binding must not/));
+      }
+    });
+
   it.each([
     ['node:crypto', "import { createPrivateKey } from 'SPECIFIER';"],
     ['ethers', "import { Wallet } from 'SPECIFIER';"],

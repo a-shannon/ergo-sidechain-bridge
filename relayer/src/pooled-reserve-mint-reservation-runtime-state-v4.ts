@@ -31,6 +31,99 @@ export interface PooledReserveMintReservationRuntimeStorageKeysV4 {
   readonly invalidatedReservationStorageKeyHex: string;
 }
 
+export interface PooledReserveMintReservationPendingV4 {
+  readonly profileIdHex: string;
+  readonly statementHex: string;
+  readonly statementIdHex: string;
+  readonly mintIdentityHex: string;
+  readonly sourceStatementBytesDigestHex: string;
+  readonly sourceProofSystemIdHex: string;
+  readonly sourceProofProfileIdHex: string;
+  readonly sourceProofIssuedAtNativeHeight: string | number | bigint;
+  readonly sourceProofRequestDigestHex: string;
+  readonly sourceProofResultIdHex: string;
+  readonly sourceProofDigestHex: string;
+  readonly reservedAtNativeHeight: string | number | bigint;
+  readonly expiresAtNativeHeight: string | number | bigint;
+}
+
+/** Encode supplied pending-record fields only; no proof, finality or mint authority. */
+export function encodePooledReserveMintReservationPendingV4ScaleHex(
+  input: Readonly<PooledReserveMintReservationPendingV4>,
+): string {
+  const hashFields = [
+    'profileIdHex', 'statementIdHex', 'mintIdentityHex',
+    'sourceStatementBytesDigestHex', 'sourceProofSystemIdHex',
+    'sourceProofProfileIdHex', 'sourceProofRequestDigestHex',
+    'sourceProofResultIdHex', 'sourceProofDigestHex',
+  ] as const;
+  const fields = [
+    ...hashFields, 'statementHex', 'sourceProofIssuedAtNativeHeight',
+    'reservedAtNativeHeight', 'expiresAtNativeHeight',
+  ] as const;
+  if (
+    input === null || typeof input !== 'object'
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))
+  ) {
+    throw new Error('pending reservation requires an exact own-data record');
+  }
+  const descriptors: PropertyDescriptorMap = Object.getOwnPropertyDescriptors(input);
+  if (
+    Reflect.ownKeys(descriptors).length !== fields.length
+    || fields.some(field => {
+      const descriptor = Object.getOwnPropertyDescriptor(descriptors, field)?.value;
+      return !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value');
+    })
+  ) {
+    throw new Error('pending reservation requires exact enumerable own-data fields');
+  }
+  const hashes = hashFields.map(field => {
+    const bytes = fixedHexBytes(descriptors[field].value, 32, field);
+    if (bytes.every(byte => byte === 0)) {
+      throw new Error(`${field} must not be zero`);
+    }
+    return bytes;
+  });
+  const statement = fixedHexBytes(descriptors.statementHex.value, 603, 'statementHex');
+  const issued = pendingReservationHeightV4(
+    descriptors.sourceProofIssuedAtNativeHeight.value, 'sourceProofIssuedAtNativeHeight',
+  );
+  const reserved = pendingReservationHeightV4(
+    descriptors.reservedAtNativeHeight.value, 'reservedAtNativeHeight',
+  );
+  const expires = pendingReservationHeightV4(
+    descriptors.expiresAtNativeHeight.value, 'expiresAtNativeHeight',
+  );
+  if (issued > reserved || reserved >= expires) {
+    throw new Error('pending reservation requires issue <= reserved < expiry');
+  }
+  const issueBytes = Buffer.alloc(8);
+  issueBytes.writeBigUInt64LE(issued);
+  const reservationWindow = Buffer.alloc(16);
+  reservationWindow.writeBigUInt64LE(reserved, 0);
+  reservationWindow.writeBigUInt64LE(expires, 8);
+  // SCALE struct: version, profile, compact(603), statement, hashes and LE heights.
+  return `0x${Buffer.concat([
+    Buffer.from([4]), hashes[0], Buffer.from([0x6d, 0x09]), statement,
+    ...hashes.slice(1, 6), issueBytes, ...hashes.slice(6), reservationWindow,
+  ]).toString('hex')}`;
+}
+
+function pendingReservationHeightV4(value: unknown, label: string): bigint {
+  if (
+    (typeof value !== 'bigint' && typeof value !== 'number' && typeof value !== 'string')
+    || (typeof value === 'number' && (!Number.isSafeInteger(value) || Object.is(value, -0)))
+    || (typeof value === 'string' && (value.length > 20 || !/^(?:0|[1-9][0-9]*)$/.test(value)))
+  ) {
+    throw new Error(`${label} must be a canonical uint64`);
+  }
+  const height = BigInt(value);
+  if (height < 0n || height > 0xffff_ffff_ffff_ffffn) {
+    throw new Error(`${label} must be a canonical uint64`);
+  }
+  return height;
+}
+
 /** Derive the exact source-locked V4 state surface for one mint identity. */
 export function derivePooledReserveMintReservationRuntimeStorageKeysV4(
   reservationKeyHex: string,

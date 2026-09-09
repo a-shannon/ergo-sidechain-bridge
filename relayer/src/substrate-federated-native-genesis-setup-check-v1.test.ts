@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import axios from 'axios';
 import { Mnemonic, SigningKey } from 'ethers';
+import blakejs from 'blakejs';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
 // Request provenance and observations are component doubles. WASM signing and
@@ -116,8 +117,10 @@ import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1 }
   from './adapters/federated-genesis-operator-v1.js';
 import * as nativeOperator from './adapters/federated-genesis-operator-v1.js';
 import * as frontierOwner from './substrate-federated-authority-safe-devnet-process-v1.js';
-import { signFrontierNativeProofBoundReservationV1 }
+import { signFrontierNativeProofBoundReservationV1, executeFrontierNativeProofBoundReservationV1 }
   from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
+import { derivePooledReserveMintReservationRuntimeStorageKeysV4 }
+  from './pooled-reserve-mint-reservation-runtime-state-v4.js';
 
 const ORIGIN = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -1043,6 +1046,90 @@ describe('native FED managed setup session', () => {
       } finally { disposeFederatedGenesisOperatorV1(operator); }
     });
   });
+
+  it.each(['none', 'missing scope', 'proof clone', 'before transport', 'after submission',
+    'after seal', 'pending drift', 'request digest drift', 'result digest drift', 'proof digest drift'])
+    ('executes the proof-bound native reservation with %s', async defect => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const operator = createFederatedGenesisOperatorV1();
+        const observed = reservationTarget(operator);
+        const directory = mkdtempSync(join(tmpdir(), 'bridge-native-composed-reservation-'));
+        try {
+          const proof = produceNativeMintProof(source, proofInput);
+          const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
+          const bytes = (hex: string) => Buffer.from(hex.slice(2), 'hex');
+          const u64 = (value: string | number | bigint) => { const out = Buffer.alloc(8); out.writeBigUInt64LE(BigInt(value)); return out; };
+          const digest = (value: Uint8Array) => Buffer.from(blakejs.blake2b(value, undefined, 32));
+          // Independent field concatenation, not the production pending encoder.
+          const pending = Buffer.concat([Buffer.from([4]), bytes(proof.runtimeProfileIdHex), Buffer.from('6d09', 'hex'),
+            bytes(proof.request.statementHex), bytes(proof.mintReservationStatementIdHex), bytes(proof.mintIdentityHex),
+            digest(bytes(proof.request.statementHex)), bytes(proof.request.runtimeProfile.sourceProofSystemIdHex),
+            bytes(proof.sourceProofProfileIdHex), u64(proof.result.issuedAtNativeHeight), bytes(proof.requestDigestHex),
+            bytes(proof.signatureVerification.resultIdHex), digest(Buffer.concat([
+              Buffer.from('E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_ENVELOPE_V1', 'ascii'),
+              bytes(proof.signatureVerification.resultIdHex), bytes(proof.signatureVerification.signatureSetDigestHex),
+            ])), u64(1), u64(proof.result.expiresAtNativeHeight)]);
+          expect(pending).toHaveLength(918);
+          if (defect === 'request digest drift') pending[806] ^= 1;
+          if (defect === 'result digest drift') pending[838] ^= 1;
+          if (defect === 'proof digest drift') pending[870] ^= 1;
+          let signed = false, submitted = false, sealed = false, extrinsic = '', extrinsicHash = '';
+          const blockHash = `0x${'a1'.repeat(32)}`;
+          const header = { parentHash: observed.fields.expectedGenesisHashHex, number: '0x1',
+            stateRoot: `0x${'a2'.repeat(32)}`, extrinsicsRoot: `0x${'a3'.repeat(32)}`, digest: { logs: [] } };
+          const primitive = SigningKey.prototype.sign;
+          vi.spyOn(SigningKey.prototype, 'sign').mockImplementation(function (this: SigningKey, hash) {
+            const result = primitive.call(this, hash); signed = true; return result;
+          });
+          const state: Record<string, string | null> = { ...observed.fields.expectedStorage,
+            [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`,
+            [keys.pendingReservationStorageKeyHex]: `0x${pending.toString('hex')}` };
+          const account = bytes(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(1, 0);
+          state[operator.nativeFunding.storageKeyHex] = `0x${account.toString('hex')}`;
+          const genesisRpc = observed.fetcher.getMockImplementation()!;
+          observed.fetcher.mockImplementation(async (url, init) => {
+            const { method, params } = JSON.parse(init.body as string);
+            if (signed && !submitted && defect === 'before transport') source.dispose();
+            let result: unknown;
+            if (method === 'author_submitExtrinsic') {
+              submitted = true; extrinsic = params[0]; extrinsicHash = `0x${digest(bytes(extrinsic)).toString('hex')}`;
+              result = extrinsicHash;
+              if (defect === 'after submission') observed.dispose();
+            } else if (method === 'engine_createBlock') {
+              sealed = true; result = { hash: blockHash, aux: { isNewBest: true } };
+              if (defect === 'after seal') source.dispose();
+            } else if (method === 'author_pendingExtrinsics' && submitted) result = sealed ? [] : [extrinsic];
+            else if (sealed && method === 'chain_getBlockHash') result = params[0] === 0 ? observed.fields.expectedGenesisHashHex : blockHash;
+            else if (sealed && method === 'chain_getHeader') result = header;
+            else if (sealed && method === 'chain_getBlock') result = { block: { header, extrinsics: ['0x1004010028', extrinsic] } };
+            else if (sealed && method === 'state_getStorage') result = defect === 'pending drift' && params[0] === keys.pendingReservationStorageKeyHex
+              ? '0x04' : state[params[0]] ?? null;
+            else return genesisRpc(url, init);
+            return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+          });
+          const input: Parameters<typeof executeFrontierNativeProofBoundReservationV1>[0] = {
+            signing: { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target, ...observed.fields },
+            attemptDirectory: directory, broadcastScope: 'fed-native-local-synthetic-reservation-only',
+          };
+          if (defect === 'missing scope') (input as any).broadcastScope = undefined;
+          if (defect === 'proof clone') (input.signing as any).proof = { ...proof };
+          if (defect === 'none') {
+            const result = await executeFrontierNativeProofBoundReservationV1(input);
+            expect(result).toMatchObject({ blockHashHex: blockHash, blockHeight: 1, extrinsicIndex: 1,
+              sourceFinalityEstablished: false, mintAuthorized: false, mintExecuted: false,
+              runtimeReservationObserved: true, sourceProofReceiptDigestHex: proof.receiptDigestHex,
+              pendingReservationScaleHex: `0x${pending.toString('hex')}` });
+          } else await expect(executeFrontierNativeProofBoundReservationV1(input))
+            .rejects.toThrow(/scope|provenance|disposed|state differs/);
+          const methods = observed.fetcher.mock.calls.map(([, init]) => JSON.parse(init.body as string).method);
+          expect(methods.filter(value => value === 'author_submitExtrinsic')).toHaveLength(submitted ? 1 : 0);
+          expect(methods.filter(value => value === 'engine_createBlock')).toHaveLength(sealed ? 1 : 0);
+          if (['missing scope', 'proof clone', 'before transport'].includes(defect)) expect(submitted).toBe(false);
+          if (defect === 'after submission') expect(sealed).toBe(false);
+          expect(readdirSync(directory)).toHaveLength(signed ? 1 : 0);
+        } finally { disposeFederatedGenesisOperatorV1(operator); rmSync(directory, { recursive: true, force: true }); }
+      });
+    });
 
   it.each(['proof clone', 'draft clone', 'session clone', 'compiled clone', 'target clone', 'operator clone',
     'operator identity', 'launch domain', 'genesis JSON', 'runtime profile', 'profile ID',
