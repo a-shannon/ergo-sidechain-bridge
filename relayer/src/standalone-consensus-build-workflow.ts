@@ -285,8 +285,8 @@ export function validateStandaloneConsensusBuildWorkflow(
   if (auditJob?.['runs-on'] !== 'windows-latest') {
     errors.push('public audit job must run on windows-latest');
   }
-  if (auditJob?.['timeout-minutes'] !== 120) {
-    errors.push('public audit job timeout must be 120 minutes');
+  if (auditJob?.['timeout-minutes'] !== 240) {
+    errors.push('public audit job timeout must be 240 minutes');
   }
   if (auditJob && !hasExactKeys(auditJob, [
     'defaults',
