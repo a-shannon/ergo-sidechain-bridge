@@ -4030,11 +4030,10 @@ export function observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1(
     '$ErrorActionPreference="Stop"',
     `$pids=@(${pids.join(',')})`,
     '$images=@(Get-Process -Id $pids -ErrorAction Stop | Select-Object Id,Path)',
-    'try { $rows=@(Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction Stop '
-      + '| Select-Object LocalAddress,LocalPort,OwningProcess) } '
-      + 'catch { if ($_.FullyQualifiedErrorId '
-      + '-like "CmdletizationQuery_NotFound,Get-NetTCPConnection*") '
-      + '{ $rows=@() } else { throw } }',
+    // Same provider as Get-NetTCPConnection; its Listen state is 2. Keep every owned listener.
+    '$rows=@(Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection '
+      + `-Filter "State = 2 AND (OwningProcess = ${primaryPid} OR OwningProcess = ${witnessPid})" `
+      + '-ErrorAction Stop | Select-Object LocalAddress,LocalPort,OwningProcess)',
     'ConvertTo-Json -Compress -Depth 3 -InputObject @{images=$images; listeners=$rows}',
   ].join('; ');
   const result = spawnSync(windowsPowerShellPath(),

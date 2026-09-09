@@ -56,8 +56,11 @@ describe.skipIf(process.platform !== 'win32')('fresh Windows process-pair observ
     expect(args.slice(0, -1)).toEqual(['-NoLogo', '-NoProfile', '-NonInteractive', '-Command']);
     expect(args.at(-1)).toContain('$pids=@(41001,41002)');
     expect(args.at(-1)).toContain('Get-Process -Id $pids -ErrorAction Stop');
-    expect(args.at(-1)).toContain('Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction Stop');
+    expect(args.at(-1)).toContain('Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection');
+    expect(args.at(-1)).toContain('-Filter "State = 2 AND (OwningProcess = 41001 OR OwningProcess = 41002)" -ErrorAction Stop');
+    expect(args.at(-1)).toContain('Select-Object LocalAddress,LocalPort,OwningProcess');
     expect(args.at(-1)).not.toContain('-LocalPort');
+    expect(args.at(-1)).not.toContain('catch');
     expect(options).toMatchObject({ encoding: 'utf8', timeout: 10_000, maxBuffer: 256 * 1024, windowsHide: true });
   });
 
