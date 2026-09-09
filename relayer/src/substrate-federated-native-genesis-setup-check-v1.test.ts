@@ -75,6 +75,7 @@ import { StateTracker } from './state-tracker.js';
 import * as deposits from './substrate-federated-pooled-reserve-deposit-v2.js';
 import { buildSubstrateFederatedNativeGenesisPegInPacketV1 as buildNativePegIn,
   assertSubstrateFederatedNativeGenesisPegInPacketV1 as assertNativePegIn,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1 as assertNativeReadCustody,
   buildSubstrateFederatedIsolatedDevnetPegInCandidateV2 as buildLegacyPegIn }
   from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { MINER_FEE_TREE } from './ergo-encoding.js';
@@ -386,6 +387,10 @@ describe('native FED managed setup session', () => {
       if (value !== compiled || expectedTarget !== target || !boundary.active) throw new Error('native compiled provenance absent');
       boundary.custody!();
     });
+    vi.spyOn(compiledGenesis, 'assertObservedSubstrateFederatedGenesisReadCustodyV1').mockImplementation((value, expectedTarget) => {
+      if (value !== compiled || expectedTarget !== target) throw new Error('native compiled read custody absent');
+      boundary.custody!();
+    });
     boundary.build.mockImplementation(async value => {
       compiledGenesis.assertObservedSubstrateFederatedGenesisV1(value.compiled, value.target);
       return request;
@@ -658,8 +663,12 @@ describe('native FED managed setup session', () => {
     let vaultSent = false;
     const headerId = (height: number): string => height === 1000 ? '71'.repeat(32)
       : height === 1020 ? '70'.repeat(32) : height.toString(16).padStart(64, '0');
-    vi.spyOn(axios, 'create').mockImplementation(options => ({ get: async (path: string) => {
+    vi.spyOn(axios, 'create').mockImplementation(options => ({ get: async (path: string, config?: { responseType?: string }) => {
       if (path === '/info') return { data: { network: 'devnet', fullHeight: 1020 } };
+      const atHeight = /^\/blocks\/at\/(1000|1020)$/.exec(path);
+      if (atHeight && config?.responseType === 'arraybuffer') {
+        return { status: 200, data: Buffer.from(JSON.stringify([headerId(Number(atHeight[1]))])) };
+      }
       if (path === '/blocks/at/1') return { data: [request.target.genesisHeaderIdHex] };
       if (path === '/blocks/at/1000') return { data: ['71'.repeat(32)] };
       if (path === '/blocks/lastHeaders/1') {
@@ -994,6 +1003,31 @@ describe('native FED managed setup session', () => {
       source.dispose();
       expect(() => assertNativeMintProof(receipt, source, proofInput.draft)).toThrow(/disposed/);
     });
+  });
+
+  it('retains native packet read custody without replacing full target validation', async () => {
+    const { batch, packet, packets, input } = await nativePegInFixture();
+    await buildNativePegIn(input);
+    expect(assertNativeReadCustody(packet, batch, target)).toBe(packet);
+    expect(() => assertNativeReadCustody({ ...packet }, batch, target)).toThrow(/read custody/);
+    expect(() => assertNativeReadCustody(packet, { ...batch }, target)).toThrow(/read custody/);
+    expect(() => assertNativeReadCustody(packet, batch, { ...target })).toThrow(/read custody/);
+    boundary.active = false;
+    expect(assertNativeReadCustody(packet, batch, target)).toBe(packet);
+    expect(() => assertNativePegIn(packet, batch, target)).toThrow();
+    boundary.active = true;
+    packets.delete(packet);
+    expect(() => assertNativeReadCustody(packet, batch, target)).toThrow(/deposit provenance/);
+    packets.add(packet);
+    session.dispose();
+    expect(() => assertNativeReadCustody(packet, batch, target)).toThrow(/inactive/);
+  });
+
+  it('does not replace compiled custody with a native batch status', async () => {
+    const { batch, packet, input } = await nativePegInFixture();
+    await buildNativePegIn(input);
+    boundary.custody = () => { throw new Error('retained signer revoked'); };
+    expect(() => assertNativeReadCustody(packet, batch, target)).toThrow('retained signer revoked');
   });
 
   function reservationTarget(operator: ReturnType<typeof createFederatedGenesisOperatorV1>,

@@ -133,6 +133,7 @@ import {
 } from './substrate-federated-native-genesis-setup-check-request-v1.js';
 import {
   assertObservedSubstrateFederatedGenesisV1,
+  assertObservedSubstrateFederatedGenesisReadCustodyV1,
   type ObservedSubstrateFederatedGenesisV1,
 } from './substrate-federated-observed-genesis-v1.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
@@ -2482,6 +2483,21 @@ export function assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
   }
   // Request age governs checking, not later issuance. Each later action reobserves its own state.
   return current;
+}
+
+/** Does not validate processes or grant checking, signing or transport authority. */
+export function assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  const retained = NATIVE_EXECUTION_BATCHES.get(batch);
+  if (retained === undefined || retained.target !== target
+    || batch.targetBinding !== retained.binding || batch.profile !== 'fed-native-height-zero-v1'
+    || batch.orderedTransactions.length !== 3) {
+    throw new Error('native FED setup batch lacks exact retained read custody');
+  }
+  retained.assertSessionActive();
+  assertObservedSubstrateFederatedGenesisReadCustodyV1(retained.compiled, target);
 }
 
 export function getSubstrateFederatedNativeGenesisSetupCompilerInputV1(

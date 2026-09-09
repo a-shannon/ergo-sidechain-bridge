@@ -49,6 +49,7 @@ export type ObservedSubstrateFederatedGenesisV1 = Awaited<ReturnType<typeof comp
 const COMPILED_GENESIS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   assertCustody: () => Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  assertReadCustody: () => void;
 }>>();
 
 /** Compile one candidate and its unsigned Ergo issuance transactions from live
@@ -176,7 +177,10 @@ export async function compileObservedSubstrateFederatedGenesisV1(
     greenfieldReplayBaselineEstablished: false as const,
     targetNodeAcceptanceEstablished: false as const, issuanceEstablished: false as const });
   const result = Object.freeze({ preparation, familyCompilerInput, familyReceipt, candidate, discovery, history, issuance });
-  COMPILED_GENESIS.set(result, Object.freeze({ target, assertCustody: () => {
+  COMPILED_GENESIS.set(result, Object.freeze({ target, assertReadCustody: () => {
+    assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setupSigner);
+    readSubstrateFederatedGenesisProfilesFromSessionV2(sourceSession);
+  }, assertCustody: () => {
     const { processBinding } = assertCustody();
     assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(history);
     return processBinding;
@@ -189,6 +193,18 @@ export function assertObservedSubstrateFederatedGenesisV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): asserts value is Readonly<ObservedSubstrateFederatedGenesisV1> {
   validateObservedSubstrateFederatedGenesisV1(value, target);
+}
+
+/** Retained custody only, for reads bracketed by full current-target validation. */
+export function assertObservedSubstrateFederatedGenesisReadCustodyV1(
+  value: unknown,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  const retained = value !== null && typeof value === 'object' ? COMPILED_GENESIS.get(value) : undefined;
+  if (retained === undefined || retained.target !== target) {
+    throw new Error('observed FED genesis lacks exact retained read custody');
+  }
+  retained.assertReadCustody();
 }
 
 /** One complete current-target traversal per synchronous compiler validation. */

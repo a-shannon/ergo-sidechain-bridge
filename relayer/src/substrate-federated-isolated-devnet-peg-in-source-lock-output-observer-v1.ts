@@ -5,6 +5,7 @@ import {
 } from './ergo-settlement-core/strict-json.js';
 import {
   normalizeSubstrateFederatedLocalDevnetGenesisConfirmationV1,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS,
   type SubstrateFederatedLocalDevnetGenesisConfirmation,
 } from './relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import {
@@ -23,6 +24,7 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
   assertSubstrateFederatedNativeGenesisPegInPacketV1,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1,
   type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type {
@@ -129,8 +131,9 @@ async function observeOutputs(
     confirmation: Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>;
   }>,
   assertCandidate: () => DepositPacket,
-  native = false,
+  assertRetainedReadCustody?: () => DepositPacket,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>> {
+  const native = assertRetainedReadCustody !== undefined;
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
   const packet = assertCandidate();
@@ -142,6 +145,15 @@ async function observeOutputs(
       || assertCandidate() !== packet) {
       throw new Error('native source-lock output target or packet changed during observation');
     }
+  };
+  const assertReadCustody = () => {
+    if (assertRetainedReadCustody && assertRetainedReadCustody() !== packet) {
+      throw new Error('native source-lock read custody changed');
+    }
+  };
+  const readGroup = async <T>(read: () => Promise<T>): Promise<T> => {
+    assertActive();
+    try { return await read(); } finally { assertActive(); }
   };
   const expectedTxId = packet.transactions.sourceLockCreation.txId;
   const confirmation =
@@ -198,7 +210,7 @@ async function observeOutputs(
   const previousTips = new Map<AuthenticatedSpvTrackerReadOnlyNodeClient, Tip>();
   const observedHeaders = new Map<number, string>();
   const readWindowTip = async (client: AuthenticatedSpvTrackerReadOnlyNodeClient) => {
-    const tip = await readTip(client, assertActive);
+    const tip = await readTip(client, native ? assertReadCustody : assertActive);
     if (native) {
       const previous = previousTips.get(client);
       if (previous && (tip.height < previous.height
@@ -226,25 +238,38 @@ async function observeOutputs(
   for (let attempt = 0; attempt < (native ? 3 : 1); attempt++) {
     const initialConfirmation = await refreshConfirmation(priorConfirmation);
     priorConfirmation = initialConfirmation;
-    const primaryTipBefore = await readWindowTip(primary);
-    const witnessTipBefore = await readWindowTip(witness);
-    if (native && !sameNativeTip(primaryTipBefore, witnessTipBefore)) continue;
-    const primaryState = await observeNodeState(
-      primary,
-      packet.boxes.sourceFundingInput.boxId,
-      packet.boxes.sourceLock,
-      packet.boxes.transitionFeeFunding,
-      'primary',
-      assertActive,
-    );
-    const witnessState = await observeNodeState(
-      witness,
-      packet.boxes.sourceFundingInput.boxId,
-      packet.boxes.sourceLock,
-      packet.boxes.transitionFeeFunding,
-      'witness',
-      assertActive,
-    );
+    const window = await readGroup(async () => {
+      const [primaryTipBefore, witnessTipBefore] = native
+        ? await settleReads([readWindowTip(primary), readWindowTip(witness)])
+        : [await readWindowTip(primary), await readWindowTip(witness)];
+      if (native && !sameNativeTip(primaryTipBefore!, witnessTipBefore!)) return null;
+      const observe = (client: AuthenticatedSpvTrackerReadOnlyNodeClient, label: string) =>
+        observeNodeState(client, packet.boxes.sourceFundingInput.boxId, packet.boxes.sourceLock,
+          packet.boxes.transitionFeeFunding, label, native ? assertReadCustody : assertActive);
+      const [primaryState, witnessState] = native
+        ? await settleReads([observe(primary, 'primary'), observe(witness, 'witness')])
+        : [await observe(primary, 'primary'), await observe(witness, 'witness')];
+      if (native) {
+        if (initialConfirmation.observedAtHeight > primaryTipBefore!.height
+          || primaryTipBefore!.height - initialConfirmation.confirmationHeight
+            < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS) {
+          throw new Error('native source-lock confirmation snapshot or depth exceeds the output tip');
+        }
+        await settleReads([primary, witness].map(async client => {
+          assertReadCustody();
+          const ids = await client.getBlockHeaderIdsAtHeight(initialConfirmation.confirmationHeight);
+          assertReadCustody();
+          if (ids.length !== 1 || ids[0] !== initialConfirmation.confirmationHeaderIdHex) {
+            throw new Error('native source-lock output inclusion differs from canonical confirmation');
+          }
+        }));
+      }
+      const after = native ? await settleReads([readWindowTip(primary), readWindowTip(witness)]) : undefined;
+      return { primaryTipBefore: primaryTipBefore!, witnessTipBefore: witnessTipBefore!,
+        primaryState: primaryState!, witnessState: witnessState!, after };
+    });
+    if (window === null) continue;
+    const { primaryTipBefore, witnessTipBefore, primaryState, witnessState } = window;
     if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
       throw new Error('isolated source-lock output observations disagree');
     }
@@ -253,8 +278,8 @@ async function observeOutputs(
       || latestConfirmation.confirmationHeaderIdHex !== initialConfirmation.confirmationHeaderIdHex) {
       throw new Error('isolated source-lock canonical inclusion changed during observation');
     }
-    const primaryTipAfter = await readWindowTip(primary);
-    const witnessTipAfter = await readWindowTip(witness);
+    const primaryTipAfter = native ? window.after![0]! : await readWindowTip(primary);
+    const witnessTipAfter = native ? window.after![1]! : await readWindowTip(witness);
     if (native) {
       priorConfirmation = latestConfirmation;
       const primaryStable = sameNativeTip(primaryTipBefore, primaryTipAfter);
@@ -265,15 +290,38 @@ async function observeOutputs(
         || packet.boxes.transitionFeeFunding.creationHeight > primaryTipBefore.height) {
         throw new Error('native source-lock output creation height exceeds the stable tip');
       }
+      if (latestConfirmation.observedAtHeight < primaryTipBefore.height) {
+        throw new Error('native source-lock confirmation snapshots differ from the output tip');
+      }
+      // The closing confirmation may observe later mining. Rebind the captured
+      // output anchor afterward; visible tips do not imply an atomic UTXO view.
+      const continuous = await readGroup(async () => {
+        const before = await settleReads([readWindowTip(primary), readWindowTip(witness)]);
+        if (!sameNativeTip(before[0]!, before[1]!)) return false;
+        if (latestConfirmation.observedAtHeight > before[0]!.height) {
+          throw new Error('native source-lock confirmation exceeds the closing tip');
+        }
+        await settleReads([primary, witness].map(async client => {
+          assertReadCustody();
+          const ids = await client.getBlockHeaderIdsAtHeight(primaryTipBefore.height);
+          assertReadCustody();
+          if (ids.length !== 1 || ids[0] !== primaryTipBefore.idHex) {
+            throw new Error('native source-lock captured output anchor changed after confirmation');
+          }
+        }));
+        const after = await settleReads([readWindowTip(primary), readWindowTip(witness)]);
+        return sameNativeTip(before[0]!, after[0]!) && sameNativeTip(before[0]!, after[1]!);
+      });
+      if (!continuous) continue;
     }
     if ([witnessTipBefore, primaryTipAfter, witnessTipAfter].some(
       tip => canonicalJson(tip) !== canonicalJson(primaryTipBefore),
     )) {
       throw new Error('isolated source-lock observation requires one stable dual-node tip');
     }
-    if (initialConfirmation.observedAtHeight > primaryTipBefore.height
+    if (!native && (initialConfirmation.observedAtHeight > primaryTipBefore.height
       || latestConfirmation.observedAtHeight !== primaryTipBefore.height
-      || latestConfirmation.confirmationHeight > primaryTipBefore.height) {
+      || latestConfirmation.confirmationHeight > primaryTipBefore.height)) {
       throw new Error('isolated source-lock confirmation snapshots differ from the stable output tip');
     }
     const current =
@@ -330,6 +378,14 @@ async function observeOutputs(
   throw new Error('native source-lock output-observation did not stabilize within three windows');
 }
 
+async function settleReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(reads);
+  return settled.map(result => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
+}
+
 export async function observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1(
   input: Readonly<{
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
@@ -341,7 +397,8 @@ export async function observeSubstrateFederatedNativeGenesisPegInSourceLockOutpu
   const retained = Object.freeze({ ...input });
   const { target, batch, packet } = retained;
   return observeOutputs(retained, () =>
-    assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target), true);
+    assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target), () =>
+    assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(packet, batch, target));
 }
 
 export function assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(

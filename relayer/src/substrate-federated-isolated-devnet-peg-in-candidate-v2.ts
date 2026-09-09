@@ -6,6 +6,7 @@ import {
   getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3,
   type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV1,
   getSubstrateFederatedNativeGenesisSetupCompilerInputV1,
   type SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
@@ -177,6 +178,21 @@ export function assertSubstrateFederatedNativeGenesisPegInPacketV1(
     throw new Error('native FED peg-in packet lacks exact process provenance');
   }
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
+  return packet;
+}
+
+/** Use only inside a read group bracketed by the full packet/target assertion. */
+export function assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(
+  packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+  batch: NativeBatch,
+  target: Target,
+): Readonly<SubstrateFederatedPooledReserveDepositV2Packet> {
+  const retained = nativePackets.get(packet);
+  if (retained === undefined || retained.batch !== batch || retained.target !== target) {
+    throw new Error('native FED peg-in packet lacks exact retained read custody');
+  }
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(batch, target);
   assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
   return packet;
 }

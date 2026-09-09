@@ -24,6 +24,7 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js', ()
 }));
 
 import { assertObservedSubstrateFederatedGenesisV1, validateObservedSubstrateFederatedGenesisV1,
+  assertObservedSubstrateFederatedGenesisReadCustodyV1,
   compileObservedSubstrateFederatedGenesisV1, type CompileObservedSubstrateFederatedGenesisV1Input } from './substrate-federated-observed-genesis-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2 } from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -188,6 +189,12 @@ describe('observed FED genesis compilation', () => {
       expect(trackerCompiler.compileSubstrateFederatedTrackerWithPinnedJvmV2).toHaveBeenCalledTimes(1);
       expect(familyCompiler.compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2).toHaveBeenCalledTimes(1);
       observations.validations = 0;
+      expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(result, expectedTarget)).not.toThrow();
+      expect(observations.validations).toBe(0);
+      for (const value of [null, undefined, {}, { ...result }]) {
+        expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(value, expectedTarget)).toThrow(/retained read custody/);
+      }
+      expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(result, { ...expectedTarget })).toThrow(/retained read custody/);
       const checked = validateObservedSubstrateFederatedGenesisV1(result, expectedTarget);
       expect(checked.compiled).toBe(result);
       expect(checked.processBinding).toBe(observations.binding);
@@ -251,15 +258,18 @@ describe('observed FED genesis compilation', () => {
       expect(retainedCompiler.familyReceipt).toBe(result.familyReceipt);
       expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, expectedTarget)).not.toThrow();
       observations.active = false;
+      expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(result, expectedTarget)).not.toThrow();
       expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/observation inactive/);
       observations.active = true;
       if (delay === 1) {
         setup.dispose();
+        expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(result, expectedTarget)).toThrow(/active process provenance/);
         expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/active process provenance/);
         expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, expectedTarget)).toThrow(/inactive/);
         expect(() => getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, expectedTarget)).toThrow(/inactive/);
       } else {
         source.dispose();
+        expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(result, expectedTarget)).toThrow(/disposed/);
         expect(() => assertObservedSubstrateFederatedGenesisV1(result, expectedTarget)).toThrow(/disposed/);
         expect(() => assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, expectedTarget)).toThrow(/disposed/);
         expect(() => getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, expectedTarget)).toThrow(/disposed/);

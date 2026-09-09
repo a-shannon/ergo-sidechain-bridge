@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => ({
   assertCandidate: vi.fn(),
   assertCandidateV2: vi.fn(),
   assertNativePacket: vi.fn(),
+  assertReadCustody: vi.fn(),
   assertConfirmation: vi.fn(),
   reobserveConfirmation: vi.fn(),
   assertTarget: vi.fn(),
   getBox: vi.fn(),
   getBestHeader: vi.fn(),
+  getHeaders: vi.fn(),
   normalizeBox: vi.fn(async value => value),
 }));
 
@@ -24,6 +26,9 @@ vi.mock('./authenticated-spv-tracker-read-only-node-client.js', () => ({
     getBestHeader() {
       return mocks.getBestHeader(this.origin);
     }
+    getBlockHeaderIdsAtHeight(height: number) {
+      return mocks.getHeaders(this.origin, height);
+    }
   },
 }));
 vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
@@ -37,6 +42,7 @@ vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v1.js', () => ({
 vi.mock('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   assertSubstrateFederatedIsolatedDevnetPegInCandidateV2: mocks.assertCandidateV2,
   assertSubstrateFederatedNativeGenesisPegInPacketV1: mocks.assertNativePacket,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1: mocks.assertReadCustody,
 }));
 vi.mock('./substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', () => ({
   assertSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1:
@@ -435,6 +441,8 @@ describe('native source-lock output observation (mocked packet custody, confirma
   const confirmationAt = (height: number) => Object.freeze({ ...FINAL_CONFIRMATION,
     confirmations: height - 200, observedAtHeight: height });
   const tips = (heights: number[]) => {
+    mocks.getHeaders.mockImplementation((_origin, height) =>
+      [height === 200 ? CONFIRMATION_HEADER_ID : tipAt(height).id]);
     let ordinal = 0;
     mocks.getBestHeader.mockImplementation(() => {
       const height = heights[ordinal++];
@@ -448,6 +456,9 @@ describe('native source-lock output observation (mocked packet custody, confirma
       if (p !== packet || b !== batch || t !== TARGET) throw new Error('native packet provenance missing');
       return packet;
     });
+    mocks.assertReadCustody.mockReset().mockImplementation((...args) => mocks.assertNativePacket(...args));
+    mocks.getHeaders.mockReset().mockImplementation((_origin, height) =>
+      [height === 200 ? CONFIRMATION_HEADER_ID : STABLE_TIP.id]);
     mocks.getBox.mockReset().mockImplementation(exactBox);
     mocks.normalizeBox.mockReset().mockImplementation(async value => value);
   });
@@ -462,12 +473,75 @@ describe('native source-lock output observation (mocked packet custody, confirma
       boundaries: { sourceFundingSpent: true, sourceLockUnspentAndExact: true,
         transitionFeeFundingUnspentAndExact: true, sourceLockStillRefundable: true,
         sourceLockConsumptionEstablished: false, reserveLineageEstablished: false, mintAuthorized: false } });
-    expect(mocks.getBox.mock.calls).toEqual([PRIMARY, WITNESS].flatMap(origin =>
-      [SOURCE_ID, LOCK_ID, FEE_ID].map(id => [origin, id])));
+    expect(mocks.getBox.mock.calls).toEqual([SOURCE_ID, LOCK_ID, FEE_ID].flatMap(id =>
+      [PRIMARY, WITNESS].map(origin => [origin, id])));
     expect(mocks.assertConfirmation).toHaveBeenCalledWith(CONFIRMATION.observerArtifact,
       BINDING.executionTargetIdentityDigestHex, GENESIS_ID, TX_ID, expect.anything());
     expect(mocks.assertCandidate).not.toHaveBeenCalled();
     expect(mocks.assertCandidateV2).not.toHaveBeenCalled();
+  });
+
+  it('allows mining during closing confirmation while rebinding the captured output anchor', async () => {
+    tips([211, 211, 211, 211, 212, 212, 212, 212]);
+    mocks.reobserveConfirmation.mockResolvedValueOnce(confirmationAt(210))
+      .mockResolvedValueOnce(confirmationAt(212));
+    expect(assertBound(await observe(input()))).toBe(packet);
+    expect(mocks.getHeaders.mock.calls).toEqual([
+      [PRIMARY, 200], [WITNESS, 200], [PRIMARY, 211], [WITNESS, 211],
+    ]);
+    const calls = mocks.reobserveConfirmation.mock.invocationCallOrder;
+    const tipCalls = mocks.getBestHeader.mock.invocationCallOrder;
+    expect(calls[0]).toBeLessThan(tipCalls[0]!);
+    expect(tipCalls[3]).toBeLessThan(calls[1]!);
+    expect(calls[1]).toBeLessThan(tipCalls[4]!);
+  });
+
+  for (const node of [PRIMARY, WITNESS]) {
+    for (const phase of ['inclusion', 'captured anchor'] as const) {
+      it.each(['missing', 'replaced', 'ambiguous'] as const)(
+        `rejects ${node} ${phase} when %s even if the older confirmation stays valid`, async fault => {
+          const read = mocks.getHeaders.getMockImplementation()!;
+          mocks.getHeaders.mockImplementation((origin, height) => {
+            const ids = read(origin, height);
+            return origin === node && height === (phase === 'inclusion' ? 200 : 211)
+              ? fault === 'missing' ? [] : fault === 'replaced' ? [hex('ff')] : [...ids, ...ids] : ids;
+          });
+          await expect(observe(input())).rejects.toThrow(/output inclusion differs|captured output anchor changed/);
+          expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(phase === 'inclusion' ? 1 : 2);
+        });
+    }
+  }
+
+  it('does not span full process assertions across the short output read window', async () => {
+    let tipReads = 0;
+    const read = mocks.getBestHeader.getMockImplementation()!;
+    mocks.getBestHeader.mockImplementation((origin) => { tipReads++; return read(origin); });
+    mocks.assertTarget.mockImplementation(value => {
+      if (value !== TARGET) throw new Error('target provenance missing');
+      if (tipReads > 0 && tipReads < 4) throw new Error('full process query inside output window');
+      return BINDING;
+    });
+    expect(assertBound(await observe(input()))).toBe(packet);
+    expect(mocks.assertReadCustody).toHaveBeenCalled();
+  });
+
+  it('drains the other node read before failing the native output group', async () => {
+    let release!: () => void;
+    const pending = new Promise<unknown>(resolve => { release = () => resolve(null); });
+    let primaryStarted!: () => void;
+    const started = new Promise<void>(resolve => { primaryStarted = resolve; });
+    mocks.getBox.mockImplementation((origin, id) => {
+      if (id === SOURCE_ID && origin === PRIMARY) { primaryStarted(); throw new Error('primary read failed'); }
+      return id === SOURCE_ID && origin === WITNESS ? pending : exactBox(origin, id);
+    });
+    let settled = false;
+    const run = observe(input()).finally(() => { settled = true; });
+    const rejection = expect(run).rejects.toThrow('primary read failed');
+    await started;
+    await new Promise(resolve => setImmediate(resolve));
+    try { expect(settled).toBe(false); } finally { release(); }
+    await rejection;
+    expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
   });
 
   it('preserves the legacy format and digest for identical observation bytes', async () => {
@@ -568,10 +642,11 @@ describe('native source-lock output observation (mocked packet custody, confirma
 
   it.each(['initial pairing', 'output advance', 'third window'] as const)(
     'reobserves complete bounded windows after %s', async stage => {
-      tips(stage === 'initial pairing' ? [212, 211, 212, 212, 212, 212]
-        : stage === 'output advance' ? [211, 211, 212, 212, 212, 212, 212, 212]
-          : [212, 211, 213, 212, 213, 213, 213, 213]);
+      tips(stage === 'initial pairing' ? [212, 211, 212, 212, 212, 212, 212, 212, 212, 212]
+        : stage === 'output advance' ? [211, 211, 212, 212, 212, 212, 212, 212, 212, 212, 212, 212]
+          : [212, 211, 213, 212, 213, 213, 213, 213, 213, 213, 213, 213]);
       mocks.reobserveConfirmation.mockResolvedValue(confirmationAt(stage === 'third window' ? 213 : 212));
+      if (stage === 'output advance') mocks.reobserveConfirmation.mockResolvedValueOnce(confirmationAt(211));
       const observation = await observe(input());
       expect(assertBound(observation)).toBe(packet);
       expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(stage === 'initial pairing' ? 3 : 4);
@@ -598,7 +673,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
     mocks.reobserveConfirmation.mockResolvedValue(confirmationAt(211));
     await expect(observe(input())).rejects.toThrow(/tips disagree at a previously observed height/);
     expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(2);
-    expect(mocks.getBestHeader).toHaveBeenCalledTimes(leader === PRIMARY ? 4 : 3);
+    expect(mocks.getBestHeader).toHaveBeenCalledTimes(4);
     expect(mocks.getBox).not.toHaveBeenCalled();
   });
 
@@ -667,17 +742,18 @@ describe('native source-lock output observation (mocked packet custody, confirma
   it('does not reuse exact boxes from a window invalidated by advancing tips', async () => {
     tips([211, 211, 212, 212, 212, 212]);
     mocks.reobserveConfirmation.mockResolvedValue(confirmationAt(212));
+    mocks.reobserveConfirmation.mockResolvedValueOnce(confirmationAt(211));
     let reads = 0;
     mocks.getBox.mockImplementation((origin, id) => ++reads > 6 && id === LOCK_ID ? null : exactBox(origin, id));
     await expect(observe(input())).rejects.toThrow(/output is unavailable/);
-    expect(reads).toBe(9);
+    expect(reads).toBe(12);
   });
 
   it.each(['initial ahead', 'final behind', 'final ahead'] as const)('rejects %s confirmation snapshots at a stable tip', async fault => {
     mocks.reobserveConfirmation.mockResolvedValueOnce(confirmationAt(fault === 'initial ahead' ? 212 : 210))
       .mockResolvedValueOnce(confirmationAt(fault === 'final behind' ? 210 : 212));
-    await expect(observe(input())).rejects.toThrow(/confirmation snapshots differ/);
-    expect(mocks.getBestHeader).toHaveBeenCalledTimes(4);
+    await expect(observe(input())).rejects.toThrow(/confirmation snapshot|confirmation exceeds/);
+    expect(mocks.getBestHeader).toHaveBeenCalledTimes(fault === 'initial ahead' ? 2 : fault === 'final behind' ? 4 : 6);
   });
 
   it('rejects canonical inclusion changing between catch-up windows', async () => {
@@ -703,12 +779,13 @@ describe('native source-lock output observation (mocked packet custody, confirma
     expect(mocks.reobserveConfirmation).toHaveBeenCalledTimes(1);
   });
 
-  for (const boundary of ['confirmation', 'tip', 'box', 'normalization'] as const) {
-    const count = { confirmation: 2, tip: 4, box: 6, normalization: 4 }[boundary];
+  for (const boundary of ['confirmation', 'tip', 'box', 'normalization', 'header'] as const) {
+    const count = { confirmation: 2, tip: 8, box: 6, normalization: 4, header: 4 }[boundary];
     for (let ordinal = 0; ordinal < count; ordinal++) {
       it(`reasserts native custody after ${boundary} await ${ordinal}`, async () => {
         const mock = boundary === 'confirmation' ? mocks.reobserveConfirmation
-          : boundary === 'tip' ? mocks.getBestHeader : boundary === 'box' ? mocks.getBox : mocks.normalizeBox;
+          : boundary === 'tip' ? mocks.getBestHeader : boundary === 'box' ? mocks.getBox
+            : boundary === 'header' ? mocks.getHeaders : mocks.normalizeBox;
         const original = mock.getMockImplementation()!;
         let calls = 0;
         mock.mockImplementation(async (...args: unknown[]) => {
@@ -717,7 +794,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
           return result;
         });
         await expect(observe(input())).rejects.toThrow('native custody disposed');
-        expect(mock).toHaveBeenCalledTimes(ordinal + 1);
+        expect(mock).toHaveBeenCalledTimes(boundary === 'confirmation' ? ordinal + 1 : 2 * Math.ceil((ordinal + 1) / 2));
       });
     }
   }
