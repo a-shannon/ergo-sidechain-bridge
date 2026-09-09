@@ -120,8 +120,8 @@ describe('FED genesis build owner', () => {
     expect(buildCalls).toHaveLength(1);
     expect(buildCalls[0].args).toEqual(['build', '--offline', '--locked', '-p', 'frontier-template-node',
       '--no-default-features', '--features', 'bridge-federated-v4-genesis-node']);
-    expect(buildCalls[0].env.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX).toBe(expectedScale.replace(/^0x/, ''));
-    expect(buildCalls[0].env.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX).toBe(session.binding.federatedMintProfile.proofProfileIdHex.slice(2));
+    expect(buildCalls[0].env.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX).toBe(expectedScale);
+    expect(buildCalls[0].env.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX).toBe(session.binding.federatedMintProfile.proofProfileIdHex);
     expect(buildCalls[0].env.SKIP_WASM_BUILD).toBeUndefined();
     expect(buildCalls[0].env.CARGO_NET_OFFLINE).toBe('true');
     expect(buildCalls[0].env.WASM_BUILD_WORKSPACE_HINT).toBe(result.sourceDirectory);

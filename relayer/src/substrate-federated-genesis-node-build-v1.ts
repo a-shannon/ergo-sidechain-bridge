@@ -131,8 +131,9 @@ export async function buildSubstrateFederatedGenesisNodeV1(input: BuildSubstrate
     frontierSourcePath: source, gitExecutablePath, protocExecutablePath,
     rustcExecutablePath, rustTarget: toolchain.rustTarget,
   });
-  environment.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX = profileScaleHex.replace(/^0x/, '');
-  environment.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX = mintProfile.proofProfileIdHex.replace(/^0x/, '');
+  // The pinned runtime build script requires canonical 0x-prefixed hex for both fields.
+  environment.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_SCALE_HEX = profileScaleHex;
+  environment.BRIDGE_LAB_FEDERATED_SOURCE_PROOF_PROFILE_ID_HEX = mintProfile.proofProfileIdHex;
   // The pinned WASM toolchain probe starts nested Cargo in a temporary crate.
   environment.TEMP = temporary;
   environment.TMP = temporary;
