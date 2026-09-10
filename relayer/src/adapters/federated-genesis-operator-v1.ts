@@ -41,8 +41,9 @@ export async function signFederatedGenesisMintV1(owner: Readonly<FederatedGenesi
     || typeof mintIdentityHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(mintIdentityHex) || /^0x0+$/.test(mintIdentityHex)) {
     throw new Error('FED mint signing differs from its first-block operator scope');
   }
+  // Exact height-one parent: cover the pinned base fee's maximum 12.5% single-block rise.
   const transaction = Object.freeze({ type: 0, chainId: 4242, nonce, to: bridgeAddressHex,
-    gasPrice: 1_000_000_000n, gasLimit: 5_000_000n, value: 0n,
+    gasPrice: 1_125_000_000n, gasLimit: 5_000_000n, value: 0n,
     data: mintAbi.encodeFunctionData('mintSERG', [recipientAddressHex, amountNanoErg, mintIdentityHex]) });
   mintSigners.add(owner);
   try {

@@ -26,10 +26,10 @@ Apply these inputs to a separate checkout in this order:
 3. [Genesis overlay 0004](../sources/frontier/0004-federated-genesis-initialization.patch),
    SHA-256 `b3688c77c1a6a2b85b95367057572f053056fa11ee31ac291373571717dd7331`.
 4. For the node, [selection overlay 0005](../sources/frontier/0005-federated-genesis-node.patch),
-   SHA-256 `906b9deabcc15214469414482f36f0fe41f038da18130646c184513aa131f4a3`.
+   SHA-256 `f1e11276188d32e3f94ddc542ce7dce911506eaf05751d152eb22a54b11d9b65`.
 
 The complete node source tree is
-`97cf80cd71f230858a20e318696ea2133be71323`. The node build owner verifies
+`0066f584c0eff7c31bce59adb89bbdb5b90a80fe`. The node build owner verifies
 both patch bytes and the reconstructed tree before compiling.
 
 Overlay 0004 changes eleven source files. It adds one non-publishable runtime
@@ -79,6 +79,33 @@ not change the SDK's empty-pool guard or the caller's one-shot submission,
 parent, `create_empty=false` and `finalized=false` settings. A fresh campaign
 must still establish acceptance with the newly built node; historical node
 results below do not validate the changed service.
+
+## Native Mint Fee Budget
+
+The fixed native caller mints only on the child of its exact height-one
+reservation block. Its legacy transaction bids 1,125,000,000 wei per gas:
+the pinned genesis base fee of 1,000,000,000 plus the maximum 12.5% rise
+across that single block. The 5,000,000 gas limit caps the transaction fee
+at 5,625,000,000,000,000 native units, funded by the operator rather than
+Ergo backing. Signing and pre-submission checks require this exact bid;
+neither a lower bid nor a higher spending budget is accepted.
+
+Reservation dispatch and the bridge callback both consume block weight.
+Even before extrinsic overhead, that budget raises the next base fee above
+the old fixed genesis bid. The native regression charges the reservation
+budget, finalizes the block, converts a signed mint through the runtime API,
+and invokes the transaction-pool validation API. It isolates rejection of
+the old bid and acceptance of the one-block ceiling. A full-weight case
+also rejects a bid one unit below that ceiling. It does not forge a source
+proof or establish whole-block mint acceptance.
+
+```powershell
+cargo test --offline --locked -p frontier-template-node --no-default-features --features bridge-federated-v4-genesis-node post_reservation_pool -- --test-threads=1
+```
+
+This budget is specific to the fixed genesis and parent-height path. A caller
+that permits later parents needs a separately bounded fee policy; it cannot
+reuse this ceiling as a general network fee estimate.
 
 ## Initialization Contract
 

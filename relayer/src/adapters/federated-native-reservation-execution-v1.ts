@@ -70,7 +70,7 @@ export function reserveFederatedNativeMintAttemptV1(directory: string, input: Re
   const tx = Transaction.from(signed.signedTransactionHex);
   if (tx.serialized !== signed.signedTransactionHex || tx.hash !== signed.transactionHashHex
     || tx.type !== 0 || tx.chainId !== 4242n || tx.nonce !== 1 || tx.value !== 0n
-    || tx.gasPrice !== 1_000_000_000n || tx.gasLimit !== 5_000_000n
+    || tx.gasPrice !== 1_125_000_000n || tx.gasLimit !== 5_000_000n
     || tx.from?.toLowerCase() !== context.recipientAddressHex || tx.to?.toLowerCase() !== context.bridgeAddressHex
     || tx.data !== applicationAbi.encodeFunctionData('mintSERG', [context.recipientAddressHex, context.amountNanoErg, context.mintIdentityHex])) {
     throw new Error('native mint bytes differ from the reserved application');

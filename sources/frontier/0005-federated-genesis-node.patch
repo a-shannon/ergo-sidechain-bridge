@@ -145,10 +145,10 @@ index 0000000000000000000000000000000000000000..df8527ad448dca7535d1bc51943ab7c8
 +mod tests;
 diff --git a/template/node/src/federated_genesis/tests.rs b/template/node/src/federated_genesis/tests.rs
 new file mode 100644
-index 0000000000000000000000000000000000000000..11782806ed8ccfa8b576ee3533cb64d010b63ce5
+index 0000000000000000000000000000000000000000..30cff4578486797008605eb96ed40937d1408fb4
 --- /dev/null
 +++ b/template/node/src/federated_genesis/tests.rs
-@@ -0,0 +1,267 @@
+@@ -0,0 +1,390 @@
 +use std::collections::BTreeMap;
 +
 +use clap::Parser;
@@ -237,6 +237,129 @@ index 0000000000000000000000000000000000000000..11782806ed8ccfa8b576ee3533cb64d0
 +	config.bridge_commitment.pooled_reserve_mint_genesis_v4 =
 +		Some((operator, profile.encode().try_into().unwrap()));
 +	config
++}
++
++#[test]
++fn post_reservation_pool_rejects_genesis_bid_and_accepts_one_block_ceiling() {
++	use crate::selected_runtime::{
++		BaseFee, BridgeCommitmentCallbackWeight, Executive, Header, RuntimeOrigin, System,
++		Timestamp, MAXIMUM_BLOCK_WEIGHT,
++	};
++	use ethereum::{
++		LegacyTransaction, LegacyTransactionMessage, TransactionAction, TransactionSignature,
++		TransactionV2,
++	};
++	use fp_evm::FeeCalculator;
++	use frame_support::dispatch::DispatchClass;
++	use scale_codec::Decode;
++	use sp_runtime::{
++		traits::Header as _,
++		transaction_validity::{InvalidTransaction, TransactionSource, TransactionValidity},
++	};
++	let key = libsecp256k1::SecretKey::parse(&[0x11; 32]).unwrap();
++	let public = libsecp256k1::PublicKey::from_secret_key(&key).serialize();
++	let sender = H160::from_slice(&sp_core::hashing::keccak_256(&public[1..])[12..]);
++	for (full_block, gas_price, accepted) in [
++		(false, 1_000_000_000u64, false),
++		(false, 1_125_000_000, true),
++		(true, 1_124_999_999, false),
++		(true, 1_125_000_000, true),
++	] {
++		let mut config = fixture();
++		config.evm_chain_id.chain_id = 4242;
++		config.evm.accounts.insert(
++			sender,
++			fp_evm::GenesisAccount {
++				nonce: U256::one(),
++				balance: U256::from(100_000_000_000_000_000_000u128),
++				code: Vec::new(),
++				storage: BTreeMap::new(),
++			},
++		);
++		let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++		ext.execute_with(|| {
++			let header = Header::new(
++				1,
++				H256::zero(),
++				H256::zero(),
++				H256::repeat_byte(0x19),
++				Default::default(),
++			);
++			Executive::initialize_block(&header);
++			Timestamp::set(RuntimeOrigin::none(), 6_000).unwrap();
++			// Exercise fee accounting and pool admission, not source-proof acceptance.
++			let dispatch_weight = if full_block {
++				MAXIMUM_BLOCK_WEIGHT.saturating_sub(System::block_weight().total())
++			} else {
++				BridgeCommitmentCallbackWeight::get()
++			};
++			System::register_extra_weight_unchecked(dispatch_weight, DispatchClass::Normal);
++			let parent = Executive::finalize_block().hash();
++			let base_fee = BaseFee::min_gas_price().0;
++			assert!(base_fee > U256::from(1_000_000_000));
++			assert!(base_fee <= U256::from(1_125_000_000));
++			if full_block {
++				assert_eq!(base_fee, U256::from(1_125_000_000));
++			}
++			let mut input =
++				sp_core::hashing::keccak_256(b"mintSERG(address,uint256,bytes32)")[..4].to_vec();
++			input.extend_from_slice(H256::from(sender).as_bytes());
++			input.extend_from_slice(H256::from_low_u64_be(20_000_000).as_bytes());
++			input.extend_from_slice(H256::repeat_byte(0x55).as_bytes());
++			let message = LegacyTransactionMessage {
++				nonce: U256::one(),
++				gas_price: U256::from(gas_price),
++				gas_limit: U256::from(5_000_000),
++				action: TransactionAction::Call(H160::repeat_byte(0x33)),
++				value: U256::zero(),
++				input: input.clone(),
++				chain_id: Some(4242),
++			};
++			let (signature, recovery) = libsecp256k1::sign(
++				&libsecp256k1::Message::parse(message.hash().as_fixed_bytes()),
++				&key,
++			);
++			let signature = signature.serialize();
++			let tx = TransactionV2::Legacy(LegacyTransaction {
++				nonce: message.nonce,
++				gas_price: message.gas_price,
++				gas_limit: message.gas_limit,
++				action: message.action,
++				value: message.value,
++				input,
++				signature: TransactionSignature::new(
++					u64::from(recovery.serialize()) + 4242 * 2 + 35,
++					H256::from_slice(&signature[..32]),
++					H256::from_slice(&signature[32..]),
++				)
++				.unwrap(),
++			});
++			let converted = crate::selected_runtime::api::dispatch(
++				"ConvertTransactionRuntimeApi_convert_transaction",
++				&tx.encode(),
++			)
++			.unwrap();
++			let extrinsic =
++				crate::selected_runtime::UncheckedExtrinsic::decode(&mut &converted[..]).unwrap();
++			let encoded = crate::selected_runtime::api::dispatch(
++				"TaggedTransactionQueue_validate_transaction",
++				&(TransactionSource::Local, extrinsic, parent).encode(),
++			)
++			.unwrap();
++			let result = TransactionValidity::decode(&mut &encoded[..]).unwrap();
++			if accepted {
++				assert!(result.is_ok(), "{result:?}");
++			} else {
++				assert_eq!(
++					result,
++					Err(InvalidTransaction::Custom(
++						fp_evm::TransactionValidationError::GasPriceTooLow as u8
++					)
++					.into())
++				);
++			}
++		});
++	}
 +}
 +
 +#[test]

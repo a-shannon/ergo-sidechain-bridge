@@ -26,7 +26,8 @@ describe('FED parent-reservation mint signing', () => {
       expect(tx.from?.toLowerCase()).toBe(input.recipientAddressHex);
       expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(1); expect(tx.type).toBe(0);
       expect(tx.to?.toLowerCase()).toBe(input.bridgeAddressHex); expect(tx.value).toBe(0n);
-      expect(tx.gasPrice).toBe(1000000000n); expect(tx.gasLimit).toBe(5000000n);
+      expect(tx.gasPrice).toBe(1125000000n); expect(tx.gasLimit).toBe(5000000n);
+      expect(tx.gasPrice! * tx.gasLimit).toBe(5_625_000_000_000_000n);
       expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [input.recipientAddressHex, input.amountNanoErg, input.mintIdentityHex]));
       assertFederatedGenesisOperatorV1(owner);
       await expect(signFederatedGenesisMintV1(owner, input)).rejects.toThrow(/unused/);
@@ -62,7 +63,7 @@ describe('FED parent-reservation mint signing', () => {
     } finally { disposeFederatedGenesisOperatorV1(owner); }
   });
 
-  it.each(['failure', 'disposal', 'nonce', 'chain', 'signer', 'concurrent'])('contains %s during Ethereum signing', async fault => {
+  it.each(['failure', 'disposal', 'nonce', 'chain', 'signer', 'gas below cap', 'gas above cap', 'concurrent'])('contains %s during Ethereum signing', async fault => {
     const owner = createFederatedGenesisOperatorV1();
     signFederatedGenesisReservationV1(owner, native);
     const original = HDNodeWallet.prototype.signTransaction;
@@ -73,6 +74,8 @@ describe('FED parent-reservation mint signing', () => {
       if (fault === 'disposal') disposeFederatedGenesisOperatorV1(owner);
       if (fault === 'concurrent') concurrent = expect(signFederatedGenesisMintV1(owner, mint(owner))).rejects.toThrow(/unused/);
       return original.call(fault === 'signer' ? other : this, { ...tx,
+        ...(fault === 'gas below cap' ? { gasPrice: 1_000_000_000n } : {}),
+        ...(fault === 'gas above cap' ? { gasPrice: 1_125_000_001n } : {}),
         ...(fault === 'nonce' ? { nonce: 0 } : {}), ...(fault === 'chain' ? { chainId: 42 } : {}) });
     });
     try {

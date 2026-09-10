@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
-import { Interface } from 'ethers';
+import { HDNodeWallet, Interface, Transaction } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1,
   signFederatedGenesisReservationV1, signFederatedGenesisMintV1 } from './federated-genesis-operator-v1.js';
@@ -118,6 +118,27 @@ async function execute(attempt: Awaited<ReturnType<typeof prepare>>) {
 }
 
 describe('native FED mint execution consumer', () => {
+  it.each([1_000_000_000n, 1_125_000_001n])('rejects a valid signature at gas price %s before transport', async gasPrice => {
+    let signer: HDNodeWallet | undefined;
+    const original = HDNodeWallet.prototype.signTransaction;
+    vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(function (this: HDNodeWallet, tx) {
+      signer = this; return original.call(this, tx);
+    });
+    await prepare();
+    const hold = readFileSync(join(directory, 'native-mint-attempt.json'), 'utf8');
+    const tx = Transaction.from(mint.signedTransactionHex);
+    const signedTransactionHex = await original.call(signer!, { type: tx.type, chainId: tx.chainId,
+      nonce: tx.nonce, to: tx.to, value: tx.value, data: tx.data, gasLimit: tx.gasLimit, gasPrice });
+    const changed = Transaction.from(signedTransactionHex);
+    expect(changed.from).toBe(tx.from); expect(changed.signature?.isValid()).toBe(true);
+    const before = [...calls];
+    expect(() => reserveFederatedNativeMintAttemptV1(directory, context, { signedTransactionHex,
+      transactionHashHex: changed.hash!, nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(signedTransactionHex) }))
+      .toThrow('native mint bytes differ from the reserved application');
+    expect(calls).toEqual(before);
+    expect(readFileSync(join(directory, 'native-mint-attempt.json'), 'utf8')).toBe(hold);
+  });
+
   it.each(['eth_call', 'eth_sendRawTransaction', 'engine_createBlock'])
     ('holds the mint attempt after a standard %s error without exposing server detail', async selectedMethod => {
       const attempt = await prepare();
