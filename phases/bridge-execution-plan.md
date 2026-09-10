@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-09
+Updated: 2026-09-10
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -19,7 +19,7 @@ when their exact boundary is reached; do not discard their safety obligations.
 
 | Track | Deliverable | Deciding trust model | State |
 |---|---|---|---|
-| **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. The local tracker-to-payout campaign passed; operational mint integration and composed two-way recovery remain open |
+| **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. Local tracker-to-payout and native deposit-to-mint campaigns passed separately; composed native two-way execution and recovery remain open |
 | **WP-06-STARK / Gate 5** | An Ergo-verifiable trustless upgrade | An activated verifier checks the separately versioned statement and finality semantics before value release | Frozen pending a compatible activated target. Not a prerequisite for the federated reference |
 
 Both tracks remain research work; neither supports production use or
@@ -125,27 +125,28 @@ establish deployment safety or independent operator custody.
   and no Sudo. Actual startup required nonempty SDK development consensus
   authorities in SS58 format; these are separate from bridge attestors. The
   process owner preserves exact pins and cleanup under a distinct FED mode.
-  Fresh custody/observed-family target binding and operational mint remain open.
+  Fresh custody/observed-family target binding and operational mint were still
+  open at that component checkpoint; the native campaign below now covers them locally.
   The observed-input compiler now connects active setup/source custody and
   owned Ergo observation/history to both pinned JVM compilers and the typed
   candidate. Component tests use real custody/JVMs with stubbed observations;
-  fresh-target composition and singleton issuance are not yet demonstrated.
+  those component checks alone did not demonstrate fresh-target composition or issuance.
   The fresh-federation build owner now derives Cargo's public profile inputs
   from retained custody and exports the exact three-patch source tree without
   rewriting historical checkouts or binaries. Its orchestration tests pass;
-  a real export matches all 563 source files. The fresh Rust build still needs
-  to run inside the composed target campaign so custody survives into its
-  consumer. No new node/WASM acceptance is claimed by this build-only join.
+  a real export matches all 563 source files. The native campaign below also
+  runs the fresh Rust build inside the composed target lifetime so custody
+  survives into its consumer. The build-only join itself did not establish acceptance.
   A static target root now composes that build, owned Ergo observations, JVM
   family compilation and paired FED genesis checks with retained synthetic
   custody. Component coverage uses real keys with stubbed builds/processes;
-  no fresh composed target run or singleton issuance is established yet.
-  The root's result is terminal public data, not resumable custody. Add the
-  issuance and operational mint consumers inside its managed lifetime before
+  the native campaign below supplies the separate fresh-target execution evidence.
+  The root's result is terminal public data, not resumable custody. Extend its
+  managed lifetime through native burn and the existing withdrawal consumers before
   spending another fresh build on a campaign that ends too early.
   The observed-input compiler now materializes all three unsigned Ergo
   singleton transactions from canonical funding boxes and the actual JVM
-  contracts. Their predicted IDs are not confirmed issuance. The next join
+  contracts. Their predicted IDs are not confirmed issuance. The native setup
   uses a separately identified FED-native setup request/checker entry; the old
   V3 G1dA history closure is not interchangeable with height-zero FED identity.
   The managed native session now takes the original compiled family through
@@ -220,7 +221,8 @@ establish deployment safety or independent operator custody.
   terminal-state absence, operator nonce and unchanged runtime/profile on both
   local nodes. Ambiguous submissions retain their hold without retry.
   Component tests use actual synthetic signatures and journal storage with
-  simulated node responses; a fresh-node reservation is not yet demonstrated.
+  simulated node responses; the native campaign below separately demonstrates
+  the reservation on fresh nodes.
   The combined proof-bound reservation/mint consumer now retains that exact
   parent and custody through a chain-4242, nonce-one Ethereum call. It rechecks
   both parent views before transport, holds ambiguous attempts, and verifies
@@ -233,8 +235,16 @@ establish deployment safety or independent operator custody.
   draft/evidence/federation proof, native reservation and parent-state mint.
   The root preserves unresolved journals, closes owned nodes and custody on
   failure, and returns terminal transaction identities rather than authority
-  handles. Root component checks do not establish fresh-node acceptance; that
-  campaign remains the next deciding run. An issuance receipt is not mint authority.
+  handles. Root component checks alone do not establish fresh-node acceptance.
+  On 2026-09-10, an owned isolated campaign at `486d8107` completed singleton
+  issuance, a 20,000,000-nanoERG deposit, its confirmed non-refundable reserve
+  transition, federation proof, native reservation and chain-4242 mint. Both
+  native/EVM views, exact token deltas and the consumed V4 record passed the
+  fixed caller's checks; owned nodes and custody were closed successfully.
+  The first-parent fee correction passed its focused negative matrix before
+  this run. This establishes local FED deposit-to-mint execution, not source
+  consensus, independent custody, a composed withdrawal or Gate 5 closure.
+  An issuance receipt is not mint authority.
   The old source locks and withdrawal campaign retain their original scope.
 
 ## Critical Path
@@ -253,8 +263,9 @@ frozen foundations + selected launch mode + fresh-owner application execution
   -> exact WASM/node selection + typed loader [local node tests passed]
   -> typed chain-spec producer + real node materialization [local check passed]
   -> typed FED process owner + matching genesis storage [configured nodes passed]
-  -> fresh custody + observed Ergo family + exact running-target binding
-  -> operational FED mint caller through the selected runtime admission consumer
+  -> fresh custody + observed Ergo family + exact running-target binding [local campaign passed]
+  -> operational FED mint caller through the selected runtime admission consumer [local campaign passed]
+  -> same-target native burn/checkpoint and Ergo payout [next composed join]
   -> composed two-way recovery and cross-profile replay cutover
   -> exact target/custody activation and operational rehearsal
   -> profile-correct evidence + final independent assurance
@@ -265,11 +276,10 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Retained FED target -> actual deposit-to-mint campaign | Run the fixed root with fresh synthetic custody and observed Ergo inputs through singleton issuance, deposit, confirmed reserve, source proof, native reservation and mint | The caller is connected; a fresh-node run must still verify actual JVM/node acceptance, exact chain-4242 mint, token deltas and consumed V4 state. No component double or unrestricted owner-mint call substitutes for those consumers |
-| 2 | Operational mint -> composed withdrawal | Continue the same target's minted balance through the selected burn/checkpoint and Ergo payout consumers, with exact native/Ethereum nonce and identity continuity | The historical block-4 LAB identity and its nonce schedule cannot be reused as FED-native evidence. An earlier isolated withdrawal does not demonstrate this two-way target |
-| 3 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
-| 4 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
-| 5 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
+| **Now** | Operational mint -> composed withdrawal | Extend the fixed root's retained lifetime through native approve/burn, checkpoint attestation and the existing Ergo tracker/payout consumers; then run one fresh composed campaign | The completed mint campaign has closed custody and cannot be resumed. Preserve new same-target identities and freshly observed nonces. Neither historical LAB block-4 receipts nor the earlier isolated withdrawal demonstrate this two-way target |
+| 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
+| 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
+| 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
 
 ## Next Executable Batches
 
@@ -278,9 +288,10 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED native runtime initialization | Native checkpoint complete; source overlay 0004 | Full typed genesis and first-block execution pass in the dedicated runtime with isolated invalid-profile/state negatives. Federation configuration, exact application storage, immutable profile and no-Sudo/Root rules are checked. Reuse this native evidence while its input closure is unchanged |
 | FED node selection and typed loader | Local checkpoint complete; overlays 0004/0005 | The dedicated node builds with the compiled federation. Its CLI reads typed genesis and executes that WASM before accepting a spec; all resulting state matches native genesis. Existing runtime predicates are unchanged. This is not a running target or a reviewed provisioning packet |
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
-| FED running-target binding | Actual root now joins issuance, deposit, confirmed reserve, evidence, proof and mint; fresh-node execution pending | Preserve original custody and both owned targets throughout. Keep request freshness at checking separate from each later action's fresh observation. Neither historical V3 G1dA requests nor the block-4 LAB launch supply native identity. The target owner retains closed journals with build artifacts, including unresolved attempts |
-| Native reservation and mint caller | Combined consumer connected to the fixed target root; fresh-node acceptance remains open | Execute the root and verify the first native reservation and chain-4242 nonce-one mint with actual RPC, exact token deltas and consumed V4 state. Preserve separate broadcast authorization and unresolved-attempt holds. Retain duplicate, absent-commitment, wrong-binding and unreserved-sibling runtime negatives. Keep transaction-pool rejection separate from whole-block rejection |
-| Fresh operational two-way campaign | Depends on both previous batches; completed withdrawal components remain reusable | Use fresh target/custody and actual RPC calls for both source reservation/mint and burn, followed by the established Ergo withdrawal consumer. Prove the composed run before claiming operational mint or reusing it for recovery tests |
+| FED running-target binding | Local native campaign passed at `486d8107` | Actual root joined fresh builds/custody, observed Ergo issuance, deposit, confirmed reserve, proof and mint on both owned targets. Keep request freshness at checking separate from later action freshness. Historical V3/LAB identities cannot replace native provenance; retain unresolved-attempt holds |
+| Native reservation and mint caller | Local native campaign passed at `486d8107` | Reservation block one and chain-4242 nonce-one mint in block two passed exact RPC/token/consumed-record checks. Preserve broadcast authorization and duplicate, absent-commitment, wrong-binding, unreserved-sibling and fee negatives. Pool admission remains distinct from execution and final state |
+| Native burn and retained withdrawal continuation | Next implementation; reuse existing V2 compiler/tracker/payout formats | Bind actual approve/burn observations to the native and Ethereum block identities, net burn and supply changes. Add native source-session attestation without fabricating LAB provenance; use the compiled application profile, not the reservation profile. Extend native setup custody through fee funding and the owned checkpoint/freeze/admission/payout phases; confirm both distinct external fee inputs before freezing the anchor horizon |
+| Fresh operational two-way campaign | Depends on the native burn/continuation join; completed mint and withdrawal component evidence remain reusable | Use new target/custody and actual RPC calls for deposit-to-mint and burn, followed by the established Ergo withdrawal consumer. Prove this composed run before claiming two-way operation or reusing it for recovery tests; do not rerun a standalone mint campaign without a changed deciding input |
 
 ### Operational Mint Bootstrap Decision
 
@@ -409,12 +420,13 @@ and boundary tests, and the fresh-node withdrawal campaign recorded above.
 Neither the command nor its receipt establishes operational mint, independent
 custody, global replay cutover, Gate 5 closure or production readiness.
 
-Then connect the operational mint caller, exercise both directions through
+The native mint caller is now locally demonstrated. Extend its retained
+lifetime through the native withdrawal, exercise both directions through
 recovery, and finish target/custody rehearsal and FED-7.
 A source-locked TestClient mint is not the operational mint route. The completed
 local exit does not close operational integration or recovery. Reuse the
 withdrawal evidence while its inputs remain unchanged; do not repeat it as an
-intermediate milestone before connecting the mint consumer.
+intermediate milestone before connecting the two-way consumer.
 
 ## Reference Checkpoints
 
