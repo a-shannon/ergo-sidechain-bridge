@@ -1,7 +1,7 @@
 import { closeSync, fsyncSync, lstatSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { Interface, Transaction } from 'ethers';
+import { Interface, SigningKey, Transaction } from 'ethers';
 import blakejs from 'blakejs';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
 
@@ -39,15 +39,294 @@ interface MintAttempt {
 }
 const MINT_FILE = 'native-mint-attempt.json';
 const mintAttempts = new WeakMap<object, { directory: string; bytes: string; context: Readonly<FederatedNativeMintContextV1>;
-  submitted: boolean; accepted: boolean; sealed: boolean; blockHash?: string; ethereumBlockHash?: string }>();
+  submitted: boolean; accepted: boolean; sealed: boolean; blockHash?: string; ethereumBlockHash?: string;
+  confirmedStorage?: Readonly<Record<string, string | null>>; approvalClaimed?: boolean; burnClaimed?: boolean }>();
 const applicationAbi = new Interface([
   'function mintSERG(address,uint256,bytes32)', 'function owner() view returns(address)',
   'function sergToken() view returns(address)', 'function paused() view returns(bool)',
   'function totalSupply() view returns(uint256)', 'function balanceOf(address) view returns(uint256)',
   'function processedPegIns(bytes32) view returns(bool)',
+  'function approve(address,uint256)', 'function pegOut(uint256,bytes)',
+  'function allowance(address,address) view returns(uint256)', 'function accumulatedFees() view returns(uint256)',
   'event Transfer(address indexed from,address indexed to,uint256 value)',
   'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)',
+  'event Approval(address indexed owner,address indexed spender,uint256 value)',
+  'event PegOut(address indexed from,uint256 amount,bytes ergoRecipientPubKey)',
 ]);
+
+export interface FederatedNativeWithdrawalContextV1 {
+  readonly mintAttempt: Readonly<MintAttempt>;
+  readonly approvalAttempt: Readonly<MintAttempt> | null;
+  readonly grossAmountNanoErg: string;
+  readonly recipientErgoTreeHex: string;
+}
+const withdrawals = new WeakMap<object, { context: Readonly<FederatedNativeWithdrawalContextV1>;
+  phase: 'approve' | 'burn'; directory: string; bytes: string; submitted: boolean; accepted: boolean;
+  sealed: boolean; observed: boolean; blockHash?: string; ethereumBlockHash?: string }>();
+
+/** Fresh paired parent observation, not authority to release Ergo funds. */
+export async function observeFederatedNativeWithdrawalParentV1(input: Readonly<FederatedNativeWithdrawalContextV1>, authorize: () => void) {
+  const context = captureWithdrawal(input);
+  await checkWithdrawalParent(context, authorize);
+  return Object.freeze({ nonce: context.approvalAttempt === null ? 2 as const : 3 as const,
+    parentNativeHeight: context.approvalAttempt === null ? 2 as const : 3 as const });
+}
+
+export function reserveFederatedNativeWithdrawalAttemptV1(input: Readonly<FederatedNativeWithdrawalContextV1>, signed: Readonly<MintAttempt>) {
+  const context = captureWithdrawal(input), mint = assertMintAttempt(context.mintAttempt);
+  const phase = context.approvalAttempt === null ? 'approve' : 'burn';
+  exact(signed, ['transactionHashHex', 'signedTransactionHex', 'nativeExtrinsicHex']);
+  const candidate = Object.freeze({ ...signed });
+  hash(candidate.transactionHashHex);
+  if (typeof candidate.signedTransactionHex !== 'string' || !/^0x(?:[0-9a-f]{2}){100,1024}$/.test(candidate.signedTransactionHex)
+    || typeof candidate.nativeExtrinsicHex !== 'string' || !/^0x(?:[0-9a-f]{2}){100,2048}$/.test(candidate.nativeExtrinsicHex)) {
+    throw new Error('native withdrawal encoding is malformed');
+  }
+  const tx = Transaction.from(candidate.signedTransactionHex), app = mint.context;
+  const data = phase === 'approve' ? applicationAbi.encodeFunctionData('approve', [app.bridgeAddressHex, context.grossAmountNanoErg])
+    : applicationAbi.encodeFunctionData('pegOut', [context.grossAmountNanoErg, context.recipientErgoTreeHex]);
+  if (tx.serialized !== candidate.signedTransactionHex || tx.hash !== candidate.transactionHashHex || tx.type !== 0
+    || tx.chainId !== 4242n || tx.nonce !== (phase === 'approve' ? 2 : 3) || tx.value !== 0n
+    || tx.gasPrice !== (phase === 'approve' ? 1_265_625_000n : 1_423_828_125n) || tx.gasLimit !== 5_000_000n
+    || tx.from?.toLowerCase() !== app.recipientAddressHex || tx.to?.toLowerCase() !== (phase === 'approve' ? app.tokenAddressHex : app.bridgeAddressHex)
+    || tx.data !== data) throw new Error('native withdrawal bytes differ from the retained application');
+  assertWithdrawalExtrinsic(tx, candidate.nativeExtrinsicHex);
+  const slot = phase === 'approve' ? 'approvalClaimed' : 'burnClaimed';
+  // Input inspection can invoke Proxy traps; claim only after rechecking the original lineage.
+  captureWithdrawal(context);
+  if (mint[slot]) throw new Error('native withdrawal attempt is already claimed');
+  mint[slot] = true;
+  const parent = withdrawalParent(context);
+  const bytes = JSON.stringify({ schema: 'e2s.fed-native-withdrawal-attempt.v1', status: 'reserved', phase,
+    parentBlockHashHex: parent.native, mintIdentityHex: app.mintIdentityHex,
+    grossAmountNanoErg: context.grossAmountNanoErg, recipientErgoTreeHex: context.recipientErgoTreeHex, ...candidate });
+  const fd = openSync(join(mint.directory, `native-${phase}-attempt.json`), 'wx');
+  try { writeFileSync(fd, bytes, 'utf8'); fsyncSync(fd); } finally { closeSync(fd); }
+  withdrawals.set(candidate, { context, phase, directory: mint.directory, bytes,
+    submitted: false, accepted: false, sealed: false, observed: false });
+  assertWithdrawal(candidate);
+  return candidate;
+}
+
+function assertWithdrawalExtrinsic(tx: Transaction, nativeExtrinsicHex: string): void {
+  // Independent fixed-call equality check against the pinned SDK's bare-v5 layout.
+  // The composition's general RLP encoder is not an adapter dependency or authority.
+  const le = (value: bigint, size: number) => Buffer.from(value.toString(16).padStart(size * 2, '0'), 'hex').reverse();
+  const compact = (length: number) => {
+    if (length < 64 || length >= 16384) throw new Error('native withdrawal SCALE length is outside the fixed call shape');
+    return le(BigInt(length * 4 + 1), 2);
+  };
+  if (!tx.signature || tx.signature.networkV === null) throw new Error('native withdrawal requires a chain-bound signature');
+  const data = Buffer.from(tx.data.slice(2), 'hex');
+  const body = Buffer.concat([Buffer.from([5, 7, 0, 0]), le(BigInt(tx.nonce), 32), le(tx.gasPrice!, 32), le(tx.gasLimit, 32),
+    Buffer.from([0]), Buffer.from(tx.to!.slice(2), 'hex'), le(tx.value, 32), compact(data.length), data,
+    le(tx.signature.networkV, 8), Buffer.from(tx.signature.r.slice(2), 'hex'), Buffer.from(tx.signature.s.slice(2), 'hex')]);
+  if (nativeExtrinsicHex !== `0x${Buffer.concat([compact(body.length), body]).toString('hex')}`) {
+    throw new Error('native withdrawal extrinsic differs from the signed transaction');
+  }
+}
+
+export async function submitFederatedNativeWithdrawalV1(attempt: Readonly<MintAttempt>, authorize: () => void): Promise<void> {
+  const state = assertWithdrawal(attempt);
+  if (state.submitted || typeof authorize !== 'function') throw new Error('native withdrawal submission is consumed or unauthorized');
+  state.submitted = true;
+  await checkWithdrawalParent(state.context, authorize);
+  authorize(); assertWithdrawal(attempt);
+  if (await rpc(PRIMARY, 'eth_sendRawTransaction', [attempt.signedTransactionHex]) !== attempt.transactionHashHex) {
+    throw new Error('native withdrawal submission is ambiguous; attempt remains held');
+  }
+  state.accepted = true;
+}
+
+export async function sealFederatedNativeWithdrawalV1(attempt: Readonly<MintAttempt>, authorize: () => void): Promise<string> {
+  const state = assertWithdrawal(attempt);
+  if (!state.accepted || state.sealed || typeof authorize !== 'function') throw new Error('native withdrawal sealing is not available');
+  state.sealed = true;
+  await checkWithdrawalParent(state.context, authorize, attempt.nativeExtrinsicHex);
+  const parent = withdrawalParent(state.context);
+  authorize(); assertWithdrawal(attempt);
+  const result = record(await rpc(PRIMARY, 'engine_createBlock', [false, false, parent.native]));
+  hash(result.hash);
+  const mint = assertMintAttempt(state.context.mintAttempt);
+  if ([parent.native, mint.blockHash, mint.context.reservation.blockHashHex, mint.context.reservation.attempt.genesisHashHex].includes(result.hash)) {
+    throw new Error('native withdrawal seal returned a predecessor');
+  }
+  state.blockHash = result.hash;
+  return result.hash;
+}
+
+/** Confirms exact local execution and token deltas, not a source-finality proof or checkpoint. */
+export async function observeFederatedNativeWithdrawalInclusionV1(attempt: Readonly<MintAttempt>, authorize: () => void) {
+  const state = assertWithdrawal(attempt);
+  if (!state.sealed || !state.blockHash || typeof authorize !== 'function') throw new Error('native withdrawal was not sealed');
+  const parent = withdrawalParent(state.context), height = parent.height + 1, number = `0x${height}`;
+  const app = assertMintAttempt(state.context.mintAttempt).context;
+  const gross = BigInt(state.context.grossAmountNanoErg), net = gross - 5_000_000n;
+  let agreed: string | undefined, ethereumHash: string | undefined;
+  for (const url of [PRIMARY, WITNESS]) {
+    const check = () => { authorize(); assertWithdrawal(attempt); };
+    const found = await waitForIndexedResult(url, 'chain_getBlockHash', [height], check);
+    if (found !== state.blockHash) throw new Error('native withdrawal child is absent or divergent');
+    const block = record(record(await rpc(url, 'chain_getBlock', [state.blockHash])).block), header = record(block.header);
+    exact(header, ['parentHash', 'number', 'stateRoot', 'extrinsicsRoot', 'digest']);
+    hash(header.stateRoot); hash(header.extrinsicsRoot); exact(header.digest, ['logs']);
+    const digest = record(header.digest).logs;
+    if (header.parentHash !== parent.native || header.number !== number || !Array.isArray(digest) || digest.length > 32
+      || digest.some(log => typeof log !== 'string' || !/^0x(?:[0-9a-f]{2}){1,16384}$/.test(log))
+      || !Array.isArray(block.extrinsics) || block.extrinsics.length !== 2 || !isTimestampInherent(block.extrinsics[0])
+      || block.extrinsics[1] !== attempt.nativeExtrinsicHex) throw new Error('native withdrawal child call differs');
+    const encoded = canonicalJson(block);
+    if (agreed !== undefined && agreed !== encoded) throw new Error('native withdrawal nodes disagree on child block');
+    agreed = encoded;
+    const ethereum = record(await waitForIndexedResult(url, 'eth_getBlockByNumber', [number, false], check)); hash(ethereum.hash);
+    if (ethereum.number !== number || ethereum.parentHash !== parent.ethereum || !Array.isArray(ethereum.transactions)
+      || ethereum.transactions.length !== 1 || ethereum.transactions[0] !== attempt.transactionHashHex
+      || ethereumHash !== undefined && ethereumHash !== ethereum.hash) throw new Error('native withdrawal Ethereum inclusion disagrees');
+    ethereumHash = ethereum.hash;
+    await waitForEthereumHash(url, ethereumHash, number, [attempt.transactionHashHex], check);
+    const receipt = record(await waitForIndexedResult(url, 'eth_getTransactionReceipt', [attempt.transactionHashHex], check));
+    const expectedLogs = state.phase === 'approve'
+      ? [{ address: app.tokenAddressHex, ...applicationAbi.encodeEventLog(applicationAbi.getEvent('Approval')!,
+        [app.recipientAddressHex, app.bridgeAddressHex, gross]) }]
+      : [{ address: app.tokenAddressHex, ...applicationAbi.encodeEventLog(applicationAbi.getEvent('Transfer')!,
+        [app.recipientAddressHex, `0x${'00'.repeat(20)}`, net]) },
+      { address: app.tokenAddressHex, ...applicationAbi.encodeEventLog(applicationAbi.getEvent('Transfer')!,
+        [app.recipientAddressHex, app.bridgeAddressHex, 5_000_000n]) },
+      { address: app.bridgeAddressHex, ...applicationAbi.encodeEventLog(applicationAbi.getEvent('PegOut')!,
+        [app.recipientAddressHex, net, state.context.recipientErgoTreeHex]) }];
+    if (receipt.transactionHash !== attempt.transactionHashHex || receipt.blockHash !== ethereumHash || receipt.blockNumber !== number
+      || receipt.transactionIndex !== '0x0' || receipt.status !== '0x1' || receipt.from !== app.recipientAddressHex
+      || receipt.to !== (state.phase === 'approve' ? app.tokenAddressHex : app.bridgeAddressHex)
+      || !Array.isArray(receipt.logs) || receipt.logs.length !== expectedLogs.length) throw new Error('native withdrawal receipt differs');
+    for (const [index, expected] of expectedLogs.entries()) {
+      const log = record(receipt.logs[index]);
+      if (log.address !== expected.address || log.data !== expected.data || canonicalJson(log.topics) !== canonicalJson(expected.topics)
+        || log.blockHash !== ethereumHash || log.blockNumber !== number || log.transactionHash !== attempt.transactionHashHex
+        || log.transactionIndex !== '0x0' || log.logIndex !== `0x${index}` || log.removed !== false) {
+        throw new Error('native withdrawal event differs');
+      }
+    }
+    await checkWithdrawalApplication(url, state.context, ethereumHash, height, check);
+    await checkWithdrawalHead(url, state.context, state.blockHash, height, check);
+  }
+  authorize(); assertWithdrawal(attempt);
+  state.ethereumBlockHash = ethereumHash!; state.observed = true;
+  return Object.freeze({ phase: state.phase, blockHashHex: state.blockHash, ethereumBlockHashHex: ethereumHash!, blockHeight: height,
+    transactionHashHex: attempt.transactionHashHex, transactionIndex: 0 as const, eventIndex: state.phase === 'burn' ? 2 : 0,
+    grossAmountNanoErg: String(gross), netAmountNanoErg: String(net), recipientErgoTreeHex: state.context.recipientErgoTreeHex,
+    sourceFinalityEstablished: false as const, trustless: false as const });
+}
+
+function captureWithdrawal(input: Readonly<FederatedNativeWithdrawalContextV1>) {
+  exact(input, ['mintAttempt', 'approvalAttempt', 'grossAmountNanoErg', 'recipientErgoTreeHex']);
+  const context = Object.freeze({ ...input }), mint = assertMintAttempt(context.mintAttempt);
+  if (!mint.confirmedStorage || !mint.ethereumBlockHash || !mint.blockHash) throw new Error('native withdrawal requires confirmed mint state');
+  if (typeof context.grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(context.grossAmountNanoErg)
+    || BigInt(context.grossAmountNanoErg) < 15_000_000n || BigInt(context.grossAmountNanoErg) > BigInt(mint.context.amountNanoErg)
+    || typeof context.recipientErgoTreeHex !== 'string' || !/^0x0008cd0[23][0-9a-f]{64}$/.test(context.recipientErgoTreeHex)) {
+    throw new Error('native withdrawal amount or recipient is malformed');
+  }
+  SigningKey.computePublicKey(`0x${context.recipientErgoTreeHex.slice(8)}`, true);
+  if (context.approvalAttempt !== null) {
+    const approval = assertWithdrawal(context.approvalAttempt);
+    if (approval.phase !== 'approve' || !approval.observed || !approval.ethereumBlockHash || !approval.blockHash
+      || approval.context.mintAttempt !== context.mintAttempt || approval.context.grossAmountNanoErg !== context.grossAmountNanoErg
+      || approval.context.recipientErgoTreeHex !== context.recipientErgoTreeHex) throw new Error('native burn approval lineage differs');
+  }
+  return context;
+}
+
+function assertWithdrawal(attempt: Readonly<MintAttempt>) {
+  const state = withdrawals.get(attempt);
+  if (!state) throw new Error('native withdrawal attempt is not original');
+  assertMintAttempt(state.context.mintAttempt);
+  if (state.context.approvalAttempt !== null) assertWithdrawal(state.context.approvalAttempt);
+  const path = join(state.directory, `native-${state.phase}-attempt.json`), stat = lstatSync(path);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== Buffer.byteLength(state.bytes)
+    || resolve(realpathSync(state.directory)) !== resolve(state.directory) || readFileSync(path, 'utf8') !== state.bytes) {
+    throw new Error('native withdrawal durable hold changed');
+  }
+  return state;
+}
+
+function withdrawalParent(context: Readonly<FederatedNativeWithdrawalContextV1>) {
+  const mint = assertMintAttempt(context.mintAttempt);
+  const state = context.approvalAttempt === null ? mint : assertWithdrawal(context.approvalAttempt);
+  if (!state.blockHash || !state.ethereumBlockHash) throw new Error('native withdrawal predecessor is absent');
+  return { native: state.blockHash, ethereum: state.ethereumBlockHash, height: context.approvalAttempt === null ? 2 : 3 };
+}
+
+async function checkWithdrawalParent(context: Readonly<FederatedNativeWithdrawalContextV1>, authorize: () => void, poolExtrinsic?: string) {
+  if (typeof authorize !== 'function') throw new Error('native withdrawal authorization is absent');
+  captureWithdrawal(context);
+  const parent = withdrawalParent(context), price = context.approvalAttempt === null ? 1_265_625_000n : 1_423_828_125n;
+  for (const url of [PRIMARY, WITNESS]) {
+    authorize();
+    const ethereum = record(await rpc(url, 'eth_getBlockByNumber', [`0x${parent.height}`, false]));
+    const transaction = context.approvalAttempt ?? context.mintAttempt;
+    if (ethereum.hash !== parent.ethereum || ethereum.number !== `0x${parent.height}`
+      || canonicalJson(ethereum.transactions) !== canonicalJson([transaction.transactionHashHex])
+      || typeof ethereum.baseFeePerGas !== 'string' || !/^0x(?:0|[1-9a-f][0-9a-f]{0,63})$/.test(ethereum.baseFeePerGas)
+      || (BigInt(ethereum.baseFeePerGas) * 9n + 7n) / 8n > price) throw new Error('native withdrawal parent or fee bound differs');
+    await waitForEthereumHash(url, parent.ethereum, `0x${parent.height}`, [transaction.transactionHashHex], authorize);
+    await checkWithdrawalApplication(url, context, parent.ethereum, parent.height, authorize);
+  }
+  for (const url of [PRIMARY, WITNESS]) await checkWithdrawalHead(url, context, parent.native, parent.height, authorize, poolExtrinsic);
+  authorize(); captureWithdrawal(context);
+}
+
+async function checkWithdrawalApplication(url: string, context: Readonly<FederatedNativeWithdrawalContextV1>, ethereum: string,
+  height: number, authorize: () => void) {
+  const app = assertMintAttempt(context.mintAttempt).context, block = { blockHash: ethereum, requireCanonical: true };
+  authorize();
+  if (await rpc(url, 'eth_chainId', []) !== '0x1092'
+    || await rpc(url, 'eth_getTransactionCount', [app.recipientAddressHex, block]) !== `0x${height}`) throw new Error('native withdrawal chain or nonce differs');
+  for (const [address, digest, length] of [[app.bridgeAddressHex, app.bridgeCodeSha256Hex, app.bridgeCodeBytes],
+    [app.tokenAddressHex, app.tokenCodeSha256Hex, app.tokenCodeBytes]] as const) {
+    authorize();
+    const code = await rpc(url, 'eth_getCode', [address, block]);
+    if (typeof code !== 'string' || !/^0x(?:[0-9a-f]{2})+$/.test(code) || (code.length - 2) / 2 !== length
+      || createHash('sha256').update(Buffer.from(code.slice(2), 'hex')).digest('hex') !== digest) throw new Error('native withdrawal application code differs');
+  }
+  const gross = BigInt(context.grossAmountNanoErg), minted = BigInt(app.amountNanoErg), burned = height === 4;
+  for (const [address, method, args, expected] of [
+    [app.bridgeAddressHex, 'owner', [], app.recipientAddressHex], [app.bridgeAddressHex, 'sergToken', [], app.tokenAddressHex],
+    [app.bridgeAddressHex, 'paused', [], false], [app.tokenAddressHex, 'owner', [], app.bridgeAddressHex],
+    [app.tokenAddressHex, 'totalSupply', [], minted - (burned ? gross - 5_000_000n : 0n)],
+    [app.tokenAddressHex, 'balanceOf', [app.recipientAddressHex], minted - (burned ? gross : 0n)],
+    [app.tokenAddressHex, 'balanceOf', [app.bridgeAddressHex], burned ? 5_000_000n : 0n],
+    [app.tokenAddressHex, 'allowance', [app.recipientAddressHex, app.bridgeAddressHex], height === 2 ? 0n : gross - (burned ? 5_000_000n : 0n)],
+    [app.bridgeAddressHex, 'accumulatedFees', [], burned ? 5_000_000n : 0n],
+    [app.bridgeAddressHex, 'processedPegIns', [app.mintIdentityHex], true],
+  ] as const) {
+    authorize();
+    if (await rpc(url, 'eth_call', [{ to: address, data: applicationAbi.encodeFunctionData(method, args) }, block])
+      !== applicationAbi.encodeFunctionResult(method, [expected])) throw new Error('native withdrawal application state differs');
+  }
+}
+
+async function checkWithdrawalHead(url: string, context: Readonly<FederatedNativeWithdrawalContextV1>, native: string,
+  height: number, authorize: () => void, poolExtrinsic?: string) {
+  const mint = assertMintAttempt(context.mintAttempt);
+  for (const [key, expected] of Object.entries(mint.confirmedStorage!)) {
+    authorize();
+    if (await rpc(url, 'state_getStorage', [key, native]) !== expected) throw new Error('native withdrawal consumed mint state differs');
+  }
+  authorize();
+  const account = await rpc(url, 'state_getStorage', [mint.context.reservation.operatorStorageKeyHex, native]);
+  const pool = await rpc(url, 'author_pendingExtrinsics', []);
+  if (typeof account !== 'string' || !/^0x[0-9a-f]{160}$/.test(account) || Buffer.from(account.slice(2), 'hex').readUInt32LE() !== height
+    || !Array.isArray(pool) || (poolExtrinsic === undefined ? pool.length !== 0
+      : pool.length > 1 || url === PRIMARY && pool.length !== 1 || pool.some(value => value !== poolExtrinsic))
+    || await rpc(url, 'chain_getBlockHash', [0]) !== mint.context.reservation.attempt.genesisHashHex
+    || await rpc(url, 'chain_getBlockHash', [1]) !== mint.context.reservation.blockHashHex
+    || await rpc(url, 'chain_getBlockHash', [2]) !== mint.blockHash
+    || context.approvalAttempt !== null && await rpc(url, 'chain_getBlockHash', [3]) !== assertWithdrawal(context.approvalAttempt).blockHash
+    || await rpc(url, 'chain_getBlockHash', [height]) !== native || await rpc(url, 'chain_getBlockHash', []) !== native) {
+    throw new Error('native withdrawal target or pool changed');
+  }
+  authorize(); captureWithdrawal(context);
+}
 
 /** A fresh parent observation, not a transferable mint authorization. */
 export async function observeFederatedNativeMintParentV1(input: Readonly<FederatedNativeMintContextV1>, assertCurrent: () => void) {
@@ -196,6 +475,7 @@ export async function observeFederatedNativeMintStateV1(attempt: Readonly<MintAt
     if (await rpc(url, 'state_getStorage', [key, state.blockHash]) !== expected) throw new Error('native mint terminal reservation state differs');
   }
   await checkMintHead(attempt, assertCurrent);
+  state.confirmedStorage = Object.freeze({ ...storage });
 }
 
 function captureMintContext(input: Readonly<FederatedNativeMintContextV1>): Readonly<FederatedNativeMintContextV1> {

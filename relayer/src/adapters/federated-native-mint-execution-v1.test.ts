@@ -1,16 +1,20 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { HDNodeWallet, Interface, Transaction } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1,
+  assertFederatedGenesisOperatorV1, signFederatedGenesisApproveV1, signFederatedGenesisBurnV1,
   signFederatedGenesisReservationV1, signFederatedGenesisMintV1 } from './federated-genesis-operator-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from '../federated-native-mint-runtime-state-v1.js';
 import { reserveFederatedNativeReservationAttemptV1, submitFederatedNativeReservationV1,
   sealFederatedNativeReservationV1, observeFederatedNativeMintParentV1, reserveFederatedNativeMintAttemptV1,
   submitFederatedNativeMintV1, sealFederatedNativeMintV1, observeFederatedNativeMintInclusionV1,
-  observeFederatedNativeMintStateV1, type FederatedNativeMintContextV1 } from './federated-native-reservation-execution-v1.js';
+  observeFederatedNativeMintStateV1, type FederatedNativeMintContextV1,
+  observeFederatedNativeWithdrawalParentV1, reserveFederatedNativeWithdrawalAttemptV1,
+  submitFederatedNativeWithdrawalV1, sealFederatedNativeWithdrawalV1, observeFederatedNativeWithdrawalInclusionV1,
+  type FederatedNativeWithdrawalContextV1 } from './federated-native-reservation-execution-v1.js';
 
 const hash = (byte: string) => `0x${byte.repeat(32)}`;
 const GENESIS = hash('11'), PARENT = hash('22'), CHILD = hash('23'), ETH_PARENT = hash('24'), ETH_CHILD = hash('25');
@@ -19,7 +23,20 @@ const CODE = '0x6000', CODE_HASH = createHash('sha256').update(Buffer.from('6000
 const ABI = new Interface(['function owner() view returns(address)', 'function sergToken() view returns(address)',
   'function paused() view returns(bool)', 'function totalSupply() view returns(uint256)', 'function balanceOf(address) view returns(uint256)',
   'function processedPegIns(bytes32) view returns(bool)', 'event Transfer(address indexed from,address indexed to,uint256 value)',
-  'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)']);
+  'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)',
+  'function approve(address,uint256)', 'function pegOut(uint256,bytes)',
+  'function allowance(address,address) view returns(uint256)', 'function accumulatedFees() view returns(uint256)',
+  'event Approval(address indexed owner,address indexed spender,uint256 value)',
+  'event PegOut(address indexed from,uint256 amount,bytes ergoRecipientPubKey)']);
+const NATIVE_BLOCKS = [GENESIS, PARENT, CHILD, hash('26'), hash('27')];
+const ETH_BLOCKS = [hash('28'), ETH_PARENT, ETH_CHILD, hash('29'), hash('2a')];
+const RECIPIENT = '0x0008cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
+const OTHER_RECIPIENT = RECIPIENT.replace('cd02', 'cd03');
+const ZERO = `0x${'00'.repeat(20)}`;
+type WithdrawalPhase = 'approve' | 'burn';
+type WithdrawalAttempt = ReturnType<typeof reserveFederatedNativeWithdrawalAttemptV1>;
+let withdrawalMode: boolean, withdrawalPending: boolean;
+let withdrawalTransactions: Map<number, WithdrawalAttempt>;
 let directory: string, owner: ReturnType<typeof createFederatedGenesisOperatorV1>;
 let height: number, nativeSubmitted: boolean, mintSubmitted: boolean;
 let native: ReturnType<typeof signFederatedGenesisReservationV1>;
@@ -36,6 +53,7 @@ beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'bridge-native-mint-test-'));
   owner = createFederatedGenesisOperatorV1(); height = 0; nativeSubmitted = false; mintSubmitted = false;
   active = true; calls = []; fault = undefined;
+  withdrawalMode = false; withdrawalPending = false; withdrawalTransactions = new Map();
   terminal = { ...storage, '0x04': '0x00', '0x05': null, '0x06': '0x0406' };
   native = signFederatedGenesisReservationV1(owner, { genesisHashHex: GENESIS, nonce: 0,
     statementHex: `0x04${'37'.repeat(602)}`, sourceProofEnvelopeScaleHex: `0x04${'53'.repeat(622)}` });
@@ -47,7 +65,8 @@ beforeEach(async () => {
     const selected = params[1] === PARENT ? 1 : height;
     const account = Buffer.from(owner.nativeFunding.accountInfoScaleHex.slice(2), 'hex'); account.writeUInt32LE(selected);
     let result: unknown;
-    if (method === 'author_submitExtrinsic') { nativeSubmitted = true; result = native.extrinsicHashHex; }
+    if (withdrawalMode) result = withdrawalRpc(method, params);
+    else if (method === 'author_submitExtrinsic') { nativeSubmitted = true; result = native.extrinsicHashHex; }
     else if (method === 'eth_sendRawTransaction') {
       expect(params).toEqual([mint.signedTransactionHex]); expect(active).toBe(true);
       expect(JSON.parse(readFileSync(join(directory, 'native-mint-attempt.json'), 'utf8')))
@@ -77,12 +96,12 @@ beforeEach(async () => {
       const minted = params[1].blockHash === ETH_CHILD;
       const value = call.name === 'owner' ? params[0].to === BRIDGE ? `0x${owner.addressHex}` : BRIDGE
         : call.name === 'sergToken' ? TOKEN : call.name === 'paused' ? false : call.name === 'processedPegIns' ? minted
-          : minted ? 15000000n : 0n;
+          : minted ? BigInt(context.amountNanoErg) : 0n;
       result = ABI.encodeFunctionResult(call.name, [value]);
     } else if (method === 'eth_getTransactionReceipt') result = { transactionHash: mint.transactionHashHex, blockHash: ETH_CHILD,
       blockNumber: '0x2', transactionIndex: '0x0', status: '0x1', from: `0x${owner.addressHex}`, to: BRIDGE,
-      logs: [ { address: TOKEN, ...ABI.encodeEventLog(ABI.getEvent('Transfer')!, [`0x${'00'.repeat(20)}`, `0x${owner.addressHex}`, 15000000n]) },
-        { address: BRIDGE, ...ABI.encodeEventLog(ABI.getEvent('PegIn')!, [`0x${owner.addressHex}`, 15000000n, MINT]) } ].map((log, index) => ({ ...log,
+      logs: [ { address: TOKEN, ...ABI.encodeEventLog(ABI.getEvent('Transfer')!, [`0x${'00'.repeat(20)}`, `0x${owner.addressHex}`, context.amountNanoErg]) },
+        { address: BRIDGE, ...ABI.encodeEventLog(ABI.getEvent('PegIn')!, [`0x${owner.addressHex}`, context.amountNanoErg, MINT]) } ].map((log, index) => ({ ...log,
         blockHash: ETH_CHILD, blockNumber: '0x2', transactionHash: mint.transactionHashHex, transactionIndex: '0x0', logIndex: `0x${index}`, removed: false })) };
     else throw new Error(`unexpected fixture RPC ${method}`);
     if (fault) result = fault(method, params, result, url);
@@ -102,11 +121,12 @@ afterEach(() => {
   disposeFederatedGenesisOperatorV1(owner); vi.restoreAllMocks(); vi.unstubAllGlobals();
   if (!resolve(directory).startsWith(`${resolve(tmpdir())}${sep}bridge-native-mint-test-`)) throw new Error('unexpected fixture directory');
   rmSync(directory, { recursive: true, force: true });
+  expect(existsSync(directory)).toBe(false);
 });
 async function prepare() {
   const parent = await observeFederatedNativeMintParentV1(context, authorize);
   mint = await signFederatedGenesisMintV1(owner, { nonce: parent.nonce, bridgeAddressHex: BRIDGE,
-    recipientAddressHex: `0x${owner.addressHex}`, amountNanoErg: '15000000', mintIdentityHex: MINT });
+    recipientAddressHex: `0x${owner.addressHex}`, amountNanoErg: context.amountNanoErg, mintIdentityHex: MINT });
   extrinsic = encodeFederatedNativeMintExtrinsicV1Hex(mint.signedTransactionHex);
   return reserveFederatedNativeMintAttemptV1(directory, context, { signedTransactionHex: mint.signedTransactionHex,
     transactionHashHex: mint.transactionHashHex, nativeExtrinsicHex: extrinsic });
@@ -115,6 +135,125 @@ async function execute(attempt: Awaited<ReturnType<typeof prepare>>) {
   await submitFederatedNativeMintV1(attempt, authorize); await sealFederatedNativeMintV1(attempt, authorize);
   const result = await observeFederatedNativeMintInclusionV1(attempt, authorize);
   await observeFederatedNativeMintStateV1(attempt, terminal, authorize); return result;
+}
+
+const withdrawalAuthorize = () => { authorize(); assertFederatedGenesisOperatorV1(owner); };
+const writes = () => calls.filter(method => ['eth_sendRawTransaction', 'engine_createBlock'].includes(method));
+const holdPath = (phase: WithdrawalPhase) => join(directory, `native-${phase}-attempt.json`);
+const quantity = (value: number | bigint) => `0x${value.toString(16)}`;
+
+// These paired RPC doubles describe component expectations, not Frontier execution evidence.
+function withdrawalRpc(method: string, params: any[]): unknown {
+  const at = (number: number) => withdrawalTransactions.get(number)!;
+  if (method === 'eth_sendRawTransaction') {
+    const attempt = at(height + 1), phase = height === 2 ? 'approve' : 'burn';
+    withdrawalAuthorize();
+    expect(params).toEqual([attempt.signedTransactionHex]);
+    expect(JSON.parse(readFileSync(holdPath(phase), 'utf8'))).toEqual({
+      schema: 'e2s.fed-native-withdrawal-attempt.v1', status: 'reserved', phase,
+      parentBlockHashHex: NATIVE_BLOCKS[height], mintIdentityHex: MINT,
+      grossAmountNanoErg: '15000000', recipientErgoTreeHex: RECIPIENT, ...attempt,
+    });
+    withdrawalPending = true;
+    return attempt.transactionHashHex;
+  }
+  if (method === 'engine_createBlock') {
+    withdrawalAuthorize(); expect(withdrawalPending).toBe(true);
+    expect(params).toEqual([false, false, NATIVE_BLOCKS[height]]);
+    withdrawalPending = false; return { hash: NATIVE_BLOCKS[++height] };
+  }
+  if (method === 'chain_getBlockHash') return NATIVE_BLOCKS[params.length ? params[0] : height];
+  if (method === 'chain_getHeader') return { number: quantity(height) };
+  if (method === 'author_pendingExtrinsics') return withdrawalPending ? [at(height + 1).nativeExtrinsicHex] : [];
+  if (method === 'state_getStorage') {
+    const selected = NATIVE_BLOCKS.indexOf(params[1]); expect(selected).toBeGreaterThanOrEqual(2);
+    if (params[0] !== owner.nativeFunding.storageKeyHex) return terminal[params[0]] ?? null;
+    const account = Buffer.from(owner.nativeFunding.accountInfoScaleHex.slice(2), 'hex');
+    account.writeUInt32LE(selected); return `0x${account.toString('hex')}`;
+  }
+  if (method === 'chain_getBlock') {
+    const selected = NATIVE_BLOCKS.indexOf(params[0]);
+    return { block: { header: { parentHash: NATIVE_BLOCKS[selected - 1], number: quantity(selected),
+      stateRoot: hash('66'), extrinsicsRoot: hash('67'), digest: { logs: [] } },
+    extrinsics: ['0x1005010028', at(selected).nativeExtrinsicHex] } };
+  }
+  if (method === 'eth_getBlockByNumber' || method === 'eth_getBlockByHash') {
+    const selected = method === 'eth_getBlockByNumber' ? Number(BigInt(params[0])) : ETH_BLOCKS.indexOf(params[0]);
+    return { number: quantity(selected), hash: ETH_BLOCKS[selected], parentHash: ETH_BLOCKS[selected - 1],
+      baseFeePerGas: quantity(selected === 2 ? 1_125_000_000n : 1_265_625_000n),
+      transactions: [at(selected).transactionHashHex] };
+  }
+  if (method === 'eth_chainId') return '0x1092';
+  if (method === 'eth_getTransactionCount' || method === 'eth_getCode' || method === 'eth_call') {
+    const selected = ETH_BLOCKS.indexOf(params[1].blockHash);
+    expect(params[1]).toEqual({ blockHash: ETH_BLOCKS[selected], requireCanonical: true });
+    expect(selected).toBeGreaterThanOrEqual(2);
+    if (method === 'eth_getTransactionCount') { expect(params[0]).toBe(`0x${owner.addressHex}`); return quantity(selected); }
+    if (method === 'eth_getCode') { expect([TOKEN, BRIDGE]).toContain(params[0]); return CODE; }
+    const call = ABI.parseTransaction({ data: params[0].data })!;
+    const burned = selected === 4, minted = BigInt(context.amountNanoErg);
+    const value = call.name === 'owner' ? params[0].to === BRIDGE ? `0x${owner.addressHex}` : BRIDGE
+      : call.name === 'sergToken' ? TOKEN : call.name === 'paused' ? false : call.name === 'processedPegIns' ? true
+        : call.name === 'totalSupply' ? minted - (burned ? 10000000n : 0n)
+          : call.name === 'balanceOf' ? call.args[0].toLowerCase() === BRIDGE ? burned ? 5000000n : 0n : minted - (burned ? 15000000n : 0n)
+            : call.name === 'allowance' ? selected === 2 ? 0n : burned ? 10000000n : 15000000n
+              : call.name === 'accumulatedFees' ? burned ? 5000000n : 0n : undefined;
+    if (value === undefined) throw new Error(`unexpected withdrawal view ${call.name}`);
+    return ABI.encodeFunctionResult(call.name, [value]);
+  }
+  if (method === 'eth_getTransactionReceipt') {
+    const selected = [...withdrawalTransactions].find(([, attempt]) => attempt.transactionHashHex === params[0])![0];
+    const operator = `0x${owner.addressHex}`;
+    const logs = selected === 3
+      ? [{ address: TOKEN, ...ABI.encodeEventLog(ABI.getEvent('Approval')!, [operator, BRIDGE, 15000000n]) }]
+      : [{ address: TOKEN, ...ABI.encodeEventLog(ABI.getEvent('Transfer')!, [operator, ZERO, 10000000n]) },
+        { address: TOKEN, ...ABI.encodeEventLog(ABI.getEvent('Transfer')!, [operator, BRIDGE, 5000000n]) },
+        { address: BRIDGE, ...ABI.encodeEventLog(ABI.getEvent('PegOut')!, [operator, 10000000n, RECIPIENT]) }];
+    const inclusion = { transactionHash: params[0], blockHash: ETH_BLOCKS[selected], blockNumber: quantity(selected), transactionIndex: '0x0' };
+    return { ...inclusion, status: '0x1', from: operator, to: selected === 3 ? TOKEN : BRIDGE,
+      logs: logs.map((log, index) => ({ ...log, ...inclusion, logIndex: quantity(index), removed: false })) };
+  }
+  throw new Error(`unexpected withdrawal fixture RPC ${method}`);
+}
+
+async function completedMint() {
+  const mintAttempt = await prepare(); await execute(mintAttempt);
+  withdrawalMode = true; withdrawalTransactions.set(2, mintAttempt);
+  return { mintAttempt, approvalAttempt: null, grossAmountNanoErg: '15000000', recipientErgoTreeHex: RECIPIENT } satisfies FederatedNativeWithdrawalContextV1;
+}
+
+async function signWithdrawal(context: FederatedNativeWithdrawalContextV1) {
+  const parent = await observeFederatedNativeWithdrawalParentV1(context, withdrawalAuthorize);
+  const nonce = context.approvalAttempt === null ? 2 : 3;
+  expect(parent).toEqual({ nonce, parentNativeHeight: nonce }); expect(Object.isFrozen(parent)).toBe(true);
+  const signed = await (nonce === 2 ? signFederatedGenesisApproveV1 : signFederatedGenesisBurnV1)(owner, {
+    ...parent, bridgeAddressHex: BRIDGE, tokenAddressHex: TOKEN,
+    grossAmountNanoErg: context.grossAmountNanoErg, recipientErgoTreeHex: context.recipientErgoTreeHex,
+  });
+  const candidate = { signedTransactionHex: signed.signedTransactionHex, transactionHashHex: signed.transactionHashHex,
+    nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(signed.signedTransactionHex) };
+  withdrawalTransactions.set(nonce + 1, candidate); return candidate;
+}
+
+async function executeWithdrawal(attempt: WithdrawalAttempt) {
+  await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+  await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+  return observeFederatedNativeWithdrawalInclusionV1(attempt, withdrawalAuthorize);
+}
+
+async function withdrawalContext(phase: WithdrawalPhase): Promise<FederatedNativeWithdrawalContextV1> {
+  const context: FederatedNativeWithdrawalContextV1 = await completedMint();
+  if (phase === 'burn') {
+    const approvalAttempt = reserveFederatedNativeWithdrawalAttemptV1(context, await signWithdrawal(context));
+    await executeWithdrawal(approvalAttempt); return { ...context, approvalAttempt };
+  }
+  return context;
+}
+
+async function prepareWithdrawal(phase: WithdrawalPhase) {
+  const context = await withdrawalContext(phase), signed = await signWithdrawal(context);
+  const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, signed);
+  return { context, signed, attempt };
 }
 
 describe('native FED mint execution consumer', () => {
@@ -280,4 +419,511 @@ describe('native FED mint execution consumer', () => {
         await observeFederatedNativeMintStateV1(attempt, terminal, authorize); })()).rejects.toThrow(/differs|disagree|changed/);
       expect(calls.filter(method => method === 'eth_sendRawTransaction')).toHaveLength(1);
     });
+});
+
+describe('native FED approve/burn execution component consumer', () => {
+  it('joins completed mint, real approval and burn signatures, exact holds and OZ5 net/fee state', async () => {
+    let context: FederatedNativeWithdrawalContextV1 = await completedMint();
+    for (const phase of ['approve', 'burn'] as const) {
+      const before = [...writes()], signed = await signWithdrawal(context);
+      expect(writes()).toEqual(before); expect(existsSync(holdPath(phase))).toBe(false);
+      const tx = Transaction.from(signed.signedTransactionHex), nonce = phase === 'approve' ? 2 : 3;
+      expect(tx.signature?.isValid()).toBe(true); expect(tx.signature?.networkV).not.toBeNull();
+      expect(tx.hash).toBe(signed.transactionHashHex); expect(tx.from?.toLowerCase()).toBe(`0x${owner.addressHex}`);
+      expect(tx).toMatchObject({ type: 0, chainId: 4242n, nonce, value: 0n, gasLimit: 5000000n,
+        gasPrice: phase === 'approve' ? 1265625000n : 1423828125n });
+      expect(tx.to?.toLowerCase()).toBe(phase === 'approve' ? TOKEN : BRIDGE);
+      expect(tx.data).toBe(phase === 'approve' ? ABI.encodeFunctionData('approve', [BRIDGE, 15000000n])
+        : ABI.encodeFunctionData('pegOut', [15000000n, RECIPIENT]));
+      const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, signed);
+      expect(Object.isFrozen(attempt)).toBe(true); expect(writes()).toEqual(before);
+      const hold = readFileSync(holdPath(phase), 'utf8');
+      expect(await executeWithdrawal(attempt)).toEqual({ phase, blockHashHex: NATIVE_BLOCKS[nonce + 1],
+        ethereumBlockHashHex: ETH_BLOCKS[nonce + 1], blockHeight: nonce + 1, transactionHashHex: signed.transactionHashHex,
+        transactionIndex: 0, eventIndex: phase === 'approve' ? 0 : 2, grossAmountNanoErg: '15000000', netAmountNanoErg: '10000000',
+        recipientErgoTreeHex: RECIPIENT, sourceFinalityEstablished: false, trustless: false });
+      expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+      expect(writes().slice(before.length)).toEqual(['eth_sendRawTransaction', 'engine_createBlock']);
+      await expect(submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed/);
+      await expect(sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not available/);
+      expect(() => reserveFederatedNativeWithdrawalAttemptV1(context, signed)).toThrow(/claimed/);
+      context = { ...context, approvalAttempt: attempt };
+    }
+    expect(height).toBe(4); expect(writes().filter(method => method === 'eth_sendRawTransaction')).toHaveLength(3);
+  });
+
+  it.each(['reserved', 'submitted', 'sealed', 'inclusion observed'] as const)
+    ('requires terminal mint storage, not merely a %s mint', async stage => {
+      const mintAttempt = await prepare();
+      if (stage !== 'reserved') await submitFederatedNativeMintV1(mintAttempt, authorize);
+      if (stage === 'sealed' || stage === 'inclusion observed') await sealFederatedNativeMintV1(mintAttempt, authorize);
+      if (stage === 'inclusion observed') await observeFederatedNativeMintInclusionV1(mintAttempt, authorize);
+      const input = { mintAttempt, approvalAttempt: null, grossAmountNanoErg: '15000000', recipientErgoTreeHex: RECIPIENT };
+      const before = [...calls];
+      await expect(observeFederatedNativeWithdrawalParentV1(input, withdrawalAuthorize)).rejects.toThrow(/confirmed mint state/);
+      expect(() => reserveFederatedNativeWithdrawalAttemptV1(input, mintAttempt)).toThrow(/confirmed mint state/);
+      expect(calls).toEqual(before); expect(existsSync(holdPath('approve'))).toBe(false);
+    });
+
+  it.each(['reserved', 'submitted', 'sealed'] as const)('requires observed approval, not a %s handle', async stage => {
+    const { context, attempt } = await prepareWithdrawal('approve');
+    if (stage !== 'reserved') await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+    if (stage === 'sealed') await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+    const burn = { ...context, approvalAttempt: attempt }, before = [...calls];
+    await expect(observeFederatedNativeWithdrawalParentV1(burn, withdrawalAuthorize)).rejects.toThrow(/approval lineage/);
+    expect(() => reserveFederatedNativeWithdrawalAttemptV1(burn, attempt)).toThrow(/approval lineage/);
+    expect(calls).toEqual(before); expect(existsSync(holdPath('burn'))).toBe(false);
+  });
+
+  it.each(['mint copy', 'approval copy', 'recipient', 'burn as approval'] as const)('rejects changed lineage: %s', async defect => {
+    const context = await withdrawalContext('burn');
+    let changed = { ...context };
+    if (defect === 'mint copy') changed.mintAttempt = { ...context.mintAttempt };
+    if (defect === 'approval copy') changed.approvalAttempt = { ...context.approvalAttempt! };
+    if (defect === 'recipient') changed.recipientErgoTreeHex = OTHER_RECIPIENT;
+    if (defect === 'burn as approval') {
+      const burn = reserveFederatedNativeWithdrawalAttemptV1(context, await signWithdrawal(context));
+      await executeWithdrawal(burn); changed.approvalAttempt = burn;
+    }
+    const before = [...calls];
+    await expect(observeFederatedNativeWithdrawalParentV1(changed, withdrawalAuthorize)).rejects.toThrow(/not original|approval lineage/);
+    expect(calls).toEqual(before);
+  });
+
+  it('rejects an original approval from a different original completed mint handle', async () => {
+    const original = await completedMint();
+    const foreign = reserveFederatedNativeMintAttemptV1(mkdtempSync(join(directory, 'foreign-mint-')), context, original.mintAttempt);
+    withdrawalMode = false; height = 1; mintSubmitted = false;
+    await execute(foreign); withdrawalMode = true;
+    const approvalAttempt = reserveFederatedNativeWithdrawalAttemptV1(original, await signWithdrawal(original));
+    await executeWithdrawal(approvalAttempt);
+    const before = [...calls];
+    await expect(observeFederatedNativeWithdrawalParentV1({ ...original, mintAttempt: foreign, approvalAttempt }, withdrawalAuthorize))
+      .rejects.toThrow(/approval lineage/);
+    expect(calls).toEqual(before);
+  });
+
+  it('binds burn gross amount to approval even when both amounts fit the completed mint', async () => {
+    context = { ...context, amountNanoErg: '20000000' };
+    const original = await withdrawalContext('burn');
+    const changed = { ...original, grossAmountNanoErg: '16000000' }, before = [...calls];
+    await expect(observeFederatedNativeWithdrawalParentV1(changed, withdrawalAuthorize)).rejects.toThrow(/approval lineage/);
+    expect(() => reserveFederatedNativeWithdrawalAttemptV1(changed, original.approvalAttempt!)).toThrow(/approval lineage/);
+    expect(calls).toEqual(before); expect(existsSync(holdPath('burn'))).toBe(false);
+  });
+
+  for (const phase of ['approve', 'burn'] as const) {
+    describe(phase, () => {
+      it.each(['amount below minimum', 'amount above mint', 'noncanonical amount', 'recipient bytes', 'invalid curve point'] as const)
+        ('rejects malformed context %s without a hold or transport', async defect => {
+          const context = await withdrawalContext(phase);
+          const changed = { ...context };
+          if (defect === 'amount below minimum') changed.grossAmountNanoErg = '14999999';
+          if (defect === 'amount above mint') changed.grossAmountNanoErg = '15000001';
+          if (defect === 'noncanonical amount') changed.grossAmountNanoErg = '015000000';
+          if (defect === 'recipient bytes') changed.recipientErgoTreeHex += '00';
+          if (defect === 'invalid curve point') changed.recipientErgoTreeHex = `0x0008cd02${'ff'.repeat(32)}`;
+          const before = [...calls];
+          await expect(observeFederatedNativeWithdrawalParentV1(changed, withdrawalAuthorize)).rejects.toThrow();
+          expect(() => reserveFederatedNativeWithdrawalAttemptV1(changed, context.mintAttempt)).toThrow();
+          expect(calls).toEqual(before); expect(existsSync(holdPath(phase))).toBe(false);
+        });
+
+      it.each(['copied', 'mint handle', 'cold module'] as const)('rejects %s withdrawal authority', async defect => {
+        const { attempt, context } = await prepareWithdrawal(phase);
+        const before = [...calls], hold = readFileSync(holdPath(phase), 'utf8');
+        if (defect === 'cold module') {
+          vi.resetModules(); const cold = await import('./federated-native-reservation-execution-v1.js');
+          await expect(cold.submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not original/);
+          await expect(cold.sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not original/);
+          await expect(cold.observeFederatedNativeWithdrawalInclusionV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not original/);
+        } else {
+          const foreign = defect === 'copied' ? { ...attempt } : context.mintAttempt;
+          await expect(submitFederatedNativeWithdrawalV1(foreign, withdrawalAuthorize)).rejects.toThrow(/not original/);
+          await expect(sealFederatedNativeWithdrawalV1(foreign, withdrawalAuthorize)).rejects.toThrow(/not original/);
+          await expect(observeFederatedNativeWithdrawalInclusionV1(foreign, withdrawalAuthorize)).rejects.toThrow(/not original/);
+        }
+        expect(calls).toEqual(before); expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+      });
+
+      it.each(['transaction hash', 'native extrinsic'] as const)('rejects a detached %s before reserving', async defect => {
+        const context = await withdrawalContext(phase), signed = await signWithdrawal(context);
+        const detached = Buffer.from(signed.nativeExtrinsicHex.slice(2), 'hex'); detached[detached.length - 1] ^= 1;
+        const changed = { ...signed, [defect === 'transaction hash' ? 'transactionHashHex' : 'nativeExtrinsicHex']:
+          defect === 'transaction hash' ? hash('77') : `0x${detached.toString('hex')}` };
+        expect(changed).not.toEqual(signed);
+        const before = [...calls];
+        expect(() => reserveFederatedNativeWithdrawalAttemptV1(context, changed))
+          .toThrow(defect === 'transaction hash' ? /bytes differ/ : /extrinsic differs from the signed transaction/);
+        expect(calls).toEqual(before); expect(existsSync(holdPath(phase))).toBe(false);
+        const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, signed);
+        expect(attempt).toEqual(signed);
+        expect(JSON.parse(readFileSync(holdPath(phase), 'utf8'))).toMatchObject(signed);
+        expect(calls).toEqual(before);
+      });
+
+      it('never overwrites a pre-existing hold or reclaims the failed reservation slot', async () => {
+        const context = await withdrawalContext(phase), signed = await signWithdrawal(context);
+        const hold = '{"fixture":"pre-existing hold"}'; writeFileSync(holdPath(phase), hold);
+        const before = [...calls];
+        expect(() => reserveFederatedNativeWithdrawalAttemptV1(context, signed)).toThrow(/EEXIST/);
+        expect(() => reserveFederatedNativeWithdrawalAttemptV1(context, signed)).toThrow(/claimed/);
+        expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold); expect(calls).toEqual(before);
+      });
+
+      it.each(['context', 'signed'] as const)('claims only one hold during %s inspection reentry', async surface => {
+        const context = await withdrawalContext(phase), signed = await signWithdrawal(context);
+        let nested: WithdrawalAttempt | undefined;
+        const trap: ProxyHandler<object> = { getPrototypeOf(target) {
+          nested ??= reserveFederatedNativeWithdrawalAttemptV1(context, signed);
+          return Reflect.getPrototypeOf(target);
+        } };
+        const before = [...calls];
+        const candidateContext = surface === 'context' ? new Proxy<typeof context>(context, trap) : context;
+        const candidateSigned = surface === 'signed' ? new Proxy<typeof signed>(signed, trap) : signed;
+        expect(() => reserveFederatedNativeWithdrawalAttemptV1(candidateContext, candidateSigned)).toThrow(/already claimed/);
+        expect(nested).toEqual(signed); expect(calls).toEqual(before);
+        const hold = readFileSync(holdPath(phase), 'utf8');
+        expect(JSON.parse(hold)).toMatchObject(signed);
+        await executeWithdrawal(nested!);
+        expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+      });
+
+      it.each(['outer length', 'version prefix', 'pallet', 'call', 'transaction variant', 'nonce', 'gas price', 'gas limit',
+        'target variant', 'target', 'value', 'data length', 'data', 'v', 'r', 's', 'signature tail', 'trailing bytes'] as const)
+        ('rejects isolated native %s mismatch before hold/claim and retains the valid slot', async field => {
+          const context = await withdrawalContext(phase), signed = await signWithdrawal(context);
+          const tx = Transaction.from(signed.signedTransactionHex);
+          const original = Buffer.from(signed.nativeExtrinsicHex.slice(2), 'hex');
+          const data = Buffer.from(tx.data.slice(2), 'hex');
+          expect(data.length).toBe(phase === 'approve' ? 68 : 164);
+          expect(original.length).toBe(phase === 'approve' ? 297 : 393);
+          // Two-byte outer and calldata SCALE lengths in the pinned bare-v5 legacy call.
+          const signature = 157 + data.length;
+          expect(original.subarray(157, signature)).toEqual(data);
+          const offsets: Record<string, number> = { 'outer length': 0, 'version prefix': 2, pallet: 3, call: 4,
+            'transaction variant': 5, nonce: 6, 'gas price': 38, 'gas limit': 70, 'target variant': 102,
+            target: 103, value: 123, 'data length': 155, data: 157, v: signature,
+            r: signature + 8, s: signature + 40, 'signature tail': original.length - 1 };
+          let changed = Buffer.from(original);
+          if (field === 'trailing bytes') changed = Buffer.concat([changed, Buffer.from([0])]);
+          else {
+            changed[offsets[field]] ^= 1;
+            expect([...changed].filter((byte, index) => byte !== original[index])).toHaveLength(1);
+          }
+          const before = [...calls];
+          expect(() => reserveFederatedNativeWithdrawalAttemptV1(context, { ...signed, nativeExtrinsicHex: `0x${changed.toString('hex')}` }))
+            .toThrow(/extrinsic differs from the signed transaction/);
+          expect(calls).toEqual(before); expect(existsSync(holdPath(phase))).toBe(false);
+          const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, signed);
+          expect(attempt).toEqual(signed);
+          expect(JSON.parse(readFileSync(holdPath(phase), 'utf8'))).toMatchObject(signed);
+          expect(calls).toEqual(before);
+        });
+
+      it.each(['eth_call', 'eth_sendRawTransaction', 'engine_createBlock'])
+        ('retains the hold and sanitizes a standard %s RPC error', async selectedMethod => {
+          const { attempt } = await prepareWithdrawal(phase);
+          const hold = readFileSync(holdPath(phase), 'utf8'), before = [...writes()];
+          const originalFetch = globalThis.fetch;
+          vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+            const response = await originalFetch(url, init);
+            if (JSON.parse(init.body as string).method !== selectedMethod) return response;
+            return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1,
+              error: { code: -32603, message: 'untrusted withdrawal diagnostic', data: { detail: 'untrusted withdrawal response' } } }));
+          }));
+          const error = await executeWithdrawal(attempt).catch(error => error);
+          expect(error).toBeInstanceOf(Error);
+          expect(error.message).toBe(`native reservation RPC ${selectedMethod} rejected (code -32603); attempt remains held`);
+          expect(error.cause).toBeUndefined();
+          await expect(submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed/);
+          await expect(sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not available/);
+          await expect(observeFederatedNativeWithdrawalInclusionV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not sealed/);
+          expect(writes().slice(before.length)).toEqual(selectedMethod === 'eth_call' ? []
+            : selectedMethod === 'eth_sendRawTransaction' ? ['eth_sendRawTransaction'] : ['eth_sendRawTransaction', 'engine_createBlock']);
+          expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+        });
+
+      it.each(['type', 'chainId', 'nonce', 'value', 'low price', 'high price', 'gasLimit', 'to', 'signer', 'amount', 'destination'] as const)
+        ('rejects independently re-signed %s mismatch before reservation', async defect => {
+          let signer: HDNodeWallet | undefined;
+          const original = HDNodeWallet.prototype.signTransaction;
+          vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(function (this: HDNodeWallet, tx) {
+            signer = this; return original.call(this, tx);
+          });
+          const context = await withdrawalContext(phase), signed = await signWithdrawal(context);
+          const tx = Transaction.from(signed.signedTransactionHex);
+          const input = { type: tx.type, chainId: tx.chainId, nonce: tx.nonce, value: tx.value, gasPrice: tx.gasPrice!,
+            gasLimit: tx.gasLimit, to: tx.to, data: tx.data };
+          if (defect === 'type') input.type = 1;
+          if (defect === 'chainId') input.chainId = 4243n;
+          if (defect === 'nonce') input.nonce++;
+          if (defect === 'value') input.value = 1n;
+          if (defect === 'low price') input.gasPrice--;
+          if (defect === 'high price') input.gasPrice++;
+          if (defect === 'gasLimit') input.gasLimit--;
+          if (defect === 'to') input.to = phase === 'approve' ? BRIDGE : TOKEN;
+          if (defect === 'amount' || defect === 'destination') input.data = phase === 'approve'
+            ? ABI.encodeFunctionData('approve', [defect === 'destination' ? TOKEN : BRIDGE, defect === 'amount' ? 15000001n : 15000000n])
+            : ABI.encodeFunctionData('pegOut', [defect === 'amount' ? 15000001n : 15000000n, defect === 'destination' ? OTHER_RECIPIENT : RECIPIENT]);
+          const bytes = await original.call(defect === 'signer' ? HDNodeWallet.createRandom() : signer!, input);
+          const changed = Transaction.from(bytes); expect(changed.signature?.isValid()).toBe(true);
+          if (defect === 'signer') expect(changed.from).not.toBe(tx.from);
+          else expect(changed.from).toBe(tx.from);
+          const before = [...calls];
+          if (defect === 'type') expect(() => encodeFederatedNativeMintExtrinsicV1Hex(bytes)).toThrow(/legacy transaction must be canonical RLP/);
+          else {
+            const candidate = { signedTransactionHex: bytes, transactionHashHex: changed.hash!,
+              nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(bytes) };
+            expect(() => reserveFederatedNativeWithdrawalAttemptV1(context, candidate)).toThrow(/bytes differ/);
+          }
+          expect(calls).toEqual(before); expect(existsSync(holdPath(phase))).toBe(false);
+        });
+
+      for (const stage of ['submit', 'seal', 'observe'] as const) {
+        it.each(['own', 'mint', 'reservation', ...(phase === 'burn' ? ['approval'] : [])])
+          (`rejects tampered %s journal at ${stage}`, async journal => {
+            const { attempt } = await prepareWithdrawal(phase);
+            if (stage !== 'submit') await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            if (stage === 'observe') await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            const path = journal === 'own' ? holdPath(phase) : join(directory, `native-${journal === 'approval' ? 'approve' : journal}-attempt.json`);
+            const bytes = readFileSync(path, 'utf8');
+            writeFileSync(path, bytes.replace('reserved', 'tampered'));
+            expect(Buffer.byteLength(readFileSync(path, 'utf8'))).toBe(Buffer.byteLength(bytes));
+            const before = [...calls];
+            const action = stage === 'submit' ? submitFederatedNativeWithdrawalV1 : stage === 'seal'
+              ? sealFederatedNativeWithdrawalV1 : observeFederatedNativeWithdrawalInclusionV1;
+            await expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/hold changed/);
+            expect(calls).toEqual(before);
+          });
+
+        it.each(['absent', 'denied', 'disposed'] as const)(`requires separate %s authorization for ${stage}`, async defect => {
+          const { attempt } = await prepareWithdrawal(phase);
+          if (stage !== 'submit') await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+          if (stage === 'observe') await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+          if (defect === 'disposed') disposeFederatedGenesisOperatorV1(owner);
+          const before = [...calls], hold = readFileSync(holdPath(phase), 'utf8');
+          const action = stage === 'submit' ? submitFederatedNativeWithdrawalV1 : stage === 'seal'
+            ? sealFederatedNativeWithdrawalV1 : observeFederatedNativeWithdrawalInclusionV1;
+          await expect(action(attempt, defect === 'absent' ? undefined as never : defect === 'denied'
+            ? () => { throw new Error('test transport authorization denied'); } : withdrawalAuthorize)).rejects.toThrow();
+          expect(calls).toEqual(before); expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+        });
+      }
+
+      for (const stage of ['submit', 'seal'] as const) {
+        it.each(['Ethereum hash', 'Ethereum number', 'Ethereum transactions', 'hash mapping', 'hash number', 'hash transactions',
+          'fee ceiling', 'fee encoding', 'fee missing', 'fee U256 overflow', 'fee U256 maximum',
+          'chain', 'Ethereum nonce', 'native nonce', 'native account encoding',
+          'genesis', 'reservation ancestor', 'mint ancestor', ...(phase === 'burn' ? ['approval ancestor'] : []),
+          'head', 'pool foreign', 'pool duplicate', ...(stage === 'seal' ? ['pool missing primary'] : [])])
+          (`rejects ${stage} parent %s before transport`, async defect => {
+            const { attempt } = await prepareWithdrawal(phase);
+            if (stage === 'seal') await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            const before = [...writes()], hold = readFileSync(holdPath(phase), 'utf8'); let injected = 0;
+            fault = (method, params, result, url) => {
+              if (!url.endsWith(defect === 'pool missing primary' ? '19955' : '19956')) return result;
+              let changed: unknown = result;
+              if (method === 'eth_getBlockByNumber') {
+                if (defect === 'Ethereum hash') changed = { ...result, hash: hash('77') };
+                if (defect === 'Ethereum number') changed = { ...result, number: '0x1' };
+                if (defect === 'Ethereum transactions') changed = { ...result, transactions: [hash('77')] };
+                if (defect === 'fee ceiling') changed = { ...result, baseFeePerGas: quantity((phase === 'approve' ? 1125000000n : 1265625000n) + 1n) };
+                if (defect === 'fee encoding') changed = { ...result, baseFeePerGas: `0x0${result.baseFeePerGas.slice(2)}` };
+                if (defect === 'fee missing') { changed = { ...result }; delete (changed as any).baseFeePerGas; }
+                if (defect === 'fee U256 overflow') changed = { ...result, baseFeePerGas: quantity(1n << 256n) };
+                if (defect === 'fee U256 maximum') changed = { ...result, baseFeePerGas: quantity((1n << 256n) - 1n) };
+              }
+              if (method === 'eth_getBlockByHash') {
+                if (defect === 'hash mapping') changed = { ...result, hash: hash('77') };
+                if (defect === 'hash number') changed = { ...result, number: '0x1' };
+                if (defect === 'hash transactions') changed = { ...result, transactions: [hash('77')] };
+              }
+              if (defect === 'chain' && method === 'eth_chainId') changed = '0x1093';
+              if (defect === 'Ethereum nonce' && method === 'eth_getTransactionCount') changed = '0x1';
+              if (method === 'state_getStorage' && params[0] === owner.nativeFunding.storageKeyHex) {
+                if (defect === 'native account encoding') changed = `${result}00`;
+                if (defect === 'native nonce') {
+                  const account = Buffer.from(result.slice(2), 'hex'); account.writeUInt32LE(1); changed = `0x${account.toString('hex')}`;
+                }
+              }
+              if (method === 'chain_getBlockHash') {
+                const ancestors: Record<string, number> = { genesis: 0, 'reservation ancestor': 1, 'mint ancestor': 2, 'approval ancestor': 3 };
+                if (Object.hasOwn(ancestors, defect) && params[0] === ancestors[defect] || defect === 'head' && params.length === 0) changed = hash('77');
+              }
+              if (method === 'author_pendingExtrinsics') {
+                if (defect === 'pool foreign') changed = ['0x1005010028'];
+                if (defect === 'pool duplicate') changed = [attempt.nativeExtrinsicHex, attempt.nativeExtrinsicHex];
+                if (defect === 'pool missing primary') changed = [];
+              }
+              if (changed !== result) injected++;
+              return changed;
+            };
+            const action = stage === 'submit' ? submitFederatedNativeWithdrawalV1 : sealFederatedNativeWithdrawalV1;
+            await expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/differs|changed/);
+            expect(injected).toBe(1); expect(writes()).toEqual(before);
+            expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+            await expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed|not available/);
+          });
+
+        it.each(['ambiguous', 'transport failure', 'concurrent', 'disposal during observation', 'disposal at last read'] as const)
+          (`holds ${stage} after %s without another transport`, async defect => {
+            const { attempt } = await prepareWithdrawal(phase);
+            if (stage === 'seal') await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            const action = stage === 'submit' ? submitFederatedNativeWithdrawalV1 : sealFederatedNativeWithdrawalV1;
+            const methodSelected = stage === 'submit' ? 'eth_sendRawTransaction' : 'engine_createBlock';
+            const before = [...writes()], hold = readFileSync(holdPath(phase), 'utf8');
+            let parallel: Promise<unknown> | undefined;
+            fault = (method, params, result, url) => {
+              if (defect === 'disposal during observation' && method === 'eth_getBlockByNumber') disposeFederatedGenesisOperatorV1(owner);
+              if (defect === 'disposal at last read' && method === 'chain_getBlockHash' && params.length === 0 && url.endsWith('19956')) {
+                disposeFederatedGenesisOperatorV1(owner);
+              }
+              if (method === methodSelected) {
+                if (defect === 'ambiguous') return stage === 'submit' ? hash('77') : { hash: NATIVE_BLOCKS[height - 1] };
+                if (defect === 'transport failure') throw new Error('synthetic withdrawal transport failure');
+                if (defect === 'concurrent') parallel = expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed|not available/);
+              }
+              return result;
+            };
+            if (defect === 'concurrent') { await action(attempt, withdrawalAuthorize); await parallel; }
+            else await expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/ambiguous|predecessor|failure|disposed/);
+            await expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed|not available/);
+            expect(writes().slice(before.length)).toEqual(defect.startsWith('disposal') ? [] : [methodSelected]);
+            expect(readFileSync(holdPath(phase), 'utf8')).toBe(hold);
+            if (stage === 'submit' && defect !== 'concurrent') await expect(sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize))
+              .rejects.toThrow(/not available/);
+          });
+      }
+
+      it.each(['zero', 'fractional growth', 'exact ceiling'] as const)('accepts bounded parent fee: %s', async boundary => {
+        const context = await withdrawalContext(phase), before = [...writes()]; let observed = 0;
+        const limit = phase === 'approve' ? 1125000000n : 1265625000n;
+        const baseFee = boundary === 'zero' ? 0n : boundary === 'fractional growth' ? limit - 1n : limit;
+        expect((baseFee * 9n + 7n) / 8n).toBeLessThanOrEqual(phase === 'approve' ? 1265625000n : 1423828125n);
+        fault = (method, _params, result) => {
+          if (method === 'eth_getBlockByNumber') { observed++; return { ...result, baseFeePerGas: quantity(baseFee) }; }
+          return result;
+        };
+        await expect(observeFederatedNativeWithdrawalParentV1(context, withdrawalAuthorize)).resolves.toEqual({
+          nonce: phase === 'approve' ? 2 : 3, parentNativeHeight: phase === 'approve' ? 2 : 3,
+        });
+        expect(observed).toBe(2); expect(writes()).toEqual(before); expect(existsSync(holdPath(phase))).toBe(false);
+      });
+
+      for (const stage of ['submit', 'seal', 'observe'] as const) {
+        it.each(['bridge code hash', 'token code hash', 'bridge code size', 'token code size',
+          'bridge owner', 'token owner', 'sergToken', 'paused', 'totalSupply', 'operator balance', 'bridge balance',
+          'allowance', 'accumulatedFees', 'processedPegIns', 'profile storage', 'pending index', 'pending reservation',
+          'consumed reservation', 'invalidated reservation'])
+          (`rejects ${stage} application/conservation fault: %s`, async defect => {
+            const { attempt } = await prepareWithdrawal(phase);
+            if (stage !== 'submit') await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            if (stage === 'observe') await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            const before = [...writes()]; let injected = 0;
+            fault = (method, params, result, url) => {
+              if (!url.endsWith('19956')) return result;
+              if (method === 'eth_getCode' && defect.includes('code') && params[0] === (defect.startsWith('bridge') ? BRIDGE : TOKEN)) {
+                injected++; return defect.endsWith('size') ? '0x600000' : '0x6001';
+              }
+              if (method === 'eth_call') {
+                const request = params[0] as any, call = ABI.parseTransaction({ data: request.data })!;
+                const selected = defect === 'bridge owner' ? call.name === 'owner' && request.to === BRIDGE
+                  : defect === 'token owner' ? call.name === 'owner' && request.to === TOKEN
+                    : defect === 'operator balance' ? call.name === 'balanceOf' && call.args[0].toLowerCase() === `0x${owner.addressHex}`
+                      : defect === 'bridge balance' ? call.name === 'balanceOf' && call.args[0].toLowerCase() === BRIDGE : call.name === defect;
+                if (selected) {
+                  const value = ABI.decodeFunctionResult(call.name, result)[0]; injected++;
+                  return ABI.encodeFunctionResult(call.name, [typeof value === 'boolean' ? !value : typeof value === 'bigint' ? value + 1n : ZERO]);
+                }
+              }
+              const keys: Record<string, string> = { 'profile storage': '0x01', 'pending index': '0x04', 'pending reservation': '0x05',
+                'consumed reservation': '0x06', 'invalidated reservation': '0x07' };
+              if (method === 'state_getStorage' && params[0] === keys[defect]) { injected++; return result === null ? '0x01' : null; }
+              return result;
+            };
+            const action = stage === 'submit' ? submitFederatedNativeWithdrawalV1 : stage === 'seal'
+              ? sealFederatedNativeWithdrawalV1 : observeFederatedNativeWithdrawalInclusionV1;
+            await expect(action(attempt, withdrawalAuthorize)).rejects.toThrow(/code differs|state differs/);
+            expect(injected).toBe(1); expect(writes()).toEqual(before);
+          });
+      }
+
+      it.each(['native hash', 'native call', 'native parent', 'native number', 'native extra call', 'native timestamp', 'native disagreement',
+        'Ethereum hash', 'Ethereum number', 'Ethereum parent', 'Ethereum transactions', 'hash mapping', 'head'])
+        ('rejects child identity fault: %s', async defect => {
+          const { attempt } = await prepareWithdrawal(phase);
+          await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize); await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+          const before = [...writes()]; let injected = 0;
+          fault = (method, params, result, url) => {
+            if (!url.endsWith('19956')) return result;
+            if (method === 'chain_getBlockHash' && (defect === 'native hash' && params[0] === height || defect === 'head' && params.length === 0)) {
+              injected++; return hash('77');
+            }
+            if (method === 'chain_getBlock') {
+              if (defect === 'native call') { injected++; result.block.extrinsics[1] += '00'; }
+              if (defect === 'native parent') { injected++; result.block.header.parentHash = GENESIS; }
+              if (defect === 'native number') { injected++; result.block.header.number = '0x1'; }
+              if (defect === 'native extra call') { injected++; result.block.extrinsics.push('0x1005010028'); }
+              if (defect === 'native timestamp') { injected++; result.block.extrinsics[0] = '0x1005010029'; }
+              if (defect === 'native disagreement') { injected++; result.block.header.stateRoot = hash('77'); }
+            }
+            if (method === 'eth_getBlockByNumber') {
+              const fields: Record<string, [string, unknown]> = { 'Ethereum hash': ['hash', hash('77')], 'Ethereum number': ['number', '0x1'],
+                'Ethereum parent': ['parentHash', ETH_PARENT], 'Ethereum transactions': ['transactions', [hash('77')]] };
+              if (fields[defect]) { injected++; result[fields[defect][0]] = fields[defect][1]; }
+            }
+            if (method === 'eth_getBlockByHash' && defect === 'hash mapping') { injected++; result.hash = hash('77'); }
+            return result;
+          };
+          await expect(observeFederatedNativeWithdrawalInclusionV1(attempt, withdrawalAuthorize)).rejects.toThrow(/differs|divergent|disagree|changed/);
+          expect(injected).toBe(1); expect(writes()).toEqual(before);
+        });
+
+      it.each(['transactionHash', 'blockHash', 'blockNumber', 'transactionIndex', 'status', 'from', 'to', 'missing log', 'extra log'])
+        ('rejects exact receipt %s mismatch', async field => {
+          const { attempt } = await prepareWithdrawal(phase);
+          await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize); await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+          const before = [...writes()]; let injected = 0;
+          fault = (method, _params, result, url) => {
+            if (method !== 'eth_getTransactionReceipt' || !url.endsWith('19956')) return result;
+            injected++;
+            const replacements: Record<string, unknown> = { transactionHash: hash('77'), blockHash: ETH_PARENT, blockNumber: '0x1',
+              transactionIndex: '0x1', status: '0x0', from: ZERO, to: ZERO };
+            if (field === 'missing log') result.logs.pop();
+            else if (field === 'extra log') result.logs.push({ ...result.logs[0] });
+            else result[field] = replacements[field];
+            return result;
+          };
+          await expect(observeFederatedNativeWithdrawalInclusionV1(attempt, withdrawalAuthorize)).rejects.toThrow(/receipt differs/);
+          expect(injected).toBe(1); expect(writes()).toEqual(before);
+        });
+
+      for (const index of phase === 'approve' ? [0] : [0, 1, 2]) {
+        it.each(['address', 'data', 'topic signature', 'topic sender', ...(phase === 'approve' || index < 2 ? ['topic destination'] : ['recipient payload']),
+          'blockHash', 'blockNumber', 'transactionHash', 'transactionIndex', 'logIndex', 'removed'])
+          (`rejects exact log ${index} %s mismatch`, async field => {
+            const { attempt } = await prepareWithdrawal(phase);
+            await submitFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize); await sealFederatedNativeWithdrawalV1(attempt, withdrawalAuthorize);
+            const before = [...writes()]; let injected = 0;
+            fault = (method, _params, result, url) => {
+              if (method !== 'eth_getTransactionReceipt' || !url.endsWith('19956')) return result;
+              injected++;
+              const log = result.logs[index];
+              const replacements: Record<string, unknown> = { address: ZERO, blockHash: ETH_PARENT, blockNumber: '0x1',
+                transactionHash: hash('77'), transactionIndex: '0x1', logIndex: '0x9', removed: true };
+              if (field === 'data') {
+                const data = Buffer.from(log.data.slice(2), 'hex'); data[31] ^= 1; log.data = `0x${data.toString('hex')}`;
+              } else if (field === 'recipient payload') log.data = ABI.encodeEventLog(ABI.getEvent('PegOut')!,
+                [`0x${owner.addressHex}`, 10000000n, OTHER_RECIPIENT]).data;
+              else if (field.startsWith('topic')) log.topics[field === 'topic signature' ? 0 : field === 'topic sender' ? 1 : 2] = hash('77');
+              else log[field] = replacements[field];
+              return result;
+            };
+            await expect(observeFederatedNativeWithdrawalInclusionV1(attempt, withdrawalAuthorize)).rejects.toThrow(/event differs/);
+            expect(injected).toBe(1); expect(writes()).toEqual(before);
+          });
+      }
+    });
+  }
 });

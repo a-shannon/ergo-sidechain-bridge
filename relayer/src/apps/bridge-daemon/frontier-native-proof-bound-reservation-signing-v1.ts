@@ -1,5 +1,6 @@
 import {
   assertFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
+  signFederatedGenesisApproveV1, signFederatedGenesisBurnV1,
   type FederatedGenesisOperatorV1,
 } from '../../adapters/federated-genesis-operator-v1.js';
 import { observeFederatedGenesisReservationTargetV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
@@ -8,6 +9,8 @@ import {
   sealFederatedNativeReservationV1, observeFederatedNativeReservationInclusionV1,
   observeFederatedNativeMintParentV1, reserveFederatedNativeMintAttemptV1, submitFederatedNativeMintV1,
   sealFederatedNativeMintV1, observeFederatedNativeMintInclusionV1, observeFederatedNativeMintStateV1,
+  observeFederatedNativeWithdrawalParentV1, reserveFederatedNativeWithdrawalAttemptV1,
+  submitFederatedNativeWithdrawalV1, sealFederatedNativeWithdrawalV1, observeFederatedNativeWithdrawalInclusionV1,
 } from '../../adapters/federated-native-reservation-execution-v1.js';
 import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
   from '../../validity-application-pooled-reserve-mint-reservation-v4.js';
@@ -18,6 +21,7 @@ import {
   derivePooledReserveMintReservationRuntimeStorageKeysV4, encodePooledReserveMintReservationPendingV4ScaleHex,
 } from '../../pooled-reserve-mint-reservation-runtime-state-v4.js';
 import { blake2b } from 'blakejs';
+import { computeAddress } from 'ethers';
 import { assertOwnedFederatedGenesisDevnetTargetV1, type OwnedFederatedGenesisDevnetTargetV1 }
   from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import {
@@ -73,6 +77,58 @@ export async function executeFrontierNativeProofBoundReservationAndMintV1(input:
   const { attemptDirectory, broadcastScope } = input;
   if (broadcastScope !== 'fed-native-local-synthetic-reservation-and-mint-only') throw new Error('native mint broadcast scope is absent');
   const retained = capture(input.signing);
+  return (await executeMint(retained, attemptDirectory)).result;
+}
+
+/** Same live proof owner through native mint, approval and burn; the return value is not payout authority. */
+export async function executeFrontierNativeProofBoundReservationMintAndBurnV1(input: Readonly<{
+  signing: Readonly<SigningInput>;
+  attemptDirectory: string;
+  broadcastScope: 'fed-native-local-synthetic-reservation-mint-and-burn-only';
+  grossAmountNanoErg: string;
+  recipientErgoTreeHex: string;
+}>) {
+  exact(input, ['signing', 'attemptDirectory', 'broadcastScope', 'grossAmountNanoErg', 'recipientErgoTreeHex']);
+  const { attemptDirectory, broadcastScope, grossAmountNanoErg, recipientErgoTreeHex } = input;
+  if (broadcastScope !== 'fed-native-local-synthetic-reservation-mint-and-burn-only') throw new Error('native burn broadcast scope is absent');
+  const retained = capture(input.signing);
+  const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(retained.input.proof.request.statementHex);
+  const intent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
+  if (typeof grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(grossAmountNanoErg)
+    || BigInt(grossAmountNanoErg) < 15_000_000n || BigInt(grossAmountNanoErg) > BigInt(intent.amountNanoErg)
+    || typeof recipientErgoTreeHex !== 'string' || !/^0x0008cd0[23][0-9a-f]{64}$/.test(recipientErgoTreeHex)) {
+    throw new Error('native burn request differs from the bounded mint or P2PK recipient');
+  }
+  try { computeAddress(`0x${recipientErgoTreeHex.slice(8)}`); }
+  catch { throw new Error('native burn request differs from a valid P2PK curve point'); }
+  retained.assertCurrent();
+  const minted = await executeMint(retained, attemptDirectory);
+  const authorize = () => retained.assertCurrent();
+  let approvalAttempt: Readonly<{ transactionHashHex: string; signedTransactionHex: string; nativeExtrinsicHex: string }> | null = null;
+  const app = retained.input.compiled.preparation.application;
+  for (const phase of ['approve', 'burn'] as const) {
+    const context = Object.freeze({ mintAttempt: minted.attempt, approvalAttempt, grossAmountNanoErg, recipientErgoTreeHex });
+    const parent = await observeFederatedNativeWithdrawalParentV1(context, authorize);
+    authorize();
+    const signingInput = { ...parent, bridgeAddressHex: `0x${app.bridgeAddressHex}`,
+      tokenAddressHex: `0x${app.tokenAddressHex}`, grossAmountNanoErg, recipientErgoTreeHex };
+    const signed = phase === 'approve' ? await signFederatedGenesisApproveV1(retained.input.operator, signingInput)
+      : await signFederatedGenesisBurnV1(retained.input.operator, signingInput);
+    authorize();
+    const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, { transactionHashHex: signed.transactionHashHex,
+      signedTransactionHex: signed.signedTransactionHex, nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(signed.signedTransactionHex) });
+    await submitFederatedNativeWithdrawalV1(attempt, authorize);
+    await sealFederatedNativeWithdrawalV1(attempt, authorize);
+    const observed = await observeFederatedNativeWithdrawalInclusionV1(attempt, authorize);
+    authorize();
+    if (phase === 'approve') approvalAttempt = attempt;
+    else return Object.freeze({ mint: minted.result, burn: observed, burnExecuted: true as const,
+      checkpointAttested: false as const, ergoPayoutExecuted: false as const, sourceFinalityEstablished: false as const, trustless: false as const });
+  }
+  throw new Error('native burn execution did not complete');
+}
+
+async function executeMint(retained: ReturnType<typeof capture>, attemptDirectory: string) {
   retained.assertCurrent();
   const { operator, proof, compiled } = retained.input;
   const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(proof.request.statementHex);
@@ -117,10 +173,11 @@ export async function executeFrontierNativeProofBoundReservationAndMintV1(input:
     [keys.pendingKeysStorageKeyHex]: '0x00', [keys.pendingReservationStorageKeyHex]: null,
     [keys.consumedReservationStorageKeyHex]: consumed }, authorize);
   retained.assertCurrent();
-  return Object.freeze({ ...minted, mintIdentityHex: proof.mintIdentityHex, amountNanoErg: context.amountNanoErg,
+  const result = Object.freeze({ ...minted, mintIdentityHex: proof.mintIdentityHex, amountNanoErg: context.amountNanoErg,
     recipientAddressHex: intent.recipientAddressHex, sourceProofReceiptDigestHex: proof.receiptDigestHex,
     consumedReservationScaleHex: consumed, runtimeReservationConsumed: true as const, mintExecuted: true as const,
     sourceFinalityEstablished: false as const, trustless: false as const });
+  return { result, attempt };
 }
 
 async function executeReservation(retained: ReturnType<typeof capture>, attemptDirectory: string) {

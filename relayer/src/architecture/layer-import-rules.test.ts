@@ -170,7 +170,7 @@ describe('layer import rules', () => {
       .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
   });
 
-  it.each(['signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1'])
+  it.each(['signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1'])
     ('restricts %s to its proof-bound composition, not the target root', binding => {
     const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
     const specifier = FEDERATED_GENESIS_OPERATOR_SPECIFIER;
@@ -223,7 +223,9 @@ describe('layer import rules', () => {
   it.each(['reserveFederatedNativeReservationAttemptV1', 'submitFederatedNativeReservationV1',
     'sealFederatedNativeReservationV1', 'observeFederatedNativeReservationInclusionV1',
     'observeFederatedNativeMintParentV1', 'reserveFederatedNativeMintAttemptV1', 'submitFederatedNativeMintV1',
-    'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1'])
+    'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1',
+    'observeFederatedNativeWithdrawalParentV1', 'reserveFederatedNativeWithdrawalAttemptV1',
+    'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1'])
     ('keeps native execution capability in its proof-bound consumer: %s', binding => {
       const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
       const specifier = '../../adapters/federated-native-reservation-execution-v1.js';
@@ -250,7 +252,16 @@ describe('layer import rules', () => {
     const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
     const source = declaration.replace('SPECIFIER', specifier);
     expect(inspect(staticAppFixture(composition, source)).map(item => item.message))
-      .toContain(`native reservation composition import is not allowlisted: ${specifier}`);
+      .toContain(specifier === 'ethers' ? declaration.startsWith('export')
+        ? 'restricted capability import must use reviewed named bindings: ethers'
+        : 'restricted capability import binding is not allowlisted: ethers#Wallet'
+        : `native reservation composition import is not allowlisted: ${specifier}`);
+  });
+
+  it.each(['SigningKey', 'HDNodeWallet'])('keeps %s out of the native composition key-validation import', binding => {
+    const file = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
+    expect(inspect(staticAppFixture(file, `import { ${binding} } from 'ethers';`)).map(item => item.message))
+      .toContain(`restricted capability import binding is not allowlisted: ethers#${binding}`);
   });
 
   it.each([

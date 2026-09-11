@@ -226,11 +226,14 @@ const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, Readonly
 ]);
 const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['blakejs', new Set(['blake2b'])],
+  ['ethers', new Set(['computeAddress'])],
   ['../../adapters/federated-native-reservation-execution-v1.js', new Set([
     'reserveFederatedNativeReservationAttemptV1', 'submitFederatedNativeReservationV1',
     'sealFederatedNativeReservationV1', 'observeFederatedNativeReservationInclusionV1',
     'observeFederatedNativeMintParentV1', 'reserveFederatedNativeMintAttemptV1', 'submitFederatedNativeMintV1',
     'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1',
+    'observeFederatedNativeWithdrawalParentV1', 'reserveFederatedNativeWithdrawalAttemptV1',
+    'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1',
   ])],
   ['../../adapters/federated-genesis-target-observation-v1.js', new Set(['observeFederatedGenesisReservationTargetV1'])],
   ...[...REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS].map(
@@ -238,6 +241,7 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
   ),
   ['../../adapters/federated-genesis-operator-v1.js', new Set([
     'assertFederatedGenesisOperatorV1', 'signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'FederatedGenesisOperatorV1',
+    'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1',
   ])],
 ]);
 
@@ -1518,6 +1522,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     'signFrontierNativeProofBoundReservationV1', 'executeFrontierNativeProofBoundReservationV1',
     'executeFrontierNativeProofBoundReservationAndMintV1',
+    'executeFrontierNativeProofBoundReservationMintAndBurnV1',
   ])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
@@ -1764,11 +1769,14 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['signFederatedGenesisReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisApproveV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisBurnV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Map([
     ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationAndMintV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['executeFrontierNativeProofBoundReservationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
   [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Map([
     ['reserveFederatedNativeReservationAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -1781,6 +1789,11 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['sealFederatedNativeMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['observeFederatedNativeMintInclusionV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['observeFederatedNativeMintStateV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['observeFederatedNativeWithdrawalParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['reserveFederatedNativeWithdrawalAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['submitFederatedNativeWithdrawalV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['sealFederatedNativeWithdrawalV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['observeFederatedNativeWithdrawalInclusionV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Map([
     ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_TARGET_ROOT])],

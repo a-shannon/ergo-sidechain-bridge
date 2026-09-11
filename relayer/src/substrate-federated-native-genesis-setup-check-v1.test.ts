@@ -64,7 +64,8 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { sha256CanonicalJson } from './strict-json.js';
 import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
-import { executeFrontierNativeProofBoundReservationAndMintV1 } from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
+import { executeFrontierNativeProofBoundReservationAndMintV1, executeFrontierNativeProofBoundReservationMintAndBurnV1 }
+  from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from './federated-native-mint-runtime-state-v1.js';
 import { encodePooledReserveMintReservationPendingV4ScaleHex } from './pooled-reserve-mint-reservation-runtime-state-v4.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
@@ -1180,7 +1181,9 @@ describe('native FED managed setup session', () => {
     });
 
   it.each(['none', 'chain mismatch', 'recipient mismatch', 'missing scope', 'after mint signing', 'after mint submission',
-    'after mint sealing', 'consumed statement', 'consumed identity', 'consumed height', 'consumed Ethereum block', 'consumed transaction', 'consumed event'])
+    'after mint sealing', 'consumed statement', 'consumed identity', 'consumed height', 'consumed Ethereum block', 'consumed transaction', 'consumed event',
+    'full burn', 'burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve',
+    'after approval submission', 'after burn signing'])
     ('composes native reservation and mint from the retained reserve proof with %s', async defect => {
       const operator = mintOperator = createFederatedGenesisOperatorV1();
       if (defect !== 'recipient mismatch') nativeMintRecipient = operator.addressHex;
@@ -1201,10 +1204,19 @@ describe('native FED managed setup session', () => {
         const state: Record<string, string | null> = { ...observed.fields.expectedStorage,
           [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`, [keys.pendingReservationStorageKeyHex]: pending };
         const parent = `0x${'a1'.repeat(32)}`, child = `0x${'a2'.repeat(32)}`, ethParent = `0x${'a3'.repeat(32)}`, ethChild = `0x${'a4'.repeat(32)}`;
+        const nativeBlocks = [observed.fields.expectedGenesisHashHex, parent, child, `0x${'b3'.repeat(32)}`, `0x${'b4'.repeat(32)}`];
+        const ethBlocks = ['', ethParent, ethChild, `0x${'c3'.repeat(32)}`, `0x${'c4'.repeat(32)}`];
+        const nativeCalls: string[] = [], txHashes: string[] = [];
+        const ergoRecipient = `0x0008cd${new SigningKey(`0x${'01'.repeat(32)}`).compressedPublicKey.slice(2)}`;
+        const burnPreflightCase = ['burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve'].includes(defect);
+        const burnCase = burnPreflightCase || ['full burn', 'after approval submission', 'after burn signing'].includes(defect);
         const bridge = `0x${'33'.repeat(20)}`, token = `0x${'44'.repeat(20)}`, recipient = `0x${operator.addressHex}`, amount = 20000000n;
         const abi = new Interface(['function owner() view returns(address)', 'function sergToken() view returns(address)',
           'function paused() view returns(bool)', 'function totalSupply() view returns(uint256)', 'function balanceOf(address) view returns(uint256)',
           'function processedPegIns(bytes32) view returns(bool)', 'function mintSERG(address,uint256,bytes32)',
+          'function approve(address,uint256)', 'function pegOut(uint256,bytes)', 'function allowance(address,address) view returns(uint256)',
+          'function accumulatedFees() view returns(uint256)', 'event Approval(address indexed owner,address indexed spender,uint256 value)',
+          'event PegOut(address indexed from,uint256 amount,bytes ergoRecipientPubKey)',
           'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)']);
         let height = 0, reservationSubmitted = false, mintSubmitted = false, nativeCall = '', mintCall = '', txHash = '', consumed = '';
         const genesisRpc = observed.fetcher.getMockImplementation()!;
@@ -1213,14 +1225,20 @@ describe('native FED managed setup session', () => {
           let result: unknown;
           if (method === 'author_submitExtrinsic') { reservationSubmitted = true; nativeCall = params[0]; result = digest(raw(nativeCall)); }
           else if (method === 'eth_sendRawTransaction') {
-            const tx = Transaction.from(params[0]); expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(1);
+            const tx = Transaction.from(params[0]); expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(height);
             expect(tx.from?.toLowerCase()).toBe(recipient);
-            expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [recipient, amount, proof.mintIdentityHex]));
-            mintSubmitted = true; txHash = tx.hash!; mintCall = encodeFederatedNativeMintExtrinsicV1Hex(params[0]); result = txHash;
+            if (height === 1) {
+              expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [recipient, amount, proof.mintIdentityHex]));
+              mintSubmitted = true; txHash = tx.hash!; mintCall = encodeFederatedNativeMintExtrinsicV1Hex(params[0]);
+            } else expect(tx.data).toBe(height === 2 ? abi.encodeFunctionData('approve', [bridge, 15000000n])
+              : abi.encodeFunctionData('pegOut', [15000000n, ergoRecipient]));
+            nativeCalls[height + 1] = encodeFederatedNativeMintExtrinsicV1Hex(params[0]); txHashes[height + 1] = tx.hash!;
+            result = tx.hash!;
             if (defect === 'after mint submission') source.dispose();
+            if (height === 2 && defect === 'after approval submission') source.dispose();
           } else if (method === 'engine_createBlock') {
-            expect(params).toEqual([false, false, height === 0 ? observed.fields.expectedGenesisHashHex : parent]);
-            height++; result = { hash: height === 1 ? parent : child };
+            expect(params).toEqual([false, false, nativeBlocks[height]]);
+            height++; result = { hash: nativeBlocks[height] };
             if (height === 2) {
               const heightBytes = Buffer.alloc(8); heightBytes.writeBigUInt64LE(2n);
               const eventBytes = Buffer.alloc(4); eventBytes.writeUInt32LE(1);
@@ -1234,32 +1252,46 @@ describe('native FED managed setup session', () => {
               if (defect === 'after mint sealing') source.dispose();
             }
           } else if (method === 'author_pendingExtrinsics') result = height === 0 && reservationSubmitted ? [nativeCall]
-            : height === 1 && mintSubmitted ? [mintCall] : [];
+            : height === 1 && mintSubmitted ? [mintCall] : nativeCalls[height + 1] ? [nativeCalls[height + 1]] : [];
           else if (height === 0) return genesisRpc(url, init);
-          else if (method === 'chain_getBlockHash') result = params[0] === 0 ? observed.fields.expectedGenesisHashHex
-            : params[0] === 1 ? parent : height === 1 ? parent : child;
+          else if (method === 'chain_getBlockHash') result = nativeBlocks[params.length === 0 ? height : params[0]];
           else if (method === 'chain_getHeader') result = { number: `0x${height}` };
           else if (method === 'chain_getBlock') result = { block: { header: {
-            parentHash: params[0] === parent ? observed.fields.expectedGenesisHashHex : parent, number: params[0] === parent ? '0x1' : '0x2',
+            parentHash: nativeBlocks[nativeBlocks.indexOf(params[0]) - 1], number: `0x${nativeBlocks.indexOf(params[0])}`,
             stateRoot: `0x${'a5'.repeat(32)}`, extrinsicsRoot: `0x${'a6'.repeat(32)}`, digest: { logs: [] } },
-            extrinsics: ['0x1005010028', params[0] === parent ? nativeCall : mintCall] } };
+            extrinsics: ['0x1005010028', params[0] === parent ? nativeCall : nativeCalls[nativeBlocks.indexOf(params[0])]] } };
           else if (method === 'state_getStorage') {
-            const at = params[1] === parent ? 1 : 2, account = raw(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(at);
+            const at = nativeBlocks.indexOf(params[1]), account = raw(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(at);
             result = params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
-              : at === 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
-                : at === 2 && params[0] === keys.pendingReservationStorageKeyHex ? null
-                  : at === 2 && params[0] === keys.consumedReservationStorageKeyHex ? consumed : state[params[0]] ?? null;
+              : at >= 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
+                : at >= 2 && params[0] === keys.pendingReservationStorageKeyHex ? null
+                  : at >= 2 && params[0] === keys.consumedReservationStorageKeyHex ? consumed : state[params[0]] ?? null;
           } else if (method === 'eth_chainId') result = '0x1092';
-          else if (method === 'eth_getBlockByNumber') result = { number: params[0], hash: params[0] === '0x1' ? ethParent : ethChild,
-            transactions: params[0] === '0x1' ? [] : [txHash] };
-          else if (method === 'eth_getBlockByHash') result = { number: params[0] === ethParent ? '0x1' : '0x2', hash: params[0],
-            transactions: params[0] === ethParent ? [] : [txHash] };
-          else if (method === 'eth_getTransactionCount') result = params[1].blockHash === ethParent ? '0x1' : '0x2';
+          else if (method === 'eth_getBlockByNumber') result = { number: params[0], hash: ethBlocks[Number(params[0])],
+            parentHash: ethBlocks[Number(params[0]) - 1], baseFeePerGas: '0x3b9aca00',
+            transactions: params[0] === '0x1' ? [] : [txHashes[Number(params[0])]] };
+          else if (method === 'eth_getBlockByHash') result = { number: `0x${ethBlocks.indexOf(params[0])}`, hash: params[0],
+            transactions: params[0] === ethParent ? [] : [txHashes[ethBlocks.indexOf(params[0])]] };
+          else if (method === 'eth_getTransactionCount') result = `0x${ethBlocks.indexOf(params[1].blockHash)}`;
           else if (method === 'eth_getCode') result = `0x${'60'.repeat(params[0] === bridge ? 100 : 200)}`;
           else if (method === 'eth_call') {
-            const name = abi.parseTransaction({ data: params[0].data })!.name, minted = params[1].blockHash === ethChild;
+            const call = abi.parseTransaction({ data: params[0].data })!, name = call.name;
+            const at = ethBlocks.indexOf(params[1].blockHash), minted = at >= 2;
             result = abi.encodeFunctionResult(name, [name === 'owner' ? params[0].to === bridge ? recipient : bridge
-              : name === 'sergToken' ? token : name === 'paused' ? false : name === 'processedPegIns' ? minted : minted ? amount : 0n]);
+              : name === 'sergToken' ? token : name === 'paused' ? false : name === 'processedPegIns' ? minted
+                : name === 'allowance' ? at === 2 ? 0n : at === 3 ? 15000000n : 10000000n
+                  : name === 'accumulatedFees' ? at === 4 ? 5000000n : 0n
+                    : name === 'balanceOf' && call.args[0].toLowerCase() === bridge ? at === 4 ? 5000000n : 0n
+                      : at === 4 ? name === 'totalSupply' ? 10000000n : 5000000n : minted ? amount : 0n]);
+          } else if (method === 'eth_getTransactionReceipt' && params[0] !== txHash) {
+            const at = txHashes.indexOf(params[0]);
+            const logs = at === 3 ? [{ address: token, ...abi.encodeEventLog(abi.getEvent('Approval')!, [recipient, bridge, 15000000n]) }]
+              : [{ address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, `0x${'00'.repeat(20)}`, 10000000n]) },
+              { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, bridge, 5000000n]) },
+              { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegOut')!, [recipient, 10000000n, ergoRecipient]) }];
+            result = { transactionHash: params[0], blockHash: ethBlocks[at], blockNumber: `0x${at}`, transactionIndex: '0x0', status: '0x1',
+              from: recipient, to: at === 3 ? token : bridge, logs: logs.map((log, index) => ({ ...log, transactionHash: params[0],
+                blockHash: ethBlocks[at], blockNumber: `0x${at}`, transactionIndex: '0x0', logIndex: `0x${index}`, removed: false })) };
           } else if (method === 'eth_getTransactionReceipt') result = { transactionHash: txHash, blockHash: ethChild, blockNumber: '0x2',
             transactionIndex: '0x0', status: '0x1', from: recipient, to: bridge,
             logs: [ { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [`0x${'00'.repeat(20)}`, recipient, amount]) },
@@ -1269,10 +1301,12 @@ describe('native FED managed setup session', () => {
           return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
         });
         if (defect === 'chain mismatch') Object.assign(compiled.preparation, { evmChainId: '42' });
-        if (defect === 'after mint signing') {
+        if (defect === 'after mint signing' || defect === 'after burn signing') {
           const original = HDNodeWallet.prototype.signTransaction;
           vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(async function (this: HDNodeWallet, tx) {
-            const result = await original.call(this, tx); source.dispose(); return result;
+            const result = await original.call(this, tx);
+            if (defect === 'after mint signing' || tx.nonce === 3) source.dispose();
+            return result;
           });
         }
         const directory = mkdtempSync(join(tmpdir(), 'bridge-native-composed-mint-'));
@@ -1280,7 +1314,35 @@ describe('native FED managed setup session', () => {
           const input = { signing: { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target, ...observed.fields },
             attemptDirectory: directory, broadcastScope: 'fed-native-local-synthetic-reservation-and-mint-only' as const };
           if (defect === 'missing scope') (input as any).broadcastScope = 'fed-native-local-synthetic-reservation-only';
-          if (defect === 'none') expect(await executeFrontierNativeProofBoundReservationAndMintV1(input)).toMatchObject({
+          if (burnCase) {
+            const full = { ...input, broadcastScope: 'fed-native-local-synthetic-reservation-mint-and-burn-only' as const,
+              grossAmountNanoErg: '15000000', recipientErgoTreeHex: ergoRecipient };
+            if (defect === 'burn scope') (full as any).broadcastScope = input.broadcastScope;
+            if (defect === 'burn amount') full.grossAmountNanoErg = '20000001';
+            if (defect === 'burn amount low') full.grossAmountNanoErg = '14999999';
+            if (defect === 'burn recipient') full.recipientErgoTreeHex = '0x00';
+            if (defect === 'burn recipient curve') full.recipientErgoTreeHex = `0x0008cd02${'ff'.repeat(32)}`;
+            const signProbe = burnPreflightCase ? vi.spyOn(HDNodeWallet.prototype, 'signTransaction') : undefined;
+            const nativeSignProbe = burnPreflightCase ? vi.spyOn(SigningKey.prototype, 'sign') : undefined;
+            if (defect === 'full burn') {
+              expect(await executeFrontierNativeProofBoundReservationMintAndBurnV1(full)).toMatchObject({
+                mint: { mintExecuted: true, runtimeReservationConsumed: true }, burn: { phase: 'burn', blockHeight: 4, eventIndex: 2,
+                  transactionHashHex: txHashes[4], netAmountNanoErg: '10000000', recipientErgoTreeHex: ergoRecipient },
+                burnExecuted: true, checkpointAttested: false, ergoPayoutExecuted: false, trustless: false });
+              expect(readdirSync(directory).sort()).toEqual(['native-approve-attempt.json', 'native-burn-attempt.json',
+                'native-mint-attempt.json', 'native-reservation-attempt.json']);
+              expect(height).toBe(4);
+            } else await expect(executeFrontierNativeProofBoundReservationMintAndBurnV1(full)).rejects.toThrow(/scope|differs|disposed/);
+            if (burnPreflightCase) {
+              expect(height).toBe(0); expect(reservationSubmitted).toBe(false); expect(mintSubmitted).toBe(false);
+              expect(signProbe).not.toHaveBeenCalled(); expect(nativeSignProbe).not.toHaveBeenCalled(); expect(readdirSync(directory)).toEqual([]);
+              const methods = observed.fetcher.mock.calls.map(([, init]) => JSON.parse(init.body as string).method);
+              expect(methods).not.toContain('author_submitExtrinsic'); expect(methods).not.toContain('eth_sendRawTransaction');
+              expect(methods).not.toContain('engine_createBlock');
+            }
+            if (defect === 'after approval submission') expect(height).toBe(2);
+            if (defect === 'after burn signing') expect(height).toBe(3);
+          } else if (defect === 'none') expect(await executeFrontierNativeProofBoundReservationAndMintV1(input)).toMatchObject({
             mintExecuted: true, runtimeReservationConsumed: true, sourceFinalityEstablished: false, trustless: false,
             amountNanoErg: '20000000', recipientAddressHex: recipient, mintIdentityHex: proof.mintIdentityHex,
             transactionHashHex: txHash, consumedReservationScaleHex: consumed });
