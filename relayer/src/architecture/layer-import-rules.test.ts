@@ -225,7 +225,8 @@ describe('layer import rules', () => {
     'observeFederatedNativeMintParentV1', 'reserveFederatedNativeMintAttemptV1', 'submitFederatedNativeMintV1',
     'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1',
     'observeFederatedNativeWithdrawalParentV1', 'reserveFederatedNativeWithdrawalAttemptV1',
-    'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1'])
+    'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1',
+    'collectFederatedNativeBurnCommitmentV1'])
     ('keeps native execution capability in its proof-bound consumer: %s', binding => {
       const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
       const specifier = '../../adapters/federated-native-reservation-execution-v1.js';

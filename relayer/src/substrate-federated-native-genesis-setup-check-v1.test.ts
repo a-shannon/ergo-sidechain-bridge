@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -64,7 +64,8 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-val
 import { sha256CanonicalJson } from './strict-json.js';
 import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
-import { executeFrontierNativeProofBoundReservationAndMintV1, executeFrontierNativeProofBoundReservationMintAndBurnV1 }
+import { executeFrontierNativeProofBoundReservationAndMintV1, executeFrontierNativeProofBoundReservationMintAndBurnV1,
+  attestFrontierNativeBurnCheckpointV1, assertFrontierNativeBurnCheckpointV1 }
   from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from './federated-native-mint-runtime-state-v1.js';
 import { encodePooledReserveMintReservationPendingV4ScaleHex } from './pooled-reserve-mint-reservation-runtime-state-v4.js';
@@ -105,6 +106,9 @@ import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 as createSourceSession,
   readSubstrateFederatedGenesisProfilesFromSessionV2 as readSourceProfiles,
   produceSubstrateFederatedNativeGenesisMintSourceProofV1 as produceNativeMintProof,
+  produceSubstrateFederatedNativeGenesisCheckpointAttestationV1 as produceNativeCheckpoint,
+  assertSubstrateFederatedNativeGenesisCheckpointAttestationV1 as assertNativeCheckpoint,
+  assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance as assertLegacyCheckpoint,
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1 as assertNativeMintProof,
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance as assertLegacyMintProof,
   type ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input,
@@ -960,7 +964,9 @@ describe('native FED managed setup session', () => {
       application: { sourceNetworkIdHex: runtimeProfile.sourceNetworkIdHex.slice(2), sidechainIdHex: runtimeProfile.sidechainIdHex.slice(2),
         bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20), settlementProfileIdHex: '88'.repeat(32),
         bridgeRuntimeCodeSha256Hex: runtimeProfile.bridgeRuntimeCodeSha256Hex.slice(2), bridgeRuntimeCodeBytes: 100,
-        tokenRuntimeCodeSha256Hex: runtimeProfile.tokenRuntimeCodeSha256Hex.slice(2), tokenRuntimeCodeBytes: 200 } },
+        tokenRuntimeCodeSha256Hex: runtimeProfile.tokenRuntimeCodeSha256Hex.slice(2), tokenRuntimeCodeBytes: 200,
+        sourceRuntimeCodeSha256Hex: '94'.repeat(32), sourceRuntimeCodeBytes: 1000,
+        runtimeProfileIdHex: '95'.repeat(32) } },
       candidate: Object.freeze({ runtimeProfile, runtimeProfileScaleHex,
         runtimeProfileIdHex: runtimeProfileId(runtimeProfile), genesisJsonSha256Hex: '93'.repeat(32) }) });
     boundary.custody = () => { assertSigner(session.signer); readSourceProfiles(source); };
@@ -976,6 +982,97 @@ describe('native FED managed setup session', () => {
       });
     } finally { source.dispose(); }
   }
+
+  const nativeCheckpointFields = () => ({ sourceNativeBlockHeight: '4', sourceNativeBlockHashHex: 'a1'.repeat(32),
+    executionBlockHashHex: 'a2'.repeat(32), bridgeEventRootHex: 'a3'.repeat(32), burnLeafCount: 1,
+    admissionValidFromErgoHeight: '100', admissionExpiresAtErgoHeight: '120' });
+
+  it('attests a native checkpoint from the original source custody and application profile', async () => {
+    await withNativeMintProof(async ({ source, proofInput }) => {
+      const proof = produceNativeMintProof(source, proofInput);
+      const fields = nativeCheckpointFields();
+      const receipt = produceNativeCheckpoint(source, { proof, checkpoint: fields });
+      assertNativeCheckpoint(receipt, source, proof);
+      expect(receipt.checkpointStatement).toMatchObject({ ...fields,
+        runtimeProfileIdHex: compiled.preparation.application.runtimeProfileIdHex,
+        sourceNetworkIdHex: compiled.preparation.application.sourceNetworkIdHex,
+        sidechainIdHex: compiled.preparation.application.sidechainIdHex });
+      expect(receipt.checkpointStatement.runtimeProfileIdHex).not.toBe(proof.runtimeProfileIdHex.replace(/^0x/, ''));
+      expect(receipt.signatures).toHaveLength(2);
+      for (const signature of receipt.signatures) {
+        expect(verify(null, Buffer.from(receipt.attestationDigestHex.replace(/^0x/, ''), 'hex'),
+          createPublicKey({ key: Buffer.from(`302a300506032b6570032100${signature.signerPublicKeyHex}`, 'hex'),
+            format: 'der', type: 'spki' }), Buffer.from(signature.signatureHex, 'hex'))).toBe(true);
+      }
+      expect(() => assertLegacyCheckpoint(receipt)).toThrow(/provenance/);
+      expect(() => assertNativeCheckpoint({ ...receipt }, source, proof)).toThrow(/provenance/);
+      expect(() => produceNativeCheckpoint(source, { proof, checkpoint: fields })).toThrow(/consumed/);
+      expect(() => source.produceCheckpointAttestation(fields)).toThrow(/launch/);
+      source.dispose();
+      expect(() => assertNativeCheckpoint(receipt, source, proof)).toThrow(/disposed/);
+    });
+  });
+
+  it.each(['height zero', 'height unsafe', 'native hash', 'execution hash', 'root', 'count zero', 'count above bound',
+    'count fractional', 'start negative', 'expiry before start', 'horizon', 'extra', 'symbol', 'accessor',
+    'proof clone', 'session clone', 'foreign session', 'source disposal', 'setup disposal', 'signature', 'verification'])
+    ('rejects native checkpoint %s at its owning boundary', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const proof = produceNativeMintProof(source, proofInput), checkpoint: any = nativeCheckpointFields();
+        const input: any = { proof, checkpoint };
+        const other = createSourceSession({ ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] });
+        try {
+          if (fault === 'height zero') checkpoint.sourceNativeBlockHeight = '0';
+          if (fault === 'height unsafe') checkpoint.sourceNativeBlockHeight = Number.MAX_SAFE_INTEGER + 1;
+          if (fault === 'native hash') checkpoint.sourceNativeBlockHashHex = 'aa';
+          if (fault === 'execution hash') checkpoint.executionBlockHashHex = 'aa';
+          if (fault === 'root') checkpoint.bridgeEventRootHex = 'aa';
+          if (fault === 'count zero') checkpoint.burnLeafCount = 0;
+          if (fault === 'count above bound') checkpoint.burnLeafCount = 257;
+          if (fault === 'count fractional') checkpoint.burnLeafCount = 1.5;
+          if (fault === 'start negative') checkpoint.admissionValidFromErgoHeight = '-1';
+          if (fault === 'expiry before start') checkpoint.admissionExpiresAtErgoHeight = '99';
+          if (fault === 'horizon') checkpoint.admissionExpiresAtErgoHeight = '100000';
+          if (fault === 'extra') checkpoint.extra = true;
+          if (fault === 'symbol') checkpoint[Symbol('extra')] = true;
+          if (fault === 'accessor') Object.defineProperty(checkpoint, 'burnLeafCount', { enumerable: true, get: () => 1 });
+          if (fault === 'proof clone') input.proof = { ...proof };
+          if (fault === 'source disposal') source.dispose();
+          if (fault === 'setup disposal') session.dispose();
+          if (fault === 'signature') boundary.failSourceSignature = true;
+          if (fault === 'verification') boundary.failSourceVerification = true;
+          expect(() => produceNativeCheckpoint(fault === 'session clone' ? { ...source } : fault === 'foreign session' ? other : source,
+            input)).toThrow(/native checkpoint|burn leaf count|uint|admission|exactly|provenance|disposed|inactive|signature/i);
+          boundary.failSourceSignature = false; boundary.failSourceVerification = false;
+          if (['source disposal', 'setup disposal', 'signature', 'verification'].includes(fault)) {
+            expect(() => produceNativeCheckpoint(source, { proof, checkpoint: nativeCheckpointFields() })).toThrow(/disposed|inactive/);
+          } else {
+            expect(() => produceNativeCheckpoint(source, { proof, checkpoint: nativeCheckpointFields() })).not.toThrow();
+          }
+        } finally { other.dispose(); }
+      });
+    });
+
+  it.each(['input inspection', 'field inspection', 'input disposal', 'field disposal'])
+    ('closes native checkpoint reentrancy at %s', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const proof = produceNativeMintProof(source, proofInput), normal = { proof, checkpoint: nativeCheckpointFields() };
+        let triggered = false, winning: ReturnType<typeof produceNativeCheckpoint> | undefined;
+        const handler = { ownKeys<T extends object>(object: T) {
+          if (!triggered) {
+            triggered = true;
+            if (fault.endsWith('disposal')) source.dispose();
+            else winning = produceNativeCheckpoint(source, normal);
+          }
+          return Reflect.ownKeys(object);
+        } };
+        const input = fault.startsWith('input') ? new Proxy<typeof normal>({ ...normal }, handler)
+          : { proof, checkpoint: new Proxy<typeof normal.checkpoint>({ ...normal.checkpoint }, handler) };
+        expect(() => produceNativeCheckpoint(source, input)).toThrow(/consumed|disposed/);
+        expect(triggered).toBe(true);
+        if (winning) expect(() => assertNativeCheckpoint(winning, source, proof)).not.toThrow();
+      });
+    });
 
   it('produces the native height-zero proof from the composed confirmed reserve and retained federation', async () => {
     await withNativeMintProof(async ({ source, proofInput, post }) => {
@@ -1183,7 +1280,9 @@ describe('native FED managed setup session', () => {
   it.each(['none', 'chain mismatch', 'recipient mismatch', 'missing scope', 'after mint signing', 'after mint submission',
     'after mint sealing', 'consumed statement', 'consumed identity', 'consumed height', 'consumed Ethereum block', 'consumed transaction', 'consumed event',
     'full burn', 'burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve',
-    'after approval submission', 'after burn signing'])
+    'after approval submission', 'after burn signing', 'checkpoint', 'checkpoint clone', 'checkpoint source disposal',
+    'checkpoint setup disposal', 'checkpoint operator disposal', 'checkpoint frontier disposal', 'checkpoint runtime mismatch',
+    'checkpoint during storage disposal', 'checkpoint concurrent'])
     ('composes native reservation and mint from the retained reserve proof with %s', async defect => {
       const operator = mintOperator = createFederatedGenesisOperatorV1();
       if (defect !== 'recipient mismatch') nativeMintRecipient = operator.addressHex;
@@ -1209,7 +1308,8 @@ describe('native FED managed setup session', () => {
         const nativeCalls: string[] = [], txHashes: string[] = [];
         const ergoRecipient = `0x0008cd${new SigningKey(`0x${'01'.repeat(32)}`).compressedPublicKey.slice(2)}`;
         const burnPreflightCase = ['burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve'].includes(defect);
-        const burnCase = burnPreflightCase || ['full burn', 'after approval submission', 'after burn signing'].includes(defect);
+        const checkpointCase = defect.startsWith('checkpoint');
+        const burnCase = checkpointCase || burnPreflightCase || ['full burn', 'after approval submission', 'after burn signing'].includes(defect);
         const bridge = `0x${'33'.repeat(20)}`, token = `0x${'44'.repeat(20)}`, recipient = `0x${operator.addressHex}`, amount = 20000000n;
         const abi = new Interface(['function owner() view returns(address)', 'function sergToken() view returns(address)',
           'function paused() view returns(bool)', 'function totalSupply() view returns(uint256)', 'function balanceOf(address) view returns(uint256)',
@@ -1219,6 +1319,39 @@ describe('native FED managed setup session', () => {
           'event PegOut(address indexed from,uint256 amount,bytes ergoRecipientPubKey)',
           'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)']);
         let height = 0, reservationSubmitted = false, mintSubmitted = false, nativeCall = '', mintCall = '', txHash = '', consumed = '';
+        let checkpointCollection = false;
+        const commitmentKey = '0xaf86fef4216ac2bcd1c592b204011ad00d2d4fb825af1fcd4c2be9f955a780c5';
+        const leavesKey = '0xaf86fef4216ac2bcd1c592b204011ad08ba92642ec2dee14a0170da020901c7f';
+        const eventsKey = '0x26aa394eea5630e07c48ae0c9558cef780d41e5e16056765bc8461851072c9d7';
+        const nativeCommitmentStorage = (): Record<string, string> => {
+          const le = (value: bigint, size: number) => { const result = Buffer.alloc(size); result.writeBigUInt64LE(value); return result; };
+          const compact = (size: number) => size < 64 ? Buffer.from([size * 4]) : Buffer.from([(size * 4 + 1) & 255, (size * 4 + 1) >>> 8]);
+          const sidechain = raw(`0x${compiled.preparation.application.sidechainIdHex}`), eventIndex = Buffer.from('00000002', 'hex');
+          const burnId = raw(digest(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_ID_V1'), sidechain, raw(txHashes[4]), eventIndex])));
+          const leaf = Buffer.concat([Buffer.from([1]), sidechain, raw(ethBlocks[4]), burnId, raw(txHashes[4]), eventIndex,
+            raw(digest(raw(ergoRecipient))), Buffer.from('0000000000989680', 'hex'), Buffer.alloc(32)]);
+          const root = raw(digest(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_LEAF_V1'), leaf])));
+          const commitment = Buffer.concat([Buffer.from([1]), sidechain, le(4n, 8), raw(ethBlocks[4]), root, Buffer.from('01000000', 'hex')]);
+          if (defect === 'checkpoint runtime mismatch') raw(nativeBlocks[0]).copy(commitment, 1);
+          const apply = (index: number) => Buffer.from([0, index, 0, 0, 0]);
+          const event = (phase: Buffer, pallet: number, variant: number, ...fields: Buffer[]) =>
+            Buffer.concat([phase, Buffer.from([pallet, variant]), ...fields, Buffer.from([0])]);
+          const operatorBytes = raw(recipient), phase = apply(1);
+          const records = [event(apply(0), 0, 0, Buffer.from([0, 0, 2, 0])),
+            event(phase, 4, 8, operatorBytes, le(7_119_140_625_000_000n, 16)),
+            event(phase, 4, 7, operatorBytes, le(7_000_000_000_000_000n, 16)),
+            event(phase, 4, 7, Buffer.alloc(20), le(0n, 16))];
+          const logs = [ { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, `0x${'00'.repeat(20)}`, 10000000n]) },
+            { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, bridge, 5000000n]) },
+            { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegOut')!, [recipient, 10000000n, ergoRecipient]) } ];
+          for (const log of logs) records.push(event(phase, 8, 0, raw(log.address), compact(log.topics.length),
+            ...log.topics.map(raw), compact(raw(log.data).length), raw(log.data)));
+          records.push(event(phase, 7, 0, operatorBytes, raw(bridge), raw(txHashes[4]), Buffer.from([0, 0, 0])),
+            event(phase, 0, 0, Buffer.from([0, 0, 0, 1])),
+            event(Buffer.from([1]), 12, 1, Buffer.from([1]), raw(ethBlocks[4]), root, Buffer.from('01000000', 'hex')));
+          return { [commitmentKey]: `0x${commitment.toString('hex')}`, [leavesKey]: `0x04${root.toString('hex')}`,
+            [eventsKey]: `0x${Buffer.concat([compact(records.length), ...records]).toString('hex')}` };
+        };
         const genesisRpc = observed.fetcher.getMockImplementation()!;
         observed.fetcher.mockImplementation(async (url, init) => {
           const { method, params } = JSON.parse(init.body as string);
@@ -1262,7 +1395,9 @@ describe('native FED managed setup session', () => {
             extrinsics: ['0x1005010028', params[0] === parent ? nativeCall : nativeCalls[nativeBlocks.indexOf(params[0])]] } };
           else if (method === 'state_getStorage') {
             const at = nativeBlocks.indexOf(params[1]), account = raw(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(at);
-            result = params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
+            if (checkpointCollection && defect === 'checkpoint during storage disposal' && params[0] === commitmentKey) source.dispose();
+            result = at === 4 && [commitmentKey, leavesKey, eventsKey].includes(params[0]) ? nativeCommitmentStorage()[params[0]]
+              : params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
               : at >= 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
                 : at >= 2 && params[0] === keys.pendingReservationStorageKeyHex ? null
                   : at >= 2 && params[0] === keys.consumedReservationStorageKeyHex ? consumed : state[params[0]] ?? null;
@@ -1324,14 +1459,42 @@ describe('native FED managed setup session', () => {
             if (defect === 'burn recipient curve') full.recipientErgoTreeHex = `0x0008cd02${'ff'.repeat(32)}`;
             const signProbe = burnPreflightCase ? vi.spyOn(HDNodeWallet.prototype, 'signTransaction') : undefined;
             const nativeSignProbe = burnPreflightCase ? vi.spyOn(SigningKey.prototype, 'sign') : undefined;
-            if (defect === 'full burn') {
-              expect(await executeFrontierNativeProofBoundReservationMintAndBurnV1(full)).toMatchObject({
+            if (defect === 'full burn' || checkpointCase) {
+              const executionResult = await executeFrontierNativeProofBoundReservationMintAndBurnV1(full);
+              expect(executionResult).toMatchObject({
                 mint: { mintExecuted: true, runtimeReservationConsumed: true }, burn: { phase: 'burn', blockHeight: 4, eventIndex: 2,
                   transactionHashHex: txHashes[4], netAmountNanoErg: '10000000', recipientErgoTreeHex: ergoRecipient },
                 burnExecuted: true, checkpointAttested: false, ergoPayoutExecuted: false, trustless: false });
               expect(readdirSync(directory).sort()).toEqual(['native-approve-attempt.json', 'native-burn-attempt.json',
                 'native-mint-attempt.json', 'native-reservation-attempt.json']);
               expect(height).toBe(4);
+              if (checkpointCase) {
+                checkpointCollection = true;
+                const checkpointInput = { execution: executionResult, admissionValidFromErgoHeight: '100', admissionExpiresAtErgoHeight: '120' };
+                if (defect === 'checkpoint clone') checkpointInput.execution = { ...executionResult };
+                if (defect === 'checkpoint source disposal') source.dispose();
+                if (defect === 'checkpoint setup disposal') session.dispose();
+                if (defect === 'checkpoint operator disposal') disposeFederatedGenesisOperatorV1(operator);
+                if (defect === 'checkpoint frontier disposal') observed.dispose();
+                if (defect === 'checkpoint' || defect === 'checkpoint concurrent') {
+                  const pending = attestFrontierNativeBurnCheckpointV1(checkpointInput);
+                  if (defect === 'checkpoint concurrent') await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/consumed/);
+                  const result = await pending;
+                  assertFrontierNativeBurnCheckpointV1(result);
+                  expect(result.attestation.checkpointStatement).toMatchObject({ sourceNativeBlockHeight: '4',
+                    sourceNativeBlockHashHex: nativeBlocks[4].slice(2), executionBlockHashHex: ethBlocks[4].slice(2),
+                    bridgeEventRootHex: result.commitment.bridgeEventRootHex.slice(2), burnLeafCount: 1,
+                    runtimeProfileIdHex: compiled.preparation.application.runtimeProfileIdHex });
+                  expect(result.commitment.burnEvent.eventIndex).toBe(2);
+                  expect(result.commitment.burnProof.leafIndex).toBe(0);
+                  expect(result.checkpointAttested).toBe(true);
+                  expect(result.ergoPayoutExecuted).toBe(false);
+                  expect(() => assertFrontierNativeBurnCheckpointV1({ ...result })).toThrow(/provenance/);
+                  await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/consumed/);
+                  source.dispose();
+                  expect(() => assertFrontierNativeBurnCheckpointV1(result)).toThrow(/disposed/);
+                } else await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/provenance|disposed|inactive|commitment/);
+              }
             } else await expect(executeFrontierNativeProofBoundReservationMintAndBurnV1(full)).rejects.toThrow(/scope|differs|disposed/);
             if (burnPreflightCase) {
               expect(height).toBe(0); expect(reservationSubmitted).toBe(false); expect(mintSubmitted).toBe(false);

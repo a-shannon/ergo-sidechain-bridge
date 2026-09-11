@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { Interface, SigningKey, Transaction } from 'ethers';
 import blakejs from 'blakejs';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
+import { buildTrustlessBurnInclusionProof, deriveTrustlessBurnIdHex } from '../profiles/substrate-grandpa-v1/trustless-burn-proof.js';
 
 const PRIMARY = 'http://127.0.0.1:19955';
 const WITNESS = 'http://127.0.0.1:19956';
@@ -37,6 +38,9 @@ interface MintAttempt {
   readonly signedTransactionHex: string;
   readonly nativeExtrinsicHex: string;
 }
+interface NativeWithdrawalReceipt {
+  readonly logs: readonly { readonly address: string; readonly topics: readonly string[]; readonly data: string }[];
+}
 const MINT_FILE = 'native-mint-attempt.json';
 const mintAttempts = new WeakMap<object, { directory: string; bytes: string; context: Readonly<FederatedNativeMintContextV1>;
   submitted: boolean; accepted: boolean; sealed: boolean; blockHash?: string; ethereumBlockHash?: string;
@@ -62,7 +66,8 @@ export interface FederatedNativeWithdrawalContextV1 {
 }
 const withdrawals = new WeakMap<object, { context: Readonly<FederatedNativeWithdrawalContextV1>;
   phase: 'approve' | 'burn'; directory: string; bytes: string; submitted: boolean; accepted: boolean;
-  sealed: boolean; observed: boolean; blockHash?: string; ethereumBlockHash?: string }>();
+  sealed: boolean; observed: boolean; blockHash?: string; ethereumBlockHash?: string;
+  observedReceipt?: NativeWithdrawalReceipt }>();
 
 /** Fresh paired parent observation, not authority to release Ergo funds. */
 export async function observeFederatedNativeWithdrawalParentV1(input: Readonly<FederatedNativeWithdrawalContextV1>, authorize: () => void) {
@@ -163,6 +168,7 @@ export async function observeFederatedNativeWithdrawalInclusionV1(attempt: Reado
   const app = assertMintAttempt(state.context.mintAttempt).context;
   const gross = BigInt(state.context.grossAmountNanoErg), net = gross - 5_000_000n;
   let agreed: string | undefined, ethereumHash: string | undefined;
+  let observedReceipt: NativeWithdrawalReceipt | undefined;
   for (const url of [PRIMARY, WITNESS]) {
     const check = () => { authorize(); assertWithdrawal(attempt); };
     const found = await waitForIndexedResult(url, 'chain_getBlockHash', [height], check);
@@ -208,13 +214,163 @@ export async function observeFederatedNativeWithdrawalInclusionV1(attempt: Reado
     }
     await checkWithdrawalApplication(url, state.context, ethereumHash, height, check);
     await checkWithdrawalHead(url, state.context, state.blockHash, height, check);
+    observedReceipt = receipt as unknown as NativeWithdrawalReceipt;
   }
   authorize(); assertWithdrawal(attempt);
   state.ethereumBlockHash = ethereumHash!; state.observed = true;
+  state.observedReceipt = freezeBurnCollection(observedReceipt!);
   return Object.freeze({ phase: state.phase, blockHashHex: state.blockHash, ethereumBlockHashHex: ethereumHash!, blockHeight: height,
     transactionHashHex: attempt.transactionHashHex, transactionIndex: 0 as const, eventIndex: state.phase === 'burn' ? 2 : 0,
     grossAmountNanoErg: String(gross), netAmountNanoErg: String(net), recipientErgoTreeHex: state.context.recipientErgoTreeHex,
     sourceFinalityEstablished: false as const, trustless: false as const });
+}
+
+const BURN_COMMITMENT_KEY = '0xaf86fef4216ac2bcd1c592b204011ad00d2d4fb825af1fcd4c2be9f955a780c5';
+const BURN_LEAVES_KEY = '0xaf86fef4216ac2bcd1c592b204011ad08ba92642ec2dee14a0170da020901c7f';
+const SYSTEM_EVENTS_KEY = '0x26aa394eea5630e07c48ae0c9558cef780d41e5e16056765bc8461851072c9d7';
+
+/** Observes the original block-four burn and its runtime commitment; this is not finality or payout authority. */
+export async function collectFederatedNativeBurnCommitmentV1(attempt: Readonly<MintAttempt>,
+  expectedSidechainIdHex: string, assertCurrent: () => void) {
+  const state = assertWithdrawal(attempt);
+  hash(expectedSidechainIdHex);
+  if (state.phase !== 'burn' || !state.observed || typeof assertCurrent !== 'function') {
+    throw new Error('native commitment collection requires the original observed burn');
+  }
+  const check = () => { assertCurrent(); assertWithdrawal(attempt); };
+  check();
+  const inclusion = await observeFederatedNativeWithdrawalInclusionV1(attempt, check);
+  check();
+  if (inclusion.blockHeight !== 4 || inclusion.eventIndex !== 2 || !state.observedReceipt) {
+    throw new Error('native commitment collection requires the fixed block-four burn');
+  }
+  const mint = assertMintAttempt(state.context.mintAttempt);
+  // Inclusion checked the complete one-transaction block and every log before retaining this receipt.
+  // Its two Transfer logs precede the sole PegOut, so the runtime global event index is exactly two.
+  const burnIdHex = deriveTrustlessBurnIdHex({ sidechainIdHex: expectedSidechainIdHex,
+    sidechainTxHashHex: attempt.transactionHashHex, eventIndex: 2 });
+  const recipientErgoTreeHex = state.context.recipientErgoTreeHex.slice(2);
+  const recipientErgoTreeHashHex = Buffer.from(blakejs.blake2b(Buffer.from(recipientErgoTreeHex, 'hex'), undefined, 32)).toString('hex');
+  const burnEvent = { transactionIndex: 0, logIndex: 2, eventIndex: 2,
+    sidechainTxHashHex: attempt.transactionHashHex.slice(2), burnIdHex,
+    userAddress: mint.context.recipientAddressHex, amountNanoErg: inclusion.netAmountNanoErg,
+    recipientErgoTreeHex, recipientErgoTreeHashHex };
+  const burnProof = buildTrustlessBurnInclusionProof([{ sidechainIdHex: expectedSidechainIdHex,
+    sidechainBlockHashHex: inclusion.ethereumBlockHashHex, burnIdHex,
+    sidechainTxHashHex: attempt.transactionHashHex, eventIndex: 2, recipientErgoTreeHashHex,
+    amountNanoErg: inclusion.netAmountNanoErg }], burnIdHex);
+  const root = `0x${burnProof.bridgeEventRootHex}`;
+  // BridgeEventCommitment v1 SCALE: version, sidechain, u64 height, Ethereum hash, root, u32 count.
+  const expectedCommitment = Buffer.alloc(109);
+  expectedCommitment[0] = 1; Buffer.from(expectedSidechainIdHex.slice(2), 'hex').copy(expectedCommitment, 1);
+  expectedCommitment.writeBigUInt64LE(4n, 33);
+  Buffer.from(inclusion.ethereumBlockHashHex.slice(2), 'hex').copy(expectedCommitment, 41);
+  Buffer.from(root.slice(2), 'hex').copy(expectedCommitment, 73); expectedCommitment.writeUInt32LE(1, 105);
+  const commitmentScaleHex = `0x${expectedCommitment.toString('hex')}`;
+  const leafHashesScaleHex = `0x04${burnProof.leaf.leafHashHex}`;
+  let systemEventsScaleHex: string | undefined;
+  for (const url of [PRIMARY, WITNESS]) {
+    await checkWithdrawalHead(url, state.context, inclusion.blockHashHex, 4, check); check();
+    for (const [key, expected] of [[BURN_COMMITMENT_KEY, commitmentScaleHex], [BURN_LEAVES_KEY, leafHashesScaleHex]]) {
+      check(); const value = await rpc(url, 'state_getStorage', [key, inclusion.blockHashHex]); check();
+      if (value !== expected) throw new Error('native burn runtime commitment or leaves differ');
+    }
+    check(); const events = await rpc(url, 'state_getStorage', [SYSTEM_EVENTS_KEY, inclusion.blockHashHex]); check();
+    assertNativeBurnSystemEvents(events, state.observedReceipt, attempt, mint.context, inclusion.ethereumBlockHashHex, root);
+    if (systemEventsScaleHex !== undefined && events !== systemEventsScaleHex) throw new Error('native burn runtime events disagree');
+    systemEventsScaleHex = events as string;
+  }
+  for (const url of [PRIMARY, WITNESS]) {
+    await checkWithdrawalHead(url, state.context, inclusion.blockHashHex, 4, check); check();
+  }
+  check();
+  return freezeBurnCollection({ sidechainIdHex: expectedSidechainIdHex,
+    nativeGenesisHashHex: mint.context.reservation.attempt.genesisHashHex,
+    blockHashHex: inclusion.blockHashHex, ethereumBlockHashHex: inclusion.ethereumBlockHashHex,
+    blockHeight: 4 as const, transactionHashHex: attempt.transactionHashHex, eventIndex: 2 as const,
+    bridgeEventRootHex: root, burnLeafCount: 1 as const, commitmentScaleHex, leafHashesScaleHex,
+    systemEventsScaleHex: systemEventsScaleHex!, burnEvent, burnProof,
+    sourceFinalityEstablished: false as const, trustless: false as const });
+}
+
+function freezeBurnCollection<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) freezeBurnCollection(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function assertNativeBurnSystemEvents(value: unknown, receipt: NativeWithdrawalReceipt, attempt: Readonly<MintAttempt>,
+  app: Readonly<FederatedNativeMintContextV1>, ethereumHash: string, root: string): void {
+  // Pinned SDK bbc435c / Frontier: EventRecord(Phase, RuntimeEvent, Vec<H256>).
+  // Only the two fixed extrinsics, their native fee events, three EVM logs and finalization root are admitted.
+  if (typeof value !== 'string' || !/^0x(?:[0-9a-f]{2}){1,4096}$/.test(value)) throw new Error('native burn runtime events are malformed');
+  const bytes = Buffer.from(value.slice(2), 'hex'); let offset = 0;
+  const take = (length: number) => {
+    if (length < 0 || offset + length > bytes.length) throw new Error('native burn runtime events are truncated');
+    const part = bytes.subarray(offset, offset += length); return part;
+  };
+  const byte = () => take(1)[0]!;
+  const compact = (maximum: bigint): bigint => {
+    const first = byte(), mode = first & 3;
+    let result: bigint;
+    if (mode === 0) result = BigInt(first >>> 2);
+    else if (mode < 3) {
+      const tail = take(mode === 1 ? 1 : 3); let encoded = BigInt(first);
+      for (let index = 0; index < tail.length; index++) encoded |= BigInt(tail[index]!) << BigInt((index + 1) * 8);
+      result = encoded >> 2n;
+      if (result < (mode === 1 ? 64n : 16384n)) throw new Error('native burn runtime events contain noncanonical SCALE');
+    } else {
+      const length = (first >>> 2) + 4;
+      if (length > 8) throw new Error('native burn runtime events exceed the SCALE bound');
+      const tail = take(length); result = 0n;
+      for (let index = 0; index < length; index++) result |= BigInt(tail[index]!) << BigInt(index * 8);
+      if (tail[length - 1] === 0 || result < 1073741824n) throw new Error('native burn runtime events contain noncanonical SCALE');
+    }
+    if (result > maximum) throw new Error('native burn runtime events exceed the SCALE bound');
+    return result;
+  };
+  const equal = (expected: string) => {
+    if (take(expected.length / 2).toString('hex') !== expected) throw new Error('native burn runtime event identity differs');
+  };
+  const count = Number(compact(16n)); let stage = 0, logs = 0, withdrawalsSeen = 0, deposits = 0, newAccounts = 0, endowments = 0;
+  for (let index = 0; index < count; index++) {
+    const phase = byte(), extrinsic = phase === 0 ? take(4).readUInt32LE() : -1;
+    const pallet = byte(), event = byte();
+    if (pallet === 0 && event === 0) {
+      if (phase !== 0 || (stage === 0 ? extrinsic !== 0 : stage !== 3 || extrinsic !== 1)) throw new Error('native burn success event order differs');
+      compact(0xffff_ffff_ffff_ffffn); compact(0xffff_ffff_ffff_ffffn);
+      if (byte() !== (stage === 0 ? 2 : 0) || byte() !== (stage === 0 ? 0 : 1)) throw new Error('native burn dispatch classification differs');
+      stage = stage === 0 ? 1 : 4;
+    } else if (stage === 1 && phase === 0 && extrinsic === 1 && pallet === 0 && event === 3) {
+      if (++newAccounts > 1 || logs !== 0) throw new Error('native burn fee account event differs');
+      take(20);
+    } else if (stage === 1 && phase === 0 && extrinsic === 1 && pallet === 4 && [0, 7, 8].includes(event)) {
+      if (logs !== 0) throw new Error('native burn fee event order differs');
+      const account = `0x${take(20).toString('hex')}`; const amountBytes = take(16);
+      const amount = BigInt(`0x${Buffer.from(amountBytes).reverse().toString('hex')}`);
+      if (amount > 7_119_140_625_000_000n) throw new Error('native burn fee event exceeds the signed fee bound');
+      if (event === 8 && (++withdrawalsSeen !== 1 || account !== app.recipientAddressHex)) throw new Error('native burn fee withdrawal differs');
+      if (event === 7 && ++deposits > 2 || event === 0 && ++endowments > 1) throw new Error('native burn fee event count differs');
+    } else if (stage === 1 && phase === 0 && extrinsic === 1 && pallet === 8 && event === 0) {
+      const log = receipt.logs?.[logs++];
+      if (!log || logs > 3 || withdrawalsSeen !== 1 || deposits < 1) throw new Error('native burn EVM event order differs');
+      equal(log.address!.slice(2));
+      if (compact(4n) !== BigInt(log.topics!.length)) throw new Error('native burn EVM topics differ');
+      for (const topic of log.topics!) equal(topic.slice(2));
+      if (compact(160n) !== BigInt((log.data!.length - 2) / 2)) throw new Error('native burn EVM data length differs');
+      equal(log.data!.slice(2)); if (logs === 3) stage = 2;
+    } else if (stage === 2 && phase === 0 && extrinsic === 1 && pallet === 7 && event === 0) {
+      equal(app.recipientAddressHex.slice(2)); equal(app.bridgeAddressHex.slice(2)); equal(attempt.transactionHashHex.slice(2));
+      if (byte() !== 0 || byte() > 1 || compact(30n) !== 0n) throw new Error('native burn Ethereum execution failed');
+      stage = 3;
+    } else if (stage === 4 && phase === 1 && pallet === 12 && event === 1 && index === count - 1) {
+      equal(`01${ethereumHash.slice(2)}${root.slice(2)}01000000`); stage = 5;
+    } else throw new Error('native burn runtime event is unknown or out of order');
+    if (compact(0n) !== 0n) throw new Error('native burn runtime event topics differ');
+  }
+  if (stage !== 5 || offset !== bytes.length) throw new Error('native burn runtime events are incomplete or trailing');
 }
 
 function captureWithdrawal(input: Readonly<FederatedNativeWithdrawalContextV1>) {

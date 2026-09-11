@@ -130,6 +130,16 @@ const NATIVE_MINT_RECEIPTS = new WeakMap<object, Readonly<{
   session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
   draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
   assertCurrent: () => void;
+  context: () => ReturnType<typeof getSubstrateFederatedNativeGenesisAttestationContextV1>;
+}>>();
+const NATIVE_CHECKPOINT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_CHECKPOINT_ATTESTATION_V1';
+const NATIVE_CHECKPOINT_PRODUCERS = new WeakMap<object, (
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisCheckpointAttestationV1Input>,
+) => Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1>>();
+const NATIVE_CHECKPOINT_RECEIPTS = new WeakMap<object, Readonly<{
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>;
+  assertCurrent: () => void;
 }>>();
 const CHECKPOINT_ATTESTATION_RECEIPTS = new WeakSet<object>();
 const UINT64_MAX = 0xffff_ffff_ffff_ffffn;
@@ -362,6 +372,28 @@ export interface ProduceSubstrateFederatedIsolatedDevnetMintSourceProofV2Input {
     Readonly<SubstrateFederatedIsolatedDevnetCommittedReserveEvidenceReceiptV1>;
   readonly issuedAtNativeHeight: string | number | bigint;
   readonly expiresAtNativeHeight: string | number | bigint;
+}
+
+export interface ProduceSubstrateFederatedNativeGenesisCheckpointAttestationV1Input {
+  readonly proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>;
+  readonly checkpoint: Readonly<ProduceSubstrateFederatedIsolatedDevnetCheckpointAttestationV1Input>;
+}
+
+/** Native setup provenance is separate from the historical LAB launch receipt. */
+export interface SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1 {
+  readonly schema: 'e2s.substrate-federated-native-genesis-checkpoint-attestation.v1';
+  readonly version: 1;
+  readonly sourceAttestationBindingDigestHex: string;
+  readonly sourceProofReceiptDigestHex: string;
+  readonly genesisJsonSha256Hex: string;
+  readonly checkpointStatement: Readonly<SubstrateFederatedCheckpointStatementV1>;
+  readonly attestationDigestHex: string;
+  readonly signatures: readonly Readonly<SubstrateFederatedIsolatedDevnetLaunchSignatureV1>[];
+  readonly signatureSetDigestHex: string;
+  readonly receiptDigestHex: string;
+  readonly sourceFinalityEstablished: false;
+  readonly ergoPayoutAuthorized: false;
+  readonly trustless: false;
 }
 
 export interface ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input {
@@ -1422,7 +1454,80 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         boundary: mintSourceProofBoundaryV2(),
       });
       const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_MINT_PROOF_DOMAIN) });
-      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, draft, assertCurrent }));
+      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, draft, assertCurrent,
+        context: () => { assertCurrent(); return getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target); } }));
+      return receipt;
+    } catch (error) {
+      signers = [];
+      state = 'disposed';
+      throw error;
+    }
+  });
+  NATIVE_CHECKPOINT_PRODUCERS.set(session, input => {
+    const assertAvailable = () => {
+      assertOpen(state);
+      if (launchSigningStarted) throw new Error('native checkpoint cannot use a LAB launch session');
+      if (checkpointAttestationProduced) throw new Error('native checkpoint-attestation capability is already consumed');
+    };
+    assertAvailable();
+    exactRecord(input, ['proof', 'checkpoint'], 'native checkpoint input');
+    if (Reflect.ownKeys(input).length !== 2) throw new Error('native checkpoint requires exact own-data fields');
+    const { proof } = input;
+    const retained = NATIVE_MINT_RECEIPTS.get(proof);
+    if (!retained || retained.session !== session) throw new Error('native checkpoint requires the original session mint proof provenance');
+    const fields = ['sourceNativeBlockHeight', 'sourceNativeBlockHashHex', 'executionBlockHashHex',
+      'bridgeEventRootHex', 'burnLeafCount', 'admissionValidFromErgoHeight', 'admissionExpiresAtErgoHeight'];
+    const raw = exactRecord(input.checkpoint, fields, 'native checkpoint fields');
+    if (Reflect.ownKeys(raw).length !== fields.length) throw new Error('native checkpoint requires exact own-data fields');
+    const checkpoint = Object.freeze({ ...raw });
+    const context = retained.context();
+    const app = context.application;
+    const appDigest = sha256CanonicalJson(app);
+    const assertCurrent = () => {
+      assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(proof, session, retained.draft);
+      const current = retained.context();
+      if (current.candidate !== context.candidate || sha256CanonicalJson(current.application) !== appDigest
+        || sha256CanonicalJson(current.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
+        throw new Error('native checkpoint retained application or federation changed');
+      }
+    };
+    assertCurrent();
+    const sourceNativeBlockHeight = uint64(checkpoint.sourceNativeBlockHeight, 'native checkpoint height');
+    if (sourceNativeBlockHeight === 0n) throw new Error('native checkpoint height must be positive');
+    const checkpointStatement = buildSubstrateFederatedCheckpointStatementV1({
+      profile: checkpointProfile,
+      sourceNetworkIdHex: app.sourceNetworkIdHex, sidechainIdHex: app.sidechainIdHex,
+      sourceNativeBlockHeight,
+      sourceNativeBlockHashHex: fixedHex(checkpoint.sourceNativeBlockHashHex, 32, 'native checkpoint block hash'),
+      executionBlockHashHex: fixedHex(checkpoint.executionBlockHashHex, 32, 'native checkpoint execution hash'),
+      bridgeEventRootHex: fixedHex(checkpoint.bridgeEventRootHex, 32, 'native checkpoint root'),
+      burnLeafCount: positiveUint32(checkpoint.burnLeafCount, 'native checkpoint leaf count'),
+      bridgeAddressHex: app.bridgeAddressHex, tokenAddressHex: app.tokenAddressHex,
+      bridgeRuntimeCodeSha256Hex: app.bridgeRuntimeCodeSha256Hex, bridgeRuntimeCodeBytes: app.bridgeRuntimeCodeBytes,
+      tokenRuntimeCodeSha256Hex: app.tokenRuntimeCodeSha256Hex, tokenRuntimeCodeBytes: app.tokenRuntimeCodeBytes,
+      sourceRuntimeCodeSha256Hex: app.sourceRuntimeCodeSha256Hex, sourceRuntimeCodeBytes: app.sourceRuntimeCodeBytes,
+      runtimeProfileIdHex: app.runtimeProfileIdHex, settlementProfileIdHex: app.settlementProfileIdHex,
+      admissionValidFromErgoHeight: uint64(checkpoint.admissionValidFromErgoHeight, 'native checkpoint admission start'),
+      admissionExpiresAtErgoHeight: uint64(checkpoint.admissionExpiresAtErgoHeight, 'native checkpoint admission expiry'),
+    });
+    const attestationDigestHex = deriveSubstrateFederatedCheckpointAttestationDigestHex(checkpointStatement.encodedStatementHex);
+    // Input inspection and retained custody checks can reenter. Claim the shared slot last.
+    assertCurrent();
+    assertAvailable();
+    checkpointAttestationProduced = true;
+    try {
+      const signatures = signThreshold(signers, attestationDigestHex);
+      assertCheckpointAttestationSignatures(checkpointProfile.sourceAttestationPublicKeysHex,
+        checkpointProfile.sourceAttestationThreshold, attestationDigestHex, signatures);
+      assertCurrent();
+      const body = deepFreeze({ schema: 'e2s.substrate-federated-native-genesis-checkpoint-attestation.v1' as const,
+        version: 1 as const, sourceAttestationBindingDigestHex: binding.bindingDigestHex,
+        sourceProofReceiptDigestHex: proof.receiptDigestHex, genesisJsonSha256Hex: context.candidate.genesisJsonSha256Hex,
+        checkpointStatement, attestationDigestHex, signatures,
+        signatureSetDigestHex: sha256CanonicalJson(signatures, CHECKPOINT_ATTESTATION_SIGNATURE_SET_DIGEST_DOMAIN),
+        sourceFinalityEstablished: false as const, ergoPayoutAuthorized: false as const, trustless: false as const });
+      const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_CHECKPOINT_DOMAIN) });
+      NATIVE_CHECKPOINT_RECEIPTS.set(receipt, Object.freeze({ session, proof, assertCurrent }));
       return receipt;
     } catch (error) {
       signers = [];
@@ -1431,6 +1536,27 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     }
   });
   return session;
+}
+
+/** Synthetic quorum decision; the composition separately binds observed burn fields. */
+export function produceSubstrateFederatedNativeGenesisCheckpointAttestationV1(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisCheckpointAttestationV1Input>,
+): Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1> {
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(session);
+  return NATIVE_CHECKPOINT_PRODUCERS.get(session)!(input);
+}
+
+export function assertSubstrateFederatedNativeGenesisCheckpointAttestationV1(
+  receipt: unknown,
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>,
+): asserts receipt is Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1> {
+  const retained = receipt !== null && typeof receipt === 'object' ? NATIVE_CHECKPOINT_RECEIPTS.get(receipt) : undefined;
+  if (!retained || retained.session !== session || retained.proof !== proof) throw new Error('native checkpoint lacks exact provenance');
+  retained.assertCurrent();
+  const { receiptDigestHex, ...body } = receipt as SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1;
+  if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_CHECKPOINT_DOMAIN)) throw new Error('native checkpoint receipt digest changed');
 }
 
 export function produceSubstrateFederatedNativeGenesisMintSourceProofV1(

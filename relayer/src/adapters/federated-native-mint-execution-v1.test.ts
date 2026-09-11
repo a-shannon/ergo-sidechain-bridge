@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
+import blakejs from 'blakejs';
 import { HDNodeWallet, Interface, Transaction } from 'ethers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1,
@@ -14,6 +15,7 @@ import { reserveFederatedNativeReservationAttemptV1, submitFederatedNativeReserv
   observeFederatedNativeMintStateV1, type FederatedNativeMintContextV1,
   observeFederatedNativeWithdrawalParentV1, reserveFederatedNativeWithdrawalAttemptV1,
   submitFederatedNativeWithdrawalV1, sealFederatedNativeWithdrawalV1, observeFederatedNativeWithdrawalInclusionV1,
+  collectFederatedNativeBurnCommitmentV1,
   type FederatedNativeWithdrawalContextV1 } from './federated-native-reservation-execution-v1.js';
 
 const hash = (byte: string) => `0x${byte.repeat(32)}`;
@@ -33,6 +35,10 @@ const ETH_BLOCKS = [hash('28'), ETH_PARENT, ETH_CHILD, hash('29'), hash('2a')];
 const RECIPIENT = '0x0008cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798';
 const OTHER_RECIPIENT = RECIPIENT.replace('cd02', 'cd03');
 const ZERO = `0x${'00'.repeat(20)}`;
+const SIDECHAIN = hash('72');
+const COMMITMENT_KEY = '0xaf86fef4216ac2bcd1c592b204011ad00d2d4fb825af1fcd4c2be9f955a780c5';
+const LEAVES_KEY = '0xaf86fef4216ac2bcd1c592b204011ad08ba92642ec2dee14a0170da020901c7f';
+const EVENTS_KEY = '0x26aa394eea5630e07c48ae0c9558cef780d41e5e16056765bc8461851072c9d7';
 type WithdrawalPhase = 'approve' | 'burn';
 type WithdrawalAttempt = ReturnType<typeof reserveFederatedNativeWithdrawalAttemptV1>;
 let withdrawalMode: boolean, withdrawalPending: boolean;
@@ -167,6 +173,7 @@ function withdrawalRpc(method: string, params: any[]): unknown {
   if (method === 'author_pendingExtrinsics') return withdrawalPending ? [at(height + 1).nativeExtrinsicHex] : [];
   if (method === 'state_getStorage') {
     const selected = NATIVE_BLOCKS.indexOf(params[1]); expect(selected).toBeGreaterThanOrEqual(2);
+    if (selected === 4 && [COMMITMENT_KEY, LEAVES_KEY, EVENTS_KEY].includes(params[0])) return nativeBurnStorage()[params[0]];
     if (params[0] !== owner.nativeFunding.storageKeyHex) return terminal[params[0]] ?? null;
     const account = Buffer.from(owner.nativeFunding.accountInfoScaleHex.slice(2), 'hex');
     account.writeUInt32LE(selected); return `0x${account.toString('hex')}`;
@@ -216,6 +223,38 @@ function withdrawalRpc(method: string, params: any[]): unknown {
   throw new Error(`unexpected withdrawal fixture RPC ${method}`);
 }
 
+// Expected corrected producer semantics: profile sidechain identity is deliberately not native genesis.
+// The original three-overlay native runtime used genesis here; its producer correction is a separate gate.
+function nativeBurnStorage(): Record<string, string> {
+  const attempt = withdrawalTransactions.get(4)!;
+  const blake = (bytes: Buffer) => Buffer.from(blakejs.blake2b(bytes, undefined, 32));
+  const decode = (hex: string) => Buffer.from(hex.replace(/^0x/, ''), 'hex');
+  const integer = (value: bigint, bytes: number) => { const result = Buffer.alloc(bytes); result.writeBigUInt64LE(value); return result; };
+  const eventIndex = Buffer.from('00000002', 'hex'), amount = Buffer.from('0000000000989680', 'hex');
+  const burnId = blake(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_ID_V1'), decode(SIDECHAIN), decode(attempt.transactionHashHex), eventIndex]));
+  const leaf = Buffer.concat([Buffer.from([1]), decode(SIDECHAIN), decode(ETH_BLOCKS[4]!), burnId,
+    decode(attempt.transactionHashHex), eventIndex, blake(decode(RECIPIENT)), amount, Buffer.alloc(32)]);
+  const root = blake(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_LEAF_V1'), leaf]));
+  const commitment = Buffer.concat([Buffer.from([1]), decode(SIDECHAIN), integer(4n, 8), decode(ETH_BLOCKS[4]!), root, Buffer.from('01000000', 'hex')]);
+  const compact = (size: number) => size < 64 ? Buffer.from([size * 4]) : Buffer.from([((size * 4 + 1) & 255), (size * 4 + 1) >>> 8]);
+  const apply = (index: number) => Buffer.from([0, index, 0, 0, 0]);
+  const event = (phase: Buffer, pallet: number, variant: number, ...fields: Buffer[]) =>
+    Buffer.concat([phase, Buffer.from([pallet, variant]), ...fields, Buffer.from([0])]);
+  const operator = decode(owner.addressHex), appPhase = apply(1);
+  const records = [event(apply(0), 0, 0, Buffer.from([0, 0, 2, 0])),
+    event(appPhase, 4, 8, operator, integer(7_119_140_625_000_000n, 16)),
+    event(appPhase, 4, 7, operator, integer(7_000_000_000_000_000n, 16)),
+    event(appPhase, 4, 7, decode(ZERO), integer(0n, 16))];
+  const receipt = withdrawalRpc('eth_getTransactionReceipt', [attempt.transactionHashHex]) as { logs: { address: string; topics: string[]; data: string }[] };
+  for (const log of receipt.logs) records.push(event(appPhase, 8, 0, decode(log.address), compact(log.topics.length),
+    ...log.topics.map(decode), compact(decode(log.data).length), decode(log.data)));
+  records.push(event(appPhase, 7, 0, operator, decode(BRIDGE), decode(attempt.transactionHashHex), Buffer.from([0, 0, 0])),
+    event(appPhase, 0, 0, Buffer.from([0, 0, 0, 1])),
+    event(Buffer.from([1]), 12, 1, Buffer.from([1]), decode(ETH_BLOCKS[4]!), root, Buffer.from('01000000', 'hex')));
+  return { [COMMITMENT_KEY]: `0x${commitment.toString('hex')}`, [LEAVES_KEY]: `0x04${root.toString('hex')}`,
+    [EVENTS_KEY]: `0x${Buffer.concat([compact(records.length), ...records]).toString('hex')}` };
+}
+
 async function completedMint() {
   const mintAttempt = await prepare(); await execute(mintAttempt);
   withdrawalMode = true; withdrawalTransactions.set(2, mintAttempt);
@@ -255,6 +294,290 @@ async function prepareWithdrawal(phase: WithdrawalPhase) {
   const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, signed);
   return { context, signed, attempt };
 }
+
+describe('native FED burn commitment collector', () => {
+  async function observedBurn() {
+    const { attempt } = await prepareWithdrawal('burn'); await executeWithdrawal(attempt); return attempt;
+  }
+
+  it('joins the original observed burn to exact paired runtime storage, global index and unchanged burn proof', async () => {
+    const attempt = await observedBurn(), before = writes();
+    const result = await collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize);
+    expect(result).toMatchObject({ sidechainIdHex: SIDECHAIN, nativeGenesisHashHex: GENESIS,
+      blockHashHex: NATIVE_BLOCKS[4], ethereumBlockHashHex: ETH_BLOCKS[4], blockHeight: 4,
+      transactionHashHex: attempt.transactionHashHex, eventIndex: 2, burnLeafCount: 1,
+      sourceFinalityEstablished: false, trustless: false,
+      burnEvent: { amountNanoErg: '10000000', eventIndex: 2, transactionIndex: 0, recipientErgoTreeHex: RECIPIENT.slice(2) },
+      burnProof: { leafIndex: 0, leafCount: 1, proof: [], leaf: { sidechainIdHex: SIDECHAIN.slice(2),
+        sidechainBlockHashHex: ETH_BLOCKS[4]!.slice(2), eventIndex: 2, amountNanoErg: '10000000' } } });
+    expect(result.commitmentScaleHex).toBe(nativeBurnStorage()[COMMITMENT_KEY]);
+    expect(result.leafHashesScaleHex).toBe(`0x04${result.burnProof.leaf.leafHashHex}`);
+    expect(result.bridgeEventRootHex).toBe(`0x${result.burnProof.bridgeEventRootHex}`);
+    expect(result.systemEventsScaleHex).toBe(nativeBurnStorage()[EVENTS_KEY]);
+    expect(Object.isFrozen(result)).toBe(true); expect(Object.isFrozen(result.burnProof)).toBe(true);
+    expect(Object.isFrozen(result.burnProof.leaf)).toBe(true); expect(Object.isFrozen(result.burnProof.proof)).toBe(true);
+    expect(Object.isFrozen(result.burnEvent)).toBe(true); expect(writes()).toEqual(before);
+  });
+
+  it.each(['copy', 'approval', 'unobserved', 'disposed', 'wrong sidechain'] as const)('rejects %s without transport', async defect => {
+    const { attempt } = await prepareWithdrawal(defect === 'approval' ? 'approve' : 'burn');
+    if (defect !== 'unobserved') await executeWithdrawal(attempt);
+    if (defect === 'disposed') active = false;
+    const before = writes();
+    await expect(collectFederatedNativeBurnCommitmentV1(defect === 'copy' ? { ...attempt } : attempt,
+      defect === 'wrong sidechain' ? GENESIS : SIDECHAIN, withdrawalAuthorize)).rejects.toThrow();
+    expect(writes()).toEqual(before);
+  });
+
+  for (const node of ['19955', '19956']) {
+    it.each(['absent commitment', 'commitment length', 'format', 'sidechain', 'height', 'Ethereum hash', 'root', 'count',
+      'native hash as Ethereum', 'absent leaves', 'leaf length', 'leaf count', 'leaf hash', 'leaf trailing'] as const)
+      (`rejects runtime %s on ${node}`, async defect => {
+        const attempt = await observedBurn(), before = writes(); let injected = 0;
+        fault = (method, params, result, url) => {
+          const leaves = defect.includes('leav') || defect.startsWith('leaf ');
+          if (method !== 'state_getStorage' || params[0] !== (leaves ? LEAVES_KEY : COMMITMENT_KEY) || !url.endsWith(node)) return result;
+          injected++; if (defect.startsWith('absent')) return null;
+          if (defect.endsWith('length')) return result.slice(0, -2);
+          if (defect === 'leaf trailing') return `${result}00`;
+          const bytes = Buffer.from(result.slice(2), 'hex');
+          if (defect === 'native hash as Ethereum') Buffer.from(NATIVE_BLOCKS[4]!.slice(2), 'hex').copy(bytes, 41);
+          else { const position = ({ format: 0, sidechain: 1, height: 33, 'Ethereum hash': 41, root: 73, count: 105,
+            'leaf count': 0, 'leaf hash': 1 } as Record<string, number>)[defect]!; bytes[position]! ^= 1; }
+          return `0x${bytes.toString('hex')}`;
+        };
+        await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/commitment or leaves differ/);
+        expect(injected).toBe(1); expect(writes()).toEqual(before);
+      });
+
+    it.each(['absent', 'truncated', 'trailing', 'unknown event', 'duplicate root', 'root phase', 'root pallet', 'root variant',
+      'root format', 'root Ethereum hash', 'root hash', 'root count', 'root topics', 'outer count', 'noncanonical count',
+      'success index', 'success class', 'success fee', 'fee count', 'EVM address', 'Ethereum from', 'Ethereum failure'] as const)
+      (`rejects structural events %s on ${node}`, async defect => {
+        const attempt = await observedBurn(), before = writes(); let injected = 0;
+        fault = (method, params, result, url) => {
+          if (method !== 'state_getStorage' || params[0] !== EVENTS_KEY || !url.endsWith(node)) return result;
+          injected++; if (defect === 'absent') return null;
+          if (defect === 'truncated') return result.slice(0, -2);
+          if (defect === 'trailing') return `${result}00`;
+          let bytes = Buffer.from(result.slice(2), 'hex'); const rootOffset = bytes.length - 73;
+          if (defect === 'unknown event' || defect === 'duplicate root') {
+            const extra = defect === 'duplicate root' ? bytes.subarray(rootOffset) : Buffer.from('0001000000ffff00', 'hex');
+            bytes[0]! += 4; bytes = Buffer.concat([bytes.subarray(0, rootOffset), extra, bytes.subarray(rootOffset)]);
+          } else if (defect === 'noncanonical count') bytes = Buffer.concat([Buffer.from([bytes[0]! + 1, 0]), bytes.subarray(1)]);
+          else if (defect.startsWith('root ')) {
+            const index = ({ 'root phase': 0, 'root pallet': 1, 'root variant': 2, 'root format': 3,
+              'root Ethereum hash': 4, 'root hash': 36, 'root count': 68, 'root topics': 72 } as Record<string, number>)[defect]!;
+            bytes[rootOffset + index]! ^= 1;
+          } else {
+            const position = defect === 'outer count' ? 0 : defect === 'success index' ? 2 : defect === 'success class' ? 10
+              : defect === 'success fee' ? 11 : defect === 'fee count' ? 19
+                : defect === 'EVM address' ? 13 + 44 * 3 + 7
+                  : defect === 'Ethereum from' ? rootOffset - 95 + 7 : rootOffset - 95 + 79;
+            bytes[position]! ^= 1;
+          }
+          return `0x${bytes.toString('hex')}`;
+        };
+        await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/native burn/);
+        expect(injected).toBe(1); expect(writes()).toEqual(before);
+      });
+
+    it.each([COMMITMENT_KEY, LEAVES_KEY, EVENTS_KEY])(`rejects custody disposal after read %s on ${node}`, async key => {
+      const attempt = await observedBurn(), before = writes(); let injected = 0;
+      fault = (method, params, result, url) => {
+        if (method === 'state_getStorage' && params[0] === key && url.endsWith(node)) { injected++; active = false; }
+        return result;
+      };
+      await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/custody disposed/);
+      expect(injected).toBe(1); expect(writes()).toEqual(before);
+    });
+
+    it(`rechecks ${node} canonical native head after collecting runtime events`, async () => {
+      const attempt = await observedBurn(), before = writes(); let collected = false, injected = 0;
+      fault = (method, params, result, url) => {
+        if (method === 'state_getStorage' && params[0] === EVENTS_KEY && url.endsWith('19956')) collected = true;
+        if (collected && method === 'chain_getBlockHash' && params.length === 0 && url.endsWith(node)) { injected++; return hash('99'); }
+        return result;
+      };
+      await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/target or pool changed/);
+      expect(injected).toBe(1); expect(writes()).toEqual(before);
+    });
+  }
+
+  it('rejects paired event disagreement even when both event envelopes independently decode', async () => {
+    const attempt = await observedBurn(), before = writes(); let injected = 0;
+    fault = (method, params, result, url) => {
+      if (method !== 'state_getStorage' || params[0] !== EVENTS_KEY || !url.endsWith('19956')) return result;
+      injected++; const bytes = Buffer.from(result.slice(2), 'hex'); bytes[8] = 4;
+      return `0x${bytes.toString('hex')}`;
+    };
+    await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/events disagree/);
+    expect(injected).toBe(1); expect(writes()).toEqual(before);
+  });
+
+  it('rejects a changed durable burn hold during commitment observation', async () => {
+    const attempt = await observedBurn(), before = writes(); let injected = 0;
+    fault = (method, params, result) => {
+      if (method === 'state_getStorage' && params[0] === COMMITMENT_KEY) {
+        injected++; writeFileSync(holdPath('burn'), '{}');
+      }
+      return result;
+    };
+    await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/durable hold changed/);
+    expect(injected).toBe(1); expect(writes()).toEqual(before);
+  });
+
+  describe('SCALE and fee event closure', () => {
+    // SDK bbc435c Weight has two Compact<u64> fields. Fixed literal encodings cover
+    // each wide SCALE mode independently of the adapter's decoder and the zero-weight base fixture.
+    const weights = [
+      ['mode2 lower', '02000100'], ['mode2 upper', 'feffffff'],
+      ['mode3 four-byte lower', '0300000040'], ['mode3 four-byte upper', '03ffffffff'],
+      ['mode3 five-byte lower', '070000000001'], ['mode3 six-byte lower', '0b000000000001'],
+      ['mode3 seven-byte lower', '0f00000000000001'], ['mode3 eight-byte lower', '130000000000000001'],
+      ['mode3 u64 maximum', '13ffffffffffffffff'],
+    ] as const;
+    const records = () => {
+      const bytes = Buffer.from(nativeBurnStorage()[EVENTS_KEY]!.slice(2), 'hex');
+      // EventRecord(Phase, RuntimeEvent, topics): timestamp; three balance events;
+      // two Transfer logs; PegOut log; Ethereum Executed; success; finalization root.
+      const sizes = [12, 44, 44, 44, 158, 158, 255, 83, 12, 73]; let offset = 1;
+      expect(bytes[0]).toBe(sizes.length * 4);
+      const result = sizes.map(size => { const part = Buffer.from(bytes.subarray(offset, offset + size)); offset += size; return part; });
+      expect(offset).toBe(bytes.length); return result;
+    };
+    const encode = (entries: Buffer[]) => `0x${Buffer.concat([Buffer.from([entries.length * 4]), ...entries]).toString('hex')}`;
+    const replaceWeight = (value: string, field: 0 | 1, bytes: Buffer, truncate = false) => {
+      const original = Buffer.from(value.slice(2), 'hex'), offset = 8 + field;
+      return `0x${Buffer.concat([original.subarray(0, offset), bytes, ...(truncate ? [] : [original.subarray(offset + 1)])]).toString('hex')}`;
+    };
+    const changeEvents = (transform: (value: string) => string) => {
+      let injected = 0;
+      fault = (method, params, result) => {
+        if (method === 'state_getStorage' && params[0] === EVENTS_KEY) { injected++; return transform(result); }
+        return result;
+      };
+      return () => injected;
+    };
+    const optionalFeeEvents = () => {
+      const account = Buffer.from('a1'.repeat(20), 'hex'), amount = Buffer.alloc(16); amount.writeBigUInt64LE(1000n);
+      const make = (pallet: number, event: number, ...fields: Buffer[]) => Buffer.concat([
+        Buffer.from([0, 1, 0, 0, 0, pallet, event]), ...fields, Buffer.from([0]),
+      ]);
+      // Balances::try_mutate_account first calls System::inc_providers, then emits
+      // Endowed; fungible::Balanced::deposit emits Deposit after increase_balance returns.
+      return [make(0, 3, account), make(4, 0, account, amount), make(4, 7, account, amount)];
+    };
+    const withOptionalFees = () => { const entries = records(); entries.splice(3, 1, ...optionalFeeEvents()); return entries; };
+
+    for (const field of [0, 1] as const) {
+      it.each(weights)(`accepts %s in weight field${field}`, async (_label, encoded) => {
+        const attempt = await observedBurn(), before = writes();
+        const injected = changeEvents(value => replaceWeight(value, field, Buffer.from(encoded, 'hex')));
+        const result = await collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize);
+        expect(result.eventIndex).toBe(2); expect(result.burnLeafCount).toBe(1);
+        expect(injected()).toBe(2); expect(writes()).toEqual(before);
+      });
+
+      it.each([
+        ['mode1 nonminimal', 'fd00', /noncanonical SCALE/],
+        ['mode2 nonminimal', 'feff0000', /noncanonical SCALE/],
+        ['mode3 below threshold', '03ffffff3f', /noncanonical SCALE/],
+        ['mode3 zero high byte', '070000004000', /noncanonical SCALE/],
+        ['mode3 eight-byte zero high byte', '130000000000004000', /noncanonical SCALE/],
+        ['mode3 u64 overflow', '17000000000000000001', /SCALE bound/],
+      ] as const)(`rejects %s in weight field${field}`, async (_label, encoded, error) => {
+        const attempt = await observedBurn(), before = writes();
+        const injected = changeEvents(value => replaceWeight(value, field, Buffer.from(encoded, 'hex')));
+        await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(error);
+        expect(injected()).toBe(1); expect(writes()).toEqual(before);
+      });
+
+      it.each([
+        ['mode1', '01'], ['mode2', '020001'], ['mode3 four-byte', '03000000'], ['mode3 eight-byte', '1300000000000000'],
+      ] as const)(`rejects truncated %s in weight field${field}`, async (_label, encoded) => {
+        const attempt = await observedBurn(), before = writes();
+        const injected = changeEvents(value => replaceWeight(value, field, Buffer.from(encoded, 'hex'), true));
+        await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/events are truncated/);
+        expect(injected()).toBe(1); expect(writes()).toEqual(before);
+      });
+    }
+
+    it('accepts optional NewAccount then Endowed then Deposit before EVM logs', async () => {
+      const attempt = await observedBurn(), before = writes();
+      const injected = changeEvents(() => encode(withOptionalFees()));
+      const result = await collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize);
+      expect(result.eventIndex).toBe(2); expect(result.burnLeafCount).toBe(1);
+      expect(injected()).toBe(2); expect(writes()).toEqual(before);
+    });
+
+    it.each(['NewAccount', 'Endowed', 'Deposit', 'Withdraw'] as const)('rejects duplicate %s fee events', async name => {
+      const attempt = await observedBurn(), before = writes();
+      const injected = changeEvents(() => {
+        const entries = withOptionalFees(), index = name === 'Withdraw' ? 1 : name === 'NewAccount' ? 3 : name === 'Endowed' ? 4 : 5;
+        entries.splice(index, 0, Buffer.from(entries[index]!)); return encode(entries);
+      });
+      await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/native burn fee/);
+      expect(injected()).toBe(1); expect(writes()).toEqual(before);
+    });
+
+    it.each(['NewAccount', 'Endowed', 'Deposit'] as const)('rejects %s after the first EVM log', async name => {
+      const attempt = await observedBurn(), before = writes();
+      const injected = changeEvents(() => {
+        const entries = withOptionalFees(), index = name === 'NewAccount' ? 3 : name === 'Endowed' ? 4 : 5;
+        const moved = entries.splice(index, 1)[0]!; entries.splice(6, 0, moved); return encode(entries);
+      });
+      await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/native burn fee/);
+      expect(injected()).toBe(1); expect(writes()).toEqual(before);
+    });
+
+    for (const name of ['NewAccount', 'Endowed', 'Deposit'] as const) {
+      it.each(['phase', 'extrinsic'] as const)(`rejects wrong %s on optional ${name}`, async defect => {
+        const attempt = await observedBurn(), before = writes();
+        const injected = changeEvents(() => {
+          const entries = withOptionalFees(), index = name === 'NewAccount' ? 3 : name === 'Endowed' ? 4 : 5;
+          if (defect === 'phase') entries[index] = Buffer.concat([Buffer.from([1]), entries[index]!.subarray(5)]);
+          else entries[index]!.writeUInt32LE(0, 1);
+          return encode(entries);
+        });
+        await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/runtime event is unknown/);
+        expect(injected()).toBe(1); expect(writes()).toEqual(before);
+      });
+      it(`rejects nonempty native topics on optional ${name}`, async () => {
+        const attempt = await observedBurn(), before = writes();
+        const injected = changeEvents(() => {
+          const entries = withOptionalFees(), index = name === 'NewAccount' ? 3 : name === 'Endowed' ? 4 : 5;
+          entries[index] = Buffer.concat([entries[index]!.subarray(0, -1), Buffer.from([4]), Buffer.alloc(32, 1)]);
+          return encode(entries);
+        });
+        await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/SCALE bound/);
+        expect(injected()).toBe(1); expect(writes()).toEqual(before);
+      });
+    }
+
+    it.each(['Withdraw', 'refund Deposit', 'Endowed', 'author Deposit'] as const)('rejects %s above the signed fee bound', async name => {
+      const attempt = await observedBurn(), before = writes();
+      const injected = changeEvents(() => {
+        const entries = withOptionalFees(), index = name === 'Withdraw' ? 1 : name === 'refund Deposit' ? 2 : name === 'Endowed' ? 4 : 5;
+        entries[index]!.writeBigUInt64LE(7_119_140_625_000_001n, 27); return encode(entries);
+      });
+      await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/signed fee bound/);
+      expect(injected()).toBe(1); expect(writes()).toEqual(before);
+    });
+
+    it.each(['too many', 'too few', 'zero', 'noncanonical'] as const)('rejects %s outer event count', async defect => {
+      const attempt = await observedBurn(), before = writes();
+      const injected = changeEvents(value => {
+        const bytes = Buffer.from(value.slice(2), 'hex');
+        if (defect === 'noncanonical') return `0x${Buffer.concat([Buffer.from([bytes[0]! + 1, 0]), bytes.subarray(1)]).toString('hex')}`;
+        bytes[0] = defect === 'too many' ? 17 * 4 : defect === 'too few' ? bytes[0]! - 4 : 0;
+        return `0x${bytes.toString('hex')}`;
+      });
+      await expect(collectFederatedNativeBurnCommitmentV1(attempt, SIDECHAIN, withdrawalAuthorize)).rejects.toThrow(/native burn runtime/);
+      expect(injected()).toBe(1); expect(writes()).toEqual(before);
+    });
+  });
+});
 
 describe('native FED mint execution consumer', () => {
   it.each([1_000_000_000n, 1_125_000_001n])('rejects a valid signature at gas price %s before transport', async gasPrice => {

@@ -2519,7 +2519,8 @@ export function getSubstrateFederatedNativeGenesisAttestationContextV1(
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
   const compiled = NATIVE_EXECUTION_BATCHES.get(batch)!.compiled;
   return Object.freeze({ candidate: compiled.candidate,
-    checkpointProfile: compiled.preparation.checkpointProfile });
+    checkpointProfile: compiled.preparation.checkpointProfile,
+    application: compiled.preparation.application });
 }
 
 // Only the session can pair a pre-check process binding with its own result.

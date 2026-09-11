@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Extend the fixed root's retained lifetime through native approve/burn, checkpoint attestation and the existing Ergo tracker/payout consumers; then run one fresh composed campaign | The completed mint campaign has closed custody and cannot be resumed. Preserve new same-target identities and freshly observed nonces. Neither historical LAB block-4 receipts nor the earlier isolated withdrawal demonstrate this two-way target |
+| **Now** | Operational mint -> composed withdrawal | Correct native runtime commitment production for the active application's bridge and sidechain identity, then extend retained custody through the existing Ergo tracker/payout consumers and the fixed root | Native burn collection and checkpoint attestation have component coverage. The three-overlay native runtime still selects the legacy bridge/genesis identity when producing a burn commitment. Reject that mismatch; do not relabel it. Run one fresh composed campaign after the return path is connected |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -290,7 +290,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
 | FED running-target binding | Local native campaign passed at `486d8107` | Actual root joined fresh builds/custody, observed Ergo issuance, deposit, confirmed reserve, proof and mint on both owned targets. Keep request freshness at checking separate from later action freshness. Historical V3/LAB identities cannot replace native provenance; retain unresolved-attempt holds |
 | Native reservation and mint caller | Local native campaign passed at `486d8107` | Reservation block one and chain-4242 nonce-one mint in block two passed exact RPC/token/consumed-record checks. Preserve broadcast authorization and duplicate, absent-commitment, wrong-binding, unreserved-sibling and fee negatives. Pool admission remains distinct from execution and final state |
-| Native burn and retained withdrawal continuation | Native mint/approve/burn consumer implemented at component level; checkpoint and Ergo continuation pending | Collect the exact native burn commitment and add source-session attestation without fabricating LAB provenance; use the compiled application profile, not the reservation profile. Extend native setup custody through fee funding and the owned checkpoint/freeze/admission/payout phases; confirm both distinct external fee inputs before freezing the anchor horizon |
+| Native burn commitment producer | Current native export uses overlays 0001/0004/0005; a source mismatch is identified | Select the active pooled-reserve profile's bridge address and sidechain identity for commitment production. Preserve the legacy branch and existing bytes/domains, and close the affected Rust/source/export checks. The collector must reject absent commitments and genesis-domain substitutions |
+| Native burn and retained withdrawal continuation | Native execution, exact commitment collection and source-session attestation implemented at component level; native producer correction and Ergo continuation pending | The original burn attempt binds paired native storage, complete runtime events, global burn index and unchanged leaf/proof formats to the retained source quorum. Extend native setup custody through fee funding and the owned checkpoint/freeze/admission/payout phases; confirm both distinct external fee inputs before freezing the anchor horizon |
 | Fresh operational two-way campaign | Depends on the native burn/continuation join; completed mint and withdrawal component evidence remain reusable | Use new target/custody and actual RPC calls for deposit-to-mint and burn, followed by the established Ergo withdrawal consumer. Prove this composed run before claiming two-way operation or reusing it for recovery tests; do not rerun a standalone mint campaign without a changed deciding input |
 
 The native execution consumer now retains the confirmed mint through one
@@ -302,12 +303,23 @@ recipient and fee balances, allowance and the consumed mint record are checked
 on both nodes. The fixed fee ceilings apply only to parents two and three;
 a higher observed requirement rejects without increasing the bid.
 
-Component tests use real signatures and journals with simulated RPC responses.
-They do not establish fresh-node burn execution, a checkpoint attestation or
-Ergo payout. The existing target root still ends after mint. The next batch
-must connect the original native burn identity and runtime commitment to the
-retained source session, then carry that custody into the Ergo return path.
-The old LAB block-four receipt is not a substitute for this native provenance.
+The native burn now feeds a collector that reobserves both nodes at its exact
+native block hash. It checks CurrentCommitment, CurrentLeafHashes and the full
+System.Events encoding, including BridgeEventRootStored. The single burn has
+global event index two and leaf index zero. Native and Ethereum hashes remain
+distinct. A separate original-object continuation binds that collection to the
+same source session's one-shot checkpoint signature. The statement and signature
+domains are unchanged; a native receipt records native setup provenance and
+uses the compiled application profile. It does not fabricate a LAB launch.
+
+These component tests use real signatures and journals with simulated RPC
+responses. The successful commitment fixtures require the application-domain
+producer semantics still missing from the current native export. Source
+inspection found that its hook uses the legacy bridge configuration and native
+genesis identity, while the native setup binds a separate application identity.
+The collector rejects this disagreement. Correct that producer before a fresh
+runtime claim. The target root still ends after mint; native-node burn,
+checkpoint execution and Ergo payout remain unestablished on this route.
 
 Keep signing/execution, checkpoint attestation and Ergo continuation as
 coherent implementation batches. Reuse unchanged compiler, runtime and prior

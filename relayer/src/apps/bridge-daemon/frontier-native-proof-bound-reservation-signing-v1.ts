@@ -11,6 +11,7 @@ import {
   sealFederatedNativeMintV1, observeFederatedNativeMintInclusionV1, observeFederatedNativeMintStateV1,
   observeFederatedNativeWithdrawalParentV1, reserveFederatedNativeWithdrawalAttemptV1,
   submitFederatedNativeWithdrawalV1, sealFederatedNativeWithdrawalV1, observeFederatedNativeWithdrawalInclusionV1,
+  collectFederatedNativeBurnCommitmentV1,
 } from '../../adapters/federated-native-reservation-execution-v1.js';
 import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
   from '../../validity-application-pooled-reserve-mint-reservation-v4.js';
@@ -26,6 +27,8 @@ import { assertOwnedFederatedGenesisDevnetTargetV1, type OwnedFederatedGenesisDe
   from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import {
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
+  produceSubstrateFederatedNativeGenesisCheckpointAttestationV1,
+  assertSubstrateFederatedNativeGenesisCheckpointAttestationV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   type SubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -47,6 +50,53 @@ interface SigningInput {
   readonly frontierTarget: Readonly<OwnedFederatedGenesisDevnetTargetV1>;
   readonly expectedStorage: Readonly<Record<string, string>>;
   readonly expectedGenesisHashHex: string;
+}
+
+const burnExecutions = new WeakMap<object, {
+  retained: ReturnType<typeof capture>;
+  attempt: Readonly<{ transactionHashHex: string; signedTransactionHex: string; nativeExtrinsicHex: string }>;
+  attestationStarted: boolean;
+}>();
+const burnCheckpoints = new WeakMap<object, () => void>();
+
+/** Bind one original burn to its exact native commitment and the retained source quorum. */
+export async function attestFrontierNativeBurnCheckpointV1(input: Readonly<{
+  execution: Awaited<ReturnType<typeof executeFrontierNativeProofBoundReservationMintAndBurnV1>>;
+  admissionValidFromErgoHeight: string;
+  admissionExpiresAtErgoHeight: string;
+}>) {
+  exact(input, ['execution', 'admissionValidFromErgoHeight', 'admissionExpiresAtErgoHeight']);
+  const { execution, admissionValidFromErgoHeight, admissionExpiresAtErgoHeight } = input;
+  const state = burnExecutions.get(execution);
+  if (!state) throw new Error('native checkpoint requires the original burn execution provenance');
+  state.retained.assertCurrent();
+  if (state.attestationStarted) throw new Error('native burn checkpoint attempt is already consumed');
+  state.attestationStarted = true;
+  const { sourceSession, proof, compiled } = state.retained.input;
+  const authorize = () => state.retained.assertCurrent();
+  const commitment = await collectFederatedNativeBurnCommitmentV1(state.attempt,
+    `0x${compiled.preparation.application.sidechainIdHex}`, authorize);
+  authorize();
+  const attestation = produceSubstrateFederatedNativeGenesisCheckpointAttestationV1(sourceSession, { proof,
+    checkpoint: { sourceNativeBlockHeight: commitment.blockHeight, sourceNativeBlockHashHex: commitment.blockHashHex,
+      executionBlockHashHex: commitment.ethereumBlockHashHex, bridgeEventRootHex: commitment.bridgeEventRootHex,
+      burnLeafCount: commitment.burnLeafCount, admissionValidFromErgoHeight, admissionExpiresAtErgoHeight } });
+  const assertCurrent = () => {
+    authorize();
+    assertSubstrateFederatedNativeGenesisCheckpointAttestationV1(attestation, sourceSession, proof);
+  };
+  assertCurrent();
+  const result = Object.freeze({ execution, commitment, attestation, checkpointAttested: true as const,
+    ergoPayoutExecuted: false as const, sourceFinalityEstablished: false as const, trustless: false as const });
+  burnCheckpoints.set(result, assertCurrent);
+  return result;
+}
+
+export function assertFrontierNativeBurnCheckpointV1(value: unknown): asserts value is
+  Awaited<ReturnType<typeof attestFrontierNativeBurnCheckpointV1>> {
+  const assertCurrent = value !== null && typeof value === 'object' ? burnCheckpoints.get(value) : undefined;
+  if (!assertCurrent) throw new Error('native burn checkpoint lacks original composition provenance');
+  assertCurrent();
 }
 
 /** Caller must reobserve the owned target before transport. A signature is not acceptance. */
@@ -122,8 +172,12 @@ export async function executeFrontierNativeProofBoundReservationMintAndBurnV1(in
     const observed = await observeFederatedNativeWithdrawalInclusionV1(attempt, authorize);
     authorize();
     if (phase === 'approve') approvalAttempt = attempt;
-    else return Object.freeze({ mint: minted.result, burn: observed, burnExecuted: true as const,
-      checkpointAttested: false as const, ergoPayoutExecuted: false as const, sourceFinalityEstablished: false as const, trustless: false as const });
+    else {
+      const result = Object.freeze({ mint: minted.result, burn: observed, burnExecuted: true as const,
+        checkpointAttested: false as const, ergoPayoutExecuted: false as const, sourceFinalityEstablished: false as const, trustless: false as const });
+      burnExecutions.set(result, { retained, attempt, attestationStarted: false });
+      return result;
+    }
   }
   throw new Error('native burn execution did not complete');
 }
