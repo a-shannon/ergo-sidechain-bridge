@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { Interface, Transaction, Wallet, keccak256, recoverAddress, type HDNodeWallet } from 'ethers';
+import { Interface, SigningKey, Transaction, Wallet, keccak256, recoverAddress, type HDNodeWallet } from 'ethers';
 import blakejs from 'blakejs';
 
 const SYSTEM_ACCOUNT_PREFIX = '26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da9';
@@ -18,7 +18,12 @@ export interface FederatedGenesisOperatorV1 {
 const owners = new WeakMap<object, HDNodeWallet>();
 const reservationSigners = new WeakSet<object>();
 const mintSigners = new WeakSet<object>();
+const completedMints = new WeakMap<object, Readonly<{ bridgeAddressHex: string; amountNanoErg: string }>>();
+const approveSigners = new WeakSet<object>();
+const burnSigners = new WeakSet<object>();
+const completedApprovals = new WeakMap<object, Readonly<FederatedGenesisWithdrawalInputV1>>();
 const mintAbi = new Interface(['function mintSERG(address recipient,uint256 amount,bytes32 mintIdentity)']);
+const withdrawalAbi = new Interface(['function approve(address,uint256)', 'function pegOut(uint256,bytes)']);
 
 /** The proof-bound app must establish parent-state eligibility; this adapter only signs. */
 export async function signFederatedGenesisMintV1(owner: Readonly<FederatedGenesisOperatorV1>, input: Readonly<{
@@ -45,6 +50,8 @@ export async function signFederatedGenesisMintV1(owner: Readonly<FederatedGenesi
   const transaction = Object.freeze({ type: 0, chainId: 4242, nonce, to: bridgeAddressHex,
     gasPrice: 1_125_000_000n, gasLimit: 5_000_000n, value: 0n,
     data: mintAbi.encodeFunctionData('mintSERG', [recipientAddressHex, amountNanoErg, mintIdentityHex]) });
+  assertFederatedGenesisOperatorV1(owner);
+  if (mintSigners.has(owner)) throw new Error('FED mint signing requires its unused post-reservation slot');
   mintSigners.add(owner);
   try {
     const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
@@ -57,6 +64,92 @@ export async function signFederatedGenesisMintV1(owner: Readonly<FederatedGenesi
       || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
       throw new Error('FED mint signature differs from its exact transaction');
     }
+    completedMints.set(owner, Object.freeze({ bridgeAddressHex, amountNanoErg }));
+    return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce });
+  } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+}
+
+export interface FederatedGenesisWithdrawalInputV1 {
+  readonly nonce: number;
+  readonly parentNativeHeight: number;
+  readonly bridgeAddressHex: string;
+  readonly tokenAddressHex: string;
+  readonly grossAmountNanoErg: string;
+  readonly recipientErgoTreeHex: string;
+}
+
+/** Signing only: the caller must authenticate the retained application and freshly observe its parent. */
+export async function signFederatedGenesisApproveV1(owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisWithdrawalInputV1>) {
+  return signWithdrawal(owner, input, 'approve');
+}
+
+/** A completed approval signature is not proof of inclusion or burn eligibility. */
+export async function signFederatedGenesisBurnV1(owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisWithdrawalInputV1>) {
+  return signWithdrawal(owner, input, 'burn');
+}
+
+async function signWithdrawal(owner: Readonly<FederatedGenesisOperatorV1>,
+  input: Readonly<FederatedGenesisWithdrawalInputV1>, phase: 'approve' | 'burn') {
+  assertFederatedGenesisOperatorV1(owner);
+  const minted = completedMints.get(owner);
+  const used = phase === 'approve' ? approveSigners : burnSigners;
+  const approval = completedApprovals.get(owner);
+  if (!minted || used.has(owner) || phase === 'burn' && !approval) {
+    throw new Error('FED withdrawal signing requires its unused completed predecessor slot');
+  }
+  const fields = ['nonce', 'parentNativeHeight', 'bridgeAddressHex', 'tokenAddressHex',
+    'grossAmountNanoErg', 'recipientErgoTreeHex'] as const;
+  if (input === null || typeof input !== 'object' || Object.getPrototypeOf(input) !== Object.prototype
+    || Reflect.ownKeys(input).length !== fields.length || fields.some(key => {
+      const property = Object.getOwnPropertyDescriptor(input, key);
+      return !property?.enumerable || !Object.hasOwn(property, 'value');
+    })) throw new Error('FED withdrawal signing requires exact own-data fields');
+  input = Object.freeze({ ...input });
+  const { nonce, parentNativeHeight, bridgeAddressHex, tokenAddressHex, grossAmountNanoErg, recipientErgoTreeHex } = input;
+  const expectedNonce = phase === 'approve' ? 2 : 3;
+  if (nonce !== expectedNonce || parentNativeHeight !== expectedNonce
+    || bridgeAddressHex !== minted.bridgeAddressHex
+    || typeof tokenAddressHex !== 'string' || !/^0x[0-9a-f]{40}$/.test(tokenAddressHex) || /^0x0+$/.test(tokenAddressHex)
+    || tokenAddressHex === bridgeAddressHex || tokenAddressHex === `0x${owner.addressHex}`
+    || typeof grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(grossAmountNanoErg)
+    || BigInt(grossAmountNanoErg) < 15_000_000n || BigInt(grossAmountNanoErg) > BigInt(minted.amountNanoErg)
+    || typeof recipientErgoTreeHex !== 'string' || !/^0x0008cd0[23][0-9a-f]{64}$/.test(recipientErgoTreeHex)) {
+    throw new Error('FED withdrawal signing differs from its bounded native scope');
+  }
+  try {
+    const key = `0x${recipientErgoTreeHex.slice(8)}`;
+    if (SigningKey.computePublicKey(key, true).toLowerCase() !== key) throw new Error('noncanonical key');
+  } catch { throw new Error('FED withdrawal recipient is not a valid P2PK curve point'); }
+  if (phase === 'burn' && (approval!.bridgeAddressHex !== bridgeAddressHex || approval!.tokenAddressHex !== tokenAddressHex
+    || approval!.grossAmountNanoErg !== grossAmountNanoErg || approval!.recipientErgoTreeHex !== recipientErgoTreeHex)) {
+    throw new Error('FED burn differs from its retained approval scope');
+  }
+  // Pinned genesis base fee 1e9 with at most 12.5% growth per parent block.
+  // These are ceilings for parents 2 and 3 only, paid from synthetic native endowment.
+  const transaction = Object.freeze({ type: 0, chainId: 4242, nonce,
+    to: phase === 'approve' ? tokenAddressHex : bridgeAddressHex,
+    gasPrice: phase === 'approve' ? 1_265_625_000n : 1_423_828_125n,
+    gasLimit: 5_000_000n, value: 0n, data: phase === 'approve'
+      ? withdrawalAbi.encodeFunctionData('approve', [bridgeAddressHex, grossAmountNanoErg])
+      : withdrawalAbi.encodeFunctionData('pegOut', [grossAmountNanoErg, recipientErgoTreeHex]) });
+  // Input inspection can invoke Proxy traps. Claim only after rechecking current custody and use.
+  assertFederatedGenesisOperatorV1(owner);
+  if (used.has(owner)) throw new Error('FED withdrawal signing requires its unused completed predecessor slot');
+  used.add(owner);
+  try {
+    const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
+    assertFederatedGenesisOperatorV1(owner);
+    const parsed = Transaction.from(signedTransactionHex);
+    if (parsed.serialized !== signedTransactionHex || parsed.signature === null || !parsed.signature.isValid()
+      || parsed.signature.networkV === null || parsed.from?.toLowerCase() !== `0x${owner.addressHex}`
+      || parsed.type !== 0 || parsed.chainId !== 4242n || parsed.nonce !== nonce
+      || parsed.to?.toLowerCase() !== transaction.to || parsed.data !== transaction.data
+      || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
+      throw new Error('FED withdrawal signature differs from its exact transaction');
+    }
+    if (phase === 'approve') completedApprovals.set(owner, input);
     return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce });
   } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
 }
@@ -100,6 +193,8 @@ export function signFederatedGenesisReservationV1(
   const payload = Buffer.concat([call, extra, Buffer.from('0100000001000000', 'hex'), genesis, genesis]);
   // SDK SignedPayload hashes payloads >256 bytes before EthereumSignature hashes with Keccak.
   const signingDigestHex = keccak256(blakejs.blake2b(payload, undefined, 32));
+  assertFederatedGenesisOperatorV1(owner);
+  if (reservationSigners.has(owner)) throw new Error('FED native reservation signing is already consumed');
   reservationSigners.add(owner);
   try {
     const signature = owners.get(owner)!.signingKey.sign(signingDigestHex);

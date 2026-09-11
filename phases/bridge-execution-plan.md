@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-10
+Updated: 2026-09-11
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -290,8 +290,24 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED typed provisioning producer | Local materialization checkpoint; native initialization and selected node | Derive the pre-genesis application identity, compile the actual JVM tracker/family, then emit the canonical height-zero V4 profile and full typed config. The selected node accepts it and its raw storage binds the expected runtime/profile. Existing formats and LAB route are unchanged |
 | FED running-target binding | Local native campaign passed at `486d8107` | Actual root joined fresh builds/custody, observed Ergo issuance, deposit, confirmed reserve, proof and mint on both owned targets. Keep request freshness at checking separate from later action freshness. Historical V3/LAB identities cannot replace native provenance; retain unresolved-attempt holds |
 | Native reservation and mint caller | Local native campaign passed at `486d8107` | Reservation block one and chain-4242 nonce-one mint in block two passed exact RPC/token/consumed-record checks. Preserve broadcast authorization and duplicate, absent-commitment, wrong-binding, unreserved-sibling and fee negatives. Pool admission remains distinct from execution and final state |
-| Native burn and retained withdrawal continuation | Next implementation; reuse existing V2 compiler/tracker/payout formats | Bind actual approve/burn observations to the native and Ethereum block identities, net burn and supply changes. Add native source-session attestation without fabricating LAB provenance; use the compiled application profile, not the reservation profile. Extend native setup custody through fee funding and the owned checkpoint/freeze/admission/payout phases; confirm both distinct external fee inputs before freezing the anchor horizon |
+| Native burn and retained withdrawal continuation | Offline approve/burn signing implemented; native execution and continuation pending | Bind actual approve/burn observations to the native and Ethereum block identities, net burn and supply changes. Add native source-session attestation without fabricating LAB provenance; use the compiled application profile, not the reservation profile. Extend native setup custody through fee funding and the owned checkpoint/freeze/admission/payout phases; confirm both distinct external fee inputs before freezing the anchor horizon |
 | Fresh operational two-way campaign | Depends on the native burn/continuation join; completed mint and withdrawal component evidence remain reusable | Use new target/custody and actual RPC calls for deposit-to-mint and burn, followed by the established Ergo withdrawal consumer. Prove this composed run before claiming two-way operation or reusing it for recovery tests; do not rerun a standalone mint campaign without a changed deciding input |
+
+The native operator can now sign one bounded approval and one matching burn
+after its completed mint signature, retaining the gross amount, bridge, token
+and P2PK recipient between calls. This is a signing component, not observation,
+burn execution or payout authority. The next batch must connect fresh parent
+and nonce observations, a durable attempt hold, explicit transport authorization
+and exact receipt/token deltas. A completed signature never substitutes for an
+included predecessor. The fixed native fee ceilings apply only to parents two
+and three of the pinned genesis; the transport must enforce those parents and
+reject a higher observed fee requirement rather than increasing the bid.
+
+Keep signing/execution, checkpoint attestation and Ergo continuation as
+coherent implementation batches. Reuse unchanged compiler, runtime and prior
+component evidence; run a fresh composed campaign only after the return path
+is connected inside the original custody lifetime. Review each stable changed
+boundary independently, not each forwarding step or test edit.
 
 ### Operational Mint Bootstrap Decision
 
