@@ -10,7 +10,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockIn
 // Request provenance and observations are component doubles. WASM signing and
 // exact checked-byte custody are real; the HTTP checker is not a JVM oracle.
 const boundary = vi.hoisted(() => ({
-  requests: new WeakMap<object, object>(), active: true, observe: vi.fn(), build: vi.fn(),
+  requests: new WeakMap<object, object>(), active: true, targetActive: true, observe: vi.fn(), build: vi.fn(),
   failSourceSignature: false, failSourceVerification: false,
   custody: undefined as (() => void) | undefined,
   assert(value: unknown, target?: object) {
@@ -162,6 +162,7 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   boundary.active = true;
+  boundary.targetActive = true;
   boundary.failSourceSignature = false;
   boundary.failSourceVerification = false;
   boundary.custody = undefined;
@@ -221,7 +222,10 @@ async function configureFixture(signer: { publicKeyHex: string; p2pkErgoTreeHex:
     try { return id.to_str(); } finally { id.free(); parsed.free(); }
   });
   vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1')
-    .mockReturnValue({ processBindingDigestHex: '68'.repeat(32), executionTargetIdentityDigestHex: '69'.repeat(32) });
+    .mockImplementation(value => {
+      if (value !== target || !boundary.targetActive) throw new Error('native execution target expired or lacks exact provenance');
+      return { processBindingDigestHex: '68'.repeat(32), executionTargetIdentityDigestHex: '69'.repeat(32) };
+    });
 }
 afterEach(() => { mnemonic = ''; vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -364,11 +368,13 @@ describe('native FED managed setup session', () => {
   let compiled: compiledGenesis.ObservedSubstrateFederatedGenesisV1;
   let sessionMnemonic: string;
   let nativeMintRecipient: string;
+  let compiledActive: boolean;
   let mintOperator: ReturnType<typeof createFederatedGenesisOperatorV1> | undefined;
   beforeEach(async () => {
     const create = execution.createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2;
     const fromEntropy = Mnemonic.fromEntropy;
     sessionMnemonic = '';
+    compiledActive = true;
     nativeMintRecipient = '89'.repeat(20); mintOperator = undefined;
     vi.spyOn(Mnemonic, 'fromEntropy').mockImplementationOnce((...args) => {
       const result = fromEntropy(...args);
@@ -390,9 +396,14 @@ describe('native FED managed setup session', () => {
         sources: { primaryNodeOrigin: ORIGIN, witnessNodeOrigin: WITNESS } },
     } as unknown as compiledGenesis.ObservedSubstrateFederatedGenesisV1;
     boundary.custody = () => assertSigner(session.signer);
-    vi.spyOn(compiledGenesis, 'assertObservedSubstrateFederatedGenesisV1').mockImplementation((value, expectedTarget) => {
-      if (value !== compiled || expectedTarget !== target || !boundary.active) throw new Error('native compiled provenance absent');
+    const validateCompiled: typeof compiledGenesis.validateObservedSubstrateFederatedGenesisV1 = (value, expectedTarget) => {
+      if (value !== compiled || expectedTarget !== target || !boundary.active || !compiledActive) throw new Error('native compiled provenance absent');
       boundary.custody!();
+      return Object.freeze({ compiled, processBinding: owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(expectedTarget) });
+    };
+    vi.spyOn(compiledGenesis, 'validateObservedSubstrateFederatedGenesisV1').mockImplementation(validateCompiled);
+    vi.spyOn(compiledGenesis, 'assertObservedSubstrateFederatedGenesisV1').mockImplementation((value, expectedTarget) => {
+      validateCompiled(value, expectedTarget);
     });
     vi.spyOn(compiledGenesis, 'assertObservedSubstrateFederatedGenesisReadCustodyV1').mockImplementation((value, expectedTarget) => {
       if (value !== compiled || expectedTarget !== target) throw new Error('native compiled read custody absent');
@@ -628,6 +639,7 @@ describe('native FED managed setup session', () => {
   async function withNativeSourceLock(runTest: (context: {
     input: Parameters<typeof executeNativeSourceLock>[0] & { state: StateTracker };
     post: MockInstance<typeof axios.post>;
+    revokePacketProvenance: () => void;
     funding: any;
     onFunding: (callback: (count: number) => void) => void;
     onPost: (callback: () => void) => void;
@@ -728,6 +740,7 @@ describe('native FED managed setup session', () => {
       return { status: 200, data: body.id };
     });
     try { await runTest({ input: { target, batch: fixture.batch, packet, setupSession: session, state }, post, funding,
+      revokePacketProvenance: () => { fixture.packets.delete(packet); },
       onFunding: callback => { fundingCallback = callback; }, onPost: callback => { postCallback = callback; },
       onConfirmation: callback => { confirmationCount = 0; confirmationCallback = callback; },
       onBoxRead: callback => { boxReadCount = 0; boxReadCallback = callback; },
@@ -868,6 +881,7 @@ describe('native FED managed setup session', () => {
   async function withNativeVault(runTest: (context: {
     input: Parameters<typeof executeNativeVault>[0] & { state: StateTracker };
     post: MockInstance<typeof axios.post>;
+    revokePacketProvenance: () => void;
     onPost: (callback: () => void) => void;
     onConfirmation: (callback: (count: number) => number) => void;
     onBoxRead: (callback: (id: string, count: number) => void) => void;
@@ -1302,7 +1316,10 @@ describe('native FED managed setup session', () => {
   it('produces the native height-zero proof from the composed confirmed reserve and retained federation', async () => {
     await withNativeMintProof(async ({ source, proofInput, post }) => {
       const receipt = produceNativeMintProof(source, proofInput);
+      const targetProbe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
+      const before = targetProbe.mock.calls.length;
       assertNativeMintProof(receipt, source, proofInput.draft);
+      expect(targetProbe.mock.calls.length - before).toBe(3);
       const profiles = readSourceProfiles(source);
       const verified = verifySourceSignatures(profiles.mintProofProfile, receipt.request, receipt.result,
         receipt.signatureVerification.signatures);
@@ -1934,18 +1951,22 @@ describe('native FED managed setup session', () => {
     });
   });
 
-  it.each(['packet clone', 'batch clone', 'target clone', 'observation clone', 'disposed'])
+  it.each(['packet clone', 'batch clone', 'target clone', 'observation clone', 'packet revoked', 'disposed'])
     ('rejects native mint draft %s after actual reserve composition', async fault => {
-      await withNativeVault(async ({ input, post }) => {
+      await withNativeVault(async ({ input, post, revokePacketProvenance }) => {
         const reserve = await executeNativeVault(input);
         const joined = { target, batch: input.batch, packet: input.packet,
           committedVaultObservation: reserve.outputObservation };
+        const originalDraft = fault === 'packet revoked' || fault === 'disposed' ? buildNativeMintDraft(joined) : undefined;
         if (fault === 'packet clone') joined.packet = { ...input.packet };
         if (fault === 'batch clone') joined.batch = { ...input.batch };
         if (fault === 'target clone') joined.target = { ...target };
         if (fault === 'observation clone') joined.committedVaultObservation = { ...reserve.outputObservation };
+        if (fault === 'packet revoked') revokePacketProvenance();
         if (fault === 'disposed') session.dispose();
+        await Promise.resolve();
         expect(() => buildNativeMintDraft(joined)).toThrow(/provenance|inactive/);
+        if (originalDraft !== undefined) expect(() => assertNativeMintDraft(originalDraft)).toThrow(/provenance|inactive/);
         expect(post).toHaveBeenCalledTimes(2);
         expect(helpers.ncheck).toHaveBeenCalledTimes(6);
       });
@@ -2312,6 +2333,65 @@ describe('native FED managed setup session', () => {
     expect(() => execution.getSubstrateFederatedNativeGenesisSetupCompilerInputV1(batch, target)).toThrow(/inactive/);
   });
 
+  const nativeBindingFaults = ['process binding', 'target binding', 'primary origin', 'witness origin',
+    'primary mining', 'witness read-only', 'target expiry', 'compiler custody', 'setup custody', 'source custody'] as const;
+  function retainNativeBindingSource(fault: typeof nativeBindingFaults[number]) {
+    if (fault !== 'source custody') return undefined;
+    const source = createSourceSession({ ergoAdmissionThreshold: 1,
+      ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] });
+    const assertCurrentCustody = boundary.custody!;
+    boundary.custody = () => { assertCurrentCustody(); readSourceProfiles(source); };
+    return source;
+  }
+  function invalidateNativeBinding(fault: typeof nativeBindingFaults[number], checking: boolean,
+    source: ReturnType<typeof createSourceSession> | undefined): RegExp {
+    if (fault === 'process binding' || fault === 'target binding') {
+      const current = owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1).mockReturnValue({ ...current,
+        [fault === 'process binding' ? 'processBindingDigestHex' : 'executionTargetIdentityDigestHex']: 'ab'.repeat(32) });
+      return /process binding changed/;
+    }
+    if (fault === 'primary origin') target.primaryNodeOrigin = 'http://127.0.0.1:19051';
+    else if (fault === 'witness origin') target.witnessNodeOrigin = 'http://127.0.0.1:19052';
+    else if (fault === 'primary mining') target.primaryMining = false;
+    else if (fault === 'witness read-only') target.witnessReadOnly = false;
+    else if (fault === 'target expiry') { boundary.targetActive = false; return /execution target expired/; }
+    else if (fault === 'compiler custody') { compiledActive = false; return /compiled provenance absent/; }
+    else if (fault === 'setup custody') {
+      if (checking) expect(() => session.dispose()).toThrow(/running/);
+      else session.dispose();
+      return /inactive|cancelled|active process provenance/;
+    } else if (fault === 'source custody') {
+      if (source === undefined) throw new Error('native binding fixture did not retain its source');
+      source.dispose();
+      return /disposed/;
+    }
+    return /execution target differs from its request/;
+  }
+
+  it('uses one fresh complete target traversal per retained native batch assertion', async () => {
+    const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
+    const probe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
+    for (let index = 0; index < 2; index++) {
+      const before = probe.mock.calls.length;
+      expect(execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toEqual(batch.targetBinding);
+      expect(probe.mock.calls.length - before).toBe(1);
+      await Promise.resolve();
+    }
+  });
+
+  it.each(nativeBindingFaults)('rechecks native batch %s after an intervening await', async fault => {
+    const source = retainNativeBindingSource(fault);
+    try {
+      const batch = await session.runNativeGenesisRetainingSigner(compiled, target);
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).not.toThrow();
+      await Promise.resolve();
+      const expected = invalidateNativeBinding(fault, false, source);
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target)).toThrow(expected);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    } finally { source?.dispose(); }
+  });
+
   it.each(['compiler clone', 'target clone', 'foreign signer'])('rejects %s before building or signing', async fault => {
     const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
     let other: typeof session | undefined;
@@ -2394,18 +2474,26 @@ describe('native FED managed setup session', () => {
     expect(helpers.ncheck).toHaveBeenCalledTimes(ordinal + 1); expect(promote).not.toHaveBeenCalled();
   });
 
-  it('rejects process-binding drift before promoting checked material', async () => {
+  it.each(nativeBindingFaults)('rejects fresh native %s after checking before promotion', async fault => {
+    const source = retainNativeBindingSource(fault);
     const observe = boundary.observe.getMockImplementation()!;
     let count = 0;
+    let expected: RegExp | undefined;
     boundary.observe.mockImplementation(async (...args) => {
       const result = await observe(...args);
-      if (++count === 3) vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1)
-        .mockReturnValue({ processBindingDigestHex: 'ab'.repeat(32), executionTargetIdentityDigestHex: '69'.repeat(32) });
+      if (++count === 3) expected = invalidateNativeBinding(fault, true, source);
       return result;
     });
     const promote = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1');
-    await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toThrow(/process binding changed/);
-    expect(promote).not.toHaveBeenCalled();
+    try {
+      const failure = await session.runNativeGenesisRetainingSigner(compiled, target).then(() => undefined, error => error);
+      expect(count).toBe(3);
+      expect(expected).toBeDefined();
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toMatch(expected!);
+      expect(promote).not.toHaveBeenCalled();
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+    } finally { source?.dispose(); }
   });
 
   it.each(['repeat', 'legacy'])('revokes a retained native batch on a %s transition', async fault => {

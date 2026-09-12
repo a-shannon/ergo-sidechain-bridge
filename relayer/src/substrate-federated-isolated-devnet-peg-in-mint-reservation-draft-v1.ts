@@ -16,7 +16,6 @@ import type {
   SubstrateFederatedIsolatedDevnetPegInCandidateV1,
 } from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
 import type { SubstrateFederatedIsolatedDevnetPegInCandidateV2 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
-import { assertSubstrateFederatedNativeGenesisPegInPacketV1 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import type { SubstrateFederatedPooledReserveDepositV1Packet } from './substrate-federated-pooled-reserve-deposit-v1.js';
 import type { SubstrateFederatedPooledReserveDepositV2Packet } from './substrate-federated-pooled-reserve-deposit-v2.js';
 import type {
@@ -121,7 +120,6 @@ export function assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1
 
 function buildNativeDraftBody(input: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>) {
   const { packet, batch, target, committedVaultObservation: observation } = input;
-  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
   if (assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1(
     observation, target, batch, packet,
   ) !== packet) throw new Error('native committed reserve requires the original packet');

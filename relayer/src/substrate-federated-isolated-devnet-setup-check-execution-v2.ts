@@ -135,6 +135,7 @@ import {
 import {
   assertObservedSubstrateFederatedGenesisV1,
   assertObservedSubstrateFederatedGenesisReadCustodyV1,
+  validateObservedSubstrateFederatedGenesisV1,
   type ObservedSubstrateFederatedGenesisV1,
 } from './substrate-federated-observed-genesis-v1.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
@@ -2541,11 +2542,12 @@ function promoteNativeSetupExecutionBatch(input: Readonly<{
 }>): Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> {
   const assertCurrent = (): void => {
     input.assertSessionActive();
-    assertObservedSubstrateFederatedGenesisV1(input.compiled, input.target);
-    const current = assertExecutionTargetMatchesOrigins(input.target, {
-      primaryNodeOrigin: input.request.target.primary.nodeOrigin,
-      witnessNodeOrigin: input.request.target.witness.nodeOrigin,
-    });
+    const current = validateObservedSubstrateFederatedGenesisV1(input.compiled, input.target).processBinding;
+    if (input.target.primaryNodeOrigin !== input.request.target.primary.nodeOrigin
+      || input.target.witnessNodeOrigin !== input.request.target.witness.nodeOrigin
+      || input.target.primaryMining !== true || input.target.witnessReadOnly !== true) {
+      throw new Error('isolated setup execution target differs from its request');
+    }
     if (canonicalJson(current) !== canonicalJson(input.binding)) {
       throw new Error('native FED setup process binding changed');
     }
@@ -2582,11 +2584,12 @@ export function assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(
     throw new Error('native FED setup batch lacks exact process provenance');
   }
   retained.assertSessionActive();
-  assertObservedSubstrateFederatedGenesisV1(retained.compiled, target);
-  const current = assertExecutionTargetMatchesOrigins(target, {
-    primaryNodeOrigin: batch.request.target.primary.nodeOrigin,
-    witnessNodeOrigin: batch.request.target.witness.nodeOrigin,
-  });
+  const current = validateObservedSubstrateFederatedGenesisV1(retained.compiled, target).processBinding;
+  if (target.primaryNodeOrigin !== batch.request.target.primary.nodeOrigin
+    || target.witnessNodeOrigin !== batch.request.target.witness.nodeOrigin
+    || target.primaryMining !== true || target.witnessReadOnly !== true) {
+    throw new Error('isolated setup execution target differs from its request');
+  }
   if (canonicalJson(current) !== canonicalJson(retained.binding) || batch.targetBinding !== retained.binding
     || batch.profile !== 'fed-native-height-zero-v1' || batch.orderedTransactions.length !== 3) {
     throw new Error('native FED setup batch process binding changed');
