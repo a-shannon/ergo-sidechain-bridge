@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Close root validation and independent review, then run one fresh complete local campaign | Overlay 0006 and retained fee/tracker/payout consumers are implemented. The fixed root now composes the return inside the original custody lifetime. Native burn and canonical Ergo payout on this route still require the fresh campaign |
+| **Now** | Operational mint -> composed withdrawal | Preserve native setup request freshness while removing repeated validation, then run one fresh complete local campaign after affected checks and review | Overlay 0006 and retained fee/tracker/payout consumers are implemented. Campaign 16 stopped at the native setup request's fixed freshness guard. Actual checkpoint attestation and canonical Ergo payout on this route still require the fresh campaign |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -337,8 +337,8 @@ was stopped to unwind the root through its existing cleanup. The root failed
 with witness exit; all owned processes and fixed listeners stopped. This was
 a controlled termination, not a successful round trip or a natural timeout
 exception. Checkpoint execution and Ergo payout remain unestablished on this
-route. The next change addresses duplicate native validation traversals before
-another fresh complete campaign; terminal attempts remain held.
+route. The native validation correction below addresses duplicate traversals;
+terminal attempts remain held.
 
 The native batch now uses the existing compiler validator's returned process
 binding within the same synchronous assertion. The native draft relies on the
@@ -356,6 +356,23 @@ and rejection before promotion after awaited checks. Existing Rust/WASM,
 compiler, V3 lifecycle, wire-format and quorum evidence retains its unchanged
 scope. These component results do not establish a new complete target run or
 a measured campaign speedup.
+
+Campaign 16 built both nodes from the pinned sources and started the paired
+targets, then stopped at the native setup request's fixed 60-second freshness
+guard before mint. All owned processes and listeners stopped. Its terminal
+attempts cannot be resumed. The request is created after Frontier startup;
+the build duration is not part of this request's age. The exact failing
+assertion inside that campaign is not established by its bounded diagnostic.
+
+The request producer now removes two synchronous assertions already performed
+by their immediate caller or callee. Build validation traversals fall from
+eight to seven; each reobservation falls from ten to eight. Runtime provenance
+still performs three traversals. Every post-await custody and freshness check,
+the original request identity, the inclusive 60-second limit and rejection of
+expired handles remain required. A composed regression joins the actual native
+request and observations to the existing checker and WASM signer, with explicit
+compiler/process and HTTP doubles. Its deterministic traversal-cost model
+exposes cumulative expiry without claiming measured node performance.
 
 Native setup now retains its original batch and compiler through withdrawal-fee
 and tracker-fee checks. Both fee consumers preserve exact authorization, durable

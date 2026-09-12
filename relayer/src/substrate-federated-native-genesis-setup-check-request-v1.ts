@@ -175,7 +175,6 @@ export async function assertSubstrateFederatedNativeGenesisSetupCheckRequestV1Ru
 export async function reobserveSubstrateFederatedNativeGenesisSetupCheckRequestV1(
   value: unknown,
 ): Promise<Readonly<SubstrateFederatedGenesisObservationV1>> {
-  assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value);
   await assertSubstrateFederatedNativeGenesisSetupCheckRequestV1RuntimeProvenance(value);
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value);
   const observation = await freshObservation(requests.get(value)!,
@@ -243,7 +242,6 @@ function makeProfile(compiled: Compiled, target: Target, source: ReturnType<type
 }
 
 async function freshObservation(retained: Retained, assertCurrent: () => void) {
-  assertCurrent();
   const observation = await observeSubstrateFederatedGenesisV1(retained.profile);
   assertCurrent();
   assertSubstrateFederatedGenesisObservationV1Provenance(retained.profile, observation);

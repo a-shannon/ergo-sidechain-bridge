@@ -6,7 +6,7 @@ import blakejs from 'blakejs';
 const boundary = vi.hoisted(() => ({
   compiled: new WeakMap<object, object>(), targets: new WeakSet<object>(),
   setupActive: true, sourceActive: true, targetActive: true,
-  processDigest: '81'.repeat(32),
+  processDigest: '81'.repeat(32), targetDigest: '82'.repeat(32),
   boxes: new Map<string, unknown>(), binary: new Map<string, string>(),
   network: 'devnet', genesis: '71'.repeat(32), tip: '72'.repeat(32), height: 120,
   anchor: '72'.repeat(32), anchorHeight: 120,
@@ -25,7 +25,7 @@ vi.mock('./substrate-federated-observed-genesis-v1.js', () => ({
     boundary.validations += 1;
     boundary.onCompiledAssert?.();
     return { compiled: value, processBinding: {
-      processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: '82'.repeat(32),
+      processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: boundary.targetDigest,
     } };
   },
 }));
@@ -79,6 +79,7 @@ beforeEach(async () => {
   vi.setSystemTime(NOW);
   boundary.setupActive = boundary.sourceActive = boundary.targetActive = true;
   boundary.processDigest = '81'.repeat(32);
+  boundary.targetDigest = '82'.repeat(32);
   boundary.network = 'devnet'; boundary.genesis = '71'.repeat(32);
   boundary.tip = boundary.anchor = '72'.repeat(32); boundary.height = boundary.anchorHeight = 120;
   boundary.onRead = undefined; boundary.reads.length = 0;
@@ -134,6 +135,20 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('native FED setup request with stubbed compiler custody and node reads', () => {
+  it.each([
+    ['build', 7], ['reobserve', 8], ['runtime provenance', 3],
+  ] as const)('counts complete compiler traversals for %s without repeating a synchronous boundary', async (operation, expected) => {
+    if (operation === 'build') {
+      await build(input);
+    } else {
+      const request = await build(input);
+      boundary.validations = 0;
+      if (operation === 'reobserve') await reobserve(request);
+      else await assertRuntime(request);
+    }
+    expect(boundary.validations).toBe(expected);
+  });
+
   it('uses one current compiled-target traversal per synchronous source assertion', async () => {
     const request = await build(input);
     boundary.validations = 0;
@@ -214,6 +229,71 @@ describe('native FED setup request with stubbed compiler custody and node reads'
     }
     expect(() => assertRequest(request, { ...input.target })).toThrow('another target');
   });
+  it('rejects copied request handles at the retained runtime entry before any reobservation', async () => {
+    const request = await build(input);
+    boundary.reads.length = 0;
+    boundary.validations = 0;
+    for (const copied of [structuredClone(request), { ...request }, new Proxy(request, {})]) {
+      await expect(reobserve(copied)).rejects.toThrow('process provenance');
+    }
+    expect(boundary.reads).toHaveLength(0);
+    expect(boundary.validations).toBe(0);
+  });
+
+  const awaitStages = [
+    'serialization import', 'serialized issuance return', 'runtime provenance return',
+    'genuine observation return', 'primary anchor read', 'witness anchor read', 'fresh observation return',
+  ] as const;
+  const awaitFaults = [
+    ['source custody', () => { boundary.sourceActive = false; }, 'stub source disposed'],
+    ['process binding', () => { boundary.processDigest = '83'.repeat(32); }, 'compiler or process binding drifted'],
+    ['target identity', () => { boundary.targetDigest = '84'.repeat(32); }, 'compiler or process binding drifted'],
+  ] as const;
+  it.each(awaitStages.flatMap(stage => awaitFaults.map(([fault, mutate, message]) => ({ stage, fault, mutate, message })) ))(
+    'rejects changed $fault after the retained $stage await', async ({ stage, mutate, message }) => {
+      const request = await build(input);
+      boundary.validations = 0;
+      boundary.reads.length = 0;
+      let observed = false;
+      let mutated = false;
+      const fault = () => { mutated = true; mutate(); };
+      const original = observationApi.observeSubstrateFederatedGenesisV1;
+      vi.spyOn(observationApi, 'observeSubstrateFederatedGenesisV1').mockImplementation(async profile => {
+        const result = await original(profile);
+        observed = true;
+        if (stage === 'genuine observation return') fault();
+        return result;
+      });
+      // These callbacks run inside the final synchronous assertion of a
+      // callee. Queue the fault after that assertion but before its caller
+      // resumes, isolating each retained post-await assertion.
+      const beforeReturn = stage === 'serialized issuance return' ? 2
+        : stage === 'runtime provenance return' ? 3
+        : stage === 'fresh observation return' ? 7 : undefined;
+      boundary.onCompiledAssert = () => {
+        if (boundary.validations === beforeReturn) queueMicrotask(fault);
+      };
+      boundary.onRead = () => {
+        if (!observed) return;
+        const read = boundary.reads.at(-1)!;
+        if (read.method === 'height' && read.height === 120
+          && ((stage === 'primary anchor read' && read.origin === PRIMARY)
+            || (stage === 'witness anchor read' && read.origin === WITNESS))) fault();
+      };
+      const pending = reobserve(request);
+      if (stage === 'serialization import') fault();
+      await expect(pending).rejects.toThrow(message);
+      expect(mutated).toBe(true);
+      if (stage === 'serialization import' || stage === 'serialized issuance return'
+        || stage === 'runtime provenance return') expect(boundary.reads).toHaveLength(0);
+      const anchorReads = boundary.reads.filter(read => read.method === 'height' && read.height === 120);
+      if (stage === 'genuine observation return') expect(anchorReads).toHaveLength(0);
+      if (stage === 'primary anchor read') expect(anchorReads.map(read => read.origin)).toEqual([PRIMARY]);
+      if (stage === 'witness anchor read' || stage === 'fresh observation return') {
+        expect(anchorReads.map(read => read.origin)).toEqual([PRIMARY, WITNESS]);
+      }
+    });
+
   it.each(['setupActive', 'sourceActive', 'targetActive'] as const)('rejects disposed %s before and after observation awaits', async key => {
     const request = await build(input);
     boundary[key] = false;
