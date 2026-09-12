@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Extend native retained custody through the existing Ergo tracker/payout consumers and the fixed root | Overlay 0006 selects the active application's bridge and sidechain identity. Native integration, historical pallet, export checks and the selected node build pass; independent source review found no remaining defect. Run one fresh composed campaign after the return path is connected |
+| **Now** | Operational mint -> composed withdrawal | Close root validation and independent review, then run one fresh complete local campaign | Overlay 0006 and retained fee/tracker/payout consumers are implemented. The fixed root now composes the return inside the original custody lifetime. Native burn and canonical Ergo payout on this route still require the fresh campaign |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -291,7 +291,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED running-target binding | Local native campaign passed at `486d8107` | Actual root joined fresh builds/custody, observed Ergo issuance, deposit, confirmed reserve, proof and mint on both owned targets. Keep request freshness at checking separate from later action freshness. Historical V3/LAB identities cannot replace native provenance; retain unresolved-attempt holds |
 | Native reservation and mint caller | Local native campaign passed at `486d8107` | Reservation block one and chain-4242 nonce-one mint in block two passed exact RPC/token/consumed-record checks. Preserve broadcast authorization and duplicate, absent-commitment, wrong-binding, unreserved-sibling and fee negatives. Pool admission remains distinct from execution and final state |
 | Native burn commitment producer | Local source/build checkpoint; overlay 0006 after 0001/0004/0005 | Active-profile selection passes 11 native integration tests, 71 historical pallet tests and 48 export-owner tests. The selected FED node and WASM build with the pinned offline toolchain. Independent source review is complete. The collector rejects absent commitments and genesis-domain substitutions; live native burn remains unestablished |
-| Native burn and retained withdrawal continuation | Native commitment producer and retained fee/tracker/payout consumers implemented; actual root composition pending | The original burn attempt binds paired native storage, runtime events and global burn index to the retained source quorum. Native setup custody now continues through distinct fee checks, process-owned tracker lineage and the terminal payout check. Confirm both external fee inputs before freezing the anchor horizon in the root |
+| Native burn and retained withdrawal continuation | Native commitment producer, retained consumers and fixed root implemented; root validation and review in progress | The original burn attempt binds paired native storage, runtime events and global burn index to the retained source quorum. The root confirms both distinct external fee inputs before attesting the checkpoint and freezing its anchor horizon, then consumes the original tracker and terminal payout checks |
 | Fresh operational two-way campaign | Depends on the native burn/continuation join; completed mint and withdrawal component evidence remain reusable | Use new target/custody and actual RPC calls for deposit-to-mint and burn, followed by the established Ergo withdrawal consumer. Prove this composed run before claiming two-way operation or reusing it for recovery tests; do not rerun a standalone mint campaign without a changed deciding input |
 
 The native execution consumer now retains the confirmed mint through one
@@ -319,8 +319,9 @@ and native genesis identity, while the native setup binds a separate application
 identity. Typed genesis initializes the legacy address too, but that does not
 correct the wrong sidechain domain. Normal native callback tests now exercise
 the selected profile and reject foreign emitters and malformed active state.
-The target root still ends after mint; native-node burn,
-checkpoint execution and Ergo payout remain unestablished on this route.
+The target root now composes mint, approval, native burn and the Ergo return.
+Native-node burn, checkpoint execution and Ergo payout remain unestablished
+on this route until the new complete campaign passes.
 
 Native setup now retains its original batch and compiler through withdrawal-fee
 and tracker-fee checks. Both fee consumers preserve exact authorization, durable
@@ -332,8 +333,13 @@ Payout checking closes signer custody while its original checked result remains
 usable by the established confirmation-target lifecycle. Composed tests use
 genuine JVM compiler output, AVL proofs, WASM signatures and journals with
 explicit source and process/RPC doubles. They do not establish a native two-way
-campaign. The next root integration must preserve these lifetimes and fund both
-fee inputs before checkpoint anchoring.
+campaign. The root retains the same journal and source/operator custody across
+the owned anchor, frozen tracker, freshness, transport and confirmation phases.
+Both external fee inputs are confirmed before the checkpoint window is chosen.
+The burn claim preserves its native and Ethereum identities, exact root, count,
+global event index, recipient and net amount. Its terminal result requires
+canonical tracker and payout confirmations; every owned mining credential is
+revoked during cleanup. Root tests use explicit process and consumer doubles.
 
 Keep signing/execution, checkpoint attestation and Ergo continuation as
 coherent implementation batches. Reuse unchanged compiler, runtime and prior

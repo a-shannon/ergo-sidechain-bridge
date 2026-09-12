@@ -65,7 +65,33 @@ describe('layer import rules', () => {
     ['../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', 'buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'],
     ['../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', 'collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'],
     ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'produceSubstrateFederatedNativeGenesisMintSourceProofV1'],
-    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationAndMintV1'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationMintAndBurnV1'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'attestFrontierNativeBurnCheckpointV1'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'assertFrontierNativeBurnCheckpointV1'],
+    ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+    ['../../substrate-federated-isolated-devnet-mining-credential-v1.js', 'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    ['../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'assertSubstrateFederatedNativeGenesisSetupReadCustodyV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'waitForCanonicalConfirmation'],
+    ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1'],
+    ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1'],
+    ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2'],
+    ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2'],
+    ['../../bridge-validity-tracker-header-context-v1.js', 'buildBridgeValidityTrackerObservedHeaderContextV1'],
+    ['../../substrate-federated-tracker-v2.js', 'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context'],
+    ['../../substrate-federated-tracker-v2-external-fee.js', 'buildSubstrateFederatedTrackerV2ExternalFeeTransaction'],
+    ['../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2'],
   ])('keeps native target lifecycle binding %s#%s at its fixed call site', (specifier, binding) => {
     const declaration = `import { ${binding} } from '${specifier}';`;
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}();`))).toEqual([]);
@@ -76,6 +102,29 @@ describe('layer import rules', () => {
     }
   });
 
+  it.each([
+    ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+    ['substrate-federated-isolated-devnet-mining-credential-v1.ts', 'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts', 'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts', 'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts', 'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+  ])('keeps native return authority %s#%s unavailable to foreign callers', (target, binding) => {
+    for (const foreign of ['apps/bridge-daemon/foreign.ts', 'adapters/foreign.ts', 'foreign.ts']) {
+      const relative = './' + path.posix.relative(path.posix.dirname(foreign), target.replace(/\.ts$/, '.js'));
+      expect(inspect(staticAppFixture(foreign, `import { ${binding} } from '${relative}'; ${binding}();`)).map(item => item.message))
+        .toContain(`exclusive authority import has the wrong owner: ${relative}#${binding}`);
+    }
+  });
+
+  it.each([
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationAndMintV1'],
+    ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2'],
+  ])('rejects superseded mint-only root binding %s#%s', (specifier, binding) => {
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${binding} } from '${specifier}'; ${binding}();`)).map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+  });
+
   it('permits owned native journal construction without exposing StateTracker', () => {
     const specifier = '../../state-tracker.js';
     const declaration = `import { StateTracker } from '${specifier}';`;
@@ -83,6 +132,22 @@ describe('layer import rules', () => {
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} const escaped = StateTracker;`))
       .map(item => item.message)).toContain(
       `restricted capability binding must not escape its reviewed call: ${specifier}#StateTracker`);
+  });
+
+  it('permits an erased native journal type alias without a runtime alias or type query', () => {
+    const specifier = '../../state-tracker.js';
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import type { StateTracker as Journal } from '${specifier}'; type Current = Journal;`))).toEqual([]);
+    for (const declaration of [
+      `import { StateTracker as Journal } from '${specifier}';`,
+      `import { StateTracker, type StateTracker as Journal } from '${specifier}';`,
+    ]) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, declaration)).map(item => item.message))
+        .toContain(`restricted capability import binding must not be aliased: ${specifier}#StateTracker`);
+    }
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { StateTracker } from '${specifier}'; type Journal = typeof StateTracker;`)).map(item => item.message))
+      .toContain(`restricted capability binding must not escape its reviewed call: ${specifier}#StateTracker`);
   });
 
   it('reserves FED genesis target observation to direct root calls', () => {
@@ -127,6 +192,13 @@ describe('layer import rules', () => {
       'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2'],
     ['../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2'],
+    ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2'],
+    ['../../substrate-federated-observed-genesis-v1.js', 'ObservedSubstrateFederatedGenesisV1'],
+    ['../../substrate-federated-isolated-devnet-mining-credential-v1.js', 'SubstrateFederatedIsolatedDevnetMiningCredentialV1'],
+    ['../../substrate-federated-pooled-reserve-deposit-v2.js', 'SubstrateFederatedPooledReserveDepositV2Packet'],
+    ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1'],
+    ['../../unsigned-ergo-transaction.js', 'Eip12Box'],
+    ['../../trustless-burn-proof.js', 'TrustlessBurnInclusionProof'],
   ])('accepts the explicit FED genesis type %s#%s without runtime escape', (specifier, binding) => {
     const root = FEDERATED_GENESIS_TARGET_ROOT;
     expect(inspect(staticAppFixture(root,
@@ -296,7 +368,7 @@ describe('layer import rules', () => {
     ['../../adapters/federated-genesis-target-observation-v1.js', 'rpc'],
     ['../../ergo-settlement-core/strict-json.js', 'parseStrictJson'],
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js',
-      'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
+      'claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2'],
     ['../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', 'buildSubstrateFederatedIsolatedDevnetPegInCandidateV2'],
     ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV2Provenance'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'signFrontierNativeProofBoundReservationV1'],

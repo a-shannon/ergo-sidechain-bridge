@@ -252,8 +252,35 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
 const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['authenticated-spv-tracker-read-only-node-client.ts', new Set(['createBoundedAuthenticatedSpvTrackerReadOnlySource'])],
   ['state-tracker.ts', new Set(['StateTracker'])],
-  ['unsigned-ergo-transaction.ts', new Set(['normalizeEip12Box'])],
-  ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set(['assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1'])],
+  ['unsigned-ergo-transaction.ts', new Set(['normalizeEip12Box', 'Eip12Box'])],
+  ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set([
+    'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1', 'assertSubstrateFederatedNativeGenesisSetupReadCustodyV1',
+    'SubstrateFederatedNativeGenesisSetupExecutionBatchV1',
+  ])],
+  ['substrate-federated-isolated-devnet-mining-credential-v1.ts', new Set([
+    'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1', 'SubstrateFederatedIsolatedDevnetMiningCredentialV1',
+  ])],
+  ['substrate-federated-pooled-reserve-deposit-v2.ts', new Set(['SubstrateFederatedPooledReserveDepositV2Packet'])],
+  ['trustless-burn-proof.ts', new Set(['TrustlessBurnInclusionProof'])],
+  ['substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.ts', new Set([
+    'observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1', 'assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1',
+    'observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2', 'assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2',
+  ])],
+  ['bridge-validity-tracker-header-context-v1.ts', new Set(['buildBridgeValidityTrackerObservedHeaderContextV1'])],
+  ['substrate-federated-tracker-v2.ts', new Set(['buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context'])],
+  ['substrate-federated-tracker-v2-external-fee.ts', new Set(['buildSubstrateFederatedTrackerV2ExternalFeeTransaction'])],
+  ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts', new Set([
+    'authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission', 'reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+    'revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission', 'confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+  ])],
+  ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts', new Set([
+    'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2', 'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
+    'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2',
+  ])],
+  ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
+    'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
+    'submitSubstrateFederatedIsolatedDevnetWithdrawalV2', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+  ])],
   ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set(['createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'])],
   ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
   ['pinned-local-native-verifier-build.ts', new Set(['runBoundedProcess'])],
@@ -283,7 +310,8 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ])],
   ['substrate-federated-isolated-devnet-setup-check-runner-v2.ts', new Set([
     'createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
-    'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
+    'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
+    'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2',
   ])],
   ['substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts', new Set([
     'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance',
@@ -292,9 +320,10 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
     'readSubstrateFederatedGenesisProfilesFromSessionV2',
     'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2',
+    'SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1',
     'produceSubstrateFederatedNativeGenesisMintSourceProofV1',
   ])],
-  ['substrate-federated-observed-genesis-v1.ts', new Set(['compileObservedSubstrateFederatedGenesisV1'])],
+  ['substrate-federated-observed-genesis-v1.ts', new Set(['compileObservedSubstrateFederatedGenesisV1', 'ObservedSubstrateFederatedGenesisV1'])],
   ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInPacketV1'])],
   ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
   ['substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts', new Set(['collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'])],
@@ -313,8 +342,12 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
     'executeSubstrateFederatedNativeGenesisBatchV1', 'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
     'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
+    'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1',
+    'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1', 'waitForCanonicalConfirmation',
   ])],
-  ['./frontier-native-proof-bound-reservation-signing-v1.js', new Set(['executeFrontierNativeProofBoundReservationAndMintV1'])],
+  ['./frontier-native-proof-bound-reservation-signing-v1.js', new Set([
+    'executeFrontierNativeProofBoundReservationMintAndBurnV1', 'attestFrontierNativeBurnCheckpointV1', 'assertFrontierNativeBurnCheckpointV1',
+  ])],
   ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys', 'canonicalJson'])],
   ['node:crypto', new Set(['createHash'])],
   ['node:fs', new Set(['mkdirSync', 'mkdtempSync', 'readFileSync', 'realpathSync', 'writeFileSync'])],
@@ -2040,7 +2073,8 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
         'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
         'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2',
-      ].map(symbol => [symbol, new Set(['apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts'])] as const),
+      ].map(symbol => [symbol, new Set([FEDERATED_GENESIS_TARGET_ROOT,
+        'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts'])] as const),
     ]),
   ],
   [
@@ -2077,6 +2111,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       [
         'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1',
         new Set([
+          FEDERATED_GENESIS_TARGET_ROOT,
           'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
           'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
           'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
@@ -2091,7 +2126,6 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       [
         'claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2',
         new Set([
-          FEDERATED_GENESIS_TARGET_ROOT,
           'apps/bridge-daemon/substrate-federated-isolated-devnet-bootstrap-root-v1.ts',
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
         ]),
@@ -2105,6 +2139,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       [
         'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2',
         new Set([
+          FEDERATED_GENESIS_TARGET_ROOT,
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
           'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
         ]),
@@ -2530,7 +2565,9 @@ function inspectRestrictedImportBindings(
         message:
           `restricted capability import binding is not allowlisted: ${imported.value}#${binding.imported}`,
       });
-    } else if (binding.local !== binding.imported) {
+    } else if (binding.local !== binding.imported
+      && !(file === FEDERATED_GENESIS_TARGET_ROOT && imported.typeOnly
+        && imported.value === '../../state-tracker.js' && binding.imported === 'StateTracker')) {
       violations.push({
         file,
         line: imported.line,
