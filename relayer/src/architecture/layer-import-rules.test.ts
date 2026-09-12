@@ -74,6 +74,7 @@ describe('layer import rules', () => {
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'waitForCanonicalConfirmation'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'projectTrackerCanonicalConfirmationFailureDiagnosticV1'],
     ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1'],
     ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1'],
     ['../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', 'observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2'],
@@ -87,6 +88,7 @@ describe('layer import rules', () => {
     ['../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', 'confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
     ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
     ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic'],
     ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetWithdrawalV2'],
     ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
     ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
@@ -390,6 +392,7 @@ describe('layer import rules', () => {
         readonly frontierBuild: Omit<BuildSubstrateFederatedGenesisNodeV1Input, 'sourceSession'>;
       }
       export function runSubstrateFederatedGenesisTargetRootV1() {}
+      export function projectSubstrateFederatedNativeTrackerConfirmationFailureV1() {}
     `))).toEqual([]);
     expect(inspect(staticAppFixture(root, "import '../../unregistered-authority.js';"))
       .map(item => item.message)).toContain(
@@ -405,6 +408,10 @@ describe('layer import rules', () => {
     expect(inspect({ [root]: 'const hidden = () => {}; export { hidden as runSubstrateFederatedGenesisTargetRootV1 };' })
       .map(item => item.message)).toContain(
       'reviewed app root export must not be aliased: hidden#runSubstrateFederatedGenesisTargetRootV1',
+    );
+    expect(inspect({ [root]: 'const hidden = () => {}; export { hidden as projectSubstrateFederatedNativeTrackerConfirmationFailureV1 };' })
+      .map(item => item.message)).toContain(
+      'reviewed app root export must not be aliased: hidden#projectSubstrateFederatedNativeTrackerConfirmationFailureV1',
     );
   });
 

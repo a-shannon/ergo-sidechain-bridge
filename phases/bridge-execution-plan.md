@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Run one fresh complete local campaign with the reviewed native observation/revalidator correction | Overlay 0006 and retained fee/tracker/payout consumers are implemented. Campaign 17 reached public mint, approval and burn, but its initial action remained open past the fixed completion budget. Actual checkpoint attestation and canonical Ergo payout on this route still require the fresh campaign |
+| **Now** | Operational mint -> composed withdrawal | Diagnose native tracker transport-to-confirmation using the retained failure projection and focused admission fixtures; run a fresh complete campaign only after a reviewed deciding change | Campaign 19 reached tracker confirmation and failed at its deadline. Its public burn observation passed, but no terminal success receipt, canonical tracker admission or Ergo payout was established. Preserve its terminal holds; do not retry it |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -469,6 +469,32 @@ The burn claim preserves its native and Ethereum identities, exact root, count,
 global event index, recipient and net amount. Its terminal result requires
 canonical tracker and payout confirmations; every owned mining credential is
 revoked during cleanup. Root tests use explicit process and consumer doubles.
+
+Campaign 19 at `241d7db83e5e1b213a98b827a45a914c0ea2894d` reached native
+burn and the tracker confirmation phase, then failed at its unchanged
+120-second confirmation deadline. The public burn capture independently
+matched both nodes' native commitment, leaf list and runtime event, with one
+leaf at global event index two. All owned processes and listeners stopped.
+No terminal success receipt was exported; canonical tracker admission and
+payout remain unestablished. Its retained attempts cannot be retried.
+
+The native root now retains the existing bounded transport and confirmation
+diagnostics through the original thrown error and the existing bounded primary
+cleanup-error chain. Transaction, durable attempt and
+confirmation-target identities must match before projection. Missing, foreign
+or throwing diagnostic producers preserve the original failure and cleanup;
+they cannot initiate another transport or payout. The projection contains no
+signed transaction, response body or resumable authority. Component tests use
+explicit process and transport doubles; cleanup-wrapper tests exercise the
+actual confirmation-diagnostic producer. A separate cleanup failure that
+replaces the original error remains outside this projection's scope.
+The exact native signed tracker
+transaction also passes WASM proof and transaction validation in synthetic
+first-block and following-block contexts. Separate anchor-retirement and
+checkpoint-expiry cases reject the tracker input while its fee input remains
+valid. These fixtures do not establish target-node inclusion or identify the
+cause of campaign 19's failure. Diagnose that boundary before another fresh
+complete campaign; recovery remains after canonical native payout.
 
 Keep signing/execution, checkpoint attestation and Ergo continuation as
 coherent implementation batches. Reuse unchanged compiler, runtime and prior

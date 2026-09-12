@@ -18,6 +18,7 @@ const mocked = vi.hoisted(() => ({
   checkpoint: vi.fn(), checkpointAssert: vi.fn(), anchor: vi.fn(), anchorAssert: vi.fn(), frozenObservation: vi.fn(), observationAssert: vi.fn(),
   headers: vi.fn(), context: vi.fn(), trackerTx: vi.fn(), trackerCheck: vi.fn(), trackerAuthorize: vi.fn(), trackerReserve: vi.fn(),
   trackerFreshness: vi.fn(), trackerSubmit: vi.fn(), trackerFinalize: vi.fn(), trackerConfirm: vi.fn(),
+  projectConfirmation: vi.fn(), projectSubmission: vi.fn(),
   payoutCheck: vi.fn(), payoutAuthorize: vi.fn(), payoutReserve: vi.fn(), payoutSubmit: vi.fn(), payoutFinalize: vi.fn(), payoutConfirm: vi.fn(), wait: vi.fn(),
 }));
 vi.mock('../../substrate-federated-genesis-node-build-v1.js', () => ({ buildSubstrateFederatedGenesisNodeV1: mocked.frontier }));
@@ -53,6 +54,7 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
   executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1: mocked.withdrawalFee,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1: mocked.trackerFee,
   waitForCanonicalConfirmation: mocked.wait,
+  projectTrackerCanonicalConfirmationFailureDiagnosticV1: mocked.projectConfirmation,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   buildSubstrateFederatedNativeGenesisPegInPacketV1: mocked.packet,
@@ -104,6 +106,7 @@ vi.mock('../../substrate-federated-isolated-devnet-checked-submission-transport-
   finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission: mocked.trackerFinalize,
   submitSubstrateFederatedIsolatedDevnetWithdrawalV2: mocked.payoutSubmit,
   finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2: mocked.payoutFinalize,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic: mocked.projectSubmission,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', () => ({
   authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2: mocked.payoutAuthorize,
@@ -111,7 +114,8 @@ vi.mock('../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 
   confirmSubstrateFederatedIsolatedDevnetWithdrawalV2: mocked.payoutConfirm,
 }));
 
-import { runSubstrateFederatedGenesisTargetRootV1, type RunSubstrateFederatedGenesisTargetRootV1Input } from './substrate-federated-genesis-target-root-v1.js';
+import { runSubstrateFederatedGenesisTargetRootV1, projectSubstrateFederatedNativeTrackerConfirmationFailureV1,
+  type RunSubstrateFederatedGenesisTargetRootV1Input } from './substrate-federated-genesis-target-root-v1.js';
 import * as setups from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import * as sources from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import * as operators from '../../adapters/federated-genesis-operator-v1.js';
@@ -253,6 +257,7 @@ function canonicalBox(fields: Omit<Eip12Box, 'boxId'>): Eip12Box {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocked.projectConfirmation.mockReturnValue(null); mocked.projectSubmission.mockReturnValue(null);
   vi.spyOn(StateTracker.prototype, 'close');
   setup = undefined; source = undefined; operator = undefined;
   miningCredential = undefined; compiledGenesisBytes = undefined;
@@ -459,7 +464,7 @@ beforeEach(() => {
   });
   mocked.confirmation.mockImplementation((value, headerId) => {
     expect([target, phaseTargets.confirmation]).toContain(value); expect(headerId).toBe(batch.request.target.genesisHeaderIdHex);
-    return { observe: observeConfirmation };
+    return { observe: observeConfirmation, reconciliationIdentityDigestHex: 'ca'.repeat(32) };
   });
   readErgoBox = (_origin, id) => {
     const value = compiled.issuance.orderedTransactions.find(({ transaction }: any) => transaction.outputs[0].boxId === id);
@@ -886,6 +891,123 @@ describe('fresh FED target composition', () => {
     expect(mocked.payoutConfirm).not.toHaveBeenCalled(); assertDownstreamCleanup();
   });
 
+  it.each(['accepted', 'ambiguous_http_response'] as const)('retains native tracker failure diagnostic after %s without retry or payout', async outcome => {
+    const failure = new Error('native tracker confirmation deadline');
+    const originalSubmission = mocked.trackerSubmit.getMockImplementation()!;
+    mocked.trackerSubmit.mockImplementation(async (...args) => {
+      const value = await originalSubmission(...args);
+      returnValues.trackerSubmission = Object.freeze({ ...value, status: outcome === 'accepted' ? 'accepted' : 'ambiguous' });
+      return returnValues.trackerSubmission;
+    });
+    const transport = Object.freeze({ outcome, httpStatus: outcome === 'accepted' ? 200 : 400,
+      expectedTxId: 'e3'.repeat(32), durableAttemptDigestHex: 'd3'.repeat(32), responseDigestHex: 'f3'.repeat(32) });
+    const confirmation = Object.freeze({ category: 'not_found_at_deadline', expectedTransactionIdHex: 'e3'.repeat(32),
+      executionTargetIdentityDigestHex: 'ca'.repeat(32), confirmationBudgetMs: 120000, observationCount: 3,
+      lastObservation: Object.freeze({ status: 'not_found', confirmations: 0, observedAtHeight: 165,
+        observationDigestHex: 'f2'.repeat(32) }) });
+    mocked.projectSubmission.mockImplementation(value => value === returnValues.trackerSubmission ? transport : null);
+    mocked.projectConfirmation.mockImplementation(value => value === failure ? confirmation : null);
+    const original = mocked.wait.getMockImplementation()!;
+    mocked.wait.mockImplementation(async (...args) => {
+      if (args[3] === 'native-tracker-admission') throw failure;
+      return original(...args);
+    });
+    expect(await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error)).toBe(failure);
+    const diagnostic = projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure);
+    expect(diagnostic).toEqual({ transport, confirmation });
+    expect(diagnostic?.transport).toBe(transport); expect(diagnostic?.confirmation).toEqual(confirmation);
+    expect(Object.isFrozen(diagnostic?.confirmation)).toBe(true);
+    expect(Object.isFrozen(diagnostic)).toBe(true);
+    expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(new Error(failure.message))).toBeNull();
+    expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(structuredClone(diagnostic))).toBeNull();
+    expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
+    expect(mocked.trackerConfirm).not.toHaveBeenCalled(); expect(mocked.payoutCheck).not.toHaveBeenCalled();
+    expect(mocked.payoutSubmit).not.toHaveBeenCalled(); assertDownstreamCleanup();
+  });
+
+  it.each(['missing transport', 'missing confirmation', 'transport transaction', 'transport attempt',
+    'confirmation transaction', 'confirmation target', 'throwing transport projector', 'throwing confirmation projector'] as const)(
+    'refuses native tracker failure diagnostic for %s while preserving the original failure', async fault => {
+      const failure = new Error('original native tracker deadline');
+      const transport = Object.freeze({ outcome: 'accepted', httpStatus: 200, expectedTxId: 'e3'.repeat(32),
+        durableAttemptDigestHex: 'd3'.repeat(32), responseDigestHex: 'f3'.repeat(32) });
+      const confirmation = Object.freeze({ category: 'not_found_at_deadline', expectedTransactionIdHex: 'e3'.repeat(32),
+        executionTargetIdentityDigestHex: 'ca'.repeat(32) });
+      mocked.projectSubmission.mockImplementation(value => {
+        expect(value).toBe(returnValues.trackerSubmission);
+        if (fault === 'throwing transport projector') throw new Error('diagnostic projection failure');
+        return fault === 'missing transport' ? null : fault === 'transport transaction'
+          ? { ...transport, expectedTxId: 'ff'.repeat(32) } : fault === 'transport attempt'
+          ? { ...transport, durableAttemptDigestHex: 'ff'.repeat(32) } : transport;
+      });
+      mocked.projectConfirmation.mockImplementation(value => {
+        expect(value).toBe(failure);
+        if (fault === 'throwing confirmation projector') throw new Error('diagnostic projection failure');
+        return fault === 'missing confirmation' ? null : fault === 'confirmation transaction'
+          ? { ...confirmation, expectedTransactionIdHex: 'ff'.repeat(32) } : fault === 'confirmation target'
+          ? { ...confirmation, executionTargetIdentityDigestHex: 'ff'.repeat(32) } : confirmation;
+      });
+      const original = mocked.wait.getMockImplementation()!;
+      mocked.wait.mockImplementation(async (...args) => {
+        if (args[3] === 'native-tracker-admission') throw failure;
+        return original(...args);
+      });
+      expect(await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error)).toBe(failure);
+      expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure)).toBeNull();
+      expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
+      expect(mocked.trackerConfirm).not.toHaveBeenCalled(); expect(mocked.payoutCheck).not.toHaveBeenCalled();
+      assertDownstreamCleanup();
+    });
+
+  it.each(['primary', 'nested primary', 'secondary', 'over depth', 'cause', 'getter', 'proxy'] as const)(
+    'projects genuine native tracker diagnostics through the %s failure boundary', async shape => {
+      const real = await vi.importActual<typeof import('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js')>(
+        './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js');
+      mocked.projectConfirmation.mockImplementation(real.projectTrackerCanonicalConfirmationFailureDiagnosticV1);
+      mocked.projectSubmission.mockImplementation(value => value === returnValues.trackerSubmission
+        ? Object.freeze({ outcome: 'accepted', httpStatus: 200, expectedTxId: 'e3'.repeat(32),
+          durableAttemptDigestHex: 'd3'.repeat(32), responseDigestHex: 'f3'.repeat(32) }) : null);
+      const originalWait = mocked.wait.getMockImplementation()!;
+      mocked.wait.mockImplementation(async (...args) => args[3] === 'native-tracker-admission'
+        ? real.waitForCanonicalConfirmation(args[0], args[1], performance.now() - 1, args[3], args[4])
+        : originalWait(...args));
+      const originalProcess = mocked.process.getMockImplementation()!;
+      let originalFailure: unknown;
+      let returnedFailure: unknown;
+      const trap = vi.fn(() => { throw new Error('failure accessor must not execute'); });
+      mocked.process.mockImplementation((...args) => {
+        const process = originalProcess(...args);
+        return { ...process, withTrackerTransportConfirmationMiningTarget: async (...confirmationArgs: unknown[]) => {
+          try { return await process.withTrackerTransportConfirmationMiningTarget(...confirmationArgs); }
+          catch (failure) {
+            originalFailure = failure;
+            const cleanup = new Error('process cleanup failure');
+            returnedFailure = new AggregateError([failure, cleanup], 'confirmation and cleanup failed');
+            if (shape === 'nested primary' || shape === 'over depth') {
+              for (let i = 1; i < (shape === 'nested primary' ? 3 : 4); i += 1) {
+                returnedFailure = new AggregateError([returnedFailure, cleanup], 'outer cleanup failed');
+              }
+            } else if (shape === 'secondary') returnedFailure = new AggregateError([cleanup, failure], 'secondary only');
+            else if (shape === 'cause') returnedFailure = new Error('cause only', { cause: failure });
+            else if (shape === 'getter') Object.defineProperty(returnedFailure, 'errors', { get: trap });
+            else if (shape === 'proxy') returnedFailure = new Proxy(returnedFailure as object, { getOwnPropertyDescriptor: trap });
+            throw returnedFailure;
+          }
+        } };
+      });
+      const caught = await runSubstrateFederatedGenesisTargetRootV1(input).catch(failure => failure);
+      expect(caught).toBe(returnedFailure);
+      const direct = projectSubstrateFederatedNativeTrackerConfirmationFailureV1(originalFailure);
+      expect(direct?.confirmation.category).toBe('managed_deadline_elapsed');
+      expect(direct?.confirmation.observationCount).toBe(0);
+      expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(caught))
+        .toBe(shape === 'primary' || shape === 'nested primary' ? direct : null);
+      expect(trap).not.toHaveBeenCalled();
+      expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
+      expect(mocked.trackerConfirm).not.toHaveBeenCalled(); expect(mocked.payoutCheck).not.toHaveBeenCalled();
+      assertDownstreamCleanup();
+    });
+
   it('retains a pending payout attempt without retry or terminal success', async () => {
     const original = mocked.wait.getMockImplementation()!;
     mocked.wait.mockImplementation(async (...args) => {
@@ -920,6 +1042,7 @@ describe('fresh FED target composition', () => {
     expect(result.singletonIssuanceEstablished).toBe(true); expect(result.operationalMintEstablished).toBe(true);
     expect(result.canonicalPayoutEstablished).toBe(true); expect(result.withdrawal.payout.amountNanoErg).toBe('10000000');
     expect(result.sourceFinalityEstablished).toBe(false); expect(result.trustless).toBe(false);
+    expect(mocked.projectConfirmation).not.toHaveBeenCalled(); expect(mocked.projectSubmission).not.toHaveBeenCalled();
     expect(result.pegIn).toEqual({ sourceLockTransactionIdHex: sourceLock.expectedTxId,
       reserveTransitionTransactionIdHex: committedVault.expectedTxId, sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
       reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId, mintIdentityHex: mint.mintIdentityHex,

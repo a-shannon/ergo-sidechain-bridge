@@ -49,6 +49,7 @@ import {
   executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   waitForCanonicalConfirmation,
+  projectTrackerCanonicalConfirmationFailureDiagnosticV1,
 } from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import { executeFrontierNativeProofBoundReservationMintAndBurnV1, attestFrontierNativeBurnCheckpointV1,
   assertFrontierNativeBurnCheckpointV1 } from './frontier-native-proof-bound-reservation-signing-v1.js';
@@ -63,7 +64,8 @@ import { authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission, reserveSub
   revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission, confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission }
   from '../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js';
 import { submitSubstrateFederatedIsolatedDevnetTrackerV2Admission, finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission,
-  submitSubstrateFederatedIsolatedDevnetWithdrawalV2, finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2 }
+  submitSubstrateFederatedIsolatedDevnetWithdrawalV2, finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic }
   from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import { authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2, reserveSubstrateFederatedIsolatedDevnetWithdrawalV2,
   confirmSubstrateFederatedIsolatedDevnetWithdrawalV2 } from '../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js';
@@ -435,6 +437,36 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
   }
 }
 
+function nativeTrackerConfirmationFailure(input: Readonly<{
+  failure: unknown;
+  submission: unknown;
+  expectedTxId: string;
+  durableAttemptDigestHex: string;
+  confirmationTargetIdentityDigestHex: string;
+}>) {
+  const transport = projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic(input.submission);
+  const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(input.failure);
+  if (transport === null || confirmation === null
+    || transport.expectedTxId !== input.expectedTxId
+    || transport.durableAttemptDigestHex !== input.durableAttemptDigestHex
+    || confirmation.expectedTransactionIdHex !== input.expectedTxId
+    || confirmation.executionTargetIdentityDigestHex !== input.confirmationTargetIdentityDigestHex) return null;
+  const diagnostic = Object.freeze({ transport, confirmation: Object.freeze({ ...confirmation }) });
+  NATIVE_TRACKER_CONFIRMATION_FAILURES.set(confirmation, diagnostic);
+  return diagnostic;
+}
+
+const NATIVE_TRACKER_CONFIRMATION_FAILURES = new WeakMap<object,
+  NonNullable<ReturnType<typeof nativeTrackerConfirmationFailure>>>();
+
+/** Bounded diagnostics from the original failure or its primary cleanup wrappers, never resume authority. */
+export function projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure: unknown) {
+  try {
+    const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(failure);
+    return confirmation === null ? null : NATIVE_TRACKER_CONFIRMATION_FAILURES.get(confirmation) ?? null;
+  } catch { return null; }
+}
+
 interface NativeFeeFundingReceipt {
   readonly expectedTxId: string;
   readonly durableAttemptDigestHex: string;
@@ -570,8 +602,18 @@ async function completeNativeReturn(input: Readonly<{
   const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {
     readCustody();
     const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, genesisHeaderIdHex);
-    const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
-      performance.now() + 2 * 60_000, 'native-tracker-admission', readCustody);
+    let confirmation: Awaited<ReturnType<typeof observer.observe>>;
+    try {
+      confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+        performance.now() + 2 * 60_000, 'native-tracker-admission', readCustody);
+    } catch (failure) {
+      try {
+        nativeTrackerConfirmationFailure({ failure, submission: transported.value.submission,
+          expectedTxId: attempt.expectedTxId, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+          confirmationTargetIdentityDigestHex: observer.reconciliationIdentityDigestHex });
+      } catch { /* Optional diagnostics must not replace the original failure or interrupt cleanup. */ }
+      throw failure;
+    }
     const tracker = await confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target, confirmation);
     readCustody();
     const checked = await setup.checkNativeWithdrawalV2(claim, target);

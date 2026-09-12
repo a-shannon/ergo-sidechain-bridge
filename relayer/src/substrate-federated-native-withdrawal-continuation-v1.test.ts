@@ -57,8 +57,10 @@ import { decodeSubstrateFederatedSettlementFamilyV1Profile } from './substrate-f
 import { buildSubstrateFederatedNativeGenesisPegInPacketV1 } from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { buildTrustlessBurnInclusionProof, deriveTrustlessBurnIdHex } from './trustless-burn-proof.js';
 import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
-import { buildBridgeValidityTrackerCanonicalHeaderContextV1, buildBridgeValidityTrackerObservedHeaderContextV1 }
+import { buildBridgeValidityTrackerCanonicalHeaderContextV1, buildBridgeValidityTrackerObservedHeaderContextV1,
+  serializeCanonicalErgoHeaderV2 }
   from './bridge-validity-tracker-header-context-v1.js';
+import { buildWasmSimplifiedUpcomingPreHeaderCarrier } from './ergo-upcoming-state-context.js';
 import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context } from './substrate-federated-tracker-v2.js';
 import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substrate-federated-tracker-v2-external-fee.js';
 import { authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission as authorizeTracker,
@@ -112,6 +114,57 @@ const headerContext = (height: number, extension = '94'.repeat(32), index = 0) =
   buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
     currentHeight: height, anchorContextIndex: index, anchorExtensionRootHex: extension,
   }).headers.map(header => header.raw);
+
+// Extend the original mined chain; rebuilding a synthetic window at another
+// height would change the attested anchor's ID even if its extension were equal.
+function appendSyntheticMinedHeader(headers: readonly Readonly<Record<string, unknown>>[]) {
+  const tip = headers[0]!;
+  const next = { ...structuredClone(tip), parentId: tip.id,
+    height: Number(tip.height) + 1, timestamp: Number(tip.timestamp) + 120_000,
+    extensionHash: '95'.repeat(32) };
+  const id = Buffer.from(blakejs.blake2b(serializeCanonicalErgoHeaderV2(next), undefined, 32)).toString('hex');
+  return [Object.freeze({ ...next, id }), ...headers.slice(0, 9)];
+}
+
+function verifyRetainedTrackerAtHeaders(input: Readonly<{
+  signedBody: Record<string, unknown>;
+  signedCandidate: Readonly<{ txId: string; signedTransactionBytesSha256Hex: string; signedTransactionBytesLength: number }>;
+  boxes: readonly Readonly<Eip12Box>[];
+  headers: readonly Readonly<Record<string, unknown>>[];
+  minedHeader?: Readonly<Record<string, unknown>>;
+}>) {
+  const { signedBody, signedCandidate, boxes, headers } = input;
+  expect(headers).toHaveLength(10);
+  for (const [index, header] of headers.entries()) {
+    expect(header.id).toBe(Buffer.from(blakejs.blake2b(serializeCanonicalErgoHeaderV2(header), undefined, 32)).toString('hex'));
+    if (index > 0) {
+      expect(headers[index - 1]!.parentId).toBe(header.id);
+      expect(Number(headers[index - 1]!.height)).toBe(Number(header.height) + 1);
+    }
+  }
+  const preHeaderRaw = input.minedHeader ?? buildWasmSimplifiedUpcomingPreHeaderCarrier(headers[0]!);
+  expect(preHeaderRaw.parentId).toBe(headers[0]!.id);
+  expect(preHeaderRaw.height).toBe(Number(headers[0]!.height) + 1);
+  const tx = wasm.Transaction.from_json(JSON.stringify(signedBody));
+  const txId = tx.id();
+  const bytes = Buffer.from(tx.sigma_serialize_bytes());
+  expect(txId.to_str()).toBe(signedCandidate.txId);
+  expect(bytes.length).toBe(signedCandidate.signedTransactionBytesLength);
+  expect(createHash('sha256').update(bytes).digest('hex')).toBe(signedCandidate.signedTransactionBytesSha256Hex);
+  expect((signedBody.inputs as { boxId: string }[]).map(value => value.boxId)).toEqual(boxes.map(box => box.boxId));
+  const carrier = wasm.BlockHeader.from_json(JSON.stringify(preHeaderRaw));
+  const preHeader = wasm.PreHeader.from_block_header(carrier);
+  const context = new wasm.ErgoStateContext(preHeader, wasm.BlockHeaders.from_json(headers), wasm.Parameters.default_parameters());
+  const inputs = wasm.ErgoBoxes.from_boxes_json(boxes);
+  const dataInputs = wasm.ErgoBoxes.empty();
+  try {
+    const proofs = boxes.map((_box, index) => wasm.verify_tx_input_proof(index, context, tx, inputs, dataInputs));
+    let transactionError: string | null = null;
+    try { wasm.validate_tx(tx, context, inputs, dataInputs); }
+    catch (error) { transactionError = String(error); }
+    return { proofs, transactionError };
+  } finally { dataInputs.free(); inputs.free(); context.free(); txId.free(); tx.free(); }
+}
 
 beforeAll(async () => {
   const module = await import('ergo-lib-wasm-nodejs'); wasm = module.default ?? module;
@@ -179,14 +232,15 @@ afterEach(() => {
 type Fault = 'valid' | 'foreign native origin' | 'source disposed during tracker' | 'source disposed during payout' | 'foreign confirmation'
   | 'source disposed before tracker authorization' | 'source disposed before tracker reservation' | 'source disposed before tracker transport'
   | 'source disposed inside tracker preparation' | 'source disposed inside tracker checker'
-  | 'source disposed inside payout preparation' | 'source disposed inside payout checker';
+  | 'source disposed inside payout preparation' | 'source disposed inside payout checker' | 'tracker WASM expiry';
 
 describe('native FED withdrawal continuation', () => {
   it.each<Fault>(['valid', 'foreign native origin', 'source disposed during tracker',
     'source disposed during payout', 'foreign confirmation', 'source disposed before tracker authorization',
     'source disposed before tracker reservation', 'source disposed before tracker transport',
     'source disposed inside tracker preparation', 'source disposed inside tracker checker',
-    'source disposed inside payout preparation', 'source disposed inside payout checker'])('preserves native custody through terminal payout: %s', async fault => {
+    'source disposed inside payout preparation', 'source disposed inside payout checker',
+    'tracker WASM expiry'])('preserves native custody through terminal payout: %s', async fault => {
     vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValue(testMnemonic);
     const session = await createSession();
     const state = new StateTracker(':memory:');
@@ -391,7 +445,8 @@ describe('native FED withdrawal continuation', () => {
       const statement = buildSubstrateFederatedCheckpointStatementV1({ ...vector.input.statement,
         ...trackerRequest.application, profile: trackerRequest.profile, sourceNativeBlockHeight: '4',
         sourceNativeBlockHashHex: 'a1'.repeat(32), executionBlockHashHex: leaf.sidechainBlockHashHex,
-        bridgeEventRootHex: proof.bridgeEventRootHex, burnLeafCount: proof.leafCount });
+        bridgeEventRootHex: proof.bridgeEventRootHex, burnLeafCount: proof.leafCount,
+        ...(fault === 'tracker WASM expiry' ? { admissionExpiresAtErgoHeight: '1031' } : {}) });
       const membership = buildErgoExtensionMembershipProof([{ key: Buffer.from('0401', 'hex'),
         value: Buffer.from(encodeSubstrateFederatedCheckpointExtensionValueV1(statement.encodedStatementHex), 'hex') }], Buffer.from('0401', 'hex'));
       signingHeaders = headerContext(1030, membership.root.toString('hex'), 1);
@@ -449,6 +504,48 @@ describe('native FED withdrawal continuation', () => {
       const submitted = await submitTracker(transportTarget, attempt);
       expect(submitted.status).toBe('accepted');
       expect(canonicalJson(submissionBodies[0])).toBe(checkedBody);
+      if (fault === 'valid' || fault === 'tracker WASM expiry') {
+        const retained = { signedBody: submissionBodies[0]!, signedCandidate: checked.result.signedCandidate,
+          boxes: transaction.inputBoxes };
+        const originalHeaders = observedHeaderContext.headers.map(header => header.raw);
+        const anchor = observedHeaderContext.anchorHeader;
+        const expectAnchor = (headers: readonly Readonly<Record<string, unknown>>[], index: number) => {
+          expect(headers[index]!.id).toBe(anchor.id);
+          expect(headers[index]!.height).toBe(anchor.height);
+          expect(headers[index]!.extensionHash).toBe(anchor.extensionRootHex);
+        };
+        expectAnchor(originalHeaders, 1);
+        expect(verifyRetainedTrackerAtHeaders({ ...retained, headers: originalHeaders })).toEqual({
+          proofs: [true, true], transactionError: null });
+        const firstMined = appendSyntheticMinedHeader(originalHeaders);
+        expectAnchor(firstMined, 2);
+        // Same parents as the check, actual synthetic H1030 preheader instead
+        // of simplifiedUpcoming. This verifies bytes, not node inclusion.
+        expect(verifyRetainedTrackerAtHeaders({ ...retained, headers: originalHeaders, minedHeader: firstMined[0] })).toEqual({
+          proofs: [true, true], transactionError: null });
+        const next = verifyRetainedTrackerAtHeaders({ ...retained, headers: firstMined,
+          minedHeader: appendSyntheticMinedHeader(firstMined)[0] });
+        if (fault === 'tracker WASM expiry') {
+          expect(Number(firstMined[0]!.height) + 1).toBe(Number(statement.admissionExpiresAtErgoHeight));
+          expect(next.proofs).toEqual([false, true]);
+          expect(next.transactionError).not.toBeNull();
+          expect(submissionBodies).toHaveLength(1);
+          finalizeTracker(attempt, submitted);
+          return;
+        }
+        expect(next).toEqual({ proofs: [true, true], transactionError: null });
+        let lastAnchorHeaders = firstMined;
+        for (let index = 1; index < 8; index++) lastAnchorHeaders = appendSyntheticMinedHeader(lastAnchorHeaders);
+        expectAnchor(lastAnchorHeaders, 9);
+        expect(verifyRetainedTrackerAtHeaders({ ...retained, headers: lastAnchorHeaders })).toEqual({
+          proofs: [true, true], transactionError: null });
+        const retiredHeaders = appendSyntheticMinedHeader(lastAnchorHeaders);
+        expect(retiredHeaders.some(header => header.id === anchor.id)).toBe(false);
+        expect(Number(retiredHeaders[0]!.height) + 1).toBeLessThan(Number(statement.admissionExpiresAtErgoHeight));
+        const retired = verifyRetainedTrackerAtHeaders({ ...retained, headers: retiredHeaders });
+        expect(retired.proofs).toEqual([false, true]);
+        expect(retired.transactionError).not.toBeNull();
+      }
       finalizeTracker(attempt, submitted);
       const admitted = await materializeUnsignedTransaction(transaction.eip12UnsignedTransaction as never, 'native admitted tracker');
       signingHeaders = headerContext(1050);

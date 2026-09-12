@@ -280,6 +280,7 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['substrate-federated-isolated-devnet-checked-submission-transport-v1.ts', new Set([
     'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission', 'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
     'submitSubstrateFederatedIsolatedDevnetWithdrawalV2', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+    'projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic',
   ])],
   ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set(['createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'])],
   ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
@@ -344,6 +345,7 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
     'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
     'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1',
     'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1', 'waitForCanonicalConfirmation',
+    'projectTrackerCanonicalConfirmationFailureDiagnosticV1',
   ])],
   ['./frontier-native-proof-bound-reservation-signing-v1.js', new Set([
     'executeFrontierNativeProofBoundReservationMintAndBurnV1', 'attestFrontierNativeBurnCheckpointV1', 'assertFrontierNativeBurnCheckpointV1',
@@ -1563,6 +1565,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   ])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
+    'projectSubstrateFederatedNativeTrackerConfirmationFailureV1',
   ])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
