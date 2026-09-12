@@ -5,24 +5,31 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 // The request, observations, checker and WASM signer are real. Compiler/process
 // custody and node responses are component doubles, not JVM or campaign evidence.
 const boundary = vi.hoisted(() => ({
-  compiled: new WeakMap<object, object>(), active: true, processDigest: '81'.repeat(32),
-  validations: 0, validationCostMs: 0, onValidation: undefined as (() => void) | undefined,
+  compiled: new WeakMap<object, object>(), active: true, processDigest: '81'.repeat(32), targetDigest: '82'.repeat(32),
+  validations: 0, targetValidations: 0, validationCostMs: 0,
+  signer: undefined as object | undefined,
+  onValidation: undefined as (() => void) | undefined,
   boxes: new Map<string, unknown>(), binary: new Map<string, string>(),
   tip: '', height: 999, genesis: '71'.repeat(32),
   onRead: undefined as (() => void) | undefined,
 }));
-vi.mock('./substrate-federated-observed-genesis-v1.js', () => ({
-  validateObservedSubstrateFederatedGenesisV1(value: object, target: object) {
+vi.mock('./substrate-federated-observed-genesis-v1.js', () => {
+  const assertCustody = (value: object, target: object) => {
     if (boundary.compiled.get(value) !== target) throw new Error('component compiler provenance');
     if (!boundary.active) throw new Error('component custody disposed');
+    if (boundary.signer !== undefined) assertSigner(boundary.signer as never);
+  };
+  const validate = (value: object, target: object) => {
+    assertCustody(value, target);
+    const processBinding = owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target as never);
     boundary.validations++;
-    vi.setSystemTime(new Date(Date.now() + boundary.validationCostMs));
     boundary.onValidation?.();
-    return { compiled: value, processBinding: {
-      processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: '82'.repeat(32),
-    } };
-  },
-}));
+    return { compiled: value, processBinding };
+  };
+  return { validateObservedSubstrateFederatedGenesisV1: validate,
+    assertObservedSubstrateFederatedGenesisV1: validate,
+    assertObservedSubstrateFederatedGenesisReadCustodyV1: assertCustody };
+});
 vi.mock('./authenticated-spv-tracker-read-only-node-client.js', async importOriginal => ({
   ...await importOriginal<typeof import('./authenticated-spv-tracker-read-only-node-client.js')>(),
   createBoundedAuthenticatedSpvTrackerReadOnlySource() {
@@ -51,6 +58,14 @@ import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-rew
 import * as helpers from './ergo-helpers.js';
 import * as owned from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import * as observations from './substrate-federated-genesis-observation-v1.js';
+import * as requestApi from './substrate-federated-native-genesis-setup-check-request-v1.js';
+import * as checking from './substrate-federated-isolated-devnet-setup-check-v2.js';
+import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import * as fleet from './fleet-signer.js';
+import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 as createSession }
+  from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertSigner }
+  from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 
 const NOW = new Date('2026-09-12T12:00:00.000Z');
 const PRIMARY = 'http://127.0.0.1:9051';
@@ -69,8 +84,9 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW);
-  boundary.active = true; boundary.processDigest = '81'.repeat(32);
-  boundary.validations = 0; boundary.validationCostMs = 0;
+  boundary.active = true; boundary.processDigest = '81'.repeat(32); boundary.targetDigest = '82'.repeat(32);
+  boundary.validations = 0; boundary.targetValidations = 0; boundary.validationCostMs = 0;
+  boundary.signer = undefined;
   boundary.onValidation = undefined; boundary.onRead = undefined;
   boundary.tip = headers[0]!.id; boundary.height = 999;
   boundary.boxes.clear(); boundary.binary.clear();
@@ -122,12 +138,111 @@ beforeEach(async () => {
   });
   vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1').mockImplementation(value => {
     if (value !== target || !boundary.active) throw new Error('component target custody');
-    return { processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: '82'.repeat(32) };
+    boundary.targetValidations++;
+    vi.setSystemTime(new Date(Date.now() + boundary.validationCostMs));
+    return { processBindingDigestHex: boundary.processDigest, executionTargetIdentityDigestHex: boundary.targetDigest };
   });
 });
 afterEach(() => { mnemonic = ''; vi.restoreAllMocks(); vi.useRealTimers(); });
 
+async function managedSession() {
+  vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValueOnce(Mnemonic.fromPhrase(mnemonic));
+  const session = await createSession();
+  boundary.signer = session.signer;
+  const compiled = input.compiled as any;
+  compiled.discovery.signer = session.signer;
+  compiled.familyCompilerInput.trackerRequest.profile = {
+    ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex],
+  };
+  return session;
+}
+
 describe('native request producer joined to the checking engine', () => {
+  it('builds, checks and promotes a managed native batch with construction age and three RPC costs included', async () => {
+    const session = await managedSession();
+    const samples: { phase: string; ageMs: number; targetValidations: number }[] = [];
+    const sample = (phase: string, request: Parameters<typeof run>[0]) => samples.push({ phase,
+      ageMs: Date.now() - Date.parse(request.target.observedAt), targetValidations: boundary.targetValidations });
+    const buildOriginal = requestApi.buildSubstrateFederatedNativeGenesisSetupCheckRequestV1;
+    vi.spyOn(requestApi, 'buildSubstrateFederatedNativeGenesisSetupCheckRequestV1').mockImplementation(async (...args) => {
+      const request = await buildOriginal(...args); sample('built', request); return request;
+    });
+    const runOriginal = checking.runSubstrateFederatedNativeGenesisSetupCheckV1;
+    vi.spyOn(checking, 'runSubstrateFederatedNativeGenesisSetupCheckV1').mockImplementation(async (...args) => {
+      const receipt = await runOriginal(...args); sample('checked', args[0]); return receipt;
+    });
+    const takeOriginal = checking.takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1;
+    vi.spyOn(checking, 'takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1').mockImplementation((...args) => {
+      const material = takeOriginal(...args); sample('consumed', args[1]); return material;
+    });
+    const promote = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1');
+    const check = vi.mocked(helpers.ncheck).getMockImplementation()!;
+    vi.mocked(helpers.ncheck).mockImplementation(async (...args) => {
+      const result = await check(...args);
+      vi.setSystemTime(new Date(Date.now() + 1000));
+      return result;
+    });
+    // Count the original request's age from its real observation during build.
+    // Target probes and each check cost one modeled second; this is not a benchmark.
+    boundary.validationCostMs = 1000;
+    try {
+      const batch = await session.runNativeGenesisRetainingSigner(input.compiled, input.target);
+      sample('promoted', batch.request);
+      expect(samples).toEqual([
+        { phase: 'built', ageMs: 4000, targetValidations: 8 },
+        { phase: 'checked', ageMs: 56000, targetValidations: 57 },
+        { phase: 'consumed', ageMs: 58000, targetValidations: 59 },
+        { phase: 'promoted', ageMs: 59000, targetValidations: 60 },
+      ]);
+      expect(samples[2]!.ageMs).toBeLessThanOrEqual(60_000);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+      expect(promote).toHaveBeenCalledTimes(3);
+      expect(batch.orderedTransactions.map(value => value.checkedAcceptance.submissionHandle)).toHaveLength(3);
+      execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, input.target);
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1({ ...batch }, input.target))
+        .toThrow('exact process provenance');
+      // Retained custody has its own action checks; request expiry never renews it.
+      boundary.validationCostMs = 0;
+      expect(() => takeOriginal(batch.receipt, batch.request, input.target)).toThrow('exact process provenance');
+      session.dispose();
+      expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, input.target)).toThrow(/inactive/);
+    } finally { session.dispose(); }
+  });
+
+  it.each(['checker return', 'first promotion'].flatMap(stage =>
+    ['setup custody', 'source custody', 'process binding', 'target binding'].map(fault => ({ stage, fault })) ))(
+    'rejects $fault at $stage without returning a managed batch', async ({ stage, fault }) => {
+      const session = await managedSession();
+      const mutate = vi.fn(() => {
+        if (fault === 'setup custody') expect(() => session.dispose()).toThrow(/running/);
+        else if (fault === 'source custody') boundary.active = false;
+        else if (fault === 'process binding') boundary.processDigest = '83'.repeat(32);
+        else boundary.targetDigest = '84'.repeat(32);
+      });
+      const runOriginal = checking.runSubstrateFederatedNativeGenesisSetupCheckV1;
+      vi.spyOn(checking, 'runSubstrateFederatedNativeGenesisSetupCheckV1').mockImplementation(async (...args) => {
+        const receipt = await runOriginal(...args);
+        if (stage === 'checker return') mutate();
+        return receipt;
+      });
+      const promoteOriginal = fleet.promoteLocalWasmCheckedTransactionForSubmissionV1;
+      const promote = vi.spyOn(fleet, 'promoteLocalWasmCheckedTransactionForSubmissionV1').mockImplementation((...args) => {
+        const result = promoteOriginal(...args);
+        if (stage === 'first promotion' && mutate.mock.calls.length === 0) mutate();
+        return result;
+      });
+      try {
+        await expect(session.runNativeGenesisRetainingSigner(input.compiled, input.target))
+          .rejects.toThrow(/inactive|disposed|binding changed/);
+        expect(mutate).toHaveBeenCalledTimes(1);
+        expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+        expect(promote).toHaveBeenCalledTimes(stage === 'checker return' ? 0 : 3);
+        await expect(session.runNativeGenesisRetainingSigner(input.compiled, input.target)).rejects.toThrow();
+        expect(helpers.ncheck).toHaveBeenCalledTimes(3);
+      } finally { session.dispose(); }
+    },
+  );
+
   it('checks and consumes original material within the fixed window under a modeled traversal cost', async () => {
     const request = await build(input);
     boundary.validations = 0;
@@ -135,7 +250,7 @@ describe('native request producer joined to the checking engine', () => {
     // is not a measurement of Windows probes or a predicted campaign duration.
     boundary.validationCostMs = 1000;
     const receipt = await run(request, mnemonic);
-    expect(boundary.validations).toBe(58);
+    expect(boundary.validations).toBe(49);
     expect(helpers.ncheck).toHaveBeenCalledTimes(3);
     expect(receipt.postCheckObservation.observedAt).not.toBe(request.target.observedAt);
     expect(receipt.target.maximumObservationAgeMs).toBe(60_000);

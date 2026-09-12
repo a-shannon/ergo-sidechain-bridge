@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import blakejs from 'blakejs';
+import * as wasm from 'ergo-lib-wasm-nodejs';
 
 // Compiler/custody and node reads are explicit component stubs. The observer,
 // profile registry, EIP-12 codecs and WASM transaction/box serialization are real.
@@ -134,9 +135,18 @@ beforeEach(async () => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
+function afterSerializationCleanup(mutate: () => void): void {
+  const free = wasm.Transaction.prototype.free;
+  let calls = 0;
+  vi.spyOn(wasm.Transaction.prototype, 'free').mockImplementation(function (this: wasm.Transaction) {
+    free.call(this);
+    if (++calls === 3) mutate();
+  });
+}
+
 describe('native FED setup request with stubbed compiler custody and node reads', () => {
   it.each([
-    ['build', 7], ['reobserve', 8], ['runtime provenance', 3],
+    ['build', 6], ['reobserve', 6], ['runtime provenance', 2],
   ] as const)('counts complete compiler traversals for %s without repeating a synchronous boundary', async (operation, expected) => {
     if (operation === 'build') {
       await build(input);
@@ -241,7 +251,6 @@ describe('native FED setup request with stubbed compiler custody and node reads'
   });
 
   const awaitStages = [
-    'serialization import', 'serialized issuance return', 'runtime provenance return',
     'genuine observation return', 'primary anchor read', 'witness anchor read', 'fresh observation return',
   ] as const;
   const awaitFaults = [
@@ -267,9 +276,7 @@ describe('native FED setup request with stubbed compiler custody and node reads'
       // These callbacks run inside the final synchronous assertion of a
       // callee. Queue the fault after that assertion but before its caller
       // resumes, isolating each retained post-await assertion.
-      const beforeReturn = stage === 'serialized issuance return' ? 2
-        : stage === 'runtime provenance return' ? 3
-        : stage === 'fresh observation return' ? 7 : undefined;
+      const beforeReturn = stage === 'fresh observation return' ? 5 : undefined;
       boundary.onCompiledAssert = () => {
         if (boundary.validations === beforeReturn) queueMicrotask(fault);
       };
@@ -281,11 +288,8 @@ describe('native FED setup request with stubbed compiler custody and node reads'
             || (stage === 'witness anchor read' && read.origin === WITNESS))) fault();
       };
       const pending = reobserve(request);
-      if (stage === 'serialization import') fault();
       await expect(pending).rejects.toThrow(message);
       expect(mutated).toBe(true);
-      if (stage === 'serialization import' || stage === 'serialized issuance return'
-        || stage === 'runtime provenance return') expect(boundary.reads).toHaveLength(0);
       const anchorReads = boundary.reads.filter(read => read.method === 'height' && read.height === 120);
       if (stage === 'genuine observation return') expect(anchorReads).toHaveLength(0);
       if (stage === 'primary anchor read') expect(anchorReads.map(read => read.origin)).toEqual([PRIMARY]);
@@ -293,6 +297,29 @@ describe('native FED setup request with stubbed compiler custody and node reads'
         expect(anchorReads.map(read => read.origin)).toEqual([PRIMARY, WITNESS]);
       }
     });
+
+  it.each(['input decoding', 'byte serialization', 'final cleanup'].flatMap(stage =>
+    awaitFaults.map(([fault, mutate, message]) => ({ stage, fault, mutate, message }))))(
+    'rejects changed $fault during synchronous $stage before reobservation', async ({ stage, mutate, message }) => {
+      const request = await build(input);
+      boundary.reads.length = 0;
+      const fault = vi.fn(mutate);
+      if (stage === 'input decoding') {
+        const decode = wasm.UnsignedTransaction.from_json;
+        vi.spyOn(wasm.UnsignedTransaction, 'from_json').mockImplementationOnce(json => {
+          const result = decode(json); fault(); return result;
+        });
+      } else if (stage === 'byte serialization') {
+        const serialize = wasm.Transaction.prototype.sigma_serialize_bytes;
+        vi.spyOn(wasm.Transaction.prototype, 'sigma_serialize_bytes').mockImplementationOnce(function (this: wasm.Transaction) {
+          const result = serialize.call(this); fault(); return result;
+        });
+      } else afterSerializationCleanup(fault);
+      await expect(reobserve(request)).rejects.toThrow(message);
+      expect(fault).toHaveBeenCalledTimes(1);
+      expect(boundary.reads).toHaveLength(0);
+    },
+  );
 
   it.each(['setupActive', 'sourceActive', 'targetActive'] as const)('rejects disposed %s before and after observation awaits', async key => {
     const request = await build(input);
@@ -302,10 +329,9 @@ describe('native FED setup request with stubbed compiler custody and node reads'
     boundary.onRead = () => { boundary[key] = false; };
     await expect(reobserve(request)).rejects.toThrow(/disposed/);
   });
-  it('reasserts custody after the build serialization await', async () => {
-    const pending = build(input);
-    boundary.setupActive = false;
-    await expect(pending).rejects.toThrow('stub setup disposed');
+  it('reasserts custody after synchronous build serialization cleanup', async () => {
+    afterSerializationCleanup(() => { boundary.setupActive = false; });
+    await expect(build(input)).rejects.toThrow('stub setup disposed');
     expect(boundary.reads).toHaveLength(0);
   });
   it('reasserts custody after the initial observation await', async () => {
@@ -321,17 +347,25 @@ describe('native FED setup request with stubbed compiler custody and node reads'
     };
     await expect(build(input)).rejects.toThrow('stub target disposed');
   });
-  it('reasserts custody after the runtime serialization await', async () => {
+  it('reasserts custody after synchronous runtime serialization cleanup', async () => {
     const request = await build(input);
+    afterSerializationCleanup(() => { boundary.sourceActive = false; });
     const pending = assertRuntime(request);
-    boundary.sourceActive = false;
+    expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow('stub source disposed');
   });
-  it('reasserts freshness after the runtime serialization await', async () => {
+  it('reasserts freshness after synchronous runtime serialization cleanup', async () => {
     const request = await build(input);
+    afterSerializationCleanup(() => vi.setSystemTime(new Date(NOW.getTime() + 60_001)));
     const pending = assertRuntime(request);
-    vi.setSystemTime(new Date(NOW.getTime() + 60_001));
+    expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow('freshness window');
+    expect(request.target.observedAt).toBe(NOW.toISOString());
+  });
+  it('preserves rejected-Promise behavior for an invalid public runtime request', async () => {
+    const pending = assertRuntime({});
+    expect(pending).toBeInstanceOf(Promise);
+    await expect(pending).rejects.toThrow('process provenance');
   });
   it('rejects a changed owned process binding', async () => {
     const request = await build(input);

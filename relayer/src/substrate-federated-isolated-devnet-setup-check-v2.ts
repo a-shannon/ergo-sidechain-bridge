@@ -387,7 +387,13 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
     assertRuntimeFresh(request);
     binding.assertActive?.(request);
   };
-  assertActive();
+  if (Object.is(binding, nativeGenesisBinding)) {
+    if (cancellation?.aborted) throw new Error('native FED setup session was cancelled');
+    assertRuntimeFresh(request);
+    // The immediately invoked native runtime validator owns the full entry check.
+  } else {
+    assertActive();
+  }
   await assertRuntimeRequest(request, binding);
   const preSignObservation = await reobserveAndBind(
     request,
@@ -625,7 +631,9 @@ function takeSetupCheckExecutionMaterial<
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   binding: Readonly<SetupCheckBinding<R, C>>,
 ): Readonly<SetupExecutionMaterial<R>> {
-  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  if (!Object.is(binding, nativeGenesisBinding)) {
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  }
   if (
     target.primaryNodeOrigin !== request.target.primary.nodeOrigin
     || target.witnessNodeOrigin !== request.target.witness.nodeOrigin

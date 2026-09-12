@@ -1,4 +1,5 @@
 import blakejs from 'blakejs';
+import * as wasm from 'ergo-lib-wasm-nodejs';
 
 import { createBoundedAuthenticatedSpvTrackerReadOnlySource } from './authenticated-spv-tracker-read-only-node-client.js';
 import { toUnsignedTransactionJson } from './ergo-unsigned-transaction.js';
@@ -78,7 +79,7 @@ export async function buildSubstrateFederatedNativeGenesisSetupCheckRequestV1(
   const profile = makeProfile(compiled, target, source);
   const retained = Object.freeze({ compiled, target, profile });
   const assertCurrent = () => assertSourceUnchanged(retained, source);
-  const orderedIssuances = await deriveIssuances(compiled, assertCurrent);
+  const orderedIssuances = deriveIssuances(compiled);
   assertCurrent();
   const observation = await freshObservation(retained, assertCurrent);
   assertCurrent();
@@ -162,10 +163,14 @@ export function assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(
 export async function assertSubstrateFederatedNativeGenesisSetupCheckRequestV1RuntimeProvenance(
   value: unknown,
 ): Promise<void> {
+  assertRuntimeProvenance(value);
+}
+
+function assertRuntimeProvenance(value: unknown): asserts value is Readonly<SubstrateFederatedNativeGenesisSetupCheckRequestV1> {
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value);
   const retained = requests.get(value)!;
-  const issuances = await deriveIssuances(retained.compiled,
-    () => assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value));
+  const issuances = deriveIssuances(retained.compiled);
+  // Include serialization and WASM cleanup in the checked synchronous boundary.
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value);
   if (canonicalJson(issuances) !== canonicalJson(value.orderedIssuances)) {
     throw new Error('native FED setup request issuance bytes drifted');
@@ -175,8 +180,7 @@ export async function assertSubstrateFederatedNativeGenesisSetupCheckRequestV1Ru
 export async function reobserveSubstrateFederatedNativeGenesisSetupCheckRequestV1(
   value: unknown,
 ): Promise<Readonly<SubstrateFederatedGenesisObservationV1>> {
-  await assertSubstrateFederatedNativeGenesisSetupCheckRequestV1RuntimeProvenance(value);
-  assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value);
+  assertRuntimeProvenance(value);
   const observation = await freshObservation(requests.get(value)!,
     () => assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value));
   assertSubstrateFederatedNativeGenesisSetupCheckRequestV1(value);
@@ -274,10 +278,7 @@ async function freshObservation(retained: Retained, assertCurrent: () => void) {
   return observation;
 }
 
-async function deriveIssuances(compiled: Compiled, assertCurrent: () => void) {
-  const imported = await import('ergo-lib-wasm-nodejs');
-  assertCurrent();
-  const wasm = imported.default ?? imported;
+function deriveIssuances(compiled: Compiled) {
   if (compiled.issuance.orderedTransactions.length !== 3) {
     throw new Error('native FED setup requires exactly three ordered issuances');
   }

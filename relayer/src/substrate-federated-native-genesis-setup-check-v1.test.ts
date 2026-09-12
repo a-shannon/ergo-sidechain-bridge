@@ -362,6 +362,124 @@ describe('native FED request through the retained checking engine', () => {
   });
 });
 
+describe('native checker boundary reductions', () => {
+  beforeEach(() => {
+    // Model the original request's full compiler -> owned-target validation.
+    // The real request producer and its await counters have a separate composition.
+    boundary.custody = () => {
+      const current = owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      if (current.processBindingDigestHex !== '68'.repeat(32)
+        || current.executionTargetIdentityDigestHex !== '69'.repeat(32)) {
+        throw new Error('native request target binding drifted');
+      }
+    };
+  });
+
+  it('does not duplicate the native runtime entry assertion', async () => {
+    const assertions = vi.spyOn(boundary, 'assert');
+    let entryCalls = 0;
+    boundary.observe.mockImplementationOnce(async () => {
+      entryCalls = assertions.mock.calls.length;
+      throw new Error('entry observation reached');
+    });
+    await expect(run(request, mnemonic)).rejects.toThrow('entry observation reached');
+    // One synchronous assertion inside the runtime double, then reobservation's entry.
+    expect(entryCalls).toBe(2);
+    expect(helpers.ngetDirect).not.toHaveBeenCalled();
+    expect(helpers.ncheck).not.toHaveBeenCalled();
+  });
+
+  it('uses one complete target traversal when consuming native material', async () => {
+    const receipt = await run(request, mnemonic);
+    const assertions = vi.spyOn(boundary, 'assert');
+    const probe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
+    probe.mockClear();
+    const material = take(receipt, request, target);
+    expect(material.request).toBe(request);
+    expect(assertions).toHaveBeenCalledExactlyOnceWith(request, target);
+    expect(probe).toHaveBeenCalledExactlyOnceWith(target);
+    expect(() => take(receipt, request, target)).toThrow(/exact process provenance/);
+  });
+
+  it.each(['future', 'expired'] as const)('rejects %s request time before native runtime provenance', async fault => {
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    (request.target as any).observedAt = new Date(now + (fault === 'future' ? 1 : -60_001)).toISOString();
+    const assertions = vi.spyOn(boundary, 'assert');
+    const signing = vi.spyOn(fleet, 'prepareLocalWasmRootCheckCandidates');
+    await expect(run(request, mnemonic)).rejects.toThrow(/expired during execution/);
+    expect(assertions).not.toHaveBeenCalled();
+    expect(boundary.observe).not.toHaveBeenCalled();
+    expect(signing).not.toHaveBeenCalled();
+    expect(helpers.ncheck).not.toHaveBeenCalled();
+  });
+
+  it('rejects prior cancellation before request getters or runtime provenance', async () => {
+    const cancellation = new AbortController(); cancellation.abort();
+    const get = vi.fn((object: object, key: PropertyKey, receiver: unknown) => Reflect.get(object, key, receiver));
+    const supplied = new Proxy<typeof request>(request, { get });
+    const assertions = vi.spyOn(boundary, 'assert');
+    await expect(run(supplied, mnemonic, cancellation.signal)).rejects.toThrow(/session was cancelled/);
+    expect(get).not.toHaveBeenCalled(); expect(assertions).not.toHaveBeenCalled();
+    expect(boundary.observe).not.toHaveBeenCalled(); expect(helpers.ncheck).not.toHaveBeenCalled();
+  });
+
+  it.each(['custody', 'target expiry', 'process digest', 'target digest', 'request copy', 'receipt copy', 'receipt proxy'] as const)(
+    'rejects %s before consuming original native material', async fault => {
+      const receipt = await run(request, mnemonic);
+      const probe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
+      const original = probe.getMockImplementation()!;
+      const receiptGet = vi.fn((object: object, key: PropertyKey, receiver: unknown) => Reflect.get(object, key, receiver));
+      const suppliedReceipt = fault === 'receipt copy' ? { ...receipt }
+        : fault === 'receipt proxy' ? new Proxy<typeof receipt>(receipt, { get: receiptGet }) : receipt;
+      const suppliedRequest = fault === 'request copy' ? { ...request } : request;
+      if (fault === 'custody') boundary.active = false;
+      else if (fault === 'target expiry') boundary.targetActive = false;
+      else if (fault === 'process digest' || fault === 'target digest') {
+        const field = fault === 'process digest' ? 'processBindingDigestHex' : 'executionTargetIdentityDigestHex';
+        probe.mockImplementation(value => ({ ...original(value), [field]: 'ff'.repeat(32) }));
+      }
+      expect(() => take(suppliedReceipt, suppliedRequest, target)).toThrow(/provenance|expired|binding drifted/);
+      expect(receiptGet).not.toHaveBeenCalled();
+      boundary.active = true; boundary.targetActive = true; probe.mockImplementation(original);
+      expect(take(receipt, request, target).request).toBe(request);
+      expect(() => take(receipt, request, target)).toThrow(/exact process provenance/);
+    },
+  );
+
+  it.each(['primaryNodeOrigin', 'witnessNodeOrigin', 'primaryMining', 'witnessReadOnly'] as const)(
+    'retains the native material %s guard after full request validation', async field => {
+      const receipt = await run(request, mnemonic);
+      const original = target[field];
+      // Keep the process double accepting the original identity to isolate this guard.
+      target[field] = typeof original === 'boolean' ? false : 'http://127.0.0.1:9999';
+      expect(() => take(receipt, request, target)).toThrow(/execution target differs from its request/);
+      target[field] = original;
+      expect(take(receipt, request, target).request).toBe(request);
+    },
+  );
+
+  it('rejects a foreign target before inspecting its origin getter or consuming material', async () => {
+    const receipt = await run(request, mnemonic);
+    const get = vi.fn(() => target.primaryNodeOrigin);
+    const foreign = { ...target, get primaryNodeOrigin() { return get(); } };
+    expect(() => take(receipt, request, foreign)).toThrow(/active exact provenance/);
+    expect(get).not.toHaveBeenCalled();
+    expect(take(receipt, request, target).request).toBe(request);
+  });
+
+  it.each([['V2', takeV2], ['V3', takeV3]] as const)('retains direct target validation at the %s material boundary', async (_name, consume) => {
+    const receipt = await run(request, mnemonic);
+    const assertions = vi.spyOn(boundary, 'assert');
+    const probe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
+    probe.mockClear();
+    expect(() => consume(receipt as never, request as never, target)).toThrow(/exact process provenance/);
+    expect(probe).toHaveBeenCalledExactlyOnceWith(target);
+    expect(assertions).not.toHaveBeenCalled();
+    expect(take(receipt, request, target).request).toBe(request);
+  });
+});
+
 describe('native FED managed setup session', () => {
   let session: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
   let privateSession: Awaited<ReturnType<typeof execution.createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2>>;

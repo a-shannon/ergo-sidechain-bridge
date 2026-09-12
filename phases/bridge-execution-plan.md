@@ -293,7 +293,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | Native burn commitment producer | Local source/build checkpoint; paired public burn observation at `7e0265329` | Active-profile selection passes 11 native integration tests, 71 historical pallet tests and 48 export-owner tests. Campaign 14 produced a successful block-four burn whose receipt, commitment storage and runtime events agree on both nodes. This observation does not authenticate an original execution handle or attest a checkpoint |
 | Native burn and retained withdrawal continuation | Native consumers and fixed root implemented; local validation and independent review complete | The original burn attempt binds paired native storage, runtime events and global burn index to the retained source quorum. The root confirms both distinct external fee inputs before attesting the checkpoint and freezing its anchor horizon, then consumes the original tracker and terminal payout checks. Actual checkpoint and Ergo return execution remain open |
 | Native validation traversal | Local affected checks and independent review complete | Native batch and original output-observation assertions each use one complete target traversal; revalidation artifacts and source-proof assertions each use two. Initial rejection order and every post-await custody check remain enforced. Keep exact process/artifact checks, failure holds and the existing duration bounds |
-| Fresh operational two-way campaign | Native validation checkpoint complete; fresh execution remains due | Use fresh target/custody and actual RPC calls through the established Ergo withdrawal consumer. Campaigns 14, 16 and 17 are terminal; their attempts cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
+| Native request and managed promotion | Local affected checks and independent review complete | Synchronous WASM derivation preserves full checks before and after serialization/cleanup. Native checker entry and material consumption use the immediately enclosing full validation; legacy checks remain. The composed fixture includes construction age, three RPC costs and actual managed promotion within the unchanged request window |
+| Fresh operational two-way campaign | Native request checkpoint complete; fresh execution remains due | Use fresh target/custody and actual RPC calls through the established Ergo withdrawal consumer. Campaigns 14, 16, 17 and 18 are terminal; their attempts cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
 
 The native execution consumer now retains the confirmed mint through one
 approval in block three and one matching burn in block four. It validates the
@@ -408,6 +409,48 @@ preserved custody vetoes, not a measured campaign speedup. Request, V3,
 compiler, Rust/WASM, format and quorum evidence remains reusable only within
 its unchanged operation and artifact closure. A fresh complete campaign is
 still needed to establish the native checkpoint and Ergo return.
+
+Campaign 18 at `9f2f0d91200d312fd74ec16cef3726e0dec6ef8a` stopped before
+mint at the unchanged native request freshness guard. Its bounded error does
+not identify the particular assertion. The root returned failure and normal
+cleanup stopped all owned processes and listeners. The earlier traversal
+fixture counted checker execution after request construction and did not reach
+managed promotion, so its passing result did not cover the full request age.
+
+The next request/checker correction imports the pinned WASM module before
+request construction and derives issuance bytes synchronously. Full request
+checks still bracket derivation, including WASM cleanup. The public runtime
+validator still returns a Promise; reobservation invokes its private synchronous
+implementation. Every remaining observation and RPC await retains its guard.
+Native checker entry preserves cancellation and age checks before the runtime
+validator performs the full request assertion. Native material consumption
+uses the public wrapper's full original request/target check; exact private
+binding selection keeps V2/V3 direct target checks intact. No request renewal,
+authority cache, duration, signing format or quorum change is introduced.
+
+Producer counts fall from seven to six at build, eight to six at reobservation
+and three to two at runtime validation. The actual managed fixture starts its
+cost model before building, charges one second per full target traversal and
+per node check, and reaches promotion at a request age of 59 seconds after
+three real WASM checked-transaction promotions. This is a deterministic
+fixture with declared compiler/process and RPC doubles, not a node benchmark.
+Single-fault negatives cover synchronous decode/serialization/cleanup, every
+remaining await, custody and both bindings after checker return and promotion,
+copies, cancellation and single-use material. Removing the post-derivation
+runtime or build check makes the targeted negatives fail; both mutants were
+restored exactly.
+
+Strict closeout owns two runtime files, their three direct/composed test files
+and this plan. Its deciding closure is request/composition, all native managed
+cases, architecture, TypeScript, actual Node ESM loading and four V2/V3 checker
+cases. All 80 request/composition, 379 native, 235 architecture and four legacy
+cases pass, as do TypeScript, the static import guard and actual Node ESM
+loading. Independent review found no actionable findings. Prior
+withdrawal and V3 lifecycle evidence is reusable for unchanged downstream
+operations; the four legacy cases cover the shared checker branches changed
+here. Rust/WASM artifacts, JVM contracts, wire formats and quorum semantics
+are unchanged. A fresh complete campaign follows only a coherent reviewed
+commit; it must still establish the original checkpoint and Ergo return.
 
 Native setup now retains its original batch and compiler through withdrawal-fee
 and tracker-fee checks. Both fee consumers preserve exact authorization, durable
