@@ -42,6 +42,7 @@ export interface SubstrateFederatedIsolatedDevnetTrackerV2Attempt {
 type Authorization = Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Authorization>;
 type Attempt = Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Attempt>;
 interface Material {
+  readonly assertCustody?: () => void;
   readonly check: Readonly<Check>;
   readonly target: Readonly<FrozenTarget>;
   readonly binding: Readonly<Binding>;
@@ -74,6 +75,7 @@ export async function authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admissio
   check: Readonly<Check>, target: Readonly<FrozenTarget>,
 ): Promise<Authorization> {
   const claimed = await claimSubstrateFederatedIsolatedDevnetTrackerV2Check(check, target);
+  claimed.assertCustody?.();
   const authorization = Object.freeze({ genesisHeaderIdHex: claimed.genesisHeaderIdHex,
     authorizationDigestHex: sha256CanonicalJson({
       checkDigestHex: check.result.checkDigestHex,
@@ -86,6 +88,7 @@ export async function authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admissio
       signedTransactionBytesSha256Hex: check.result.signedCandidate.signedTransactionBytesSha256Hex,
     }, 'E2S_ISOLATED_TRACKER_V2_ADMISSION_AUTHORIZATION') });
   AUTHORIZATIONS.set(authorization, Object.freeze({ check, target, binding: claimed.binding,
+    assertCustody: claimed.assertCustody,
     revalidationDigestHex: claimed.revalidationDigestHex, authorization }));
   return authorization;
 }
@@ -98,6 +101,7 @@ export function reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission(
     throw new Error('tracker V2 authorization is absent, consumed or has no journal');
   }
   RESERVED.add(authorization);
+  material.assertCustody?.();
   const current = assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(material.target);
   if (canonicalJson(current) !== canonicalJson(material.binding)) throw new Error('tracker V2 reservation target changed');
   const { check } = material;
@@ -135,8 +139,10 @@ export async function revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admissi
   const material = requireAttempt(attempt);
   if (FRESHNESS_STARTED.has(attempt)) throw new Error('tracker V2 reservation freshness is already consumed');
   FRESHNESS_STARTED.add(attempt);
+  material.assertCustody?.();
   assertStored(material, 'pending');
   const freshness = await revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reservation(material.check, target);
+  material.assertCustody?.();
   assertStored(material, 'pending');
   FRESHNESS.set(attempt, freshness);
   return freshness.completion;
@@ -152,8 +158,10 @@ export async function claimSubstrateFederatedIsolatedDevnetTrackerV2Transport(
     throw new Error('tracker V2 transport has no exact freshness or is already consumed');
   }
   TRANSPORT_STARTED.add(attempt);
+  material.assertCustody?.();
   assertStored(material, 'pending');
   const checked = await checkSubstrateFederatedIsolatedDevnetTrackerV2Transport(material.check, freshness, target);
+  material.assertCustody?.();
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(checked.checkedAcceptance.submissionHandle, {
     processBindingDigestHex: checked.binding.processBindingDigestHex,
     executionTargetIdentityDigestHex: checked.binding.executionTargetIdentityDigestHex,
@@ -168,6 +176,7 @@ export function assertSubstrateFederatedIsolatedDevnetTrackerV2TransportReady(
   attempt: Attempt, target: Readonly<TransportTarget>,
 ): void {
   const material = requireAttempt(attempt);
+  material.assertCustody?.();
   const transport = TRANSPORT.get(attempt);
   if (transport === undefined || transport.target !== target) throw new Error('tracker V2 transport target changed');
   const current = assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);

@@ -47,6 +47,7 @@ interface Material {
   readonly binding: Readonly<Binding>;
   readonly genesisHeaderIdHex: string;
   readonly authorization: Authorization;
+  readonly assertCustody: () => void;
 }
 interface DurableMaterial extends Material {
   readonly state: StateTracker;
@@ -66,7 +67,7 @@ const FUNDING_PROFILES = Object.freeze({
     sourceDomain: 'E2S_ISOLATED_WITHDRAWAL_FEE_FUNDING_SOURCE_V1' }),
 });
 
-/** Explicit LAB-only authorization; checking alone never constructs this capability. */
+/** Explicit isolated-target authorization from the retained native or LAB setup. */
 export async function authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   check: Readonly<Check>, target: Readonly<Target>,
 ): Promise<Authorization> {
@@ -82,11 +83,12 @@ export async function authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFund
 async function authorizeFeeFunding(
   check: Readonly<Check>, target: Readonly<Target>, purpose: Material['purpose'],
 ): Promise<Authorization> {
-  const { batch, binding } = purpose === 'tracker'
+  const { batch, binding, assertActive: assertCustody } = purpose === 'tracker'
     ? claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(check, target)
     : claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1(check, target);
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(check.checkedAcceptance.submissionHandle, binding);
-  await reobserveSource(check, target, binding);
+  await reobserveSource(check, target, binding, assertCustody);
+  assertCustody();
   const authorization = Object.freeze({ genesisHeaderIdHex: batch.request.target.genesisHeaderIdHex, authorizationDigestHex: sha256CanonicalJson({
     processBindingDigestHex: binding.processBindingDigestHex,
     executionTargetIdentityDigestHex: binding.executionTargetIdentityDigestHex,
@@ -96,7 +98,7 @@ async function authorizeFeeFunding(
     checkResponseDigestHex: check.checkedAcceptance.submissionHandle.checkResponseDigestHex,
   }, FUNDING_PROFILES[purpose].authorizationDomain) });
   AUTHORIZATIONS.set(authorization, Object.freeze({
-    purpose, check, target, binding, authorization,
+    purpose, check, target, binding, authorization, assertCustody,
     genesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
   }));
   return authorization;
@@ -122,6 +124,7 @@ function reserveFeeFunding(
     throw new Error('tracker fee funding authorization is absent, consumed or has no journal');
   }
   RESERVED.add(authorization);
+  material.assertCustody();
   assertBinding(material.target, material.binding);
   const { check, binding } = material;
   const source = check.transaction.eip12Tx.inputs[0]!;
@@ -171,13 +174,16 @@ async function claimFeeFundingTransport(attempt: Attempt, target: Readonly<Targe
     throw new Error('tracker fee funding transport target differs or attempt is consumed');
   }
   TRANSPORT_STARTED.add(attempt);
+  material.assertCustody();
   assertStored(material, 'pending');
-  await reobserveSource(material.check, target, material.binding);
-  const currentCheck = await checkSignedTransaction(material.check.signedCandidate, 'isolated tracker fee pretransport', target.primaryNodeOrigin);
+  await reobserveSource(material.check, target, material.binding, material.assertCustody);
+  const currentCheck = await checkSignedTransaction(material.check.signedCandidate, 'isolated tracker fee pretransport', target.primaryNodeOrigin,
+    () => { material.assertCustody(); assertBinding(target, material.binding); });
   if (currentCheck === null) throw new Error('tracker fee funding pretransport node check failed');
-  await reobserveSource(material.check, target, material.binding);
+  await reobserveSource(material.check, target, material.binding, material.assertCustody);
   assertStored(material, 'pending');
   assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(material.check.checkedAcceptance.submissionHandle, material.binding);
+  material.assertCustody();
   return Object.freeze({ check: material.check, binding: material.binding, authorization: material.authorization });
 }
 
@@ -289,12 +295,14 @@ function assertBinding(target: Readonly<Target>, binding: Readonly<Binding>): vo
   }
 }
 
-async function reobserveSource(check: Readonly<Check>, target: Readonly<Target>, binding: Readonly<Binding>) {
+async function reobserveSource(check: Readonly<Check>, target: Readonly<Target>, binding: Readonly<Binding>, assertCustody: () => void) {
+  assertCustody();
   assertBinding(target, binding);
   const { extension: _extension, ...source } = check.transaction.eip12Tx.inputs[0]!;
   for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
     const current = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${source.boxId}`, origin), 'tracker fee pretransport source');
     if (canonicalJson(current) !== canonicalJson(source)) throw new Error('tracker fee funding pretransport source differs');
+    assertCustody();
   }
   assertBinding(target, binding);
 }

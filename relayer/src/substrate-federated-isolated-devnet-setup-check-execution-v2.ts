@@ -86,6 +86,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
   assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2,
   assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2,
+  assertSubstrateFederatedNativeSetupTrackerLineageV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
@@ -215,22 +216,24 @@ export interface SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1 {
   readonly checkedAcceptance: Readonly<LocalWasmCheckedSubmissionAcceptanceV1>;
 }
 
-const TRACKER_FEE_CHECKS = new WeakMap<object, Readonly<{
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+type FeeSetupCustody = Readonly<{
+  route: 'v3'; batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
-}>>();
+} | {
+  route: 'native'; batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+}>;
+const TRACKER_FEE_CHECKS = new WeakMap<object, FeeSetupCustody>();
 const CLAIMED_TRACKER_FEE_CHECKS = new WeakSet<object>();
 export type SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1 =
   SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1;
-const WITHDRAWAL_FEE_CHECKS = new WeakMap<object, Readonly<{
-  batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
-  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
-}>>();
+const WITHDRAWAL_FEE_CHECKS = new WeakMap<object, FeeSetupCustody>();
 const CLAIMED_WITHDRAWAL_FEE_CHECKS = new WeakSet<object>();
 const TRACKER_PROTOCOL_V2_CHECKS = new WeakMap<object, Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>;
   result: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1Result>;
   genesisHeaderIdHex: string;
+  assertCustody?: () => void;
 }>>();
 const CLAIMED_TRACKER_V2_CHECKS = new WeakSet<object>();
 const REVALIDATED_TRACKER_V2_CHECKS = new WeakSet<object>();
@@ -307,6 +310,7 @@ export function assertSubstrateFederatedIsolatedDevnetTrackerV2Check(
   if (material === undefined || material.target !== target || material.result !== value.result) {
     throw new Error('isolated tracker protocol V2 check lacks exact session provenance');
   }
+  material.assertCustody?.();
   const current = assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
   if (canonicalJson(current) !== canonicalJson(value.result.targetBinding)) {
     throw new Error('isolated tracker protocol V2 check target binding changed');
@@ -324,8 +328,10 @@ export async function claimSubstrateFederatedIsolatedDevnetTrackerV2Check(
   const revalidationDigestHex = await reobserveTrackerV2(check, target, () => {
     assertSubstrateFederatedIsolatedDevnetTrackerV2Check(check, target);
   }, true);
+  const material = TRACKER_PROTOCOL_V2_CHECKS.get(check)!;
+  material.assertCustody?.();
   return Object.freeze({ binding: check.result.targetBinding, revalidationDigestHex,
-    genesisHeaderIdHex: TRACKER_PROTOCOL_V2_CHECKS.get(check)!.genesisHeaderIdHex });
+    genesisHeaderIdHex: material.genesisHeaderIdHex, assertCustody: material.assertCustody });
 }
 
 export interface SubstrateFederatedIsolatedDevnetTrackerV2Freshness {
@@ -342,15 +348,20 @@ export async function revalidateSubstrateFederatedIsolatedDevnetTrackerV2Reserva
     throw new Error('tracker V2 reservation revalidation lacks an unconsumed claimed check');
   }
   REVALIDATED_TRACKER_V2_CHECKS.add(check);
+  const material = TRACKER_PROTOCOL_V2_CHECKS.get(check)!;
+  material.assertCustody?.();
   const binding = assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, check.result.targetBinding);
   const assertActive = () => {
+    material.assertCustody?.();
     const current = assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, check.result.targetBinding);
     if (canonicalJson(current) !== canonicalJson(binding)) throw new Error('tracker V2 freshness binding changed');
   };
   await reobserveTrackerV2(check, target, assertActive, true);
-  const checked = await checkSignedTransaction(check.result.signedCandidate, 'isolated tracker V2 reservation', PRIMARY_NODE_ORIGIN);
+  const checked = await checkSignedTransaction(check.result.signedCandidate, 'isolated tracker V2 reservation', PRIMARY_NODE_ORIGIN,
+    material.assertCustody === undefined ? undefined : assertActive);
   if (checked === null) throw new Error('tracker V2 reservation node check failed');
   await reobserveTrackerV2(check, target, assertActive, true);
+  assertActive();
   const freshness = Object.freeze({ binding,
     completion: issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(target) });
   TRACKER_V2_FRESHNESS.set(freshness, Object.freeze({ check, binding }));
@@ -366,8 +377,11 @@ export async function checkSubstrateFederatedIsolatedDevnetTrackerV2Transport(
   if (retained === undefined || retained.check !== check) throw new Error('tracker V2 transport lacks exact freshness provenance');
   // Consume before I/O, including a failed check. The same signed candidate is never retried.
   TRACKER_V2_FRESHNESS.delete(freshness);
+  const material = TRACKER_PROTOCOL_V2_CHECKS.get(check)!;
+  material.assertCustody?.();
   const binding = assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
   const assertActive = () => {
+    material.assertCustody?.();
     const current = assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
     if (canonicalJson(current) !== canonicalJson(binding)
       || current.reservationFreshnessProcessBindingDigestHex !== retained.binding.processBindingDigestHex
@@ -376,13 +390,14 @@ export async function checkSubstrateFederatedIsolatedDevnetTrackerV2Transport(
     }
   };
   await reobserveTrackerV2(check, target, assertActive, false);
-  const checked = await checkSignedTransaction(check.result.signedCandidate, 'isolated tracker V2 pretransport', PRIMARY_NODE_ORIGIN);
+  const checked = await checkSignedTransaction(check.result.signedCandidate, 'isolated tracker V2 pretransport', PRIMARY_NODE_ORIGIN,
+    material.assertCustody === undefined ? undefined : assertActive);
   if (checked === null) throw new Error('tracker V2 pretransport node check failed');
   await reobserveTrackerV2(check, target, assertActive, false);
   const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(check.result.signedCandidate, checked, {
     processBindingDigestHex: binding.processBindingDigestHex,
     executionTargetIdentityDigestHex: binding.executionTargetIdentityDigestHex,
-  });
+  }, material.assertCustody === undefined ? undefined : assertActive);
   TRACKER_V2_TRANSPORT_BINDINGS.set(check, binding);
   return Object.freeze({ binding, checkedAcceptance });
 }
@@ -395,20 +410,24 @@ async function reobserveTrackerV2(
 ): Promise<string> {
   const material = TRACKER_PROTOCOL_V2_CHECKS.get(check);
   if (material === undefined) throw new Error('tracker V2 observation lacks session provenance');
-  assertActive();
+  const assertCurrent = () => { material.assertCustody?.(); assertActive(); };
+  assertCurrent();
   if (target.primaryNodeOrigin !== PRIMARY_NODE_ORIGIN || target.witnessNodeOrigin !== WITNESS_NODE_ORIGIN) {
     throw new Error('tracker V2 observation origins differ from the isolated target');
   }
   const expectedHeaders = check.result.observedHeaderContext.headers;
   const importedWasm = await import('ergo-lib-wasm-nodejs');
+  assertCurrent();
   const wasm = importedWasm.default ?? importedWasm;
   const observations = [];
   for (const origin of [PRIMARY_NODE_ORIGIN, WITNESS_NODE_ORIGIN]) {
     const genesis = await ngetDirect('/blocks/at/1', origin);
+    assertCurrent();
     if (canonicalJson(genesis) !== canonicalJson([material.genesisHeaderIdHex])) {
       throw new Error('tracker V2 admission genesis changed');
     }
     const apiHeaders = await ngetDirect('/blocks/lastHeaders/10', origin);
+    assertCurrent();
     if (!Array.isArray(apiHeaders) || apiHeaders.length !== 10) throw new Error('tracker V2 admission headers unavailable');
     // Ergo's API returns oldest-first; the checked state context is newest-first.
     const headers = [...apiHeaders].reverse();
@@ -427,16 +446,25 @@ async function reobserveTrackerV2(
     const inputs = [];
     for (const expected of check.result.transaction.inputBoxes) {
       const current = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${expected.boxId}`, origin), 'tracker V2 admission input');
+      assertCurrent();
       if (canonicalJson(current) !== canonicalJson(expected)) throw new Error('tracker V2 admission input changed');
       inputs.push(current);
     }
     observations.push({ origin, genesis, headers: currentHeaders.headers.map(header => header.serializedHex), inputs });
-    assertActive();
+    assertCurrent();
   }
   return sha256CanonicalJson({ checkDigestHex: check.result.checkDigestHex, observations }, 'E2S_ISOLATED_TRACKER_V2_ADMISSION_REVALIDATION');
 }
 
 /** Claim only a genuine retained-signer result; a JSON copy cannot restore it. */
+function assertFeeSetupCustody(material: FeeSetupCustody,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>) {
+  if (material.target !== target) throw new Error('fee funding target differs from retained setup');
+  return material.route === 'native'
+    ? assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(material.batch, target)
+    : assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(material.batch, target);
+}
+
 export function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(
   check: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>,
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -445,9 +473,9 @@ export function claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1(
   if (material === undefined || material.target !== target || CLAIMED_TRACKER_FEE_CHECKS.has(check)) {
     throw new Error('tracker fee funding check lacks unconsumed exact provenance');
   }
-  const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(material.batch, target);
+  const binding = assertFeeSetupCustody(material, target);
   CLAIMED_TRACKER_FEE_CHECKS.add(check);
-  return Object.freeze({ batch: material.batch, binding });
+  return Object.freeze({ batch: material.batch, binding, assertActive: () => assertFeeSetupCustody(material, target) });
 }
 
 export function claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1(
@@ -458,9 +486,9 @@ export function claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1
   if (material === undefined || material.target !== target || CLAIMED_WITHDRAWAL_FEE_CHECKS.has(check)) {
     throw new Error('withdrawal fee funding check lacks unconsumed exact provenance');
   }
-  const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(material.batch, target);
+  const binding = assertFeeSetupCustody(material, target);
   CLAIMED_WITHDRAWAL_FEE_CHECKS.add(check);
-  return Object.freeze({ batch: material.batch, binding });
+  return Object.freeze({ batch: material.batch, binding, assertActive: () => assertFeeSetupCustody(material, target) });
 }
 const FAMILY_EXECUTION_BATCHES = new WeakMap<
   object,
@@ -623,6 +651,10 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>>;
+  readonly checkNativeWithdrawalFeeFundingV1: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3'];
+  readonly checkNativeTrackerFeeFundingV1: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3'];
+  readonly checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkNativeWithdrawalV2: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
   readonly runForExecutionV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1406,8 +1438,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let frozenTrackerCheck:
       Readonly<SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2Receipt>
       | undefined;
-    let trackerFeeContinuation: Readonly<{
-      batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    let trackerFeeContinuation: FeeSetupCustody & Readonly<{
       feePayerPublicKeyHex: string;
       retainTrackerSigner: boolean;
       trackerCompilerRequest: Readonly<SubstrateFederatedTrackerCompilerRequestV2>;
@@ -1415,7 +1446,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let retainedTrackerFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1> | undefined;
     let retainedWithdrawalFeeCheck: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1> | undefined;
     let retainedCommittedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
-    let retainedWithdrawalCompiler: ReturnType<typeof getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3> | undefined;
+    let retainedWithdrawalCompiler: ReturnType<typeof getSubstrateFederatedNativeGenesisSetupCompilerInputV1> | undefined;
     let retainedWithdrawalTracker: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let nativeBatch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> | undefined;
@@ -1426,6 +1457,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'native-setup-complete'
       | 'native-source-lock-checked'
       | 'native-vault-checked'
+      | 'native-withdrawal-fee-checked'
+      | 'native-tracker-fee-checked'
+      | 'native-withdrawal-ready'
       | 'v3-peg-in-ready'
       | 'v3-source-lock-checked'
       | 'v3-tracker-fee-ready'
@@ -1441,7 +1475,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     const nativeCancellation = new AbortController();
     const assertNativeSessionActive = (): void => {
       if (!nativeRouteSelected || terminalInvalidationRequested || nativeCancellation.signal.aborted
-        || !['running', 'native-setup-complete', 'native-source-lock-checked', 'native-vault-checked'].includes(state)) {
+        || !['running', 'native-setup-complete', 'native-source-lock-checked', 'native-vault-checked',
+          'native-withdrawal-fee-checked', 'native-tracker-fee-checked', 'native-withdrawal-ready'].includes(state)) {
         throw new Error('native FED setup session is inactive');
       }
     };
@@ -1490,6 +1525,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'open'
         | 'native-setup-complete'
         | 'native-source-lock-checked'
+        | 'native-vault-checked'
+        | 'native-withdrawal-fee-checked'
+        | 'native-tracker-fee-checked'
+        | 'native-withdrawal-ready'
         | 'setup-complete'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
@@ -1505,6 +1544,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'native-setup-complete'
         | 'native-source-lock-checked'
         | 'native-vault-checked'
+        | 'native-withdrawal-fee-checked'
+        | 'native-tracker-fee-checked'
+        | 'native-withdrawal-ready'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
@@ -1563,7 +1605,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
       const result = await runFixedSetupCheckV3(captured, activeMnemonic);
       const batch = promoteSetupExecutionBatchV3(result, target, binding);
-      trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
+      trackerFeeContinuation = Object.freeze({ route: 'v3', batch, target, feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
         trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
       return batch;
     };
@@ -1607,7 +1649,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     ): Promise<void> => {
       assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
       const continuation = trackerFeeContinuation;
-      if (continuation?.retainTrackerSigner !== true) {
+      if (continuation?.retainTrackerSigner !== true || continuation.route !== 'v3') {
         throw new Error('isolated V2 peg-in setup custody is absent');
       }
       const compiler = getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3(continuation.batch, target);
@@ -1643,6 +1685,14 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       if (continuation?.retainTrackerSigner !== true || feeCheck === undefined) {
         throw new Error('retained tracker V2 signer or fee funding is absent');
       }
+      const assertCurrent = () => {
+        if (continuation.route === 'native') {
+          assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(continuation.batch, continuation.target);
+          return assertSubstrateFederatedNativeSetupTrackerLineageV1(target, continuation.target);
+        }
+        return assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+      };
+      assertCurrent();
       assertSubstrateFederatedTrackerV2Context(context);
       assertSubstrateFederatedTrackerV2ExternalFeeTransaction(transaction);
       assertBridgeValidityTrackerObservedHeaderContextV1(observedHeaderContext);
@@ -1654,33 +1704,291 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         || canonicalJson(transaction.inputBoxes[1]) !== canonicalJson(feeCheck.transaction.outputs[0])) {
         throw new Error('tracker V2 inputs differ from retained genesis and fee funding');
       }
-      assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+      assertCurrent();
       for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
         if (canonicalJson(await ngetDirect('/blocks/at/1', origin))
           !== canonicalJson([continuation.batch.request.target.genesisHeaderIdHex])) {
           throw new Error('tracker V2 frozen target genesis differs from setup');
         }
+        assertCurrent();
       }
       const result = await executeSubstrateFederatedIsolatedDevnetTrackerV2CheckKernelV1({
         compilerRequest: continuation.trackerCompilerRequest,
         context, transaction, observedHeaderContext, target,
         expectedSigner: { publicKeyHex: signer.publicKeyHex, p2pkErgoTreeHex: signer.p2pkErgoTreeHex, networkPrefix: signer.networkPrefix },
         operations: {
-          captureTargetBinding: () => assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target),
+          captureTargetBinding: assertCurrent,
           observeInputBox: (boxId, origin) => ngetDirect(`/utxo/byId/${boxId}`, origin),
           prepareCandidate: input => prepareLocalWasmRootCheckCandidates({
             mnemonic: activeMnemonic, networkPrefix: input.networkPrefix, nodeOrigin: input.nodeOrigin,
             headers: input.headers,
             candidates: [{ role: input.role, eip12Tx: input.eip12Tx, expectedTxId: input.expectedTxId }],
+            ...(continuation.route === 'native' ? { assertActive: assertCurrent } : {}),
           }),
-          checkCandidate: (candidate, origin) => checkSignedTransaction(candidate, 'isolated tracker protocol V2 check', origin),
+          checkCandidate: (candidate, origin) => checkSignedTransaction(candidate, 'isolated tracker protocol V2 check', origin,
+            continuation.route === 'native' ? assertCurrent : undefined),
         },
       });
+      assertCurrent();
       const check = Object.freeze({ result, setupRequestDigestHex: continuation.batch.request.requestDigestHex,
         feeFundingTransactionIdHex: feeCheck.transaction.txId });
       TRACKER_PROTOCOL_V2_CHECKS.set(check, Object.freeze({ target, result,
+        ...(continuation.route === 'native' ? { assertCustody: () =>
+          assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(continuation.batch, continuation.target) } : {}),
         genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex }));
       return check;
+    };
+    const checkWithdrawalFeeFunding = async (
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>, activeMnemonic: string,
+    ): Promise<Readonly<SubstrateFederatedIsolatedDevnetWithdrawalFeeFundingCheckV1>> => {
+      const continuation = trackerFeeContinuation;
+      if (continuation?.retainTrackerSigner !== true || retainedCommittedPegInPacket === undefined
+        || retainedWithdrawalFeeCheck !== undefined) {
+        throw new Error('withdrawal fee funding requires unconsumed committed-deposit custody');
+      }
+      if (continuation.route === 'native') await assertNativePegInPacket(retainedCommittedPegInPacket, target);
+      else await assertPegInPacketV2(retainedCommittedPegInPacket, target);
+      const assertCurrent = () => assertFeeSetupCustody(continuation, target);
+      const binding = assertCurrent();
+      const issuance = continuation.batch.orderedTransactions[1]!.issuance;
+      const genesis = await materializeUnsignedTransaction(
+        structuredClone(issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+        'retained V3 DUP genesis change',
+      );
+      const source = genesis.outputs[1];
+      if (genesis.txId !== issuance.unsignedTransactionIdHex || genesis.outputs.length !== 3
+        || source === undefined || source.assets.length !== 0
+        || ![signer.p2pkErgoTreeHex, signer.rewardInputErgoTrees.delay1, signer.rewardInputErgoTrees.delay720]
+          .includes(source.ergoTree)) {
+        throw new Error('retained V3 DUP genesis has no exact operator change');
+      }
+      const reobserve = async (): Promise<void> => {
+        assertCurrent();
+        for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+          const exact = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${source.boxId}`, origin), 'withdrawal fee funding live source');
+          if (canonicalJson(exact) !== canonicalJson(source)) {
+            throw new Error('withdrawal fee funding live source differs from retained genesis change');
+          }
+          assertCurrent();
+        }
+      };
+      await reobserve();
+      const headers: unknown = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
+      if (!Array.isArray(headers) || headers.length !== 10) {
+        throw new Error('withdrawal fee funding requires ten signing headers');
+      }
+      assertCurrent();
+      const tip = selectLatestHeader(headers);
+      const transaction = await buildSubstrateFederatedWithdrawalV2FeeFunding({
+        sourceBox: source, fundingPublicKeyHex: signer.publicKeyHex,
+        feePayerPublicKeyHex: signer.publicKeyHex, currentHeight: tip.header.height + 1,
+      });
+      assertCurrent();
+      const prepared = await prepareLocalWasmRootCheckCandidates({
+        mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
+        candidates: [{ role: 'withdrawal-v2-fee-funding', eip12Tx: transaction.eip12Tx, expectedTxId: transaction.txId }],
+        ...(continuation.route === 'native' ? { assertActive: assertCurrent } : {}),
+      });
+      if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
+        || prepared.candidates.length !== 1 || prepared.candidates[0]!.expectedTxId !== transaction.txId) {
+        throw new Error('withdrawal fee funding signer binding differs');
+      }
+      assertCurrent();
+      const candidate = prepared.candidates[0]!.signedCandidate;
+      const checked = await checkSignedTransaction(candidate, 'isolated withdrawal V2 fee funding', target.primaryNodeOrigin,
+        continuation.route === 'native' ? assertCurrent : undefined);
+      if (checked === null) throw new Error('withdrawal fee funding JVM node check failed');
+      await reobserve();
+      const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding,
+        continuation.route === 'native' ? assertCurrent : undefined);
+      assertCurrent();
+      const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
+      WITHDRAWAL_FEE_CHECKS.set(result, continuation);
+      retainedWithdrawalCompiler = continuation.route === 'native'
+        ? getSubstrateFederatedNativeGenesisSetupCompilerInputV1(continuation.batch, target)
+        : getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3(continuation.batch, target);
+      retainedWithdrawalFeeCheck = result;
+      return result;
+    };
+    const checkTrackerFeeFunding = async (
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>, activeMnemonic: string,
+    ): Promise<Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>> => {
+      const continuation = trackerFeeContinuation;
+      if (continuation === undefined) throw new Error('tracker fee continuation is absent');
+      const assertCurrent = () => assertFeeSetupCustody(continuation, target);
+      const binding = assertCurrent();
+      const issuance = continuation.batch.orderedTransactions[0]!.issuance;
+      const genesis = await materializeUnsignedTransaction(
+        structuredClone(issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+        'retained V3 tracker genesis',
+      );
+      const source = genesis.outputs[1];
+      if (genesis.txId !== issuance.unsignedTransactionIdHex || genesis.outputs.length !== 3
+        || source === undefined || source.assets.length !== 0
+        || ![signer.p2pkErgoTreeHex, signer.rewardInputErgoTrees.delay1, signer.rewardInputErgoTrees.delay720]
+          .includes(source.ergoTree)) {
+        throw new Error('retained V3 tracker genesis has no exact operator change');
+      }
+      const reobserve = async (): Promise<void> => {
+        assertCurrent();
+        for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+          const current = await ngetDirect(`/utxo/byId/${source.boxId}`, origin);
+          const exact = await normalizeEip12Box(current, 'tracker fee funding live source');
+          if (canonicalJson(exact) !== canonicalJson(source)) {
+            throw new Error('tracker fee funding live source differs from retained genesis change');
+          }
+          assertCurrent();
+        }
+      };
+      await reobserve();
+      const headers: unknown = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
+      if (!Array.isArray(headers) || headers.length !== 10) {
+        throw new Error('tracker fee funding requires ten signing headers');
+      }
+      assertCurrent();
+      const tip = selectLatestHeader(headers);
+      const transaction = await buildSubstrateFederatedTrackerV2FeeFunding({
+        sourceBox: source, fundingPublicKeyHex: signer.publicKeyHex,
+        feePayerPublicKeyHex: continuation.feePayerPublicKeyHex, currentHeight: tip.header.height + 1,
+      });
+      assertCurrent();
+      const prepared = await prepareLocalWasmRootCheckCandidates({
+        mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
+        candidates: [{ role: 'tracker-v2-fee-funding', eip12Tx: transaction.eip12Tx, expectedTxId: transaction.txId }],
+        ...(continuation.route === 'native' ? { assertActive: assertCurrent } : {}),
+      });
+      if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
+        || prepared.candidates.length !== 1 || prepared.candidates[0]!.expectedTxId !== transaction.txId) {
+        throw new Error('tracker fee funding signer binding differs');
+      }
+      assertCurrent();
+      const candidate = prepared.candidates[0]!.signedCandidate;
+      const checked = await checkSignedTransaction(candidate, 'isolated tracker V2 fee funding', target.primaryNodeOrigin,
+        continuation.route === 'native' ? assertCurrent : undefined);
+      if (checked === null) throw new Error('tracker fee funding JVM node check failed');
+      await reobserve();
+      const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding,
+        continuation.route === 'native' ? assertCurrent : undefined);
+      assertCurrent();
+      const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
+      TRACKER_FEE_CHECKS.set(result, continuation);
+      if (continuation.retainTrackerSigner) retainedTrackerFeeCheck = result;
+      return result;
+    };
+    const checkWithdrawal = async (
+      claimValue: Readonly<SubstrateFederatedBurnClaimV1>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>, activeMnemonic: string,
+    ): Promise<Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check>> => {
+      const claim = structuredClone(claimValue);
+      const tracker = retainedWithdrawalTracker;
+      const deposit = retainedCommittedPegInPacket;
+      const fee = retainedWithdrawalFeeCheck;
+      const compiler = retainedWithdrawalCompiler;
+      const continuation = trackerFeeContinuation;
+      const transport = tracker === undefined ? undefined : TRACKER_V2_TRANSPORT_BINDINGS.get(tracker);
+      if (tracker === undefined || deposit === undefined || fee === undefined || compiler === undefined
+        || continuation === undefined || transport === undefined) {
+        throw new Error('withdrawal check lacks retained deposit, fee, compiler or tracker transport');
+      }
+      const trackerTxId = tracker.result.transaction.unsignedTransactionIdHex;
+      const binding = assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId);
+      const assertActive = (): void => {
+        if (continuation.route === 'native') {
+          assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(continuation.batch, continuation.target);
+        }
+        if (canonicalJson(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId))
+          !== canonicalJson(binding)) throw new Error('withdrawal check target binding changed');
+      };
+      assertActive();
+      const admitted = await materializeUnsignedTransaction(
+        structuredClone(tracker.result.transaction.eip12UnsignedTransaction) as unknown as Eip12UnsignedTransaction,
+        'withdrawal admitted tracker',
+      );
+      const dup = await materializeUnsignedTransaction(
+        structuredClone(continuation.batch.orderedTransactions[1]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
+        'withdrawal DUP genesis',
+      );
+      const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        target, continuation.batch.request.target.genesisHeaderIdHex,
+      );
+      const txIds = [deposit.transactions.reserveTransition.txId, dup.txId, fee.transaction.txId, trackerTxId];
+      const observeConfirmations = async () => {
+        const confirmations = [];
+        for (const [index, txId] of txIds.entries()) {
+          const confirmation = await observer.observe(txId, PRIMARY_NODE_ORIGIN);
+          if (confirmation === null || confirmation.status !== 'confirmed') throw new Error(`withdrawal predecessor ${index} lacks canonical confirmation`);
+          confirmations.push(confirmation);
+        }
+        assertActive();
+        return confirmations;
+      };
+      const before = await observeConfirmations();
+      const headers = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
+      if (!Array.isArray(headers) || headers.length !== 10) throw new Error('withdrawal requires ten signing headers');
+      const height = selectLatestHeader(headers).header.height + 1;
+      const packet = await buildSubstrateFederatedBurnSettlementV2({
+        familyCompilerInput: {
+          trackerRequest: compiler.trackerRequest, trackerReceipt: compiler.trackerReceipt,
+          templates: compiler.familyTemplates,
+          duplicatePreventionGenesisInputBoxIdHex: compiler.familyReceipt.profile.duplicatePreventionNftIdHex,
+          pooledReserveGenesisInputBoxIdHex: compiler.familyReceipt.profile.pooledReserveNftIdHex,
+        },
+        familyCompilerReceipt: compiler.familyReceipt,
+        trackerState: { dataInput: admitted.outputs[0]!, history: [{
+          key: tracker.result.context.trackerTransition.trackerKeyHex,
+          value: tracker.result.context.trackerTransition.trackerValueHex,
+        }] },
+        reserveState: { predecessor: deposit.boxes.reserveSuccessor },
+        duplicatePreventionState: { predecessor: dup.outputs[0]!, historyKeys: [] },
+        feeFundingInput: fee.transaction.outputs[0]!, claim,
+        currentErgoHeight: height, creationHeight: height,
+      });
+      const observeInputs = async (): Promise<void> => {
+        for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+          for (const box of [packet.boxes.reservePredecessor, packet.boxes.duplicatePreventionPredecessor,
+            packet.boxes.feeFundingInput, packet.boxes.trackerDataInput]) {
+            const observed = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${box.boxId}`, origin), 'withdrawal live input');
+            if (canonicalJson(observed) !== canonicalJson(box)) throw new Error('withdrawal live input differs from retained lineage');
+          }
+        }
+        assertActive();
+      };
+      await observeInputs();
+      assertActive();
+      const prepared = await prepareLocalWasmRootCheckCandidates({
+        mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
+        candidates: [{ role: 'withdrawal-v2', eip12Tx: packet.transaction.eip12Tx, expectedTxId: packet.transaction.txId }],
+        ...(continuation.route === 'native' ? { assertActive } : {}),
+      });
+      const candidate = prepared.candidates[0];
+      if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
+        || prepared.candidates.length !== 1 || candidate?.expectedTxId !== packet.transaction.txId
+        || candidate.signedCandidate.txId !== packet.transaction.txId) throw new Error('withdrawal signer binding differs');
+      assertActive();
+      const checkedResult = await checkSignedTransaction(candidate.signedCandidate, 'isolated withdrawal V2 check', target.primaryNodeOrigin,
+        continuation.route === 'native' ? assertActive : undefined);
+      if (checkedResult === null) throw new Error('withdrawal JVM node check failed');
+      await observeInputs();
+      const after = await observeConfirmations();
+      for (let i = 0; i < before.length; i++) {
+        if (after[i]!.confirmationHeight !== before[i]!.confirmationHeight
+          || after[i]!.confirmationHeaderIdHex !== before[i]!.confirmationHeaderIdHex
+          || after[i]!.confirmations < before[i]!.confirmations
+          || after[i]!.observedAtHeight < before[i]!.observedAtHeight) {
+          throw new Error(`withdrawal canonical predecessor ${i} changed during check`);
+        }
+      }
+      const result = Object.freeze({ packet, signedCandidate: candidate.signedCandidate, checkedResult });
+      WITHDRAWAL_V2_CHECKS.set(result, Object.freeze({ target, binding,
+        trackerTransportBinding: transport, trackerTransactionIdHex: trackerTxId,
+        genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex,
+        setupRequestDigestHex: continuation.batch.request.requestDigestHex,
+        checkDigestHex: sha256CanonicalJson(result, 'E2S_ISOLATED_WITHDRAWAL_V2_CHECK'),
+        predecessors: Object.freeze(after.map((item, index) => Object.freeze({ transactionIdHex: txIds[index]!,
+          confirmationHeight: item.confirmationHeight!, confirmationHeaderIdHex: item.confirmationHeaderIdHex!,
+          confirmations: item.confirmations, observedAtHeight: item.observedAtHeight }))),
+      }));
+      return result;
     };
     const runForExecution = async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
@@ -1795,6 +2103,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         assertNativeSessionActive();
         nativeBatch = promoteNativeSetupExecutionBatch({ compiled, target, binding, request, receipt,
           assertSessionActive: assertNativeSessionActive });
+        trackerFeeContinuation = Object.freeze({ route: 'native', batch: nativeBatch, target,
+          feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
+          trackerCompilerRequest: compiled.familyCompilerInput.trackerRequest });
         return nativeBatch;
       }, 'native-setup-complete'),
       checkNativePegInSourceLockRetainingSignerV1: async (
@@ -1858,7 +2169,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, captured) });
         const result = await runFixedSetupCheckV3(captured, activeMnemonic);
         const batch = promoteSetupExecutionBatchV3(result, target, binding);
-        trackerFeeContinuation = Object.freeze({ batch, feePayerPublicKeyHex, retainTrackerSigner: false,
+        trackerFeeContinuation = Object.freeze({ route: 'v3', batch, target, feePayerPublicKeyHex, retainTrackerSigner: false,
           trackerCompilerRequest: captured.sourceAndCompilerInput.trackerRequest });
         return batch;
       }, 'v3-tracker-fee-ready'),
@@ -1904,124 +2215,28 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         retainedCommittedPegInPacket = packet;
         return checked;
       }, 'v3-tracker-fee-ready'),
-      checkWithdrawalFeeFundingV3: async (
-        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-      ) => consume('v3-tracker-fee-ready', async activeMnemonic => {
-        const continuation = trackerFeeContinuation;
-        if (continuation?.retainTrackerSigner !== true || retainedCommittedPegInPacket === undefined
-          || retainedWithdrawalFeeCheck !== undefined) {
-          throw new Error('withdrawal fee funding requires unconsumed committed-deposit custody');
-        }
-        await assertPegInPacketV2(retainedCommittedPegInPacket, target);
-        const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-        const issuance = continuation.batch.orderedTransactions[1]!.issuance;
-        const genesis = await materializeUnsignedTransaction(
-          structuredClone(issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
-          'retained V3 DUP genesis change',
-        );
-        const source = genesis.outputs[1];
-        if (genesis.txId !== issuance.unsignedTransactionIdHex || genesis.outputs.length !== 3
-          || source === undefined || source.assets.length !== 0
-          || ![signer.p2pkErgoTreeHex, signer.rewardInputErgoTrees.delay1, signer.rewardInputErgoTrees.delay720]
-            .includes(source.ergoTree)) {
-          throw new Error('retained V3 DUP genesis has no exact operator change');
-        }
-        const reobserve = async (): Promise<void> => {
-          assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-          for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
-            const exact = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${source.boxId}`, origin), 'withdrawal fee funding live source');
-            if (canonicalJson(exact) !== canonicalJson(source)) {
-              throw new Error('withdrawal fee funding live source differs from retained genesis change');
-            }
+      checkNativeWithdrawalFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalFeeFundingV1']>) => consume('native-vault-checked',
+        activeMnemonic => checkWithdrawalFeeFunding(target, activeMnemonic), 'native-withdrawal-fee-checked'),
+      checkNativeTrackerFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeTrackerFeeFundingV1']>) => consume('native-withdrawal-fee-checked',
+        activeMnemonic => checkTrackerFeeFunding(target, activeMnemonic), 'native-tracker-fee-checked'),
+      checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner']>) =>
+        consume('native-tracker-fee-checked', async activeMnemonic => {
+          withdrawalRouteSelected = true;
+          if (retainedCommittedPegInPacket === undefined || retainedWithdrawalFeeCheck === undefined
+            || retainedWithdrawalCompiler === undefined) {
+            throw new Error('native withdrawal continuation requires original deposit, compiler and distinct fee check');
           }
-        };
-        await reobserve();
-        const headers: unknown = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
-        if (!Array.isArray(headers) || headers.length !== 10) {
-          throw new Error('withdrawal fee funding requires ten signing headers');
-        }
-        const tip = selectLatestHeader(headers);
-        const transaction = await buildSubstrateFederatedWithdrawalV2FeeFunding({
-          sourceBox: source, fundingPublicKeyHex: signer.publicKeyHex,
-          feePayerPublicKeyHex: signer.publicKeyHex, currentHeight: tip.header.height + 1,
-        });
-        const prepared = await prepareLocalWasmRootCheckCandidates({
-          mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
-          candidates: [{ role: 'withdrawal-v2-fee-funding', eip12Tx: transaction.eip12Tx, expectedTxId: transaction.txId }],
-        });
-        if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
-          || prepared.candidates.length !== 1 || prepared.candidates[0]!.expectedTxId !== transaction.txId) {
-          throw new Error('withdrawal fee funding signer binding differs');
-        }
-        const candidate = prepared.candidates[0]!.signedCandidate;
-        const checked = await checkSignedTransaction(candidate, 'isolated withdrawal V2 fee funding', target.primaryNodeOrigin);
-        if (checked === null) throw new Error('withdrawal fee funding JVM node check failed');
-        await reobserve();
-        const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding);
-        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-        const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
-        WITHDRAWAL_FEE_CHECKS.set(result, Object.freeze({ batch: continuation.batch, target }));
-        retainedWithdrawalCompiler = getSubstrateFederatedIsolatedDevnetSetupCompilerInputV3(continuation.batch, target);
-        retainedWithdrawalFeeCheck = result;
-        return result;
-      }, 'v3-tracker-fee-ready'),
-      checkTrackerFeeFundingV3: async (
-        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-      ) => consume('v3-tracker-fee-ready', async activeMnemonic => {
-        const continuation = trackerFeeContinuation;
-        if (continuation === undefined) throw new Error('tracker fee continuation is absent');
-        const binding = assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-        const issuance = continuation.batch.orderedTransactions[0]!.issuance;
-        const genesis = await materializeUnsignedTransaction(
-          structuredClone(issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
-          'retained V3 tracker genesis',
-        );
-        const source = genesis.outputs[1];
-        if (genesis.txId !== issuance.unsignedTransactionIdHex || genesis.outputs.length !== 3
-          || source === undefined || source.assets.length !== 0
-          || ![signer.p2pkErgoTreeHex, signer.rewardInputErgoTrees.delay1, signer.rewardInputErgoTrees.delay720]
-            .includes(source.ergoTree)) {
-          throw new Error('retained V3 tracker genesis has no exact operator change');
-        }
-        const reobserve = async (): Promise<void> => {
-          assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-          for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
-            const current = await ngetDirect(`/utxo/byId/${source.boxId}`, origin);
-            const exact = await normalizeEip12Box(current, 'tracker fee funding live source');
-            if (canonicalJson(exact) !== canonicalJson(source)) {
-              throw new Error('tracker fee funding live source differs from retained genesis change');
-            }
-          }
-        };
-        await reobserve();
-        const headers: unknown = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
-        if (!Array.isArray(headers) || headers.length !== 10) {
-          throw new Error('tracker fee funding requires ten signing headers');
-        }
-        const tip = selectLatestHeader(headers);
-        const transaction = await buildSubstrateFederatedTrackerV2FeeFunding({
-          sourceBox: source, fundingPublicKeyHex: signer.publicKeyHex,
-          feePayerPublicKeyHex: continuation.feePayerPublicKeyHex, currentHeight: tip.header.height + 1,
-        });
-        const prepared = await prepareLocalWasmRootCheckCandidates({
-          mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
-          candidates: [{ role: 'tracker-v2-fee-funding', eip12Tx: transaction.eip12Tx, expectedTxId: transaction.txId }],
-        });
-        if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
-          || prepared.candidates.length !== 1 || prepared.candidates[0]!.expectedTxId !== transaction.txId) {
-          throw new Error('tracker fee funding signer binding differs');
-        }
-        const candidate = prepared.candidates[0]!.signedCandidate;
-        const checked = await checkSignedTransaction(candidate, 'isolated tracker V2 fee funding', target.primaryNodeOrigin);
-        if (checked === null) throw new Error('tracker fee funding JVM node check failed');
-        await reobserve();
-        const checkedAcceptance = promoteLocalWasmCheckedTransactionForSubmissionV1(candidate, checked, binding);
-        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV3(continuation.batch, target);
-        const result = Object.freeze({ transaction, signedCandidate: candidate, checkedAcceptance });
-        TRACKER_FEE_CHECKS.set(result, Object.freeze({ batch: continuation.batch, target }));
-        if (continuation.retainTrackerSigner) retainedTrackerFeeCheck = result;
-        return result;
-      }, trackerFeeContinuation?.retainTrackerSigner === true ? 'v3-tracker-ready' : 'closed'),
+          const check = await checkTrackerV2(input, target, activeMnemonic);
+          retainedWithdrawalTracker = check;
+          return check;
+        }, 'native-withdrawal-ready'),
+      checkNativeWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalV2']>) => consume('native-withdrawal-ready',
+        activeMnemonic => checkWithdrawal(claim, target, activeMnemonic), 'closed'),
+      checkWithdrawalFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3']>) => consume('v3-tracker-fee-ready',
+        activeMnemonic => checkWithdrawalFeeFunding(target, activeMnemonic), 'v3-tracker-fee-ready'),
+      checkTrackerFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>) => consume('v3-tracker-fee-ready',
+        activeMnemonic => checkTrackerFeeFunding(target, activeMnemonic),
+        trackerFeeContinuation?.retainTrackerSigner === true ? 'v3-tracker-ready' : 'closed'),
       checkFrozenTrackerV2Candidate: async (
         inputValue: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2CheckInput>,
         target: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
@@ -2039,113 +2254,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         retainedWithdrawalTracker = check;
         return check;
       }, 'v2-withdrawal-ready'),
-      checkWithdrawalV2: async (
-        claimValue: Readonly<SubstrateFederatedBurnClaimV1>,
-        target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
-      ) => consume('v2-withdrawal-ready', async activeMnemonic => {
-        const claim = structuredClone(claimValue);
-        const tracker = retainedWithdrawalTracker;
-        const deposit = retainedCommittedPegInPacket;
-        const fee = retainedWithdrawalFeeCheck;
-        const compiler = retainedWithdrawalCompiler;
-        const continuation = trackerFeeContinuation;
-        const transport = tracker === undefined ? undefined : TRACKER_V2_TRANSPORT_BINDINGS.get(tracker);
-        if (tracker === undefined || deposit === undefined || fee === undefined || compiler === undefined
-          || continuation === undefined || transport === undefined) {
-          throw new Error('withdrawal check lacks retained deposit, fee, compiler or tracker transport');
-        }
-        const trackerTxId = tracker.result.transaction.unsignedTransactionIdHex;
-        const binding = assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId);
-        const assertActive = (): void => {
-          if (canonicalJson(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId))
-            !== canonicalJson(binding)) throw new Error('withdrawal check target binding changed');
-        };
-        const admitted = await materializeUnsignedTransaction(
-          structuredClone(tracker.result.transaction.eip12UnsignedTransaction) as unknown as Eip12UnsignedTransaction,
-          'withdrawal admitted tracker',
-        );
-        const dup = await materializeUnsignedTransaction(
-          structuredClone(continuation.batch.orderedTransactions[1]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
-          'withdrawal DUP genesis',
-        );
-        const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
-          target, continuation.batch.request.target.genesisHeaderIdHex,
-        );
-        const txIds = [deposit.transactions.reserveTransition.txId, dup.txId, fee.transaction.txId, trackerTxId];
-        const observeConfirmations = async () => {
-          const confirmations = [];
-          for (const [index, txId] of txIds.entries()) {
-            const confirmation = await observer.observe(txId, PRIMARY_NODE_ORIGIN);
-            if (confirmation === null || confirmation.status !== 'confirmed') throw new Error(`withdrawal predecessor ${index} lacks canonical confirmation`);
-            confirmations.push(confirmation);
-          }
-          assertActive();
-          return confirmations;
-        };
-        const before = await observeConfirmations();
-        const headers = await ngetDirect('/blocks/lastHeaders/10', target.primaryNodeOrigin);
-        if (!Array.isArray(headers) || headers.length !== 10) throw new Error('withdrawal requires ten signing headers');
-        const height = selectLatestHeader(headers).header.height + 1;
-        const packet = await buildSubstrateFederatedBurnSettlementV2({
-          familyCompilerInput: {
-            trackerRequest: compiler.trackerRequest, trackerReceipt: compiler.trackerReceipt,
-            templates: compiler.familyTemplates,
-            duplicatePreventionGenesisInputBoxIdHex: compiler.familyReceipt.profile.duplicatePreventionNftIdHex,
-            pooledReserveGenesisInputBoxIdHex: compiler.familyReceipt.profile.pooledReserveNftIdHex,
-          },
-          familyCompilerReceipt: compiler.familyReceipt,
-          trackerState: { dataInput: admitted.outputs[0]!, history: [{
-            key: tracker.result.context.trackerTransition.trackerKeyHex,
-            value: tracker.result.context.trackerTransition.trackerValueHex,
-          }] },
-          reserveState: { predecessor: deposit.boxes.reserveSuccessor },
-          duplicatePreventionState: { predecessor: dup.outputs[0]!, historyKeys: [] },
-          feeFundingInput: fee.transaction.outputs[0]!, claim,
-          currentErgoHeight: height, creationHeight: height,
-        });
-        const observeInputs = async (): Promise<void> => {
-          for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
-            for (const box of [packet.boxes.reservePredecessor, packet.boxes.duplicatePreventionPredecessor,
-              packet.boxes.feeFundingInput, packet.boxes.trackerDataInput]) {
-              const observed = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${box.boxId}`, origin), 'withdrawal live input');
-              if (canonicalJson(observed) !== canonicalJson(box)) throw new Error('withdrawal live input differs from retained lineage');
-            }
-          }
-          assertActive();
-        };
-        await observeInputs();
-        const prepared = await prepareLocalWasmRootCheckCandidates({
-          mnemonic: activeMnemonic, networkPrefix: 16, headers, nodeOrigin: target.primaryNodeOrigin,
-          candidates: [{ role: 'withdrawal-v2', eip12Tx: packet.transaction.eip12Tx, expectedTxId: packet.transaction.txId }],
-        });
-        const candidate = prepared.candidates[0];
-        if (prepared.pubKeyHex !== signer.publicKeyHex || prepared.ergoTreeHex !== signer.p2pkErgoTreeHex
-          || prepared.candidates.length !== 1 || candidate?.expectedTxId !== packet.transaction.txId
-          || candidate.signedCandidate.txId !== packet.transaction.txId) throw new Error('withdrawal signer binding differs');
-        const checkedResult = await checkSignedTransaction(candidate.signedCandidate, 'isolated withdrawal V2 check', target.primaryNodeOrigin);
-        if (checkedResult === null) throw new Error('withdrawal JVM node check failed');
-        await observeInputs();
-        const after = await observeConfirmations();
-        for (let i = 0; i < before.length; i++) {
-          if (after[i]!.confirmationHeight !== before[i]!.confirmationHeight
-            || after[i]!.confirmationHeaderIdHex !== before[i]!.confirmationHeaderIdHex
-            || after[i]!.confirmations < before[i]!.confirmations
-            || after[i]!.observedAtHeight < before[i]!.observedAtHeight) {
-            throw new Error(`withdrawal canonical predecessor ${i} changed during check`);
-          }
-        }
-        const result = Object.freeze({ packet, signedCandidate: candidate.signedCandidate, checkedResult });
-        WITHDRAWAL_V2_CHECKS.set(result, Object.freeze({ target, binding,
-          trackerTransportBinding: transport, trackerTransactionIdHex: trackerTxId,
-          genesisHeaderIdHex: continuation.batch.request.target.genesisHeaderIdHex,
-          setupRequestDigestHex: continuation.batch.request.requestDigestHex,
-          checkDigestHex: sha256CanonicalJson(result, 'E2S_ISOLATED_WITHDRAWAL_V2_CHECK'),
-          predecessors: Object.freeze(after.map((item, index) => Object.freeze({ transactionIdHex: txIds[index]!,
-            confirmationHeight: item.confirmationHeight!, confirmationHeaderIdHex: item.confirmationHeaderIdHex!,
-            confirmations: item.confirmations, observedAtHeight: item.observedAtHeight }))),
-        }));
-        return result;
-      }, 'closed'),
+      checkWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2']>) => consume('v2-withdrawal-ready',
+        activeMnemonic => checkWithdrawal(claim, target, activeMnemonic), 'closed'),
       runForExecution: async (
         input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,

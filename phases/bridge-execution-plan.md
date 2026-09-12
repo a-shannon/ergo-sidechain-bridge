@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-11
+Updated: 2026-09-12
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -291,7 +291,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | FED running-target binding | Local native campaign passed at `486d8107` | Actual root joined fresh builds/custody, observed Ergo issuance, deposit, confirmed reserve, proof and mint on both owned targets. Keep request freshness at checking separate from later action freshness. Historical V3/LAB identities cannot replace native provenance; retain unresolved-attempt holds |
 | Native reservation and mint caller | Local native campaign passed at `486d8107` | Reservation block one and chain-4242 nonce-one mint in block two passed exact RPC/token/consumed-record checks. Preserve broadcast authorization and duplicate, absent-commitment, wrong-binding, unreserved-sibling and fee negatives. Pool admission remains distinct from execution and final state |
 | Native burn commitment producer | Local source/build checkpoint; overlay 0006 after 0001/0004/0005 | Active-profile selection passes 11 native integration tests, 71 historical pallet tests and 48 export-owner tests. The selected FED node and WASM build with the pinned offline toolchain. Independent source review is complete. The collector rejects absent commitments and genesis-domain substitutions; live native burn remains unestablished |
-| Native burn and retained withdrawal continuation | Native execution, exact commitment collection and source-session attestation implemented at component level; native producer correction and Ergo continuation pending | The original burn attempt binds paired native storage, complete runtime events, global burn index and unchanged leaf/proof formats to the retained source quorum. Extend native setup custody through fee funding and the owned checkpoint/freeze/admission/payout phases; confirm both distinct external fee inputs before freezing the anchor horizon |
+| Native burn and retained withdrawal continuation | Native commitment producer and retained fee/tracker/payout consumers implemented; actual root composition pending | The original burn attempt binds paired native storage, runtime events and global burn index to the retained source quorum. Native setup custody now continues through distinct fee checks, process-owned tracker lineage and the terminal payout check. Confirm both external fee inputs before freezing the anchor horizon in the root |
 | Fresh operational two-way campaign | Depends on the native burn/continuation join; completed mint and withdrawal component evidence remain reusable | Use new target/custody and actual RPC calls for deposit-to-mint and burn, followed by the established Ergo withdrawal consumer. Prove this composed run before claiming two-way operation or reusing it for recovery tests; do not rerun a standalone mint campaign without a changed deciding input |
 
 The native execution consumer now retains the confirmed mint through one
@@ -321,6 +321,19 @@ correct the wrong sidechain domain. Normal native callback tests now exercise
 the selected profile and reject foreign emitters and malformed active state.
 The target root still ends after mint; native-node burn,
 checkpoint execution and Ergo payout remain unestablished on this route.
+
+Native setup now retains its original batch and compiler through withdrawal-fee
+and tracker-fee checks. Both fee consumers preserve exact authorization, durable
+reservation and submission handles. After the initial target expires, a private
+process-owned relation binds the current frozen tracker target to that same
+setup; the expired target cannot become active again. Custody checks cover
+internal signing/checking awaits and later admission or transport consumers.
+Payout checking closes signer custody while its original checked result remains
+usable by the established confirmation-target lifecycle. Composed tests use
+genuine JVM compiler output, AVL proofs, WASM signatures and journals with
+explicit source and process/RPC doubles. They do not establish a native two-way
+campaign. The next root integration must preserve these lifetimes and fund both
+fee inputs before checkpoint anchoring.
 
 Keep signing/execution, checkpoint attestation and Ergo continuation as
 coherent implementation batches. Reuse unchanged compiler, runtime and prior

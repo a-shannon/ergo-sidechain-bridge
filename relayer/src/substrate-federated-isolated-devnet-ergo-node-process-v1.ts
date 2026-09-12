@@ -123,7 +123,9 @@ const OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS =
   new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS =
-  new WeakMap<object, OwnedTargetBinding>();
+  new WeakMap<object, OwnedTargetBinding & {
+    readonly originalSetupTarget?: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  }>();
 const ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS =
   new WeakSet<object>();
 const OWNED_TRACKER_RESERVATION_FRESHNESS_TARGET_BINDINGS =
@@ -856,6 +858,21 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecut
   });
 }
 
+/** Current tracker authority descending from the exact completed setup action. */
+export function assertSubstrateFederatedNativeSetupTrackerLineageV1(
+  frozenTarget: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+  originalSetupTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const current = assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(frozenTarget);
+  const retained = OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS.get(frozenTarget)!;
+  // The original action may be closed. Its identity is provenance, not renewed authority.
+  if (retained.originalSetupTarget !== originalSetupTarget
+    || !OWNED_EXECUTION_TARGET_BINDINGS.has(originalSetupTarget)) {
+    throw new Error('native tracker target does not descend from the original completed setup action');
+  }
+  return current;
+}
+
 export function assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
   value: Readonly<
     SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
@@ -1041,6 +1058,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
     Readonly<TrackerTransportContinuation> | undefined;
   let trackerConfirmationContinuation:
     Readonly<TrackerConfirmationContinuation> | undefined;
+  let completedSetupTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1> | undefined;
   let state: 'inert' | 'mining' | 'action' | 'read-only' | 'stopped' = 'inert';
   let ownedRuntimeRoot: string | undefined;
   let runtime: RuntimeLayout | undefined;
@@ -1350,6 +1368,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
             initialSnapshot,
             finalSnapshot,
           });
+        completedSetupTarget = target;
         return Object.freeze({ value, receipt });
       } catch (error) {
         return await failWithCleanup(error);
@@ -2095,6 +2114,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
             processBindingDigestHex,
             executionTargetIdentityDigestHex,
             assertActiveProcesses,
+            originalSetupTarget: completedSetupTarget,
           }),
         );
         state = 'action';

@@ -63,6 +63,8 @@ import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-rew
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
 import { sha256CanonicalJson } from './strict-json.js';
 import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import * as feeAuthority from './substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
+import * as checkedTransport from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
 import { executeFrontierNativeProofBoundReservationAndMintV1, executeFrontierNativeProofBoundReservationMintAndBurnV1,
   attestFrontierNativeBurnCheckpointV1, assertFrontierNativeBurnCheckpointV1 }
@@ -1011,6 +1013,229 @@ describe('native FED managed setup session', () => {
       source.dispose();
       expect(() => assertNativeCheckpoint(receipt, source, proof)).toThrow(/disposed/);
     });
+  });
+
+  async function nativeFeeFixture() {
+    const fixture = await nativePegInFixture();
+    await session.checkNativePegInSourceLockRetainingSignerV1(fixture.packet, target);
+    await session.checkNativePegInCommittedVaultRetainingSignerV1(fixture.packet, target);
+    const transactions = await Promise.all(fixture.batch.orderedTransactions.map(item =>
+      materializeUnsignedTransaction(item.issuance.unsignedTransactionBody as never, 'native retained fee source')));
+    const sourceBoxes = [transactions[0]!.outputs[1]!, transactions[1]!.outputs[1]!] as const;
+    const feeHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+      currentHeight: 1002, anchorContextIndex: 0, anchorExtensionRootHex: '94'.repeat(32),
+    }).headers.map(header => header.raw);
+    vi.mocked(helpers.ngetDirect).mockImplementation(async (path, origin) => {
+      if (![ORIGIN, WITNESS].includes(origin!)) throw new Error('unexpected fee observation origin');
+      if (path === '/blocks/lastHeaders/10') return feeHeaders;
+      const box = sourceBoxes.find(value => path === `/utxo/byId/${value.boxId}`);
+      if (!box) throw new Error(`unexpected native fee observation: ${path}`);
+      return structuredClone(box);
+    });
+    return { ...fixture, sourceBoxes };
+  }
+
+  it('native fees retain distinct genesis inputs through original authorization and durable transport claims', async () => {
+    const fixture = await nativeFeeFixture();
+    const withdrawal = await session.checkNativeWithdrawalFeeFundingV1(target);
+    const tracker = await session.checkNativeTrackerFeeFundingV1(target);
+    const directory = mkdtempSync(join(tmpdir(), 'native-fee-journal-'));
+    const state = new StateTracker(join(directory, 'state.sqlite'));
+    try {
+      const checks = [tracker, withdrawal] as const;
+      const authorize = [feeAuthority.authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+        feeAuthority.authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1] as const;
+      const reserve = [feeAuthority.reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+        feeAuthority.reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1] as const;
+      const transport = [feeAuthority.claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1,
+        feeAuthority.claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1] as const;
+      expect(tracker.transaction.outputs[0]!.boxId).not.toBe(withdrawal.transaction.outputs[0]!.boxId);
+      for (const [index, checked] of checks.entries()) {
+        expect(checked.transaction.eip12Tx.inputs[0]!.boxId).toBe(fixture.sourceBoxes[index]!.boxId);
+        expect(checked.transaction.outputs[0]!.value).toBe('1100000');
+        expect(checked.transaction.outputs[0]!.ergoTree).toBe(session.signer.p2pkErgoTreeHex);
+        expect(checked.transaction.outputs.reduce((sum, box) => sum + BigInt(box.value), 0n))
+          .toBe(BigInt(fixture.sourceBoxes[index]!.value));
+        await expect(authorize[index]!({ ...checked }, target)).rejects.toThrow(/exact provenance/);
+        await expect(authorize[index]!(checked, { ...target })).rejects.toThrow(/exact provenance/);
+        await expect(authorize[1 - index]!(checked, target)).rejects.toThrow(/exact provenance/);
+        const authorization = await authorize[index]!(checked, target);
+        expect(authorization.genesisHeaderIdHex).toBe(request.target.genesisHeaderIdHex);
+        const attempt = reserve[index]!(authorization, state);
+        expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)?.status).toBe('pending');
+        const claimed = await transport[index]!(attempt, target);
+        expect(claimed.check).toBe(checked);
+        await expect(transport[index]!(attempt, target)).rejects.toThrow(/consumed/);
+        await expect(authorize[index]!(checked, target)).rejects.toThrow(/exact provenance/);
+      }
+      execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(fixture.batch, target);
+      expect(() => assertSigner(session.signer)).not.toThrow();
+    } finally {
+      state.close();
+      if (!directory.startsWith(join(tmpdir(), 'native-fee-journal-'))) throw new Error('unexpected fee test root');
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  describe.each(['withdrawal', 'tracker'] as const)('native %s fee transition', purpose => {
+    it.each(['signer-await', 'checker-await'])('revokes custody inside %s before a new signature or check', async stage => {
+      await nativeFeeFixture();
+      if (purpose === 'tracker') await session.checkNativeWithdrawalFeeFundingV1(target);
+      const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+      const beforeChecks = vi.mocked(helpers.ncheck).mock.calls.length;
+      const dispose = () => { expect(() => session.dispose()).toThrow(/running/); };
+      if (stage === 'signer-await') {
+        const prepare = fleet.prepareLocalWasmRootCheckCandidates;
+        vi.spyOn(fleet, 'prepareLocalWasmRootCheckCandidates').mockImplementationOnce(async input => {
+          const pending = prepare(input); dispose(); return pending;
+        });
+      } else {
+        const check = fleet.checkSignedTransaction;
+        vi.spyOn(fleet, 'checkSignedTransaction').mockImplementationOnce(async (...args) => {
+          const pending = check(...args); dispose(); return pending;
+        });
+      }
+      const runCheck = purpose === 'tracker' ? session.checkNativeTrackerFeeFundingV1 : session.checkNativeWithdrawalFeeFundingV1;
+      await expect(runCheck(target)).rejects.toThrow(/inactive|node check failed|invalidated/);
+      if (stage === 'signer-await') expect(signatures).not.toHaveBeenCalled();
+      expect(helpers.ncheck).toHaveBeenCalledTimes(beforeChecks);
+      expect(() => assertSigner(session.signer)).toThrow(/active process provenance/);
+    });
+
+    it.each(['target', 'source-primary', 'source-witness', 'late-primary', 'late-witness', 'headers',
+      'node-check', 'disposed-primary', 'disposed-witness', 'disposed-headers', 'disposed-signing', 'disposed-check', 'concurrent'])
+      ('rejects %s without returning signing authority', async fault => {
+        const fixture = await nativeFeeFixture();
+        if (purpose === 'tracker') await session.checkNativeWithdrawalFeeFundingV1(target);
+        const runCheck = purpose === 'tracker' ? session.checkNativeTrackerFeeFundingV1 : session.checkNativeWithdrawalFeeFundingV1;
+        const source = fixture.sourceBoxes[purpose === 'tracker' ? 0 : 1];
+        const other = fixture.sourceBoxes[purpose === 'tracker' ? 1 : 0];
+        const beforeChecks = vi.mocked(helpers.ncheck).mock.calls.length;
+        const get = vi.mocked(helpers.ngetDirect).getMockImplementation()!;
+        let injected = false;
+        const dispose = () => { injected = true; expect(() => session.dispose()).toThrow(/running/); };
+        vi.mocked(helpers.ngetDirect).mockImplementation(async (path, origin) => {
+          const boxRead = path === `/utxo/byId/${source.boxId}`;
+          const side = origin === WITNESS ? 'witness' : 'primary';
+          if (boxRead && (fault === `source-${side}` || (fault === `late-${side}`
+            && vi.mocked(helpers.ncheck).mock.calls.length > beforeChecks))) { injected = true; return other; }
+          if (!injected && ((boxRead && fault === `disposed-${side}`)
+            || (path === '/blocks/lastHeaders/10' && fault === 'disposed-headers'))) dispose();
+          if (path === '/blocks/lastHeaders/10' && fault === 'headers') { injected = true; return headers.slice(1); }
+          return get(path, origin);
+        });
+        if (fault === 'node-check') vi.spyOn(fleet, 'checkSignedTransaction').mockImplementationOnce(async () => {
+          injected = true; return null;
+        });
+        if (fault === 'disposed-signing') {
+          const prepare = fleet.prepareLocalWasmRootCheckCandidates;
+          vi.spyOn(fleet, 'prepareLocalWasmRootCheckCandidates').mockImplementationOnce(async value => {
+            const result = await prepare(value); dispose(); return result;
+          });
+        }
+        if (fault === 'disposed-check') {
+          const check = fleet.checkSignedTransaction;
+          vi.spyOn(fleet, 'checkSignedTransaction').mockImplementationOnce(async (...args) => {
+            const result = await check(...args); dispose(); return result;
+          });
+        }
+        const pending = runCheck(fault === 'target' ? { ...target } : target);
+        if (fault === 'concurrent') await expect(runCheck(target)).rejects.toThrow(/continuation/);
+        await expect(pending).rejects.toThrow(fault === 'target' ? /target differs|process provenance/
+          : fault.includes('source-') || fault.startsWith('late-') ? /live source differs/
+            : fault === 'headers' ? /ten signing headers/
+              : fault === 'node-check' ? /node check failed/ : /inactive|active process provenance|invalidated/);
+        if (!['target', 'concurrent'].includes(fault)) expect(injected).toBe(true);
+        expect(() => assertSigner(session.signer)).toThrow(/active process provenance/);
+        await expect(runCheck(target)).rejects.toThrow(/continuation/);
+      });
+  });
+
+  it.each(['tracker-first', 'legacy-withdrawal', 'legacy-tracker', 'tracker-before-fees', 'withdrawal-before-tracker'])
+    ('native fee ordering closes custody for %s', async fault => {
+      await nativeFeeFixture();
+      const operation = fault === 'tracker-first' ? () => session.checkNativeTrackerFeeFundingV1(target)
+        : fault === 'legacy-withdrawal' ? () => session.checkWithdrawalFeeFundingV3(target)
+          : fault === 'legacy-tracker' ? () => session.checkTrackerFeeFundingV3(target)
+            : fault === 'tracker-before-fees' ? () => session.checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner({} as never, {} as never)
+              : () => session.checkNativeWithdrawalV2({} as never, target);
+      const before = vi.mocked(helpers.ncheck).mock.calls.length;
+      await expect(operation()).rejects.toThrow(/continuation/);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(before);
+      expect(() => assertSigner(session.signer)).toThrow(/active process provenance/);
+    });
+
+  describe.each(['withdrawal', 'tracker'] as const)('native %s fee custody after checking', purpose => {
+    it.each(['authorization-read', 'reservation', 'transport-entry', 'transport-read', 'transport-check', 'transport-checker-await', 'transport-claim-return'])
+      ('blocks a new capability after disposal at %s and preserves any durable hold', async stage => {
+        await nativeFeeFixture();
+        const withdrawal = await session.checkNativeWithdrawalFeeFundingV1(target);
+        const checked = purpose === 'withdrawal' ? withdrawal : await session.checkNativeTrackerFeeFundingV1(target);
+        const authorize = purpose === 'withdrawal' ? feeAuthority.authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1
+          : feeAuthority.authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1;
+        const reserve = purpose === 'withdrawal' ? feeAuthority.reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1
+          : feeAuthority.reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1;
+        const transport = purpose === 'withdrawal' ? feeAuthority.claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1
+          : feeAuthority.claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1;
+        const directory = mkdtempSync(join(tmpdir(), 'native-fee-custody-'));
+        const state = new StateTracker(join(directory, 'state.sqlite'));
+        let disposed = false;
+        const dispose = () => { session.dispose(); disposed = true; };
+        const disposeAtRead = () => {
+          const get = vi.mocked(helpers.ngetDirect).getMockImplementation()!;
+          vi.mocked(helpers.ngetDirect).mockImplementationOnce(async (...args) => {
+            const value = await get(...args); dispose(); return value;
+          });
+        };
+        try {
+          if (stage === 'authorization-read') {
+            disposeAtRead();
+            await expect(authorize(checked, target)).rejects.toThrow(/inactive/);
+            expect(state.getErgoOperationalTransactionAttempt(checked.transaction.txId)).toBeNull();
+          } else {
+            const authorization = await authorize(checked, target);
+            if (stage === 'reservation') {
+              dispose();
+              expect(() => reserve(authorization, state)).toThrow(/inactive/);
+              expect(state.getErgoOperationalTransactionAttempt(checked.transaction.txId)).toBeNull();
+            } else {
+              const attempt = reserve(authorization, state);
+              if (stage === 'transport-entry') dispose();
+              else if (stage === 'transport-read') disposeAtRead();
+              else if (stage === 'transport-claim-return') {
+                const name = purpose === 'withdrawal' ? 'claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1'
+                  : 'claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1';
+                vi.spyOn(feeAuthority, name).mockImplementationOnce(async (...args: Parameters<typeof transport>) => {
+                  const value = await transport(...args); dispose(); return value;
+                });
+              }
+              else {
+                const check = fleet.checkSignedTransaction;
+                vi.spyOn(fleet, 'checkSignedTransaction').mockImplementationOnce(async (...args) => {
+                  if (stage === 'transport-checker-await') { const pending = check(...args); dispose(); return pending; }
+                  const value = await check(...args); dispose(); return value;
+                });
+              }
+              const beforeChecks = vi.mocked(helpers.ncheck).mock.calls.length;
+              const post = vi.spyOn(axios, 'post').mockRejectedValue(new Error('unexpected fee transport'));
+              const beforePosts = post.mock.calls.length;
+              const submit = purpose === 'withdrawal' ? checkedTransport.submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1
+                : checkedTransport.submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1;
+              await expect(stage === 'transport-claim-return' ? submit(target, attempt) : transport(attempt, target))
+                .rejects.toThrow(/inactive|node check failed/);
+              if (stage === 'transport-checker-await') expect(helpers.ncheck).toHaveBeenCalledTimes(beforeChecks);
+              expect(post).toHaveBeenCalledTimes(beforePosts);
+              expect(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)?.status).toBe('pending');
+            }
+          }
+          expect(disposed).toBe(true);
+          expect(() => assertSigner(session.signer)).toThrow(/active process provenance/);
+        } finally {
+          state.close();
+          if (!directory.startsWith(join(tmpdir(), 'native-fee-custody-'))) throw new Error('unexpected fee custody test root');
+          rmSync(directory, { recursive: true, force: true });
+        }
+      });
   });
 
   it.each(['height zero', 'height unsafe', 'native hash', 'execution hash', 'root', 'count zero', 'count above bound',

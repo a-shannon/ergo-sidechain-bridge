@@ -22,6 +22,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
+  assertSubstrateFederatedNativeSetupTrackerLineageV1,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
@@ -735,6 +736,81 @@ describe.skipIf(process.platform !== 'win32')(
 
     const liveJavaPath = process.env.G1DI3B_JAVA_PATH;
     const liveJarPath = process.env.G1DI3B_ERGO_JAR_PATH;
+    it.skipIf(!liveJavaPath || !liveJarPath)(
+      'native setup tracker lineage preserves expired setup provenance across owned process phases',
+      async () => {
+        type SetupTarget = Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0];
+        type FrozenTarget = Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2>[0];
+        let foreignSetupTarget: SetupTarget | undefined;
+        // Both fresh owners use the fixed devnet genesis configuration and identical origins.
+        // The first owner is fully stopped before the second claims those ports.
+        for (const owner of ['foreign', 'current'] as const) {
+          const setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+          const credentials = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
+          const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1({
+            javaExecutablePath: liveJavaPath!, expectedJavaExecutableSha256Hex: fileSha256(liveJavaPath!),
+            nodeAssemblyJarPath: liveJarPath!, expectedNodeAssemblyJarSha256Hex: fileSha256(liveJarPath!),
+            buildIdentityDigestHex: sha256(Buffer.from('native-setup-tracker-process-only', 'ascii')),
+          }, launchBindingForSigner(setup.signer), credentials.miningCredential,
+          credentials.checkpointMiningCredential, credentials.trackerAdmissionMiningCredential,
+          credentials.trackerConfirmationMiningCredential);
+          let originalSetupTarget: SetupTarget | undefined;
+          let frozenTarget: FrozenTarget | undefined;
+          let checkpointTarget: unknown;
+          try {
+            await session.startMining();
+            await session.withMiningActiveExecutionTarget(async target => {
+              originalSetupTarget = target;
+              assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+              expect(() => assertSubstrateFederatedNativeSetupTrackerLineageV1(
+                target as unknown as FrozenTarget, target,
+              )).toThrow(/not owned by the active tracker-check action/);
+            });
+            expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(originalSetupTarget!))
+              .toThrow(/not owned by the active mining action/);
+            if (owner === 'foreign') {
+              foreignSetupTarget = originalSetupTarget;
+              continue;
+            }
+            expect(originalSetupTarget).toEqual(foreignSetupTarget);
+            expect(originalSetupTarget).not.toBe(foreignSetupTarget);
+            await session.withCheckpointExtensionMiningTarget('ab'.repeat(64), { minimumTipHeight: 11 }, async target => {
+              checkpointTarget = target;
+              expect(() => assertSubstrateFederatedNativeSetupTrackerLineageV1(
+                target as unknown as FrozenTarget, originalSetupTarget!,
+              )).toThrow(/not owned by the active tracker-check action/);
+            });
+            await session.withCheckpointBoundMiningStoppedExecutionTarget(async target => {
+              frozenTarget = target;
+              const binding = assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+              expect(assertSubstrateFederatedNativeSetupTrackerLineageV1(target, originalSetupTarget!)).toEqual(binding);
+              expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(originalSetupTarget!))
+                .toThrow(/not owned by the active mining action/);
+              const faults = [
+                ['copied tracker', () => assertSubstrateFederatedNativeSetupTrackerLineageV1({ ...target }, originalSetupTarget!), /not owned/],
+                ['copied setup', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, { ...originalSetupTarget! }), /does not descend/],
+                ['other session', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, foreignSetupTarget!), /does not descend/],
+                ['wrong origin phase', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, checkpointTarget as SetupTarget), /does not descend/],
+                ['changed setup origin', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, {
+                  ...originalSetupTarget!, primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+                } as unknown as SetupTarget), /does not descend/],
+              ] as const;
+              for (const [label, attempt, error] of faults) {
+                expect(attempt, label).toThrow(error);
+              }
+              // Failed lineage assertions do not consume the genuine current continuation.
+              expect(assertSubstrateFederatedNativeSetupTrackerLineageV1(target, originalSetupTarget!)).toEqual(binding);
+            });
+            expect(() => assertSubstrateFederatedNativeSetupTrackerLineageV1(frozenTarget!, originalSetupTarget!))
+              .toThrow(/not owned by the active tracker-check action/);
+          } finally {
+            try { await session.stop(); } finally { setup.dispose(); }
+          }
+        }
+      },
+      480_000,
+    );
+
     it.skipIf(!liveJavaPath || !liveJarPath)(
       'owns a real direct-Java mining to non-mining lifecycle without submission',
       async () => {
