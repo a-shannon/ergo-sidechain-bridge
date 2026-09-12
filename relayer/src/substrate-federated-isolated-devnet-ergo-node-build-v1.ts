@@ -2,17 +2,21 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import {
   basename,
   dirname,
   relative,
   resolve,
+  sep,
 } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   inspectConsensusSourceBaseline,
@@ -53,6 +57,23 @@ interface NodeBuildLockV1 {
   readonly javaHomeSha256: string;
   readonly sbtLauncherJarSha256: string;
   readonly projectSbtVersion: '1.11.1';
+  readonly javaSystemProperties: readonly [
+    '-Dsbt.offline=true',
+    '-Dsbt.server.autostart=false',
+    '-Dsbt.override.build.repos=false',
+    '-Djava.net.useSystemProxies=false',
+  ];
+  readonly coursierMode: 'offline';
+  readonly sbtLauncherRepositoriesFileName: 'repositories';
+  readonly sbtLauncherRepositoriesFileTemplate:
+    '[repositories]\n  bridge-maven-central-cache: {{MAVEN_CENTRAL_CACHE_URI}}\n  bridge-empty-offline: {{EMPTY_REPOSITORY_URI}}, bootOnly\n';
+  readonly sbtLauncherEmptyRepositoryDirectoryName:
+    'sbt-launcher-empty-repository';
+  readonly hostSbtBootDirectoryRelativeToUserProfile: '.sbt/boot';
+  readonly hostCoursierCacheDirectoryRelativeToLocalAppData: 'Coursier/cache/v1';
+  readonly hostMavenCentralCacheDirectoryRelativeToCoursierCache:
+    'https/repo1.maven.org/maven2';
+  readonly isolatedSbtStateDirectory: 'target/bridge-sbt-state-v1';
   readonly buildArguments: readonly ['assembly'];
   readonly buildProcessRunner: 'reviewed-windows-job-object-v1';
   readonly windowsJobProcessRunnerSha256: string;
@@ -158,6 +179,22 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1View {
   readonly javaHomeSha256Hex: string;
   readonly sbtLauncherJarSha256Hex: string;
   readonly projectSbtVersion: NodeBuildLockV1['projectSbtVersion'];
+  readonly javaSystemProperties: NodeBuildLockV1['javaSystemProperties'];
+  readonly coursierMode: NodeBuildLockV1['coursierMode'];
+  readonly sbtLauncherRepositoriesFileName:
+    NodeBuildLockV1['sbtLauncherRepositoriesFileName'];
+  readonly sbtLauncherRepositoriesFileTemplate:
+    NodeBuildLockV1['sbtLauncherRepositoriesFileTemplate'];
+  readonly sbtLauncherEmptyRepositoryDirectoryName:
+    NodeBuildLockV1['sbtLauncherEmptyRepositoryDirectoryName'];
+  readonly hostSbtBootDirectoryRelativeToUserProfile:
+    NodeBuildLockV1['hostSbtBootDirectoryRelativeToUserProfile'];
+  readonly hostCoursierCacheDirectoryRelativeToLocalAppData:
+    NodeBuildLockV1['hostCoursierCacheDirectoryRelativeToLocalAppData'];
+  readonly hostMavenCentralCacheDirectoryRelativeToCoursierCache:
+    NodeBuildLockV1['hostMavenCentralCacheDirectoryRelativeToCoursierCache'];
+  readonly isolatedSbtStateDirectory:
+    NodeBuildLockV1['isolatedSbtStateDirectory'];
   readonly buildProcessRunner: NodeBuildLockV1['buildProcessRunner'];
   readonly windowsJobProcessRunnerSha256Hex: string;
   readonly buildTimeoutMs: NodeBuildLockV1['buildTimeoutMs'];
@@ -182,6 +219,21 @@ export function inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(
     javaHomeSha256Hex: lock.javaHomeSha256,
     sbtLauncherJarSha256Hex: lock.sbtLauncherJarSha256,
     projectSbtVersion: lock.projectSbtVersion,
+    javaSystemProperties: lock.javaSystemProperties,
+    coursierMode: lock.coursierMode,
+    sbtLauncherRepositoriesFileName:
+      lock.sbtLauncherRepositoriesFileName,
+    sbtLauncherRepositoriesFileTemplate:
+      lock.sbtLauncherRepositoriesFileTemplate,
+    sbtLauncherEmptyRepositoryDirectoryName:
+      lock.sbtLauncherEmptyRepositoryDirectoryName,
+    hostSbtBootDirectoryRelativeToUserProfile:
+      lock.hostSbtBootDirectoryRelativeToUserProfile,
+    hostCoursierCacheDirectoryRelativeToLocalAppData:
+      lock.hostCoursierCacheDirectoryRelativeToLocalAppData,
+    hostMavenCentralCacheDirectoryRelativeToCoursierCache:
+      lock.hostMavenCentralCacheDirectoryRelativeToCoursierCache,
+    isolatedSbtStateDirectory: lock.isolatedSbtStateDirectory,
     buildProcessRunner: lock.buildProcessRunner,
     windowsJobProcessRunnerSha256Hex:
       lock.windowsJobProcessRunnerSha256,
@@ -253,9 +305,17 @@ export async function buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
 
   const sourceBaselineBefore = exactSourceBaseline(input, lock);
   const sourceBaselineDigestHex = sourceBaselineDigest(sourceBaselineBefore);
-  const assemblyDirectory = assertBuildOutputReady(input.ergoSourcePath, lock);
+  const { assemblyDirectory, isolatedSbtStateDirectory } = assertBuildOutputReady(
+    input.ergoSourcePath,
+    lock,
+  );
 
-  await runPinnedBuild({ input, lock, javaHome });
+  await runPinnedBuild({
+    input,
+    lock,
+    javaHome,
+    isolatedSbtStateDirectory,
+  });
   assertUnlinkedPathInside(
     input.ergoSourcePath,
     assemblyDirectory,
@@ -416,18 +476,27 @@ function loadBuildLock(bridgeRoot: string): Readonly<NodeBuildLockV1> {
     'buildTerminationGraceMs',
     'buildTimeoutMs',
     'consensusSourceLockSha256',
+    'coursierMode',
     'ergoNodeBaseCommit',
     'ergoPatchSha256',
     'gitExecutableSha256',
     'gitVersion',
+    'hostCoursierCacheDirectoryRelativeToLocalAppData',
+    'hostMavenCentralCacheDirectoryRelativeToCoursierCache',
+    'hostSbtBootDirectoryRelativeToUserProfile',
+    'isolatedSbtStateDirectory',
     'javaDistribution',
     'javaHomeSha256',
     'javaMajorVersion',
+    'javaSystemProperties',
     'kind',
     'minimumAssemblyBytes',
     'platform',
     'projectSbtVersion',
     'sbtLauncherJarSha256',
+    'sbtLauncherEmptyRepositoryDirectoryName',
+    'sbtLauncherRepositoriesFileName',
+    'sbtLauncherRepositoriesFileTemplate',
     'schemaVersion',
     'trustedHostModel',
     'windowsJobProcessRunnerSha256',
@@ -444,6 +513,24 @@ function loadBuildLock(bridgeRoot: string): Readonly<NodeBuildLockV1> {
     || parsed.javaMajorVersion !== 17
     || parsed.javaDistribution !== 'Microsoft OpenJDK 17.0.19+10-LTS'
     || parsed.projectSbtVersion !== '1.11.1'
+    || JSON.stringify(parsed.javaSystemProperties)
+      !== JSON.stringify([
+        '-Dsbt.offline=true',
+        '-Dsbt.server.autostart=false',
+        '-Dsbt.override.build.repos=false',
+        '-Djava.net.useSystemProxies=false',
+      ])
+    || parsed.coursierMode !== 'offline'
+    || parsed.sbtLauncherRepositoriesFileName !== 'repositories'
+    || parsed.sbtLauncherRepositoriesFileTemplate
+      !== '[repositories]\n  bridge-maven-central-cache: {{MAVEN_CENTRAL_CACHE_URI}}\n  bridge-empty-offline: {{EMPTY_REPOSITORY_URI}}, bootOnly\n'
+    || parsed.sbtLauncherEmptyRepositoryDirectoryName
+      !== 'sbt-launcher-empty-repository'
+    || parsed.hostSbtBootDirectoryRelativeToUserProfile !== '.sbt/boot'
+    || parsed.hostCoursierCacheDirectoryRelativeToLocalAppData !== 'Coursier/cache/v1'
+    || parsed.hostMavenCentralCacheDirectoryRelativeToCoursierCache
+      !== 'https/repo1.maven.org/maven2'
+    || parsed.isolatedSbtStateDirectory !== 'target/bridge-sbt-state-v1'
     || JSON.stringify(parsed.buildArguments) !== JSON.stringify(['assembly'])
     || parsed.buildProcessRunner !== 'reviewed-windows-job-object-v1'
     || parsed.buildTimeoutMs !== 900_000
@@ -504,41 +591,241 @@ async function runPinnedBuild(input: Readonly<{
   input: Readonly<BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input>;
   lock: Readonly<NodeBuildLockV1>;
   javaHome: string;
+  isolatedSbtStateDirectory: string;
 }>): Promise<void> {
+  const runtime = preparePinnedBuildRuntime(
+    input.input.ergoSourcePath,
+    input.isolatedSbtStateDirectory,
+    input.lock,
+  );
   await runBoundedNativeBuildProcess({
     executablePath: input.input.javaExecutablePath,
-    args: ['-jar', input.input.sbtLauncherJarPath, ...input.lock.buildArguments],
+    args: [
+      ...input.lock.javaSystemProperties,
+      `-Djava.io.tmpdir=${runtime.tempDirectory}`,
+      `-Duser.home=${runtime.homeDirectory}`,
+      `-Dsbt.global.base=${runtime.sbtGlobalBaseDirectory}`,
+      `-Dsbt.global.localcache=${runtime.sbtGlobalLocalCacheDirectory}`,
+      `-Dsbt.boot.directory=${runtime.hostSbtBootDirectory}`,
+      `-Dsbt.ivy.home=${runtime.sbtIvyHomeDirectory}`,
+      `-Dsbt.repository.config=${runtime.sbtLauncherRepositoriesFilePath}`,
+      '-jar',
+      input.input.sbtLauncherJarPath,
+      ...input.lock.buildArguments,
+    ],
     cwd: input.input.ergoSourcePath,
-    env: buildEnvironment(input.javaHome, input.input.javaExecutablePath),
+    env: buildEnvironment(
+      input.javaHome,
+      input.input.javaExecutablePath,
+      input.lock.coursierMode,
+      runtime,
+    ),
     timeoutMs: input.lock.buildTimeoutMs,
     terminationGraceMs: input.lock.buildTerminationGraceMs,
     maxOutputBytes: input.lock.buildMaxOutputBytes,
     label: 'pinned Ergo node build',
   });
+  assertSbtLauncherRepositoriesBoundary(
+    input.lock,
+    runtime.sbtLauncherRepositoriesFilePath,
+    runtime.hostMavenCentralCacheDirectory,
+    runtime.sbtLauncherEmptyRepositoryDirectory,
+  );
 }
 
 function buildEnvironment(
   javaHome: string,
   javaExecutablePath: string,
+  coursierMode: NodeBuildLockV1['coursierMode'],
+  input: Readonly<PinnedBuildRuntimeV1>,
 ): NodeJS.ProcessEnv {
+  const systemRootValue = process.env.SystemRoot ?? process.env.SYSTEMROOT;
+  const systemRoot = canonicalDirectory(systemRootValue ?? '', 'SystemRoot');
   const environment: NodeJS.ProcessEnv = {
+    APPDATA: input.appDataDirectory,
+    CI: 'true',
+    COURSIER_CACHE: input.hostCoursierCacheDirectory,
+    COURSIER_CONFIG_DIR: input.coursierConfigDirectory,
+    COURSIER_MODE: coursierMode,
+    HOME: input.homeDirectory,
     JAVA_HOME: javaHome,
+    LOCALAPPDATA: input.localAppDataDirectory,
+    NO_COLOR: '1',
     PATH: dirname(javaExecutablePath),
+    PSModuleAnalysisCachePath: input.powerShellModuleAnalysisCachePath,
+    SCALA_CLI_CONFIG: input.scalaCliConfigPath,
+    SystemRoot: systemRoot,
+    TEMP: input.tempDirectory,
+    TMP: input.tempDirectory,
+    USERPROFILE: input.homeDirectory,
+    WINDIR: systemRoot,
   };
-  for (const key of [
-    'APPDATA',
-    'HOME',
-    'LOCALAPPDATA',
-    'SystemRoot',
-    'TEMP',
-    'TMP',
-    'USERPROFILE',
-    'WINDIR',
-  ] as const) {
-    const value = process.env[key];
-    if (value !== undefined) environment[key] = value;
-  }
   return environment;
+}
+
+interface PinnedBuildRuntimeV1 {
+  readonly appDataDirectory: string;
+  readonly coursierConfigDirectory: string;
+  readonly homeDirectory: string;
+  readonly hostCoursierCacheDirectory: string;
+  readonly hostMavenCentralCacheDirectory: string;
+  readonly hostSbtBootDirectory: string;
+  readonly localAppDataDirectory: string;
+  readonly powerShellModuleAnalysisCachePath: string;
+  readonly scalaCliConfigPath: string;
+  readonly sbtLauncherEmptyRepositoryDirectory: string;
+  readonly sbtLauncherRepositoriesFilePath: string;
+  readonly sbtGlobalBaseDirectory: string;
+  readonly sbtGlobalLocalCacheDirectory: string;
+  readonly sbtIvyHomeDirectory: string;
+  readonly tempDirectory: string;
+}
+
+function preparePinnedBuildRuntime(
+  ergoSourcePath: string,
+  isolatedSbtStateDirectory: string,
+  lock: Readonly<NodeBuildLockV1>,
+): Readonly<PinnedBuildRuntimeV1> {
+  if (existsSync(isolatedSbtStateDirectory)) {
+    throw new Error('isolated sbt state directory must not pre-exist');
+  }
+  const userProfile = canonicalDirectory(
+    process.env.USERPROFILE ?? '',
+    'host user profile',
+  );
+  const localAppData = canonicalDirectory(
+    process.env.LOCALAPPDATA ?? '',
+    'host local application data',
+  );
+  const hostSbtBootDirectory = existingUnlinkedDirectoryInside(
+    userProfile,
+    lock.hostSbtBootDirectoryRelativeToUserProfile,
+    'host sbt boot cache',
+  );
+  const hostCoursierCacheDirectory = existingUnlinkedDirectoryInside(
+    localAppData,
+    lock.hostCoursierCacheDirectoryRelativeToLocalAppData,
+    'host Coursier dependency cache',
+  );
+  const hostMavenCentralCacheDirectory = existingUnlinkedDirectoryInside(
+    hostCoursierCacheDirectory,
+    lock.hostMavenCentralCacheDirectoryRelativeToCoursierCache,
+    'host Maven Central dependency cache',
+  );
+  const directories = {
+    appDataDirectory: resolve(isolatedSbtStateDirectory, 'appdata'),
+    coursierConfigDirectory: resolve(isolatedSbtStateDirectory, 'coursier-config'),
+    homeDirectory: resolve(isolatedSbtStateDirectory, 'home'),
+    localAppDataDirectory: resolve(isolatedSbtStateDirectory, 'localappdata'),
+    sbtLauncherEmptyRepositoryDirectory: resolve(
+      isolatedSbtStateDirectory,
+      lock.sbtLauncherEmptyRepositoryDirectoryName,
+    ),
+    sbtGlobalBaseDirectory: resolve(isolatedSbtStateDirectory, 'sbt-global'),
+    sbtGlobalLocalCacheDirectory: resolve(isolatedSbtStateDirectory, 'sbt-cache'),
+    sbtIvyHomeDirectory: resolve(isolatedSbtStateDirectory, 'ivy'),
+    tempDirectory: resolve(isolatedSbtStateDirectory, 'temp'),
+  } as const;
+  const powerShellCacheDirectory = resolve(
+    isolatedSbtStateDirectory,
+    'powershell-cache',
+  );
+  for (const path of [...Object.values(directories), powerShellCacheDirectory]) {
+    mkdirSync(path, { recursive: true });
+  }
+  assertUnlinkedPathInside(
+    ergoSourcePath,
+    isolatedSbtStateDirectory,
+    'isolated sbt state directory',
+  );
+  const sbtLauncherRepositoriesFilePath = resolveUncreatedUnlinkedInside(
+    isolatedSbtStateDirectory,
+    lock.sbtLauncherRepositoriesFileName,
+    'sbt launcher repositories file',
+  );
+  writeFileSync(
+    sbtLauncherRepositoriesFilePath,
+    renderSbtLauncherRepositoriesFile(
+      lock,
+      hostMavenCentralCacheDirectory,
+      directories.sbtLauncherEmptyRepositoryDirectory,
+    ),
+    { encoding: 'utf8', flag: 'wx' },
+  );
+  assertSbtLauncherRepositoriesBoundary(
+    lock,
+    sbtLauncherRepositoriesFilePath,
+    hostMavenCentralCacheDirectory,
+    directories.sbtLauncherEmptyRepositoryDirectory,
+  );
+  return Object.freeze({
+    ...directories,
+    hostCoursierCacheDirectory,
+    hostMavenCentralCacheDirectory,
+    hostSbtBootDirectory,
+    powerShellModuleAnalysisCachePath: resolve(
+      powerShellCacheDirectory,
+      'ModuleAnalysisCache',
+    ),
+    scalaCliConfigPath: resolve(isolatedSbtStateDirectory, 'scala-cli-config.json'),
+    sbtLauncherRepositoriesFilePath,
+  });
+}
+
+function renderSbtLauncherRepositoriesFile(
+  lock: Readonly<NodeBuildLockV1>,
+  mavenCentralCacheDirectory: string,
+  emptyRepositoryDirectory: string,
+): string {
+  const mavenCentralCacheUri = pathToFileURL(
+    `${mavenCentralCacheDirectory}${sep}`,
+  ).href;
+  const emptyRepositoryUri = pathToFileURL(
+    `${emptyRepositoryDirectory}${sep}`,
+  ).href;
+  return lock.sbtLauncherRepositoriesFileTemplate
+    .replace('{{MAVEN_CENTRAL_CACHE_URI}}', mavenCentralCacheUri)
+    .replace('{{EMPTY_REPOSITORY_URI}}', emptyRepositoryUri);
+}
+
+function assertSbtLauncherRepositoriesBoundary(
+  lock: Readonly<NodeBuildLockV1>,
+  repositoriesFilePath: string,
+  mavenCentralCacheDirectory: string,
+  emptyRepositoryDirectory: string,
+): void {
+  if (
+    readFileSync(
+      canonicalRegularFile(
+        repositoriesFilePath,
+        'sbt launcher repositories file',
+      ),
+      'utf8',
+    ) !== renderSbtLauncherRepositoriesFile(
+      lock,
+      mavenCentralCacheDirectory,
+      emptyRepositoryDirectory,
+    )
+  ) {
+    throw new Error('sbt launcher repositories file differs from the build lock');
+  }
+  if (readdirSync(
+    canonicalDirectory(
+      emptyRepositoryDirectory,
+      'sbt launcher empty repository',
+    ),
+  ).length !== 0) {
+    throw new Error('sbt launcher empty repository must remain empty');
+  }
+}
+
+function existingUnlinkedDirectoryInside(
+  root: string,
+  relativePath: string,
+  label: string,
+): string {
+  const path = resolveUncreatedUnlinkedInside(root, relativePath, label);
+  return canonicalDirectory(path, label);
 }
 
 function assertNoPreexistingAssemblyCandidates(
@@ -563,16 +850,27 @@ function assertBuildOutputReady(
   ergoSourcePath: string,
   lock: Readonly<Pick<
     NodeBuildLockV1,
-    'assemblyDirectory' | 'assemblyNamePattern'
+    'assemblyDirectory' | 'assemblyNamePattern' | 'isolatedSbtStateDirectory'
   >>,
-): string {
+): Readonly<{
+  assemblyDirectory: string;
+  isolatedSbtStateDirectory: string;
+}> {
   const assemblyDirectory = resolveUncreatedUnlinkedInside(
     ergoSourcePath,
     lock.assemblyDirectory,
     'Ergo assembly directory',
   );
   assertNoPreexistingAssemblyCandidates(assemblyDirectory, lock);
-  return assemblyDirectory;
+  const isolatedSbtStateDirectory = resolveUncreatedUnlinkedInside(
+    ergoSourcePath,
+    lock.isolatedSbtStateDirectory,
+    'isolated sbt state directory',
+  );
+  if (existsSync(isolatedSbtStateDirectory)) {
+    throw new Error('isolated sbt state directory must not pre-exist');
+  }
+  return Object.freeze({ assemblyDirectory, isolatedSbtStateDirectory });
 }
 
 export function assertSubstrateFederatedIsolatedDevnetErgoNodeAssemblyDirectoryReadyV1(

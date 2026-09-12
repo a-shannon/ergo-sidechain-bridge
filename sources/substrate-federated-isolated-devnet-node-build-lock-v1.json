@@ -13,6 +13,20 @@
   "javaHomeSha256": "43ddaddbc9c892eebb9017eaadd292a0198a3262941f061de61ab03db283dd7e",
   "sbtLauncherJarSha256": "b4c0c55d68f11b1510d884641cb1b1456191dac40ddc958bf86c825adc344e16",
   "projectSbtVersion": "1.11.1",
+  "javaSystemProperties": [
+    "-Dsbt.offline=true",
+    "-Dsbt.server.autostart=false",
+    "-Dsbt.override.build.repos=false",
+    "-Djava.net.useSystemProxies=false"
+  ],
+  "coursierMode": "offline",
+  "sbtLauncherRepositoriesFileName": "repositories",
+  "sbtLauncherRepositoriesFileTemplate": "[repositories]\n  bridge-maven-central-cache: {{MAVEN_CENTRAL_CACHE_URI}}\n  bridge-empty-offline: {{EMPTY_REPOSITORY_URI}}, bootOnly\n",
+  "sbtLauncherEmptyRepositoryDirectoryName": "sbt-launcher-empty-repository",
+  "hostSbtBootDirectoryRelativeToUserProfile": ".sbt/boot",
+  "hostCoursierCacheDirectoryRelativeToLocalAppData": "Coursier/cache/v1",
+  "hostMavenCentralCacheDirectoryRelativeToCoursierCache": "https/repo1.maven.org/maven2",
+  "isolatedSbtStateDirectory": "target/bridge-sbt-state-v1",
   "buildArguments": [
     "assembly"
   ],
