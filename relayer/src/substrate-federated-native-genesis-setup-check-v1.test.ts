@@ -897,6 +897,27 @@ describe('native FED managed setup session', () => {
 
   it('executes native deposit-to-reserve with external fees, exact checked transport and confirmed lineage', async () => {
     await withNativeVault(async ({ input, post }) => {
+      const targetProbe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
+      const beforeRoot = targetProbe.mock.calls.length;
+      let afterCheck: number | undefined;
+      const checkVault = input.setupSession.checkNativePegInCommittedVaultRetainingSignerV1;
+      const promoteVault = execution.promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1;
+      const promotion = vi.spyOn(execution, 'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1')
+        .mockImplementation((receipt, currentTarget) => {
+          expect(afterCheck).toBeDefined();
+          expect(targetProbe.mock.calls.length - afterCheck!).toBe(1);
+          return promoteVault(receipt, currentTarget);
+        });
+      // Only the test session facade measures entry and return. The actual checker
+      // and its original receipt/handle are retained through promotion.
+      const setupSession = { ...input.setupSession,
+        checkNativePegInCommittedVaultRetainingSignerV1: async (...args: Parameters<typeof checkVault>) => {
+          // Packet + original observation + the confirmation observer's own check.
+          expect(targetProbe.mock.calls.length - beforeRoot).toBe(3);
+          const receipt = await checkVault(...args);
+          afterCheck = targetProbe.mock.calls.length;
+          return receipt;
+        } };
       const artifactAssert = vaultAuthority.assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1;
       const scopes: string[] = [];
       vi.spyOn(vaultAuthority, 'assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1')
@@ -904,7 +925,8 @@ describe('native FED managed setup session', () => {
           artifactAssert(authorizer, authorization);
           scopes.push((authorization.authorizationArtifact as { authorizationScope: string }).authorizationScope);
         });
-      const result = await executeNativeVault(input);
+      const result = await executeNativeVault({ ...input, setupSession });
+      expect(promotion).toHaveBeenCalledTimes(1);
       expect(post).toHaveBeenCalledTimes(2);
       expect(helpers.ncheck).toHaveBeenCalledTimes(6);
       expect(new Set(scopes)).toEqual(new Set(['fed-6-native-local-synthetic-peg-in-committed-vault-transition-only']));
@@ -1319,7 +1341,7 @@ describe('native FED managed setup session', () => {
       const targetProbe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
       const before = targetProbe.mock.calls.length;
       assertNativeMintProof(receipt, source, proofInput.draft);
-      expect(targetProbe.mock.calls.length - before).toBe(3);
+      expect(targetProbe.mock.calls.length - before).toBe(2);
       const profiles = readSourceProfiles(source);
       const verified = verifySourceSignatures(profiles.mintProofProfile, receipt.request, receipt.result,
         receipt.signatureVerification.signatures);
@@ -2004,6 +2026,45 @@ describe('native FED managed setup session', () => {
       expect(helpers.ncheck).toHaveBeenCalledTimes(6);
     });
   });
+
+  it('rejects revoked native packet custody before inspecting a forged source observation getter', async () => {
+    await withNativeVault(async ({ input, post }) => {
+      const observation = { ...input.sourceLockObservation };
+      const getter = vi.fn(() => input.sourceLockObservation.observationDigestHex);
+      Object.defineProperty(observation, 'observationDigestHex', { enumerable: true, get: getter });
+      session.dispose();
+      await expect(executeNativeVault({ ...input, sourceLockObservation: observation })).rejects.toThrow(/inactive/);
+      expect(getter).not.toHaveBeenCalled();
+      expect(post).toHaveBeenCalledTimes(1);
+      expect(helpers.ncheck).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  it.each(['process binding', 'target binding', 'target expiry', 'compiler custody', 'setup custody', 'source custody'] as const)(
+    'vetoes native reserve %s after the original check returns and before promotion', async fault => {
+      const source = retainNativeBindingSource(fault);
+      try {
+        await withNativeVault(async ({ input, post }) => {
+          const checkVault = input.setupSession.checkNativePegInCommittedVaultRetainingSignerV1;
+          const promotion = vi.spyOn(execution, 'promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1');
+          let expected: RegExp | undefined;
+          const setupSession = { ...input.setupSession,
+            checkNativePegInCommittedVaultRetainingSignerV1: async (...args: Parameters<typeof checkVault>) => {
+              const receipt = await checkVault(...args);
+              expected = invalidateNativeBinding(fault, false, source);
+              return receipt;
+            } };
+          const failure = await executeNativeVault({ ...input, setupSession }).then(() => undefined, error => error);
+          expect(expected).toBeDefined();
+          expect(failure).toBeInstanceOf(Error);
+          expect(failure.message).toMatch(expected!);
+          expect(promotion).not.toHaveBeenCalled();
+          expect(post).toHaveBeenCalledTimes(1);
+          expect(helpers.ncheck).toHaveBeenCalledTimes(5);
+          expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.reserveTransition.txId)).toBeNull();
+        });
+      } finally { source?.dispose(); }
+    });
 
   it.each(['packet clone', 'batch clone', 'target clone', 'source observation clone', 'disposed'])
     ('rejects native reserve %s before checking', async fault => {

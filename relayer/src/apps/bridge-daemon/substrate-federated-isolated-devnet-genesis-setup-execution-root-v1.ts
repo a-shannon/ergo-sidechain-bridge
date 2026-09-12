@@ -2707,8 +2707,8 @@ export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV
   outputObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
 }>> {
   const { target, batch, packet, sourceLockObservation, setupSession, state } = input;
+  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
   const assertActive = () => {
-    assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
     assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(sourceLockObservation, target, batch, packet);
   };
   assertActive();

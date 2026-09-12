@@ -286,7 +286,16 @@ beforeEach(() => {
 });
 
 describe('native committed-vault observation (mocked packet custody, box codec and nodes)', () => {
-  const batch = Object.freeze({ ...BATCH, role: 'native' });
+  const batch = Object.freeze({ ...BATCH, role: 'native', targetBinding: BINDING });
+  let custodyActive = true;
+  let custodyPacket: unknown = PACKET;
+  const assertReadCustody = (packet: unknown, suppliedBatch: unknown, target: unknown) => {
+    if (!custodyActive) throw new Error('custody revoked');
+    if (packet !== custodyPacket || suppliedBatch !== batch || target !== TARGET) {
+      throw new Error('native packet provenance missing');
+    }
+    return custodyPacket;
+  };
   const observe = observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1;
   const assertBound = assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1;
   const input = () => ({ target: TARGET as never, batch: batch as never,
@@ -316,13 +325,19 @@ describe('native committed-vault observation (mocked packet custody, box codec a
     });
   }
   beforeEach(() => {
+    custodyActive = true;
+    custodyPacket = PACKET;
     mocks.assertNativePacket.mockImplementation((suppliedPacket, suppliedBatch, target) => {
-      if (suppliedPacket !== PACKET || suppliedBatch !== batch || target !== TARGET) {
-        throw new Error('native packet provenance missing');
+      assertReadCustody(suppliedPacket, suppliedBatch, target);
+      // The real retained packet validates its batch and current owned target.
+      const current = mocks.assertTarget(target);
+      if (current.processBindingDigestHex !== batch.targetBinding.processBindingDigestHex
+        || current.executionTargetIdentityDigestHex !== batch.targetBinding.executionTargetIdentityDigestHex) {
+        throw new Error('native packet target provenance changed');
       }
-      return PACKET;
+      return custodyPacket;
     });
-    mocks.assertNativeReadCustody.mockImplementation((...args) => mocks.assertNativePacket(...args));
+    mocks.assertNativeReadCustody.mockImplementation(assertReadCustody);
     mocks.assertConfirmation.mockImplementation((artifact, identity, genesis, txId, confirmation) => {
       if (artifact !== REFRESHED_CONFIRMATION.observerArtifact
         || identity !== BINDING.executionTargetIdentityDigestHex || genesis !== GENESIS_ID
@@ -333,6 +348,20 @@ describe('native committed-vault observation (mocked packet custody, box codec a
     });
     mocks.normalizeBox.mockImplementation(async value => value);
     confirmationHeights(211);
+  });
+
+  it.each(['native', 'generic'] as const)('uses one complete target traversal at original %s receipt consumption', async consumer => {
+    const observation = await observe(input());
+    expect(Object.isFrozen(observation)).toBe(true);
+    expect(Object.isFrozen(observation.boundaries)).toBe(true);
+    expect(Object.isFrozen(observation.finalityPathHeaderIdsHex)).toBe(true);
+    expect(Object.values(Object.getOwnPropertyDescriptors(observation)).every(descriptor => 'value' in descriptor)).toBe(true);
+    mocks.assertTarget.mockClear();
+    mocks.assertNativePacket.mockClear();
+    if (consumer === 'native') assertBound(observation, TARGET as never, batch as never, PACKET as never);
+    else assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, TARGET as never);
+    expect(mocks.assertNativePacket).toHaveBeenCalledTimes(1);
+    expect(mocks.assertTarget).toHaveBeenCalledExactlyOnceWith(TARGET);
   });
 
   it('binds the original native packet and batch without a candidate or mint authority', async () => {
@@ -356,8 +385,96 @@ describe('native committed-vault observation (mocked packet custody, box codec a
       confirmation: REFRESHED_CONFIRMATION as never,
     });
     expect(native).toEqual(legacy);
+    mocks.assertTarget.mockClear();
+    mocks.assertNativePacket.mockClear();
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(legacy, TARGET as never);
+    expect(mocks.assertTarget).toHaveBeenCalledExactlyOnceWith(TARGET);
+    expect(mocks.assertNativePacket).not.toHaveBeenCalled();
     expect(() => assertBound(legacy, TARGET as never, batch as never, PACKET as never))
       .toThrow(/packet and batch provenance/);
+  });
+
+  it('rejects a different packet returned after the retained full validation', async () => {
+    const observation = await observe(input());
+    const fullPacket = mocks.assertNativePacket.getMockImplementation()!;
+    mocks.assertNativePacket.mockImplementation((...args) => {
+      fullPacket(...args);
+      return { ...PACKET };
+    });
+    expect(() => assertBound(observation, TARGET as never, batch as never, PACKET as never))
+      .toThrow('native committed-vault observation packet changed');
+  });
+
+  it.each(['packet revoked', 'target disposed'] as const)(
+    'rejects original %s at receipt consumption', async fault => {
+      const observation = await observe(input());
+      if (fault === 'packet revoked') custodyPacket = { ...PACKET };
+      else mocks.assertTarget.mockImplementation(() => { throw new Error('target disposed'); });
+      expect(() => assertBound(observation, TARGET as never, batch as never, PACKET as never))
+        .toThrow(fault === 'packet revoked' ? /packet provenance missing/ : /target disposed/);
+    },
+  );
+
+  it.each(['absent', 'copy', 'frozen copy', 'proxy', 'getter copy'] as const)(
+    'keeps target-first fallback for %s observations', async variant => {
+      const observation = await observe(input());
+      const trace: string[] = [];
+      const supplied = variant === 'absent' ? {} : variant === 'copy' ? { ...observation }
+        : variant === 'frozen copy' ? Object.freeze(structuredClone(observation))
+          : variant === 'proxy' ? new Proxy(observation, {
+            get(object, key, receiver) {
+              if (key === 'observationDigestHex') trace.push('getter');
+              return Reflect.get(object, key, receiver);
+            },
+          }) : { ...observation, get observationDigestHex() {
+            trace.push('getter'); return observation.observationDigestHex;
+          } };
+      mocks.assertNativePacket.mockClear();
+      const targetAssertion = mocks.assertTarget.getMockImplementation()!;
+      mocks.assertTarget.mockImplementation(target => {
+        trace.push('target'); return targetAssertion(target);
+      });
+      expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
+        supplied as never, TARGET as never)).toThrow('isolated committed-vault output observation lacks provenance');
+      expect(trace).toEqual(variant === 'proxy' || variant === 'getter copy' ? ['target', 'getter'] : ['target']);
+      expect(mocks.assertNativePacket).not.toHaveBeenCalled();
+
+      trace.length = 0;
+      mocks.assertTarget.mockImplementation(() => {
+        trace.push('target'); throw new Error('target disposed');
+      });
+      expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
+        supplied as never, TARGET as never)).toThrow('target disposed');
+      expect(trace).toEqual(['target']);
+      expect(mocks.assertNativePacket).not.toHaveBeenCalled();
+    },
+  );
+
+  it('validates a foreign target before rejecting its original observation without calling native custody', async () => {
+    const observation = await observe(input());
+    const foreignTarget = Object.freeze({ ...TARGET });
+    mocks.assertTarget.mockClear();
+    mocks.assertNativePacket.mockClear();
+    // The process double admits another original session with the same public binding.
+    mocks.assertTarget.mockImplementation(target => {
+      if (target !== foreignTarget) throw new Error('foreign target provenance missing');
+      return BINDING;
+    });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
+      observation, foreignTarget as never)).toThrow('isolated committed-vault output observation lacks provenance');
+    expect(mocks.assertTarget).toHaveBeenCalledExactlyOnceWith(foreignTarget);
+    expect(mocks.assertNativePacket).not.toHaveBeenCalled();
+  });
+
+  it('keeps the target assertion first when both provenance and target are absent', () => {
+    const supplied = { get observationDigestHex() { throw new Error('unexpected observation getter'); } };
+    mocks.assertTarget.mockClear();
+    mocks.assertNativePacket.mockClear();
+    mocks.assertTarget.mockImplementation(() => { throw new Error('target provenance missing'); });
+    expect(() => assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(
+      supplied as never, undefined as never)).toThrow('target provenance missing');
+    expect(mocks.assertTarget).toHaveBeenCalledExactlyOnceWith(undefined);
+    expect(mocks.assertNativePacket).not.toHaveBeenCalled();
   });
 
   it.each(['packet', 'batch', 'target', 'confirmation'] as const)('rejects copied %s before node reads', async field => {
@@ -382,7 +499,7 @@ describe('native committed-vault observation (mocked packet custody, box codec a
 
   it.each(['native', 'generic'] as const)('rechecks revoked custody at %s receipt consumption', async consumer => {
     const observation = await observe(input());
-    mocks.assertNativePacket.mockImplementation(() => { throw new Error('custody revoked'); });
+    custodyActive = false;
     expect(() => consumer === 'native'
       ? assertBound(observation, TARGET as never, batch as never, PACKET as never)
       : assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, TARGET as never))
@@ -399,7 +516,7 @@ describe('native committed-vault observation (mocked packet custody, box codec a
 
   it.each(['confirmation', 'tip', 'box', 'normalization', 'header'] as const)(
     'rejects custody revocation during asynchronous %s without another window', async phase => {
-      const revoke = () => mocks.assertNativePacket.mockImplementation(() => { throw new Error('custody revoked'); });
+      const revoke = () => { custodyActive = false; };
       if (phase === 'confirmation') mocks.reobserveConfirmation.mockImplementationOnce(async () => { revoke(); return REFRESHED_CONFIRMATION; });
       if (phase === 'tip') mocks.getBestHeader.mockImplementationOnce(async () => { revoke(); return stable; });
       if (phase === 'box') mocks.getBox.mockImplementationOnce(async () => { revoke(); return null; });
@@ -696,10 +813,7 @@ describe('native committed-vault observation (mocked packet custody, box codec a
   it('rejects a packet-exact successor from a future height without retry', async () => {
     const successor = { ...RESERVE_SUCCESSOR, creationHeight: 220 };
     const packet = { ...PACKET, boxes: { ...PACKET.boxes, reserveSuccessor: successor } };
-    mocks.assertNativePacket.mockImplementation((supplied, suppliedBatch, target) => {
-      if (supplied !== packet || suppliedBatch !== batch || target !== TARGET) throw new Error('provenance');
-      return packet;
-    });
+    custodyPacket = packet;
     mocks.getBox.mockImplementation((_origin, id) => id === SUCCESSOR_ID ? successor : null);
     tipSequence([stable, advanced]);
     await expect(observe({ ...input(), packet: packet as never })).rejects.toThrow(/creation height/);

@@ -437,8 +437,17 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObser
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): void {
   const material = OBSERVATIONS.get(observation);
-  const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  let current: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  if (material !== undefined && material.target === target && material.assertNativePacket !== undefined) {
+    if (material.assertNativePacket() !== material.packet) {
+      throw new Error('native source-lock output observation packet changed');
+    }
+    // Original native observations have frozen own data. The packet assertion
+    // has just validated this exact batch binding against the current target.
+    current = (material.batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>).targetBinding;
+  } else {
+    current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  }
   const { observationDigestHex, ...body } = observation;
   if (
     material === undefined
@@ -451,9 +460,6 @@ export function assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObser
       !== sha256CanonicalJson(body, OBSERVATION_DIGEST_DOMAIN)
   ) {
     throw new Error('isolated source-lock output observation lacks provenance');
-  }
-  if (material.assertNativePacket && material.assertNativePacket() !== material.packet) {
-    throw new Error('native source-lock output observation packet changed');
   }
 }
 

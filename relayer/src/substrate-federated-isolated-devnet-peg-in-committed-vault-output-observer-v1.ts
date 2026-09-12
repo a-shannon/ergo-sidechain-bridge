@@ -634,8 +634,16 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputO
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
 ): void {
   const material = OBSERVATIONS.get(observation);
-  const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  let current: Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  if (material !== undefined && material.target === target && material.assertNativePacket !== undefined) {
+    if (material.assertNativePacket() !== material.packet) {
+      throw new Error('native committed-vault observation packet changed');
+    }
+    // The original packet assertion has just validated its original batch and target.
+    current = (material.batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>).targetBinding;
+  } else {
+    current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  }
   const { observationDigestHex, ...body } = observation;
   if (
     material === undefined
@@ -650,9 +658,6 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputO
     throw new Error(
       'isolated committed-vault output observation lacks provenance',
     );
-  }
-  if (material.assertNativePacket && material.assertNativePacket() !== material.packet) {
-    throw new Error('native committed-vault observation packet changed');
   }
 }
 

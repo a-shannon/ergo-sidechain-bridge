@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Preserve native setup request freshness while removing repeated validation, then run one fresh complete local campaign after affected checks and review | Overlay 0006 and retained fee/tracker/payout consumers are implemented. Campaign 16 stopped at the native setup request's fixed freshness guard. Actual checkpoint attestation and canonical Ergo payout on this route still require the fresh campaign |
+| **Now** | Operational mint -> composed withdrawal | Run one fresh complete local campaign with the reviewed native observation/revalidator correction | Overlay 0006 and retained fee/tracker/payout consumers are implemented. Campaign 17 reached public mint, approval and burn, but its initial action remained open past the fixed completion budget. Actual checkpoint attestation and canonical Ergo payout on this route still require the fresh campaign |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -292,8 +292,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | Native reservation and mint caller | Local native campaign passed at `486d8107` | Reservation block one and chain-4242 nonce-one mint in block two passed exact RPC/token/consumed-record checks. Preserve broadcast authorization and duplicate, absent-commitment, wrong-binding, unreserved-sibling and fee negatives. Pool admission remains distinct from execution and final state |
 | Native burn commitment producer | Local source/build checkpoint; paired public burn observation at `7e0265329` | Active-profile selection passes 11 native integration tests, 71 historical pallet tests and 48 export-owner tests. Campaign 14 produced a successful block-four burn whose receipt, commitment storage and runtime events agree on both nodes. This observation does not authenticate an original execution handle or attest a checkpoint |
 | Native burn and retained withdrawal continuation | Native consumers and fixed root implemented; local validation and independent review complete | The original burn attempt binds paired native storage, runtime events and global burn index to the retained source quorum. The root confirms both distinct external fee inputs before attesting the checkpoint and freezing its anchor horizon, then consumes the original tracker and terminal payout checks. Actual checkpoint and Ergo return execution remain open |
-| Native validation traversal | Local implementation and affected checks complete; independent closeout review | Native batch assertions use one complete target traversal; source-proof assertions use three. The original observation validates the same packet before draft construction. Fresh process/artifact checks after awaits, exact custody, failure holds and the existing duration bound remain required |
-| Fresh operational two-way campaign | Depends on native validation correction; completed component evidence remains reusable | Use fresh target/custody and actual RPC calls through the established Ergo withdrawal consumer. Campaign 14 is terminal after controlled cleanup; its attempts cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
+| Native validation traversal | Local affected checks and independent review complete | Native batch and original output-observation assertions each use one complete target traversal; revalidation artifacts and source-proof assertions each use two. Initial rejection order and every post-await custody check remain enforced. Keep exact process/artifact checks, failure holds and the existing duration bounds |
+| Fresh operational two-way campaign | Native validation checkpoint complete; fresh execution remains due | Use fresh target/custody and actual RPC calls through the established Ergo withdrawal consumer. Campaigns 14, 16 and 17 are terminal; their attempts cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
 
 The native execution consumer now retains the confirmed mint through one
 approval in block three and one matching burn in block four. It validates the
@@ -348,7 +348,7 @@ one and three traversals respectively. The composed retained assertion adds
 its unchanged direct compiler check. This reduces duplicate work without a
 cached authority or a change to checking intervals.
 
-All 353 native cases, 12 composed withdrawal cases, 235 architecture tests,
+At `9a5fd277`, all 353 native cases, 12 composed withdrawal cases, 235 architecture tests,
 the static import guard and TypeScript pass. The withdrawal group prepares one
 tracker/family JVM pair. Isolated negatives preserve target and process digests,
 origins, mining roles, expiry, compiler/setup/source custody, packet provenance
@@ -373,6 +373,41 @@ expired handles remain required. A composed regression joins the actual native
 request and observations to the existing checker and WASM signer, with explicit
 compiler/process and HTTP doubles. Its deterministic traversal-cost model
 exposes cumulative expiry without claiming measured node performance.
+
+Campaign 17 at `413ed4d9603277f8e1367697c42896576ffcbd25` reached public
+mint, approval and burn. Paired reads again matched the native commitment,
+leaf hashes, runtime event and global burn index, keeping the Ethereum and
+native block identities distinct. Its initial callback remained active past
+the conservative latest deadline allowed by the unchanged 78-minute budget.
+The budget is checked after callback return; this was a source-derived bound,
+not an emitted timeout exception. Controlled witness termination unwound the
+root with an action/cleanup error. A separate final inspection found all owned
+processes and listeners absent. The public burn capture does not authenticate
+the original execution handle or establish checkpoint attestation or payout.
+
+The next correction removes repeated synchronous native validation at the
+observation and revalidator joins. An original native observation first runs
+its retained full packet assertion, requires the same packet, then consumes
+the original batch binding that assertion just checked. Both binding digests
+and the observation digest remain required. Copies, proxies, absent material,
+foreign targets and legacy observations keep their target-first fallback.
+The native revalidator consumes its batch assertion's complete target check;
+both artifact checks remain around caller-supplied expectation getters.
+The committed-vault root keeps its initial packet guard and every later
+post-await check through the original source-lock observation.
+
+Counter regressions distinguish native artifact validation (four to two
+target traversals), each original output observation (two to one), later
+committed-vault callbacks (three to one), and source-proof consumption (three
+to two). All 410 direct revalidator/observer cases and 360 native composed
+cases pass, as do 235 architecture cases, the static import guard and
+TypeScript. Three guard-removal mutants fail at the intended initial,
+caller-getter and post-await boundaries. These checks use declared process,
+compiler and node doubles; they establish the validation reduction and
+preserved custody vetoes, not a measured campaign speedup. Request, V3,
+compiler, Rust/WASM, format and quorum evidence remains reusable only within
+its unchanged operation and artifact closure. A fresh complete campaign is
+still needed to establish the native checkpoint and Ergo return.
 
 Native setup now retains its original batch and compiler through withdrawal-fee
 and tracker-fee checks. Both fee consumers preserve exact authorization, durable

@@ -274,6 +274,8 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
         if (batches.get(value) !== profile || target !== TARGET) {
           throw new Error('synthetic setup batch provenance is missing');
         }
+        // Native production batch validation includes a complete current-target check.
+        if (profile === 'native') return mocks.assertTarget(target);
         return BINDING;
       });
     }
@@ -367,6 +369,7 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
     expect(() => assertArtifact(another, postCheck.revalidationArtifact, artifactExpectation))
       .toThrow(/exact process provenance/);
     await expect(another.revalidate(checked, 'post-check')).rejects.toThrow(/already issued/);
+    const beforeArtifact = mocks.assertTarget.mock.calls.length;
     expect(() =>
       assertArtifact(
         revalidator,
@@ -374,6 +377,7 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
         artifactExpectation,
       )
     ).not.toThrow();
+    expect(mocks.assertTarget.mock.calls.length - beforeArtifact).toBe(2);
     expect(() =>
       assertArtifact(
         revalidator,
@@ -482,6 +486,35 @@ describe.each(PROFILES)('genesis revalidator profile %s', version => {
   });
 
   describe.each(['post-check', 'pre-transport'] as const)('%s evidence boundary', phase => {
+    it.each(['target disposal', 'batch revocation', 'processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+      'rechecks %s after a caller expectation getter', async fault => {
+        const setupBatch = batch();
+        const tx = setupBatch.orderedTransactions[0];
+        configureSources(new Map([[tx.issuance.genesisInputBoxIdHex,
+          nodeBox(tx.issuance.unsignedTransactionBody.inputs[0])]]));
+        const revalidator = createRevalidator(TARGET, setupBatch);
+        const checked = checkedCandidate(setupBatch);
+        const result = await revalidator.revalidate(checked, phase);
+        const expectation = { ...result, role: 'tracker', phase,
+          expectedTxId: tx.issuance.unsignedTransactionIdHex };
+        const getter = vi.fn(() => {
+          if (fault === 'target disposal') {
+            mocks.assertTarget.mockImplementation(() => { throw new Error('synthetic target disposed'); });
+          } else if (fault === 'batch revocation') {
+            batches.delete(setupBatch);
+          } else {
+            mocks.assertTarget.mockReturnValue(Object.freeze({ ...BINDING, [fault]: hex('ff') }));
+          }
+          return checked;
+        });
+        Object.defineProperty(expectation, 'checkedCandidate', { enumerable: true, get: getter });
+        const beforeHandle = mocks.assertHandleProvenance.mock.calls.length;
+        expect(() => assertArtifact(revalidator, result.revalidationArtifact, expectation))
+          .toThrow(/disposed|provenance is missing|process binding changed/);
+        expect(getter).toHaveBeenCalledTimes(1);
+        expect(mocks.assertHandleProvenance.mock.calls.length).toBe(beforeHandle);
+      });
+
     it.each(['target disposal', 'batch revocation'] as const)('rejects %s before observation and artifact consumption', async cause => {
       const setupBatch = batch();
       const tx = setupBatch.orderedTransactions[0];

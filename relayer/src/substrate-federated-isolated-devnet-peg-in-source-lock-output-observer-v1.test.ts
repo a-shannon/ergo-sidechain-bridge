@@ -418,13 +418,14 @@ describe('isolated source-lock V2 candidate boundary (mocked provenance and node
 });
 
 describe('native source-lock output observation (mocked packet custody, confirmation, node and normalization)', () => {
-  const batch = Object.freeze({ ...BATCH, profile: 'fed-native-height-zero-v1' });
+  const batch = Object.freeze({ ...BATCH, targetBinding: BINDING, profile: 'fed-native-height-zero-v1' });
   const lock = Object.freeze({ ...SOURCE_LOCK, creationHeight: 200, transactionId: TX_ID, index: 0,
     ergoTree: '10010100d17300', assets: [], additionalRegisters: {} });
   const fee = Object.freeze({ ...TRANSITION_FEE, creationHeight: 200, transactionId: TX_ID, index: 1,
     ergoTree: '10010100d17300', assets: [], additionalRegisters: {} });
   const packet = Object.freeze({ ...PACKET, boxes: Object.freeze({ ...PACKET.boxes,
     sourceLock: lock, transitionFeeFunding: fee }) });
+  const nativeCustody = vi.fn();
   const input = () => ({ target: TARGET as never, batch: batch as never, packet: packet as never,
     confirmation: CONFIRMATION as never });
   const observe = observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1;
@@ -452,11 +453,20 @@ describe('native source-lock output observation (mocked packet custody, confirma
   };
 
   beforeEach(() => {
-    mocks.assertNativePacket.mockReset().mockImplementation((p, b, t) => {
+    nativeCustody.mockReset().mockImplementation((p, b, t) => {
       if (p !== packet || b !== batch || t !== TARGET) throw new Error('native packet provenance missing');
       return packet;
     });
-    mocks.assertReadCustody.mockReset().mockImplementation((...args) => mocks.assertNativePacket(...args));
+    mocks.assertNativePacket.mockReset().mockImplementation((p, b, t) => {
+      const result = nativeCustody(p, b, t);
+      const current = mocks.assertTarget(t);
+      if (current.processBindingDigestHex !== batch.targetBinding.processBindingDigestHex
+        || current.executionTargetIdentityDigestHex !== batch.targetBinding.executionTargetIdentityDigestHex) {
+        throw new Error('native packet process binding provenance changed');
+      }
+      return result;
+    });
+    mocks.assertReadCustody.mockReset().mockImplementation((...args) => nativeCustody(...args));
     mocks.getHeaders.mockReset().mockImplementation((_origin, height) =>
       [height === 200 ? CONFIRMATION_HEADER_ID : STABLE_TIP.id]);
     mocks.getBox.mockReset().mockImplementation(exactBox);
@@ -480,6 +490,37 @@ describe('native source-lock output observation (mocked packet custody, confirma
     expect(mocks.assertCandidate).not.toHaveBeenCalled();
     expect(mocks.assertCandidateV2).not.toHaveBeenCalled();
   });
+
+  it.each(['native', 'generic'] as const)('uses one complete current-target traversal for an original %s assertion', async consumer => {
+    const observation = await observe(input());
+    const before = mocks.assertTarget.mock.calls.length;
+    if (consumer === 'native') expect(assertBound(observation)).toBe(packet);
+    else assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, TARGET as never);
+    expect(mocks.assertTarget.mock.calls.length - before).toBe(1);
+  });
+
+  it.each(['copy', 'proxy', 'absent', 'absent target', 'foreign target', 'getter'] as const)(
+    'keeps direct target validation before inspecting a %s observation', async fault => {
+      const original = await observe(input());
+      const effects: string[] = [];
+      const targetCheck = mocks.assertTarget.getMockImplementation()!;
+      mocks.assertTarget.mockImplementation(value => { effects.push('target'); return targetCheck(value); });
+      const suppliedTarget = fault === 'absent target' ? undefined : fault === 'foreign target' ? { ...TARGET } : TARGET;
+      let observation: typeof original = fault === 'absent' || fault === 'absent target' ? {} as typeof original : { ...original };
+      if (fault === 'foreign target') observation = original;
+      if (fault === 'proxy') observation = new Proxy(original, {
+        ownKeys(value) { effects.push('inspect'); return Reflect.ownKeys(value); },
+      });
+      if (fault === 'getter') Object.defineProperty(observation, 'observationDigestHex', {
+        enumerable: true, get: () => { effects.push('inspect'); return original.observationDigestHex; },
+      });
+      const beforePacket = mocks.assertNativePacket.mock.calls.length;
+      expect(() => assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
+        observation, suppliedTarget as never)).toThrow(/provenance/);
+      expect(effects[0]).toBe('target');
+      if (fault === 'getter' || fault === 'proxy') expect(effects).toContain('inspect');
+      expect(mocks.assertNativePacket.mock.calls.length).toBe(beforePacket);
+    });
 
   it('allows mining during closing confirmation while rebinding the captured output anchor', async () => {
     tips([211, 211, 211, 211, 212, 212, 212, 212]);
@@ -688,7 +729,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
   });
 
   it('rejects native custody already disposed at entry', async () => {
-    mocks.assertNativePacket.mockImplementation(() => { throw new Error('native custody disposed'); });
+    nativeCustody.mockImplementation(() => { throw new Error('native custody disposed'); });
     await expect(observe(input())).rejects.toThrow('native custody disposed');
     expect(mocks.getBestHeader).not.toHaveBeenCalled();
     expect(mocks.reobserveConfirmation).not.toHaveBeenCalled();
@@ -696,7 +737,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
 
   it('rejects replacement packet identity returned after asynchronous reads', async () => {
     mocks.getBox.mockImplementationOnce(async () => {
-      mocks.assertNativePacket.mockReturnValue({ ...packet });
+      nativeCustody.mockReturnValue({ ...packet });
       return null;
     });
     await expect(observe(input())).rejects.toThrow(/target or packet changed/);
@@ -707,7 +748,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
     'rejects expected %s creation height beyond the stable output tip', async role => {
       const futureBox = { ...packet.boxes[role], creationHeight: 212 };
       const futurePacket = { ...packet, boxes: { ...packet.boxes, [role]: futureBox } };
-      mocks.assertNativePacket.mockImplementation((p, b, t) => {
+      nativeCustody.mockImplementation((p, b, t) => {
         if (p !== futurePacket || b !== batch || t !== TARGET) throw new Error('native packet provenance missing');
         return futurePacket;
       });
@@ -790,7 +831,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
         let calls = 0;
         mock.mockImplementation(async (...args: unknown[]) => {
           const result = await (original as (...args: unknown[]) => unknown)(...args);
-          if (calls++ === ordinal) mocks.assertNativePacket.mockImplementation(() => { throw new Error('native custody disposed'); });
+          if (calls++ === ordinal) nativeCustody.mockImplementation(() => { throw new Error('native custody disposed'); });
           return result;
         });
         await expect(observe(input())).rejects.toThrow('native custody disposed');
@@ -801,7 +842,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
 
   it.each(['native assertion', 'generic assertion'] as const)('rechecks retained custody on later %s', async consumer => {
     const observation = await observe(input());
-    mocks.assertNativePacket.mockImplementation(() => { throw new Error('native custody disposed'); });
+    nativeCustody.mockImplementation(() => { throw new Error('native custody disposed'); });
     expect(() => consumer === 'native assertion' ? assertBound(observation)
       : assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, TARGET as never))
       .toThrow('native custody disposed');
@@ -809,7 +850,7 @@ describe('native source-lock output observation (mocked packet custody, confirma
 
   it('rejects changed packet identity returned by the retained callback', async () => {
     const observation = await observe(input());
-    mocks.assertNativePacket.mockReturnValue({ ...packet });
+    nativeCustody.mockReturnValue({ ...packet });
     expect(() => assertBound(observation)).toThrow(/packet changed/);
   });
 

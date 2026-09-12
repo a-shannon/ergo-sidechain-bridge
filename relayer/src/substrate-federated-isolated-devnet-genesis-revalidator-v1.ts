@@ -452,15 +452,12 @@ function assertRevalidator(
   ) {
     throw new Error('isolated genesis revalidator lacks process provenance');
   }
-  const current =
-    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
-      material.target,
-    );
-  assertSetupBatch(
-    material.target,
-    material.batch,
-    material.version,
-  );
+  const current = material.version === 'native'
+    ? assertSetupBatch(material.target, material.batch, material.version)
+    : assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(material.target);
+  if (material.version !== 'native') {
+    assertSetupBatch(material.target, material.batch, material.version);
+  }
   if (
     current.processBindingDigestHex
       !== material.binding.processBindingDigestHex
