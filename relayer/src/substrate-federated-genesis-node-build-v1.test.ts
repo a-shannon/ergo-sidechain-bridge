@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,10 @@ import { encodeFederatedPooledReserveSourceProofProfileScaleV1Hex } from './subs
 const bridgeRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sourceBytes = Buffer.from('[package]\nname="reviewed-fixture"\n');
 const blob = createHash('sha1').update(`blob ${sourceBytes.length}\0`).update(sourceBytes).digest('hex');
-const tree = '0066f584c0eff7c31bce59adb89bbdb5b90a80fe';
+const tree = '8dca3c37da8e24cb37d40c8121465e5d14e8a58c';
+const patchNames = ['0001-bridge-runtime-commitment.patch', '0004-federated-genesis-initialization.patch',
+  '0005-federated-genesis-node.patch', '0006-federated-native-burn-commitment.patch'];
+const burnPatch = (root: string) => join(root, 'sources/frontier', patchNames[3]!);
 const wasm = Buffer.from('0061736d01000000', 'hex');
 let root: string;
 let input: BuildSubstrateFederatedGenesisNodeV1Input;
@@ -80,6 +83,7 @@ beforeEach(() => {
       writeFileSync(join(buildSource, 'Cargo.toml'), fault === 'export drift' ? 'changed' : sourceBytes);
       mkdirSync(join(buildSource, 'runtime'));
       writeFileSync(join(buildSource, 'runtime/Cargo.toml'), sourceBytes);
+      if (fault === 'patch export drift') writeFileSync(burnPatch(input.bridgeRoot), 'changed patch');
       if (!configuration?.afterBuild) addConfiguration(join(dirname(buildSource.replace(/[\\/]+$/, '')), 'target'));
     }
     if (args[0] === 'build') {
@@ -87,6 +91,7 @@ beforeEach(() => {
       if (fault === 'source disposed') session.dispose();
       if (fault === 'source drift') writeFileSync(join(buildSource, 'Cargo.toml'), 'changed');
       if (fault === 'protoc drift') writeFileSync(input.protocExecutablePath, 'changed tool');
+      if (fault === 'patch build drift') writeFileSync(burnPatch(input.bridgeRoot), 'changed patch');
       const target = request.env.CARGO_TARGET_DIR;
       const node = join(target, 'debug', process.platform === 'win32' ? 'frontier-template-node.exe' : 'frontier-template-node');
       const wasmPath = join(target, 'debug/wbuild/frontier-template-v4-fed-genesis-runtime/frontier_template_v4_fed_genesis_runtime.wasm');
@@ -116,6 +121,10 @@ describe('FED genesis build owner', () => {
     const expectedScale = encodeFederatedPooledReserveSourceProofProfileScaleV1Hex(
       readSubstrateFederatedGenesisProfilesFromSessionV2(session).mintProofProfile);
     const result = await buildSubstrateFederatedGenesisNodeV1(input);
+    expect(result.sourceTreeId).toBe(tree);
+    expect(mocks.run.mock.calls.map(([call]) => call.args).filter(args => args[2] === 'apply'))
+      .toEqual(patchNames.map(name => ['-c', 'core.autocrlf=false', 'apply', '--cached', '--whitespace=nowarn',
+        join(bridgeRoot, 'sources/frontier', name)]));
     const buildCalls = mocks.run.mock.calls.map(([call]) => call).filter(call => call.args[0] === 'build');
     expect(buildCalls).toHaveLength(1);
     expect(buildCalls[0].args).toEqual(['build', '--offline', '--locked', '-p', 'frontier-template-node',
@@ -137,6 +146,22 @@ describe('FED genesis build owner', () => {
     expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2(session)).not.toThrow();
     expect(mocks.run.mock.calls.filter(([call]) => call.args[0] !== 'build')
       .every(([call]) => call.env.GIT_INDEX_FILE.startsWith(input.buildParentDirectory))).toBe(true);
+  });
+
+  it.each(['missing', 'hash', 'export', 'build'])('rejects native burn patch %s drift', async selected => {
+    const fixtureRoot = join(root, 'bridge');
+    mkdirSync(join(fixtureRoot, 'sources/frontier'), { recursive: true });
+    for (const name of patchNames) copyFileSync(join(bridgeRoot, 'sources/frontier', name),
+      join(fixtureRoot, 'sources/frontier', name));
+    input = { ...input, bridgeRoot: fixtureRoot };
+    if (selected === 'missing') rmSync(burnPatch(fixtureRoot));
+    else if (selected === 'hash') writeFileSync(burnPatch(fixtureRoot), 'changed patch');
+    else fault = `patch ${selected} drift`;
+    await expect(buildSubstrateFederatedGenesisNodeV1(input)).rejects.toThrow(
+      selected === 'missing' ? /ENOENT/ : /patch differs/);
+    expect(mocks.run.mock.calls.filter(([call]) => call.args[0] === 'build'))
+      .toHaveLength(selected === 'build' ? 1 : 0);
+    if (selected === 'missing' || selected === 'hash') expect(mocks.run).not.toHaveBeenCalled();
   });
 
   describe.each(['config', 'config.toml'])('Cargo %s exclusion', name => {

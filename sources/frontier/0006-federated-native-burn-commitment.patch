@@ -1,0 +1,230 @@
+diff --git a/template/runtime-v4-fed-genesis/tests/federated_genesis.rs b/template/runtime-v4-fed-genesis/tests/federated_genesis.rs
+index fe2622237fdfe01dc1e2dc99c7bc3fea1f1d07c6..5337d4e8cd92d389bde88ef2bca345a043c6da2a 100644
+--- a/template/runtime-v4-fed-genesis/tests/federated_genesis.rs
++++ b/template/runtime-v4-fed-genesis/tests/federated_genesis.rs
+@@ -1,8 +1,9 @@
+ use std::{collections::BTreeMap, panic::{catch_unwind, AssertUnwindSafe}};
+ 
+ use frame_support::{assert_noop, assert_ok, traits::BuildGenesisConfig};
++use pallet_ethereum::{Block, Log, OnBlockStored, Receipt, Transaction, TransactionAction, TransactionStatus};
+ use scale_codec::{Decode, Encode};
+-use sp_core::{hashing::sha2_256, H160, H256, U256};
++use sp_core::{hashing::{blake2_256, keccak_256, sha2_256}, H160, H256, U256};
+ use sp_runtime::{traits::Header as HeaderT, BuildStorage};
+ 
+ use frontier_template_v4_fed_genesis_runtime::{
+@@ -11,7 +12,7 @@ use frontier_template_v4_fed_genesis_runtime::{
+     peg_in_pooled_reserve_reservation::{
+         PooledReserveMintReservationRuntimeProfileV4,
+         PooledReserveMintReservationSourceProofVerifierV4},
+-    BridgeCommitment, Executive, Header, Runtime, RuntimeGenesisConfig, RuntimeOrigin, System, Timestamp,
++    BridgeCommitment, Executive, Header, Runtime, RuntimeEvent, RuntimeGenesisConfig, RuntimeOrigin, System, Timestamp,
+ };
+ 
+ type SourceProofVerifier = <Runtime as bridge_commitment::Config>::PooledReserveMintReservationSourceProofVerifier;
+@@ -273,3 +274,182 @@ fn missing_or_partial_genesis_profile_cannot_fall_back_to_legacy_on_first_block(
+         });
+     }
+ }
++
++// Callback fixtures use the normal FED library and its real parent-profile snapshot.
++// They exercise commitment production, not EVM transaction execution or source finality.
++fn native_burn_commitment_parent() {
++    frame_system::BlockHash::<Runtime>::insert(0, H256::repeat_byte(0xa1));
++    System::initialize(&4, &H256::repeat_byte(0xa2), &Default::default());
++    assert_ok!(<BridgeCommitment as OnBlockStored>::on_block_started());
++}
++
++fn native_burn_commitment_block(profile: &PooledReserveMintReservationRuntimeProfileV4, emitter: H160)
++    -> (Block, Vec<Receipt>, Vec<TransactionStatus>, Vec<u8>)
++{
++    let recipient = code("0008cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
++    let user = H160::repeat_byte(0x42);
++    let transfer_topic = H256::from(keccak_256(b"Transfer(address,address,uint256)"));
++    let transfer = |to: H160, amount: u64| Log {
++        address: profile.token_address,
++        topics: vec![transfer_topic, H256::from(user), H256::from(to)],
++        data: H256::from_low_u64_be(amount).as_bytes().to_vec(),
++    };
++    let mut data = vec![0u8; 160];
++    data[24..32].copy_from_slice(&10_000_000u64.to_be_bytes());
++    data[63] = 64;
++    data[95] = recipient.len() as u8;
++    data[96..132].copy_from_slice(&recipient);
++    let mut call = keccak_256(b"pegOut(uint256,bytes)")[..4].to_vec();
++    call.extend_from_slice(&data);
++    call[28..36].copy_from_slice(&15_000_000u64.to_be_bytes());
++    let logs = vec![transfer(H160::zero(), 10_000_000), transfer(emitter, 5_000_000), Log {
++        address: emitter,
++        topics: vec![H256::from(keccak_256(b"PegOut(address,uint256,bytes)")), H256::from(user)], data,
++    }];
++    // Legacy TransactionV2 + signature SCALE schema from the pinned Ethereum crate.
++    let encoded = (0u8, U256::from(3), U256::from(1_423_828_125u64), U256::from(5_000_000),
++        TransactionAction::Call(emitter), U256::zero(), call, 8519u64,
++        H256::from_low_u64_be(1), H256::from_low_u64_be(2)).encode();
++    let transaction = Transaction::decode(&mut &encoded[..]).unwrap();
++    assert_eq!(transaction.encode(), encoded);
++    let status = TransactionStatus { transaction_hash: transaction.hash(), transaction_index: 0,
++        from: user, to: Some(emitter), contract_address: None, logs: logs.clone(), logs_bloom: Default::default() };
++    let receipt_bytes = (0u8, 1u8, U256::from(100_000), status.logs_bloom, logs).encode();
++    let receipt = Receipt::decode(&mut &receipt_bytes[..]).unwrap();
++    assert_eq!(receipt.encode(), receipt_bytes);
++    let mut header = pallet_ethereum::CurrentBlock::<Runtime>::get().unwrap().header;
++    header.number = U256::from(4);
++    let block = Block::new(header.into(), vec![transaction], Vec::new());
++    (block, vec![receipt], vec![status], recipient)
++}
++
++fn native_burn_commitment_leaf(sidechain: H256, ethereum_hash: H256, transaction_hash: H256,
++    event_index: u32, recipient: &[u8]) -> H256
++{
++    let mut burn_id = b"E2S_TRUSTLESS_BURN_ID_V1".to_vec();
++    burn_id.extend_from_slice(sidechain.as_bytes());
++    burn_id.extend_from_slice(transaction_hash.as_bytes());
++    burn_id.extend_from_slice(&event_index.to_be_bytes());
++    let mut leaf = vec![1u8];
++    leaf.extend_from_slice(sidechain.as_bytes());
++    leaf.extend_from_slice(ethereum_hash.as_bytes());
++    leaf.extend_from_slice(&blake2_256(&burn_id));
++    leaf.extend_from_slice(transaction_hash.as_bytes());
++    leaf.extend_from_slice(&event_index.to_be_bytes());
++    leaf.extend_from_slice(&blake2_256(recipient));
++    leaf.extend_from_slice(&10_000_000u64.to_be_bytes());
++    leaf.extend_from_slice(&[0u8; 32]);
++    assert_eq!(leaf.len(), 205);
++    let mut preimage = b"E2S_TRUSTLESS_BURN_LEAF_V1".to_vec();
++    preimage.extend_from_slice(&leaf);
++    H256::from(blake2_256(&preimage))
++}
++
++#[test]
++fn native_burn_commitment_selects_active_application_without_legacy_identity() {
++    for legacy in [None, Some(H160::repeat_byte(0x33)), Some(H160::repeat_byte(0x77))] {
++        let (config, profile) = fixture();
++        let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++        ext.execute_with(|| {
++            bridge_commitment::BridgeAddress::<Runtime>::kill();
++            if let Some(address) = legacy { bridge_commitment::BridgeAddress::<Runtime>::put(address); }
++            assert_eq!(bridge_commitment::BridgeAddress::<Runtime>::get(), legacy);
++            native_burn_commitment_parent();
++            let (block, receipts, statuses, recipient) = native_burn_commitment_block(&profile, profile.bridge_address);
++            let ethereum_hash = block.header.hash();
++            let genesis = System::block_hash(0);
++            assert_ne!(profile.sidechain_id, genesis);
++            assert_ne!(ethereum_hash, genesis);
++            assert_ne!(ethereum_hash, profile.sidechain_id);
++            let leaf = native_burn_commitment_leaf(profile.sidechain_id, ethereum_hash, statuses[0].transaction_hash, 2, &recipient);
++            assert_ne!(leaf, native_burn_commitment_leaf(genesis, ethereum_hash, statuses[0].transaction_hash, 2, &recipient));
++            assert_ne!(leaf, native_burn_commitment_leaf(profile.sidechain_id, genesis, statuses[0].transaction_hash, 2, &recipient));
++            assert_ne!(leaf, native_burn_commitment_leaf(profile.sidechain_id, ethereum_hash, statuses[0].transaction_hash, 0, &recipient));
++            let before_events = System::events().len();
++            assert_ok!(<BridgeCommitment as OnBlockStored>::on_block_stored(&block, &receipts, &statuses));
++            let mut expected = vec![1u8];
++            expected.extend_from_slice(profile.sidechain_id.as_bytes());
++            expected.extend_from_slice(&4u64.to_le_bytes());
++            expected.extend_from_slice(ethereum_hash.as_bytes());
++            expected.extend_from_slice(leaf.as_bytes());
++            expected.extend_from_slice(&1u32.to_le_bytes());
++            assert_eq!(expected.len(), 109);
++            assert_eq!(bridge_commitment::CurrentCommitment::<Runtime>::get().expect("active application burn commitment").encode(), expected, "legacy={legacy:?}");
++            let mut expected_leaves = vec![4u8];
++            expected_leaves.extend_from_slice(leaf.as_bytes());
++            assert_eq!(bridge_commitment::CurrentLeafHashes::<Runtime>::get().encode(), expected_leaves);
++            let events = System::events();
++            assert_eq!(events.len(), before_events + 1);
++            assert_eq!(events.last().unwrap().event, RuntimeEvent::BridgeCommitment(bridge_commitment::Event::BridgeEventRootStored {
++                format_version: 1, execution_block_hash: ethereum_hash, bridge_event_root: leaf, burn_leaf_count: 1,
++            }));
++        });
++    }
++}
++
++#[test]
++fn native_burn_commitment_ignores_foreign_bridge_even_when_legacy_selects_it() {
++    for legacy in [None, Some(H160::repeat_byte(0x77))] {
++        let (config, profile) = fixture();
++        let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++        ext.execute_with(|| {
++            bridge_commitment::BridgeAddress::<Runtime>::kill();
++            if let Some(address) = legacy { bridge_commitment::BridgeAddress::<Runtime>::put(address); }
++            native_burn_commitment_parent();
++            let (block, receipts, statuses, _) = native_burn_commitment_block(&profile, H160::repeat_byte(0x77));
++            let events = System::events();
++            assert_ok!(<BridgeCommitment as OnBlockStored>::on_block_stored(&block, &receipts, &statuses));
++            assert!(bridge_commitment::CurrentCommitment::<Runtime>::get().is_none());
++            assert!(bridge_commitment::CurrentLeafHashes::<Runtime>::get().is_empty());
++            assert_eq!(System::events(), events);
++        });
++    }
++}
++
++#[test]
++fn native_burn_commitment_rejects_invalid_active_state_without_writes() {
++    for fault in ["missing-profile", "missing-enforcement", "missing-both", "version", "sidechain",
++        "aliased-addresses", "proof-system", "proof-profile", "activation"] {
++        let (config, mut profile) = fixture();
++        let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++        ext.execute_with(|| {
++            native_burn_commitment_parent();
++            let (block, receipts, statuses, _) = native_burn_commitment_block(&profile, profile.bridge_address);
++            let prior = bridge_commitment::BridgeEventCommitment { format_version: 1, sidechain_id: profile.sidechain_id,
++                sidechain_height: 3, execution_block_hash: H256::repeat_byte(0xb1),
++                bridge_event_root: H256::repeat_byte(0xb2), burn_leaf_count: 1 };
++            bridge_commitment::CurrentCommitment::<Runtime>::put(&prior);
++            let leaves: frame_support::BoundedVec<H256, <Runtime as bridge_commitment::Config>::MaxBurnsPerBlock> =
++                vec![prior.bridge_event_root].try_into().unwrap();
++            bridge_commitment::CurrentLeafHashes::<Runtime>::put(&leaves);
++            System::deposit_event(RuntimeEvent::BridgeCommitment(bridge_commitment::Event::BridgeEventRootStored {
++                format_version: 1, execution_block_hash: prior.execution_block_hash,
++                bridge_event_root: prior.bridge_event_root, burn_leaf_count: 1,
++            }));
++            match fault {
++                "missing-profile" | "missing-both" => CurrentPooledReserveMintReservationProfileV4::<Runtime>::kill(),
++                "missing-enforcement" => PooledReserveMintReservationEnforcementActivatedV4::<Runtime>::kill(),
++                "version" => profile.format_version = 5,
++                "sidechain" => profile.sidechain_id = H256::zero(),
++                "aliased-addresses" => profile.token_address = profile.bridge_address,
++                "proof-system" => profile.source_proof_system_id = H256::repeat_byte(0xb3),
++                "proof-profile" => profile.source_proof_profile_id = H256::repeat_byte(0xb4),
++                "activation" => profile.activation_height = 5,
++                _ => unreachable!(),
++            }
++            if fault == "missing-both" { PooledReserveMintReservationEnforcementActivatedV4::<Runtime>::kill(); }
++            if !fault.starts_with("missing-") { CurrentPooledReserveMintReservationProfileV4::<Runtime>::put(&profile); }
++            let expected = if fault.starts_with("missing-") { "required V4 genesis profile or enforcement is missing" }
++                else if fault.starts_with("proof-") { "pooled-reserve mint-reservation profile selects an unknown source proof" }
++                else if fault == "activation" { "pooled-reserve mint-reservation profile is not active" }
++                else { "pooled-reserve mint-reservation profile contains a zero or aliased field" };
++            let before = sp_io::storage::root(sp_runtime::StateVersion::V1);
++            let events = System::events();
++            assert_eq!(<BridgeCommitment as OnBlockStored>::on_block_stored(&block, &receipts, &statuses), Err(expected), "{fault}");
++            assert_eq!(sp_io::storage::root(sp_runtime::StateVersion::V1), before, "partial write for {fault}");
++            assert_eq!(bridge_commitment::CurrentCommitment::<Runtime>::get(), Some(prior));
++            assert_eq!(bridge_commitment::CurrentLeafHashes::<Runtime>::get(), leaves);
++            assert_eq!(System::events(), events);
++        });
++    }
++}
+diff --git a/template/runtime/src/bridge_commitment.rs b/template/runtime/src/bridge_commitment.rs
+index 34eb14912545cdc2b852779ab06c58f58f9c580e..401da9e0a4abb162a42885c75f4fef394d42ad07 100644
+--- a/template/runtime/src/bridge_commitment.rs
++++ b/template/runtime/src/bridge_commitment.rs
+@@ -2675,11 +2675,16 @@ impl<T: Config> OnBlockStored for Pallet<T> {
+ 			Some(remaining)
+ 		};
+ 
+-		let bridge_address = BridgeAddress::<T>::get();
++		let (bridge_address, commitment_sidechain_id) =
++			if let Some(profile) = pooled_reserve_profile.as_ref() {
++				(Some(profile.bridge_address), profile.sidechain_id)
++			} else {
++				(BridgeAddress::<T>::get(), sidechain_id)
++			};
+ 		let produced = if let Some(bridge_address) = bridge_address {
+ 			produce_commitment(
+ 				bridge_address,
+-				sidechain_id,
++				commitment_sidechain_id,
+ 				block.header.number,
+ 				execution_block_hash,
+ 				receipts,

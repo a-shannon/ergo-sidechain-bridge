@@ -11,8 +11,9 @@ The dedicated node selects this runtime and accepts typed genesis through its
 compiled WASM. The provisioning producer now connects actual JVM tracker and
 family compilation to that loader. Its synthetic configuration passes
 `build-spec` and starts two isolated nodes with matching genesis storage.
-Fresh usable federation custody, observed Ergo family inputs, transaction-pool
-admission and operational reservation-to-mint remain open.
+A subsequent native campaign demonstrated fresh custody, observed Ergo family
+inputs and reservation-to-mint. Native burn, checkpoint and Ergo payout still
+require a fresh composed campaign; see the [execution plan](../phases/bridge-execution-plan.md).
 The existing main runtime stays inert; LAB/TestClient remains a separate route.
 
 ## Source Closure
@@ -27,9 +28,11 @@ Apply these inputs to a separate checkout in this order:
    SHA-256 `b3688c77c1a6a2b85b95367057572f053056fa11ee31ac291373571717dd7331`.
 4. For the node, [selection overlay 0005](../sources/frontier/0005-federated-genesis-node.patch),
    SHA-256 `f1e11276188d32e3f94ddc542ce7dce911506eaf05751d152eb22a54b11d9b65`.
+5. [Native burn overlay 0006](../sources/frontier/0006-federated-native-burn-commitment.patch),
+   SHA-256 `30d2b72b20e1845a93fb6ab52da1edd32d88b0e90b6953bbf8e6031cd4d18002`.
 
 The complete node source tree is
-`0066f584c0eff7c31bce59adb89bbdb5b90a80fe`. The node build owner verifies
+`8dca3c37da8e24cb37d40c8121465e5d14e8a58c`. The node build owner verifies
 both patch bytes and the reconstructed tree before compiling.
 
 Overlay 0004 changes eleven source files. It adds one non-publishable runtime
@@ -44,6 +47,15 @@ Overlay 0005 changes the node manifest, its local lock dependency,
 runtime/CLI selection, typed loader and manual-seal provider with direct tests.
 It changes no runtime pallet sources, proof formats, contracts or application
 bytecode. Compiled node/WASM identities require their own exact build checks.
+
+Overlay 0006 selects the validated active V4 profile's bridge address and
+sidechain identity when producing burn commitments. Without an active profile,
+the historical branch still uses the legacy bridge and genesis identity; the
+native runtime requires its profile at every positive height. Native integration
+tests cover the exact 109-byte commitment, leaf vector and root event with
+distinct application, genesis and Ethereum hashes, global burn index two,
+foreign emitters and invalid active state without partial writes. These callback
+fixtures do not execute an EVM burn or establish source finality.
 
 V4 profile bytes remain exactly 349 bytes. Existing proof formats, domains,
 verifier IDs, contracts and ErgoTrees are unchanged. A new target must derive
@@ -288,7 +300,7 @@ or mint authorization.
 
 The [FED build owner](../relayer/src/substrate-federated-genesis-node-build-v1.ts)
 accepts an open, unbound source-attestation session and derives the public
-profile bytes and ID used by Cargo. It reconstructs the three-patch source
+profile bytes and ID used by Cargo. It reconstructs the four-patch source
 tree through a separate Git index and exports it to a fresh build directory.
 Every exported file is checked against its exact Git blob before and after
 compilation; the original checkout and historical outputs are not rewritten.
