@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync, statfsSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import blakejs from 'blakejs';
 import { Mnemonic } from 'ethers';
@@ -517,6 +519,38 @@ describe('native FED withdrawal continuation', () => {
         expectAnchor(originalHeaders, 1);
         expect(verifyRetainedTrackerAtHeaders({ ...retained, headers: originalHeaders })).toEqual({
           proofs: [true, true], transactionError: null });
+        if (fault === 'valid' && process.env.BRIDGE_NATIVE_TRACKER_MEMPOOL_FIXTURE !== undefined) {
+          // Explicit JVM fixture export from this fresh synthetic component run.
+          // Only public signed bytes, input boxes and headers leave the test.
+          const output = process.env.BRIDGE_NATIVE_TRACKER_MEMPOOL_FIXTURE;
+          expect(isAbsolute(output)).toBe(true);
+          const parent = realpathSync(dirname(output));
+          expect(parent.toLowerCase()).toBe(resolve(dirname(output)).toLowerCase());
+          const root = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+          const location = relative(root, parent);
+          expect(isAbsolute(location) || location === '..' || location.startsWith('..\\') || location.startsWith('../')).toBe(true);
+          const space = statfsSync(parent, { bigint: true });
+          expect(space.bavail * space.bsize).toBeGreaterThanOrEqual(10n * 1024n ** 3n);
+          const signed = wasm.Transaction.from_json(JSON.stringify(retained.signedBody));
+          let signedBytes: Buffer;
+          try { signedBytes = Buffer.from(signed.sigma_serialize_bytes()); } finally { signed.free(); }
+          expect(createHash('sha256').update(signedBytes).digest('hex')).toBe(retained.signedCandidate.signedTransactionBytesSha256Hex);
+          const fixture = Buffer.from(JSON.stringify({
+            schema: 'e2s.substrate-federated-native-tracker-mempool-fixture.v1', version: 1,
+            transaction: { id: attempt.expectedTxId, signedBytesHex: signedBytes.toString('hex'),
+              signedBytesSha256Hex: retained.signedCandidate.signedTransactionBytesSha256Hex,
+              signedBytesLength: signedBytes.length, json: retained.signedBody },
+            inputs: transaction.inputBoxSigmaHex.map((serializedHex, index) => ({ id: transaction.inputBoxes[index]!.boxId, serializedHex })),
+            headers: observedHeaderContext.headers.map(header => ({ id: header.id, serializedHex: header.serializedHex })),
+            anchor: { id: anchor.id, height: anchor.height, index: 1, extensionRootHex: anchor.extensionRootHex },
+            checkpointExpiryHeight: Number(statement.admissionExpiresAtErgoHeight),
+          }) + '\n', 'utf8');
+          expect(fixture.length).toBeLessThanOrEqual(1024 * 1024);
+          expect(fixture.every(byte => byte < 128)).toBe(true);
+          writeFileSync(output, fixture, { flag: 'wx', mode: 0o600 });
+          expect(readFileSync(output)).toEqual(fixture);
+          console.info(`native_tracker_mempool_fixture_sha256=${createHash('sha256').update(fixture).digest('hex')}`);
+        }
         const firstMined = appendSyntheticMinedHeader(originalHeaders);
         expectAnchor(firstMined, 2);
         // Same parents as the check, actual synthetic H1030 preheader instead

@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Diagnose native tracker transport-to-confirmation using the retained failure projection and focused admission fixtures; run a fresh complete campaign only after a reviewed deciding change | Campaign 19 reached tracker confirmation and failed at its deadline. Its public burn observation passed, but no terminal success receipt, canonical tracker admission or Ergo payout was established. Preserve its terminal holds; do not retry it |
+| **Now** | Operational mint -> composed withdrawal | Run one fresh complete campaign with the retained failure projection and the pinned native mempool oracle; inspect its bounded public diagnostic only if tracker confirmation fails | Campaign 19 reached tracker confirmation and failed at its deadline. Its public burn observation passed, but no terminal success receipt, canonical tracker admission or Ergo payout was established. Preserve its terminal holds; do not retry it |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -294,7 +294,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | Native burn and retained withdrawal continuation | Native consumers and fixed root implemented; local validation and independent review complete | The original burn attempt binds paired native storage, runtime events and global burn index to the retained source quorum. The root confirms both distinct external fee inputs before attesting the checkpoint and freezing its anchor horizon, then consumes the original tracker and terminal payout checks. Actual checkpoint and Ergo return execution remain open |
 | Native validation traversal | Local affected checks and independent review complete | Native batch and original output-observation assertions each use one complete target traversal; revalidation artifacts and source-proof assertions each use two. Initial rejection order and every post-await custody check remain enforced. Keep exact process/artifact checks, failure holds and the existing duration bounds |
 | Native request and managed promotion | Local affected checks and independent review complete | Synchronous WASM derivation preserves full checks before and after serialization/cleanup. Native checker entry and material consumption use the immediately enclosing full validation; legacy checks remain. The composed fixture includes construction age, three RPC costs and actual managed promotion within the unchanged request window |
-| Fresh operational two-way campaign | Native request checkpoint complete; fresh execution remains due | Use fresh target/custody and actual RPC calls through the established Ergo withdrawal consumer. Campaigns 14, 16, 17 and 18 are terminal; their attempts cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
+| Native tracker mempool oracle | Local main-source checkpoint; fresh campaign remains due | The exact composed tracker bytes reparse under pinned Ergo codecs, round-trip through a persisted two-box UTXO state and pass shared validation plus `ErgoMemPool.process`. Duplicate and blacklist negatives use the same bytes. This synthetic state does not establish target-node admission, inclusion or the cause of campaign 19 |
+| Fresh operational two-way campaign | Native request and diagnostic checkpoints complete; fresh execution remains due | Use fresh target/custody and actual RPC calls through the established Ergo withdrawal consumer. Campaigns 14, 16, 17, 18 and 19 are terminal; their attempts cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
 
 The native execution consumer now retains the confirmed mint through one
 approval in block three and one matching burn in block four. It validates the
@@ -495,6 +496,23 @@ checkpoint-expiry cases reject the tracker input while its fee input remains
 valid. These fixtures do not establish target-node inclusion or identify the
 cause of campaign 19's failure. Diagnose that boundary before another fresh
 complete campaign; recovery remains after canonical native payout.
+
+The 4,173-byte tracker transaction exported by the composed test also reparses
+under the codecs at Ergo source `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1`.
+Its two input boxes and ten headers round-trip byte for byte. A persisted
+synthetic UTXO state retains the exact context and boxes, shared validation
+reports cost 16,614, and the main-source mempool accepts the transaction. The
+same mempool declines a duplicate, while a separate blacklist invalidates the
+same transaction. Nine Scala tests pass through the Windows PowerShell 5.1
+runner: the valid path plus isolated trailing-byte, transaction identity, input
+identity/order, header identity/parent/height and missing-UTXO rejections. The
+runner pins Node 24, the TypeScript process owner and the reviewed Windows Job
+Object wrapper; it bounds the JVM to 300 seconds and 4 MiB of combined output,
+then removes every LevelDB directory. No node service, wallet, actor, HTTP
+submission or mining process runs in this oracle. It closes the main-source
+parser and local mempool checks for this exported component fixture. No byte or
+context identity to campaign 19 was retained, so that campaign's confirmation
+failure remains undetermined.
 
 Keep signing/execution, checkpoint attestation and Ergo continuation as
 coherent implementation batches. Reuse unchanged compiler, runtime and prior
