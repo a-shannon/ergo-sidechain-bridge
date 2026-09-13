@@ -13,7 +13,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
-$ExpectedSpecHash = 'b5ab1955e30c55b9607028b6b13a81bfbddf4e00b0c9e0f7824a45e625e963a0'
+$ExpectedSpecHash = '6e9d7bda01680ca2214ba16d29c69b37da3fae1de763867b8fbe8f835545db84'
 $ExpectedNodeHash = '63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088'
 $ExpectedJobRunnerHash = '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627'
 $ExpectedBoundedProcessLibraryHash = '09cc5b729365b8e41b276117b54888dd58d0f2dc89b08a21db1f64853cfa82af'
@@ -21,7 +21,7 @@ $ExpectedProcessOwnerHash = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac
 $ExpectedTsxCliHash = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
 $ExpectedTsxPackageHash = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
 $ExpectedPackageLockHash = 'a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8'
-$ExpectedTests = 9
+$ExpectedTests = 13
 $SbtTimeoutMilliseconds = 300000
 $TerminationGraceMilliseconds = 15000
 $MaxOutputBytes = 4MB

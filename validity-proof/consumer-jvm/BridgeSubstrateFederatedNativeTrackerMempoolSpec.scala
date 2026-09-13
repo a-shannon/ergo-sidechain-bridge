@@ -12,6 +12,7 @@ import net.ceedubs.ficus.readers.ArbitraryTypeReader._
 import org.ergoplatform.ErgoBox
 import org.ergoplatform.core.idToVersion
 import org.ergoplatform.http.api.ApiCodecs
+import org.ergoplatform.mining.{CandidateGenerator, group}
 import org.ergoplatform.modifiers.history.header.{Header, HeaderSerializer}
 import org.ergoplatform.modifiers.mempool.{ErgoTransaction, ErgoTransactionSerializer, UnconfirmedTransaction}
 import org.ergoplatform.nodeView.mempool.ErgoMemPool
@@ -19,6 +20,7 @@ import org.ergoplatform.nodeView.mempool.ErgoMemPoolUtils.ProcessingOutcome
 import org.ergoplatform.nodeView.state.{BoxHolder, ErgoStateContext, ErgoStateReader, UtxoState, VotingData}
 import org.ergoplatform.settings._
 import org.ergoplatform.settings.Algos.HF
+import org.ergoplatform.wallet.interpreter.ErgoInterpreter
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import scorex.crypto.authds.ADValue
@@ -27,6 +29,7 @@ import scorex.crypto.hash.Digest32
 import scorex.db.{LDBFactory, LDBKVStore, LDBVersionedStore}
 import scorex.util.serialization.VLQByteBufferReader
 import sigma.VersionContext
+import sigma.data.ProveDlog
 import sigma.serialization.SigmaSerializer
 
 import scala.collection.JavaConverters._
@@ -122,7 +125,8 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
     require(window.sliding(2).forall(pair => pair.head.parentId == pair(1).id), "newest-first header parents")
   }
 
-  private def settings(scratch: Path): ErgoSettings = {
+  private def settings(scratch: Path, minerRewardDelay: Int, actualMinimumFee: Boolean): ErgoSettings = {
+    require(minerRewardDelay == 720 || minerRewardDelay == 1, "bounded monetary delay comparison")
     val source = Paths.get(property("root")).toAbsolutePath.normalize()
     val bytes = boundedFile(source.resolve("src/main/resources/application.conf"), MaxFixtureBytes)
     require(sha256(bytes) == SourceConfigHash, "pinned main-source configuration mismatch")
@@ -132,12 +136,19 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
       .withValue("ergo.directory", ConfigValueFactory.fromAnyRef(scratch.toString))
       .withValue("scorex.dataDir", ConfigValueFactory.fromAnyRef(scratch.resolve("inert-scorex").toString))
       .withValue("scorex.logDir", ConfigValueFactory.fromAnyRef(scratch.resolve("inert-log").toString))
+      .withValue("ergo.chain.monetary.minerRewardDelay", ConfigValueFactory.fromAnyRef(minerRewardDelay))
       .resolve(ConfigResolveOptions.noSystem())
     val node = config.as[NodeConfigurationSettings]("ergo.node")
     require(!node.mining && node.blacklistedTransactions.isEmpty, "inert baseline node settings")
+    node.minimalFeeAmount shouldBe 1000000L
+    // The generated isolated target sets ergo.node.minimalFeeAmount = 0
+    // (node-process-v1.ts), independently of monetary.minerRewardDelay = 1.
+    // Candidate comparisons use that policy at both delays; old cases retain
+    // the pinned application.conf positive minimum without another override.
+    val selectedNode = if (actualMinimumFee) node.copy(minimalFeeAmount = 0L) else node
     val wallet = config.as[WalletSettings]("ergo.wallet")
     require(wallet.testMnemonic.isEmpty && wallet.testKeysQty.isEmpty, "inert wallet settings")
-    ErgoSettings(scratch.toString, NetworkType.DevNet, config.as[ChainSettings]("ergo.chain"), node,
+    ErgoSettings(scratch.toString, NetworkType.DevNet, config.as[ChainSettings]("ergo.chain"), selectedNode,
       config.as[ScorexSettings]("scorex"), wallet, config.as[CacheSettings]("ergo.cache"))
   }
 
@@ -156,7 +167,9 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
     require(int(cursor, "checkpointExpiryHeight") > headers.head.height + 1, "unexpired fixture context")
   }
 
-  private def withState[A](availableInputs: Vector[ErgoBox] = inputs)(body: (UtxoState, ErgoSettings, ErgoStateContext) => A): A = {
+  private def withState[A](availableInputs: Vector[ErgoBox] = inputs, minerRewardDelay: Int = 720,
+                           actualMinimumFee: Boolean = false)
+                          (body: (UtxoState, ErgoSettings, ErgoStateContext) => A): A = {
     checkFixture()
     val parent = Paths.get(property("scratch")).toAbsolutePath.normalize()
     require(Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(parent), "scratch parent directory")
@@ -166,7 +179,8 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
     var store: Option[LDBVersionedStore] = None
     var snapshotsStore: Option[LDBKVStore] = None
     try {
-      val config = settings(directory)
+      val config = settings(directory, minerRewardDelay, actualMinimumFee)
+      config.chainSettings.monetary.minerRewardDelay shouldBe minerRewardDelay
       val prover = new BatchAVLProver[Digest32, HF](32, None)
       BoxHolder(availableInputs).sortedBoxes.foreach(box => prover.performOneOperation(Insert(box.id, ADValue @@ box.bytes)).get)
       val base = new ErgoStateContext(headers, None, config.chainSettings.genesisStateDigest,
@@ -195,6 +209,121 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
       owned.foreach(p => require(p.toAbsolutePath.normalize().startsWith(directory) && !Files.isSymbolicLink(p), "unsafe scratch cleanup"))
       owned.sortBy(_.getNameCount).reverse.foreach(p => Files.delete(p))
       require(!Files.exists(directory, LinkOption.NOFOLLOW_LINKS), "scratch cleanup incomplete")
+    }
+  }
+
+  private val candidateMiner = ProveDlog(group.generator)
+
+  private def candidateUpcoming(base: ErgoStateContext): ErgoStateContext = {
+    val upcoming = base.upcoming(candidateMiner.value, headers.head.timestamp + 120000L,
+      headers.head.nBits, Array(0.toByte, 0.toByte, 0.toByte), ErgoValidationSettingsUpdate.empty, BlockVersion)
+    upcoming.currentHeight shouldBe headers.head.height + 1
+    upcoming.blockVersion shouldBe BlockVersion
+    upcoming.lastHeaders.map(_.id) shouldBe headers.map(_.id)
+    upcoming
+  }
+
+  private def checkCandidate(minerRewardDelay: Int, requireValidFee: Boolean): Unit = {
+    withState(minerRewardDelay = minerRewardDelay, actualMinimumFee = true) { (state, config, base) =>
+      config.nodeSettings.minimalFeeAmount shouldBe 0L
+      val upcoming = candidateUpcoming(base)
+      val verifier = ErgoInterpreter(upcoming.currentParameters)
+      val maxCost = upcoming.currentParameters.maxBlockCost
+      val maxSize = upcoming.currentParameters.maxBlockSize
+      val originalCost = inVersion { state.validateWithCost(transaction, upcoming, maxCost, Some(verifier)).get }
+      originalCost should be > 0
+      val pool = ErgoMemPool.empty(config)
+      val (acceptedPool, admission) = inVersion { pool.process(UnconfirmedTransaction(transaction, None), state) }
+      admission shouldBe a[ProcessingOutcome.Accepted]
+      acceptedPool.modifierById(transaction.id).get.bytes.toVector shouldBe signedBytes.toVector
+
+      val matchingFeeBoxes = transaction.outputs.filter(box =>
+        java.util.Arrays.equals(box.propositionBytes, config.chainSettings.monetary.feePropositionBytes))
+      if (minerRewardDelay == 1) matchingFeeBoxes shouldBe empty
+      val fee = CandidateGenerator.collectFees(base.currentHeight, Seq(transaction), candidateMiner, upcoming)
+      fee.isDefined shouldBe matchingFeeBoxes.nonEmpty
+      val feeValidation = fee.map { generated =>
+        generated.inputs.map(input => hex(input.boxId)) shouldBe matchingFeeBoxes.map(box => hex(box.id))
+        generated.outputs.size shouldBe 1
+        generated.outputs.head.value shouldBe matchingFeeBoxes.map(_.value).sum
+        generated.outputs.head.creationHeight shouldBe upcoming.currentHeight
+        inVersion { generated.statefulValidity(matchingFeeBoxes, IndexedSeq(), upcoming)(verifier) }
+      }
+      val (selected, eliminated) = inVersion {
+        CandidateGenerator.collectTxs(candidateMiner, maxCost, maxSize, state, upcoming, Seq(transaction))
+      }
+      info(s"synthetic_native_tracker_candidate_delay=$minerRewardDelay selected=${selected.size} " +
+        s"original_selected=${selected.exists(_.id == transaction.id)} matching_fee_boxes=${matchingFeeBoxes.size} " +
+        s"fee_generated=${fee.isDefined} fee_valid=${feeValidation.map(_.isSuccess)} eliminated=${eliminated.size} " +
+        s"shared_cost=$originalCost original_id=${transaction.id}")
+      if (requireValidFee) {
+        fee.isDefined shouldBe true
+        feeValidation.get.isSuccess shouldBe true
+      }
+      // Both monetary settings must retain the original transaction. A failed
+      // fee spend must stay RED rather than becoming an accepted empty result.
+      selected.exists(_.id == transaction.id) shouldBe true
+      val expected = Seq(transaction) ++ fee.toSeq
+      selected.map(_.id) shouldBe expected.map(_.id)
+      selected.map(_.bytes.toVector) shouldBe expected.map(_.bytes.toVector)
+      eliminated shouldBe empty
+      selected.head.id shouldBe transaction.id
+      selected.head.bytes.toVector shouldBe signedBytes.toVector
+      feeValidation.foreach(_.isSuccess shouldBe true)
+      val costs = Seq(transaction -> originalCost) ++ fee.toSeq.zip(feeValidation.toSeq.map(_.get))
+      CandidateGenerator.correctLimits(costs, maxCost, maxSize) shouldBe true
+      state.stateContext.bytes.toVector shouldBe base.bytes.toVector
+      inputs.foreach(box => state.boxById(box.id).get.bytes.toVector shouldBe box.bytes.toVector)
+      transaction.bytes.toVector shouldBe signedBytes.toVector
+    }
+  }
+
+  test("candidate selection at monetary delay 720 includes exact tracker bytes and a valid generated fee") {
+    checkCandidate(720, requireValidFee = true)
+  }
+
+  test("candidate selection at monetary delay 1 retains exact tracker bytes with its actual fee handling") {
+    checkCandidate(1, requireValidFee = false)
+  }
+
+  test("delay 1 unchanged tracker is declined only when the baseline positive minimum fee is restored") {
+    withState(minerRewardDelay = 1, actualMinimumFee = true) { (state, config, base) =>
+      config.nodeSettings.minimalFeeAmount shouldBe 0L
+      transaction.outputs.filter(_.ergoTree == config.chainSettings.monetary.feeProposition) shouldBe empty
+      val upcoming = candidateUpcoming(base)
+      inVersion { state.validateWithCost(transaction, upcoming, config.nodeSettings.maxTransactionCost, None).isSuccess } shouldBe true
+      val unconfirmed = UnconfirmedTransaction(transaction, None)
+      val (acceptedPool, accepted) = inVersion { ErgoMemPool.empty(config).process(unconfirmed, state) }
+      accepted shouldBe a[ProcessingOutcome.Accepted]
+      acceptedPool.modifierById(transaction.id).get.bytes.toVector shouldBe signedBytes.toVector
+      // Same state, headers, signed bytes and monetary delay. Only the pinned
+      // application.conf minimum changes from the actual target's 0 to 1M.
+      val positiveMinimum = config.copy(nodeSettings = config.nodeSettings.copy(minimalFeeAmount = 1000000L))
+      val (declinedPool, declined) = inVersion { ErgoMemPool.empty(positiveMinimum).process(unconfirmed, state) }
+      declined shouldBe a[ProcessingOutcome.Declined]
+      declined.asInstanceOf[ProcessingOutcome.Declined].e.getMessage shouldBe
+        "Min fee not met: 0.001 ergs required, 0.0 ergs given"
+      declinedPool.size shouldBe 0
+      declinedPool.isInvalidated(transaction.id) shouldBe false
+      state.stateContext.bytes.toVector shouldBe base.bytes.toVector
+      inputs.foreach(box => state.boxById(box.id).get.bytes.toVector shouldBe box.bytes.toVector)
+      transaction.bytes.toVector shouldBe signedBytes.toVector
+    }
+  }
+
+  test("candidate selection eliminates exact tracker ID when only its required fee UTXO is absent") {
+    withState(inputs.take(1), minerRewardDelay = 1, actualMinimumFee = true) { (state, _, base) =>
+      val upcoming = candidateUpcoming(base)
+      state.boxById(inputs.head.id).get.bytes.toVector shouldBe inputs.head.bytes.toVector
+      state.boxById(inputs(1).id) shouldBe None
+      val (selected, eliminated) = inVersion {
+        CandidateGenerator.collectTxs(candidateMiner, upcoming.currentParameters.maxBlockCost,
+          upcoming.currentParameters.maxBlockSize, state, upcoming, Seq(transaction))
+      }
+      selected shouldBe empty
+      eliminated shouldBe Seq(transaction.id)
+      state.stateContext.bytes.toVector shouldBe base.bytes.toVector
+      transaction.bytes.toVector shouldBe signedBytes.toVector
     }
   }
 
