@@ -342,6 +342,30 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
     expect(mocked.assertActiveTarget).toHaveBeenCalledTimes(2);
   });
 
+  it.each(['active', 'frozen', 'reservation'] as const)(
+    'accepts anchor index eight at the %s boundary', async route => {
+      primary = nodeFixture(11, 20, 12);
+      witness = structuredClone(primary);
+      const observed = await observeBoundAnchor(route);
+      expect(observed.anchorContextIndex).toBe(8);
+      expect(observed.headers).toHaveLength(10);
+      expect(observed.headers[8]!.idHex).toBe(primary.block.header.id);
+    },
+  );
+
+  it.each(['active', 'frozen', 'reservation'] as const)(
+    'rejects anchor index nine before accepting the %s observation', async route => {
+      primary = nodeFixture(11, 20, 11);
+      witness = structuredClone(primary);
+      // Both nodes retain the exact anchor and extension in their ten-header
+      // API window. Only its availability to next-block execution is false.
+      expect(primary.headers[9]!.id).toBe(primary.block.header.id);
+      await expect(observeBoundAnchor(route)).rejects.toThrow(
+        /anchor is outside the next block execution window/,
+      );
+    },
+  );
+
   it('rebinds the retained anchor into the V2 frozen context', async () => {
     primary = nodeFixture(13, 22, 20);
     witness = structuredClone(primary);
@@ -515,6 +539,30 @@ describe('isolated devnet checkpoint anchor observer V1', () => {
       }),
     ).rejects.toThrow(/process binding changed during observation/);
   });
+
+  async function observeBoundAnchor(route: 'active' | 'frozen' | 'reservation') {
+    const anchor = primary.block.header;
+    const input = {
+      targetGenesisHeaderIdHex: GENESIS_ID_HEX,
+      expectedAnchorHeaderIdHex: anchor.id,
+      expectedAnchorHeight: anchor.height,
+      expectedAnchorExtensionRootHex: anchor.extensionHash,
+      expectedExtensionValueHex: EXTENSION_VALUE_HEX,
+    };
+    if (route === 'active') {
+      return observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV1({
+        ...input, target: ACTIVE_TARGET,
+      });
+    }
+    if (route === 'frozen') {
+      return observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2({
+        ...input, target: FROZEN_TARGET,
+      });
+    }
+    return observeSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessV1({
+      ...input, target: FRESHNESS_TARGET,
+    });
+  }
 
   async function observe(
     expectedExtensionValueHex = EXTENSION_VALUE_HEX,

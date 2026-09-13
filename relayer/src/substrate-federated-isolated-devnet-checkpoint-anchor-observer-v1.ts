@@ -39,6 +39,9 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_O
 
 const EXTENSION_KEY_HEX = '0401' as const;
 const MAX_ANCESTRY_HEADER_COUNT = 256;
+// The pinned node retains ten state headers, then removes the new block's
+// header from script context. Upcoming validation exposes one extra old slot.
+const NEXT_BLOCK_SCRIPT_HEADER_COUNT = 9;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 const OBSERVATION_DIGEST_DOMAIN =
@@ -53,6 +56,12 @@ const OBSERVATIONS = new WeakSet<object>();
 const CHECKPOINT_BOUND_TRACKER_OBSERVATIONS = new WeakSet<object>();
 const CHECKPOINT_BOUND_TRACKER_V2_OBSERVATIONS = new WeakSet<object>();
 const TRACKER_RESERVATION_FRESHNESS_OBSERVATIONS_V1 = new WeakSet<object>();
+
+function assertAnchorFitsNextBlock(anchorContextIndex: number): void {
+  if (anchorContextIndex >= NEXT_BLOCK_SCRIPT_HEADER_COUNT) {
+    throw new Error('tracker anchor is outside the next block execution window');
+  }
+}
 
 export interface SubstrateFederatedIsolatedDevnetCheckpointAnchorHeaderV1 {
   readonly raw: Readonly<Record<string, unknown>>;
@@ -477,6 +486,7 @@ export async function observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrac
       'checkpoint-bound tracker anchor is absent or changed in the current context',
     );
   }
+  assertAnchorFitsNextBlock(anchorContextIndex);
   const matchingFields = primary.extensionFields.filter(
     field => field.keyHex === EXTENSION_KEY_HEX,
   );
@@ -676,6 +686,7 @@ export async function observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrac
       'checkpoint-bound tracker anchor is absent or changed in the current context',
     );
   }
+  assertAnchorFitsNextBlock(anchorContextIndex);
   const matchingFields = primary.extensionFields.filter(
     field => field.keyHex === EXTENSION_KEY_HEX,
   );
@@ -878,6 +889,7 @@ export async function observeSubstrateFederatedIsolatedDevnetTrackerReservationF
       'tracker reservation freshness anchor is absent or changed in the current context',
     );
   }
+  assertAnchorFitsNextBlock(anchorContextIndex);
   const matchingFields = primary.extensionFields.filter(
     field => field.keyHex === EXTENSION_KEY_HEX,
   );

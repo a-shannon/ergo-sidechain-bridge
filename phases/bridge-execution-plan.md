@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-12
+Updated: 2026-09-13
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Run one fresh complete campaign with original index-progress/pool failure capture, the pinned native candidate oracle and locked offline Ergo build | Campaign 20 ended at the tracker confirmation deadline after transport acceptance. The bounded diagnostic producer and original-error consumer now pass local checks and independent review. Canonical tracker admission and Ergo payout remain unestablished; preserve all terminal holds |
+| **Now** | Retained native tracker -> full-block application | Test the miner's failed-application recovery before another fresh complete campaign | The native context-window guard passes local checks and independent review: upcoming validation exposes ten prior headers while processed block execution exposes nine, and all three tracker observers reject index nine. Campaign 21 ended at the tracker deadline with caught-up paired indexes at height 496 and the expected transaction in both pools; its exact cause and canonical payout remain unestablished |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -297,7 +297,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | Native tracker mempool and candidate oracle | Local main-source checkpoint; target inclusion remains due | The exact composed tracker bytes reparse under pinned Ergo codecs, round-trip through a persisted two-box UTXO state and pass shared validation, `ErgoMemPool.process` and `CandidateGenerator.collectTxs`. At zero minimum fee, delay 720 selects the tracker and a valid fee-collection transaction; the isolated target's delay 1 selects the tracker but does not recognize its standard fee output. Separate minimum-fee and missing-input negatives preserve the signed bytes. This synthetic state does not establish target inclusion or the cause of campaigns 19 or 20 |
 | Isolated Ergo resolver boundary | Local locked-build checkpoint; fresh campaign remains due | The launcher bootstrap is restricted by a generated repository file to the file-backed Maven Central cache plus an empty `bootOnly` sentinel; project dependency resolution retains that cache through `COURSIER_MODE=offline`. The SBT server and Java system proxies are disabled, while profile, global plugin, Ivy, Coursier and Scala CLI configuration, temporary and PowerShell cache state are fresh and source-contained. The existing SBT boot and Coursier caches are mutable and unattested. This is resolver confinement, not an operating-system egress sandbox |
 | Original confirmation progress -> native failure export | Local affected checks and independent review complete | Only the native tracker opts into bounded paired index-height and exact-transaction pool reads. A private snapshot is published after required observation checks succeed and binds the latest sequence, transaction, live observer and target. The original error projects this separate diagnostic through the existing cleanup chain; it supplies no authority and cannot alter confirmation or initiate another request |
-| Fresh operational two-way campaign | Campaign 20 terminal; canonical tracker confirmation unresolved | Campaign 20 received the expected tracker ID from transport, then ended with paired indexed-transaction absence at the confirmation deadline. No original success result exists. Source review rules out disabled indexing and orchestration restart after that POST; the synthetic candidate oracle does not reproduce non-selection. The next fresh runner must export the new bounded index-progress/pool projection from the original failure before serialization. Campaigns 14, 16, 17, 18, 19 and 20 cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
+| Observed anchor -> next-block script context | Local affected checks and independent review complete | With identical signed tracker and input bytes, native upcoming and processed contexts both execute at anchor index eight. At index nine, upcoming execution passes and processed execution rejects the tracker input. Active, frozen and reservation-freshness observations now reject that index while preserving the ten-header observation format. All 30 observer and 15 native cases pass, as do TypeScript and the corrected contained cleanup. This does not guarantee later inclusion or repair a miner stalled after semantic block rejection |
+| Fresh operational two-way campaign | Campaign 21 terminal; canonical tracker confirmation unresolved | The original failure retained 47 observations over 120 seconds, HTTP 200 acceptance, caught-up paired indexes at height 496 and paired pool presence for the expected tracker. Public burn commitment, leaves and global event index agreed, but no success result or Ergo payout exists. Retained signed bytes and resolved public inputs support offline diagnosis; missing original headers prevent an actual-context replay. Test the source-supported miner recovery and context-window hypotheses before another fresh full run. Campaigns 14, 16, 17, 18, 19, 20 and 21 cannot be resumed. No additional standalone mint campaign is due |
 
 The native execution consumer now retains the confirmed mint through one
 approval in block three and one matching burn in block four. It validates the
@@ -528,6 +529,19 @@ submission or mining process runs in this oracle. It closes the main-source
 parser and local mempool checks for this exported component fixture. No byte or
 context identity to campaign 19 was retained, so that campaign's confirmation
 failure remains undetermined.
+
+The context-window differential derives synthetic descendants in memory while
+retaining the original anchor and signed transaction. It compares the native
+upcoming and processed contexts through `ErgoState.execTransactions`, matching
+preheader, previous state digest, execution parameters and validation settings.
+Index eight succeeds in both; index nine succeeds only in the upcoming context
+and fails with tracker-input verification returning false in the processed
+context. The observer's active, frozen and reservation-freshness consumers
+reject index nine before publishing provenance. The API window remains ten
+headers and no serialized contract, signature domain or quorum changes.
+An index-eight observation is still subject to later chain movement; it does
+not promise inclusion. Full-block application, miner recovery and the original
+campaign's missing header provenance remain separate deciding boundaries.
 
 Keep signing/execution, checkpoint attestation and Ergo continuation as
 coherent implementation batches. Reuse unchanged compiler, runtime and prior

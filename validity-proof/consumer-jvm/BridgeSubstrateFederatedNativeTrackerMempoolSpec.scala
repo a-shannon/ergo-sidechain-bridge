@@ -17,7 +17,7 @@ import org.ergoplatform.modifiers.history.header.{Header, HeaderSerializer}
 import org.ergoplatform.modifiers.mempool.{ErgoTransaction, ErgoTransactionSerializer, UnconfirmedTransaction}
 import org.ergoplatform.nodeView.mempool.ErgoMemPool
 import org.ergoplatform.nodeView.mempool.ErgoMemPoolUtils.ProcessingOutcome
-import org.ergoplatform.nodeView.state.{BoxHolder, ErgoStateContext, ErgoStateReader, UtxoState, VotingData}
+import org.ergoplatform.nodeView.state.{BoxHolder, ErgoState, ErgoStateContext, ErgoStateReader, UtxoState, VotingData}
 import org.ergoplatform.settings._
 import org.ergoplatform.settings.Algos.HF
 import org.ergoplatform.wallet.interpreter.ErgoInterpreter
@@ -221,6 +221,112 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
     upcoming.blockVersion shouldBe BlockVersion
     upcoming.lastHeaders.map(_.id) shouldBe headers.map(_.id)
     upcoming
+  }
+
+  private def checkContextWindow(index: Int, fullValid: Boolean): Unit = inVersion {
+    require(index == 8 || index == 9, "bounded context-window comparison")
+    sha256(fixtureBytes) shouldBe "ff5b4efec4ef8dc0d1c3631f43ad0c3d18ad8972c8c647141c6de720abade8bf"
+    signedBytes.length shouldBe 4173
+    headers.head.height shouldBe 1029
+    int(cursor, "checkpointExpiryHeight") shouldBe 1060
+    Constants.LastHeadersInContext shouldBe 10
+    val anchor = headers(1)
+    anchor.height shouldBe 1028
+    transaction.outputs.map(_.creationHeight) shouldBe IndexedSeq(1030, 1030)
+    transaction.outputs.head.additionalRegisters(ErgoBox.R8) shouldBe sigma.ast.IntConstant(1030)
+    val frozenTransaction = signedBytes.toVector
+    val frozenInputs = inputs.map(box => ErgoBox.sigmaSerializer.toBytes(box).toVector)
+    val frozenHeaders = headers.map(header => HeaderSerializer.toBytes(header).toVector)
+    val frozenAnchor = HeaderSerializer.toBytes(anchor).toVector
+
+    def child(tip: Header): Header = tip.copy(parentId = tip.id, height = tip.height + 1,
+      timestamp = tip.timestamp + 120000L, version = BlockVersion,
+      votes = Array(0.toByte, 0.toByte, 0.toByte), sizeOpt = None)
+    def sigmaIds(context: ErgoStateContext): Vector[Vector[Byte]] =
+      context.sigmaLastHeaders.toArray.toVector.map(_.id.toArray.toVector)
+    def sigmaHeights(context: ErgoStateContext): Vector[Int] =
+      context.sigmaLastHeaders.toArray.toVector.map(_.height)
+
+    withState(actualMinimumFee = true) { (state, config, base) =>
+      val frozenStateContext = base.bytes.toVector
+      val tip = (1 until index).foldLeft(base) { (context, _) =>
+        context.process(child(context.lastHeaders.head), None).get
+      }
+      checkHeaderOrder(tip.lastHeaders.toVector)
+      tip.lastHeaders.head.height shouldBe 1028 + index
+      tip.lastHeaders(index).id shouldBe anchor.id
+      HeaderSerializer.toBytes(tip.lastHeaders(index)).toVector shouldBe frozenAnchor
+      val next = child(tip.lastHeaders.head)
+      // Synthetic descendants use the native producers. process() is the
+      // transition after appendFullBlock's extension/size/height checks; no
+      // full block or campaign header/state provenance is supplied here.
+      val upcoming = tip.upcoming(next.minerPk, next.timestamp, next.nBits, next.votes,
+        ErgoValidationSettingsUpdate.empty, next.version)
+      val processed = tip.process(next, None).get
+      processed.lastHeaders.map(_.id) shouldBe (next +: tip.lastHeaders.take(9)).map(_.id)
+      sigmaHeights(upcoming) shouldBe (tip.currentHeight to (tip.currentHeight - 9) by -1).toVector
+      sigmaHeights(processed) shouldBe (tip.currentHeight to (tip.currentHeight - 8) by -1).toVector
+      sigmaIds(upcoming) shouldBe tip.lastHeaders.map(h => Header.toSigma(h).id.toArray.toVector).toVector
+      sigmaIds(processed) shouldBe sigmaIds(upcoming).take(9)
+      sigmaIds(upcoming)(index) shouldBe Header.toSigma(anchor).id.toArray.toVector
+      sigmaIds(processed).contains(Header.toSigma(anchor).id.toArray.toVector) shouldBe fullValid
+
+      val a = upcoming.sigmaPreHeader
+      val b = processed.sigmaPreHeader
+      a.height shouldBe next.height
+      a.height shouldBe b.height
+      a.version shouldBe b.version
+      a.parentId.toArray.toVector shouldBe b.parentId.toArray.toVector
+      a.timestamp shouldBe b.timestamp
+      a.nBits shouldBe b.nBits
+      a.minerPk.getEncoded.toArray.toVector shouldBe b.minerPk.getEncoded.toArray.toVector
+      a.votes.toArray.toVector shouldBe b.votes.toArray.toVector
+      upcoming.previousStateDigest.toArray.toVector shouldBe processed.previousStateDigest.toArray.toVector
+      upcoming.currentParameters.parametersTable shouldBe processed.currentParameters.parametersTable
+      upcoming.currentParameters.proposedUpdate shouldBe processed.currentParameters.proposedUpdate
+      // The native producers differ in parameter-height metadata, while the
+      // execution parameter table and validation settings remain identical.
+      upcoming.currentParameters.height shouldBe next.height
+      processed.currentParameters.height shouldBe tip.currentParameters.height
+      upcoming.validationSettings.bytes.toVector shouldBe processed.validationSettings.bytes.toVector
+      upcoming.blockVersion shouldBe processed.blockVersion
+      upcoming.currentHeight shouldBe processed.currentHeight
+      upcoming.currentHeight should be < int(cursor, "checkpointExpiryHeight")
+      config.nodeSettings.checkpoint shouldBe None
+
+      def execute(context: ErgoStateContext) = ErgoState.execTransactions(Seq(transaction), context, config.nodeSettings) { id =>
+        state.boxById(id).map(scala.util.Success(_))
+          .getOrElse(scala.util.Failure(new Exception("missing frozen input")))
+      }
+      val candidateResult = execute(upcoming)
+      val fullResult = execute(processed)
+      candidateResult.isValid shouldBe true
+      candidateResult.payload.get should be > 0L
+      fullResult.isValid shouldBe fullValid
+      if (fullValid) fullResult.payload shouldBe candidateResult.payload
+      else {
+        fullResult.errors.size shouldBe 1
+        fullResult.errors.head.message should include(transaction.id + ": #0 => Success((false,")
+      }
+      state.stateContext.bytes.toVector shouldBe frozenStateContext
+      inputs.foreach(box => state.boxById(box.id).get.bytes.toVector shouldBe box.bytes.toVector)
+      ErgoTransactionSerializer.toBytes(transaction).toVector shouldBe frozenTransaction
+      inputs.map(box => ErgoBox.sigmaSerializer.toBytes(box).toVector) shouldBe frozenInputs
+      headers.map(header => HeaderSerializer.toBytes(header).toVector) shouldBe frozenHeaders
+      HeaderSerializer.toBytes(anchor).toVector shouldBe frozenAnchor
+      info(s"synthetic_native_context_window anchor_index=$index tip=${tip.currentHeight} " +
+        s"execution_height=${upcoming.currentHeight} upcoming_headers=${upcoming.sigmaLastHeaders.length} " +
+        s"processed_headers=${processed.sigmaLastHeaders.length} upcoming_valid=${candidateResult.isValid} " +
+        s"processed_valid=${fullResult.isValid} actual_campaign_context=false")
+    }
+  }
+
+  test("native upcoming and processed contexts both execute the unchanged tracker at anchor index eight") {
+    checkContextWindow(8, fullValid = true)
+  }
+
+  test("native upcoming executes the unchanged tracker at index nine while processed context rejects its input script") {
+    checkContextWindow(9, fullValid = false)
   }
 
   private def checkCandidate(minerRewardDelay: Int, requireValidFee: Boolean): Unit = {
