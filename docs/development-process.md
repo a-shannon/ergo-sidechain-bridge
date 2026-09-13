@@ -25,6 +25,38 @@ At each checkpoint report what a caller can now execute, what remains a
 fixture and the next unconnected consumer. Version numbers and test counts
 are evidence identifiers, not measures of product completion.
 
+## Keep The Working Context Small
+
+Read the applicable instructions at startup. Within the same continuing task,
+retain their exact path and SHA-256 once read; check for drift before relying
+on them again. Read changed instructions before acting. A fingerprint detects
+change; it does not replace reading a new source or any required startup step.
+
+- Start source navigation with named files, symbols and line ranges. Expand
+  only at a concrete unresolved producer, consumer or invariant. Narrow a
+  truncated read instead of repeating the complete file.
+- Batch independent searches and return the deciding matches, exit codes,
+  counts and failures. Set an output budget before each tool call; retrieve
+  additional source or diagnostics only when needed to assess the result.
+- Keep the active handoff to current state, exact pins, the validation
+  dependency map, holds and the next action. Preserve completed detail in a
+  linked archive rather than loading it on every continuation.
+- Give a subagent only its question, owned paths, requirements, exact review
+  handle and stop condition. Use a fresh bounded context instead of copying
+  the full conversation when the task is independent. Do not ask two agents
+  to explore or run the same closure.
+- Route routine mapping and test inventory to bounded read-only work with
+  lightweight or medium reasoning. Keep signing, transport, protocol and
+  claim-boundary review at the risk-appropriate reasoning level. The main
+  owner integrates and verifies the result before committing.
+- Reuse green validation only under the unchanged input and state conditions
+  below. Concise output and summaries never replace exact-source independent
+  review, isolated negatives, artifact checks or publication guards.
+
+Report deterministic reductions in loaded bytes or duplicated work separately
+from measured runtime or account usage. Do not claim a token saving percentage
+without matched measurements.
+
 ## Select Checks By Changed Behavior
 
 Record this compact map in the task handoff before expensive validation:
