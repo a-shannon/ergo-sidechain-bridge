@@ -89,13 +89,20 @@ the unresolved question with exact evidence; do not restart completed work or
 retry the same inadequate assignment unchanged. Model choice never waives a
 required check or makes an unreviewed result authoritative.
 
-Select supported subagent models directly where authorized. Confirm the actual
-main model from explicit configuration when available; otherwise record it as
-unverified. If the main role needs a different model and no supported control
-can change it, request the exact model and reasoning from the user at the batch
-boundary, explaining the unresolved work. Do not invent a switch or use a new
-task or self-message as a workaround. Report a pending gate if budget cannot
-cover it; no automatic credit redemption or reduced acceptance criteria.
+Within standing delegation authority, select supported subagent models and
+reasoning directly, including upgrades and downgrades between assignments.
+Record the choice without requesting another confirmation. If a stronger model
+is needed, assign the bounded unresolved problem to that model and retain the
+main owner's integration and verification duties. A model preference alone is
+not a reason to pause delivery.
+
+Confirm the actual main model from explicit configuration when available;
+otherwise record it as unverified. If no supported delegation can close a
+required gate and changing the main model is necessary, request the exact
+model and reasoning from the user, explaining the blocker. Do not invent a
+switch or use a new task or self-message as a workaround. Report a pending
+gate if budget cannot cover it; no automatic credit redemption or reduced
+acceptance criteria.
 
 ## Select Checks By Changed Behavior
 
