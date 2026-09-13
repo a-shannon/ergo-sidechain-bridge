@@ -119,7 +119,7 @@ const ergoNode = {
   baseCommit: '2'.repeat(40),
   baseTag: 'v6.0.2',
   patchCommitProvenance: 'e'.repeat(40),
-  patchPath: 'sources/ergo-node/0001-sidechain-extension-fields.patch',
+  patchPath: 'sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch',
   patchSha256: 'f'.repeat(64),
   role: 'operator-provided-ergo-extension-producer',
   commitmentInput: 'operator-provided',
@@ -217,7 +217,7 @@ describe('consensus source baseline', () => {
       BRIDGE_ROOT,
       'sources',
       'ergo-node',
-      '0001-sidechain-extension-fields.patch',
+      '0002-sidechain-extension-fields-candidate-recovery.patch',
     );
     const frontierPatchPath = resolve(
       BRIDGE_ROOT,
@@ -659,6 +659,25 @@ describe('consensus source baseline', () => {
     });
 
     expect(result.errors).toEqual([]);
+  });
+
+  it('rejects the historical Ergo patch path with all other bindings unchanged', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+
+    const drifted = structuredClone(validLock);
+    drifted.ergoNode.patchPath = 'sources/ergo-node/0001-sidechain-extension-fields.patch';
+    const result = baseline.validateConsensusSourceLock(drifted, {
+      frontierGitlinkCommit: frontier.commit,
+      frontierSubmoduleUrl: frontier.repository,
+      frontierPatchSha256: frontier.patchSha256,
+      ergoPatchSha256: ergoNode.patchSha256,
+    });
+
+    expect(result.errors).toEqual([
+      'Ergo patch path must identify the tracked sidechain extension and candidate recovery patch',
+    ]);
   });
 
   it('rejects gitlink, patch, or trust-boundary drift', async () => {
@@ -1250,7 +1269,7 @@ describe('consensus source baseline', () => {
     expect(workflow).toContain('cargo test --locked -p bridge-state-proof');
     expect(workflow).toContain('https://github.com/ergoplatform/ergo.git');
     expect(workflow).toContain('2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1');
-    expect(workflow).toContain('0001-sidechain-extension-fields.patch');
+    expect(workflow).toContain('0002-sidechain-extension-fields-candidate-recovery.patch');
     expect(workflow).toContain('testOnly org.ergoplatform.mining.CandidateGeneratorSpec');
     expect(workflow).toContain('node-version: "24.14.0"');
     expect(workflow).toContain('distribution: microsoft');

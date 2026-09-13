@@ -168,7 +168,8 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
   }
 
   private def withState[A](availableInputs: Vector[ErgoBox] = inputs, minerRewardDelay: Int = 720,
-                           actualMinimumFee: Boolean = false)
+                           actualMinimumFee: Boolean = false,
+                           contextForState: ErgoStateContext => ErgoStateContext = identity)
                           (body: (UtxoState, ErgoSettings, ErgoStateContext) => A): A = {
     checkFixture()
     val parent = Paths.get(property("scratch")).toAbsolutePath.normalize()
@@ -183,15 +184,15 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
       config.chainSettings.monetary.minerRewardDelay shouldBe minerRewardDelay
       val prover = new BatchAVLProver[Digest32, HF](32, None)
       BoxHolder(availableInputs).sortedBoxes.foreach(box => prover.performOneOperation(Insert(box.id, ADValue @@ box.bytes)).get)
-      val base = new ErgoStateContext(headers, None, config.chainSettings.genesisStateDigest,
-        parameters, ErgoValidationSettings.initial, VotingData.empty)(config.chainSettings)
+      val base = contextForState(new ErgoStateContext(headers, None, config.chainSettings.genesisStateDigest,
+        parameters, ErgoValidationSettings.initial, VotingData.empty)(config.chainSettings))
       val db = new LDBVersionedStore(directory.toFile, initialKeepVersions = config.nodeSettings.keepVersions)
       store = Some(db)
       // UtxoState eagerly opens the node's separate snapshots database, while
       // closeStorage closes only ldb_main/ldb_undo. Retain the registry-owned
       // instance first so this bounded harness can close that exact database.
       snapshotsStore = Some(LDBFactory.createKvDb(s"${config.directory}/snapshots"))
-      val version = idToVersion(headers.head.id)
+      val version = idToVersion(base.lastHeaders.head.id)
       val persistent = PersistentBatchAVLProver.create(prover, new VersionedLDBAVLStorage(db),
         UtxoState.metadata(version, prover.digest, None, base), paranoidChecks = true).get
       val state = new UtxoState(persistent, version, db, config)
@@ -247,11 +248,15 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
     def sigmaHeights(context: ErgoStateContext): Vector[Int] =
       context.sigmaLastHeaders.toArray.toVector.map(_.height)
 
-    withState(actualMinimumFee = true) { (state, config, base) =>
-      val frozenStateContext = base.bytes.toVector
-      val tip = (1 until index).foldLeft(base) { (context, _) =>
+    // collectTxs also reads the persisted state height when generating its fee
+    // transaction. Install the same synthetic tip used by script execution.
+    withState(actualMinimumFee = true, contextForState = base =>
+      (1 until index).foldLeft(base) { (context, _) =>
         context.process(child(context.lastHeaders.head), None).get
-      }
+      }) { (state, config, base) =>
+      val frozenStateContext = base.bytes.toVector
+      val tip = base
+      state.stateContext.currentHeight shouldBe tip.currentHeight
       checkHeaderOrder(tip.lastHeaders.toVector)
       tip.lastHeaders.head.height shouldBe 1028 + index
       tip.lastHeaders(index).id shouldBe anchor.id
@@ -307,6 +312,37 @@ class BridgeSubstrateFederatedNativeTrackerMempoolSpec
       else {
         fullResult.errors.size shouldBe 1
         fullResult.errors.head.message should include(transaction.id + ": #0 => Success((false,")
+      }
+
+      // Use the actual candidate producer as well as the unchanged generic
+      // upcoming/process differential above. A call-site-only fix must reach
+      // this signed tracker, not merely a test-created context.
+      val selectedContext = CandidateGenerator.candidateExecutionContext(tip,
+        next.minerPk, next.timestamp, next.nBits, next.votes,
+        ErgoValidationSettingsUpdate.empty, next.version)
+      sigmaIds(selectedContext) shouldBe sigmaIds(processed)
+      selectedContext.sigmaPreHeader shouldBe upcoming.sigmaPreHeader
+      selectedContext.previousStateDigest.toArray.toVector shouldBe processed.previousStateDigest.toArray.toVector
+      selectedContext.currentParameters.parametersTable shouldBe upcoming.currentParameters.parametersTable
+      selectedContext.validationSettings.bytes.toVector shouldBe upcoming.validationSettings.bytes.toVector
+      val selectedResult = execute(selectedContext)
+      selectedResult.isValid shouldBe fullValid
+      if (fullValid) selectedResult.payload shouldBe fullResult.payload
+      else {
+        selectedResult.errors.size shouldBe 1
+        selectedResult.errors.head.message should include(transaction.id + ": #0 => Success((false,")
+      }
+      val (selected, eliminated) = CandidateGenerator.collectTxs(ProveDlog(next.minerPk),
+        selectedContext.currentParameters.maxBlockCost, selectedContext.currentParameters.maxBlockSize,
+        state, selectedContext, Seq(transaction))
+      selected.exists(_.id == transaction.id) shouldBe fullValid
+      if (fullValid) {
+        selected.head.bytes.toVector shouldBe frozenTransaction
+        eliminated shouldBe empty
+        selectedResult.payload.get should be > 0L
+      } else {
+        selected shouldBe empty
+        eliminated shouldBe Seq(transaction.id)
       }
       state.stateContext.bytes.toVector shouldBe frozenStateContext
       inputs.foreach(box => state.boxById(box.id).get.bytes.toVector shouldBe box.bytes.toVector)

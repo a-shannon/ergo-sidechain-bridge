@@ -9,8 +9,22 @@ machine-readable identity is `sources/consensus-source-lock.json`.
 | Component | Public source | Immutable identity | Bridge-owned material | Current role |
 |---|---|---|---|---|
 | Substrate/Frontier | `https://github.com/polkadot-evm/frontier.git` | Base `75329a2df49e2cc7981485392c31160929d1bd48` | Superproject gitlink plus `sources/frontier/0001-bridge-runtime-commitment.patch` | EVM execution, bridge-native burn commitment production, GRANDPA proof serving, and native finalized-state verification |
-| Ergo node | `https://github.com/ergoplatform/ergo.git` | Base `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (`v6.0.2`) | Versioned patch `sources/ergo-node/0001-sidechain-extension-fields.patch` | Devnet `0x04xx` extension producer from operator-provided bytes |
+| Ergo node | `https://github.com/ergoplatform/ergo.git` | Base `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (`v6.0.2`) | Cumulative patch `sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch` | Devnet `0x04xx` extension producer from operator-provided bytes, with candidate context alignment and semantic-rejection recovery |
 | Solidity bridge/token | npm-locked `solc 0.8.35` and OpenZeppelin `5.6.1` | Package lock, exact compiler/settings, normalized source closure, and artifact manifest | `solidity/compile.js`, sources, settings, and generated identities | Reproducible local ABI, creation/runtime bytecode, metadata, and storage-layout closure |
+
+The Ergo patch applies directly to the pinned base. It includes the original
+extension overlay, limits candidate transaction scripts to the predecessor
+window used during full-block application, and clears a solved candidate only
+after a semantic rejection with the same full-block type and ID. Regeneration
+uses normal candidate polling; the rejected block is not retransmitted.
+`patchCommitProvenance` retains the historical extension-origin commit. The
+cumulative patch SHA-256 and resulting Git blob IDs bind the current source.
+Historical compiler locks continue to reference the unchanged `0001` patch.
+
+Recovery after rejection of the initial full block remains outside this
+overlay: the upstream history can retain a pre-genesis best-block identifier
+that prevents a replacement from being applied. The recovery fixture starts
+from an applied first block and includes a stale-solution rejection case.
 
 The source lock v3 binds the Solidity build manifest. A clean local check is:
 
@@ -416,7 +430,7 @@ git -C .source-cache/ergo-node init
 git -C .source-cache/ergo-node remote add origin https://github.com/ergoplatform/ergo.git
 git -C .source-cache/ergo-node fetch --depth=1 origin refs/tags/v6.0.2
 git -C .source-cache/ergo-node checkout --detach 2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1
-git -C .source-cache/ergo-node apply --unidiff-zero ../../sources/ergo-node/0001-sidechain-extension-fields.patch
+git -C .source-cache/ergo-node apply --unidiff-zero ../../sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch
 ```
 
 Validate the tracked identities first, then the complete source checkouts:

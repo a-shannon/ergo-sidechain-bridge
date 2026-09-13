@@ -472,8 +472,8 @@ export function validateConsensusSourceLock(
     requireExact(
       errors,
       ergoNode.patchPath,
-      'sources/ergo-node/0001-sidechain-extension-fields.patch',
-      'Ergo patch path must identify the tracked sidechain extension patch',
+      'sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch',
+      'Ergo patch path must identify the tracked sidechain extension and candidate recovery patch',
     );
     requireSafeRelativePath(errors, ergoNode.patchPath, 'Ergo patch path');
     requireSha256(errors, ergoNode.patchSha256, 'Ergo patch SHA-256');

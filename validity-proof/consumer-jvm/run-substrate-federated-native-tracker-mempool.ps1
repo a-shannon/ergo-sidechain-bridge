@@ -13,7 +13,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
-$ExpectedSpecHash = 'e62592f20b782d7bd3ff9f1088961a0939c834ffbb3bcb3c41948d9d02784f90'
+$ExpectedSpecHash = 'b2170ad15314a46ccfe3c597fa64d08d9c941142c315dd48def051323159365e'
+$ExpectedRecoverySpecHash = '41b1ef9a15eeab3d3d12ac974c6a77c4d26da36e06ef5512cdd28c961bf4d8ad'
 $ExpectedNodeHash = '63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088'
 $ExpectedJobRunnerHash = '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627'
 $ExpectedBoundedProcessLibraryHash = '09cc5b729365b8e41b276117b54888dd58d0f2dc89b08a21db1f64853cfa82af'
@@ -21,16 +22,16 @@ $ExpectedProcessOwnerHash = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac
 $ExpectedTsxCliHash = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
 $ExpectedTsxPackageHash = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
 $ExpectedPackageLockHash = 'a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8'
-$ExpectedTests = 15
+$ExpectedTests = 20
 $SbtTimeoutMilliseconds = 300000
 $TerminationGraceMilliseconds = 15000
 $MaxOutputBytes = 4MB
 $MaxOwnerOutputBytes = $MaxOutputBytes + 64KB
 $PatchFiles = [ordered]@{
     'src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala' =
-        '43fa47c1b8cb50f76ddc25f3398dfe7e6a55da4557183780f8dc9ecefa22c3bc'
+        'e19af43eed37fa4ed70a7ab7bd7656e5a263be0e69992ec0f5bfbd8cf25db319'
     'src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala' =
-        '67abc3d95c5f582a875e9bf8c14efef99ef5b67406770e359d47572e3aca0efb'
+        'd7bbc0a3c8da6ed3cbf25f517ccb0d6638dd77205ccf0e8433cf35b1fdcc0869'
 }
 
 function Resolve-RealPath([string] $Path, [bool] $Directory) {
@@ -63,7 +64,7 @@ function Assert-NodeSource {
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect Ergo source status' }
     $expected = @($PatchFiles.Keys | ForEach-Object { " M $_" })
     if (@(Compare-Object $status $expected -CaseSensitive).Count -ne 0) {
-        throw 'Ergo source must contain only the two pinned extension changes'
+        throw 'Ergo source must contain only the two pinned candidate changes'
     }
     foreach ($entry in $PatchFiles.GetEnumerator()) {
         Assert-Hash (Join-Path $ErgoNodeRoot $entry.Key) $entry.Value
@@ -210,6 +211,8 @@ Assert-Hash $PackageLockPath $ExpectedPackageLockHash
 $spec = Resolve-RealPath (Join-Path $PSScriptRoot 'BridgeSubstrateFederatedNativeTrackerMempoolSpec.scala') $false
 Assert-NodeSource
 Assert-Hash $spec $ExpectedSpecHash
+$recoverySpec = Resolve-RealPath (Join-Path $PSScriptRoot 'BridgeCandidateApplicationRecoverySpec.scala') $false
+Assert-Hash $recoverySpec $ExpectedRecoverySpecHash
 Assert-Hash $FixturePath $FixtureSha256
 $cache = Resolve-RealPath (Join-Path $env:LOCALAPPDATA 'Coursier/cache/v1/https/repo1.maven.org/maven2') $true
 $boot = Resolve-RealPath (Join-Path $env:USERPROFILE '.sbt/boot') $true
@@ -242,11 +245,13 @@ $arguments = @(
     "-Djava.io.tmpdir=$offlineRoot/temp",
     "-D${prefix}root=$ErgoNodeRoot", "-D${prefix}fixture=$FixturePath",
     "-D${prefix}fixture.sha256=$FixtureSha256", "-D${prefix}scratch=$ScratchRoot",
+    "-Dbridge.candidate.solved.application.root=$ErgoNodeRoot",
+    "-Dbridge.candidate.solved.application.scratch=$ScratchRoot",
     '-jar', $SbtLauncherPath,
     'set offline := true', 'set logLevel := Level.Info',
     'set Test / fork := false', 'set Test / parallelExecution := false',
-    ('set Test / unmanagedSources := Seq(file("' + $spec.Replace('\', '/') + '"))'),
-    'Test / testOnly org.ergoplatform.bridge.BridgeSubstrateFederatedNativeTrackerMempoolSpec'
+    ('set Test / unmanagedSources := Seq(file("' + $spec.Replace('\', '/') + '"), file("' + $recoverySpec.Replace('\', '/') + '"))'),
+    'Test / testOnly org.ergoplatform.bridge.BridgeSubstrateFederatedNativeTrackerMempoolSpec org.ergoplatform.mining.BridgeCandidateApplicationRecoverySpec'
 )
 $result = $null
 $primaryError = $null
@@ -283,6 +288,7 @@ try {
     $closeoutErrors = New-Object 'Collections.Generic.List[Exception]'
     try { Assert-NodeSource } catch { $closeoutErrors.Add($_.Exception) }
     try { Assert-Hash $spec $ExpectedSpecHash } catch { $closeoutErrors.Add($_.Exception) }
+    try { Assert-Hash $recoverySpec $ExpectedRecoverySpecHash } catch { $closeoutErrors.Add($_.Exception) }
     try { Assert-Hash $FixturePath $FixtureSha256 } catch { $closeoutErrors.Add($_.Exception) }
     if ($ownerReturned) {
         try { Remove-OwnedScratchChildren $ScratchRoot } catch { $closeoutErrors.Add($_.Exception) }

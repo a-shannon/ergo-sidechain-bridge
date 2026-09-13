@@ -15,6 +15,7 @@ relayer/src/scripts/export-substrate-federated-tracker-v2-node-fixture.ts text e
 validity-proof/consumer-jvm/BridgeSubstrateFederatedTrackerV2NodeSpec.scala text eol=lf
 validity-proof/consumer-jvm/run-substrate-federated-tracker-v2-node.ps1 text eol=lf
 validity-proof/consumer-jvm/BridgeSubstrateFederatedNativeTrackerMempoolSpec.scala text eol=lf
+validity-proof/consumer-jvm/BridgeCandidateApplicationRecoverySpec.scala text eol=lf
 validity-proof/consumer-jvm/run-substrate-federated-native-tracker-mempool.ps1 text eol=lf
 relayer/src/scripts/run-substrate-federated-native-tracker-mempool-process.ts text eol=lf
 relayer/src/substrate-federated-native-withdrawal-continuation-v1.test.ts text eol=lf

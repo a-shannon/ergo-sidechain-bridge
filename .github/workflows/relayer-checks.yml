@@ -304,7 +304,7 @@ jobs:
           git -C "$source_dir" remote add origin https://github.com/ergoplatform/ergo.git
           git -C "$source_dir" fetch --depth=1 origin refs/tags/v6.0.2
           git -C "$source_dir" checkout --detach 2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1
-          git -C "$source_dir" apply --unidiff-zero "$GITHUB_WORKSPACE/sources/ergo-node/0001-sidechain-extension-fields.patch"
+          git -C "$source_dir" apply --unidiff-zero "$GITHUB_WORKSPACE/sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch"
 
       - name: Verify complete source checkouts
         working-directory: relayer

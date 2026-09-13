@@ -1,0 +1,293 @@
+diff --git a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+index bfa0fe6162477fae9012eddd3de8736f2c140a1d..e7ebfd3dd3b962e6a149c3f54f5953cd621703c6 100644
+--- a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
++++ b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+@@ -11 +11 @@ import org.ergoplatform.modifiers.history._
+-import org.ergoplatform.modifiers.history.extension.Extension
++import org.ergoplatform.modifiers.history.extension.{Extension, ExtensionCandidate}
+@@ -22,2 +22,2 @@ import org.ergoplatform.nodeView.mempool.ErgoMemPoolReader
+-import org.ergoplatform.nodeView.state.{ErgoState, ErgoStateContext, StateType, UtxoStateReader}
+-import org.ergoplatform.settings.{ErgoSettings, ErgoValidationSettingsUpdate, Parameters}
++import org.ergoplatform.nodeView.state.{ErgoState, ErgoStateContext, StateType, UpcomingStateContext, UtxoStateReader}
++import org.ergoplatform.settings.{Constants, ErgoSettings, ErgoValidationSettingsUpdate, Parameters}
+@@ -32 +32 @@ import sigma.Extensions.ArrayOps
+-import sigma.crypto.CryptoFacade
++import sigma.crypto.{CryptoFacade, EcPointType}
+@@ -105,0 +106,2 @@ class CandidateGenerator(
++      context.system.eventStream
++        .subscribe(self, classOf[SemanticallyFailedModification])
+@@ -133,0 +136,8 @@ class CandidateGenerator(
++    case SemanticallyFailedModification(typeId, modifierId, error)
++        if typeId == ErgoFullBlock.modifierTypeId && state.solvedBlock.exists(_.id == modifierId) =>
++      log.warn(s"Clearing solved candidate after semantic rejection of block $modifierId: ${error.getMessage}")
++      context.become(initialized(state.copy(
++        cachedCandidate = None,
++        cachedPreviousCandidate = None,
++        solvedBlock = None
++      )))
+@@ -214 +224,4 @@ class CandidateGenerator(
+-            completeBlock(state.cachedPreviousCandidate.get.candidateBlock, solution)
++            completeBlock(
++              state.cachedPreviousCandidate.getOrElse(state.cachedCandidate.get).candidateBlock,
++              solution
++            )
+@@ -245,0 +259,2 @@ object CandidateGenerator extends ScorexLogging {
++  val SidechainExtensionFieldsEnv = "ERGO_SIDECHAIN_EXTENSION_FIELDS"
++
+@@ -370,0 +386,66 @@ object CandidateGenerator extends ScorexLogging {
++  private[mining] def parseSidechainExtensionFields(raw: String): ExtensionCandidate = {
++    val fields = raw
++      .split("[,;]")
++      .toSeq
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map { entry =>
++        val parts = entry.split(":", 2).map(_.trim)
++        require(
++          parts.length == 2,
++          s"$SidechainExtensionFieldsEnv entries must use keyHex:valueHex format"
++        )
++
++        val key = Base16.decode(parts(0)).get
++        val value = Base16.decode(parts(1)).get
++
++        require(
++          key.lengthCompare(Extension.FieldKeySize) == 0,
++          s"Sidechain extension key ${parts(0)} must be ${Extension.FieldKeySize} bytes"
++        )
++        require(
++          key.headOption.contains(0x04.toByte),
++          s"Sidechain extension key ${parts(0)} must use the 0x04 key space"
++        )
++        require(
++          value.lengthCompare(Extension.FieldValueMaxSize) <= 0,
++          s"Sidechain extension value for ${parts(0)} exceeds ${Extension.FieldValueMaxSize} bytes"
++        )
++
++        key -> value
++      }
++
++    val encodedKeys = fields.map { case (key, _) => Base16.encode(key) }
++    require(
++      encodedKeys.distinct.length == encodedKeys.length,
++      s"$SidechainExtensionFieldsEnv contains duplicate keys"
++    )
++
++    ExtensionCandidate(fields)
++  }
++
++  private[mining] def sidechainExtensionFieldsFromEnv(): ExtensionCandidate =
++    sys.env
++      .get(SidechainExtensionFieldsEnv)
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map(parseSidechainExtensionFields)
++      .getOrElse(ExtensionCandidate(Seq.empty))
++
++  private[mining] def appendConfiguredSidechainExtensionFields(base: ExtensionCandidate): ExtensionCandidate = {
++    val extra = sidechainExtensionFieldsFromEnv()
++    if (extra.fields.isEmpty) {
++      base
++    } else {
++      val duplicate = base.fields.exists { case (existingKey, _) =>
++        extra.fields.exists { case (extraKey, _) => existingKey sameElements extraKey }
++      }
++      require(
++        !duplicate,
++        s"$SidechainExtensionFieldsEnv duplicates an existing extension key"
++      )
++      log.info(s"Appending ${extra.fields.size} configured sidechain extension fields")
++      base ++ extra
++    }
++  }
++
+@@ -484,0 +566,26 @@ object CandidateGenerator extends ScorexLogging {
++  /**
++    * Build the transaction execution context for a block candidate. The predicted
++    * header consumes one of the consensus context's fixed header slots, so only
++    * its nine predecessors are exposed to scripts once the state has a full window.
++    */
++  private[ergoplatform] def candidateExecutionContext(
++    stateContext: ErgoStateContext,
++    minerPk: EcPointType,
++    timestamp: Long,
++    nBits: Long,
++    votes: Array[Byte],
++    proposedUpdate: ErgoValidationSettingsUpdate,
++    version: Byte
++  ): UpcomingStateContext = {
++    val upcoming = stateContext.upcoming(minerPk, timestamp, nBits, votes, proposedUpdate, version)
++    UpcomingStateContext(
++      upcoming.lastHeaders.take(Constants.LastHeadersInContext - 1),
++      upcoming.lastExtensionOpt,
++      upcoming.predictedHeader,
++      upcoming.genesisStateDigest,
++      upcoming.currentParameters,
++      upcoming.validationSettings,
++      upcoming.votingData
++    )(upcoming.chainSettings)
++  }
++
+@@ -570 +677,5 @@ object CandidateGenerator extends ScorexLogging {
+-      val upcomingContext = state.stateContext.upcoming(
++      val extensionCandidateWithSidechainFields =
++        appendConfiguredSidechainExtensionFields(extensionCandidate)
++
++      val upcomingContext = candidateExecutionContext(
++        state.stateContext,
+@@ -627 +738 @@ object CandidateGenerator extends ScorexLogging {
+-            extensionCandidate,
++            extensionCandidateWithSidechainFields,
+@@ -659 +770 @@ object CandidateGenerator extends ScorexLogging {
+-                    extensionCandidate,
++                    extensionCandidateWithSidechainFields,
+diff --git a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+index 1c394b28174aa12303e67827d9c6a38ea6a38caf..7d53e048663cd111077c2f792228979b731171af 100644
+--- a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
++++ b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+@@ -16 +16 @@ import org.ergoplatform.nodeView.history.ErgoHistoryReader
+-import org.ergoplatform.nodeView.state.StateType
++import org.ergoplatform.nodeView.state.{ErgoStateContext, StateType}
+@@ -19 +19 @@ import org.ergoplatform.settings.NetworkType.DevNet60
+-import org.ergoplatform.settings.{ErgoSettings, ErgoSettingsReader}
++import org.ergoplatform.settings.{Constants, ErgoSettings, ErgoSettingsReader}
+@@ -20,0 +21 @@ import org.ergoplatform.utils.ErgoTestHelpers
++import org.ergoplatform.utils.generators.ChainGenerator
+@@ -58,0 +60,137 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
++  it should "parse configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++    val candidate = CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex")
++
++    candidate.fields.length shouldBe 1
++    Base16.encode(candidate.fields.head._1) shouldBe "0401"
++    Base16.encode(candidate.fields.head._2) shouldBe valueHex
++  }
++
++  it should "reject extension fields outside the sidechain key space" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0301:$valueHex")
++    }.getMessage should include("0x04 key space")
++  }
++
++  it should "reject duplicate configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex,0401:$valueHex")
++    }.getMessage should include("duplicate keys")
++  }
++
++  it should "preserve an empty predecessor window in the candidate execution context" in {
++    val stateContext = ErgoStateContext.empty(chainSettings, parameters)
++    val expected = stateContext.upcoming(
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++    val actual = CandidateGenerator.candidateExecutionContext(
++      stateContext,
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++
++    actual.lastHeaders shouldBe empty
++    actual.lastExtensionOpt shouldBe expected.lastExtensionOpt
++    actual.predictedHeader shouldBe expected.predictedHeader
++    actual.genesisStateDigest shouldBe expected.genesisStateDigest
++    actual.currentParameters shouldBe expected.currentParameters
++    actual.validationSettings shouldBe expected.validationSettings
++    actual.votingData shouldBe expected.votingData
++  }
++
++  it should "preserve non-empty short predecessor windows in the candidate execution context" in {
++    Seq(1, 8).foreach { windowSize =>
++      val headers = ChainGenerator
++        .genHeaderChain(windowSize, diffBitsOpt = None, useRealTs = false)
++        .headers
++        .reverse
++      headers.size shouldBe windowSize
++      val emptyContext = ErgoStateContext.empty(chainSettings, parameters)
++      val stateContext = new ErgoStateContext(
++        headers,
++        None,
++        emptyContext.genesisStateDigest,
++        emptyContext.currentParameters,
++        emptyContext.validationSettings,
++        emptyContext.votingData
++      )(chainSettings)
++      val expected = stateContext.upcoming(
++        defaultMinerPkPoint,
++        defaultTimestamp,
++        defaultNBits,
++        defaultVotes,
++        emptyVSUpdate,
++        Header.InitialVersion
++      )
++      val actual = CandidateGenerator.candidateExecutionContext(
++        stateContext,
++        defaultMinerPkPoint,
++        defaultTimestamp,
++        defaultNBits,
++        defaultVotes,
++        emptyVSUpdate,
++        Header.InitialVersion
++      )
++
++      actual.lastHeaders.map(_.id) shouldBe expected.lastHeaders.map(_.id)
++      actual.sigmaLastHeaders.length shouldBe windowSize
++    }
++  }
++
++  it should "reserve the predicted-header slot in a full candidate execution context" in {
++    val headers = ChainGenerator
++      .genHeaderChain(Constants.LastHeadersInContext, diffBitsOpt = None, useRealTs = false)
++      .headers
++      .reverse
++    headers.size shouldBe Constants.LastHeadersInContext
++    val emptyContext = ErgoStateContext.empty(chainSettings, parameters)
++    val stateContext = new ErgoStateContext(
++      headers,
++      None,
++      emptyContext.genesisStateDigest,
++      emptyContext.currentParameters,
++      emptyContext.validationSettings,
++      emptyContext.votingData
++    )(chainSettings)
++    val expected = stateContext.upcoming(
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++    val actual = CandidateGenerator.candidateExecutionContext(
++      stateContext,
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++
++    expected.lastHeaders.size shouldBe Constants.LastHeadersInContext
++    actual.lastHeaders.map(_.id) shouldBe headers.take(Constants.LastHeadersInContext - 1).map(_.id)
++    actual.sigmaLastHeaders.length shouldBe Constants.LastHeadersInContext - 1
++    actual.lastExtensionOpt shouldBe expected.lastExtensionOpt
++    actual.predictedHeader shouldBe expected.predictedHeader
++    actual.genesisStateDigest shouldBe expected.genesisStateDigest
++    actual.currentParameters shouldBe expected.currentParameters
++    actual.validationSettings shouldBe expected.validationSettings
++    actual.votingData shouldBe expected.votingData
++  }
++
