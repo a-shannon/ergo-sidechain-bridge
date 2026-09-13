@@ -57,6 +57,46 @@ Report deterministic reductions in loaded bytes or duplicated work separately
 from measured runtime or account usage. Do not claim a token saving percentage
 without matched measurements.
 
+## Select Models At Each Batch Boundary
+
+At the end of every coherent batch, the integration owner assesses the next
+batch from the execution plan. Record one compact decision in the active
+handoff beside the validation map: next consumer and owned paths, risk and
+unresolved uncertainty, worker/reviewer models and reasoning, selection reason,
+and the concrete condition requiring escalation. Reassess before delegation if
+the scope, available models or evidence changes. Do not create another queue.
+
+Use hosted agents only; local model execution is excluded from this workflow.
+Use these initial routes for agent-assisted work, then adjust from evidence:
+
+| Work | Initial model and reasoning |
+|---|---|
+| Read-only mapping, test inventory, or bounded implementation with clear requirements and low impact | GPT-5.6 Terra, medium |
+| Signing, transaction construction, transport, evidence or protocol boundaries; independent review of those changes | GPT-5.6 Sol, high |
+| Unresolved architecture, conflicting evidence across boundaries, or a critical problem the bounded route cannot resolve | GPT-6 Astra, high; extra-high only for a named unresolved problem |
+
+Keep the main integration role on Astra when configured for that role. It owns
+the overall plan, security context, final diff, checks and commit decision.
+Delegate only a concrete independent deliverable with bounded context; keep at
+most two subagents active and avoid repeating their exploration. A small batch
+may stay with the main owner. Independent review remains a separate context
+that inspects the exact candidate and requirements.
+
+Judge adequacy from supported findings, applicable negative checks and review
+results. Unsupported conclusions, a missed invariant, conflicting evidence or
+unresolved cross-boundary impact require reassessment before promotion. Escalate
+the unresolved question with exact evidence; do not restart completed work or
+retry the same inadequate assignment unchanged. Model choice never waives a
+required check or makes an unreviewed result authoritative.
+
+Select supported subagent models directly where authorized. Confirm the actual
+main model from explicit configuration when available; otherwise record it as
+unverified. If the main role needs a different model and no supported control
+can change it, request the exact model and reasoning from the user at the batch
+boundary, explaining the unresolved work. Do not invent a switch or use a new
+task or self-message as a workaround. Report a pending gate if budget cannot
+cover it; no automatic credit redemption or reduced acceptance criteria.
+
 ## Select Checks By Changed Behavior
 
 Record this compact map in the task handoff before expensive validation:
