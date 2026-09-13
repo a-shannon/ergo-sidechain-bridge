@@ -276,7 +276,7 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Operational mint -> composed withdrawal | Run one fresh complete campaign with the retained failure projection, pinned native mempool oracle and locked offline Ergo build; inspect its bounded public diagnostic only if tracker confirmation fails | Campaign 19 reached tracker confirmation and failed at its deadline. Its public burn observation passed, but no terminal success receipt, canonical tracker admission or Ergo payout was established. Preserve its terminal holds; do not retry it |
+| **Now** | Operational mint -> composed withdrawal | Run one fresh complete campaign with original index-progress/pool failure capture, the pinned native candidate oracle and locked offline Ergo build | Campaign 20 ended at the tracker confirmation deadline after transport acceptance. The bounded diagnostic producer and original-error consumer now pass local checks and independent review. Canonical tracker admission and Ergo payout remain unestablished; preserve all terminal holds |
 | 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
 | 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
 | 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
@@ -296,7 +296,8 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 | Native request and managed promotion | Local affected checks and independent review complete | Synchronous WASM derivation preserves full checks before and after serialization/cleanup. Native checker entry and material consumption use the immediately enclosing full validation; legacy checks remain. The composed fixture includes construction age, three RPC costs and actual managed promotion within the unchanged request window |
 | Native tracker mempool and candidate oracle | Local main-source checkpoint; target inclusion remains due | The exact composed tracker bytes reparse under pinned Ergo codecs, round-trip through a persisted two-box UTXO state and pass shared validation, `ErgoMemPool.process` and `CandidateGenerator.collectTxs`. At zero minimum fee, delay 720 selects the tracker and a valid fee-collection transaction; the isolated target's delay 1 selects the tracker but does not recognize its standard fee output. Separate minimum-fee and missing-input negatives preserve the signed bytes. This synthetic state does not establish target inclusion or the cause of campaigns 19 or 20 |
 | Isolated Ergo resolver boundary | Local locked-build checkpoint; fresh campaign remains due | The launcher bootstrap is restricted by a generated repository file to the file-backed Maven Central cache plus an empty `bootOnly` sentinel; project dependency resolution retains that cache through `COURSIER_MODE=offline`. The SBT server and Java system proxies are disabled, while profile, global plugin, Ivy, Coursier and Scala CLI configuration, temporary and PowerShell cache state are fresh and source-contained. The existing SBT boot and Coursier caches are mutable and unattested. This is resolver confinement, not an operating-system egress sandbox |
-| Fresh operational two-way campaign | Campaign 20 terminal; canonical tracker confirmation unresolved | Campaign 20 received the expected tracker ID from transport, then ended with paired indexed-transaction absence at the confirmation deadline. No original success result exists. Source review rules out disabled indexing and orchestration restart after that POST; the synthetic candidate oracle does not reproduce non-selection. Add bounded public index-progress and pool observations to the original confirmation-failure path before another fresh complete run. Campaigns 14, 16, 17, 18, 19 and 20 cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
+| Original confirmation progress -> native failure export | Local affected checks and independent review complete | Only the native tracker opts into bounded paired index-height and exact-transaction pool reads. A private snapshot is published after required observation checks succeed and binds the latest sequence, transaction, live observer and target. The original error projects this separate diagnostic through the existing cleanup chain; it supplies no authority and cannot alter confirmation or initiate another request |
+| Fresh operational two-way campaign | Campaign 20 terminal; canonical tracker confirmation unresolved | Campaign 20 received the expected tracker ID from transport, then ended with paired indexed-transaction absence at the confirmation deadline. No original success result exists. Source review rules out disabled indexing and orchestration restart after that POST; the synthetic candidate oracle does not reproduce non-selection. The next fresh runner must export the new bounded index-progress/pool projection from the original failure before serialization. Campaigns 14, 16, 17, 18, 19 and 20 cannot be resumed. Prove a complete run before claiming two-way operation or using it for recovery tests; no additional standalone mint campaign is due |
 
 The native execution consumer now retains the confirmed mint through one
 approval in block three and one matching burn in block four. It validates the
@@ -490,6 +491,19 @@ signed transaction, response body or resumable authority. Component tests use
 explicit process and transport doubles; cleanup-wrapper tests exercise the
 actual confirmation-diagnostic producer. A separate cleanup failure that
 replaces the original error remains outside this projection's scope.
+The separate progress projection observes both nodes' index heights and the
+exact transaction's pool endpoint in the existing transaction-request wave.
+Each optional read has a two-second bound; the required observation and
+confirmation budgets are unchanged. Index heights must agree with the same
+node's surrounding height observations. A pool 404 records that endpoint's
+response, without proving global absence. Invalid or failed optional reads
+produce fixed categories. Starting another observation clears the old snapshot;
+only successful required checks may publish the latest sequence. Publication
+after a rejected required check is covered by four isolated negatives and an
+early-publication mutant. The observer/root closure passes 375 cases and the
+architecture closure 240; type and capability checks pass. Independent source
+review found and closed the premature-publication defect. These component
+checks do not establish campaign 20's cause or actual target inclusion.
 The exact native signed tracker
 transaction also passes WASM proof and transaction validation in synthetic
 first-block and following-block contexts. Separate anchor-retirement and

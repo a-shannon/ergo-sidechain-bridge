@@ -18,7 +18,7 @@ const mocked = vi.hoisted(() => ({
   checkpoint: vi.fn(), checkpointAssert: vi.fn(), anchor: vi.fn(), anchorAssert: vi.fn(), frozenObservation: vi.fn(), observationAssert: vi.fn(),
   headers: vi.fn(), context: vi.fn(), trackerTx: vi.fn(), trackerCheck: vi.fn(), trackerAuthorize: vi.fn(), trackerReserve: vi.fn(),
   trackerFreshness: vi.fn(), trackerSubmit: vi.fn(), trackerFinalize: vi.fn(), trackerConfirm: vi.fn(),
-  projectConfirmation: vi.fn(), projectSubmission: vi.fn(),
+  projectConfirmation: vi.fn(), projectSubmission: vi.fn(), projectProgress: vi.fn(),
   payoutCheck: vi.fn(), payoutAuthorize: vi.fn(), payoutReserve: vi.fn(), payoutSubmit: vi.fn(), payoutFinalize: vi.fn(), payoutConfirm: vi.fn(), wait: vi.fn(),
 }));
 vi.mock('../../substrate-federated-genesis-node-build-v1.js', () => ({ buildSubstrateFederatedGenesisNodeV1: mocked.frontier }));
@@ -84,6 +84,7 @@ vi.mock('../../authenticated-spv-tracker-read-only-node-client.js', async import
 vi.mock('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js')>(),
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1: mocked.confirmation,
+  projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1: mocked.projectProgress,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js', () => ({
@@ -115,6 +116,7 @@ vi.mock('../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 
 }));
 
 import { runSubstrateFederatedGenesisTargetRootV1, projectSubstrateFederatedNativeTrackerConfirmationFailureV1,
+  projectSubstrateFederatedNativeTrackerConfirmationProgressV1,
   type RunSubstrateFederatedGenesisTargetRootV1Input } from './substrate-federated-genesis-target-root-v1.js';
 import * as setups from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import * as sources from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
@@ -232,6 +234,15 @@ function rawSpec() {
   return { id: 'bridge_federated_v4_genesis', bootNodes: [], genesis: { raw: { top, childrenDefault: {} } } };
 }
 function response(result: unknown) { return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result })); }
+function confirmationProgress() {
+  const node = Object.freeze({ fullHeightBefore: 165, fullHeightAfter: 166,
+    index: Object.freeze({ status: 'observed' as const, indexedHeight: 166, fullHeight: 166 }),
+    pool: Object.freeze({ status: 'present' as const }) });
+  return Object.freeze({ schema: 'e2s.substrate-federated-isolated-devnet-confirmation-progress.v1', version: 1,
+    expectedErgoTransactionIdHex: 'e3'.repeat(32), executionTargetIdentityDigestHex: 'ca'.repeat(32),
+    targetGenesisHeaderIdHex: '91'.repeat(32), observationSequence: 3, observedAtUnixMs: 1800000000000,
+    primary: node, witness: node, diagnosticDigestHex: 'a4'.repeat(32) });
+}
 function canonicalBox(fields: Omit<Eip12Box, 'boxId'>): Eip12Box {
   const owned: { free(): void }[] = [];
   const own = <T extends { free(): void }>(value: T): T => { owned.push(value); return value; };
@@ -258,6 +269,7 @@ function canonicalBox(fields: Omit<Eip12Box, 'boxId'>): Eip12Box {
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.projectConfirmation.mockReturnValue(null); mocked.projectSubmission.mockReturnValue(null);
+  mocked.projectProgress.mockReturnValue(null);
   vi.spyOn(StateTracker.prototype, 'close');
   setup = undefined; source = undefined; operator = undefined;
   miningCredential = undefined; compiledGenesisBytes = undefined;
@@ -462,8 +474,9 @@ beforeEach(() => {
     expect(receipts.some(receipt => receipt.expectedTxId === id)).toBe(true);
     return { status: 'confirmed', confirmationHeight: 100, confirmationHeaderIdHex: '92'.repeat(32) };
   });
-  mocked.confirmation.mockImplementation((value, headerId) => {
+  mocked.confirmation.mockImplementation((value, headerId, progressTransactionIdHex) => {
     expect([target, phaseTargets.confirmation]).toContain(value); expect(headerId).toBe(batch.request.target.genesisHeaderIdHex);
+    expect(progressTransactionIdHex).toBe(value === phaseTargets.confirmation ? 'e3'.repeat(32) : undefined);
     return { observe: observeConfirmation, reconciliationIdentityDigestHex: 'ca'.repeat(32) };
   });
   readErgoBox = (_origin, id) => {
@@ -907,6 +920,15 @@ describe('fresh FED target composition', () => {
         observationDigestHex: 'f2'.repeat(32) }) });
     mocked.projectSubmission.mockImplementation(value => value === returnValues.trackerSubmission ? transport : null);
     mocked.projectConfirmation.mockImplementation(value => value === failure ? confirmation : null);
+    const progress = confirmationProgress();
+    mocked.projectProgress.mockImplementation((observer, txId, targetIdentity) => {
+      expect(observer).toBe(mocked.confirmation.mock.results.at(-1)!.value);
+      expect(txId).toBe('e3'.repeat(32)); expect(targetIdentity).toBe('ca'.repeat(32));
+      expect(mocked.projectConfirmation).toHaveBeenCalledWith(failure);
+      // V1 evidence is registered before the optional progress producer runs.
+      expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure)).toEqual({ transport, confirmation });
+      return progress;
+    });
     const original = mocked.wait.getMockImplementation()!;
     mocked.wait.mockImplementation(async (...args) => {
       if (args[3] === 'native-tracker-admission') throw failure;
@@ -918,6 +940,9 @@ describe('fresh FED target composition', () => {
     expect(diagnostic?.transport).toBe(transport); expect(diagnostic?.confirmation).toEqual(confirmation);
     expect(Object.isFrozen(diagnostic?.confirmation)).toBe(true);
     expect(Object.isFrozen(diagnostic)).toBe(true);
+    expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(failure)).toBe(progress);
+    expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(new Error(failure.message))).toBeNull();
+    expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(structuredClone(progress))).toBeNull();
     expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(new Error(failure.message))).toBeNull();
     expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(structuredClone(diagnostic))).toBeNull();
     expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
@@ -933,6 +958,7 @@ describe('fresh FED target composition', () => {
         durableAttemptDigestHex: 'd3'.repeat(32), responseDigestHex: 'f3'.repeat(32) });
       const confirmation = Object.freeze({ category: 'not_found_at_deadline', expectedTransactionIdHex: 'e3'.repeat(32),
         executionTargetIdentityDigestHex: 'ca'.repeat(32) });
+      mocked.projectProgress.mockReturnValue(confirmationProgress());
       mocked.projectSubmission.mockImplementation(value => {
         expect(value).toBe(returnValues.trackerSubmission);
         if (fault === 'throwing transport projector') throw new Error('diagnostic projection failure');
@@ -954,9 +980,39 @@ describe('fresh FED target composition', () => {
       });
       expect(await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error)).toBe(failure);
       expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure)).toBeNull();
+      expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(failure)).toBeNull();
+      expect(mocked.projectProgress).not.toHaveBeenCalled();
       expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
       expect(mocked.trackerConfirm).not.toHaveBeenCalled(); expect(mocked.payoutCheck).not.toHaveBeenCalled();
       assertDownstreamCleanup();
+    });
+
+  it.each(['missing', 'transaction', 'target', 'genesis', 'throwing projector'] as const)(
+    'refuses native confirmation progress for %s while retaining V1 evidence and original failure', async fault => {
+      const failure = new Error('original native tracker deadline');
+      const transport = Object.freeze({ outcome: 'accepted', httpStatus: 200, expectedTxId: 'e3'.repeat(32),
+        durableAttemptDigestHex: 'd3'.repeat(32), responseDigestHex: 'f3'.repeat(32) });
+      const confirmation = Object.freeze({ category: 'not_found_at_deadline', expectedTransactionIdHex: 'e3'.repeat(32),
+        executionTargetIdentityDigestHex: 'ca'.repeat(32) });
+      mocked.projectSubmission.mockImplementation(value => value === returnValues.trackerSubmission ? transport : null);
+      mocked.projectConfirmation.mockImplementation(value => value === failure ? confirmation : null);
+      const progress = confirmationProgress();
+      mocked.projectProgress.mockImplementation(() => {
+        if (fault === 'throwing projector') throw new Error('optional progress producer failure');
+        return fault === 'missing' ? null : fault === 'transaction'
+          ? { ...progress, expectedErgoTransactionIdHex: 'ff'.repeat(32) } : fault === 'target'
+          ? { ...progress, executionTargetIdentityDigestHex: 'ff'.repeat(32) } : fault === 'genesis'
+          ? { ...progress, targetGenesisHeaderIdHex: 'ff'.repeat(32) } : progress;
+      });
+      const original = mocked.wait.getMockImplementation()!;
+      mocked.wait.mockImplementation(async (...args) => args[3] === 'native-tracker-admission'
+        ? Promise.reject(failure) : original(...args));
+      expect(await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error)).toBe(failure);
+      expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure)).toEqual({ transport, confirmation });
+      expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(failure)).toBeNull();
+      expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
+      expect(mocked.trackerConfirm).not.toHaveBeenCalled(); expect(mocked.payoutCheck).not.toHaveBeenCalled();
+      expect(mocked.payoutSubmit).not.toHaveBeenCalled(); assertDownstreamCleanup();
     });
 
   it.each(['primary', 'nested primary', 'secondary', 'over depth', 'cause', 'getter', 'proxy'] as const)(
@@ -964,6 +1020,8 @@ describe('fresh FED target composition', () => {
       const real = await vi.importActual<typeof import('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js')>(
         './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js');
       mocked.projectConfirmation.mockImplementation(real.projectTrackerCanonicalConfirmationFailureDiagnosticV1);
+      const progress = confirmationProgress();
+      mocked.projectProgress.mockReturnValue(progress);
       mocked.projectSubmission.mockImplementation(value => value === returnValues.trackerSubmission
         ? Object.freeze({ outcome: 'accepted', httpStatus: 200, expectedTxId: 'e3'.repeat(32),
           durableAttemptDigestHex: 'd3'.repeat(32), responseDigestHex: 'f3'.repeat(32) }) : null);
@@ -1002,6 +1060,9 @@ describe('fresh FED target composition', () => {
       expect(direct?.confirmation.observationCount).toBe(0);
       expect(projectSubstrateFederatedNativeTrackerConfirmationFailureV1(caught))
         .toBe(shape === 'primary' || shape === 'nested primary' ? direct : null);
+      expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(originalFailure)).toBe(progress);
+      expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(caught))
+        .toBe(shape === 'primary' || shape === 'nested primary' ? progress : null);
       expect(trap).not.toHaveBeenCalled();
       expect(mocked.trackerSubmit).toHaveBeenCalledOnce(); expect(mocked.trackerFinalize).toHaveBeenCalledOnce();
       expect(mocked.trackerConfirm).not.toHaveBeenCalled(); expect(mocked.payoutCheck).not.toHaveBeenCalled();
@@ -1043,6 +1104,8 @@ describe('fresh FED target composition', () => {
     expect(result.canonicalPayoutEstablished).toBe(true); expect(result.withdrawal.payout.amountNanoErg).toBe('10000000');
     expect(result.sourceFinalityEstablished).toBe(false); expect(result.trustless).toBe(false);
     expect(mocked.projectConfirmation).not.toHaveBeenCalled(); expect(mocked.projectSubmission).not.toHaveBeenCalled();
+    expect(mocked.projectProgress).not.toHaveBeenCalled();
+    expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(result)).toBeNull();
     expect(result.pegIn).toEqual({ sourceLockTransactionIdHex: sourceLock.expectedTxId,
       reserveTransitionTransactionIdHex: committedVault.expectedTxId, sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
       reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId, mintIdentityHex: mint.mintIdentityHex,

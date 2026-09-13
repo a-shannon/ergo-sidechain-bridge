@@ -34,7 +34,10 @@ import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readS
 import { compileObservedSubstrateFederatedGenesisV1, type ObservedSubstrateFederatedGenesisV1 } from '../../substrate-federated-observed-genesis-v1.js';
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1, assertSubstrateFederatedNativeGenesisSetupReadCustodyV1 }
   from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
-import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+  projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import type { SubstrateFederatedIsolatedDevnetConfirmationProgressV1,
+  SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
 import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS } from '../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
 import { normalizeEip12Box, type Eip12Box } from '../../unsigned-ergo-transaction.js';
 import type { TrustlessBurnInclusionProof } from '../../profiles/substrate-grandpa-v1/trustless-burn-proof.js';
@@ -467,6 +470,36 @@ export function projectSubstrateFederatedNativeTrackerConfirmationFailureV1(fail
   } catch { return null; }
 }
 
+const NATIVE_TRACKER_CONFIRMATION_PROGRESS = new WeakMap<object,
+  Readonly<SubstrateFederatedIsolatedDevnetConfirmationProgressV1>>();
+
+function retainNativeTrackerConfirmationProgress(input: Readonly<{
+  failure: unknown;
+  observer: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>;
+  expectedTxId: string;
+  targetIdentityDigestHex: string;
+  genesisHeaderIdHex: string;
+}>) {
+  const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(input.failure);
+  if (confirmation === null || !NATIVE_TRACKER_CONFIRMATION_FAILURES.has(confirmation)) return;
+  const progress = projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1(
+    input.observer, input.expectedTxId, input.targetIdentityDigestHex);
+  if (progress === null
+    || progress.expectedErgoTransactionIdHex !== input.expectedTxId
+    || progress.executionTargetIdentityDigestHex !== input.targetIdentityDigestHex
+    || progress.targetGenesisHeaderIdHex !== input.genesisHeaderIdHex) return;
+  NATIVE_TRACKER_CONFIRMATION_PROGRESS.set(confirmation, progress);
+}
+
+/** Original-observer progress is diagnostic only and cannot resume the failed attempt. */
+export function projectSubstrateFederatedNativeTrackerConfirmationProgressV1(failure: unknown) {
+  try {
+    const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(failure);
+    return confirmation === null || !NATIVE_TRACKER_CONFIRMATION_FAILURES.has(confirmation)
+      ? null : NATIVE_TRACKER_CONFIRMATION_PROGRESS.get(confirmation) ?? null;
+  } catch { return null; }
+}
+
 interface NativeFeeFundingReceipt {
   readonly expectedTxId: string;
   readonly durableAttemptDigestHex: string;
@@ -601,7 +634,7 @@ async function completeNativeReturn(input: Readonly<{
   readCustody();
   const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {
     readCustody();
-    const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, genesisHeaderIdHex);
+    const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, genesisHeaderIdHex, attempt.expectedTxId);
     let confirmation: Awaited<ReturnType<typeof observer.observe>>;
     try {
       confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
@@ -612,6 +645,10 @@ async function completeNativeReturn(input: Readonly<{
           expectedTxId: attempt.expectedTxId, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
           confirmationTargetIdentityDigestHex: observer.reconciliationIdentityDigestHex });
       } catch { /* Optional diagnostics must not replace the original failure or interrupt cleanup. */ }
+      try {
+        retainNativeTrackerConfirmationProgress({ failure, observer, expectedTxId: attempt.expectedTxId,
+          targetIdentityDigestHex: observer.reconciliationIdentityDigestHex, genesisHeaderIdHex });
+      } catch { /* Progress capture cannot suppress V1 evidence or delay cleanup. */ }
       throw failure;
     }
     const tracker = await confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target, confirmation);

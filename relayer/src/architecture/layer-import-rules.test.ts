@@ -415,6 +415,34 @@ describe('layer import rules', () => {
     );
   });
 
+  it('keeps confirmation progress imports bounded to the reviewed native root and exact binding', () => {
+    const specifier = '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+    const binding = 'projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1';
+    const source = `import { ${binding} } from '${specifier}'; ${binding}(null, '', '');`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT, source)).map(item => item.message))
+      .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    const otherBinding = 'reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1';
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      source.replaceAll(binding, otherBinding))).map(item => item.message))
+      .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${otherBinding}`);
+  });
+
+  it.each([
+    'SubstrateFederatedIsolatedDevnetConfirmationProgressV1',
+    'SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+  ])('keeps the new native-root type import erased and bounded: %s', binding => {
+    const specifier = '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+    const source = `import type { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+    const message = `restricted capability import binding is not allowlisted: ${specifier}#${binding}`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source.replace('import type', 'import')))
+      .map(item => item.message)).toContain(message);
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT, source)).map(item => item.message)).toContain(message);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      source.replace(`${binding} }`, `${binding} as Alias }`))).length).toBeGreaterThan(0);
+  });
+
   it('does not exempt the FED genesis root from global RPC, reflection, entropy or type-query guards', () => {
     const root = FEDERATED_GENESIS_TARGET_ROOT;
     expect(inspect({ [root]: "fetch('http://127.0.0.1:19955');" }).map(item => item.message))

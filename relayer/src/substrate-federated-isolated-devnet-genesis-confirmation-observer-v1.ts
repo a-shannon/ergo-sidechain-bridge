@@ -24,6 +24,41 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATIO
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const OBSERVATION_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_V1';
+const PROGRESS_REQUEST_TIMEOUT_MS = 2_000;
+
+type ProgressUnavailable = Readonly<{
+  status: 'unavailable';
+  reason: 'http_error' | 'request_failed' | 'invalid_response';
+  httpStatus: number | null;
+}>;
+type IndexProgress = Readonly<{ status: 'observed'; indexedHeight: number; fullHeight: number }>
+  | ProgressUnavailable;
+type PoolProgress = Readonly<{ status: 'present' | 'not_found' }> | ProgressUnavailable;
+interface NodeProgress {
+  readonly index: IndexProgress;
+  readonly pool: PoolProgress;
+}
+interface BoundedNodeProgress extends NodeProgress {
+  readonly fullHeightBefore: number;
+  readonly fullHeightAfter: number;
+}
+export interface SubstrateFederatedIsolatedDevnetConfirmationProgressV1 {
+  readonly schema: 'e2s.substrate-federated-isolated-devnet-confirmation-progress.v1';
+  readonly version: 1;
+  readonly expectedErgoTransactionIdHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly targetGenesisHeaderIdHex: string;
+  readonly observationSequence: number;
+  readonly observedAtUnixMs: number;
+  readonly primary: Readonly<BoundedNodeProgress>;
+  readonly witness: Readonly<BoundedNodeProgress>;
+  readonly diagnosticDigestHex: string;
+}
+interface ProgressCapture {
+  readonly expectedTxId: string;
+  sequence: number;
+  latest: Readonly<SubstrateFederatedIsolatedDevnetConfirmationProgressV1> | null;
+}
 
 type ConfirmationObserver =
   SubstrateFederatedLocalDevnetGenesisExecutionPorts['confirmationObserver'];
@@ -41,6 +76,7 @@ interface ObserverMaterialV1 {
   readonly binding:
     Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
   readonly targetGenesisHeaderIdHex: string;
+  readonly progress?: ProgressCapture;
 }
 
 interface ArtifactMaterialV1 {
@@ -57,6 +93,7 @@ const ARTIFACTS = new WeakMap<object, ArtifactMaterialV1>();
 export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   targetGenesisHeaderIdHexValue: string,
+  progressTransactionIdHex?: string,
 ): Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1> {
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
@@ -74,6 +111,11 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
   }
   const primaryClient = createClient(target.primaryNodeOrigin);
   const witnessClient = createClient(target.witnessNodeOrigin);
+  const progress: ProgressCapture | undefined = progressTransactionIdHex === undefined ? undefined : {
+    expectedTxId: fixedHex32(progressTransactionIdHex, 'diagnostic Ergo transaction ID'),
+    sequence: 0,
+    latest: null,
+  };
   let observer!:
     Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>;
   observer = Object.freeze({
@@ -86,6 +128,9 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
       nodeOrigin:
         typeof SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_PRIMARY_ORIGIN,
     ) => {
+      // Clear before any validation can fail; never return an earlier attempt.
+      const sequence = progress === undefined ? 0 : ++progress.sequence;
+      if (progress !== undefined) progress.latest = null;
       assertSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
         observer,
         binding.executionTargetIdentityDigestHex,
@@ -97,15 +142,35 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         expectedTxIdValue,
         'isolated genesis expected transaction ID',
       );
+      const capture = progress?.expectedTxId === expectedTxId;
       const identityBefore = await observeExactTargetIdentity(
         primaryClient,
         witnessClient,
         targetGenesisHeaderIdHex,
       );
-      const [primaryTransaction, witnessTransaction] = await Promise.all([
+      const transactionReads = Promise.all([
         readTransaction(primaryClient, expectedTxId, 'primary'),
         readTransaction(witnessClient, expectedTxId, 'witness'),
       ]);
+      let nodeProgress: readonly NodeProgress[] | undefined;
+      let transactions: Awaited<typeof transactionReads>;
+      if (capture) {
+        // Drain optional reads in the existing request wave before propagating
+        // a required read failure. No diagnostic IO survives the observe call.
+        const [required, optional] = await Promise.allSettled([
+          transactionReads,
+          Promise.all([
+            readNodeProgress(primaryClient, expectedTxId),
+            readNodeProgress(witnessClient, expectedTxId),
+          ]),
+        ]);
+        if (required.status === 'rejected') throw required.reason;
+        transactions = required.value;
+        if (optional.status === 'fulfilled') nodeProgress = optional.value;
+      } else {
+        transactions = await transactionReads;
+      }
+      const [primaryTransaction, witnessTransaction] = transactions;
       // Mining may advance between the identity and transaction reads. The
       // second identity bounds each node's reported depth without freezing it.
       const identityAfter = await observeExactTargetIdentity(
@@ -114,8 +179,32 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         targetGenesisHeaderIdHex,
       );
       assertNonRegressingIdentity(identityBefore, identityAfter);
+      const finish = (observation: SubstrateFederatedLocalDevnetGenesisConfirmation) => {
+        if (capture && nodeProgress !== undefined && progress?.sequence === sequence) {
+          try {
+            assertSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+              observer, binding.executionTargetIdentityDigestHex,
+            );
+            const payload = Object.freeze({
+              schema: 'e2s.substrate-federated-isolated-devnet-confirmation-progress.v1' as const,
+              version: 1 as const,
+              expectedErgoTransactionIdHex: expectedTxId,
+              executionTargetIdentityDigestHex: binding.executionTargetIdentityDigestHex,
+              targetGenesisHeaderIdHex,
+              observationSequence: sequence,
+              observedAtUnixMs: Date.now(),
+              primary: boundNodeProgress(nodeProgress[0]!, identityBefore.primaryHeight, identityAfter.primaryHeight),
+              witness: boundNodeProgress(nodeProgress[1]!, identityBefore.witnessHeight, identityAfter.witnessHeight),
+            });
+            progress.latest = Object.freeze({ ...payload, diagnosticDigestHex: sha256CanonicalJson(
+              payload, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONFIRMATION_PROGRESS_V1',
+            ) });
+          } catch { /* Optional data cannot replace required confirmation behavior. */ }
+        }
+        return observation;
+      };
       if (primaryTransaction === null && witnessTransaction === null) {
-        return createObservation(observer, binding, {
+        return finish(createObservation(observer, binding, {
           status: 'not_found',
           expectedTxId,
           observedTxId: null,
@@ -124,7 +213,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
           confirmationHeight: null,
           confirmationHeaderIdHex: null,
           targetGenesisHeaderIdHex,
-        });
+        }));
       }
       if (primaryTransaction === null || witnessTransaction === null) {
         throw new Error('isolated genesis transaction observations disagree');
@@ -156,7 +245,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         witnessConfirmations,
       );
       if (confirmations < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS) {
-        return createObservation(observer, binding, {
+        return finish(createObservation(observer, binding, {
           status: 'pending',
           expectedTxId,
           observedTxId,
@@ -165,7 +254,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
           confirmationHeight: null,
           confirmationHeaderIdHex: null,
           targetGenesisHeaderIdHex,
-        });
+        }));
       }
       const primaryInclusion = await confirmedInclusion(
         primaryClient,
@@ -190,7 +279,7 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         throw new Error('isolated genesis canonical inclusion observations disagree');
       }
       const confirmedObservedAtHeight = primaryInclusion.height + confirmations;
-      return createObservation(observer, binding, {
+      return finish(createObservation(observer, binding, {
         status: 'confirmed',
         expectedTxId,
         observedTxId,
@@ -199,15 +288,86 @@ export function createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserve
         confirmationHeight: primaryInclusion.height,
         confirmationHeaderIdHex: primaryInclusion.headerIdHex,
         targetGenesisHeaderIdHex,
-      });
+      }));
     },
   });
   OBSERVERS.set(observer, Object.freeze({
     target,
     binding,
     targetGenesisHeaderIdHex,
+    progress,
   }));
   return observer;
+}
+
+/** Observation data only; never an artifact accepted by the confirmation consumer. */
+export function projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1(
+  observer: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>,
+  expectedTxId: string,
+  expectedTargetIdentityDigestHex: string,
+): Readonly<SubstrateFederatedIsolatedDevnetConfirmationProgressV1> | null {
+  try {
+    const material = OBSERVERS.get(observer);
+    if (material?.progress === undefined || material.progress.expectedTxId !== expectedTxId) return null;
+    assertSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(observer, expectedTargetIdentityDigestHex);
+    const latest = material.progress.latest;
+    return latest?.observationSequence === material.progress.sequence ? latest : null;
+  } catch { return null; }
+}
+
+function unavailable(reason: ProgressUnavailable['reason'], httpStatus: number | null = null): ProgressUnavailable {
+  return Object.freeze({ status: 'unavailable', reason, httpStatus });
+}
+
+function requestUnavailable(error: unknown): ProgressUnavailable {
+  try {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      if (Number.isInteger(status) && status! >= 100 && status! <= 599) return unavailable('http_error', status!);
+    }
+  } catch { /* Unavailable diagnostics never propagate an exception accessor. */ }
+  return unavailable('request_failed');
+}
+
+async function readNodeProgress(client: ReturnType<typeof axios.create>, expectedTxId: string): Promise<NodeProgress> {
+  const readIndex = async (): Promise<IndexProgress> => {
+    let value: unknown;
+    try { value = (await client.get('/blockchain/indexedHeight', { timeout: PROGRESS_REQUEST_TIMEOUT_MS })).data; }
+    catch (error) { return requestUnavailable(error); }
+    try {
+      const row = plainRecord(value, 'index progress');
+      const indexedHeight = nonNegativeInteger(row.indexedHeight, 'indexed height');
+      const fullHeight = nonNegativeInteger(row.fullHeight, 'index full height');
+      if (indexedHeight > fullHeight || fullHeight > 0x7fffffff) return unavailable('invalid_response');
+      return Object.freeze({ status: 'observed', indexedHeight, fullHeight });
+    } catch { return unavailable('invalid_response'); }
+  };
+  const readPool = async (): Promise<PoolProgress> => {
+    let value: unknown;
+    try {
+      value = (await client.get(`/transactions/unconfirmed/byTransactionId/${expectedTxId}`,
+        { timeout: PROGRESS_REQUEST_TIMEOUT_MS })).data;
+    } catch (error) {
+      // Pinned ApiResponse maps the endpoint's null pool lookup to HTTP 404.
+      // Keep that literal observation distinct from chain absence or invalidity.
+      const failure = requestUnavailable(error);
+      return failure.reason === 'http_error' && failure.httpStatus === 404
+        ? Object.freeze({ status: 'not_found' }) : failure;
+    }
+    try {
+      return plainRecord(value, 'pool transaction').id === expectedTxId
+        ? Object.freeze({ status: 'present' }) : unavailable('invalid_response');
+    } catch { return unavailable('invalid_response'); }
+  };
+  const [index, pool] = await Promise.all([readIndex(), readPool()]);
+  return Object.freeze({ index, pool });
+}
+
+function boundNodeProgress(value: NodeProgress, before: number, after: number): Readonly<BoundedNodeProgress> {
+  const index = value.index.status === 'observed'
+    && (value.index.fullHeight < before || value.index.fullHeight > after)
+    ? unavailable('invalid_response') : value.index;
+  return Object.freeze({ fullHeightBefore: before, fullHeightAfter: after, index, pool: value.pool });
 }
 
 export function assertSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(

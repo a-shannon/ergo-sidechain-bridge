@@ -282,7 +282,10 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'submitSubstrateFederatedIsolatedDevnetWithdrawalV2', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
     'projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic',
   ])],
-  ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set(['createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'])],
+  ['substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts', new Set([
+    'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+    'projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1',
+  ])],
   ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
   ['pinned-local-native-verifier-build.ts', new Set(['runBoundedProcess'])],
   ['substrate-federated-authority-safe-devnet-build-environment-v1.ts', new Set([
@@ -1566,6 +1569,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   [FEDERATED_GENESIS_TARGET_ROOT, new Set([
     'RunSubstrateFederatedGenesisTargetRootV1Input', 'runSubstrateFederatedGenesisTargetRootV1',
     'projectSubstrateFederatedNativeTrackerConfirmationFailureV1',
+    'projectSubstrateFederatedNativeTrackerConfirmationProgressV1',
   ])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts',
@@ -2560,7 +2564,11 @@ function inspectRestrictedImportBindings(
 
   const violations: LayerImportViolation[] = [];
   for (const binding of imported.bindings) {
-    if (!allowedBindings.has(binding.imported)) {
+    const erasedNativeConfirmationType = file === FEDERATED_GENESIS_TARGET_ROOT && imported.typeOnly
+      && imported.value === '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js'
+      && (binding.imported === 'SubstrateFederatedIsolatedDevnetConfirmationProgressV1'
+        || binding.imported === 'SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1');
+    if (!allowedBindings.has(binding.imported) && !erasedNativeConfirmationType) {
       violations.push({
         file,
         line: imported.line,
