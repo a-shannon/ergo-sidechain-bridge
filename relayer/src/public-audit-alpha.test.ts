@@ -360,6 +360,13 @@ describe('public audit alpha bootstrap', () => {
       "{ envName: 'STATE_TRACKER_TEST_SHARD', shardCount: 4 }",
     );
     expect(boundedVitestRunner).toContain(
+      "['src/adapters/federated-native-mint-execution-v1.test.ts', 50]",
+    );
+    expect(boundedVitestRunner).toContain("'--testNamePattern'");
+    expect(boundedVitestRunner).toContain("'--hideSkippedTests'");
+    expect(boundedVitestRunner).toContain('spawnSync(process.execPath');
+    expect(boundedVitestRunner).toContain("'node_modules', 'vitest', 'vitest.mjs'");
+    expect(boundedVitestRunner).toContain(
       "const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'",
     );
     expect(boundedVitestRunner).toContain('? 15_000');
