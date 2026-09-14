@@ -625,12 +625,16 @@ async function completeNativeReturn(input: Readonly<{
     readCustody(); return completion;
   });
   readCustody();
-  const transported = await node.withCheckpointBoundTrackerTransportTarget(refreshed.value, async target => {
-    readCustody();
-    const submission = await submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(target, attempt);
-    const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, submission);
-    readCustody(); return { submission, journalDigestHex: finalized.journalDigestHex };
-  });
+  const transported = await node.withCheckpointBoundTrackerTransportTarget(
+    refreshed.value,
+    attempt.expectedTxId,
+    async target => {
+      readCustody();
+      const submission = await submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(target, attempt);
+      const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, submission);
+      readCustody(); return { submission, journalDigestHex: finalized.journalDigestHex };
+    },
+  );
   readCustody();
   const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {
     readCustody();

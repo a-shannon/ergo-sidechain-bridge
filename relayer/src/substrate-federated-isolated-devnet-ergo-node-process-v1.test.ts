@@ -157,6 +157,7 @@ describe.skipIf(process.platform !== 'win32')(
               'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1',
             version: 1,
           }),
+          '11'.repeat(32),
           async () => 'never',
         ),
       ).rejects.toThrow(/requires one completed reservation freshness check/);
@@ -235,6 +236,8 @@ describe.skipIf(process.platform !== 'win32')(
           reservationFreshnessCheckBound: true,
           trackerTransport: true,
           sameProcessCanonicalConfirmation: true,
+          candidateMiningRequiresExpectedTransaction: true,
+          expectedTransactionIdHex: '11'.repeat(32),
         })
       ).toThrow(/not owned by the active tracker-transport action/);
       await expect(session.startMining()).rejects.toThrow(/exactly once/);
@@ -1154,12 +1157,15 @@ describe.skipIf(process.platform !== 'win32')(
           await expect(
             session.withCheckpointBoundTrackerTransportTarget(
               structuredClone(freshnessCompletion!),
+              'ac'.repeat(32),
               async () => 'never',
             ),
           ).rejects.toThrow(/lacks exact reservation freshness completion/);
+          const confirmationTransactionIdHex = 'ac'.repeat(32);
           const transport = await session
             .withCheckpointBoundTrackerTransportTarget(
               freshnessCompletion!,
+              confirmationTransactionIdHex,
               async target => {
                 transportTarget = target;
                 expect(target).toMatchObject({
@@ -1169,6 +1175,8 @@ describe.skipIf(process.platform !== 'win32')(
                   reservationFreshnessCheckBound: true,
                   trackerTransport: true,
                   sameProcessCanonicalConfirmation: true,
+                  candidateMiningRequiresExpectedTransaction: true,
+                  expectedTransactionIdHex: confirmationTransactionIdHex,
                 });
                 const binding =
                   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(
@@ -1193,6 +1201,10 @@ describe.skipIf(process.platform !== 'win32')(
             transport.receipt
               .trackerConfirmationMiningCredentialConsumedBeforeTransportOnce,
           ).toBe(true);
+          expect(transport.receipt.candidateMiningRequiresExpectedTransaction)
+            .toBe(true);
+          expect(transport.receipt.expectedTransactionIdHex)
+            .toBe(confirmationTransactionIdHex);
           expect(
             transport.receipt
               .exactReservationFreshnessSnapshotRevalidatedBeforeAction,
@@ -1225,6 +1237,7 @@ describe.skipIf(process.platform !== 'win32')(
           await expect(
             session.withCheckpointBoundTrackerTransportTarget(
               freshnessCompletion!,
+              confirmationTransactionIdHex,
               async () => 'never',
             ),
           ).rejects.toThrow(/requires one completed reservation freshness check/);
@@ -1236,7 +1249,17 @@ describe.skipIf(process.platform !== 'win32')(
           await expect(session.withCheckpointBoundMiningStoppedExecutionTarget(
             async () => 'never',
           )).rejects.toThrow(/requires one completed checkpoint observation/);
-          const confirmationTransactionIdHex = 'ac'.repeat(32);
+          let foreignConfirmationActionInvoked = false;
+          await expect(
+            session.withTrackerTransportConfirmationMiningTarget(
+              'ff'.repeat(32),
+              async () => {
+                foreignConfirmationActionInvoked = true;
+                return 'never';
+              },
+            ),
+          ).rejects.toThrow(/does not match the completed transport/);
+          expect(foreignConfirmationActionInvoked).toBe(false);
           let confirmationTarget: typeof ownedTarget;
           const confirmation = await session
             .withTrackerTransportConfirmationMiningTarget(

@@ -104,6 +104,9 @@ export async function submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransp
       || input.target.reservationFreshnessCheckBound !== true
       || input.target.trackerTransport !== true
       || input.target.sameProcessCanonicalConfirmation !== true
+      || input.target.candidateMiningRequiresExpectedTransaction !== true
+      || input.target.expectedTransactionIdHex
+        !== input.authorization.expectedTransactionIdHex
       || checkedBinding.processBindingDigestHex
         !== binding.processBindingDigestHex
       || checkedBinding.executionTargetIdentityDigestHex

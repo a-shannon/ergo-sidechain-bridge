@@ -650,7 +650,7 @@
     "baseTag": "v6.0.2",
     "patchCommitProvenance": "ed506f3c63273a89793a14505a709f18701825f8",
     "patchPath": "sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch",
-    "patchSha256": "72316d9d04704b7b44a854a719c470931e4485901944aa42b701609b8a15ec0c",
+    "patchSha256": "8c56b3cfb2e6d6a8114dfd4071723dccf7f7bc5bddcdf78ee0c412c82ade21fe",
     "javaVersion": "17",
     "testCommand": "sbt \"testOnly org.ergoplatform.mining.CandidateGeneratorSpec\"",
     "buildCommand": "sbt assembly",
@@ -660,12 +660,12 @@
       {
         "path": "src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala",
         "baseBlob": "bfa0fe6162477fae9012eddd3de8736f2c140a1d",
-        "patchedBlob": "e7ebfd3dd3b962e6a149c3f54f5953cd621703c6"
+        "patchedBlob": "1d827151dd3a027478b1cd8fd2ea3938c119a9a9"
       },
       {
         "path": "src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala",
         "baseBlob": "1c394b28174aa12303e67827d9c6a38ea6a38caf",
-        "patchedBlob": "7d53e048663cd111077c2f792228979b731171af"
+        "patchedBlob": "fdfbf97b9f1c3c5d683c7777cc10bc58f86d4c02"
       }
     ]
   },

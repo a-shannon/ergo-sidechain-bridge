@@ -265,8 +265,7 @@ describe('native FED withdrawal continuation', () => {
       primaryMining: false as const, primaryReadOnly: true as const, witnessReadOnly: true as const,
       miningStopped: true as const, checkpointBound: true as const });
     const freshnessTarget = Object.freeze({ ...frozenTarget, reservationFreshnessRevalidation: true as const });
-    const transportTarget = Object.freeze({ ...setupTarget, checkpointBound: true as const,
-      reservationFreshnessCheckBound: true as const, trackerTransport: true as const, sameProcessCanonicalConfirmation: true as const });
+    let transportTarget: Parameters<typeof submitTracker>[0];
     const confirmationTarget = Object.freeze({ ...setupTarget });
     const foreignTarget = Object.freeze({ ...confirmationTarget });
     const foreignSetupTarget = Object.freeze({ ...setupTarget });
@@ -462,6 +461,11 @@ describe('native FED withdrawal continuation', () => {
       const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({ trackerContext: context,
         trackerInputBox: issuances[0]!.outputs[0]!, feeInputBox: trackerFee.transaction.outputs[0]!, feePayerPublicKeyHex: signer.publicKeyHex });
       trackerTxId = transaction.unsignedTransactionIdHex;
+      transportTarget = Object.freeze({ ...setupTarget, checkpointBound: true as const,
+        reservationFreshnessCheckBound: true as const, trackerTransport: true as const,
+        sameProcessCanonicalConfirmation: true as const,
+        candidateMiningRequiresExpectedTransaction: true as const,
+        expectedTransactionIdHex: trackerTxId });
       boundary.setupActive = false; phase = 'frozen';
       expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, setupTarget)).toThrow(/expired/);
       const pendingTracker = session.checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner({ context, transaction, observedHeaderContext }, frozenTarget);

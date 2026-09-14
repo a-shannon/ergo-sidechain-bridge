@@ -380,6 +380,14 @@ export async function checkSubstrateFederatedIsolatedDevnetTrackerV2Transport(
   TRACKER_V2_FRESHNESS.delete(freshness);
   const material = TRACKER_PROTOCOL_V2_CHECKS.get(check)!;
   material.assertCustody?.();
+  if (
+    target.candidateMiningRequiresExpectedTransaction !== true
+    || target.expectedTransactionIdHex !== check.result.signedCandidate.txId
+  ) {
+    throw new Error(
+      'tracker V2 transport mining requirement differs from the exact checked transaction',
+    );
+  }
   const binding = assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
   const assertActive = () => {
     material.assertCustody?.();

@@ -83,6 +83,8 @@ const PRIMARY_REST_PORT = 9051;
 const WITNESS_REST_PORT = 9052;
 const PRIMARY_P2P_PORT = 9021;
 const WITNESS_P2P_PORT = 9022;
+const REQUIRED_MINING_TRANSACTION_ID_ENVIRONMENT_VARIABLE =
+  'ERGO_SIDECHAIN_REQUIRED_MINING_TRANSACTION_ID';
 const OWNED_PORTS = [
   PRIMARY_REST_PORT,
   WITNESS_REST_PORT,
@@ -295,6 +297,7 @@ interface TrackerTransportContinuation {
 interface TrackerConfirmationContinuation {
   readonly trackerTransportProcessBindingDigestHex: string;
   readonly trackerTransportExecutionTargetIdentityDigestHex: string;
+  readonly expectedTransactionIdHex: string;
   readonly primaryProcessId: number;
   readonly witnessProcessId: number;
   readonly extensionValueHex: string;
@@ -407,6 +410,7 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2 {
     completion: Readonly<
       SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
     >,
+    expectedTransactionIdHex: string,
     action: (
       target: Readonly<
         SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2
@@ -504,6 +508,8 @@ export interface SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2 {
   readonly reservationFreshnessCheckBound: true;
   readonly trackerTransport: true;
   readonly sameProcessCanonicalConfirmation: true;
+  readonly candidateMiningRequiresExpectedTransaction: true;
+  readonly expectedTransactionIdHex: string;
 }
 
 export interface SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1 {
@@ -686,6 +692,8 @@ export interface SubstrateFederatedIsolatedDevnetTrackerTransportExecutionV2Rece
   readonly sameProcessesAsReservationFreshness: false;
   readonly exactReservationFreshnessSnapshotRevalidatedBeforeAction: true;
   readonly trackerConfirmationMiningCredentialConsumedBeforeTransportOnce: true;
+  readonly candidateMiningRequiresExpectedTransaction: true;
+  readonly expectedTransactionIdHex: string;
   readonly buildIdentityDigestHex: string;
   readonly executableIdentityDigestHex: string;
   readonly reservationFreshnessProcessBindingDigestHex: string;
@@ -2397,6 +2405,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       completion: Readonly<
         SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
       >,
+      expectedTransactionIdHexValue: string,
       action: (
         target: Readonly<
           SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2
@@ -2416,6 +2425,11 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       if (typeof action !== 'function') {
         throw new Error('isolated tracker transport action is required');
       }
+      const expectedTransactionIdHex = fixedHex(
+        expectedTransactionIdHexValue,
+        32,
+        'isolated tracker transport expected transaction ID',
+      );
       if (trackerConfirmationMiningCredential === undefined) {
         throw new Error(
           'isolated tracker-confirmation mining credential is absent, consumed, or revoked',
@@ -2493,6 +2507,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               'mining',
               ephemeralMiningMnemonic,
               `${CHECKPOINT_EXTENSION_KEY_HEX}:${continuation.extensionValueHex}`,
+              expectedTransactionIdHex,
             );
           },
         );
@@ -2534,6 +2549,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           checkpointSnapshot: continuation.checkpointSnapshot,
           reservationFreshnessSnapshot: continuation.frozenSnapshot,
           actionStartSnapshot,
+          expectedTransactionIdHex,
         });
         const processBindingDigestHex = sha256CanonicalJson({
           schema:
@@ -2544,6 +2560,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           primaryProcessId: processId(primary),
           witnessProcessId: processId(witness),
           actionStartSnapshot,
+          expectedTransactionIdHex,
         });
         const target = Object.freeze({
           primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
@@ -2554,6 +2571,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           reservationFreshnessCheckBound: true as const,
           trackerTransport: true as const,
           sameProcessCanonicalConfirmation: true as const,
+          candidateMiningRequiresExpectedTransaction: true as const,
+          expectedTransactionIdHex,
         });
         const assertActiveProcesses = (): void => {
           if (
@@ -2623,6 +2642,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               true as const,
             trackerConfirmationMiningCredentialConsumedBeforeTransportOnce:
               true as const,
+            candidateMiningRequiresExpectedTransaction: true as const,
+            expectedTransactionIdHex,
             buildIdentityDigestHex: input.buildIdentityDigestHex,
             executableIdentityDigestHex: input.executableIdentityDigestHex,
             reservationFreshnessProcessBindingDigestHex:
@@ -2648,6 +2669,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           trackerTransportProcessBindingDigestHex: processBindingDigestHex,
           trackerTransportExecutionTargetIdentityDigestHex:
             executionTargetIdentityDigestHex,
+          expectedTransactionIdHex,
           primaryProcessId: processId(primary),
           witnessProcessId: processId(witness),
           extensionValueHex: continuation.extensionValueHex,
@@ -2699,6 +2721,14 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         32,
         'isolated tracker confirmation transaction ID',
       );
+      if (
+        confirmedTransactionIdHex
+        !== trackerConfirmationContinuation.expectedTransactionIdHex
+      ) {
+        throw new Error(
+          'isolated tracker confirmation transaction ID does not match the completed transport',
+        );
+      }
       activeOperation = 'tracker-confirmation';
       try {
         const continuation = trackerConfirmationContinuation;
@@ -3247,6 +3277,7 @@ function spawnOwnedNode(
   mode: NodeMode,
   ephemeralMiningMnemonic?: string,
   extensionFields: string = INITIAL_EXTENSION_FIELDS,
+  requiredMiningTransactionIdHex?: string,
 ): OwnedNode {
   const requiresMiningSecret = role === 'primary' && mode === 'mining';
   if (
@@ -3255,6 +3286,19 @@ function spawnOwnedNode(
       : ephemeralMiningMnemonic !== undefined
   ) {
     throw new Error('isolated Ergo ephemeral PoW secret does not match the process role');
+  }
+  if (
+    requiredMiningTransactionIdHex !== undefined
+    && (!requiresMiningSecret
+      || fixedHex(
+        requiredMiningTransactionIdHex,
+        32,
+        'isolated Ergo required mining transaction ID',
+      ) !== requiredMiningTransactionIdHex)
+  ) {
+    throw new Error(
+      'isolated Ergo required mining transaction ID does not match the process role',
+    );
   }
   const configPath = role === 'primary'
     ? mode === 'mining'
@@ -3290,7 +3334,11 @@ function spawnOwnedNode(
     shell: false,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: minimalEnvironment(ephemeralMiningMnemonic, extensionFields),
+    env: minimalEnvironment(
+      ephemeralMiningMnemonic,
+      extensionFields,
+      requiredMiningTransactionIdHex,
+    ),
   });
   child.stdout?.resume();
   child.stderr?.resume();
@@ -4275,6 +4323,7 @@ function isLoopbackAddress(value: string): boolean {
 function minimalEnvironment(
   ephemeralMiningMnemonic?: string,
   extensionFields: string = INITIAL_EXTENSION_FIELDS,
+  requiredMiningTransactionIdHex?: string,
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     ERGO_SIDECHAIN_EXTENSION_FIELDS: extensionFields,
@@ -4282,6 +4331,10 @@ function minimalEnvironment(
   if (ephemeralMiningMnemonic !== undefined) {
     environment[EPHEMERAL_MINING_MNEMONIC_ENVIRONMENT_VARIABLE] =
       ephemeralMiningMnemonic;
+  }
+  if (requiredMiningTransactionIdHex !== undefined) {
+    environment[REQUIRED_MINING_TRANSACTION_ID_ENVIRONMENT_VARIABLE] =
+      requiredMiningTransactionIdHex;
   }
   for (const key of ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP']) {
     if (process.env[key]) environment[key] = process.env[key];

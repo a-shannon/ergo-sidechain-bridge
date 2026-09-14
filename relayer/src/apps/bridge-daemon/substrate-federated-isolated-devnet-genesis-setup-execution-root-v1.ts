@@ -6228,6 +6228,7 @@ async function runTrackerReservationFreshnessCampaignV8(
       const transported = await input.nodeSession
         .withCheckpointBoundTrackerTransportTarget(
           completion,
+          durableReservation.bindings.unsignedTransactionIdHex,
           async target => {
             input.setManagedPhase('tracker transport authorization');
             const executionCheck =

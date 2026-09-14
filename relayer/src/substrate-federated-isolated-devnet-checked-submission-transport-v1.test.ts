@@ -117,6 +117,8 @@ const trackerBoundary = vi.hoisted(() => ({
     reservationFreshnessCheckBound: true as const,
     trackerTransport: true as const,
     sameProcessCanonicalConfirmation: true as const,
+    candidateMiningRequiresExpectedTransaction: true as const,
+    expectedTransactionIdHex: '03'.repeat(32),
   }),
   authorization: Object.freeze({
     expectedTransactionIdHex: '03'.repeat(32),
@@ -1159,6 +1161,40 @@ describe('isolated devnet checked submission transport V1', () => {
       expect(node.post).not.toHaveBeenCalled();
     },
   );
+
+  it('rejects a mining target bound to a foreign transaction before durable claim or POST', async () => {
+    const originalTarget = trackerBoundary.target;
+    trackerBoundary.target = Object.freeze({
+      ...originalTarget,
+      expectedTransactionIdHex: 'fa'.repeat(32),
+    });
+    try {
+      let failure: unknown;
+      try {
+        await submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
+          target: trackerBoundary.target,
+          executionCheck: trackerBoundary.executionCheck as any,
+          authorization: trackerBoundary.authorization as any,
+          journal: trackerBoundary.journal as any,
+          attempt: trackerBoundary.attempt as any,
+          preflight: trackerBoundary.preflight as any,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(
+        projectSubstrateFederatedIsolatedDevnetTrackerCheckedSubmissionFailureV1(
+          failure,
+        ),
+      ).toBe('authority_binding');
+      expect(trackerBoundary.claimAttempt).not.toHaveBeenCalled();
+      expect(boundary.consume).not.toHaveBeenCalled();
+      expect(node.post).not.toHaveBeenCalled();
+    } finally {
+      trackerBoundary.target = originalTarget;
+    }
+  });
 
   it.each([
     [

@@ -3729,7 +3729,7 @@ describe('isolated devnet genesis setup execution root V1', () => {
       'transport post-action validation',
       'tracker transport post-action validation',
       () => processSession.withCheckpointBoundTrackerTransportTarget
-        .mockImplementationOnce(async (_completion, action) => {
+        .mockImplementationOnce(async (_completion, _expectedTransactionIdHex, action) => {
           await action(trackerTransportTarget());
           throw new Error('synthetic private transport post-action failure');
         }),
@@ -7264,11 +7264,15 @@ function validProcessSession(order: string[]) {
     ),
     withCheckpointBoundTrackerTransportTarget: vi.fn(async (
       completion,
+      expectedTransactionIdHex,
       action,
     ) => {
       order.push('tracker-transport-execution:enter');
       if (completion !== TRACKER_RESERVATION_FRESHNESS_COMPLETION) {
         throw new Error('tracker transport completion changed');
+      }
+      if (expectedTransactionIdHex !== digest('c')) {
+        throw new Error('tracker transport transaction changed');
       }
       const value = await action(trackerTransportTarget());
       order.push('tracker-transport-execution:leave');

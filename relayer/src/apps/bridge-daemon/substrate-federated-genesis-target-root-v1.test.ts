@@ -383,8 +383,10 @@ beforeEach(() => {
       },
       withCheckpointBoundMiningStoppedExecutionTarget: (callback: (value: any) => Promise<unknown>) => invoke('frozen', callback),
       withCheckpointBoundReservationFreshnessRevalidationTarget: (callback: (value: any) => Promise<unknown>) => invoke('freshness', callback),
-      withCheckpointBoundTrackerTransportTarget: (completion: unknown, callback: (value: any) => Promise<unknown>) => {
-        expect(completion).toBe(returnValues.freshness); return invoke('transport', callback);
+      withCheckpointBoundTrackerTransportTarget: (completion: unknown, txId: string, callback: (value: any) => Promise<unknown>) => {
+        expect(completion).toBe(returnValues.freshness);
+        expect(txId).toBe(returnValues.trackerAttempt.expectedTxId);
+        return invoke('transport', callback);
       },
       withTrackerTransportConfirmationMiningTarget: (txId: string, callback: (value: any) => Promise<unknown>) => {
         expect(txId).toBe(returnValues.trackerAttempt.expectedTxId); return invoke('confirmation', callback);

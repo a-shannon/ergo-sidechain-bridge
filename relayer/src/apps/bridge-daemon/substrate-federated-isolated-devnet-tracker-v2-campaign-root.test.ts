@@ -92,8 +92,10 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', () 
       withCheckpointExtensionMiningTarget: (_extension: unknown, _policy: unknown, callback: (target: never) => Promise<unknown>) => action('anchor', callback),
       withCheckpointBoundMiningStoppedExecutionTarget: (callback: (target: never) => Promise<unknown>) => action('frozen', callback),
       withCheckpointBoundReservationFreshnessRevalidationTarget: (callback: (target: never) => Promise<unknown>) => action('freshness', callback),
-      withCheckpointBoundTrackerTransportTarget: (completion: unknown, callback: (target: never) => Promise<unknown>) => {
-        expect(completion).toBe(fixture.completion); return action('transport', callback);
+      withCheckpointBoundTrackerTransportTarget: (completion: unknown, txId: string, callback: (target: never) => Promise<unknown>) => {
+        expect(completion).toBe(fixture.completion);
+        expect(txId).toBe(fixture.attempt.expectedTxId);
+        return action('transport', callback);
       },
       withTrackerTransportConfirmationMiningTarget: (txId: unknown, callback: (target: never) => Promise<unknown>) => {
         expect(txId).toBe(fixture.attempt.expectedTxId); return action('confirmation', callback);

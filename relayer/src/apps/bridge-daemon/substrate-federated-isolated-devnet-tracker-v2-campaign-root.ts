@@ -325,11 +325,15 @@ async function runCampaign(input: Readonly<{
   const { attempt } = admitted.value;
   const refreshed = await node.withCheckpointBoundReservationFreshnessRevalidationTarget(
     target => revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target));
-  const transported = await node.withCheckpointBoundTrackerTransportTarget(refreshed.value, async target => {
-    const submission = await submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(target, attempt);
-    const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, submission);
-    return { submission, journalDigestHex: finalized.journalDigestHex };
-  });
+  const transported = await node.withCheckpointBoundTrackerTransportTarget(
+    refreshed.value,
+    attempt.expectedTxId,
+    async target => {
+      const submission = await submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(target, attempt);
+      const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, submission);
+      return { submission, journalDigestHex: finalized.journalDigestHex };
+    },
+  );
   let withdrawal: WithdrawalCheck | undefined;
   let withdrawalCompletion: WithdrawalCompletion | undefined;
   const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {

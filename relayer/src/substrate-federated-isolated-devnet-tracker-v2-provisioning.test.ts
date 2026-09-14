@@ -3759,7 +3759,9 @@ async function exerciseTrackerV2Admission(
   const transportTarget = Object.freeze({ primaryNodeOrigin: frozenTarget.primaryNodeOrigin,
     witnessNodeOrigin: frozenTarget.witnessNodeOrigin, primaryMining: true as const, witnessReadOnly: true as const,
     checkpointBound: true as const, reservationFreshnessCheckBound: true as const,
-    trackerTransport: true as const, sameProcessCanonicalConfirmation: true as const });
+    trackerTransport: true as const, sameProcessCanonicalConfirmation: true as const,
+    candidateMiningRequiresExpectedTransaction: true as const,
+    expectedTransactionIdHex: checked.result.signedCandidate.txId });
   const transportBinding = Object.freeze({ processBindingDigestHex: '81'.repeat(32), executionTargetIdentityDigestHex: '82'.repeat(32),
     reservationFreshnessProcessBindingDigestHex: freshnessBinding.processBindingDigestHex,
     reservationFreshnessExecutionTargetIdentityDigestHex: freshnessBinding.executionTargetIdentityDigestHex });
