@@ -83,10 +83,11 @@ beforeEach(() => {
     return packet;
   });
   mocks.assertNativeObservation.mockImplementation((observation, target, batch, packet) => {
+    const assertedPacket = mocks.assertNativePacket(packet, batch, target);
     if (!mocks.targetActive) throw new Error('native target custody disposed');
     if (!mocks.nativeMaterials.some(value => value.observation === observation && value.packet === packet
       && value.batch === batch && value.target === target)) throw new Error('native observation provenance missing');
-    return packet;
+    return assertedPacket;
   });
   mocks.drafts = new WeakSet<object>();
   mocks.packet = packet();

@@ -121,10 +121,11 @@ beforeEach(() => {
     return packet;
   });
   mocks.assertNativeObservation.mockImplementation((observation, target, batch, packet) => {
+    const assertedPacket = mocks.assertNativePacket(packet, batch, target);
     if (observation !== NATIVE_OBSERVATION || target !== TARGET || batch !== NATIVE_BATCH || packet !== PACKET_V2) {
       throw new Error('native observation provenance missing');
     }
-    return packet;
+    return assertedPacket;
   });
   mocks.assertCommittedVaultForCandidateV2.mockImplementation((observation, batch, candidate, target) => {
     if (observation !== OBSERVATION || batch !== BATCH || candidate !== CANDIDATE_V2 || target !== TARGET) {

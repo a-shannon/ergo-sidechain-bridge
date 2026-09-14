@@ -37,12 +37,14 @@ export const PINNED_LOCAL_PEG_IN_CAUSAL_SOURCE_PROOF_RESULT_PRODUCER_V1_EXECUTIO
   'e2s.pinned-local-peg-in-causal-source-proof-result-producer-v1-execution-identity.v1' as const;
 
 export const EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256 =
+  'ddfc4a317d124401d3ebd491e1b62770229ce0d6f6adbd07b61f21910f599aa5';
+const EXPECTED_AUTHENTICATED_V2_COMPILER_CONSENSUS_SOURCE_LOCK_SHA256 =
   'ebc6f342f36e84a98dce6d7bd0930598850ff255f4e7d1850fa930163995ceb4';
 export const EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256 =
   '2480775ab0f14b3389a021e2645e0e082d81ebaaef3e797063fb14d18e67f189';
 const EXPECTED_FRONTIER_COMMIT = '75329a2df49e2cc7981485392c31160929d1bd48';
-const EXPECTED_FRONTIER_PATCH_SHA256 =
-  '9bcfe26d8e367c858f69bfafd58f47de726b95c8884ef7ef1b957bd766d5a68b';
+export const EXPECTED_FRONTIER_PATCH_SHA256 =
+  'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634';
 const BUILD_TIMEOUT_MS = 10 * 60_000;
 const MAX_BUILD_OUTPUT_BYTES = 1024 * 1024;
 const TOOL_VERSION_TIMEOUT_MS = 10_000;
@@ -1131,12 +1133,27 @@ function assertCanonicalSourceLocks(): void {
   if (sourceLockSha256 !== EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256) {
     throw new Error('canonical consensus source lock digest is not the pinned identity');
   }
+  const compilerSourceLockPath = resolve(
+    CANONICAL_BRIDGE_ROOT,
+    'sources',
+    'authenticated-v2-compiler-consensus-source-lock-v1.json',
+  );
+  const compilerSourceLockSha256 = fileSha256Hex(compilerSourceLockPath).slice(2);
+  if (
+    compilerSourceLockSha256
+    !== EXPECTED_AUTHENTICATED_V2_COMPILER_CONSENSUS_SOURCE_LOCK_SHA256
+  ) {
+    throw new Error('authenticated V2 compiler consensus source lock digest is not pinned');
+  }
   const compilerLock = parseJsonObject(resolve(
     CANONICAL_BRIDGE_ROOT,
     'sources',
     'authenticated-v2-compiler-lock.json',
   ));
-  if (compilerLock.consensusSourceLockSha256 !== EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256) {
+  if (
+    compilerLock.consensusSourceLockSha256
+    !== EXPECTED_AUTHENTICATED_V2_COMPILER_CONSENSUS_SOURCE_LOCK_SHA256
+  ) {
     throw new Error('authenticated V2 compiler lock does not bind the pinned consensus source lock');
   }
 }

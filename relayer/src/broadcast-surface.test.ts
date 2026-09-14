@@ -355,6 +355,8 @@ describe('broadcast surface isolation', () => {
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const managedSetupV2 =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-managed-setup-v2.ts';
+    const nativeRoundTripRoot =
+      'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
     const trackerCampaignV2 =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts';
     const trackerCheckWorkerFile =
@@ -486,12 +488,15 @@ describe('broadcast surface isolation', () => {
     expect(filesContainingIdentifier(sources, 'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3'))
       .toEqual([executionRoot, managedSetupV2]);
     expect(filesImporting(sources, 'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1'))
-      .toEqual([managedSetupV2]);
+      .toEqual([nativeRoundTripRoot, managedSetupV2]);
     for (const name of [
       'submitSubstrateFederatedIsolatedDevnetTrackerV2Admission',
       'finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission',
     ]) {
-      expect(filesImporting(sources, name)).toEqual([trackerCampaignV2]);
+      expect(filesImporting(sources, name)).toEqual([
+        nativeRoundTripRoot,
+        trackerCampaignV2,
+      ]);
     }
     expect(filesImporting(
       sources,

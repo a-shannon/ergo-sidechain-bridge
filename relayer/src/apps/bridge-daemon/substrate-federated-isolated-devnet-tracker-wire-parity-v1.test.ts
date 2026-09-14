@@ -1,5 +1,8 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
+} from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 
 // Transport-only fixture, following tracker-transport-attempt-v1.test.ts.
 // No real signer, process, authorization, durable journal, or check receipt is
@@ -16,6 +19,7 @@ const synthetic = vi.hoisted(() => {
     processBindingDigestHex: '41'.repeat(32),
     executionTargetIdentityDigestHex: '42'.repeat(32),
   });
+  const transactionIdHex = '0d'.repeat(32);
   const target = freeze({
     primaryNodeOrigin: 'http://127.0.0.1:9051',
     witnessNodeOrigin: 'http://127.0.0.1:9052',
@@ -25,10 +29,12 @@ const synthetic = vi.hoisted(() => {
     reservationFreshnessCheckBound: true,
     trackerTransport: true,
     sameProcessCanonicalConfirmation: true,
-  });
+    candidateMiningRequiresExpectedTransaction: true,
+    expectedTransactionIdHex: transactionIdHex,
+  } satisfies Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>);
   const signedCandidate = freeze({
     profile: 'synthetic-signed-candidate',
-    txId: '0d'.repeat(32),
+    txId: transactionIdHex,
     nodeOrigin: target.primaryNodeOrigin,
     signedTransactionDigestHex: '51'.repeat(32),
     signedTransactionBytesSha256Hex: '52'.repeat(32),

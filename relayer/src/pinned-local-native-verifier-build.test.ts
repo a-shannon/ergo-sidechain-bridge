@@ -28,7 +28,9 @@ import {
   canonicalizePinnedGeneratedJsonVectorBytes,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256,
+  EXPECTED_FRONTIER_PATCH_SHA256,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
+  preparePinnedLocalNativeVerifierBuild,
   runBoundedProcess,
   runBoundedNativeBuildProcess,
   terminateNativeBuildProcessTree,
@@ -302,6 +304,9 @@ describe('pinned local native verifier build conformance', () => {
       'authenticated-v2-compiler-consensus-source-lock-v1.json',
     );
     const currentSourceLock = JSON.parse(readFileSync(currentSourceLockPath, 'utf8')) as {
+      frontier: {
+        patchSha256: string;
+      };
       ergoNode: {
         baseCommit: string;
         patchSha256: string;
@@ -322,16 +327,50 @@ describe('pinned local native verifier build conformance', () => {
       ergoPatchedBlobIds: string[];
     };
 
-    expect(sha256(currentSourceLockPath)).not.toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
-    expect(sha256(historicalSourceLockPath)).toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
-    expect(compilerLock.consensusSourceLockSha256)
-      .toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
-    expect(currentSourceLock.ergoNode).toEqual(historicalSourceLock.ergoNode);
+    expect(sha256(currentSourceLockPath)).toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
+    expect(sha256(historicalSourceLockPath))
+      .toBe(compilerLock.consensusSourceLockSha256);
+    expect(sha256(historicalSourceLockPath)).not.toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
+    expect(currentSourceLock.frontier.patchSha256)
+      .toBe(EXPECTED_FRONTIER_PATCH_SHA256);
+    expect(currentSourceLock.ergoNode.baseCommit)
+      .toBe(historicalSourceLock.ergoNode.baseCommit);
+    expect(currentSourceLock.ergoNode.patchSha256)
+      .not.toBe(historicalSourceLock.ergoNode.patchSha256);
+    expect(currentSourceLock.ergoNode.files.map(file => file.patchedBlob).sort())
+      .not.toEqual(historicalSourceLock.ergoNode.files.map(file => file.patchedBlob).sort());
     expect(historicalSourceLock.ergoNode.baseCommit).toBe(compilerLock.ergoNodeBaseCommit);
     expect(historicalSourceLock.ergoNode.patchSha256).toBe(compilerLock.ergoPatchSha256);
     expect(historicalSourceLock.ergoNode.files.map(file => file.patchedBlob).sort())
       .toEqual([...compilerLock.ergoPatchedBlobIds].sort());
     expect(sha256(toolchainLockPath)).toBe(EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256);
+  });
+
+  it('admits the exact current and compiler source locks before checking caller paths', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'pinned-local-native-verifier-input-'));
+    const missing = resolve(parent, 'missing');
+    try {
+      let failure: unknown;
+      try {
+        await preparePinnedLocalNativeVerifierBuild({
+          frontierSourcePath: missing,
+          cargoExecutablePath: missing,
+          rustcExecutablePath: missing,
+          gitExecutablePath: missing,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as NodeJS.ErrnoException).code).toBe('ENOENT');
+      expect((failure as Error).message)
+        .not.toContain('canonical consensus source lock digest is not the pinned identity');
+      expect((failure as Error).message)
+        .not.toContain('authenticated V2 compiler consensus source lock digest is not pinned');
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   it('accepts only the exact pinned platform tool identities', () => {

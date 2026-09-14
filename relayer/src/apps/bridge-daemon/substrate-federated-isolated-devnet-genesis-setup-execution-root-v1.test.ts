@@ -49,6 +49,9 @@ import {
 import {
   createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
 } from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
+import type {
+  SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
+} from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 
 const mocked = vi.hoisted(() => ({
   build: vi.fn(),
@@ -8202,7 +8205,9 @@ function trackerTransportTarget() {
     reservationFreshnessCheckBound: true,
     trackerTransport: true,
     sameProcessCanonicalConfirmation: true,
-  } as const;
+    candidateMiningRequiresExpectedTransaction: true,
+    expectedTransactionIdHex: digest('c'),
+  } satisfies Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>;
 }
 
 function rootInput() {
