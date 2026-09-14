@@ -8,6 +8,9 @@ import {
   assertSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
   createSubstrateFederatedIsolatedDevnetTrackerTransportResponseClassificationV1,
 } from '../../adapters/substrate-federated-isolated-devnet-tracker-transport-response-v1.js';
+import type {
+  SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
+} from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 
 const fixture = vi.hoisted(() => ({
   target: Object.freeze({
@@ -19,7 +22,9 @@ const fixture = vi.hoisted(() => ({
     reservationFreshnessCheckBound: true,
     trackerTransport: true,
     sameProcessCanonicalConfirmation: true,
-  }),
+    candidateMiningRequiresExpectedTransaction: true,
+    expectedTransactionIdHex: '0d'.repeat(32),
+  }) satisfies Readonly<SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2>,
   processBindingDigestHex: '41'.repeat(32),
   executionTargetIdentityDigestHex: '42'.repeat(32),
   trackerInputBoxIdHex: '0c'.repeat(32),
@@ -324,7 +329,7 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
 
       const submission =
         await submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
-          target: fixture.target as any,
+          target: fixture.target,
           executionCheck: syntheticExecutionCheck,
           authorization,
           journal,
@@ -360,7 +365,7 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
 
       const submission =
         await submitSubstrateFederatedIsolatedDevnetTrackerCheckedTransportV1({
-          target: fixture.target as any,
+          target: fixture.target,
           executionCheck: syntheticExecutionCheck,
           authorization,
           journal,
@@ -396,7 +401,7 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetTrackerTransportAuthorizationV1(
           structuredClone(authorization),
-          fixture.target as any,
+          fixture.target,
           syntheticExecutionCheck,
         )
       ).toThrow(/lacks exact provenance|binding changed/);
@@ -748,7 +753,7 @@ describe('isolated tracker transport authorization and durable attempt V1', () =
 function authorize() {
   return authorizeSubstrateFederatedIsolatedDevnetTrackerTransportV1({
     executionCheck: syntheticExecutionCheck,
-    target: fixture.target as any,
+    target: fixture.target,
     durableReservation: syntheticDurableReservation,
   });
 }
@@ -766,7 +771,7 @@ function preflightBinding(
   authorization: ReturnType<typeof authorize>,
 ) {
   return {
-    target: fixture.target as any,
+    target: fixture.target,
     executionCheck: syntheticExecutionCheck,
     authorization,
     journal,
