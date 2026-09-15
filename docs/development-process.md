@@ -189,10 +189,39 @@ campaign custody, exact authorization, fresh state and terminal-attempt holds.
 
 ## Keep The Queue Small
 
-The execution plan contains current state, blockers, the dependency graph and
-the next few executable batches. Move completed specifications to a linked
-checkpoint archive without deleting obligations or evidence limits. Old next
-actions do not become a second queue.
+Use an adaptive plan with a short planning horizon. The execution plan remains
+the only queue and distinguishes three things:
+
+- Fixed delivery obligations: the accepted objective, trust model, security
+  invariants, authorization boundaries and required evidence for each claim.
+- Now: one selected medium batch or bounded decision, with its executable
+  result, deciding check, owned paths and stop condition. Record those details
+  in the plan or its existing task handoff, not a new tracking system.
+- Next and later: candidate outcomes and their dependencies. Keep near-term
+  candidates concise and leave distant implementation details undecided.
+
+At a coherent checkpoint, an assumption disproved by evidence, or a material
+dependency change, compare the remaining candidates with the accepted result.
+Continue, split, reorder or replace the approach according to the cheapest
+decisive check or useful consumer. Record the reason and the next stop rule in
+a few lines. Do not rebuild the entire plan or reopen settled decisions after
+each edit. Routine implementation findings need no new user confirmation;
+a change to the user's objective, accepted trust model or permissions does.
+
+Keep one integration lane. A disproved approach ends with its evidence and
+explicit unresolved obligations, never a false completion claim. Preserve
+dirty work and terminal holds when changing direction. A revised schedule
+cannot waive a required gate, relax a protocol predicate, authorize an external
+action or invalidate unchanged green evidence. Freeze exact inputs for each
+due test, review and promotion, even while later delivery choices remain open.
+
+The dependency graph expresses prerequisites, not a compulsory sequence of
+commits. Prepare independent consumers in parallel where useful. Stop refining
+a batch when its acceptance contract is met; stop an inconclusive experiment
+at its declared bound and name what could justify further effort.
+
+Move completed specifications to a linked checkpoint archive without deleting
+obligations or evidence limits. Old next actions do not become a second queue.
 
 Keep one short active handoff per investigation; link preserved predecessors.
 Update it at deciding milestones, not after every command. Separate maintenance

@@ -10,8 +10,8 @@ Apply the [development process](../docs/development-process.md) on every
 continuation. Judge progress by executable consumers and confirmed lifecycle
 milestones, not the number of intermediate versions.
 
-The first delivery targets a **new greenfield sidechain**. Read Delivery
-Contract, Critical Path and Next Executable Batches for current work; the
+The first delivery targets a **new greenfield sidechain**. Read Current Focus,
+Delivery Contract, Critical Path and Next Executable Batches for current work; the
 completed implementation and reference checkpoints below retain scoped
 historical evidence. The [September 15 plan review](../docs/plan-review-2026-09-15.md)
 explains the revised sequence and is not a second execution queue.
@@ -20,6 +20,29 @@ The [execution history](bridge-execution-history-2026-09-05.md) retains the
 previous package specifications, decisions and checkpoint records. Its old
 "next" actions are historical, not a second queue. Use those specifications
 when their exact boundary is reached; do not discard their safety obligations.
+
+## Current Focus
+
+Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-small):
+the delivery obligations remain binding, while future batch order and
+implementation choices are provisional. Only the current result is detailed.
+
+**Now:** close two decisions from existing source and evidence: the supported
+greenfield environment and the FED evidence-to-validator mapping. Both remain
+open. The result must name supported and unestablished behavior, reusable
+consumers, required adaptations and their deciding checks. If a source
+inspection cannot decide a question, select one bounded discriminating check;
+do not turn it into an unrestricted investigation or a stronger support claim.
+
+**Next candidate:** consume the first cycle's reserve/DUP/tracker successors
+in a second normal cycle. Reassess the smallest useful join after the two
+decisions above; prepare the operator invocation alongside it only where the
+work is independent and serves the same delivery result.
+
+**Replan when:** a batch closes, a deciding assumption fails, or a dependency
+changes. Record what was learned and why the next result changed. Preserve the
+greenfield choice, evidence limits and safety obligations below; a future
+change of approach does not close an unmet obligation.
 
 ## Delivery Contract
 
@@ -281,34 +304,21 @@ target is explicitly selected. Their formats and safety obligations remain
 binding on that route. Cross-profile rejection, durable input holds and global
 replay isolation remain required for greenfield operation.
 
-```text
-frozen foundations + selected launch mode + fresh-owner application execution
-  -> exact tracker transport and canonical admission [local campaign passed]
-  -> burn/checkpoint binding + profile-bound DUP insertion + external-fee payout [local campaign passed]
-  -> typed FED genesis + compiled federation [native first-block checks passed]
-  -> exact WASM/node selection + typed loader [local node tests passed]
-  -> typed chain-spec producer + real node materialization [local check passed]
-  -> typed FED process owner + matching genesis storage [configured nodes passed]
-  -> fresh custody + observed Ergo family + exact running-target binding [local campaign passed]
-  -> operational FED mint caller through the selected runtime admission consumer [local campaign passed]
-  -> same-target native burn/checkpoint and Ergo payout [local campaign passed]
-  -> FED acceptance-consumer map + exact supported environment
-  -> second normal cycle consuming the first cycle's live successors
-  -> composed recovery on accumulated state + cross-profile rejection
-  -> reproducible operator entry point + exact target/custody rehearsal
-  -> profile-correct evidence + fresh external integration + final independent assurance
-  -> FED-7 federated reference package
+Campaign 23 supplies the first local roundtrip baseline. The current dependency
+hypothesis is: resolve acceptance/environment questions, connect normal
+successor use, then exercise recovery on accumulated state. Operator packaging
+and reviewer preparation can proceed alongside independent implementation.
+Adapt the batch sequence when evidence changes that hypothesis. FED-7 still
+requires all applicable lifecycle, recovery, reproducibility, custody and
+independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
-separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
-```
-
-| Order | Boundary | Next concrete action | Completion evidence / blocker |
+| Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
 | **Now** | Local first cycle -> explicit FED delivery acceptance | Map the selected profile to its evidence producers and final validators; fix one supported build/runtime environment and identify the node/miner integration needed by it | The existing Gate 3 contract names `authenticated-external-fee-v1`; do not relabel FED evidence or defer this mismatch until final review. Patched local execution does not establish unmodified-node or public-network compatibility |
-| 2 | First-cycle successors -> another normal operation | Connect observed reserve, DUP and tracker successors to the next deposit, mint, burn, checkpoint and payout on the same greenfield chain | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
-| 3 | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
-| 4 | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
-| 5 | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
+| Next candidate | First-cycle successors -> another normal operation | Connect observed reserve, DUP and tracker successors to the next deposit, mint, burn, checkpoint and payout on the same greenfield chain | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
+| Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
+| Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
+| Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
 Campaigns through 23 are terminal. The next full local campaign must exercise
 the changed successor consumer through the reusable invocation. Add ready
@@ -320,6 +330,12 @@ frozen anchor. Preserve all formats, domains, quorum thresholds and
 key-destruction rules.
 
 ## Next Executable Batches
+
+These are candidate outcomes with acceptance criteria, not a fixed schedule or
+precommitted file list. Select and detail one at a deciding checkpoint. A new
+result may change the approach or order; it cannot remove a delivery obligation
+or its required evidence. Keep batch decisions in Current Focus and the
+existing task handoff.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
@@ -924,7 +940,8 @@ remain binding. V149 remains terminal and must not be retried or inspected.
 
 1. Read this queue, Git status and the current task-owned handoff. Preserve
    unrelated changes; do not restart discovery from the full history.
-2. Select one independently testable producer-to-consumer boundary, normally
+2. Reassess Current Focus only at a deciding checkpoint, a refuted assumption
+   or a changed dependency. Select one independently testable producer-to-consumer boundary, normally
    one to four source files plus direct tests. Name the invariant, expected
    discriminator, owned paths and validation closure before editing.
 3. Use the cheapest decisive check first. For the withdrawal boundary,
