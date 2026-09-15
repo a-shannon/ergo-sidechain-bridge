@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-14
+Updated: 2026-09-15
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -9,6 +9,12 @@ can use as the engineering base for its own Ergo-settled sidechain.
 Apply the [development process](../docs/development-process.md) on every
 continuation. Judge progress by executable consumers and confirmed lifecycle
 milestones, not the number of intermediate versions.
+
+The first delivery targets a **new greenfield sidechain**. Read Delivery
+Contract, Critical Path and Next Executable Batches for current work; the
+completed implementation and reference checkpoints below retain scoped
+historical evidence. The [September 15 plan review](../docs/plan-review-2026-09-15.md)
+explains the revised sequence and is not a second execution queue.
 
 The [execution history](bridge-execution-history-2026-09-05.md) retains the
 previous package specifications, decisions and checkpoint records. Its old
@@ -28,6 +34,10 @@ Public research-alpha availability, local simulations and green CI do not
 establish deployment safety or independent operator custody.
 
 ## Verified Baseline
+
+The entries retain their original evidence scope. Campaign 23 is the latest
+complete local lifecycle below; older statements about missing mint or payout
+describe their respective checkpoints, not the current implementation.
 
 - Integration source baseline: `907e8c8deca5ed51e2c647d9d0b75a3c7e36beb9`.
   Its tree is identical to the preceding green integration
@@ -262,11 +272,14 @@ establish deployment safety or independent operator custody.
 
 ## Critical Path
 
-Choose **greenfield or migration** for one exact target before provisioning.
-Both require authenticated history and exact authority/replay lineage. A
-greenfield launch needs the reviewed non-instantiation baseline and derived
-empty replay root; a migration needs paid-burn import and closure of every
-legacy authority. Neither a fresh DB nor an empty UTXO view proves greenfield.
+The selected first delivery is **greenfield**. It requires authenticated
+history, the reviewed non-instantiation baseline, exact authority lineage and
+the derived empty replay root. Account for every legacy-route requirement as
+not instantiated; neither a fresh DB nor an empty UTXO view proves greenfield.
+Migration import and retirement execution are deferred until an existing
+target is explicitly selected. Their formats and safety obligations remain
+binding on that route. Cross-profile rejection, durable input holds and global
+replay isolation remain required for greenfield operation.
 
 ```text
 frozen foundations + selected launch mode + fresh-owner application execution
@@ -279,9 +292,11 @@ frozen foundations + selected launch mode + fresh-owner application execution
   -> fresh custody + observed Ergo family + exact running-target binding [local campaign passed]
   -> operational FED mint caller through the selected runtime admission consumer [local campaign passed]
   -> same-target native burn/checkpoint and Ergo payout [local campaign passed]
-  -> composed two-way recovery and cross-profile replay cutover
-  -> exact target/custody activation and operational rehearsal
-  -> profile-correct evidence + final independent assurance
+  -> FED acceptance-consumer map + exact supported environment
+  -> second normal cycle consuming the first cycle's live successors
+  -> composed recovery on accumulated state + cross-profile rejection
+  -> reproducible operator entry point + exact target/custody rehearsal
+  -> profile-correct evidence + fresh external integration + final independent assurance
   -> FED-7 federated reference package
 
 separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
@@ -289,12 +304,43 @@ separate upgrade: activated Ergo verifier -> WP-06-STARK -> Gate 5
 
 | Order | Boundary | Next concrete action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Completed local roundtrip -> reproducible FED package and recovery evidence | Freeze the Campaign 23 evidence and prepare the operator-facing package, then exercise the composed two-way recovery and cross-profile replay cutover on their exact inputs | Campaign 23 completed the same-session native burn, checkpoint, exact tracker inclusion and canonical payout. Campaigns through 23 are terminal and must not be replayed. Preserve the federated trust boundary and all production, public-network, source-finality and trustless nonclaims |
-| 2 | Both value paths -> recovery | Exercise the selected FED identities through restart, DB loss/rollback, divergent RPC, out-of-order events and reorgs; close the exact target's replay cutover | Recovery holds remain non-authorizing; no repeated mint/payout, no reconstructed funds authority and no restoration of retired legacy paths |
-| 3 | Local reference -> target operation | Complete exact non-mainnet target, role custody, approval, key-loss/rotation and alert/recovery rehearsal | Local actor simulation remains useful but does not prove independent custody. A missing external participant blocks only that operational claim, not local engineering |
-| 4 | Working FED profile -> FED-7 | Bind the completed lifecycle to its own evidence producer/validator, clean checkout and final independent review | No relabelling of legacy `authenticated-external-fee-v1` evidence as FED. Close every claim-relevant blocker before supported release |
+| **Now** | Local first cycle -> explicit FED delivery acceptance | Map the selected profile to its evidence producers and final validators; fix one supported build/runtime environment and identify the node/miner integration needed by it | The existing Gate 3 contract names `authenticated-external-fee-v1`; do not relabel FED evidence or defer this mismatch until final review. Patched local execution does not establish unmodified-node or public-network compatibility |
+| 2 | First-cycle successors -> another normal operation | Connect observed reserve, DUP and tracker successors to the next deposit, mint, burn, checkpoint and payout on the same greenfield chain | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
+| 3 | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
+| 4 | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
+| 5 | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
+
+Campaigns through 23 are terminal. The next full local campaign must exercise
+the changed successor consumer through the reusable invocation. Add ready
+recovery cases when they share that evidence closure; do not wait for the
+entire recovery matrix when a live second-cycle result decides further work.
+Create a fresh chain and custody, perform both cycles there, and never resume
+Campaign 23. Prepare the two external fee inputs before each corresponding
+frozen anchor. Preserve all formats, domains, quorum thresholds and
+key-destruction rules.
 
 ## Next Executable Batches
+
+| Batch | Completion contract | Cheapest deciding check |
+|---|---|---|
+| FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
+| Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation | Focused composed positives and isolated replay, foreign-profile, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
+| FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
+| Reproducible operator delivery | A fresh external context can use repository instructions and the packaged entry point without campaign-specific maintainer scripts | Separate-root exact source/tool/runtime checks, then one distinguishing packaged lifecycle/recovery rehearsal. Reuse the historical campaign only as evidence, never as an execution session |
+| FED-7 decision | Exact evidence reaches the proper release consumer, with due independent review and current promotion checks | Reuse unchanged gates. Keep public research availability, reference support, independent custody and production claims distinct |
+
+Prepare the operator entry point and reviewer onboarding alongside successor
+work where file ownership is disjoint. Packaging is complete only after it
+consumes the working lifecycle and recovery path. Measure the selected path's
+transaction sizes, fees, confirmation latency and resource requirements for
+its documented limits. Broader batching, sharded lanes and comparative scaling
+remain later milestones of the ultimate objective, reopened after the
+reproducible single-lane lifecycle is closed or a measured limit requires them.
+
+## Completed Implementation Batches
+
+The following rows and detailed narratives retain the original checkpoint
+scope. Their historical "next" statements are not executable instructions.
 
 | Batch | Owner / dependency | Completion contract |
 |---|---|---|

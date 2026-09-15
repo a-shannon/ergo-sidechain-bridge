@@ -5,25 +5,27 @@ sidechain on Ergo.
 
 > **Status:** public research alpha, not an operational two-way release.
 > The active delivery target is an explicitly federated reference that works
-> without EIP-0045. The isolated local campaign has completed tracker admission
-> and an Ergo withdrawal, including reserve and replay-state updates with
-> separately funded miner fees. Its source mint uses a LAB/TestClient route;
-> operational mint and composed two-way recovery remain open. The separate
+> without EIP-0045. Campaign 23 completed one isolated local native round trip:
+> Ergo deposit, sidechain mint, approval and burn, runtime commitment,
+> federated checkpoint, tracker admission and Ergo payout, with separately
+> funded miner fees. Repeated operation from successor state, composed recovery
+> and a reproducible operator package remain open. The separate
 > trustless upgrade requires
 > an activated Ergo-verifiable profile and full Gate 5 acceptance. Neither
 > public source availability nor green CI supports production or mainnet use.
 
 ## Latest Milestone
 
-The local withdrawal campaign now carries a sidechain burn through checkpoint
-admission to a confirmed Ergo payout. Both local Ergo nodes agreed on the
-payout, remaining reserve and replay-protection successor. Miner fees come
-from separate funding, so the payout does not spend the backing of remaining
-sERG to pay transaction fees.
+Campaign 23 completed the native two-way path in one disposable custody
+session. Both local Ergo nodes agreed on the payout, remaining reserve and
+replay-protection successor. Miner fees came from separate funding, so the
+payout did not spend the backing of remaining sERG to pay transaction fees.
 
 This is progress toward an EVM-compatible sidechain that uses Ergo for
-settlement, under an explicit federated trust model. The next delivery step is
-operational mint integration, followed by composed two-way recovery. The
+settlement, under an explicit federated trust model. The first delivery targets
+a newly initialized sidechain. The next runtime step is a second cycle on the
+same chain, consuming the first cycle's successor state, followed by composed
+recovery and independent reproduction from the packaged entry point. The
 [execution plan](phases/bridge-execution-plan.md#verified-baseline) records the
 exact local campaign and its limits; this milestone is not a supported release.
 
