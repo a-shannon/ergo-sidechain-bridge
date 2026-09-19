@@ -28,8 +28,8 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** compose both component cycles under the retained native owner in the
-root before a fresh two-cycle campaign. The second
+**Now:** provide the minimal repository invocation for the composed two-cycle
+root, then run one fresh complete campaign. The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
 payout and both replay histories. Confirm both new external fee inputs before
@@ -53,7 +53,7 @@ attempts still block replacement. Composed tests use real compilers, AVL
 witnesses, WASM signatures and these consumers against explicit node/process and
 funding-discovery doubles. They cover copied or foreign evidence, consumed evidence,
 target/custody loss and an ambiguous response without resubmission. The second
-payout component is connected below; the current root still executes one cycle.
+payout component and its root consumer are connected below.
 
 The original second-deposit evidence now feeds an explicit source-attestation
 operation and the actual continuation reservation, mint and burn callers after
@@ -77,7 +77,8 @@ journals and transports confirm two fee transactions per purpose without changin
 the first rows. Composed tests reach both new fee outputs and native checkpoint
 eight in the retained session, and reject copied checks, foreign targets, spent
 sources, custody loss and ambiguous resubmission. The old one-shot APIs remain
-unchanged. These tests use simulated RPCs; root composition remains open.
+unchanged. These tests use simulated RPCs; the root composition below connects
+their consumers.
 
 The continuation tracker constructor now retains its exact parent context and
 compiler identities, reproduces the nonempty AVL history, and inserts the new
@@ -89,7 +90,8 @@ through the existing tracker consumers, preserving the first journal row and
 both AVL entries. The old confirmation and frozen-check targets expire before
 their successor actions; original read custody remains live. Node/process and
 initial-vault observations in this test are explicit doubles. This establishes
-the component join, not sequential process support or a two-cycle node campaign.
+the component join. Separate process tests below establish sequential scopes;
+a complete two-cycle node campaign remains pending.
 
 The terminal continuation payout now selects the second committed reserve,
 the first payout's exact DUP successor, the second withdrawal fee and the
@@ -119,16 +121,21 @@ test completes both process cycles without transaction submission; composed
 tests separately exercise the actual fee and setup-authority producers. This
 does not establish the full two-cycle bridge lifecycle.
 
-The root now retains one native process session through its Ergo return. The
+The root now retains one native process session through both Ergo returns. The
 same genuine native target stays continuously registered between serialized
 actions; copied targets, overlap, use after close and process loss fail closed.
 Close revokes the target before teardown and joins the existing process owner's
 cleanup. The root awaits the final receipt and closes every retained owner even
 when execution or cleanup fails. The legacy callback API remains scoped to one
-action. Lifecycle and root tests cover this ownership join with explicit process
-and downstream doubles; the root still executes one cycle. Next connect the existing
-second deposit, source proof, native reservation/mint/burn, funded fees,
-checkpoint, tracker and payout consumers under that retained owner.
+action. The first payout retains signing custody for the second deposit,
+source proof, native reservation/mint/burn and both confirmed external fees.
+The root leaves the first confirmation callback, stops mining and captures the
+new final snapshot before starting the next checkpoint scope. The second tracker
+consumes the first tracker context and successor; the terminal withdrawal check
+destroys the signer. Both confirmed returns and completed teardown precede a
+two-cycle success result. Root tests cover ordering, held attempts, custody loss,
+canonical confirmation fields and cleanup with explicit downstream and process
+doubles. They do not establish two-cycle node acceptance.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -140,7 +147,7 @@ leaf; formats, domains and quorum are unchanged. The focused native fault matrix
 retains an explicit second-packet/observation/ancestry double with real codecs,
 source signatures, operator signing and execution consumers; the separate
 withdrawal composition exercises the real second-deposit producers.
-The root still runs one cycle; no second complete cycle has run on nodes.
+The root connects these consumers; no second complete cycle has run on nodes.
 
 The source-quorum join is implemented: individual mint/checkpoint operations
 share retained federation custody and keep the original live target, genesis
@@ -197,16 +204,17 @@ independent custody are unestablished. No public-network rehearsal is selected.
 The final FED discriminator and report schema are selected with their actual
 consumer; a gate-wide refactor is not a prerequisite for successor work.
 
-**Next candidate:** consume the first cycle's reserve/DUP/tracker successors
-in a second normal cycle. A focused component join can use the pinned local
-profile while unrelated release mapping remains open. Reassess the smallest
-useful join as the deciding evidence arrives; prepare the invocation where the
-work is independent and serves the same delivery result.
+**Next candidate:** exercise both cycles through one repository-owned command
+with an exact clean candidate, pinned runtime and tools, a fresh one-shot
+attempt directory and contained process cleanup. The command consumes the
+existing root and builders; it does not introduce new protocol or recovery
+authority. Reassess recovery against the accumulated state after this deciding
+run, while independent operator documentation and release mapping continue.
 
 The source-quorum, native operator operations and explicitly retained setup
-signer now have separate continuation boundaries. A second complete cycle still
-needs tracker/payout successor consumers and
-root composition. Do not clear consumed flags, reopen a closed signer, recreate
+signer now have separate continuation boundaries connected to the second
+tracker/payout consumers in the root. Their complete real-node execution is
+still pending. Do not clear consumed flags, reopen a closed signer, recreate
 destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
 validate the new operation boundary with focused duplicate, disposed-custody,
 foreign-operation and wrong-parent negatives before composing another cycle.
@@ -489,9 +497,8 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Scoped Ergo cycles -> retained native owner and one root | Keep the exact native target continuously live through both returns, then connect the existing second-cycle consumers | Leave the first Ergo confirmation callback before the next checkpoint; serialize native actions, await teardown, preserve read custody and consumed handles, and never revive an expired target |
-| Next candidate | Two-cycle root -> fresh chain | Keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; do not reset genesis, substitute historical custody, reuse ambiguous attempts or repeat an equivalent one-cycle campaign |
-| Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
+| **Now** | Two-cycle root -> fresh chain | Provide a minimal repository invocation, keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse ambiguous attempts |
+| Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 

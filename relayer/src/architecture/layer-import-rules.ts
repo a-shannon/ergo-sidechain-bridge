@@ -291,7 +291,10 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2', 'assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2',
   ])],
   ['bridge-validity-tracker-header-context-v1.ts', new Set(['buildBridgeValidityTrackerObservedHeaderContextV1'])],
-  ['substrate-federated-tracker-v2.ts', new Set(['buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context'])],
+  ['substrate-federated-tracker-v2.ts', new Set([
+    'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context',
+    'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext',
+  ])],
   ['substrate-federated-tracker-v2-external-fee.ts', new Set(['buildSubstrateFederatedTrackerV2ExternalFeeTransaction'])],
   ['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts', new Set([
     'authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission', 'reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission',
@@ -331,7 +334,9 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
     'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2',
     'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
+    'assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1',
     'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2',
+    'SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1',
   ])],
   ['substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.ts', new Set([
     'discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1',
@@ -356,7 +361,10 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'SubstrateFederatedNativeGenesisSourceAttestationOperationV1',
   ])],
   ['substrate-federated-observed-genesis-v1.ts', new Set(['compileObservedSubstrateFederatedGenesisV1', 'ObservedSubstrateFederatedGenesisV1'])],
-  ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInPacketV1'])],
+  ['substrate-federated-isolated-devnet-peg-in-candidate-v2.ts', new Set([
+    'buildSubstrateFederatedNativeGenesisPegInPacketV1',
+    'buildSubstrateFederatedNativeContinuationPegInPacketV1',
+  ])],
   ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
   ['substrate-federated-isolated-devnet-committed-reserve-evidence-v1.ts', new Set(['collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'])],
 ]);
@@ -374,6 +382,8 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', new Set([
     'executeSubstrateFederatedNativeGenesisBatchV1', 'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
     'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
+    'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
+    'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
     'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1',
     'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1', 'waitForCanonicalConfirmation',
     'projectTrackerCanonicalConfirmationFailureDiagnosticV1',
@@ -3071,6 +3081,17 @@ function collectCapabilityRestrictedLayerViolations(
           REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS.has(file)
           && ((ts.isTypeQueryNode(node.parent) && node.parent.exprName === node)
             || (ts.isTypeReferenceNode(node.parent) && node.parent.typeName === node));
+        const isReviewedNativeReturnTypeQuery = file === FEDERATED_GENESIS_TARGET_ROOT
+          && ts.isTypeQueryNode(node.parent) && node.parent.exprName === node
+          && ((restricted.moduleSpecifier === './frontier-native-proof-bound-reservation-signing-v1.js'
+              && restricted.binding === 'executeFrontierNativeProofBoundReservationMintAndBurnV1')
+            || (restricted.moduleSpecifier === '../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js'
+              && ['authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2',
+                'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2',
+                'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2'].includes(restricted.binding))
+            || (restricted.moduleSpecifier === '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js'
+              && ['submitSubstrateFederatedIsolatedDevnetWithdrawalV2',
+                'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'].includes(restricted.binding)));
         if (
           !isReviewedEcdhCall
           && !isReviewedCryptoFactoryCall
@@ -3078,6 +3099,7 @@ function collectCapabilityRestrictedLayerViolations(
           && !isReviewedStateTrackerConstruction
           && !isReviewedReadOnlyValue
           && !isReviewedErasedTypeReference
+          && !isReviewedNativeReturnTypeQuery
         ) {
           addViolation(
             node,

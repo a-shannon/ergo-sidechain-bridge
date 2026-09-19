@@ -8,18 +8,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // root control flow, journal ownership, box codecs and bounded FED RPC decoding stay real.
 // Downstream deposit, burn, checkpoint, tracker and payout are component doubles, not crypto evidence.
 const mocked = vi.hoisted(() => ({
-  frontier: vi.fn(), ergoBuild: vi.fn(), process: vi.fn(), owned: vi.fn(),
+  frontier: vi.fn(), ergoBuild: vi.fn(), process: vi.fn(), owned: vi.fn(), readOnlyOwned: vi.fn(),
   discover: vi.fn(), history: vi.fn(), compile: vi.fn(), materialize: vi.fn(),
   pin: vi.fn(), nodes: vi.fn(), environment: vi.fn(),
   check: vi.fn(), batch: vi.fn(), execute: vi.fn(), source: vi.fn(), confirmation: vi.fn(),
-  frontierOwned: vi.fn(), fundingOwned: vi.fn(), packet: vi.fn(), sourceLock: vi.fn(), committedVault: vi.fn(),
-  draft: vi.fn(), evidence: vi.fn(), proof: vi.fn(), mint: vi.fn(),
-  nativeRead: vi.fn(), withdrawalFeeCheck: vi.fn(), trackerFeeCheck: vi.fn(), withdrawalFee: vi.fn(), trackerFee: vi.fn(),
+  frontierOwned: vi.fn(), fundingOwned: vi.fn(), packet: vi.fn(), continuationPacket: vi.fn(),
+  sourceLock: vi.fn(), committedVault: vi.fn(), continuationSourceLock: vi.fn(), continuationVault: vi.fn(),
+  draft: vi.fn(), evidence: vi.fn(), proof: vi.fn(), mint: vi.fn(), continuationReservation: vi.fn(), continuationMintBurn: vi.fn(),
+  nativeRead: vi.fn(), withdrawalFeeCheck: vi.fn(), trackerFeeCheck: vi.fn(), continuationWithdrawalFeeCheck: vi.fn(),
+  continuationTrackerFeeCheck: vi.fn(), withdrawalFee: vi.fn(), trackerFee: vi.fn(), miningAuthority: vi.fn(),
   checkpoint: vi.fn(), checkpointAssert: vi.fn(), anchor: vi.fn(), anchorAssert: vi.fn(), frozenObservation: vi.fn(), observationAssert: vi.fn(),
-  headers: vi.fn(), context: vi.fn(), trackerTx: vi.fn(), trackerCheck: vi.fn(), trackerAuthorize: vi.fn(), trackerReserve: vi.fn(),
+  headers: vi.fn(), context: vi.fn(), continuationContext: vi.fn(), trackerTx: vi.fn(), trackerCheck: vi.fn(),
+  continuationTrackerCheck: vi.fn(), trackerAuthorize: vi.fn(), trackerReserve: vi.fn(),
   trackerFreshness: vi.fn(), trackerSubmit: vi.fn(), trackerFinalize: vi.fn(), trackerConfirm: vi.fn(),
   projectConfirmation: vi.fn(), projectSubmission: vi.fn(), projectProgress: vi.fn(),
-  payoutCheck: vi.fn(), payoutAuthorize: vi.fn(), payoutReserve: vi.fn(), payoutSubmit: vi.fn(), payoutFinalize: vi.fn(), payoutConfirm: vi.fn(), wait: vi.fn(),
+  payoutCheck: vi.fn(), continuationPayoutCheck: vi.fn(), payoutAuthorize: vi.fn(), payoutReserve: vi.fn(),
+  payoutSubmit: vi.fn(), payoutFinalize: vi.fn(), payoutConfirm: vi.fn(), wait: vi.fn(),
 }));
 vi.mock('../../substrate-federated-genesis-node-build-v1.js', () => ({ buildSubstrateFederatedGenesisNodeV1: mocked.frontier }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () => ({ buildSubstrateFederatedIsolatedDevnetErgoNodeV1: mocked.ergoBuild }));
@@ -27,6 +31,7 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', asy
   ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js')>(),
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2: mocked.process,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: mocked.owned,
+  assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1: mocked.readOnlyOwned,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
   discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1: mocked.discover,
@@ -51,6 +56,8 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
   executeSubstrateFederatedNativeGenesisBatchV1: mocked.execute,
   executeSubstrateFederatedNativeGenesisPegInSourceLockV1: mocked.sourceLock,
   executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1: mocked.committedVault,
+  executeSubstrateFederatedNativeContinuationPegInSourceLockV1: mocked.continuationSourceLock,
+  executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1: mocked.continuationVault,
   executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1: mocked.withdrawalFee,
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1: mocked.trackerFee,
   waitForCanonicalConfirmation: mocked.wait,
@@ -58,6 +65,7 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
 }));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   buildSubstrateFederatedNativeGenesisPegInPacketV1: mocked.packet,
+  buildSubstrateFederatedNativeContinuationPegInPacketV1: mocked.continuationPacket,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', async importOriginal => ({
   ...await importOriginal<typeof import('../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js')>(),
@@ -69,6 +77,8 @@ vi.mock('../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1
 }));
 vi.mock('./frontier-native-proof-bound-reservation-signing-v1.js', () => ({
   executeFrontierNativeProofBoundReservationMintAndBurnV1: mocked.mint,
+  executeFrontierNativeProofBoundContinuationReservationV1: mocked.continuationReservation,
+  executeFrontierNativeProofBoundContinuationMintAndBurnV1: mocked.continuationMintBurn,
   attestFrontierNativeBurnCheckpointV1: mocked.checkpoint,
   assertFrontierNativeBurnCheckpointV1: mocked.checkpointAssert,
 }));
@@ -94,7 +104,10 @@ vi.mock('../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1
   assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2: mocked.observationAssert,
 }));
 vi.mock('../../bridge-validity-tracker-header-context-v1.js', () => ({ buildBridgeValidityTrackerObservedHeaderContextV1: mocked.headers }));
-vi.mock('../../substrate-federated-tracker-v2.js', () => ({ buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context: mocked.context }));
+vi.mock('../../substrate-federated-tracker-v2.js', () => ({
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context: mocked.context,
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext: mocked.continuationContext,
+}));
 vi.mock('../../substrate-federated-tracker-v2-external-fee.js', () => ({ buildSubstrateFederatedTrackerV2ExternalFeeTransaction: mocked.trackerTx }));
 vi.mock('../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js', () => ({
   authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission: mocked.trackerAuthorize,
@@ -148,6 +161,7 @@ const claimMining = setups.claimSubstrateFederatedIsolatedDevnetMiningCredential
 let setup: Awaited<ReturnType<typeof makeSetup>> | undefined;
 let source: ReturnType<typeof makeSource> | undefined;
 let sourceOperation: ReturnType<typeof makeSourceOperation> | undefined;
+let continuationSourceOperation: ReturnType<typeof makeSourceOperation> | undefined;
 let operator: ReturnType<typeof makeOperator> | undefined;
 let miningCredential: ReturnType<typeof claimMining> | undefined;
 let compiledGenesisBytes: Buffer | undefined;
@@ -178,6 +192,7 @@ let batchActive: boolean;
 let journalDirectory: string;
 let attemptFiles: string[];
 let funding: any;
+let continuationFunding: any;
 let packet: any;
 let sourceLock: any;
 let committedVault: any;
@@ -188,12 +203,24 @@ let proof: any;
 let mint: any;
 let burn: any;
 let checkpoint: any;
+let continuationPacket: any;
+let continuationSourceLock: any;
+let continuationVault: any;
+let continuationDraftInputs: any;
+let continuationDraft: any;
+let continuationEvidence: any;
+let continuationProof: any;
+let continuationReservation: any;
+let continuationExecution: any;
+let continuationCheckpoint: any;
+let continuationMiningAuthority: any;
 let phase: string;
 let returnValues: Record<string, any>;
 const downstreamStages = ['funding', 'packet', 'sourceLock', 'committedVault', 'draft', 'evidence', 'proof', 'mint'] as const;
 type DownstreamStage = typeof downstreamStages[number];
 const target = Object.freeze({ primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052' });
-const phaseTargets = Object.freeze(Object.fromEntries(['anchor', 'frozen', 'freshness', 'transport', 'confirmation'].map(name =>
+const phaseTargets = Object.freeze(Object.fromEntries(['anchor', 'frozen', 'freshness', 'transport', 'confirmation',
+  'readOnly', 'secondAnchor', 'secondFrozen', 'secondFreshness', 'secondTransport', 'secondConfirmation'].map(name =>
   [name, Object.freeze({ ...target, componentPhase: name })])));
 const discovery = Object.freeze({ observation: Object.freeze({ genesisBoxIds: Object.freeze({
   tracker: '81'.repeat(32), duplicatePrevention: '82'.repeat(32), pooledReserve: '83'.repeat(32),
@@ -207,14 +234,25 @@ function assertCustodyActive() {
 }
 function assertDisposed() {
   if (operator) expect(() => operators.assertFederatedGenesisOperatorV1(operator!)).toThrow(/disposed/);
+  if (sourceOperation && source) expect(() =>
+    sources.assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(sourceOperation!, source!)).toThrow(/disposed/);
+  if (continuationSourceOperation && source) expect(() =>
+    sources.assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+      continuationSourceOperation!, source!,
+    )).toThrow(/disposed/);
   if (source) expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).toThrow(/disposed/);
   if (setup) expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).toThrow(/active process provenance/);
 }
 function stageMock(stage: DownstreamStage) { return stage === 'funding' ? mocked.discover : mocked[stage]; }
 function assertDownstreamPrefix(stage: DownstreamStage) {
   const last = downstreamStages.indexOf(stage);
+  const continuationCalls: Partial<Record<DownstreamStage, string>> = {
+    draft: 'continuationDraft', evidence: 'continuationEvidence', proof: 'continuationProof',
+  };
   for (const [index, name] of downstreamStages.entries()) {
-    expect(stageMock(name)).toHaveBeenCalledTimes(name === 'funding' ? 2 : index <= last ? 1 : 0);
+    expect(stageMock(name)).toHaveBeenCalledTimes(name === 'funding'
+      ? (order.includes('continuationFunding') ? 3 : 2)
+      : (index <= last ? 1 : 0) + Number(order.includes(continuationCalls[name] ?? '')));
   }
   expect(mocked.check).toHaveBeenCalledOnce(); expect(mocked.execute).toHaveBeenCalledOnce();
 }
@@ -276,6 +314,7 @@ beforeEach(() => {
   mocked.projectProgress.mockReturnValue(null);
   vi.spyOn(StateTracker.prototype, 'close');
   setup = undefined; source = undefined; operator = undefined;
+  sourceOperation = undefined; continuationSourceOperation = undefined;
   miningCredential = undefined; compiledGenesisBytes = undefined;
   compiled = undefined; batch = undefined; receipts = []; journalState = undefined;
   retainedSetup = undefined; draftInputs = undefined; journalDirectory = ''; attemptFiles = [];
@@ -285,6 +324,10 @@ beforeEach(() => {
   funding = Object.freeze({ observation: Object.freeze({
     target: Object.freeze({ tipHeight: 137, genesisHeaderIdHex: '91'.repeat(32) }),
     genesisInputs: Object.freeze({ tracker: Object.freeze({ component: 'fresh reward funding double', boxId: 'a1'.repeat(32) }) }),
+  }) });
+  continuationFunding = Object.freeze({ observation: Object.freeze({
+    target: Object.freeze({ tipHeight: 166, genesisHeaderIdHex: '91'.repeat(32) }),
+    genesisInputs: Object.freeze({ tracker: Object.freeze({ component: 'continuation reward funding double', boxId: 'b1'.repeat(32) }) }),
   }) });
   packet = Object.freeze({ component: 'native peg-in packet double',
     boxes: Object.freeze({ sourceLock: Object.freeze({ boxId: 'a2'.repeat(32) }),
@@ -306,12 +349,51 @@ beforeEach(() => {
     mintIdentityHex: proof.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex,
     sourceFinalityEstablished: false, trustless: false });
   burn = Object.freeze({ mint, burn: Object.freeze({ netAmountNanoErg: '10000000', grossAmountNanoErg: '15000000' }), burnExecuted: true });
-  sourceOperation = undefined;
+  continuationPacket = Object.freeze({ component: 'native continuation peg-in packet double',
+    boxes: Object.freeze({ sourceLock: Object.freeze({ boxId: 'b2'.repeat(32) }),
+      reserveSuccessor: Object.freeze({ boxId: 'b3'.repeat(32) }) }),
+    transactions: Object.freeze({ sourceLockCreation: Object.freeze({ txId: 'b4'.repeat(32) }),
+      reserveTransition: Object.freeze({ txId: 'b5'.repeat(32) }) }) });
+  continuationSourceLock = Object.freeze({ expectedTxId: 'b4'.repeat(32),
+    outputObservation: Object.freeze({ component: 'continuation source-lock observation double', sourceLockBoxIdHex: 'b2'.repeat(32) }) });
+  continuationVault = Object.freeze({ expectedTxId: 'b5'.repeat(32),
+    outputObservation: Object.freeze({ component: 'continuation committed reserve observation double', confirmationHeight: 170,
+      confirmationHeaderIdHex: 'b6'.repeat(32), sourceLockBoxIdHex: 'b2'.repeat(32), reserveSuccessorBoxIdHex: 'b3'.repeat(32) }) });
+  continuationDraft = Object.freeze({ component: 'continuation reservation draft double', reservationKeyHex: '0x' + 'b7'.repeat(32) });
+  continuationEvidence = Object.freeze({ component: 'continuation reserve evidence double' });
+  continuationProof = Object.freeze({ component: 'continuation source proof double', mintIdentityHex: continuationDraft.reservationKeyHex,
+    receiptDigestHex: 'b8'.repeat(32), result: Object.freeze({ issuedAtNativeHeight: '4', expiresAtNativeHeight: '32' }) });
+  continuationReservation = Object.freeze({ blockHeight: 5, runtimeReservationObserved: true, mintExecuted: false,
+    mintIdentityHex: continuationProof.mintIdentityHex });
+  continuationExecution = Object.freeze({ mint: Object.freeze({ blockHeight: 6, mintExecuted: true,
+    runtimeReservationConsumed: true, amountNanoErg: '20000000', mintIdentityHex: continuationProof.mintIdentityHex }),
+    burn: Object.freeze({ blockHeight: 8, netAmountNanoErg: '10000000', grossAmountNanoErg: '15000000' }), burnExecuted: true });
+  continuationMiningAuthority = Object.freeze({ schema: 'native continuation authority double', version: 1 });
   vi.spyOn(sources, 'produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1').mockImplementation(mocked.proof);
+  const assertSourceOperation = sources.assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1;
+  let continuationOperationDisposed = false;
+  let modeledContinuationOperation: ReturnType<typeof makeSourceOperation> | undefined;
   vi.spyOn(sources, 'createSubstrateFederatedNativeGenesisSourceAttestationOperationV1').mockImplementation(value => {
     expect(value).toBe(source);
-    sourceOperation = makeSourceOperation(value);
-    return sourceOperation;
+    if (sourceOperation === undefined) return sourceOperation = makeSourceOperation(value);
+    if (continuationSourceOperation !== undefined) throw new Error('unexpected third native source operation');
+    sources.readSubstrateFederatedGenesisProfilesFromSessionV2(value);
+    assertSourceOperation(sourceOperation, value);
+    // The checkpoint double cannot complete the real operation's private state.
+    // Model only operation 2 here; the composed suite uses both real operations.
+    if (checkpoint === undefined) throw new Error('native source-attestation operation is already active');
+    modeledContinuationOperation = Object.freeze({ dispose: () => { continuationOperationDisposed = true; } });
+    continuationSourceOperation = modeledContinuationOperation;
+    return continuationSourceOperation;
+  });
+  vi.spyOn(sources, 'assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1')
+    .mockImplementation((operation, session) => {
+      if (modeledContinuationOperation === undefined || operation !== modeledContinuationOperation) {
+        return assertSourceOperation(operation, session);
+      }
+      expect(session).toBe(source);
+      sources.readSubstrateFederatedGenesisProfilesFromSessionV2(session);
+      if (continuationOperationDisposed) throw new Error('native source-attestation operation is disposed');
   });
   order = []; calls = []; active = false; started = false;
   directory = mkdtempSync(join(tmpdir(), 'fed-root-component-'));
@@ -333,7 +415,12 @@ beforeEach(() => {
     retainedSetup = { ...setup, runNativeGenesisRetainingSigner: mocked.check,
       checkNativeWithdrawalFeeFundingV1: mocked.withdrawalFeeCheck, checkNativeTrackerFeeFundingV1: mocked.trackerFeeCheck,
       checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: mocked.trackerCheck,
-      checkNativeWithdrawalV2: mocked.payoutCheck };
+      checkNativeWithdrawalRetainingContinuationSignerV2: mocked.payoutCheck,
+      checkNativeContinuationWithdrawalFeeFundingV1: mocked.continuationWithdrawalFeeCheck,
+      checkNativeContinuationTrackerFeeFundingV1: mocked.continuationTrackerFeeCheck,
+      issueNativeContinuationMiningAuthorityV1: mocked.miningAuthority,
+      checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner: mocked.continuationTrackerCheck,
+      checkNativeContinuationWithdrawalV2: mocked.continuationPayoutCheck };
     return retainedSetup;
   });
   vi.spyOn(sources, 'createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2').mockImplementation(value => {
@@ -379,6 +466,7 @@ beforeEach(() => {
       expect(StateTracker.prototype.close).not.toHaveBeenCalled();
       const value = await callback(phaseTargets[name]); return { value, receipt: { component: `${name} process stub` } };
     };
+    let readOnlyComplete = false;
     return { startMining: async () => { order.push('mine'); started = true; }, stop,
       withMiningActiveExecutionTarget: async (callback: (value: object) => Promise<unknown>) => {
         expect(started).toBe(true); active = true;
@@ -400,11 +488,45 @@ beforeEach(() => {
       },
       withTrackerTransportConfirmationMiningTarget: (txId: string, callback: (value: any) => Promise<unknown>) => {
         expect(txId).toBe(returnValues.trackerAttempt.expectedTxId); return invoke('confirmation', callback);
+      },
+      withMiningStoppedReadOnlyTarget: async (callback: (value: any) => Promise<unknown>) => {
+        const result = await invoke('readOnly', callback); readOnlyComplete = true;
+        return { ...result, receipt: { ...result.receipt,
+          finalSnapshot: { fullHeight: 190, headerIdHex: '98'.repeat(32) } } };
+      },
+      continueNativeTrackerCycleV1: (authority: unknown) => {
+        expect(readOnlyComplete).toBe(true); expect(authority).toBe(continuationMiningAuthority);
+        order.push('continue-cycle');
+        return {
+          withCheckpointExtensionMiningTarget: async (_extension: string, policy: unknown,
+            callback: (value: any) => Promise<unknown>) => {
+            expect(policy).toEqual({ minimumTipHeight: 191 }); return invoke('secondAnchor', callback);
+          },
+          withCheckpointBoundMiningStoppedExecutionTarget: (callback: (value: any) => Promise<unknown>) =>
+            invoke('secondFrozen', callback),
+          withCheckpointBoundReservationFreshnessRevalidationTarget: (callback: (value: any) => Promise<unknown>) =>
+            invoke('secondFreshness', callback),
+          withCheckpointBoundTrackerTransportTarget: (completion: unknown, txId: string,
+            callback: (value: any) => Promise<unknown>) => {
+            expect(completion).toBe(returnValues.secondFreshness);
+            expect(txId).toBe(returnValues.secondTrackerAttempt.expectedTxId);
+            return invoke('secondTransport', callback);
+          },
+          withTrackerTransportConfirmationMiningTarget: (txId: string, callback: (value: any) => Promise<unknown>) => {
+            expect(txId).toBe(returnValues.secondTrackerAttempt.expectedTxId);
+            return invoke('secondConfirmation', callback);
+          },
+        };
       } };
   });
   mocked.owned.mockImplementation(value => { if (!active || value !== target) throw new Error('target inactive'); });
+  mocked.readOnlyOwned.mockImplementation(value => { expect(value).toBe(phaseTargets.readOnly); });
   mocked.discover.mockImplementation(async (signer, value) => {
-    expect(signer).toBe(setup!.signer); expect(value).toBe(target); expect(active).toBe(true);
+    expect(signer).toBe(setup!.signer);
+    if (value === phaseTargets.confirmation) {
+      expect(phase).toBe('confirmation'); order.push('continuationFunding'); return continuationFunding;
+    }
+    expect(value).toBe(target); expect(active).toBe(true);
     if (order.includes('execute')) {
       order.push('funding');
       expect(observeConfirmation.mock.calls.length).toBeGreaterThanOrEqual(6);
@@ -487,8 +609,10 @@ beforeEach(() => {
     return { status: 'confirmed', confirmationHeight: 100, confirmationHeaderIdHex: '92'.repeat(32) };
   });
   mocked.confirmation.mockImplementation((value, headerId, progressTransactionIdHex) => {
-    expect([target, phaseTargets.confirmation]).toContain(value); expect(headerId).toBe(batch.request.target.genesisHeaderIdHex);
-    expect(progressTransactionIdHex).toBe(value === phaseTargets.confirmation ? 'e3'.repeat(32) : undefined);
+    expect([target, phaseTargets.confirmation, phaseTargets.secondConfirmation]).toContain(value);
+    expect(headerId).toBe(batch.request.target.genesisHeaderIdHex);
+    expect(progressTransactionIdHex).toBe(value === phaseTargets.confirmation ? 'e3'.repeat(32)
+      : value === phaseTargets.secondConfirmation ? 'c3'.repeat(32) : undefined);
     return { observe: observeConfirmation, reconciliationIdentityDigestHex: 'ca'.repeat(32) };
   });
   readErgoBox = (_origin, id) => {
@@ -560,6 +684,9 @@ beforeEach(() => {
     if (!frontierActive || value !== frontierEndpoints) throw new Error('FED target inactive');
   });
   mocked.fundingOwned.mockImplementation((value, executionTarget) => {
+    if (value === continuationFunding) {
+      expect(executionTarget).toBe(phaseTargets.confirmation); return continuationFunding.observation;
+    }
     expect(value).toBe(funding); expect(executionTarget).toBe(target); return funding.observation;
   });
   mocked.packet.mockImplementation(async value => {
@@ -577,6 +704,14 @@ beforeEach(() => {
     expect(value.creationHeights).toEqual({ currentErgoHeight: 137, sourceLockCreation: 137, reserveTransition: 137 });
     return packet;
   });
+  mocked.continuationPacket.mockImplementation(async value => {
+    order.push('continuationPacket'); expect(value.batch).toBe(batch); expect(value.target).toBe(phaseTargets.confirmation);
+    expect(value.previousPacket).toBe(packet); expect(value.withdrawal.check).toBe(returnValues.payoutCheck);
+    expect(value.withdrawal.attempt).toBe(returnValues.payoutAttempt);
+    expect(value.sourceFundingInput).toBe(continuationFunding.observation.genesisInputs.tracker);
+    expect(value.creationHeights).toEqual({ currentErgoHeight: 166, sourceLockCreation: 166, reserveTransition: 166 });
+    return continuationPacket;
+  });
   mocked.sourceLock.mockImplementation(async value => {
     order.push('sourceLock');
     expect(value).toEqual({ target, batch, packet, setupSession: retainedSetup, state: journalState });
@@ -593,7 +728,24 @@ beforeEach(() => {
     expect(value.setupSession).toBe(retainedSetup); expect(value.state).toBe(journalState);
     retainAttempt('reserve-transition-attempt'); return committedVault;
   });
+  mocked.continuationSourceLock.mockImplementation(async value => {
+    order.push('continuationSourceLock'); expect(value).toEqual({ target: phaseTargets.confirmation, batch,
+      packet: continuationPacket, setupSession: retainedSetup, state: journalState });
+    retainAttempt('continuation-source-lock-attempt'); return continuationSourceLock;
+  });
+  mocked.continuationVault.mockImplementation(async value => {
+    order.push('continuationVault'); expect(value).toEqual({ target: phaseTargets.confirmation, batch,
+      packet: continuationPacket, sourceLockObservation: continuationSourceLock.outputObservation,
+      setupSession: retainedSetup, state: journalState });
+    retainAttempt('continuation-reserve-transition-attempt'); return continuationVault;
+  });
   mocked.draft.mockImplementation(value => {
+    if (value.packet === continuationPacket) {
+      order.push('continuationDraft'); continuationDraftInputs = value;
+      expect(value).toEqual({ target: phaseTargets.confirmation, batch, packet: continuationPacket,
+        committedVaultObservation: continuationVault.outputObservation });
+      return continuationDraft;
+    }
     order.push('draft'); draftInputs = value;
     expect(value).toEqual({ target, batch, packet, committedVaultObservation: committedVault.outputObservation });
     expect(value.target).toBe(target); expect(value.batch).toBe(batch);
@@ -601,12 +753,21 @@ beforeEach(() => {
     return draft;
   });
   mocked.evidence.mockImplementation(value => {
+    if (value.packet === continuationPacket) {
+      order.push('continuationEvidence'); expect(value).toEqual({ ...continuationDraftInputs, draft: continuationDraft });
+      return continuationEvidence;
+    }
     order.push('evidence'); expect(value).toEqual({ ...draftInputs, draft });
     expect(value.target).toBe(target); expect(value.batch).toBe(batch);
     expect(value.draft).toBe(draft); expect(value.packet).toBe(packet);
     expect(value.committedVaultObservation).toBe(committedVault.outputObservation); return evidence;
   });
   mocked.proof.mockImplementation((operation, value) => {
+    if (operation === continuationSourceOperation) {
+      order.push('continuationProof'); expect(value).toEqual({ draftInputs: continuationDraftInputs,
+        draft: continuationDraft, evidenceReceipt: continuationEvidence, issuedAtNativeHeight: '4', expiresAtNativeHeight: '32' });
+      return continuationProof;
+    }
     order.push('proof'); expect(operation).toBe(sourceOperation); expect(operation).toBeDefined();
     expect(value).toEqual({ draftInputs, draft, evidenceReceipt: evidence, issuedAtNativeHeight: '0', expiresAtNativeHeight: '32' });
     expect(value.draftInputs).toBe(draftInputs); expect(value.draft).toBe(draft); expect(value.evidenceReceipt).toBe(evidence);
@@ -630,6 +791,22 @@ beforeEach(() => {
     retainAttempt('native-approval-attempt', value.attemptDirectory); retainAttempt('native-burn-attempt', value.attemptDirectory);
     return burn;
   });
+  mocked.continuationReservation.mockImplementation(async value => {
+    order.push('continuationReservation'); expect(value.previousExecution).toBe(burn);
+    expect(value.signing).toMatchObject({ operator, sourceOperation: continuationSourceOperation,
+      draft: continuationDraft, proof: continuationProof, compiled, target: phaseTargets.confirmation,
+      frontierTarget: frontierEndpoints, expectedStorage: top, expectedGenesisHashHex: genesis });
+    expect(dirname(value.attemptDirectory)).toBe(journalDirectory);
+    expect(value.broadcastScope).toBe('fed-native-local-synthetic-continuation-reservation-only');
+    retainAttempt('native-reservation-attempt', value.attemptDirectory); return continuationReservation;
+  });
+  mocked.continuationMintBurn.mockImplementation(async value => {
+    order.push('continuationMintBurn'); expect(value.reservationExecution).toBe(continuationReservation);
+    expect(value).toMatchObject({ grossAmountNanoErg: '15000000',
+      recipientErgoTreeHex: `0x${setup!.signer.p2pkErgoTreeHex}`,
+      broadcastScope: 'fed-native-local-synthetic-continuation-mint-and-burn-only' });
+    return continuationExecution;
+  });
   configureNativeReturnMocks();
   readResult = (_url, method, params) => {
     if (method === 'chain_getBlockHash') return genesis;
@@ -652,27 +829,48 @@ afterEach(() => {
 });
 
 function configureNativeReturnMocks() {
-  const confirmedFee = (name: 'withdrawal' | 'tracker', byte: string, height: number) => {
+  const confirmedFee = (name: 'withdrawal' | 'tracker', byte: string, height: number,
+    secondByte: string, secondHeight: number) => {
     const checkName = `${name}FeeCheck` as const;
+    const continuationCheckName = `continuation${name[0]!.toUpperCase()}${name.slice(1)}FeeCheck` as
+      'continuationWithdrawalFeeCheck' | 'continuationTrackerFeeCheck';
     const executeName = `${name}Fee` as const;
     mocked[checkName].mockImplementation(async value => {
       order.push(checkName); expect(value).toBe(target); expect(active).toBe(true); assertCustodyActive();
       const feeInputBox = Object.freeze({ boxId: byte.repeat(32), value: '1100000', ergoTree: setup!.signer.p2pkErgoTreeHex });
-      const checked = Object.freeze({ transaction: Object.freeze({ txId: byte.repeat(32), outputs: [feeInputBox] }) });
+      const change = Object.freeze({ boxId: `${byte[0]}f`.repeat(32), value: '1100000', ergoTree: setup!.signer.p2pkErgoTreeHex });
+      const checked = Object.freeze({ transaction: Object.freeze({ txId: byte.repeat(32), outputs: [feeInputBox, change] }) });
       returnValues[checkName] = checked; return checked;
     });
+    mocked[continuationCheckName].mockImplementation(async value => {
+      order.push(continuationCheckName); expect(value).toBe(phaseTargets.confirmation); assertCustodyActive();
+      const feeInputBox = Object.freeze({ boxId: secondByte.repeat(32), value: '1100000', ergoTree: setup!.signer.p2pkErgoTreeHex });
+      const checked = Object.freeze({ transaction: Object.freeze({ txId: secondByte.repeat(32), outputs: [feeInputBox] }) });
+      returnValues[continuationCheckName] = checked; return checked;
+    });
     mocked[executeName].mockImplementation(async value => {
-      order.push(executeName); expect(value.target).toBe(target); expect(value.checked).toBe(returnValues[checkName]);
-      expect(value.state).toBe(journalState); assertCustodyActive(); expect(active).toBe(true);
-      retainAttempt(`${name}-fee-attempt`);
-      returnValues[executeName] = Object.freeze({ expectedTxId: value.checked.transaction.txId,
+      const second = value.checked === returnValues[continuationCheckName];
+      const resultName = `${second ? 'second' : ''}${second ? name[0]!.toUpperCase() + name.slice(1) : name}Fee`;
+      order.push(resultName); expect(value.target).toBe(second ? phaseTargets.confirmation : target);
+      expect(value.checked).toBe(returnValues[second ? continuationCheckName : checkName]);
+      expect(value.state).toBe(journalState); assertCustodyActive();
+      if (!second) expect(active).toBe(true);
+      retainAttempt(`${resultName}-attempt`);
+      returnValues[resultName] = Object.freeze({ expectedTxId: value.checked.transaction.txId,
         durableAttemptDigestHex: 'de'.repeat(32), transportStatus: 'accepted', journalDigestHex: 'dd'.repeat(32),
-        confirmationDigestHex: 'dc'.repeat(32), confirmationHeight: height, confirmationHeaderIdHex: 'db'.repeat(32),
+        confirmationDigestHex: 'dc'.repeat(32), confirmationHeight: second ? secondHeight : height,
+        confirmationHeaderIdHex: 'db'.repeat(32),
         feeInputBox: value.checked.transaction.outputs[0] });
-      return returnValues[executeName];
+      return returnValues[resultName];
     });
   };
-  confirmedFee('withdrawal', 'e1', 138); confirmedFee('tracker', 'e2', 139);
+  confirmedFee('withdrawal', 'e1', 138, 'c1', 172); confirmedFee('tracker', 'e2', 139, 'c2', 173);
+  mocked.miningAuthority.mockImplementation(async value => {
+    order.push('miningAuthority'); expect(value).toBe(phaseTargets.confirmation);
+    expect(returnValues.secondWithdrawalFee.confirmationHeight).toBe(172);
+    expect(returnValues.secondTrackerFee.confirmationHeight).toBe(173);
+    assertCustodyActive(); return continuationMiningAuthority;
+  });
   mocked.wait.mockImplementation(async (_observer, txId, _deadline, stage, assertActive) => {
     assertActive?.();
     if (stage === 'native-checkpoint-admission') {
@@ -680,90 +878,154 @@ function configureNativeReturnMocks() {
       expect(order).toContain('withdrawalFee'); expect(order).toContain('trackerFee');
       return { status: 'confirmed', observedAtHeight: 140, confirmationHeight: 130, confirmationHeaderIdHex: '96'.repeat(32) };
     }
-    expect(phase).toBe('confirmation');
-    expect(txId).toBe(stage === 'native-tracker-admission' ? returnValues.trackerAttempt.expectedTxId : returnValues.payoutAttempt.expectedTxId);
-    returnValues[stage] = Object.freeze({ status: 'confirmed', observedAtHeight: 165,
-      confirmationHeight: 150, confirmationHeaderIdHex: 'f1'.repeat(32), observationDigestHex: 'f2'.repeat(32) });
+    const second = stage.startsWith('native-continuation-');
+    expect(phase).toBe(second ? 'secondConfirmation' : 'confirmation');
+    const tracker = stage.endsWith('tracker-admission');
+    expect(txId).toBe(returnValues[second ? (tracker ? 'secondTrackerAttempt' : 'secondPayoutAttempt')
+      : (tracker ? 'trackerAttempt' : 'payoutAttempt')].expectedTxId);
+    returnValues[stage] = Object.freeze({ status: 'confirmed', observedAtHeight: second ? 205 : 165,
+      confirmationHeight: second ? 200 : 150, confirmationHeaderIdHex: (second ? 'f2' : 'f1').repeat(32),
+      observationDigestHex: (second ? 'f3' : 'f2').repeat(32) });
     return returnValues[stage];
   });
   mocked.checkpoint.mockImplementation(async value => {
-    order.push('checkpoint'); expect(value.execution).toBe(burn); assertCustodyActive();
-    expect(active).toBe(true); expect(frontierActive).toBe(true);
-    expect(value.admissionValidFromErgoHeight).toBe('140'); expect(value.admissionExpiresAtErgoHeight).toBe('204');
+    const second = value.execution === continuationExecution;
+    order.push(second ? 'continuationCheckpoint' : 'checkpoint');
+    expect(value.execution).toBe(second ? continuationExecution : burn); assertCustodyActive();
+    if (!second) expect(active).toBe(true); expect(frontierActive).toBe(true);
+    expect(value.admissionValidFromErgoHeight).toBe(second ? '173' : '140');
+    expect(value.admissionExpiresAtErgoHeight).toBe(second ? '237' : '204');
     const statement = buildSubstrateFederatedCheckpointStatementV1({ profile: compiled.preparation.checkpointProfile,
-      sourceNetworkIdHex: 'b1'.repeat(32), sidechainIdHex: 'b2'.repeat(32), sourceNativeBlockHeight: '4',
-      sourceNativeBlockHashHex: 'a1'.repeat(32), executionBlockHashHex: 'a2'.repeat(32), bridgeEventRootHex: 'a3'.repeat(32), burnLeafCount: 1,
+      sourceNetworkIdHex: 'b1'.repeat(32), sidechainIdHex: 'b2'.repeat(32), sourceNativeBlockHeight: second ? '8' : '4',
+      sourceNativeBlockHashHex: (second ? 'd1' : 'a1').repeat(32), executionBlockHashHex: (second ? 'd2' : 'a2').repeat(32),
+      bridgeEventRootHex: (second ? 'd3' : 'a3').repeat(32), burnLeafCount: 1,
       bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20), bridgeRuntimeCodeSha256Hex: 'b5'.repeat(32), bridgeRuntimeCodeBytes: 4104,
       tokenRuntimeCodeSha256Hex: 'b6'.repeat(32), tokenRuntimeCodeBytes: 2356, sourceRuntimeCodeSha256Hex: 'b7'.repeat(32), sourceRuntimeCodeBytes: 1000,
       runtimeProfileIdHex: 'b8'.repeat(32), settlementProfileIdHex: 'b3'.repeat(32),
       admissionValidFromErgoHeight: value.admissionValidFromErgoHeight, admissionExpiresAtErgoHeight: value.admissionExpiresAtErgoHeight });
     const leaf = Object.freeze({ sidechainIdHex: statement.sidechainIdHex, sidechainBlockHashHex: statement.executionBlockHashHex,
-      sidechainTxHashHex: 'a4'.repeat(32), burnIdHex: 'a5'.repeat(32), eventIndex: 2, recipientErgoTreeHashHex: 'a6'.repeat(32),
+      sidechainTxHashHex: (second ? 'd4' : 'a4').repeat(32), burnIdHex: (second ? 'd5' : 'a5').repeat(32), eventIndex: 2,
+      recipientErgoTreeHashHex: (second ? 'd6' : 'a6').repeat(32),
       amountNanoErg: '10000000', assetIdHex: '00'.repeat(32) });
-    checkpoint = Object.freeze({ execution: burn, attestation: Object.freeze({ checkpointStatement: statement }),
+    const result = Object.freeze({ execution: value.execution, attestation: Object.freeze({ checkpointStatement: statement }),
       commitment: Object.freeze({ blockHashHex: `0x${statement.sourceNativeBlockHashHex}`, burnEvent: Object.freeze({ recipientErgoTreeHex: setup!.signer.p2pkErgoTreeHex }),
         burnProof: Object.freeze({ leaf, bridgeEventRootHex: statement.bridgeEventRootHex, leafIndex: 0, leafCount: 1, proof: [] }) }) });
-    return checkpoint;
+    if (second) continuationCheckpoint = result; else checkpoint = result;
+    return result;
   });
   mocked.checkpointAssert.mockImplementation(value => {
-    expect(value).toBe(checkpoint); expect(active).toBe(true); expect(frontierActive).toBe(true); assertCustodyActive();
+    expect([checkpoint, continuationCheckpoint]).toContain(value);
+    if (value === checkpoint) expect(active).toBe(true);
+    expect(frontierActive).toBe(true); assertCustodyActive();
   });
   mocked.anchor.mockImplementation(async value => {
-    order.push('anchor'); expect(value.target).toBe(phaseTargets.anchor); expect(active).toBe(false);
-    expect(value.expectedPriorHeight).toBe(140); expect(value.expectedPriorHeaderIdHex).toBe('97'.repeat(32));
-    returnValues.anchor = Object.freeze({ anchorHeaderIdHex: 'c1'.repeat(32), anchorHeight: 141, anchorExtensionRootHex: 'c2'.repeat(32) });
-    return returnValues.anchor;
+    const second = value.target === phaseTargets.secondAnchor;
+    order.push(second ? 'secondAnchor' : 'anchor'); expect(value.target).toBe(phaseTargets[second ? 'secondAnchor' : 'anchor']);
+    expect(active).toBe(false);
+    expect(value.expectedPriorHeight).toBe(second ? 190 : 140);
+    expect(value.expectedPriorHeaderIdHex).toBe((second ? '98' : '97').repeat(32));
+    const name = second ? 'secondAnchor' : 'anchor';
+    returnValues[name] = Object.freeze({ anchorHeaderIdHex: (second ? 'd1' : 'c1').repeat(32),
+      anchorHeight: second ? 191 : 141, anchorExtensionRootHex: (second ? 'd2' : 'c2').repeat(32) });
+    return returnValues[name];
   });
-  mocked.anchorAssert.mockImplementation(value => { expect(value).toBe(returnValues.anchor); });
+  mocked.anchorAssert.mockImplementation(value => { expect([returnValues.anchor, returnValues.secondAnchor]).toContain(value); });
   mocked.frozenObservation.mockImplementation(async value => {
-    order.push('frozenObservation'); expect(value.target).toBe(phaseTargets.frozen);
-    expect(value.expectedAnchorHeaderIdHex).toBe(returnValues.anchor.anchorHeaderIdHex);
-    returnValues.observation = Object.freeze({ ...returnValues.anchor, headers: [{ raw: { height: 141 } }], anchorContextIndex: 0,
-      extensionMembershipProofHex: 'c3' }); return returnValues.observation;
+    const second = value.target === phaseTargets.secondFrozen;
+    order.push(second ? 'secondFrozenObservation' : 'frozenObservation');
+    const anchorName = second ? 'secondAnchor' : 'anchor'; const name = second ? 'secondObservation' : 'observation';
+    expect(value.target).toBe(phaseTargets[second ? 'secondFrozen' : 'frozen']);
+    expect(value.expectedAnchorHeaderIdHex).toBe(returnValues[anchorName].anchorHeaderIdHex);
+    returnValues[name] = Object.freeze({ ...returnValues[anchorName], headers: [{ raw: { height: second ? 191 : 141 } }],
+      anchorContextIndex: 0, extensionMembershipProofHex: second ? 'd3' : 'c3' }); return returnValues[name];
   });
-  mocked.observationAssert.mockImplementation(value => { expect(value).toBe(returnValues.observation); });
-  mocked.headers.mockImplementation(() => (returnValues.headers = Object.freeze({ component: 'observed headers double' })));
+  mocked.observationAssert.mockImplementation(value => {
+    expect([returnValues.observation, returnValues.secondObservation]).toContain(value);
+  });
+  mocked.headers.mockImplementation((_module, value) => {
+    const second = value.rawHeaders[0].height === 191; const name = second ? 'secondHeaders' : 'headers';
+    returnValues[name] = Object.freeze({ component: `${name} double` }); return returnValues[name];
+  });
   mocked.context.mockImplementation(async value => {
     order.push('context'); expect(value.trackerInputBox).toBe(compiled.issuance.orderedTransactions[0].transaction.outputs[0]);
     expect(value.observedHeaderContext).toBe(returnValues.headers); expect(value.encodedStatementHex).toBe(checkpoint.attestation.checkpointStatement.encodedStatementHex);
     returnValues.context = Object.freeze({ component: 'tracker context double' }); return returnValues.context;
   });
+  mocked.continuationContext.mockImplementation(async value => {
+    order.push('continuationContext'); expect(value.previousContext).toBe(returnValues.context);
+    expect(value.trackerInputBox).toBe(returnValues.payoutCheck.packet.boxes.trackerDataInput);
+    expect(value.observedHeaderContext).toBe(returnValues.secondHeaders);
+    expect(value.encodedStatementHex).toBe(continuationCheckpoint.attestation.checkpointStatement.encodedStatementHex);
+    returnValues.secondContext = Object.freeze({ component: 'continuation tracker context double' });
+    return returnValues.secondContext;
+  });
   mocked.trackerTx.mockImplementation(async value => {
-    order.push('trackerTx'); expect(value.trackerContext).toBe(returnValues.context); expect(value.feeInputBox).toBe(returnValues.trackerFee.feeInputBox);
-    returnValues.trackerTx = Object.freeze({ unsignedTransactionIdHex: 'e3'.repeat(32) }); return returnValues.trackerTx;
+    const second = returnValues.secondContext !== undefined && value.trackerContext === returnValues.secondContext;
+    const name = second ? 'secondTrackerTx' : 'trackerTx';
+    order.push(name); expect(value.trackerContext).toBe(returnValues[second ? 'secondContext' : 'context']);
+    expect(value.feeInputBox).toBe(returnValues[second ? 'secondTrackerFee' : 'trackerFee'].feeInputBox);
+    returnValues[name] = Object.freeze({ unsignedTransactionIdHex: (second ? 'c3' : 'e3').repeat(32) }); return returnValues[name];
   });
   mocked.trackerCheck.mockImplementation(async (value, ownedTarget) => {
     order.push('trackerCheck'); expect(ownedTarget).toBe(phaseTargets.frozen); expect(value.transaction).toBe(returnValues.trackerTx);
     expect(() => mocked.batch(batch, target)).toThrow('target inactive'); assertCustodyActive();
     returnValues.trackerCheck = Object.freeze({ result: Object.freeze({ checkDigestHex: 'd1'.repeat(32) }) }); return returnValues.trackerCheck;
   });
+  mocked.continuationTrackerCheck.mockImplementation(async (value, ownedTarget) => {
+    order.push('continuationTrackerCheck'); expect(ownedTarget).toBe(phaseTargets.secondFrozen);
+    expect(value.context).toBe(returnValues.secondContext); expect(value.transaction).toBe(returnValues.secondTrackerTx);
+    assertCustodyActive();
+    returnValues.secondTrackerCheck = Object.freeze({ result: Object.freeze({ checkDigestHex: 'c4'.repeat(32) }) });
+    return returnValues.secondTrackerCheck;
+  });
   mocked.trackerAuthorize.mockImplementation(async (value, ownedTarget) => {
-    order.push('trackerAuthorize'); expect(value).toBe(returnValues.trackerCheck); expect(ownedTarget).toBe(phaseTargets.frozen);
-    returnValues.trackerAuthorization = Object.freeze({ authorizationDigestHex: 'd2'.repeat(32) }); return returnValues.trackerAuthorization;
+    const second = value === returnValues.secondTrackerCheck; const name = second ? 'secondTrackerAuthorization' : 'trackerAuthorization';
+    order.push(second ? 'secondTrackerAuthorize' : 'trackerAuthorize');
+    expect(value).toBe(returnValues[second ? 'secondTrackerCheck' : 'trackerCheck']);
+    expect(ownedTarget).toBe(phaseTargets[second ? 'secondFrozen' : 'frozen']);
+    returnValues[name] = Object.freeze({ authorizationDigestHex: (second ? 'c5' : 'd2').repeat(32) }); return returnValues[name];
   });
   mocked.trackerReserve.mockImplementation((value, state) => {
-    order.push('trackerReserve'); expect(value).toBe(returnValues.trackerAuthorization); expect(state).toBe(journalState);
-    retainAttempt('tracker-admission-attempt'); returnValues.trackerAttempt = Object.freeze({ expectedTxId: 'e3'.repeat(32), durableAttemptDigestHex: 'd3'.repeat(32) });
-    return returnValues.trackerAttempt;
+    const second = value === returnValues.secondTrackerAuthorization; const name = second ? 'secondTrackerAttempt' : 'trackerAttempt';
+    order.push(second ? 'secondTrackerReserve' : 'trackerReserve');
+    expect(value).toBe(returnValues[second ? 'secondTrackerAuthorization' : 'trackerAuthorization']); expect(state).toBe(journalState);
+    retainAttempt(`${second ? 'second-' : ''}tracker-admission-attempt`);
+    returnValues[name] = Object.freeze({ expectedTxId: (second ? 'c3' : 'e3').repeat(32),
+      durableAttemptDigestHex: (second ? 'c6' : 'd3').repeat(32) }); return returnValues[name];
   });
   mocked.trackerFreshness.mockImplementation(async (value, ownedTarget) => {
-    order.push('trackerFreshness'); expect(value).toBe(returnValues.trackerAttempt); expect(ownedTarget).toBe(phaseTargets.freshness);
-    returnValues.freshness = Object.freeze({ component: 'freshness completion double' }); return returnValues.freshness;
+    const second = value === returnValues.secondTrackerAttempt; const name = second ? 'secondFreshness' : 'freshness';
+    order.push(second ? 'secondTrackerFreshness' : 'trackerFreshness');
+    expect(value).toBe(returnValues[second ? 'secondTrackerAttempt' : 'trackerAttempt']);
+    expect(ownedTarget).toBe(phaseTargets[second ? 'secondFreshness' : 'freshness']);
+    returnValues[name] = Object.freeze({ component: `${name} completion double` }); return returnValues[name];
   });
   for (const name of ['tracker', 'payout'] as const) {
     mocked[`${name}Submit`].mockImplementation(async (ownedTarget, value) => {
-      order.push(`${name}Submit`); expect(value).toBe(returnValues[`${name}Attempt`]);
-      expect(ownedTarget).toBe(name === 'tracker' ? phaseTargets.transport : phaseTargets.confirmation);
-      expect(StateTracker.prototype.close).not.toHaveBeenCalled(); retainAttempt(`${name}-transport-attempt`);
-      returnValues[`${name}Submission`] = Object.freeze({ status: 'accepted', responseDigestHex: 'f3'.repeat(32) }); return returnValues[`${name}Submission`];
+      const second = value === returnValues[`second${name[0]!.toUpperCase()}${name.slice(1)}Attempt`];
+      const stem = `${second ? 'second' : ''}${second ? name[0]!.toUpperCase() + name.slice(1) : name}`;
+      order.push(`${stem}Submit`); expect(value).toBe(returnValues[`${stem}Attempt`]);
+      expect(ownedTarget).toBe(phaseTargets[second ? (name === 'tracker' ? 'secondTransport' : 'secondConfirmation')
+        : (name === 'tracker' ? 'transport' : 'confirmation')]);
+      expect(StateTracker.prototype.close).not.toHaveBeenCalled(); retainAttempt(`${stem}-transport-attempt`);
+      returnValues[`${stem}Submission`] = Object.freeze({ status: 'accepted', responseDigestHex: 'f3'.repeat(32) });
+      return returnValues[`${stem}Submission`];
     });
     mocked[`${name}Finalize`].mockImplementation((attempt, submission) => {
-      order.push(`${name}Finalize`); expect(attempt).toBe(returnValues[`${name}Attempt`]); expect(submission).toBe(returnValues[`${name}Submission`]);
+      const second = attempt === returnValues[`second${name[0]!.toUpperCase()}${name.slice(1)}Attempt`];
+      const stem = `${second ? 'second' : ''}${second ? name[0]!.toUpperCase() + name.slice(1) : name}`;
+      order.push(`${stem}Finalize`); expect(attempt).toBe(returnValues[`${stem}Attempt`]);
+      expect(submission).toBe(returnValues[`${stem}Submission`]);
       return Object.freeze({ journalDigestHex: 'f4'.repeat(32) });
     });
     mocked[`${name}Confirm`].mockImplementation(async (attempt, ownedTarget, confirmation) => {
-      order.push(`${name}Confirm`); expect(attempt).toBe(returnValues[`${name}Attempt`]); expect(ownedTarget).toBe(phaseTargets.confirmation);
-      expect(confirmation).toBe(returnValues[name === 'tracker' ? 'native-tracker-admission' : 'native-withdrawal']);
+      const second = attempt === returnValues[`second${name[0]!.toUpperCase()}${name.slice(1)}Attempt`];
+      const stem = `${second ? 'second' : ''}${second ? name[0]!.toUpperCase() + name.slice(1) : name}`;
+      order.push(`${stem}Confirm`); expect(attempt).toBe(returnValues[`${stem}Attempt`]);
+      expect(ownedTarget).toBe(phaseTargets[second ? 'secondConfirmation' : 'confirmation']);
+      const stage = second ? (name === 'tracker' ? 'native-continuation-tracker-admission' : 'native-continuation-withdrawal')
+        : (name === 'tracker' ? 'native-tracker-admission' : 'native-withdrawal');
+      expect(confirmation).toBe(returnValues[stage]);
       return Object.freeze({ expectedTxId: attempt.expectedTxId, status: 'confirmed', confirmationHeight: confirmation.confirmationHeight,
         confirmationHeaderId: confirmation.confirmationHeaderIdHex });
     });
@@ -772,21 +1034,39 @@ function configureNativeReturnMocks() {
     order.push('payoutCheck'); expect(ownedTarget).toBe(phaseTargets.confirmation); assertCustodyActive();
     expect(claim.burnLeaf).toEqual(checkpoint.commitment.burnProof.leaf);
     expect(claim.burnProof).toBe(checkpoint.commitment.burnProof.proof);
-    expect(claim.recipientErgoTreeHex).toBe(setup!.signer.p2pkErgoTreeHex); setup!.dispose();
+    expect(claim.recipientErgoTreeHex).toBe(setup!.signer.p2pkErgoTreeHex);
     returnValues.payoutCheck = Object.freeze({ packet: Object.freeze({ transaction: Object.freeze({ txId: 'e4'.repeat(32) }),
       burn: Object.freeze({ leaf: claim.burnLeaf }), boxes: Object.freeze({ payout: { boxId: 'f5'.repeat(32) },
-        reserveSuccessor: { boxId: 'f6'.repeat(32) }, duplicatePreventionSuccessor: { boxId: 'f7'.repeat(32) } }) }) });
+        reserveSuccessor: { boxId: 'f6'.repeat(32) }, duplicatePreventionSuccessor: { boxId: 'f7'.repeat(32) },
+        trackerDataInput: { boxId: 'f8'.repeat(32) } }) }) });
     return returnValues.payoutCheck;
   });
+  mocked.continuationPayoutCheck.mockImplementation(async (claim, ownedTarget) => {
+    order.push('continuationPayoutCheck'); expect(ownedTarget).toBe(phaseTargets.secondConfirmation); assertCustodyActive();
+    expect(claim.burnLeaf).toEqual(continuationCheckpoint.commitment.burnProof.leaf);
+    returnValues.secondPayoutCheck = Object.freeze({ packet: Object.freeze({ transaction: Object.freeze({ txId: 'c7'.repeat(32) }),
+      burn: Object.freeze({ leaf: claim.burnLeaf }), boxes: Object.freeze({ payout: { boxId: 'c8'.repeat(32) },
+        reserveSuccessor: { boxId: 'c9'.repeat(32) }, duplicatePreventionSuccessor: { boxId: 'ca'.repeat(32) },
+        trackerDataInput: { boxId: 'cb'.repeat(32) } }) }) });
+    setup!.dispose(); return returnValues.secondPayoutCheck;
+  });
   mocked.payoutAuthorize.mockImplementation(async (value, ownedTarget) => {
-    order.push('payoutAuthorize'); expect(value).toBe(returnValues.payoutCheck); expect(ownedTarget).toBe(phaseTargets.confirmation);
-    expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).toThrow(/active process provenance/);
-    returnValues.payoutAuthorization = Object.freeze({ authorizationDigestHex: 'f8'.repeat(32) }); return returnValues.payoutAuthorization;
+    const second = value === returnValues.secondPayoutCheck; const name = second ? 'secondPayoutAuthorization' : 'payoutAuthorization';
+    order.push(second ? 'secondPayoutAuthorize' : 'payoutAuthorize');
+    expect(value).toBe(returnValues[second ? 'secondPayoutCheck' : 'payoutCheck']);
+    expect(ownedTarget).toBe(phaseTargets[second ? 'secondConfirmation' : 'confirmation']);
+    if (second) expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer))
+      .toThrow(/active process provenance/);
+    else expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).not.toThrow();
+    returnValues[name] = Object.freeze({ authorizationDigestHex: (second ? 'cc' : 'f8').repeat(32) }); return returnValues[name];
   });
   mocked.payoutReserve.mockImplementation((value, state) => {
-    order.push('payoutReserve'); expect(value).toBe(returnValues.payoutAuthorization); expect(state).toBe(journalState);
-    retainAttempt('payout-attempt'); returnValues.payoutAttempt = Object.freeze({ expectedTxId: 'e4'.repeat(32), durableAttemptDigestHex: 'f9'.repeat(32) });
-    return returnValues.payoutAttempt;
+    const second = value === returnValues.secondPayoutAuthorization; const name = second ? 'secondPayoutAttempt' : 'payoutAttempt';
+    order.push(second ? 'secondPayoutReserve' : 'payoutReserve');
+    expect(value).toBe(returnValues[second ? 'secondPayoutAuthorization' : 'payoutAuthorization']); expect(state).toBe(journalState);
+    retainAttempt(`${second ? 'second-' : ''}payout-attempt`);
+    returnValues[name] = Object.freeze({ expectedTxId: (second ? 'c7' : 'e4').repeat(32),
+      durableAttemptDigestHex: (second ? 'cd' : 'f9').repeat(32) }); return returnValues[name];
   });
 }
 
@@ -927,12 +1207,12 @@ describe('fresh FED target composition', () => {
   }
 
   it.each(['payoutCheck', 'payoutAuthorize'] as const)
-    ('holds payout after operation disposal at awaited %s with setup custody already retired', async stage => {
+    ('holds first payout after original operation disposal at awaited %s while setup custody remains retained', async stage => {
       const original = mocked[stage].getMockImplementation()!;
       mocked[stage].mockImplementation(async (...args) => {
         const value = await original(...args);
         expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer))
-          .toThrow(/active process provenance/);
+          .not.toThrow();
         sourceOperation!.dispose();
         expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).not.toThrow();
         return value;
@@ -1155,6 +1435,137 @@ describe('fresh FED target composition', () => {
     expect(mocked.payoutConfirm).not.toHaveBeenCalled(); assertDownstreamCleanup();
   });
 
+  it.each(['absent', 'foreign'] as const)('holds second admission when the continuation tracker rejects an %s predecessor', async fault => {
+    if (fault === 'absent') {
+      mocked.context.mockImplementationOnce(async value => {
+        await Promise.resolve(); expect(value.trackerInputBox).toBe(compiled.issuance.orderedTransactions[0].transaction.outputs[0]);
+        returnValues.context = undefined; return undefined;
+      });
+    }
+    mocked.continuationContext.mockImplementationOnce(async value => {
+      expect(value.previousContext).toBe(fault === 'absent' ? undefined : returnValues.context);
+      throw new Error(`substrate federated tracker V2 continuation ${fault === 'absent' ? 'previous context is required' : 'parent differs'}`);
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(
+      fault === 'absent' ? /previous context is required/ : /parent differs/,
+    );
+    expect(mocked.continuationTrackerCheck).not.toHaveBeenCalled();
+    expect(mocked.continuationPayoutCheck).not.toHaveBeenCalled(); assertDownstreamCleanup();
+  });
+
+  it.each(['withdrawal', 'tracker'] as const)('holds the second anchor until the second %s fee is confirmed', async purpose => {
+    const execute = mocked[`${purpose}Fee`]; const original = execute.getMockImplementation()!;
+    execute.mockImplementation(async (...args) => {
+      const value = await original(...args);
+      return args[0].checked === returnValues[`continuation${purpose[0]!.toUpperCase()}${purpose.slice(1)}FeeCheck`]
+        ? { ...value, confirmationHeight: null } : value;
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('external fee funding lacks canonical confirmation');
+    expect(mocked.anchor).toHaveBeenCalledOnce(); expect(order).not.toContain('secondAnchor-phase');
+    expect(mocked.continuationPayoutCheck).not.toHaveBeenCalled(); assertDownstreamCleanup();
+  });
+
+  it('fails closed when retained source custody is lost during the second anchor await', async () => {
+    const original = mocked.anchor.getMockImplementation()!;
+    mocked.anchor.mockImplementation(async (...args) => {
+      const value = await original(...args);
+      if (args[0].target === phaseTargets.secondAnchor) continuationSourceOperation!.dispose();
+      return value;
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/operation is disposed/);
+    expect(mocked.anchor).toHaveBeenCalledTimes(2); expect(mocked.continuationContext).not.toHaveBeenCalled();
+    expect(mocked.continuationPayoutCheck).not.toHaveBeenCalled(); assertDownstreamCleanup();
+  });
+
+  it('preserves a first-return failure when continuation operation cleanup also fails', async () => {
+    const primary = new Error('continuation reservation failed');
+    const cleanup = new Error('continuation operation cleanup failed');
+    const create = vi.mocked(sources.createSubstrateFederatedNativeGenesisSourceAttestationOperationV1)
+      .getMockImplementation()!;
+    const assertOperation = sources.assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1;
+    let created = 0;
+    let backing: ReturnType<typeof makeSourceOperation> | undefined;
+    let wrapper: ReturnType<typeof makeSourceOperation> | undefined;
+    vi.mocked(sources.createSubstrateFederatedNativeGenesisSourceAttestationOperationV1)
+      .mockImplementation(value => {
+        const operation = create(value);
+        created += 1;
+        if (created !== 2) return operation;
+        backing = operation;
+        wrapper = Object.freeze({ dispose: () => { throw cleanup; } });
+        continuationSourceOperation = wrapper;
+        return wrapper;
+      });
+    vi.spyOn(sources, 'assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1')
+      .mockImplementation((operation, session) => assertOperation(operation === wrapper ? backing! : operation, session));
+    mocked.continuationReservation.mockRejectedValueOnce(primary);
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors).toEqual([primary, cleanup]);
+    expect(mocked.continuationReservation).toHaveBeenCalledOnce();
+    expect(mocked.continuationMintBurn).not.toHaveBeenCalled();
+    assertDownstreamCleanup();
+  });
+
+  it('retains a pending second payout attempt without retry or a two-cycle success result', async () => {
+    const original = mocked.wait.getMockImplementation()!;
+    mocked.wait.mockImplementation(async (...args) => {
+      if (args[3] === 'native-continuation-withdrawal') {
+        throw new Error('native continuation payout confirmation pending; retained attempt');
+      }
+      return original(...args);
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('continuation payout confirmation pending');
+    expect(mocked.payoutSubmit).toHaveBeenCalledTimes(2); expect(mocked.payoutFinalize).toHaveBeenCalledTimes(2);
+    expect(mocked.payoutConfirm).toHaveBeenCalledOnce(); expect(closeNative).toHaveBeenCalledTimes(2);
+    assertDownstreamCleanup();
+  });
+
+  it.each(['status', 'transaction', 'height', 'header'] as const)(
+    'does not report two completed cycles when terminal second payout %s is not canonical', async fault => {
+    const original = mocked.payoutConfirm.getMockImplementation()!;
+    mocked.payoutConfirm.mockImplementation(async (...args) => {
+      const value = await original(...args);
+      if (args[0] !== returnValues.secondPayoutAttempt) return value;
+      return fault === 'status' ? { ...value, status: 'pending' }
+        : fault === 'transaction' ? { ...value, expectedTxId: '00'.repeat(32) }
+        : fault === 'height' ? { ...value, confirmationHeight: null }
+        : { ...value, confirmationHeaderId: null };
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(
+      'FED continuation return lacks its exact canonical payout',
+    );
+    expect(mocked.payoutConfirm).toHaveBeenCalledTimes(2); expect(mocked.continuationPayoutCheck).toHaveBeenCalledOnce();
+    expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer))
+      .toThrow(/active process provenance/);
+    assertDownstreamCleanup();
+  });
+
+  it('retains an ambiguous second tracker transport without retry or checking the second payout', async () => {
+    const originalSubmission = mocked.trackerSubmit.getMockImplementation()!;
+    mocked.trackerSubmit.mockImplementation(async (...args) => {
+      const value = await originalSubmission(...args);
+      if (args[1] !== returnValues.secondTrackerAttempt) return value;
+      returnValues.secondTrackerSubmission = Object.freeze({ ...value, status: 'ambiguous' });
+      return returnValues.secondTrackerSubmission;
+    });
+    const failure = new Error('second tracker confirmation pending; retained ambiguous attempt');
+    const originalWait = mocked.wait.getMockImplementation()!;
+    mocked.wait.mockImplementation(async (...args) => {
+      if (args[3] === 'native-continuation-tracker-admission') throw failure;
+      return originalWait(...args);
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toBe(failure);
+    expect(mocked.trackerSubmit).toHaveBeenCalledTimes(2);
+    expect(mocked.trackerFinalize).toHaveBeenCalledTimes(2);
+    expect(order.filter(value => value === 'secondTrackerSubmit')).toHaveLength(1);
+    expect(order.filter(value => value === 'secondTrackerFinalize')).toHaveLength(1);
+    expect(mocked.trackerConfirm).toHaveBeenCalledOnce();
+    expect(mocked.continuationPayoutCheck).not.toHaveBeenCalled();
+    expect(mocked.payoutSubmit).toHaveBeenCalledOnce();
+    assertDownstreamCleanup();
+  });
+
   it.each(['status', 'transaction', 'height', 'header'] as const)('requires canonical payout %s before returning success', async fault => {
     const original = mocked.payoutConfirm.getMockImplementation()!;
     mocked.payoutConfirm.mockImplementation(async (...args) => {
@@ -1177,6 +1588,10 @@ describe('fresh FED target composition', () => {
     })));
     expect(result.singletonIssuanceEstablished).toBe(true); expect(result.operationalMintEstablished).toBe(true);
     expect(result.canonicalPayoutEstablished).toBe(true); expect(result.withdrawal.payout.amountNanoErg).toBe('10000000');
+    expect(result.completedCycles).toBe(2); expect(result.secondCycle.payout.amountNanoErg).toBe('10000000');
+    expect(result.secondCycle.mint).toBe(continuationExecution.mint); expect(result.secondCycle.burn).toBe(continuationExecution.burn);
+    expect(result.secondCycle.feeFunding.withdrawal.feeInputBoxIdHex).toBe(returnValues.secondWithdrawalFee.feeInputBox.boxId);
+    expect(result.secondCycle.feeFunding.tracker.feeInputBoxIdHex).toBe(returnValues.secondTrackerFee.feeInputBox.boxId);
     expect(result.sourceFinalityEstablished).toBe(false); expect(result.trustless).toBe(false);
     expect(mocked.projectConfirmation).not.toHaveBeenCalled(); expect(mocked.projectSubmission).not.toHaveBeenCalled();
     expect(mocked.projectProgress).not.toHaveBeenCalled();
@@ -1195,15 +1610,25 @@ describe('fresh FED target composition', () => {
       ...downstreamStages, 'withdrawalFeeCheck', 'withdrawalFee', 'trackerFeeCheck', 'trackerFee', 'checkpoint',
       'anchor-phase', 'anchor', 'frozen-phase', 'frozenObservation', 'context', 'trackerTx', 'trackerCheck', 'trackerAuthorize', 'trackerReserve',
       'freshness-phase', 'trackerFreshness', 'transport-phase', 'trackerSubmit', 'trackerFinalize', 'confirmation-phase', 'trackerConfirm',
-      'payoutCheck', 'payoutAuthorize', 'payoutReserve', 'payoutSubmit', 'payoutFinalize', 'payoutConfirm', 'nodes-stop', 'stop']);
-    expect(nativeAction).toHaveBeenCalledTimes(2);
+      'payoutCheck', 'payoutAuthorize', 'payoutReserve', 'payoutSubmit', 'payoutFinalize', 'payoutConfirm',
+      'continuationFunding', 'continuationPacket', 'continuationSourceLock', 'continuationVault', 'continuationDraft',
+      'continuationEvidence', 'continuationProof', 'continuationReservation', 'continuationMintBurn',
+      'continuationWithdrawalFeeCheck', 'secondWithdrawalFee', 'continuationTrackerFeeCheck', 'secondTrackerFee',
+      'miningAuthority', 'continuationCheckpoint', 'readOnly-phase', 'continue-cycle',
+      'secondAnchor-phase', 'secondAnchor', 'secondFrozen-phase', 'secondFrozenObservation', 'continuationContext',
+      'secondTrackerTx', 'continuationTrackerCheck', 'secondTrackerAuthorize', 'secondTrackerReserve',
+      'secondFreshness-phase', 'secondTrackerFreshness', 'secondTransport-phase', 'secondTrackerSubmit',
+      'secondTrackerFinalize', 'secondConfirmation-phase', 'secondTrackerConfirm', 'continuationPayoutCheck',
+      'secondPayoutAuthorize', 'secondPayoutReserve', 'secondPayoutSubmit', 'secondPayoutFinalize', 'secondPayoutConfirm',
+      'nodes-stop', 'stop']);
+    expect(nativeAction).toHaveBeenCalledTimes(3);
     expect(closeNative).toHaveBeenCalledTimes(2);
     expect(result.frontierProcess).toEqual({ component: 'FED process stub' });
     expect(calls.filter(call => call.method === 'state_getStorage')).toHaveLength(28);
     expect(new Set(calls.map(call => call.url))).toEqual(new Set([PRIMARY, WITNESS]));
     expect(mocked.pin).toHaveBeenCalledTimes(2); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
     assertDownstreamPrefix('mint'); assertDownstreamCleanup();
-    expect(mocked.fundingOwned).toHaveBeenCalledOnce();
+    expect(mocked.fundingOwned).toHaveBeenCalledTimes(2);
     expect(mocked.frontierOwned).toHaveBeenCalledWith(frontierEndpoints);
     expect(readdirSync(journalDirectory).filter(name => name.startsWith('native-mint-'))).toHaveLength(1);
   });
@@ -1214,10 +1639,16 @@ describe('fresh FED target composition', () => {
       'typedGenesisSha256Hex', 'rawSpecSha256Hex', 'runtimeProfileIdHex', 'familyIdHex', 'sourceProofProfileIdHex',
       'nodeSha256Hex', 'wasmSha256Hex', 'operatorAddressHex', 'storageKeysChecked', 'issuanceInputBoxIds',
       'issuedTransactions', 'pegIn', 'mint', 'unsignedIssuance', 'ergoExecution', 'singletonIssuanceEstablished',
-      'operationalMintEstablished', 'sourceFinalityEstablished', 'trustless', 'burn', 'withdrawal', 'canonicalPayoutEstablished'].sort());
+      'operationalMintEstablished', 'sourceFinalityEstablished', 'trustless', 'burn', 'withdrawal', 'canonicalPayoutEstablished',
+      'completedCycles', 'secondCycle'].sort());
     const privateHandles = new Set([setup, retainedSetup, source, operator, miningCredential, target,
+      ...Object.values(phaseTargets),
       frontierEndpoints, batch, compiled, funding, packet, sourceLock, sourceLock.outputObservation,
-      committedVault, committedVault.outputObservation, draftInputs, draft, evidence, proof, journalState]);
+      committedVault, committedVault.outputObservation, draftInputs, draft, evidence, proof, journalState,
+      continuationFunding, continuationPacket, continuationSourceLock, continuationSourceLock.outputObservation,
+      continuationVault, continuationVault.outputObservation, continuationDraftInputs, continuationDraft,
+      continuationEvidence, continuationProof, continuationReservation, continuationExecution,
+      continuationMiningAuthority, continuationSourceOperation]);
     const visit = (value: unknown) => {
       expect(typeof value).not.toBe('function'); expect(typeof value).not.toBe('symbol');
       if (value === null || typeof value !== 'object') return;
@@ -1266,6 +1697,38 @@ describe('fresh FED target composition', () => {
     assertDownstreamCleanup();
   });
 
+  it('awaits Ergo teardown after both payouts and native teardown before resolving success', async () => {
+    const createProcess = mocked.process.getMockImplementation()!;
+    let releaseStop!: () => void;
+    let stopEntered!: () => void;
+    const entered = new Promise<void>(resolve => { stopEntered = resolve; });
+    const held = new Promise<void>(resolve => { releaseStop = resolve; });
+    mocked.process.mockImplementation((...args) => {
+      const owner = createProcess(...args);
+      const originalStop = stop.getMockImplementation()!;
+      stop.mockImplementation(async () => {
+        stopEntered();
+        await held;
+        return originalStop();
+      });
+      return owner;
+    });
+    let settled = false;
+    const running = runSubstrateFederatedGenesisTargetRootV1(input).then(
+      value => { settled = true; return value; },
+      failure => { settled = true; throw failure; },
+    );
+    await Promise.race([entered, running]);
+    try {
+      expect(mocked.payoutConfirm).toHaveBeenCalledTimes(2);
+      expect(frontierActive).toBe(false);
+      expect(stop).toHaveBeenCalledOnce();
+      expect(settled).toBe(false);
+    } finally { releaseStop(); }
+    expect((await running).completedCycles).toBe(2);
+    assertDownstreamCleanup();
+  });
+
   it('closes native ownership when the Ergo setup fails after its first native action', async () => {
     const createProcess = mocked.process.getMockImplementation()!;
     const failure = new Error('setup post-action failure');
@@ -1288,12 +1751,12 @@ describe('fresh FED target composition', () => {
     const confirm = mocked.payoutConfirm.getMockImplementation()!;
     mocked.payoutConfirm.mockImplementation(async (...args) => {
       const result = await confirm(...args);
-      frontierActive = false;
+      if (mocked.payoutConfirm.mock.calls.length === 2) frontierActive = false;
       return result;
     });
     await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('FED target inactive');
-    expect(mocked.payoutConfirm).toHaveBeenCalledOnce();
-    expect(nativeAction).toHaveBeenCalledTimes(2);
+    expect(mocked.payoutConfirm).toHaveBeenCalledTimes(2);
+    expect(nativeAction).toHaveBeenCalledTimes(3);
     assertDownstreamCleanup();
   });
 
@@ -1451,7 +1914,12 @@ describe('fresh FED target composition', () => {
       retainedSetup = { ...setup, runNativeGenesisRetainingSigner: mocked.check,
         checkNativeWithdrawalFeeFundingV1: mocked.withdrawalFeeCheck, checkNativeTrackerFeeFundingV1: mocked.trackerFeeCheck,
         checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: mocked.trackerCheck,
-        checkNativeWithdrawalV2: mocked.payoutCheck };
+        checkNativeWithdrawalRetainingContinuationSignerV2: mocked.payoutCheck,
+        checkNativeContinuationWithdrawalFeeFundingV1: mocked.continuationWithdrawalFeeCheck,
+        checkNativeContinuationTrackerFeeFundingV1: mocked.continuationTrackerFeeCheck,
+        issueNativeContinuationMiningAuthorityV1: mocked.miningAuthority,
+        checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner: mocked.continuationTrackerCheck,
+        checkNativeContinuationWithdrawalV2: mocked.continuationPayoutCheck };
       return retainedSetup;
     });
     await runSubstrateFederatedGenesisTargetRootV1(input);

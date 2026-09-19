@@ -61,8 +61,12 @@ describe('layer import rules', () => {
     ['../../substrate-federated-authority-safe-devnet-process-v1.js', 'createOwnedFederatedGenesisDevnetProcessSessionV1'],
     ['../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', 'assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1'],
     ['../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', 'buildSubstrateFederatedNativeGenesisPegInPacketV1'],
+    ['../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', 'buildSubstrateFederatedNativeContinuationPegInPacketV1'],
+    ['../../substrate-federated-tracker-v2.js', 'buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisPegInSourceLockV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeContinuationPegInSourceLockV1'],
+    ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1'],
     ['../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', 'buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'],
     ['../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', 'collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'],
     ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1'],
@@ -74,6 +78,7 @@ describe('layer import rules', () => {
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
     ['../../substrate-federated-isolated-devnet-mining-credential-v1.js', 'revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1'],
     ['../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'assertSubstrateFederatedNativeGenesisSetupReadCustodyV1'],
+    ['../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', 'assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'waitForCanonicalConfirmation'],
@@ -102,6 +107,26 @@ describe('layer import rules', () => {
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${binding}();`))).toEqual([]);
     for (const escape of [`capture(${binding});`, `const escaped = ${binding};`, `function expose() { return ${binding}; }`]) {
       expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${escape}`))
+        .map(item => item.message)).toContain(
+        `restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    }
+  });
+
+  it.each([
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationMintAndBurnV1'],
+    ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'reserveSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js', 'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'submitSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+    ['../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js', 'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'],
+  ])('permits only erased native return type queries for %s#%s', (specifier, binding) => {
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `${declaration} type Result = Awaited<ReturnType<typeof ${binding}>>; type Input = Parameters<typeof ${binding}>[0];`)))
+      .toEqual([]);
+    for (const value of [`const reflected = typeof ${binding};`,
+      `const escaped: typeof ${binding} = ${binding};`, `capture(${binding});`]) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${value}`))
         .map(item => item.message)).toContain(
         `restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
     }
@@ -197,6 +222,8 @@ describe('layer import rules', () => {
       'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2'],
     ['../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2'],
+    ['../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+      'SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1'],
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'SubstrateFederatedIsolatedDevnetSetupCheckSessionV2'],
     ['../../substrate-federated-observed-genesis-v1.js', 'ObservedSubstrateFederatedGenesisV1'],
     ['../../substrate-federated-isolated-devnet-mining-credential-v1.js', 'SubstrateFederatedIsolatedDevnetMiningCredentialV1'],
@@ -690,12 +717,12 @@ describe('layer import rules', () => {
   it.each([
     'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
     'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
-  ])('limits the continuation execution export %s to the setup root', binding => {
+  ])('limits the continuation execution export %s to the reviewed native root', binding => {
     expect(inspect({ [GENESIS_SETUP_ROOT]: `export async function ${binding}() {}` })).toEqual([]);
     expect(inspect({ [TRACKER_V2_CAMPAIGN_ROOT]: `export async function ${binding}() {}` })
       .map(item => item.message)).toContain(`reviewed app root export is not allowlisted: ${binding}`);
     const specifier = './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
-    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT,
       `import { ${binding} } from '${specifier}'; ${binding}();`)).map(item => item.message))
       .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
   });
