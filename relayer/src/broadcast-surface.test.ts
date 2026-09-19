@@ -240,6 +240,7 @@ describe('broadcast surface isolation', () => {
       .sort();
     expect(fixtureSources).toEqual([
       'test-fixtures/frontier-ergo-utxo-runtime-statement-v3-fixture.ts',
+      'test-fixtures/native-continuation-rpc-fixture.ts',
       'test-fixtures/wp06-fixture-backed-lifecycle.ts',
       'test-fixtures/wp06-source-derived-fixture.ts',
     ]);
