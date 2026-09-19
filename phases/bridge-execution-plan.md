@@ -28,12 +28,12 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect the continuation checkpoint to the second external fee inputs
-and the retained tracker/DUP/reserve successors. Start with the setup session's
-fee and tracker consumers: they still retain the first operation's checks and
-one-shot state. Use separately scoped continuation authority, preserving the
-first confirmed payout and its nonempty replay state. Fund both new external
-fee inputs before fixing the second anchor. Then connect the second payout and
+**Now:** connect the continuation checkpoint and new external fee inputs to the
+retained tracker/DUP/reserve successors. Start with nonempty tracker context
+construction and its setup-session consumer: they still require genesis state
+and the first operation's checks. Use separately scoped continuation authority,
+preserving the first confirmed payout and its nonempty replay state. Confirm
+both new external fee inputs before fixing the second anchor. Then connect the second payout and
 compose both cycles in the root before a fresh two-cycle campaign. Keep both
 node groups and original source custody alive through both returns; never reopen
 a disposed signer, reset a consumed API or reconstruct historical keys.
@@ -68,6 +68,18 @@ mint six and burn eight using real second-deposit producers, codecs and signatur
 against explicit node/process, compiled-genesis custody and funding doubles.
 Its first vault observation and initial tracker fixture remain simulated.
 This is component evidence, not a two-cycle node campaign.
+
+Explicit continuation fee methods now spend the respective first confirmed fee
+transactions' exact change output 1. They retain original setup read custody,
+the current packet and target, and reobserve each funding source on both nodes.
+The post-deposit check preserves authenticated ancestry after the second vault
+has spent the first payout reserve. Existing purpose-separated authorizers,
+journals and transports confirm two fee transactions per purpose without changing
+the first rows. Composed tests reach both new fee outputs and native checkpoint
+eight in the retained session, and reject copied checks, foreign targets, spent
+sources, custody loss and ambiguous resubmission. The old one-shot APIs remain
+unchanged. These tests use simulated RPCs; second tracker admission, payout and
+root composition remain open.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -144,7 +156,7 @@ work is independent and serves the same delivery result.
 
 The source-quorum, native operator operations and explicitly retained setup
 signer now have separate continuation boundaries. A second complete cycle still
-needs the second fees, tracker/payout successor consumers and
+needs tracker/payout successor consumers and
 root composition. Do not clear consumed flags, reopen a closed signer, recreate
 destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
 validate the new operation boundary with focused duplicate, disposed-custody,
@@ -428,7 +440,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Second native checkpoint and Ergo successors -> next settlement | Connect separately scoped external fee funding and tracker/payout consumers to the retained successors | Preserve the first replay key, insert the new key, fund both external fee inputs before the anchor, check cumulative value/liability conservation, and reject stale predecessors and either burn's replay |
+| **Now** | Second native checkpoint, funded fees and Ergo successors -> next settlement | Build the nonempty tracker context and connect separately scoped tracker/payout consumers to retained successors | Preserve the first replay key, insert the new key, confirm both external fee inputs before the anchor, check cumulative value/liability conservation, and reject stale predecessors and either burn's replay |
 | Next candidate | Both component cycles -> one root and fresh chain | Keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Do not reset genesis, substitute historical custody, reuse ambiguous attempts or repeat an equivalent one-cycle campaign |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

@@ -75,6 +75,19 @@ const V3_WITHDRAWAL_FEE_CHECK = Object.freeze({ stage: 'v3-withdrawal-fee-check'
 const V2_TRACKER_CHECK = Object.freeze({ stage: 'v2-tracker-check' });
 const WITHDRAWAL_CLAIM = Object.freeze({ source: 'withdrawal-claim' });
 const WITHDRAWAL_CHECK = Object.freeze({ stage: 'withdrawal-check' });
+const NATIVE_COMPILED = Object.freeze({ source: 'native-compiled' });
+const NATIVE_SETUP_BATCH = Object.freeze({ stage: 'native-setup' });
+const NATIVE_DEPOSIT_PACKET = Object.freeze({ source: 'native-deposit' });
+const NATIVE_CONTINUATION_PACKET = Object.freeze({ source: 'native-continuation-deposit' });
+const NATIVE_SOURCE_LOCK_RECEIPT = Object.freeze({ stage: 'native-source-lock' });
+const NATIVE_COMMITTED_VAULT_RECEIPT = Object.freeze({ stage: 'native-committed-vault' });
+const NATIVE_WITHDRAWAL_FEE_CHECK = Object.freeze({ stage: 'native-withdrawal-fee' });
+const NATIVE_TRACKER_FEE_CHECK = Object.freeze({ stage: 'native-tracker-fee' });
+const NATIVE_CONTINUATION_SOURCE_LOCK_RECEIPT = Object.freeze({ stage: 'native-continuation-source-lock' });
+const NATIVE_CONTINUATION_VAULT_RECEIPT = Object.freeze({ stage: 'native-continuation-vault' });
+const NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK = Object.freeze({ stage: 'native-continuation-withdrawal-fee' });
+const NATIVE_CONTINUATION_TRACKER_FEE_CHECK = Object.freeze({ stage: 'native-continuation-tracker-fee' });
+const FOREIGN_TARGET = Object.freeze({ target: 'foreign' });
 
 type FacadeSession = Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>>;
 const MANAGED_PHASES = [
@@ -428,6 +441,128 @@ describe('isolated setup-check runner V2 lifecycle', () => {
   });
 });
 
+describe('managed native continuation fee funding lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.registerSignerBinding.mockReturnValue(SIGNER_BINDING);
+  });
+
+  it('dispatches the two continuation fee checks exactly once and in order', async () => {
+    const execution = executionSession();
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+
+    await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never))
+      .resolves.toBe(NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK);
+    await expect(session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never))
+      .resolves.toBe(NATIVE_CONTINUATION_TRACKER_FEE_CHECK);
+
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1)
+      .toHaveBeenCalledExactlyOnceWith(TARGET);
+    expect(execution.checkNativeContinuationTrackerFeeFundingV1)
+      .toHaveBeenCalledExactlyOnceWith(TARGET);
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1.mock.invocationCallOrder[0])
+      .toBeLessThan(execution.checkNativeContinuationTrackerFeeFundingV1.mock.invocationCallOrder[0]!);
+    session.dispose();
+    expect(execution.dispose).toHaveBeenCalledOnce();
+  });
+
+  it.each(['checkNativeWithdrawalFeeFundingV1', 'checkNativeTrackerFeeFundingV1'] as const)(
+    'rejects the old one-shot %s after the continuation vault', async method => {
+      const execution = executionSession();
+      mocks.createExecutionSession.mockResolvedValue(execution);
+      const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      await advanceNativeContinuationToVault(session);
+
+      await expect(session[method](TARGET as never)).rejects.toThrow(/continuation is absent, consumed, or disposed/);
+      expect(execution[method]).toHaveBeenCalledOnce();
+      expect(execution.checkNativeContinuationWithdrawalFeeFundingV1).not.toHaveBeenCalled();
+      await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never))
+        .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    },
+  );
+
+  it('does not reopen or reuse a completed continuation withdrawal fee transition', async () => {
+    const execution = executionSession();
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+    await session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+
+    await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1).toHaveBeenCalledOnce();
+    expect(execution.checkNativeContinuationTrackerFeeFundingV1).not.toHaveBeenCalled();
+  });
+
+  it('rejects a disposed continuation before inner fee checking', async () => {
+    const execution = executionSession();
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+    session.dispose();
+
+    await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1).not.toHaveBeenCalled();
+  });
+
+  it('forwards a foreign target once, closes on rejection, and never retries it', async () => {
+    const execution = executionSession();
+    execution.checkNativeContinuationWithdrawalFeeFundingV1.mockImplementationOnce(async target => {
+      if (target !== TARGET) throw new Error('synthetic foreign continuation fee target');
+      return NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK;
+    });
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+
+    await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(FOREIGN_TARGET as never))
+      .rejects.toThrow(/foreign continuation fee target/);
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1)
+      .toHaveBeenCalledExactlyOnceWith(FOREIGN_TARGET);
+    await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1).toHaveBeenCalledOnce();
+  });
+
+  it('terminally invalidates concurrent continuation fee use', async () => {
+    const execution = executionSession();
+    const gate = deferred<typeof NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK>();
+    execution.checkNativeContinuationWithdrawalFeeFundingV1.mockImplementationOnce(() => gate.promise);
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+
+    const pending = session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+    await expect(session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    gate.resolve(NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK);
+    await expect(pending).rejects.toThrow(/invalidated by a concurrent transition/);
+    expect(execution.checkNativeContinuationWithdrawalFeeFundingV1).toHaveBeenCalledOnce();
+    await expect(session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+  });
+
+  it('closes both continuations when the second fee check fails', async () => {
+    const execution = executionSession();
+    execution.checkNativeContinuationTrackerFeeFundingV1.mockRejectedValueOnce(
+      new Error('synthetic continuation tracker fee failure'),
+    );
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+    await session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+
+    await expect(session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation tracker fee failure/);
+    await expect(session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(execution.dispose).toHaveBeenCalledOnce();
+  });
+});
+
 describe('managed facade V3 setup -> V2 tracker admission continuation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -672,6 +807,22 @@ async function advanceManaged(session: FacadeSession, completed: number): Promis
   }
 }
 
+async function advanceNativeContinuationToVault(session: FacadeSession): Promise<void> {
+  await session.runNativeGenesisRetainingSigner(NATIVE_COMPILED as never, TARGET as never);
+  await session.checkNativePegInSourceLockRetainingSignerV1(NATIVE_DEPOSIT_PACKET as never, TARGET as never);
+  await session.checkNativePegInCommittedVaultRetainingSignerV1(NATIVE_DEPOSIT_PACKET as never, TARGET as never);
+  await session.checkNativeWithdrawalFeeFundingV1(TARGET as never);
+  await session.checkNativeTrackerFeeFundingV1(TARGET as never);
+  await session.checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner(V2_TRACKER_INPUT as never, TARGET as never);
+  await session.checkNativeWithdrawalRetainingContinuationSignerV2(WITHDRAWAL_CLAIM as never, TARGET as never);
+  await session.checkNativeContinuationPegInSourceLockRetainingSignerV1(
+    NATIVE_CONTINUATION_PACKET as never, TARGET as never,
+  );
+  await session.checkNativeContinuationPegInCommittedVaultRetainingSignerV1(
+    NATIVE_CONTINUATION_PACKET as never, TARGET as never,
+  );
+}
+
 function expectManagedCleanup(execution: ReturnType<typeof executionSession>, custody: 'unclaimed' | 'pair' | 'sequence' = 'unclaimed'): void {
   expect(mocks.revokeSignerBinding).toHaveBeenCalledExactlyOnceWith(SIGNER_BINDING);
   expect(execution.dispose).toHaveBeenCalledOnce();
@@ -718,6 +869,22 @@ function executionSession() {
     checkFrozenTrackerCandidate: vi.fn(async () => FROZEN_TRACKER_RECEIPT),
     recheckTrackerReservationFreshnessCandidate:
       vi.fn(async () => FRESHNESS_RECEIPT),
+    runNativeGenesisRetainingSigner: vi.fn(async () => NATIVE_SETUP_BATCH),
+    checkNativePegInSourceLockRetainingSignerV1: vi.fn(async () => NATIVE_SOURCE_LOCK_RECEIPT),
+    checkNativePegInCommittedVaultRetainingSignerV1: vi.fn(async () => NATIVE_COMMITTED_VAULT_RECEIPT),
+    checkNativeWithdrawalFeeFundingV1: vi.fn(async () => NATIVE_WITHDRAWAL_FEE_CHECK),
+    checkNativeTrackerFeeFundingV1: vi.fn(async () => NATIVE_TRACKER_FEE_CHECK),
+    checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: vi.fn(async () => V2_TRACKER_CHECK),
+    checkNativeWithdrawalV2: vi.fn(async () => WITHDRAWAL_CHECK),
+    checkNativeWithdrawalRetainingContinuationSignerV2: vi.fn(async () => WITHDRAWAL_CHECK),
+    checkNativeContinuationPegInSourceLockRetainingSignerV1:
+      vi.fn(async () => NATIVE_CONTINUATION_SOURCE_LOCK_RECEIPT),
+    checkNativeContinuationPegInCommittedVaultRetainingSignerV1:
+      vi.fn(async () => NATIVE_CONTINUATION_VAULT_RECEIPT),
+    checkNativeContinuationWithdrawalFeeFundingV1:
+      vi.fn(async (_target: unknown) => NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK),
+    checkNativeContinuationTrackerFeeFundingV1:
+      vi.fn(async (_target: unknown) => NATIVE_CONTINUATION_TRACKER_FEE_CHECK),
     runForExecutionV3RetainingPegInAndTrackerSigner: vi.fn(async () => V3_SETUP_BATCH),
     checkPegInSourceLockV2RetainingSigner: vi.fn(async () => V2_SOURCE_LOCK_RECEIPT),
     checkPegInCommittedVaultV2RetainingSigner: vi.fn(async () => V2_COMMITTED_VAULT_RECEIPT),
