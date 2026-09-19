@@ -55,7 +55,10 @@ export interface SubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1 {
     expectedTxId: string,
     confirmation: SubstrateFederatedLocalDevnetGenesisConfirmation,
   ): void;
-  revalidateConfirmed(observer: Readonly<Observer>): Promise<readonly Readonly<
+  revalidateConfirmed(
+    observer: Readonly<Observer>,
+    expectedTxId?: string,
+  ): Promise<readonly Readonly<
     SubstrateFederatedLocalDevnetGenesisConfirmation
   >[]>;
 }
@@ -214,7 +217,10 @@ export function createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1(
       confirmExact(attempt.expectedTxId, observation);
       return 'confirmed';
     },
-    revalidateConfirmed: async (observer: Readonly<Observer>) => {
+    revalidateConfirmed: async (
+      observer: Readonly<Observer>,
+      expectedTxId?: string,
+    ) => {
       assertSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
         observer,
         executionTargetIdentityDigestHex,
@@ -222,9 +228,13 @@ export function createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1(
       const confirmed = state.getConfirmedErgoOperationalTransactionAttempts(
         PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
       );
+      const selected = selectConfirmedAttempts(confirmed, expectedTxId);
       const observations: SubstrateFederatedLocalDevnetGenesisConfirmation[] = [];
-      for (const attempt of confirmed) {
+      for (const attempt of selected) {
         const observation = await observeExact(observer, attempt.expectedTxId);
+        if (expectedTxId !== undefined) {
+          assertSelectedAttemptUnchanged(state, attempt);
+        }
         if (
           observation.status !== 'confirmed'
           || observation.confirmationHeight === null
@@ -270,6 +280,41 @@ export function createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1(
       exact,
     );
     return exact;
+  }
+}
+
+function selectConfirmedAttempts(
+  confirmed: readonly ErgoOperationalTransactionAttempt[],
+  expectedTxId: string | undefined,
+): readonly ErgoOperationalTransactionAttempt[] {
+  if (expectedTxId === undefined) return confirmed;
+  const normalizedTxId = fixedHex32(
+    expectedTxId,
+    'committed-vault transaction ID',
+  );
+  const selected = confirmed.filter(attempt =>
+    attempt.expectedTxId === normalizedTxId
+  );
+  if (selected.length !== 1) {
+    throw new Error(
+      `exactly one confirmed committed-vault attempt is required for ${normalizedTxId}`,
+    );
+  }
+  assertStoredIdentity(selected[0]!);
+  return selected;
+}
+
+function assertSelectedAttemptUnchanged(
+  state: SubstrateFederatedLocalDevnetPegInCommittedVaultJournalStateV1,
+  selected: ErgoOperationalTransactionAttempt,
+): void {
+  const current = state.getErgoOperationalTransactionAttempts(
+    PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+  ).filter(attempt => attempt.expectedTxId === selected.expectedTxId);
+  if (current.length !== 1 || !sameAttempt(current[0]!, selected)) {
+    throw new Error(
+      `selected committed-vault attempt ${selected.expectedTxId} changed during confirmation observation`,
+    );
   }
 }
 
@@ -410,4 +455,11 @@ function fixedHex32(value: unknown, label: string): string {
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length
     && left.every((value, index) => value === right[index]);
+}
+
+function sameAttempt(
+  left: ErgoOperationalTransactionAttempt,
+  right: ErgoOperationalTransactionAttempt,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

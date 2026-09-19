@@ -499,6 +499,36 @@ describe('native source-lock output observation (mocked packet custody, confirma
     expect(mocks.assertTarget.mock.calls.length - before).toBe(1);
   });
 
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'retains the current continuation target independently of the setup batch and rejects %s drift', async field => {
+      const originalSetupBatch = Object.freeze({ ...batch, targetBinding: {
+        processBindingDigestHex: hex('a1'), executionTargetIdentityDigestHex: hex('a2'),
+      } });
+      nativeCustody.mockImplementation((p, b, t) => {
+        if (p !== packet || b !== originalSetupBatch || t !== TARGET) throw new Error('native packet provenance missing');
+        return packet;
+      });
+      // Model the retained withdrawal lineage: it binds the current target,
+      // while setup custody survives only as the original read capability.
+      mocks.assertNativePacket.mockImplementation((p, b, t) => {
+        nativeCustody(p, b, t);
+        const current = mocks.assertTarget(t);
+        if (current.processBindingDigestHex !== BINDING.processBindingDigestHex
+          || current.executionTargetIdentityDigestHex !== BINDING.executionTargetIdentityDigestHex) {
+          throw new Error('continuation target provenance changed');
+        }
+        return packet;
+      });
+      const observation = await observe({ ...input(), batch: originalSetupBatch as never });
+      expect(observation).toMatchObject(BINDING);
+      const consume = () => assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(
+        observation, TARGET as never, originalSetupBatch as never, packet as never);
+      expect(consume()).toBe(packet);
+      assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, TARGET as never);
+      mocks.assertTarget.mockReturnValue({ ...BINDING, [field]: hex('ff') });
+      expect(consume).toThrow('continuation target provenance changed');
+    });
+
   it.each(['copy', 'proxy', 'absent', 'absent target', 'foreign target', 'getter'] as const)(
     'keeps direct target validation before inspecting a %s observation', async fault => {
       const original = await observe(input());

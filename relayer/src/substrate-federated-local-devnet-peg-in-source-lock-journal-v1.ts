@@ -54,7 +54,10 @@ export interface SubstrateFederatedLocalDevnetPegInSourceLockJournalV1 {
     expectedTxId: string,
     confirmation: SubstrateFederatedLocalDevnetGenesisConfirmation,
   ): void;
-  revalidateConfirmed(observer: Readonly<Observer>): Promise<number>;
+  revalidateConfirmed(
+    observer: Readonly<Observer>,
+    expectedTxId?: string,
+  ): Promise<number>;
 }
 
 interface DurableMaterialV1 {
@@ -211,7 +214,10 @@ export function createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1(
       confirmExact(attempt.expectedTxId, observation);
       return 'confirmed';
     },
-    revalidateConfirmed: async (observer: Readonly<Observer>) => {
+    revalidateConfirmed: async (
+      observer: Readonly<Observer>,
+      expectedTxId?: string,
+    ) => {
       assertSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
         observer,
         reconciliationIdentityDigestHex,
@@ -219,8 +225,16 @@ export function createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1(
       const confirmed = state.getConfirmedErgoOperationalTransactionAttempts(
         SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
       );
-      for (const attempt of confirmed) {
+      const selected = selectConfirmedAttempts(
+        confirmed,
+        expectedTxId,
+        reconciliationIdentityDigestHex,
+      );
+      for (const attempt of selected) {
         const observation = await observeExact(observer, attempt.expectedTxId);
+        if (expectedTxId !== undefined) {
+          assertSelectedAttemptUnchanged(state, attempt);
+        }
         if (
           observation.status !== 'confirmed'
           || observation.confirmationHeight === null
@@ -241,7 +255,7 @@ export function createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1(
         });
         assertStoredIdentity(rebound, reconciliationIdentityDigestHex);
       }
-      return confirmed.length;
+      return selected.length;
     },
   });
 
@@ -289,12 +303,61 @@ function assertJournalState(
   for (const attempt of state.getErgoOperationalTransactionAttempts(
     SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
   )) {
-    assertStoredIdentity(attempt, reconciliationIdentityDigestHex);
+    assertStoredProfileShape(attempt);
     if (attempt.status === 'quarantined' || attempt.status === 'abandoned') {
       throw new Error(
         `source-lock attempt ${attempt.expectedTxId} requires reviewed recovery`,
       );
     }
+    if (attempt.status === 'confirmed') {
+      fixedHex32(
+        attempt.reconciliationIdentityDigestHex,
+        'confirmed source-lock reconciliation identity digest',
+      );
+    } else {
+      assertStoredIdentity(attempt, reconciliationIdentityDigestHex);
+    }
+  }
+}
+
+function selectConfirmedAttempts(
+  confirmed: readonly ErgoOperationalTransactionAttempt[],
+  expectedTxId: string | undefined,
+  reconciliationIdentityDigestHex: string,
+): readonly ErgoOperationalTransactionAttempt[] {
+  if (expectedTxId === undefined) {
+    for (const attempt of confirmed) {
+      assertStoredIdentity(attempt, reconciliationIdentityDigestHex);
+    }
+    return confirmed;
+  }
+  const normalizedTxId = fixedHex32(
+    expectedTxId,
+    'source-lock transaction ID',
+  );
+  const selected = confirmed.filter(attempt =>
+    attempt.expectedTxId === normalizedTxId
+  );
+  if (selected.length !== 1) {
+    throw new Error(
+      `exactly one confirmed source-lock attempt is required for ${normalizedTxId}`,
+    );
+  }
+  assertStoredIdentity(selected[0]!, reconciliationIdentityDigestHex);
+  return selected;
+}
+
+function assertSelectedAttemptUnchanged(
+  state: SubstrateFederatedLocalDevnetPegInSourceLockJournalStateV1,
+  selected: ErgoOperationalTransactionAttempt,
+): void {
+  const current = state.getErgoOperationalTransactionAttempts(
+    SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+  ).filter(attempt => attempt.expectedTxId === selected.expectedTxId);
+  if (current.length !== 1 || !sameAttempt(current[0]!, selected)) {
+    throw new Error(
+      `selected source-lock attempt ${selected.expectedTxId} changed during confirmation observation`,
+    );
   }
 }
 
@@ -335,18 +398,35 @@ function assertStoredIdentity(
   attempt: ErgoOperationalTransactionAttempt,
   reconciliationIdentityDigestHex: string,
 ): void {
+  assertStoredProfileShape(attempt);
+  if (
+    attempt.reconciliationIdentityDigestHex
+      !== reconciliationIdentityDigestHex
+  ) {
+    throw new Error('source-lock SQLite attempt identity is invalid');
+  }
+}
+
+function assertStoredProfileShape(
+  attempt: ErgoOperationalTransactionAttempt,
+): void {
   if (
     attempt.operationProfile
       !== SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE
     || attempt.targetSidechainHeight !== null
     || attempt.targetSidechainBlockHashHex !== null
     || attempt.heartbeatKeyHex !== null
-    || attempt.reconciliationIdentityDigestHex
-      !== reconciliationIdentityDigestHex
     || attempt.fundsReleaseAuthorityEpochHex !== null
   ) {
     throw new Error('source-lock SQLite attempt identity is invalid');
   }
+}
+
+function sameAttempt(
+  left: ErgoOperationalTransactionAttempt,
+  right: ErgoOperationalTransactionAttempt,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function requireState(

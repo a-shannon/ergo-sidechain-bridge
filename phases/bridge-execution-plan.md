@@ -28,12 +28,14 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect the checked second source deposit to transport and committed
-reserve evidence. Start at the native source-lock and committed-vault execution
-functions in `substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts`
-and their existing authorizer/journal consumers. Select the smallest join that
-delivers original second-deposit observations to the continuation source proof,
-reservation and mint caller. Keep each operation's authority separate; never
+**Now:** connect original second-deposit evidence to the continuation source proof,
+reservation and mint caller. Start at native proof production in
+`substrate-federated-isolated-devnet-source-attestation-session-v1.ts` and its
+`getSubstrateFederatedNativeGenesisAttestationContextV1` consumer. The getter still
+requires the initial setup action, which is closed before the first payout;
+the attestation parent also retains the original target identity. Preserve that
+parent custody and genesis while binding the proven live descendant target.
+Keep each operation's authority separate; never
 reopen a disposed signer or reset a consumed legacy API. Connect the second
 fees, tracker/payout and root before the fresh two-cycle campaign. The root must
 keep both node groups and original source custody alive through both returns.
@@ -45,9 +47,17 @@ reserve/DUP/tracker on both nodes. The deposit extends the original AVL history
 using the payout reserve and remaining liability. Separate source-lock and
 reserve-transition check methods retain that provenance and reject disposed,
 foreign, stale or reused state. The old withdrawal API still destroys custody.
-This boundary is exercised with real compilers, AVL witnesses and WASM signatures
-against explicit node/process observation doubles; second-deposit transport and
-second tracker/payout consumers are still unconnected.
+Explicit continuation execution functions now connect those checks to the existing
+authorizers, durable journals and checked transports. Journals and original output
+observations bind the current target, then feed the native reservation draft and
+committed-reserve evidence collector. Exact journal revalidation selects the
+current transaction and preserves resolved first-deposit history; unresolved
+attempts still block replacement. Composed tests use real compilers, AVL
+witnesses, WASM signatures and these consumers against explicit node/process and
+funding-discovery doubles. They cover copied or foreign evidence, consumed evidence,
+target/custody loss and an ambiguous response without resubmission. Source-proof
+production and the second tracker/payout remain unconnected; the current root
+still executes one cycle.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -123,7 +133,7 @@ work is independent and serves the same delivery result.
 
 The source-quorum, native operator operations and explicitly retained setup
 signer now have separate continuation boundaries. A second complete cycle still
-needs the second deposit transport, fees, tracker/payout successor consumers and
+needs the source-proof/mint join, fees, tracker/payout successor consumers and
 root composition. Do not clear consumed flags, reopen a closed signer, recreate
 destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
 validate the new operation boundary with focused duplicate, disposed-custody,

@@ -694,6 +694,36 @@ describe('native committed-vault observation (mocked packet custody, box codec a
     expect(mocks.getBox).toHaveBeenCalledTimes(10);
   });
 
+  it.each(['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const)(
+    'retains the current continuation target independently of the setup batch and rejects %s drift', async field => {
+      const originalSetupBatch = Object.freeze({ ...batch, targetBinding: {
+        processBindingDigestHex: hex('a1'), executionTargetIdentityDigestHex: hex('a2'),
+      } });
+      const custody = (packet: unknown, suppliedBatch: unknown, target: unknown) => {
+        if (!custodyActive || packet !== PACKET || suppliedBatch !== originalSetupBatch || target !== TARGET) {
+          throw new Error('native continuation provenance missing');
+        }
+        return PACKET;
+      };
+      mocks.assertNativeReadCustody.mockImplementation(custody);
+      mocks.assertNativePacket.mockImplementation((p, b, t) => {
+        custody(p, b, t);
+        const current = mocks.assertTarget(t);
+        if (current.processBindingDigestHex !== BINDING.processBindingDigestHex
+          || current.executionTargetIdentityDigestHex !== BINDING.executionTargetIdentityDigestHex) {
+          throw new Error('continuation target provenance changed');
+        }
+        return PACKET;
+      });
+      const observation = await observe({ ...input(), batch: originalSetupBatch as never });
+      expect(observation).toMatchObject(BINDING);
+      const consume = () => assertBound(observation, TARGET as never, originalSetupBatch as never, PACKET as never);
+      expect(consume()).toBe(PACKET);
+      assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1(observation, TARGET as never);
+      mocks.assertTarget.mockReturnValue({ ...BINDING, [field]: hex('ff') });
+      expect(consume).toThrow('continuation target provenance changed');
+    });
+
   it.each(['output', 'closing'] as const)('drains the %s peer header read before surfacing a failure', async phase => {
     const phaseCount = phase === 'output' ? 1 : 2;
     const headers = headerFixture();

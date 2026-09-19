@@ -699,6 +699,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
         new Set([
+          'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
           'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
           'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA',
@@ -1214,6 +1215,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       [
         '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js',
         new Set([
+          'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
           'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1',
           'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1',
@@ -1710,6 +1712,8 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
       'executeSubstrateFederatedNativeGenesisBatchV1',
       'executeSubstrateFederatedNativeGenesisPegInSourceLockV1',
       'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1',
+      'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
+      'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
       'executeSubstrateFederatedIsolatedDevnetGenesisBatchV3',
       'executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1',
       'executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1',

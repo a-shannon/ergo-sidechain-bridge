@@ -639,8 +639,9 @@ export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputO
     if (material.assertNativePacket() !== material.packet) {
       throw new Error('native committed-vault observation packet changed');
     }
-    // The original packet assertion has just validated its original batch and target.
-    current = (material.batch as Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>).targetBinding;
+    // Full packet provenance revalidates this exact target and its immutable
+    // binding. A continuation's setup batch belongs to the earlier setup action.
+    current = material.binding;
   } else {
     current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   }

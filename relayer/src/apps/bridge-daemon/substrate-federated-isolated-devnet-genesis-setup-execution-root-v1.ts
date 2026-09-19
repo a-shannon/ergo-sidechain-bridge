@@ -95,6 +95,7 @@ import {
   type SubstrateFederatedIsolatedDevnetErgoNodeBuildV1Receipt,
 } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA,
@@ -2575,28 +2576,64 @@ export async function executeSubstrateFederatedNativeGenesisBatchV1(input: Reado
   return transactions;
 }
 
-/** Create and confirm the refundable native deposit; reserve commitment and mint are separate. */
-export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(input: Readonly<{
+type NativePegInSourceLockExecutionInputV1 = Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
   packet: ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV1>;
   setupSession: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   state: SubstrateFederatedLocalDevnetPegInSourceLockJournalStateV1;
-}>): Promise<Readonly<{
+}>;
+
+type NativePegInSourceLockExecutionResultV1 = Readonly<{
   expectedTxId: string;
   transportStatus: 'accepted' | 'reconciled';
   durableAttemptDigestHex: string;
   journalDigestHex: string;
   outputObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
-}>> {
+}>;
+
+type NativePegInSourceLockCheckV1 = (
+  packet: NativePegInSourceLockExecutionInputV1['packet'],
+  target: NativePegInSourceLockExecutionInputV1['target'],
+) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>>;
+
+/** Create and confirm the first refundable native deposit; later lifecycle branches are explicit. */
+export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(
+  input: NativePegInSourceLockExecutionInputV1,
+): Promise<NativePegInSourceLockExecutionResultV1> {
+  const session = input.setupSession;
+  const check = session.checkNativePegInSourceLockRetainingSignerV1;
+  return executeSubstrateFederatedNativePegInSourceLockV1(
+    input,
+    (packet, target) => check.call(session, packet, target),
+  );
+}
+
+/** Continue after the original withdrawal without re-entering the genesis setup branch. */
+export async function executeSubstrateFederatedNativeContinuationPegInSourceLockV1(
+  input: NativePegInSourceLockExecutionInputV1,
+): Promise<NativePegInSourceLockExecutionResultV1> {
+  const session = input.setupSession;
+  const check = session.checkNativeContinuationPegInSourceLockRetainingSignerV1;
+  return executeSubstrateFederatedNativePegInSourceLockV1(
+    input,
+    (packet, target) => check.call(session, packet, target),
+  );
+}
+
+async function executeSubstrateFederatedNativePegInSourceLockV1(
+  input: NativePegInSourceLockExecutionInputV1,
+  check: NativePegInSourceLockCheckV1,
+): Promise<NativePegInSourceLockExecutionResultV1> {
   const { target, batch, packet, setupSession, state } = input;
+  const targetBinding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   const assertActive = () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
   assertActive();
   const completionDeadline = performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS;
   const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
     target, batch.request.target.genesisHeaderIdHex,
   );
-  const receipt = await setupSession.checkNativePegInSourceLockRetainingSignerV1(packet, target);
+  const receipt = await check(packet, target);
   assertActive();
   const discoverFunding = async (minimumHeight: number) => {
     assertActive();
@@ -2617,13 +2654,14 @@ export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(in
     target, batch, packet, executionCheck, postCheck, preTransport,
   });
   const journal = createSubstrateFederatedLocalDevnetPegInSourceLockJournalV1({
-    state, authorizer, reconciliationIdentityDigestHex: batch.targetBinding.executionTargetIdentityDigestHex,
+    state, authorizer, reconciliationIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
     targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
   });
-  if (await journal.reconcileActive(observer) !== 'none') {
+  const prior = await journal.reconcileActive(observer);
+  assertActive();
+  if (prior !== 'none') {
     throw new Error('unexpected prior native source-lock attempt was reconciled');
   }
-  assertActive();
   const transport = createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(target, authorizer);
   const transaction = packet.transactions.sourceLockCreation;
   const sourceBoxId = packet.boxes.sourceFundingInput.boxId;
@@ -2675,7 +2713,7 @@ export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(in
   if (reconciled !== 'confirmed') {
     throw new Error('native source-lock journal did not retain exact confirmation');
   }
-  const revalidated = await journal.revalidateConfirmed(observer);
+  const revalidated = await journal.revalidateConfirmed(observer, transaction.txId);
   assertActive();
   if (revalidated !== 1) {
     throw new Error('native source-lock journal did not retain exact confirmation');
@@ -2690,31 +2728,66 @@ export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(in
     durableAttemptDigestHex: result.durableAttemptDigestHex, journalDigestHex: result.journalDigestHex, outputObservation });
 }
 
-/** Commit the exact native deposit to its non-refundable reserve before mint admission. */
-export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1(input: Readonly<{
+type NativePegInCommittedVaultExecutionInputV1 = Readonly<{
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
   packet: ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV1>;
   sourceLockObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
   setupSession: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
   state: SubstrateFederatedLocalDevnetPegInCommittedVaultJournalStateV1;
-}>): Promise<Readonly<{
+}>;
+
+type NativePegInCommittedVaultExecutionResultV1 = Readonly<{
   expectedTxId: string;
   transportStatus: 'accepted' | 'reconciled';
   durableAttemptDigestHex: string;
   journalDigestHex: string;
   preTransportObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1>;
   outputObservation: Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultOutputObservationV1>;
-}>> {
-  const { target, batch, packet, sourceLockObservation, setupSession, state } = input;
-  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+}>;
+
+type NativePegInCommittedVaultCheckV1 = (
+  packet: NativePegInCommittedVaultExecutionInputV1['packet'],
+  target: NativePegInCommittedVaultExecutionInputV1['target'],
+) => Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt>>;
+
+/** Commit the first native deposit to its non-refundable reserve before mint admission. */
+export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1(
+  input: NativePegInCommittedVaultExecutionInputV1,
+): Promise<NativePegInCommittedVaultExecutionResultV1> {
+  const session = input.setupSession;
+  const check = session.checkNativePegInCommittedVaultRetainingSignerV1;
+  return executeSubstrateFederatedNativePegInCommittedVaultV1(
+    input,
+    (packet, target) => check.call(session, packet, target),
+  );
+}
+
+/** Commit the post-withdrawal continuation deposit without resetting session state. */
+export async function executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1(
+  input: NativePegInCommittedVaultExecutionInputV1,
+): Promise<NativePegInCommittedVaultExecutionResultV1> {
+  const session = input.setupSession;
+  const check = session.checkNativeContinuationPegInCommittedVaultRetainingSignerV1;
+  return executeSubstrateFederatedNativePegInCommittedVaultV1(
+    input,
+    (packet, target) => check.call(session, packet, target),
+  );
+}
+
+async function executeSubstrateFederatedNativePegInCommittedVaultV1(
+  input: NativePegInCommittedVaultExecutionInputV1,
+  check: NativePegInCommittedVaultCheckV1,
+): Promise<NativePegInCommittedVaultExecutionResultV1> {
+  const { target, batch, packet, sourceLockObservation, state } = input;
+  const targetBinding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   const assertActive = () => {
     assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(sourceLockObservation, target, batch, packet);
   };
   assertActive();
   const completionDeadline = performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS;
   const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, batch.request.target.genesisHeaderIdHex);
-  const receipt = await setupSession.checkNativePegInCommittedVaultRetainingSignerV1(packet, target);
+  const receipt = await check(packet, target);
   assertActive();
   const executionCheck = promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(receipt, target);
   const authorizationSession = createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1({
@@ -2722,7 +2795,7 @@ export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV
   });
   const journal = createSubstrateFederatedLocalDevnetPegInCommittedVaultJournalV1({
     state, authorizer: authorizationSession.broadcastAuthorizer,
-    executionTargetIdentityDigestHex: batch.targetBinding.executionTargetIdentityDigestHex,
+    executionTargetIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
     targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
   });
   const prior = await journal.reconcileActive(observer);
@@ -2774,7 +2847,7 @@ export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV
   const reconciled = await journal.reconcileActive(observer);
   assertActive();
   if (reconciled !== 'confirmed') throw new Error('native committed-vault journal did not retain exact confirmation');
-  const confirmations = await journal.revalidateConfirmed(observer);
+  const confirmations = await journal.revalidateConfirmed(observer, transaction.txId);
   assertActive();
   if (confirmations.length !== 1) throw new Error('native committed-vault confirmed attempt count changed');
   const outputObservation = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1({

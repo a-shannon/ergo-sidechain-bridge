@@ -85,7 +85,21 @@ import { submitSubstrateFederatedIsolatedDevnetWithdrawalV2 as submitWithdrawal,
   from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 as createObserver }
   from './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import { executeSubstrateFederatedNativeContinuationPegInSourceLockV1 as executeContinuationSourceLock,
+  executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1 as executeContinuationVault }
+  from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import * as rewardDiscovery from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
+import { buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeMintDraft }
+  from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import { collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 as collectNativeReserveEvidence,
+  consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1 as consumeNativeReserveEvidence }
+  from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1 as REQUIRED_SUCCESSOR_DEPTH }
+  from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import { StateTracker } from './state-tracker.js';
+import { PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE }
+  from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
 
 const PRIMARY = 'http://127.0.0.1:9051';
@@ -250,7 +264,10 @@ type ContinuationFault = 'continuation valid' | 'continuation old terminal signe
   | 'continuation disposed during vault preparation' | 'continuation disposed during vault checker'
   | 'continuation disposed during builder' | 'continuation successor changes during source'
   | 'continuation successor changes during vault' | 'continuation builder snapshots caller input'
-  | 'continuation legacy replay';
+  | 'continuation legacy replay' | 'continuation foreign observation before draft'
+  | 'continuation copied observation before evidence' | 'continuation mismatched reservation draft'
+  | 'continuation current target lost before transport' | 'continuation custody lost after funding await'
+  | 'continuation ambiguous source transport';
 
 describe('native FED withdrawal continuation', () => {
   it.each<Fault | ContinuationFault>(['valid', 'foreign native origin', 'source disposed during tracker',
@@ -265,7 +282,10 @@ describe('native FED withdrawal continuation', () => {
     'continuation wrong vault packet', 'continuation disposed during vault preparation',
     'continuation disposed during vault checker', 'continuation disposed during builder',
     'continuation successor changes during source', 'continuation successor changes during vault',
-    'continuation builder snapshots caller input', 'continuation legacy replay'])(
+    'continuation builder snapshots caller input', 'continuation legacy replay',
+    'continuation foreign observation before draft', 'continuation copied observation before evidence',
+    'continuation mismatched reservation draft', 'continuation current target lost before transport',
+    'continuation custody lost after funding await', 'continuation ambiguous source transport'])(
     'preserves native custody through payout and a second source deposit: %s', async fault => {
     vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValue(testMnemonic);
     const session = await createSession();
@@ -280,6 +300,15 @@ describe('native FED withdrawal continuation', () => {
     let injectedCheckCalls: number | undefined;
     let continuationReserveId: string | undefined;
     let mutateContinuationBuilderInput: (() => void) | undefined;
+    let continuationFundingObservation: object | undefined;
+    let continuationFundingReads = 0;
+    let currentTargetActive = true;
+    let loseCurrentTargetAtTransport = false;
+    let loseCustodyAfterFundingAwait = false;
+    let loseSourceTransportResponse = false;
+    let secondSourceInclusionHeight: number | undefined;
+    let secondVaultInclusionHeight: number | undefined;
+    let secondContinuationPacket: Awaited<ReturnType<typeof buildSubstrateFederatedNativeContinuationPegInPacketV1>> | undefined;
     const boxes = new Map<string, Eip12Box>();
     const confirmed = new Map<string, number>();
     const checkBodies: Record<string, unknown>[] = [];
@@ -345,7 +374,7 @@ describe('native FED withdrawal continuation', () => {
     });
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1').mockImplementation(target => {
       if (target === setupTarget && boundary.setupActive) return setupBinding;
-      if (phase === 'confirmation' && target === confirmationTarget) return confirmBinding;
+      if (phase === 'confirmation' && target === confirmationTarget && currentTargetActive) return confirmBinding;
       if (phase === 'confirmation' && target === foreignTarget) return binding('92');
       throw new Error('synthetic initial execution target expired');
     });
@@ -370,9 +399,11 @@ describe('native FED withdrawal continuation', () => {
     });
     let trackerTxId: string | undefined;
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2').mockImplementation((target, parent, txId) => {
+      const currentBinding = owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
       expect(parent).toEqual(transportBinding); expect(txId).toBe(trackerTxId); expect(phase).toBe('confirmation');
       if (target !== confirmationTarget) throw new Error('synthetic foreign confirmation lineage');
-      return confirmBinding;
+      expect(currentBinding).toEqual(confirmBinding);
+      return currentBinding;
     });
     const read = async (path: string, origin: string): Promise<any> => {
       if (![PRIMARY, WITNESS].includes(origin)) throw new Error('unexpected synthetic RPC origin');
@@ -381,6 +412,7 @@ describe('native FED withdrawal continuation', () => {
         injectionCount++; boundary.sourceActive = false;
       }
       if (path === '/blocks/lastHeaders/10') return [...signingHeaders].reverse();
+      if (path === '/blocks/lastHeaders/1') return [{ height: tip(), id: headerId(tip()), parentId: headerId(tip() - 1) }];
       if (path === '/blocks/at/1') return [GENESIS];
       if (path === '/info') return { network: 'devnet', fullHeight: tip() };
       if (path.startsWith('/utxo/byId/')) {
@@ -412,6 +444,12 @@ describe('native FED withdrawal continuation', () => {
         if (inclusionHeight !== undefined) return { id, inclusionHeight, headerId: headerId(inclusionHeight), numConfirmations: tip() - inclusionHeight };
       }
       if (/^\/blocks\/at\/[0-9]+$/.test(path)) return [headerId(Number(path.slice('/blocks/at/'.length)))];
+      const headerMatch = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(path);
+      if (headerMatch) {
+        const height = Array.from({ length: 64 }, (_, index) => tip() - index)
+          .find(value => headerId(value) === headerMatch[1]);
+        if (height !== undefined) return { height, id: headerId(height), parentId: headerId(height - 1) };
+      }
       throw new Error(`unexpected synthetic RPC path ${path}`);
     };
     const signedId = (body: Record<string, unknown>) => {
@@ -419,6 +457,20 @@ describe('native FED withdrawal continuation', () => {
       try { return id.to_str() as string; } finally { id.free(); tx.free(); }
     };
     vi.spyOn(helpers, 'ngetDirect').mockImplementation((path, origin) => read(path, origin!));
+    const fundingObservations = new WeakSet<object>();
+    vi.spyOn(rewardDiscovery, 'discoverSubstrateFederatedRewardInputsV2').mockImplementation(async () => {
+      if (continuationFundingObservation === undefined) throw new Error('synthetic continuation funding unavailable');
+      const observed = structuredClone(continuationFundingObservation);
+      fundingObservations.add(observed);
+      continuationFundingReads++;
+      if (loseCustodyAfterFundingAwait && continuationFundingReads === 2) boundary.sourceActive = false;
+      return observed as never;
+    });
+    vi.spyOn(rewardDiscovery, 'assertSubstrateFederatedRewardInputDiscoveryV2Provenance').mockImplementation(value => {
+      if (value === null || typeof value !== 'object' || !fundingObservations.has(value)) {
+        throw new Error('synthetic continuation funding provenance absent');
+      }
+    });
     vi.spyOn(helpers, 'ncheck').mockImplementation(async (path, body, origin) => {
       expect(path).toBe('/transactions/check'); expect(origin).toBe(PRIMARY);
       checkBodies.push(body as Record<string, unknown>); return signedId(body as Record<string, unknown>);
@@ -463,7 +515,18 @@ describe('native FED withdrawal continuation', () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
     }
     vi.spyOn(axios, 'create').mockImplementation(config => ({
-      get: async (path: string) => ({ data: await read(path, config!.baseURL!) }),
+      get: async (path: string, request?: { responseType?: string }) => {
+        try {
+          const data = await read(path, config!.baseURL!);
+          return { status: 200, data: request?.responseType === 'arraybuffer'
+            ? Buffer.from(JSON.stringify(data)) : data };
+        }
+        catch (error) {
+          if (path.startsWith('/utxo/byId/')) return { status: 404,
+            data: request?.responseType === 'arraybuffer' ? Buffer.from('null') : null };
+          throw error;
+        }
+      },
     }) as never);
     vi.spyOn(axios, 'get').mockImplementation(async url => {
       const value = String(url);
@@ -477,7 +540,24 @@ describe('native FED withdrawal continuation', () => {
       expect(url).toBe(`${PRIMARY}/transactions`); expect(['transport', 'confirmation']).toContain(phase);
       const payload = body as Record<string, unknown>;
       const id = signedId(payload); submissionBodies.push(payload);
-      confirmed.set(id, 1031);
+      if (id === secondContinuationPacket?.transactions.sourceLockCreation.txId) {
+        secondSourceInclusionHeight = tip() + 1;
+        confirmed.set(id, secondSourceInclusionHeight);
+        boxes.delete(secondContinuationPacket.boxes.sourceFundingInput.boxId);
+        publish(secondContinuationPacket.boxes.sourceLock, secondContinuationPacket.boxes.transitionFeeFunding);
+        signingHeaders = headerContext(secondSourceInclusionHeight + REQUIRED_SUCCESSOR_DEPTH + 1);
+        if (loseSourceTransportResponse) throw new Error('synthetic continuation source response lost');
+      } else if (id === secondContinuationPacket?.transactions.reserveTransition.txId) {
+        secondVaultInclusionHeight = tip() + 1;
+        confirmed.set(id, secondVaultInclusionHeight);
+        boxes.delete(secondContinuationPacket.boxes.reservePredecessor.boxId);
+        boxes.delete(secondContinuationPacket.boxes.sourceLock.boxId);
+        boxes.delete(secondContinuationPacket.boxes.transitionFeeFunding.boxId);
+        publish(secondContinuationPacket.boxes.reserveSuccessor);
+        signingHeaders = headerContext(secondVaultInclusionHeight + REQUIRED_SUCCESSOR_DEPTH + 1);
+      } else {
+        confirmed.set(id, 1031);
+      }
       return { status: 200, data: id };
     });
     try {
@@ -497,9 +577,9 @@ describe('native FED withdrawal continuation', () => {
         creationHeights: { currentErgoHeight: 1001, sourceLockCreation: 1001, reserveTransition: 1001 } });
       signingHeaders = headerContext(1001);
       publish(packet.boxes.sourceFundingInput);
-      await session.checkNativePegInSourceLockRetainingSignerV1(packet, setupTarget);
+      const firstSourceCheck = await session.checkNativePegInSourceLockRetainingSignerV1(packet, setupTarget);
       publish(packet.boxes.reservePredecessor, packet.boxes.sourceLock, packet.boxes.transitionFeeFunding);
-      await session.checkNativePegInCommittedVaultRetainingSignerV1(packet, setupTarget);
+      const firstVaultCheck = await session.checkNativePegInCommittedVaultRetainingSignerV1(packet, setupTarget);
       signingHeaders = headerContext(1012);
       publish(issuances[0]!.outputs[1]!, issuances[1]!.outputs[1]!);
       const withdrawalFee = await session.checkNativeWithdrawalFeeFundingV1(setupTarget);
@@ -803,6 +883,7 @@ describe('native FED withdrawal continuation', () => {
             };
           }
           const second = await buildSubstrateFederatedNativeContinuationPegInPacketV1(secondInput);
+          secondContinuationPacket = second;
           if (fault === 'continuation builder snapshots caller input') {
             expect(injectionCount).toBe(1);
             expect(second.boxes.sourceFundingInput.boxId).toBe(secondSourceFunding.boxId);
@@ -830,6 +911,194 @@ describe('native FED withdrawal continuation', () => {
           publish(second.boxes.sourceFundingInput);
           signingHeaders = headerContext(1051);
           continuation.stage = 'source';
+          const transportCompositionFault = new Set<ContinuationFault>([
+            'continuation valid', 'continuation foreign observation before draft',
+            'continuation copied observation before evidence', 'continuation mismatched reservation draft',
+            'continuation current target lost before transport', 'continuation custody lost after funding await',
+            'continuation ambiguous source transport',
+          ]).has(fault as ContinuationFault);
+          if (transportCompositionFault) {
+            // Seed resolved durable history from the first checked deposit. Its
+            // transport is historical fixture input; these rows grant no authority.
+            const historicalRows = [
+              { operationProfile: SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
+                transaction: packet.transactions.sourceLockCreation, check: firstSourceCheck,
+                inputBoxIds: [packet.boxes.sourceFundingInput.boxId], confirmationHeight: 1002,
+                reconciliationIdentityDigestHex: setupBinding.executionTargetIdentityDigestHex },
+              { operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+                transaction: packet.transactions.reserveTransition, check: firstVaultCheck,
+                inputBoxIds: [packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId,
+                  packet.boxes.transitionFeeFunding.boxId], confirmationHeight: 1020,
+                reconciliationIdentityDigestHex: null },
+            ].map(previous => {
+              const historicalDigest = sha256CanonicalJson({ transactionId: previous.transaction.txId },
+                'TEST_RESOLVED_PEG_IN_JOURNAL_HISTORY');
+              const attempt = state.reserveErgoOperationalTransactionAttempt({
+                operationProfile: previous.operationProfile, expectedTxId: previous.transaction.txId,
+                sourceBoxId: previous.inputBoxIds[0]!, inputBoxIds: previous.inputBoxIds,
+                attemptedAtHeight: previous.check.signer.stateContextTipHeight,
+                targetSidechainHeight: null, targetSidechainBlockHashHex: null, heartbeatKeyHex: null,
+                reconciliationIdentityDigestHex: previous.reconciliationIdentityDigestHex,
+                bindingDigestHex: historicalDigest,
+                signedTransactionDigestHex: previous.check.signedTransactionCanonicalJsonSha256Hex,
+                checkResponseDigestHex: previous.check.checkResponseSha256Hex,
+                revalidationDigestHex: historicalDigest, authorizationDigestHex: historicalDigest,
+              });
+              state.finalizeErgoOperationalTransactionAttempt({ expectedTxId: attempt.expectedTxId,
+                durableAttemptDigestHex: attempt.durableAttemptDigestHex, disposition: 'accepted',
+                submittedTxId: attempt.expectedTxId, responseDigestHex: historicalDigest });
+              state.confirmErgoOperationalTransactionAttempt({ expectedTxId: attempt.expectedTxId,
+                confirmationHeight: previous.confirmationHeight,
+                confirmationHeaderId: headerId(previous.confirmationHeight) });
+              confirmed.set(attempt.expectedTxId, previous.confirmationHeight);
+              return { expectedTxId: attempt.expectedTxId,
+                snapshot: canonicalJson(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId)) };
+            });
+            const assertHistoricalRowsUnchanged = () => {
+              for (const previous of historicalRows) {
+                expect(canonicalJson(state.getErgoOperationalTransactionAttempt(previous.expectedTxId)))
+                  .toBe(previous.snapshot);
+              }
+            };
+            signingHeaders = headerContext(1062);
+            const otherFunding = sourceFundingOutputs[0]!;
+            const thirdFunding = result.packet.boxes.payout;
+            continuationFundingObservation = {
+              schema: 'e2s.substrate-federated-reward-input-discovery.v2', version: 2,
+              status: 'agreed_non_authorizing_snapshot_anchored_reward_inputs', reportDigestHex: 'ab'.repeat(32),
+              observedAt: new Date().toISOString(),
+              sources: { primaryNodeOrigin: PRIMARY, witnessNodeOrigin: WITNESS },
+              target: { network: 'devnet', genesisHeaderHeight: 1, genesisHeaderIdHex: GENESIS,
+                tipHeight: tip(), tipHeaderIdHex: headerId(tip()) },
+              signer: { publicKeyHex: signer.publicKeyHex, p2pkErgoTreeHex: signer.p2pkErgoTreeHex,
+                rewardDelayBlocks: 1, rewardInputErgoTreeHex: secondSourceFunding.ergoTree,
+                rewardAddress: 'synthetic-continuation-reward-address' },
+              inventory: { anchorRewardBoxCount: 3, matureRewardBoxCount: 3,
+                usableRewardBoxCount: 3, requiredAgeBlocks: 2 },
+              genesisBoxIds: { tracker: secondSourceFunding.boxId,
+                duplicatePrevention: otherFunding.boxId, pooledReserve: thirdFunding.boxId },
+              genesisInputs: { tracker: secondSourceFunding,
+                duplicatePrevention: otherFunding, pooledReserve: thirdFunding },
+              boundary: { fixedDualLoopbackOrigins: true, getOnlyNodeRequests: true,
+                exactPublicSignerBinding: true, matchingSnapshotAnchor: true,
+                canonicalExtensionBeyondAnchorAllowed: true, discoveryAnchorRetained: true,
+                postAnchorRewardBoxesExcluded: true, exactCanonicalBoxIdsRecomputed: true,
+                exactRewardTreeMatched: true, pairwiseDistinctPureErgRegisterFreeInputs: true,
+                targetBinaryRevalidationRequired: true, signerOrWalletMaterialRead: false,
+                sessionSignerProvenanceAuthenticated: false, tipAndUtxoObservedAtomically: false,
+                nodeExecutableIdentityAuthenticated: false, independentNodeControlVerified: false,
+                canonicalConsensusEstablished: false },
+              authorization: { constructSetup: false, check: false, sign: false, submit: false,
+                broadcast: false, deploy: false, activate: false, fundsAuthority: false,
+                gate5Closed: false, productionReady: false },
+            };
+            loseCustodyAfterFundingAwait = fault === 'continuation custody lost after funding await';
+            loseSourceTransportResponse = fault === 'continuation ambiguous source transport';
+            loseCurrentTargetAtTransport = fault === 'continuation current target lost before transport';
+            if (loseCurrentTargetAtTransport) {
+              const reserveAttempt = state.reserveErgoOperationalTransactionAttempt.bind(state);
+              vi.spyOn(state, 'reserveErgoOperationalTransactionAttempt').mockImplementation(input => {
+                const attempt = reserveAttempt(input);
+                if (input.expectedTxId === second.transactions.sourceLockCreation.txId) {
+                  currentTargetActive = false;
+                }
+                return attempt;
+              });
+            }
+            const beforeTransportSubmissions = submissionBodies.length;
+            const sourcePromise = executeContinuationSourceLock({
+              target: confirmationTarget, batch, packet: second, setupSession: session, state,
+            });
+            if (loseCustodyAfterFundingAwait) {
+              await expect(sourcePromise).rejects.toThrow(/custody|disposed|inactive|provenance/);
+              expect(state.getErgoOperationalTransactionAttempt(second.transactions.sourceLockCreation.txId)).toBeNull();
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
+            if (loseCurrentTargetAtTransport) {
+              await expect(sourcePromise).rejects.toThrow(/target|provenance|inactive|not transported/);
+              expect(state.getErgoOperationalTransactionAttempt(second.transactions.sourceLockCreation.txId))
+                .toMatchObject({ status: 'ambiguous', submissionDisposition: 'ambiguous',
+                  submittedTxId: null, responseDigestHex: null });
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions);
+              await expect(executeContinuationSourceLock({
+                target: confirmationTarget, batch, packet: second, setupSession: session, state,
+              })).rejects.toThrow(/target|provenance|inactive/);
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
+            const sourceExecution = await sourcePromise;
+            expect(sourceExecution.expectedTxId).toBe(second.transactions.sourceLockCreation.txId);
+            expect(sourceExecution.transportStatus).toBe(loseSourceTransportResponse ? 'reconciled' : 'accepted');
+            expect(state.getErgoOperationalTransactionAttempt(sourceExecution.expectedTxId)?.status).toBe('confirmed');
+            expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 1);
+            continuation.stage = 'vault';
+            const vaultExecution = await executeContinuationVault({
+              target: confirmationTarget, batch, packet: second,
+              sourceLockObservation: sourceExecution.outputObservation, setupSession: session, state,
+            });
+            expect(vaultExecution.expectedTxId).toBe(second.transactions.reserveTransition.txId);
+            expect(vaultExecution.transportStatus).toBe('accepted');
+            expect(state.getErgoOperationalTransactionAttempt(vaultExecution.expectedTxId)?.status).toBe('confirmed');
+            expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 2);
+            expect(second.transactions.sourceLockCreation.outputs[0]!.creationHeight)
+              .toBeLessThanOrEqual(secondSourceInclusionHeight!);
+            expect(sourceExecution.outputObservation.confirmationHeight).toBe(secondSourceInclusionHeight);
+            expect(second.transactions.reserveTransition.outputs[0]!.creationHeight)
+              .toBeLessThanOrEqual(secondVaultInclusionHeight!);
+            expect(vaultExecution.outputObservation.confirmationHeight).toBe(secondVaultInclusionHeight);
+            expect(secondSourceInclusionHeight!).toBeLessThan(secondVaultInclusionHeight!);
+            assertHistoricalRowsUnchanged();
+            expect(state.getConfirmedErgoOperationalTransactionAttempts(
+              SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE)).toHaveLength(2);
+            expect(state.getConfirmedErgoOperationalTransactionAttempts(
+              PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE)).toHaveLength(2);
+            const joined = { batch, target: confirmationTarget, packet: second,
+              committedVaultObservation: vaultExecution.outputObservation };
+            if (fault === 'continuation foreign observation before draft') {
+              expect(() => buildNativeMintDraft({ ...joined,
+                committedVaultObservation: sourceExecution.outputObservation as never }))
+                .toThrow(/observation|reserve|provenance|status/);
+              return;
+            }
+            const draft = buildNativeMintDraft(joined);
+            expect(draft.statement.reserveTransitionTransactionIdHex).toBe(`0x${vaultExecution.expectedTxId}`);
+            expect(draft.statement.successorReserveBoxIdHex).toBe(`0x${second.boxes.reserveSuccessor.boxId}`);
+            expect(draft.statement.successorReserveLiabilityNanoErg).toBe('25000000');
+            if (fault === 'continuation copied observation before evidence') {
+              expect(() => collectNativeReserveEvidence({ ...joined,
+                committedVaultObservation: { ...vaultExecution.outputObservation }, draft }))
+                .toThrow(/observation|provenance|lineage|original inputs/);
+              return;
+            }
+            const evidenceReceipt = collectNativeReserveEvidence({ ...joined, draft });
+            if (fault === 'continuation mismatched reservation draft') {
+              const otherDraft = buildNativeMintDraft(joined);
+              expect(() => consumeNativeReserveEvidence(evidenceReceipt, otherDraft))
+                .toThrow(/different mint-reservation draft/);
+              return;
+            }
+            const evidence = consumeNativeReserveEvidence(evidenceReceipt, draft);
+            expect(evidence.sourceLockBoxCanonicalHex.length).toBeGreaterThan(0);
+            expect(evidence.reserveTransitionTransactionCanonicalHex.length).toBeGreaterThan(0);
+            expect(() => consumeNativeReserveEvidence(evidenceReceipt, draft)).toThrow(/already consumed/);
+            expect(() => assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(second, batch, confirmationTarget)).not.toThrow();
+            expect(() => assertSubstrateFederatedNativeGenesisPegInPacketV1(second, batch, confirmationTarget))
+              .not.toThrow();
+            phase = 'expired-current-action';
+            expect(() => assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(second, batch, confirmationTarget))
+              .not.toThrow();
+            expect(() => assertSubstrateFederatedNativeGenesisPegInPacketV1(second, batch, confirmationTarget))
+              .toThrow(/expired|target|lineage/);
+            session.dispose();
+            expect(() => assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(second, batch, confirmationTarget))
+              .toThrow(/disposed|custody|provenance|inactive/);
+            expect(() => assertSubstrateFederatedNativeGenesisPegInPacketV1(second, batch, confirmationTarget))
+              .toThrow(/disposed|custody|provenance|inactive/);
+            return;
+          }
           if (fault === 'continuation duplicate source invocation') {
             const beforeDuplicateSigns = signCalls.mock.calls.length;
             const beforeDuplicateChecks = checkBodies.length;
@@ -888,16 +1157,6 @@ describe('native FED withdrawal continuation', () => {
           expect(signedId(checkBodies.at(-1)!)).toBe(second.transactions.reserveTransition.txId);
           expect(submissionBodies).toHaveLength(2);
           expect(() => assertSigner(session.signer)).not.toThrow();
-          if (fault === 'continuation valid') {
-            phase = 'expired-current-action';
-            expect(() => assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(second, batch, confirmationTarget)).not.toThrow();
-            expect(() => assertSubstrateFederatedNativeGenesisPegInPacketV1(second, batch, confirmationTarget))
-              .toThrow(/expired|target|lineage/);
-            session.dispose();
-            expect(() => assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(second, batch, confirmationTarget))
-              .toThrow(/disposed|custody|provenance|inactive/);
-            return;
-          }
         }
       }
       if (!continuationFault) {

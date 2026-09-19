@@ -672,6 +672,32 @@ describe('layer import rules', () => {
     },
   );
 
+  it('keeps the continuation journal target check at direct setup-root calls', () => {
+    const specifier = '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+    const binding = 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1';
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT, `${declaration} ${binding}(target);`))).toEqual([]);
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT, `${declaration} const escaped = ${binding};`))
+      .map(item => item.message)).toContain(
+      `restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture(TRACKER_V2_CAMPAIGN_ROOT, `${declaration} ${binding}(target);`))
+      .map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+  });
+
+  it.each([
+    'executeSubstrateFederatedNativeContinuationPegInSourceLockV1',
+    'executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1',
+  ])('limits the continuation execution export %s to the setup root', binding => {
+    expect(inspect({ [GENESIS_SETUP_ROOT]: `export async function ${binding}() {}` })).toEqual([]);
+    expect(inspect({ [TRACKER_V2_CAMPAIGN_ROOT]: `export async function ${binding}() {}` })
+      .map(item => item.message)).toContain(`reviewed app root export is not allowlisted: ${binding}`);
+    const specifier = './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${binding} } from '${specifier}'; ${binding}();`)).map(item => item.message))
+      .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+  });
+
   it.each([
     [MANAGED_SETUP_V2, './ergo-operational-transaction.js', 'runErgoOperationalTransaction'],
     [TRACKER_V2_CAMPAIGN_ROOT, './substrate-federated-isolated-devnet-managed-setup-v2.js', 'executeSubstrateFederatedIsolatedDevnetManagedSetupV2'],
