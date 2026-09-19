@@ -44,6 +44,14 @@ interface DurableMaterial extends Material {
   readonly stored: ErgoOperationalTransactionAttempt;
   readonly expectedReservation: Readonly<Record<string, unknown>>;
 }
+interface ConfirmedMaterial {
+  readonly attempt: Attempt;
+  readonly check: Readonly<Check>;
+  readonly target: Readonly<Target>;
+  readonly originalConfirmation: Readonly<Confirmation>;
+  readonly normalizedConfirmation: Readonly<Confirmation>;
+  readonly journal: Readonly<ErgoOperationalTransactionAttempt>;
+}
 type Submission = Readonly<{ status: 'accepted' | 'ambiguous'; submittedTxId: string | null; responseDigestHex: string | null }>;
 const AUTHORIZATIONS = new WeakMap<object, Material>();
 const RESERVED = new WeakSet<object>();
@@ -53,6 +61,7 @@ const TRANSPORT_READY = new WeakSet<object>();
 const FINALIZATION_STARTED = new WeakSet<object>();
 const FINALIZATIONS = new WeakMap<object, Submission>();
 const CONFIRMATION_STARTED = new WeakSet<object>();
+const CONFIRMATIONS = new WeakMap<object, ConfirmedMaterial>();
 
 /** Explicit local LAB payout authority; a check or a journal row is insufficient. */
 export async function authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2(
@@ -152,27 +161,38 @@ export async function confirmSubstrateFederatedIsolatedDevnetWithdrawalV2(attemp
   if (confirmation.status !== 'confirmed' || confirmation.confirmationHeight === null || confirmation.confirmationHeaderIdHex === null) {
     throw new Error('withdrawal V2 requires canonical payout confirmation');
   }
-  const packet = material.check.packet;
-  for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
-    for (const box of [packet.boxes.reserveSuccessor, packet.boxes.duplicatePreventionSuccessor, packet.boxes.payout,
-      packet.boxes.trackerDataInput]) {
-      const current = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${box.boxId}`, origin), 'confirmed withdrawal V2 output');
-      if (canonicalJson(current) !== canonicalJson(box)) throw new Error('confirmed withdrawal V2 output differs');
-    }
-    for (const input of packet.transaction.eip12Tx.inputs) await requireSpent(input.boxId, origin);
-  }
-  const refreshed = await createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target,
-    material.lineage.genesisHeaderIdHex).observe(attempt.expectedTxId, target.primaryNodeOrigin);
-  if (refreshed === null || refreshed.status !== 'confirmed'
-    || refreshed.confirmationHeight !== confirmation.confirmationHeight
-    || refreshed.confirmationHeaderIdHex !== confirmation.confirmationHeaderIdHex
-    || refreshed.confirmations < confirmation.confirmations || refreshed.observedAtHeight < confirmation.observedAtHeight) {
-    throw new Error('withdrawal V2 canonical payout changed after output observation');
-  }
-  assertLineage(material.check, target, material.lineage);
-  assertFinalization(attempt, material);
-  return material.state.confirmErgoOperationalTransactionAttempt({ expectedTxId: attempt.expectedTxId,
+  const assertCurrent = () => {
+    assertLineage(material.check, target, material.lineage);
+    assertFinalization(attempt, material);
+  };
+  await observeConfirmedWithdrawalState(material.check.packet, target, [material.check.packet.boxes.reserveSuccessor,
+    material.check.packet.boxes.duplicatePreventionSuccessor, material.check.packet.boxes.payout,
+    material.check.packet.boxes.trackerDataInput], assertCurrent);
+  await assertSameCanonicalConfirmation(attempt, target, material.lineage.genesisHeaderIdHex, confirmation, assertCurrent);
+  assertCurrent();
+  const confirmed = material.state.confirmErgoOperationalTransactionAttempt({ expectedTxId: attempt.expectedTxId,
     confirmationHeight: confirmation.confirmationHeight, confirmationHeaderId: confirmation.confirmationHeaderIdHex });
+  const journal = snapshotAttempt(confirmed);
+  assertConfirmedJournal(attempt, material, confirmation, journal);
+  CONFIRMATIONS.set(attempt, Object.freeze({ attempt, check: material.check, target,
+    originalConfirmation: value, normalizedConfirmation: confirmation, journal }));
+  return confirmed;
+}
+
+/** Re-observe only the exact successors retained by a successful in-process confirmation. */
+export async function reobserveSubstrateFederatedIsolatedDevnetConfirmedWithdrawalV2(
+  attempt: Attempt, target: Readonly<Target>, expectedCheck: Readonly<Check>,
+): Promise<Readonly<Check['packet']>> {
+  const retained = requireConfirmed(attempt, target, expectedCheck);
+  const material = requireAttempt(attempt, target);
+  const assertCurrent = () => assertConfirmedJournal(attempt, material, retained.normalizedConfirmation, retained.journal);
+  assertCurrent();
+  await observeConfirmedWithdrawalState(retained.check.packet, target, [retained.check.packet.boxes.reserveSuccessor,
+    retained.check.packet.boxes.duplicatePreventionSuccessor, retained.check.packet.boxes.trackerDataInput], assertCurrent);
+  await assertSameCanonicalConfirmation(attempt, target, material.lineage.genesisHeaderIdHex,
+    retained.normalizedConfirmation, assertCurrent);
+  assertCurrent();
+  return retained.check.packet;
 }
 
 async function requireSpent(boxId: string, origin: string): Promise<void> {
@@ -183,6 +203,43 @@ async function requireSpent(boxId: string, origin: string): Promise<void> {
     throw new Error('withdrawal V2 spent-input observation is unavailable');
   }
   throw new Error('withdrawal V2 predecessor remains unspent');
+}
+
+async function observeConfirmedWithdrawalState(
+  packet: Readonly<Check['packet']>, target: Readonly<Target>,
+  outputs: readonly Readonly<Check['packet']['boxes'][keyof Check['packet']['boxes']]>[], assertCurrent: () => void,
+): Promise<void> {
+  for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+    for (const box of outputs) {
+      assertCurrent();
+      const observed = await ngetDirect(`/utxo/byId/${box.boxId}`, origin);
+      assertCurrent();
+      const current = await normalizeEip12Box(observed, 'confirmed withdrawal V2 output');
+      assertCurrent();
+      if (canonicalJson(current) !== canonicalJson(box)) throw new Error('confirmed withdrawal V2 output differs');
+    }
+    for (const input of packet.transaction.eip12Tx.inputs) {
+      assertCurrent();
+      await requireSpent(input.boxId, origin);
+      assertCurrent();
+    }
+  }
+}
+
+async function assertSameCanonicalConfirmation(
+  attempt: Attempt, target: Readonly<Target>, genesisHeaderIdHex: string,
+  confirmation: Readonly<Confirmation>, assertCurrent: () => void,
+): Promise<void> {
+  assertCurrent();
+  const refreshed = await createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target,
+    genesisHeaderIdHex).observe(attempt.expectedTxId, target.primaryNodeOrigin);
+  assertCurrent();
+  if (refreshed === null || refreshed.status !== 'confirmed'
+    || refreshed.confirmationHeight !== confirmation.confirmationHeight
+    || refreshed.confirmationHeaderIdHex !== confirmation.confirmationHeaderIdHex
+    || refreshed.confirmations < confirmation.confirmations || refreshed.observedAtHeight < confirmation.observedAtHeight) {
+    throw new Error('withdrawal V2 canonical payout changed after output observation');
+  }
 }
 
 function assertLineage(check: Readonly<Check>, target: Readonly<Target>, lineage: Lineage): void {
@@ -230,6 +287,17 @@ function requireAttempt(attempt: Attempt, target?: Readonly<Target>): DurableMat
   return material;
 }
 
+function requireConfirmed(attempt: Attempt, target: Readonly<Target>, expectedCheck: Readonly<Check>): ConfirmedMaterial {
+  const material = requireAttempt(attempt, target);
+  const retained = CONFIRMATIONS.get(attempt);
+  if (retained === undefined || retained.attempt !== attempt || retained.check !== expectedCheck
+    || retained.check !== material.check || retained.target !== target) {
+    throw new Error('withdrawal V2 confirmation lacks exact in-process provenance');
+  }
+  assertConfirmedJournal(attempt, material, retained.normalizedConfirmation, retained.journal);
+  return retained;
+}
+
 function assertStored(material: DurableMaterial, phase: 'pending' | 'submitted'): ErgoOperationalTransactionAttempt {
   const row = material.state.getErgoOperationalTransactionAttempt(material.stored.expectedTxId);
   if (row === null || row.operationProfile !== PROFILE
@@ -247,5 +315,28 @@ function assertFinalization(attempt: Attempt, material: DurableMaterial): void {
   if (expected === undefined || row.status !== expected.status || row.submissionDisposition !== expected.status
     || row.submittedTxId !== expected.submittedTxId || row.responseDigestHex !== expected.responseDigestHex) {
     throw new Error('withdrawal V2 journal differs from retained transport result');
+  }
+}
+
+function snapshotAttempt(value: ErgoOperationalTransactionAttempt): Readonly<ErgoOperationalTransactionAttempt> {
+  return Object.freeze({ ...value, inputBoxIds: Object.freeze([...value.inputBoxIds]) });
+}
+
+function assertConfirmedJournal(
+  attempt: Attempt, material: DurableMaterial, confirmation: Readonly<Confirmation>,
+  retainedJournal: Readonly<ErgoOperationalTransactionAttempt>,
+): void {
+  assertLineage(material.check, material.target, material.lineage);
+  const row = material.state.getErgoOperationalTransactionAttempt(material.stored.expectedTxId);
+  const submission = FINALIZATIONS.get(attempt);
+  if (row === null || submission === undefined || row.status !== 'confirmed'
+    || row.operationProfile !== PROFILE
+    || canonicalJson(Object.fromEntries(Object.keys(material.expectedReservation)
+      .map(key => [key, row[key as keyof ErgoOperationalTransactionAttempt]]))) !== canonicalJson(material.expectedReservation)
+    || row.submissionDisposition !== submission.status || row.submittedTxId !== submission.submittedTxId
+    || row.responseDigestHex !== submission.responseDigestHex || row.confirmationHeight !== confirmation.confirmationHeight
+    || row.confirmationHeaderId !== confirmation.confirmationHeaderIdHex
+    || canonicalJson(row) !== canonicalJson(retainedJournal)) {
+    throw new Error('withdrawal V2 confirmed journal differs from retained reservation, transport or confirmation');
   }
 }

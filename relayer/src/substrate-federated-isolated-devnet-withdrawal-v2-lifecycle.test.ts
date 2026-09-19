@@ -29,7 +29,8 @@ vi.mock('./fleet-signer.js', () => ({
 
 import { authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2 as authorize,
   reserveSubstrateFederatedIsolatedDevnetWithdrawalV2 as reserve,
-  confirmSubstrateFederatedIsolatedDevnetWithdrawalV2 as confirm }
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalV2 as confirm,
+  reobserveSubstrateFederatedIsolatedDevnetConfirmedWithdrawalV2 as reobserveConfirmed }
   from './substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js';
 import { submitSubstrateFederatedIsolatedDevnetWithdrawalV2 as submit,
   finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2 as finalize }
@@ -100,6 +101,13 @@ describe('withdrawal V2 durable lifecycle with bounded capability doubles', () =
   beforeEach(() => { vi.resetAllMocks(); root = mkdtempSync(join(tmpdir(), 'bridge-withdrawal-v2-')); state = new StateTracker(join(root, 'state.db')); f = fixture(); });
   afterEach(() => { vi.restoreAllMocks(); state?.close(); rmSync(root, { recursive: true, force: true }); });
   const attempt = async () => reserve(await authorize(f.check, f.target), state);
+  const confirmed = async () => {
+    const a = await attempt();
+    const submission = await submit(f.target, a);
+    finalize(a, submission);
+    await confirm(a, f.target, f.confirmation);
+    return a;
+  };
 
   it.each(['accepted', 'ambiguous'] as const)('completes %s transport once, retaining all three input holds', async status => {
     if (status === 'ambiguous') mocks.post.mockImplementationOnce(async () => { throw { isAxiosError: true, response: { status: 503 } }; });
@@ -230,4 +238,125 @@ describe('withdrawal V2 durable lifecycle with bounded capability doubles', () =
       expect(mocks.post).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('reobserves the exact retained reserve, DUP and tracker successors without requiring the spent payout', async () => {
+    const a = await confirmed();
+    const read = mocks.read.getMockImplementation()!;
+    mocks.read.mockImplementation(async (path, origin) => {
+      if (path === `/utxo/byId/${f.outputs[2].boxId}`) throw new Error('spent payout must not be reobserved');
+      return read(path, origin);
+    });
+    mocks.read.mockClear(); mocks.get.mockClear(); mocks.observe.mockClear();
+    await expect(reobserveConfirmed(a, f.target, f.check)).resolves.toBe(f.check.packet);
+    expect(mocks.read).toHaveBeenCalledTimes(6);
+    expect(mocks.read.mock.calls.some(([path]) => path === `/utxo/byId/${f.outputs[2].boxId}`)).toBe(false);
+    expect(mocks.get).toHaveBeenCalledTimes(6);
+    expect(mocks.observe).toHaveBeenCalledExactlyOnceWith(a.expectedTxId, f.target.primaryNodeOrigin);
+  });
+
+  it.each([
+    ['cloned attempt', (a: Awaited<ReturnType<typeof confirmed>>) => [{ ...a }, f.target, f.check]],
+    ['foreign attempt', () => [Object.freeze({ expectedTxId: hex(90), durableAttemptDigestHex: hex(91) }), f.target, f.check]],
+    ['cloned check', (a: Awaited<ReturnType<typeof confirmed>>) => [a, f.target, { ...f.check }]],
+    ['forged check', (a: Awaited<ReturnType<typeof confirmed>>) => [a, f.target,
+      Object.freeze({ packet: f.check.packet, signedCandidate: f.check.signedCandidate, checkedResult: f.check.checkedResult })]],
+    ['cloned target', (a: Awaited<ReturnType<typeof confirmed>>) => [a, { ...f.target }, f.check]],
+    ['foreign target', (a: Awaited<ReturnType<typeof confirmed>>) => [a,
+      Object.freeze({ ...f.target, primaryNodeOrigin: 'http://127.0.0.1:9991' }), f.check]],
+  ] as const)('rejects %s provenance during confirmed reobservation', async (_name, build) => {
+    const a = await confirmed();
+    const [selectedAttempt, selectedTarget, selectedCheck] = build(a);
+    await expect(reobserveConfirmed(selectedAttempt as typeof a, selectedTarget as typeof f.target,
+      selectedCheck as Readonly<Check>)).rejects.toThrow(/provenance/);
+  });
+
+  it('does not treat a confirmed journal row as in-process confirmation authority', async () => {
+    const a = await attempt(); const submission = await submit(f.target, a); finalize(a, submission);
+    state.confirmErgoOperationalTransactionAttempt({ expectedTxId: a.expectedTxId,
+      confirmationHeight: f.confirmation.confirmationHeight!, confirmationHeaderId: f.confirmation.confirmationHeaderIdHex! });
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/in-process provenance/);
+  });
+
+  it('does not retain reobservation authority when the original confirmation fails', async () => {
+    const a = await attempt(); const submission = await submit(f.target, a); finalize(a, submission);
+    mocks.read.mockResolvedValue({ ...f.outputs[0], value: '0' });
+    await expect(confirm(a, f.target, f.confirmation)).rejects.toThrow(/output differs/);
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/in-process provenance/);
+  });
+
+  it('rejects changed reservation fields returned while persisting confirmation', async () => {
+    const a = await attempt(); const submission = await submit(f.target, a); finalize(a, submission);
+    const persist = state.confirmErgoOperationalTransactionAttempt.bind(state);
+    vi.spyOn(state, 'confirmErgoOperationalTransactionAttempt').mockImplementation(input => {
+      const changed = { ...persist(input), authorizationDigestHex: hex(84) };
+      vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue(changed);
+      return changed;
+    });
+    await expect(confirm(a, f.target, f.confirmation)).rejects.toThrow(/confirmed journal differs/);
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/in-process provenance/);
+  });
+
+  it.each([
+    ['reservation', { authorizationDigestHex: hex(80) }],
+    ['submission', { submittedTxId: hex(81) }],
+    ['confirmation height', { confirmationHeight: 106 }],
+    ['confirmation header', { confirmationHeaderId: hex(82) }],
+    ['journal timestamp', { updatedAt: '2099-01-01 00:00:00' }],
+  ] as const)('rejects changed confirmed %s journal state', async (_name, patch) => {
+    const a = await confirmed(); const stored = state.getErgoOperationalTransactionAttempt(a.expectedTxId)!;
+    vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...stored, ...patch });
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/confirmed journal differs/);
+  });
+
+  it('rechecks retained lineage and journal immediately after an output await', async () => {
+    const a = await confirmed(); const stored = state.getErgoOperationalTransactionAttempt(a.expectedTxId)!;
+    const read = mocks.read.getMockImplementation()!; let restore: (() => void) | undefined;
+    mocks.read.mockImplementationOnce(async (...args) => {
+      const value = await read(...args);
+      const drift = vi.spyOn(state, 'getErgoOperationalTransactionAttempt').mockReturnValue({ ...stored, responseDigestHex: hex(83) });
+      restore = () => drift.mockRestore();
+      return value;
+    });
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/confirmed journal differs/);
+    restore?.();
+  });
+
+  it.each([
+    ['missing primary reserve', 'primary' as const, 0, 'missing' as const],
+    ['changed primary tracker', 'primary' as const, 3, 'changed' as const],
+    ['missing witness DUP', 'witness' as const, 1, 'missing' as const],
+    ['changed witness reserve', 'witness' as const, 0, 'changed' as const],
+  ])('rejects %s during confirmed output reobservation', async (_name, node, index, fault) => {
+    const a = await confirmed(); const read = mocks.read.getMockImplementation()!;
+    const selected = [...f.outputs, f.tracker][index as number]!;
+    const origin = node === 'primary' ? f.target.primaryNodeOrigin : f.target.witnessNodeOrigin;
+    mocks.read.mockImplementation(async (path, selectedOrigin) => {
+      if (selectedOrigin === origin && path === `/utxo/byId/${selected.boxId}`) {
+        if (fault === 'missing') throw new Error('synthetic confirmed output missing');
+        return { ...selected, value: '0' };
+      }
+      return read(path, selectedOrigin);
+    });
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/output missing|output differs/);
+  });
+
+  it.each(['primary', 'witness'] as const)('rejects an unspent withdrawal input on the %s node', async node => {
+    const a = await confirmed(); const get = mocks.get.getMockImplementation()!;
+    const origin = node === 'primary' ? f.target.primaryNodeOrigin : f.target.witnessNodeOrigin;
+    mocks.get.mockImplementation(async url => url === `${origin}/utxo/byId/${f.inputs[1].boxId}`
+      ? { data: f.inputs[1] } : get(url));
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/predecessor remains unspent/);
+  });
+
+  it.each([
+    ['reorg', { confirmationHeaderIdHex: hex(84) }],
+    ['height change', { confirmationHeight: 106 }],
+    ['confirmation regression', { confirmations: 9 }],
+    ['observation regression', { observedAtHeight: 114 }],
+    ['loss of confirmation', { status: 'pending' as const, confirmationHeight: null, confirmationHeaderIdHex: null }],
+  ])('rejects canonical confirmation %s', async (_name, patch) => {
+    const a = await confirmed();
+    mocks.observe.mockResolvedValue({ ...f.confirmation, ...patch });
+    await expect(reobserveConfirmed(a, f.target, f.check)).rejects.toThrow(/canonical payout changed/);
+  });
 });

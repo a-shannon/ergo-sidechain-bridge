@@ -28,17 +28,26 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect retained setup custody and observed Ergo successors to the
-second source deposit. Trace the first payout's reserve/DUP/tracker observations
-through the setup execution and deposit packet builders before selecting the
-smallest implementation join. Start at `substrate-federated-genesis-target-root-v1.ts`,
-`substrate-federated-isolated-devnet-setup-check-execution-v2.ts` and
-`substrate-federated-pooled-reserve-deposit-v2.ts`. The deciding consumer must
-produce the next deposit from the observed reserve successor, preserve the first
-replay key, retain the required original custody and reject stale or foreign
-state. Keep each operation's authority separate; never reopen a disposed signer
-or reset a consumed legacy API. Connect the second tracker/payout and root before
-the fresh two-cycle campaign.
+**Now:** connect the checked second source deposit to transport and committed
+reserve evidence. Start at the native source-lock and committed-vault execution
+functions in `substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts`
+and their existing authorizer/journal consumers. Select the smallest join that
+delivers original second-deposit observations to the continuation source proof,
+reservation and mint caller. Keep each operation's authority separate; never
+reopen a disposed signer or reset a consumed legacy API. Connect the second
+fees, tracker/payout and root before the fresh two-cycle campaign. The root must
+keep both node groups and original source custody alive through both returns.
+
+An explicit retained-withdrawal branch now keeps the original setup signer for
+the second deposit. Its builder requires the original successfully confirmed
+payout attempt and check, verifies the durable confirmation and reobserves the
+reserve/DUP/tracker on both nodes. The deposit extends the original AVL history
+using the payout reserve and remaining liability. Separate source-lock and
+reserve-transition check methods retain that provenance and reject disposed,
+foreign, stale or reused state. The old withdrawal API still destroys custody.
+This boundary is exercised with real compilers, AVL witnesses and WASM signatures
+against explicit node/process observation doubles; second-deposit transport and
+second tracker/payout consumers are still unconnected.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -112,10 +121,10 @@ profile while unrelated release mapping remains open. Reassess the smallest
 useful join as the deciding evidence arrives; prepare the invocation where the
 work is independent and serves the same delivery result.
 
-The source-quorum and native operator operation boundaries are connected. The
-setup signer still closes after the withdrawal check. A second complete cycle
-needs retained setup custody and observed Ergo successor state as well as the
-new native continuation. Do not clear consumed flags, reopen a closed signer, recreate
+The source-quorum, native operator operations and explicitly retained setup
+signer now have separate continuation boundaries. A second complete cycle still
+needs the second deposit transport, fees, tracker/payout successor consumers and
+root composition. Do not clear consumed flags, reopen a closed signer, recreate
 destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
 validate the new operation boundary with focused duplicate, disposed-custody,
 foreign-operation and wrong-parent negatives before composing another cycle.
@@ -398,7 +407,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Retained setup custody and reserve successor -> next source deposit | Connect the observed first payout's reserve state to a separately scoped second deposit packet and execution | Reject disposed custody, stale predecessor and foreign operation before new signing/transport; preserve durable ambiguous holds and old one-shot APIs |
+| **Now** | Checked second deposit -> transport and committed reserve evidence | Deliver original second-deposit observations to the continuation source proof and reservation/mint caller | Reject disposed custody, stale predecessor and foreign operation before transport; preserve durable ambiguous holds and old one-shot APIs |
 | Next candidate | Second native checkpoint and Ergo successors -> next settlement | Connect the continuation checkpoint to the retained tracker/DUP/reserve successors and compose both cycles in the root | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

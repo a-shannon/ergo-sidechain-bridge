@@ -2103,12 +2103,22 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       'checkSubstrateFederatedIsolatedDevnetTrackerV2Transport',
     ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.ts'])] as const).concat([
       'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Check',
-      'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check',
-    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts'])] as const))),
+    ].map(symbol => [symbol, new Set(['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts'])] as const)).concat([
+      ['assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', new Set([
+        'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts',
+        'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
+      ])] as const,
+      ['getSubstrateFederatedNativeGenesisReadCompilerInputV1', new Set([
+        'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
+      ])] as const,
+    ])),
   ],
   [
     'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts',
     new Map([
+      ['reobserveSubstrateFederatedIsolatedDevnetConfirmedWithdrawalV2', new Set([
+        'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
+      ])],
       ...[
         'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport',
         'assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady',

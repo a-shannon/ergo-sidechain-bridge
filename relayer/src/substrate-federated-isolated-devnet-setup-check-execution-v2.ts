@@ -664,6 +664,12 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
   readonly checkNativeTrackerFeeFundingV1: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3'];
   readonly checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
   readonly checkNativeWithdrawalV2: SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
+  readonly checkNativeWithdrawalRetainingContinuationSignerV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
+  readonly checkNativeContinuationPegInSourceLockRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1'];
+  readonly checkNativeContinuationPegInCommittedVaultRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInCommittedVaultRetainingSignerV1'];
   readonly runForExecutionV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1459,6 +1465,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let retainedWithdrawalTracker: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let nativeBatch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> | undefined;
+    let retainedContinuationWithdrawal: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check> | undefined;
     let state:
       | 'open'
       | 'running'
@@ -1469,6 +1476,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       | 'native-withdrawal-fee-checked'
       | 'native-tracker-fee-checked'
       | 'native-withdrawal-ready'
+      | 'native-continuation-deposit-ready'
+      | 'native-continuation-source-lock-checked'
+      | 'native-continuation-vault-checked'
       | 'v3-peg-in-ready'
       | 'v3-source-lock-checked'
       | 'v3-tracker-fee-ready'
@@ -1485,7 +1495,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     const assertNativeSessionActive = (): void => {
       if (!nativeRouteSelected || terminalInvalidationRequested || nativeCancellation.signal.aborted
         || !['running', 'native-setup-complete', 'native-source-lock-checked', 'native-vault-checked',
-          'native-withdrawal-fee-checked', 'native-tracker-fee-checked', 'native-withdrawal-ready'].includes(state)) {
+          'native-withdrawal-fee-checked', 'native-tracker-fee-checked', 'native-withdrawal-ready',
+          'native-continuation-deposit-ready', 'native-continuation-source-lock-checked',
+          'native-continuation-vault-checked'].includes(state)) {
         throw new Error('native FED setup session is inactive');
       }
     };
@@ -1526,6 +1538,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       retainedWithdrawalTracker = undefined;
       retainedPegInPacket = undefined;
       nativeBatch = undefined;
+      retainedContinuationWithdrawal = undefined;
       mnemonic = '';
       state = 'closed';
     };
@@ -1538,6 +1551,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'native-withdrawal-fee-checked'
         | 'native-tracker-fee-checked'
         | 'native-withdrawal-ready'
+        | 'native-continuation-deposit-ready'
+        | 'native-continuation-source-lock-checked'
+        | 'native-continuation-vault-checked'
         | 'setup-complete'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
@@ -1556,6 +1572,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         | 'native-withdrawal-fee-checked'
         | 'native-tracker-fee-checked'
         | 'native-withdrawal-ready'
+        | 'native-continuation-deposit-ready'
+        | 'native-continuation-source-lock-checked'
+        | 'native-continuation-vault-checked'
         | 'v3-peg-in-ready'
         | 'v3-source-lock-checked'
         | 'v3-tracker-fee-ready'
@@ -1626,6 +1645,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
       if (nativeBatch === undefined) throw new Error('native FED peg-in setup custody is absent');
       const compiler = getSubstrateFederatedNativeGenesisSetupCompilerInputV1(nativeBatch, target);
+      assertNativePacketCompiler(packet, compiler);
+      return nativeBatch;
+    };
+    const assertNativePacketCompiler = (
+      packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+      compiler: ReturnType<typeof getSubstrateFederatedNativeGenesisSetupCompilerInputV1>,
+    ): void => {
       if (packet.familyIdHex !== compiler.familyReceipt.profile.familyIdHex
         || canonicalJson(packet.familyCompiler) !== canonicalJson({
           trackerRequestDigestHex: compiler.familyReceipt.trackerCompilerRequestDigestHex,
@@ -1636,7 +1662,6 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         })) {
         throw new Error('native FED peg-in compiler differs from retained setup');
       }
-      return nativeBatch;
     };
     const assertNativePegInPacket = async (
       packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
@@ -1651,6 +1676,37 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         throw new Error('native FED peg-in reserve differs from retained setup');
       }
       assertNativePegInCustody(packet, target);
+    };
+    const assertNativeContinuationCustody = (
+      packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => {
+      assertNativeSessionActive();
+      const continuation = trackerFeeContinuation;
+      const withdrawal = retainedContinuationWithdrawal;
+      if (nativeBatch === undefined || continuation?.route !== 'native' || continuation.batch !== nativeBatch
+        || withdrawal === undefined) throw new Error('native FED continuation custody is absent');
+      assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
+      const compiler = getSubstrateFederatedNativeGenesisReadCompilerInputV1(nativeBatch, continuation.target);
+      assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check(withdrawal, target);
+      assertNativePacketCompiler(packet, compiler);
+      return nativeBatch;
+    };
+    const assertNativeContinuationPacket = async (
+      packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ): Promise<void> => {
+      const batch = assertNativeContinuationCustody(packet, target);
+      const previousPacket = retainedCommittedPegInPacket;
+      const withdrawal = retainedContinuationWithdrawal;
+      if (previousPacket === undefined || withdrawal === undefined) {
+        throw new Error('native FED continuation lacks its retained first deposit and payout');
+      }
+      const { assertSubstrateFederatedNativeContinuationPegInPacketV1 } =
+        await import('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js');
+      assertNativeContinuationCustody(packet, target);
+      await assertSubstrateFederatedNativeContinuationPegInPacketV1(packet, batch, target, previousPacket, withdrawal);
+      assertNativeContinuationCustody(packet, target);
     };
     const assertPegInPacketV2 = async (
       packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
@@ -2241,6 +2297,38 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         }, 'native-withdrawal-ready'),
       checkNativeWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalV2']>) => consume('native-withdrawal-ready',
         activeMnemonic => checkWithdrawal(claim, target, activeMnemonic), 'closed'),
+      checkNativeWithdrawalRetainingContinuationSignerV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalRetainingContinuationSignerV2']>) =>
+        consume('native-withdrawal-ready', async activeMnemonic => {
+          const checked = await checkWithdrawal(claim, target, activeMnemonic);
+          retainedContinuationWithdrawal = checked;
+          return checked;
+        }, 'native-continuation-deposit-ready'),
+      checkNativeContinuationPegInSourceLockRetainingSignerV1: async (...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInSourceLockRetainingSignerV1']>) =>
+        consume('native-continuation-deposit-ready', async activeMnemonic => {
+          await assertNativeContinuationPacket(packet, target);
+          const checked = await runPegInSourceLockCheck({
+            sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+            unsignedTransaction: packet.transactions.sourceLockCreation,
+          }, target, signer, activeMnemonic, () => assertNativeContinuationCustody(packet, target));
+          await assertNativeContinuationPacket(packet, target);
+          retainedPegInPacket = packet;
+          return checked;
+        }, 'native-continuation-source-lock-checked'),
+      checkNativeContinuationPegInCommittedVaultRetainingSignerV1: async (...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInCommittedVaultRetainingSignerV1']>) =>
+        consume('native-continuation-source-lock-checked', async activeMnemonic => {
+          if (packet !== retainedPegInPacket) throw new Error('native FED continuation differs from its checked source lock');
+          await assertNativeContinuationPacket(packet, target);
+          const checked = await runPegInCommittedVaultCheck({
+            reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+            sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+            transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+            unsignedTransaction: packet.transactions.reserveTransition,
+          }, target, signer, activeMnemonic, () => assertNativeContinuationCustody(packet, target));
+          await assertNativeContinuationPacket(packet, target);
+          retainedPegInPacket = undefined;
+          retainedCommittedPegInPacket = packet;
+          return checked;
+        }, 'native-continuation-vault-checked'),
       checkWithdrawalFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3']>) => consume('v3-tracker-fee-ready',
         activeMnemonic => checkWithdrawalFeeFunding(target, activeMnemonic), 'v3-tracker-fee-ready'),
       checkTrackerFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>) => consume('v3-tracker-fee-ready',
@@ -2627,6 +2715,18 @@ export function getSubstrateFederatedNativeGenesisSetupCompilerInputV1(
 ): Readonly<Pick<DeriveSubstrateFederatedIsolatedDevnetSourceCompilerClosureV2Input,
   'trackerRequest' | 'trackerReceipt' | 'familyReceipt' | 'familyTemplates'>> {
   assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+  const compiled = NATIVE_EXECUTION_BATCHES.get(batch)!.compiled;
+  return Object.freeze({ trackerRequest: compiled.familyCompilerInput.trackerRequest,
+    trackerReceipt: compiled.familyCompilerInput.trackerReceipt, familyReceipt: compiled.familyReceipt,
+    familyTemplates: structuredClone(compiled.familyCompilerInput.templates) });
+}
+
+/** Compiler bytes from retained custody; does not renew the completed setup action. */
+export function getSubstrateFederatedNativeGenesisReadCompilerInputV1(
+  batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
+  originalSetupTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): ReturnType<typeof getSubstrateFederatedNativeGenesisSetupCompilerInputV1> {
+  assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(batch, originalSetupTarget);
   const compiled = NATIVE_EXECUTION_BATCHES.get(batch)!.compiled;
   return Object.freeze({ trackerRequest: compiled.familyCompilerInput.trackerRequest,
     trackerReceipt: compiled.familyCompilerInput.trackerReceipt, familyReceipt: compiled.familyReceipt,

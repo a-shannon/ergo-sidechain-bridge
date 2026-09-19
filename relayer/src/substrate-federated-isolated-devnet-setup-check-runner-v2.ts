@@ -79,6 +79,12 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
   readonly checkNativeWithdrawalV2:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalV2'];
+  readonly checkNativeWithdrawalRetainingContinuationSignerV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalRetainingContinuationSignerV2'];
+  readonly checkNativeContinuationPegInSourceLockRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInSourceLockRetainingSignerV1'];
+  readonly checkNativeContinuationPegInCommittedVaultRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInCommittedVaultRetainingSignerV1'];
   readonly runForExecutionV3RetainingPegInAndTrackerSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
   readonly checkPegInSourceLockV2RetainingSigner:
@@ -233,6 +239,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'native-withdrawal-fee-checked'
     | 'native-tracker-fee-checked'
     | 'native-withdrawal-ready'
+    | 'native-continuation-deposit-ready'
+    | 'native-continuation-source-lock-checked'
+    | 'native-continuation-vault-checked'
     | 'native-vault-checked'
     | 'v2-source-lock-check-complete'
     | 'v2-committed-vault-check-complete'
@@ -288,6 +297,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'native-withdrawal-fee-checked'
       | 'native-tracker-fee-checked'
       | 'native-withdrawal-ready'
+      | 'native-continuation-deposit-ready'
+      | 'native-continuation-source-lock-checked'
+      | 'native-continuation-vault-checked'
       | 'setup-complete'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
@@ -311,6 +323,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'native-withdrawal-fee-checked'
       | 'native-tracker-fee-checked'
       | 'native-withdrawal-ready'
+      | 'native-continuation-deposit-ready'
+      | 'native-continuation-source-lock-checked'
+      | 'native-continuation-vault-checked'
       | 'native-vault-checked'
       | 'v2-source-lock-check-complete'
       | 'v2-committed-vault-check-complete'
@@ -327,7 +342,13 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       );
       if (state === 'running') {
         terminalInvalidationRequested = true;
-        if (nativeRouteSelected) revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+        if (nativeRouteSelected) {
+          revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+          // Abort the inner operation before it resumes with its retained mnemonic.
+          // Its running-state disposal throws after setting cancellation; preserve
+          // the duplicate transition error for this caller.
+          try { execution.dispose(); } finally { throw error; }
+        }
       } else if (state !== 'closed') {
         close();
       }
@@ -380,6 +401,9 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'native-withdrawal-fee-checked'
           || state === 'native-tracker-fee-checked'
           || state === 'native-withdrawal-ready'
+          || state === 'native-continuation-deposit-ready'
+          || state === 'native-continuation-source-lock-checked'
+          || state === 'native-continuation-vault-checked'
           || state === 'v2-source-lock-check-complete'
           || state === 'v2-committed-vault-check-complete'
           || state === 'v3-withdrawal-fee-check-complete'
@@ -417,6 +441,12 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       }, 'native-withdrawal-ready'),
     checkNativeWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalV2']>) => consume('native-withdrawal-ready',
       () => execution.checkNativeWithdrawalV2(claim, target), 'closed'),
+    checkNativeWithdrawalRetainingContinuationSignerV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalRetainingContinuationSignerV2']>) => consume('native-withdrawal-ready',
+      () => execution.checkNativeWithdrawalRetainingContinuationSignerV2(claim, target), 'native-continuation-deposit-ready'),
+    checkNativeContinuationPegInSourceLockRetainingSignerV1: async (...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInSourceLockRetainingSignerV1']>) => consume('native-continuation-deposit-ready',
+      () => execution.checkNativeContinuationPegInSourceLockRetainingSignerV1(packet, target), 'native-continuation-source-lock-checked'),
+    checkNativeContinuationPegInCommittedVaultRetainingSignerV1: async (...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInCommittedVaultRetainingSignerV1']>) => consume('native-continuation-source-lock-checked',
+      () => execution.checkNativeContinuationPegInCommittedVaultRetainingSignerV1(packet, target), 'native-continuation-vault-checked'),
     runForExecutionV3RetainingPegInAndTrackerSigner: async (
       ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
     ) => consume(
