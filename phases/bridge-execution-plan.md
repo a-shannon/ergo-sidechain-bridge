@@ -28,8 +28,8 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** add separately scoped sequential process authority and compose both
-component cycles in the root before a fresh two-cycle campaign. The second
+**Now:** retain native node ownership and compose both component cycles in the
+root before a fresh two-cycle campaign. The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
 payout and both replay histories. Confirm both new external fee inputs before
@@ -104,6 +104,29 @@ old-claim replay, a foreign current target, a canonical stale reserve, and
 custody loss inside preparation and checking. Construction-only probes reject
 both burns against the resulting two-key DUP state. RPCs and process bindings
 remain explicit doubles; this does not establish a second cycle on nodes.
+
+The sequential Ergo process API now admits a separate second cycle only after
+the original confirmation action completes and both nodes stop mining. The setup
+session issues one opaque authority for three fresh mining credentials after
+reobserving both claimed second fee outputs and their canonical confirmations.
+The process binds that authority to the exact original setup and completed
+confirmation targets. Its new cycle uses the same chain data; the original
+cycle's methods and consumed credentials remain unavailable. The second frozen
+tracker target retains both original setup and first-confirmation ancestry.
+Custody loss revokes the remaining credentials, while the final payout may
+destroy the signer inside its confirmation callback. A bounded real-node control
+test completes both process cycles without transaction submission; composed
+tests separately exercise the actual fee and setup-authority producers. This
+does not establish the full two-cycle bridge lifecycle.
+
+The root's native node owner currently closes when the first Ergo setup callback
+returns. The continuation signer requires the same live native target object,
+so another callback with a fresh target cannot replace it. The next join keeps
+one native session and its target continuously live across the Ergo phases,
+serializes its actions and awaits teardown before producing the final receipt.
+Keep the legacy callback API scoped to one action. Then connect the existing
+second deposit, source proof, native reservation/mint/burn, funded fees,
+checkpoint, tracker and payout consumers under that retained owner.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -464,7 +487,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Both component cycles -> sequential process authority and one root | Issue separately scoped second-cycle checkpoint, admission and confirmation authority, then connect the existing consumers | Leave the first confirmation callback before starting the next checkpoint; preserve original read custody and consumed handles without resets or reconstructed credentials |
+| **Now** | Scoped Ergo cycles -> retained native owner and one root | Keep the exact native target continuously live through both returns, then connect the existing second-cycle consumers | Leave the first Ergo confirmation callback before the next checkpoint; serialize native actions, await teardown, preserve read custody and consumed handles, and never revive an expired target |
 | Next candidate | Two-cycle root -> fresh chain | Keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; do not reset genesis, substitute historical custody, reuse ambiguous attempts or repeat an equivalent one-cycle campaign |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

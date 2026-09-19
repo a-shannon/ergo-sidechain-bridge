@@ -56,6 +56,9 @@ import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1,
+  revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1,
+  type SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1,
   type SubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
@@ -127,6 +130,7 @@ const ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS =
   new WeakMap<object, OwnedTargetBinding & {
     readonly originalSetupTarget?: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    readonly parentConfirmationTarget?: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   }>();
 const ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS =
   new WeakSet<object>();
@@ -434,7 +438,16 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2 {
     >;
   }>>;
   readonly stop: () => Promise<void>;
+  readonly continueNativeTrackerCycleV1: (
+    authority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>,
+  ) => Readonly<SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1>;
 }
+
+export type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1 = Pick<
+  SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
+  'withCheckpointExtensionMiningTarget' | 'withCheckpointBoundMiningStoppedExecutionTarget'
+  | 'withCheckpointBoundReservationFreshnessRevalidationTarget' | 'withCheckpointBoundTrackerTransportTarget'
+  | 'withTrackerTransportConfirmationMiningTarget'>;
 
 export interface SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1 {
   readonly minimumTipHeight?: number;
@@ -881,6 +894,19 @@ export function assertSubstrateFederatedNativeSetupTrackerLineageV1(
   return current;
 }
 
+export function assertSubstrateFederatedNativeContinuationTrackerLineageV1(
+  frozenTarget: Readonly<SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2>,
+  originalSetupTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  parentConfirmationTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1> {
+  const current = assertSubstrateFederatedNativeSetupTrackerLineageV1(frozenTarget, originalSetupTarget);
+  if (OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGET_BINDINGS.get(frozenTarget)!.parentConfirmationTarget
+    !== parentConfirmationTarget || !OWNED_TRACKER_CONFIRMATION_TARGET_PARENTS.has(parentConfirmationTarget)) {
+    throw new Error('native continuation tracker target differs from its completed first confirmation');
+  }
+  return current;
+}
+
 export function assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
   value: Readonly<
     SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
@@ -1054,10 +1080,19 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
   let miningCredential:
     Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined =
       miningCredentialValue;
-  let checkpointMiningCredential = checkpointMiningCredentialValue;
-  let trackerAdmissionMiningCredential = trackerAdmissionMiningCredentialValue;
-  let trackerConfirmationMiningCredential =
-    trackerConfirmationMiningCredentialValue;
+  interface MiningCycle {
+    checkpointMiningCredential: Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+    trackerAdmissionMiningCredential: Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+    trackerConfirmationMiningCredential: Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+    readonly assertCustody?: () => void;
+    readonly parentConfirmationTarget?: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  }
+  const originalCycle: MiningCycle = { checkpointMiningCredential: checkpointMiningCredentialValue,
+    trackerAdmissionMiningCredential: trackerAdmissionMiningCredentialValue,
+    trackerConfirmationMiningCredential: trackerConfirmationMiningCredentialValue };
+  let currentCycle = originalCycle;
+  let continuationAuthority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1> | undefined;
+  let completedConfirmationTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1> | undefined;
   let checkpointExecutionContinuation:
     Readonly<CheckpointExecutionContinuation> | undefined;
   let trackerReservationFreshnessContinuation:
@@ -1086,29 +1121,32 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
 
   const cleanup = async (): Promise<void> => {
     if (state === 'stopped') return;
+    if (continuationAuthority !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(continuationAuthority);
+    }
     if (miningCredential !== undefined) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         miningCredential,
       );
       miningCredential = undefined;
     }
-    if (checkpointMiningCredential !== undefined) {
+    if (currentCycle.checkpointMiningCredential !== undefined) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
-        checkpointMiningCredential,
+        currentCycle.checkpointMiningCredential,
       );
-      checkpointMiningCredential = undefined;
+      currentCycle.checkpointMiningCredential = undefined;
     }
-    if (trackerAdmissionMiningCredential !== undefined) {
+    if (currentCycle.trackerAdmissionMiningCredential !== undefined) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
-        trackerAdmissionMiningCredential,
+        currentCycle.trackerAdmissionMiningCredential,
       );
-      trackerAdmissionMiningCredential = undefined;
+      currentCycle.trackerAdmissionMiningCredential = undefined;
     }
-    if (trackerConfirmationMiningCredential !== undefined) {
+    if (currentCycle.trackerConfirmationMiningCredential !== undefined) {
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
-        trackerConfirmationMiningCredential,
+        currentCycle.trackerConfirmationMiningCredential,
       );
-      trackerConfirmationMiningCredential = undefined;
+      currentCycle.trackerConfirmationMiningCredential = undefined;
     }
     if (
       state === 'inert' && ownedRuntimeRoot === undefined && runtime === undefined
@@ -1198,7 +1236,13 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
     throw failure;
   };
 
-  return Object.freeze({
+  const runCycleAction = <Target extends object, T>(
+    action: (target: Readonly<Target>) => Promise<T>, target: Readonly<Target>,
+  ): Promise<T> => {
+    currentCycle.assertCustody?.();
+    return runManagedAction(action, target);
+  };
+  const operations: Omit<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2, 'continueNativeTrackerCycleV1'> = Object.freeze({
     startMining: async () => {
       if (state !== 'inert' || activeOperation !== undefined) {
         throw new Error('isolated Ergo mining phase can start exactly once');
@@ -1336,7 +1380,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_EXECUTION_TARGETS.delete(target);
         }
@@ -1449,7 +1493,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_READ_ONLY_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_READ_ONLY_TARGETS.delete(target);
         }
@@ -1533,7 +1577,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       );
       const extensionFields =
         `${CHECKPOINT_EXTENSION_KEY_HEX}:${checkpointExtensionValueHex}`;
-      const credential = checkpointMiningCredential;
+      const credential = currentCycle.checkpointMiningCredential;
       if (credential === undefined) {
         throw new Error(
           'isolated checkpoint mining credential is absent, consumed, or revoked',
@@ -1555,7 +1599,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         assertPortsUnowned(OWNED_PORTS);
         recheckRuntimeFiles(input, runtime);
 
-        checkpointMiningCredential = undefined;
+        currentCycle.assertCustody?.();
+        currentCycle.checkpointMiningCredential = undefined;
         let launchedPrimary: OwnedNode | undefined;
         consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
           credential,
@@ -1670,7 +1715,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_CHECKPOINT_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_CHECKPOINT_TARGETS.delete(target);
         }
@@ -1740,7 +1785,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           'isolated Ergo checkpoint-bound execution requires one completed checkpoint observation',
         );
       }
-      if (trackerAdmissionMiningCredential === undefined) {
+      if (currentCycle.trackerAdmissionMiningCredential === undefined) {
         throw new Error(
           'isolated tracker-admission mining credential is absent, consumed, or revoked',
         );
@@ -1763,8 +1808,9 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         assertPortsUnowned(OWNED_PORTS);
         recheckRuntimeFiles(input, runtime);
 
-        const credential = trackerAdmissionMiningCredential;
-        trackerAdmissionMiningCredential = undefined;
+        currentCycle.assertCustody?.();
+        const credential = currentCycle.trackerAdmissionMiningCredential;
+        currentCycle.trackerAdmissionMiningCredential = undefined;
         let launchedPrimary: OwnedNode | undefined;
         consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
           credential,
@@ -1867,7 +1913,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_CHECKPOINT_BOUND_EXECUTION_TARGETS.delete(target);
         }
@@ -1961,7 +2007,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           'isolated Ergo checkpoint-bound execution requires one completed checkpoint observation',
         );
       }
-      if (trackerAdmissionMiningCredential === undefined) {
+      if (currentCycle.trackerAdmissionMiningCredential === undefined) {
         throw new Error(
           'isolated tracker-admission mining credential is absent, consumed, or revoked',
         );
@@ -1984,8 +2030,9 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         assertPortsUnowned(OWNED_PORTS);
         recheckRuntimeFiles(input, runtime);
 
-        const credential = trackerAdmissionMiningCredential;
-        trackerAdmissionMiningCredential = undefined;
+        currentCycle.assertCustody?.();
+        const credential = currentCycle.trackerAdmissionMiningCredential;
+        currentCycle.trackerAdmissionMiningCredential = undefined;
         let launchedPrimary: OwnedNode | undefined;
         consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
           credential,
@@ -2123,13 +2170,14 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
             executionTargetIdentityDigestHex,
             assertActiveProcesses,
             originalSetupTarget: completedSetupTarget,
+            parentConfirmationTarget: currentCycle.parentConfirmationTarget,
           }),
         );
         state = 'action';
         ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_CHECKPOINT_BOUND_FROZEN_EXECUTION_TARGETS.delete(target);
         }
@@ -2313,7 +2361,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_TRACKER_RESERVATION_FRESHNESS_TARGETS.delete(target);
         }
@@ -2430,7 +2478,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         32,
         'isolated tracker transport expected transaction ID',
       );
-      if (trackerConfirmationMiningCredential === undefined) {
+      if (currentCycle.trackerConfirmationMiningCredential === undefined) {
         throw new Error(
           'isolated tracker-confirmation mining credential is absent, consumed, or revoked',
         );
@@ -2493,8 +2541,9 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         assertOwnedNodeIdentity(input, runtime, witness);
 
         targetActivationFailurePhase = 'tracker transport primary restart';
-        const credential = trackerConfirmationMiningCredential;
-        trackerConfirmationMiningCredential = undefined;
+        currentCycle.assertCustody?.();
+        const credential = currentCycle.trackerConfirmationMiningCredential;
+        currentCycle.trackerConfirmationMiningCredential = undefined;
         let launchedPrimary: OwnedNode | undefined;
         consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
           credential,
@@ -2605,7 +2654,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_TRACKER_TRANSPORT_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_TRACKER_TRANSPORT_TARGETS.delete(target);
         }
@@ -2808,7 +2857,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
         let value: T;
         try {
-          value = await runManagedAction(action, target);
+          value = await runCycleAction(action, target);
         } finally {
           ACTIVE_OWNED_EXECUTION_TARGETS.delete(target);
         }
@@ -2861,6 +2910,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
             checkpointSnapshot: continuation.checkpointSnapshot,
             transportSnapshot: continuation.transportSnapshot,
           });
+        completedConfirmationTarget = target;
         return Object.freeze({ value, receipt });
       } catch (error) {
         return await failWithCleanup(error);
@@ -2869,6 +2919,48 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       }
     },
     stop,
+  });
+
+  const guardCycle = <Args extends unknown[], Result>(cycle: MiningCycle,
+    operation: (...args: Args) => Promise<Result>) => async (...args: Args): Promise<Result> => {
+    if (cycle !== currentCycle) throw new Error('isolated Ergo process cycle is no longer current');
+    if (activeOperation === undefined) {
+      try { cycle.assertCustody?.(); } catch (error) { return await failWithCleanup(error); }
+    }
+    return await operation(...args);
+  };
+  const cycleView = (cycle: MiningCycle): Readonly<SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1> => Object.freeze({
+    withCheckpointExtensionMiningTarget: guardCycle(cycle, operations.withCheckpointExtensionMiningTarget),
+    withCheckpointBoundMiningStoppedExecutionTarget: guardCycle(cycle, operations.withCheckpointBoundMiningStoppedExecutionTarget),
+    withCheckpointBoundReservationFreshnessRevalidationTarget: guardCycle(cycle, operations.withCheckpointBoundReservationFreshnessRevalidationTarget),
+    withCheckpointBoundTrackerTransportTarget: guardCycle(cycle, operations.withCheckpointBoundTrackerTransportTarget),
+    withTrackerTransportConfirmationMiningTarget: guardCycle(cycle, operations.withTrackerTransportConfirmationMiningTarget),
+  });
+  return Object.freeze({
+    ...operations,
+    ...cycleView(originalCycle),
+    startMining: guardCycle(originalCycle, operations.startMining),
+    withMiningActiveExecutionTarget: guardCycle(originalCycle, operations.withMiningActiveExecutionTarget),
+    withMiningStoppedReadOnlyTarget: guardCycle(originalCycle, operations.withMiningStoppedReadOnlyTarget),
+    withCheckpointBoundMiningActiveExecutionTarget: guardCycle(originalCycle, operations.withCheckpointBoundMiningActiveExecutionTarget),
+    continueNativeTrackerCycleV1: (authority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>) => {
+      if (state !== 'read-only' || activeOperation !== undefined || runtime === undefined
+        || primary?.mode !== 'non-mining' || witness?.mode !== 'non-mining'
+        || currentCycle !== originalCycle || continuationAuthority !== undefined
+        || completedSetupTarget === undefined || completedConfirmationTarget === undefined
+        || miningCredential !== undefined || originalCycle.checkpointMiningCredential !== undefined
+        || originalCycle.trackerAdmissionMiningCredential !== undefined
+        || originalCycle.trackerConfirmationMiningCredential !== undefined
+        || checkpointExecutionContinuation !== undefined || trackerReservationFreshnessContinuation !== undefined
+        || trackerTransportContinuation !== undefined || trackerConfirmationContinuation !== undefined) {
+        throw new Error('native continuation requires one completed confirmation and a frozen original cycle');
+      }
+      const credentials = claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(
+        authority, binding.miningTargetPublicKeyHex, completedSetupTarget, completedConfirmationTarget);
+      continuationAuthority = authority;
+      currentCycle = { ...credentials, parentConfirmationTarget: completedConfirmationTarget };
+      return cycleView(currentCycle);
+    },
   });
 }
 

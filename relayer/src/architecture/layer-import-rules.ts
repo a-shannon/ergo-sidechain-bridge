@@ -2179,6 +2179,16 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [
     'substrate-federated-isolated-devnet-mining-credential-v1.ts',
     new Map([
+      ['issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1', new Set([
+        'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+      ])],
+      ['claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1', new Set([
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      ])],
+      ['revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1', new Set([
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+      ])],
       [
         'issueSubstrateFederatedIsolatedDevnetMiningCredentialV1',
         new Set([

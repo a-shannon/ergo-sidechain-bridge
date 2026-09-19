@@ -64,6 +64,9 @@ import {
 import {
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1,
+  revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1,
+  type SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1,
   type SubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
@@ -88,6 +91,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2,
   assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2,
   assertSubstrateFederatedNativeSetupTrackerLineageV1,
+  assertSubstrateFederatedNativeContinuationTrackerLineageV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
   issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
   type SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
@@ -697,6 +701,9 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
   readonly checkNativeContinuationWithdrawalV2:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
+  readonly issueNativeContinuationMiningAuthorityV1: (
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>>;
   readonly runForExecutionV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -1497,6 +1504,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     let retainedWithdrawalCompiler: ReturnType<typeof getSubstrateFederatedNativeGenesisSetupCompilerInputV1> | undefined;
     let retainedWithdrawalTracker: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check> | undefined;
     let retainedContinuationTracker: Readonly<SubstrateFederatedIsolatedDevnetTrackerV2Check> | undefined;
+    let continuationMiningAuthority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1> | undefined;
     let retainedPegInPacket: Readonly<SubstrateFederatedPooledReserveDepositV2Packet> | undefined;
     let nativeBatch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1> | undefined;
     let retainedContinuationWithdrawal: Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check> | undefined;
@@ -1543,6 +1551,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       if (state === 'closed') return;
       terminalInvalidationRequested = true;
       nativeCancellation.abort();
+      if (continuationMiningAuthority !== undefined) {
+        revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(continuationMiningAuthority);
+        continuationMiningAuthority = undefined;
+      }
       revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         miningCredential,
       );
@@ -1940,7 +1952,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
       };
       const assertCurrent = () => {
         assertRetainedCustody();
-        return assertSubstrateFederatedNativeSetupTrackerLineageV1(target, continuation.target);
+        return assertSubstrateFederatedNativeContinuationTrackerLineageV1(target, continuation.target, withdrawalMaterial.target);
       };
       assertCurrent();
       assertSubstrateFederatedTrackerV2ExternalFeeTransaction(transaction);
@@ -2669,6 +2681,68 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         ...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2']>
       ) => consume('native-continuation-withdrawal-ready',
         activeMnemonic => checkWithdrawal(claim, target, activeMnemonic, true), 'closed'),
+      issueNativeContinuationMiningAuthorityV1: async (target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>) => consume('native-continuation-tracker-fee-checked',
+        async activeMnemonic => {
+          const continuation = trackerFeeContinuation;
+          const packet = retainedCommittedPegInPacket;
+          const originalPacket = retainedOriginalCommittedPegInPacket;
+          const withdrawal = retainedContinuationWithdrawal;
+          const trackerFee = retainedContinuationTrackerFeeCheck;
+          const withdrawalFee = retainedContinuationWithdrawalFeeCheck;
+          const trackerFeeMaterial = trackerFee === undefined ? undefined : TRACKER_FEE_CHECKS.get(trackerFee);
+          const withdrawalFeeMaterial = withdrawalFee === undefined ? undefined : WITHDRAWAL_FEE_CHECKS.get(withdrawalFee);
+          if (continuationMiningAuthority !== undefined || continuation?.route !== 'native'
+            || packet === undefined || originalPacket === undefined || withdrawal === undefined
+            || trackerFee === undefined || withdrawalFee === undefined
+            || trackerFeeMaterial?.route !== 'native-continuation' || withdrawalFeeMaterial?.route !== 'native-continuation'
+            || trackerFeeMaterial.target !== target || withdrawalFeeMaterial.target !== target
+            || trackerFeeMaterial.packet !== packet || withdrawalFeeMaterial.packet !== packet
+            || !CLAIMED_TRACKER_FEE_CHECKS.has(trackerFee) || !CLAIMED_WITHDRAWAL_FEE_CHECKS.has(withdrawalFee)) {
+            throw new Error('native continuation mining requires its two claimed second fees exactly once');
+          }
+          const withdrawalMaterial = WITHDRAWAL_V2_CHECKS.get(withdrawal);
+          if (withdrawalMaterial === undefined || withdrawalMaterial.target !== target) {
+            throw new Error('native continuation mining lacks its retained first confirmation');
+          }
+          const assertReadCustody = () => {
+            assertNativeSessionActive();
+            if (trackerFeeContinuation !== continuation || nativeBatch !== continuation.batch
+              || retainedCommittedPegInPacket !== packet || retainedOriginalCommittedPegInPacket !== originalPacket
+              || retainedContinuationWithdrawal !== withdrawal || retainedContinuationTrackerFeeCheck !== trackerFee
+              || retainedContinuationWithdrawalFeeCheck !== withdrawalFee
+              || WITHDRAWAL_V2_CHECKS.get(withdrawal) !== withdrawalMaterial
+              || sha256CanonicalJson(withdrawal, 'E2S_ISOLATED_WITHDRAWAL_V2_CHECK') !== withdrawalMaterial.checkDigestHex) {
+              throw new Error('native continuation mining retained lineage changed');
+            }
+            const compiler = getSubstrateFederatedNativeGenesisReadCompilerInputV1(continuation.batch, continuation.target);
+            assertSubstrateFederatedPooledReserveDepositV2Packet(packet);
+            assertNativePacketCompiler(packet, compiler);
+          };
+          const assertCurrent = () => {
+            assertReadCustody();
+            assertNativeContinuationPostVaultCustody(packet, target, originalPacket, withdrawal);
+          };
+          assertCurrent();
+          const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+            target, continuation.batch.request.target.genesisHeaderIdHex);
+          for (const fee of [trackerFee, withdrawalFee]) {
+            const confirmed = await observer.observe(fee.transaction.txId, PRIMARY_NODE_ORIGIN);
+            assertCurrent();
+            if (confirmed?.status !== 'confirmed') throw new Error('native continuation mining fee is not canonically confirmed');
+            for (const origin of [target.primaryNodeOrigin, target.witnessNodeOrigin]) {
+              const expected = fee.transaction.outputs[0]!;
+              const observed = await normalizeEip12Box(await ngetDirect(`/utxo/byId/${expected.boxId}`, origin),
+                'native continuation mining fee input');
+              assertCurrent();
+              if (canonicalJson(observed) !== canonicalJson(expected)) throw new Error('native continuation mining fee input changed');
+            }
+          }
+          continuationMiningAuthority = issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1({
+            mnemonic: activeMnemonic, publicKeyHex: signer.publicKeyHex,
+            setupTarget: continuation.target, confirmationTarget: target, assertCustody: assertReadCustody,
+          });
+          return continuationMiningAuthority;
+        }, 'native-continuation-tracker-fee-checked'),
       checkWithdrawalFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3']>) => consume('v3-tracker-fee-ready',
         activeMnemonic => checkWithdrawalFeeFunding(target, activeMnemonic), 'v3-tracker-fee-ready'),
       checkTrackerFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>) => consume('v3-tracker-fee-ready',

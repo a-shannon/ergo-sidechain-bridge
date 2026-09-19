@@ -10,7 +10,8 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import {
@@ -23,6 +24,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
   assertSubstrateFederatedNativeSetupTrackerLineageV1,
+  assertSubstrateFederatedNativeContinuationTrackerLineageV1,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
@@ -52,7 +54,10 @@ import type {
 import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 as issueContinuationAuthority,
+  revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 as revokeContinuationAuthority,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+import * as miningCredentials from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
   claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
   claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
@@ -383,7 +388,7 @@ describe.skipIf(process.platform !== 'win32')(
       expect(methodEnd).toBeGreaterThan(methodStart);
       const method = source.slice(methodStart, methodEnd);
       const callbackCompletion = method.indexOf(
-        'value = await runManagedAction(action, target);',
+        'value = await runCycleAction(action, target);',
       );
       const observation = method.indexOf(
         'await observeExactCheckpointExtensionOnBothNodes(',
@@ -739,6 +744,135 @@ describe.skipIf(process.platform !== 'win32')(
 
     const liveJavaPath = process.env.G1DI3B_JAVA_PATH;
     const liveJarPath = process.env.G1DI3B_ERGO_JAR_PATH;
+    it.skipIf(!liveJavaPath || !liveJarPath).each(['valid', 'checkpoint', 'admission', 'confirmation', 'checkpoint late'] as const)(
+      'continues two owned process cycles without resetting credentials: %s', async fault => {
+        const identity = await deriveLocalWasmRootSignerPublicIdentity(MNEMONIC);
+        const signer = { ...identity, rewardInputErgoTrees: {
+          delay1: deriveDevnetRewardErgoTreeHexForDelay(identity.publicKeyHex, 1),
+          delay720: deriveDevnetRewardErgoTreeHexForDelay(identity.publicKeyHex, 720),
+        } };
+        const credential = () => issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(MNEMONIC, signer.publicKeyHex);
+        const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1({
+          javaExecutablePath: liveJavaPath!, expectedJavaExecutableSha256Hex: fileSha256(liveJavaPath!),
+          nodeAssemblyJarPath: liveJarPath!, expectedNodeAssemblyJarSha256Hex: fileSha256(liveJarPath!),
+          buildIdentityDigestHex: sha256(Buffer.from('live-native-continuation-process-only')),
+        }, launchBindingForSigner(signer), credential(), credential(), credential(), credential());
+        let live = true;
+        let authority: ReturnType<typeof issueContinuationAuthority> | undefined;
+        let firstConfirmation: Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0] | undefined;
+        let injected = 0;
+        let phase = 'first';
+        const callbacks: string[] = [];
+        const consumes = vi.spyOn(miningCredentials, 'consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1');
+        const claims = vi.spyOn(miningCredentials, 'claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1');
+        const originalFetch = globalThis.fetch;
+        const reads = vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args) => {
+          const response = await originalFetch(...args);
+          const atSelectedRead = fault === 'checkpoint late'
+            ? phase === 'checkpoint' && consumes.mock.calls.length === 5 : phase === fault;
+          if (fault !== 'valid' && atSelectedRead && injected === 0 && String(args[0]).endsWith('/info')) {
+            injected++; live = false;
+          }
+          return response;
+        });
+        const assertCustody = () => { if (!live) throw new Error('synthetic continuation custody lost during await'); };
+        try {
+          await session.startMining();
+          const setup = await session.withMiningActiveExecutionTarget(async target => target);
+          const runCycle = async (scope: Pick<typeof session,
+            'withCheckpointExtensionMiningTarget' | 'withCheckpointBoundMiningStoppedExecutionTarget'
+            | 'withCheckpointBoundReservationFreshnessRevalidationTarget' | 'withCheckpointBoundTrackerTransportTarget'
+            | 'withTrackerTransportConfirmationMiningTarget'>, second: boolean) => {
+            phase = second ? 'checkpoint' : 'first';
+            const anchor = await scope.withCheckpointExtensionMiningTarget(second ? 'cd'.repeat(64) : 'ab'.repeat(64),
+              { minimumTipHeight: 11 }, async () => { if (second) callbacks.push('checkpoint'); });
+            phase = second ? 'admission' : 'first';
+            const frozen = await scope.withCheckpointBoundMiningStoppedExecutionTarget(async target => {
+              if (second) {
+                callbacks.push('admission');
+                expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(firstConfirmation!)).toThrow(/not owned/);
+                const binding = assertSubstrateFederatedNativeContinuationTrackerLineageV1(target, setup.value, firstConfirmation!);
+                expect(() => assertSubstrateFederatedNativeContinuationTrackerLineageV1(target, setup.value,
+                  { ...firstConfirmation! })).toThrow(/first confirmation/);
+                return binding;
+              }
+              return assertSubstrateFederatedNativeSetupTrackerLineageV1(target, setup.value);
+            });
+            let completion: ReturnType<typeof issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1> | undefined;
+            await scope.withCheckpointBoundReservationFreshnessRevalidationTarget(async target => {
+              expect(assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, frozen.value))
+                .toMatchObject({ processBindingDigestHex: expect.any(String) });
+              completion = issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(target);
+            });
+            phase = second ? 'confirmation' : 'first';
+            // No transaction is submitted: this tests process/capability control,
+            // not canonical transaction inclusion or a bridge roundtrip.
+            const txId = second ? 'be'.repeat(32) : 'ac'.repeat(32);
+            const transported = await scope.withCheckpointBoundTrackerTransportTarget(completion!, txId, async target => {
+              if (second) callbacks.push('transport');
+              return assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
+            });
+            await scope.withTrackerTransportConfirmationMiningTarget(txId, async target => {
+              expect(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transported.value, txId))
+                .toMatchObject({ processBindingDigestHex: expect.any(String) });
+              if (second) {
+                callbacks.push('confirmation');
+                // Terminal payout may destroy the signer inside this callback.
+                live = false;
+                revokeContinuationAuthority(authority!);
+                expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target)).not.toThrow();
+              } else {
+                firstConfirmation = target;
+                authority = issueContinuationAuthority({ mnemonic: MNEMONIC, publicKeyHex: signer.publicKeyHex,
+                  setupTarget: setup.value, confirmationTarget: target, assertCustody });
+                expect(() => session.continueNativeTrackerCycleV1(authority!)).toThrow(/completed confirmation/);
+              }
+            });
+            return anchor;
+          };
+          const first = await runCycle(session, false);
+          const frozen = await session.withMiningStoppedReadOnlyTarget(async target => target);
+          expect(frozen.receipt.finalSnapshot.fullHeight).toBeGreaterThanOrEqual(first.receipt.finalSnapshot.fullHeight);
+          expect(() => session.continueNativeTrackerCycleV1({ ...authority! })).toThrow(/authority is absent/);
+          for (const parent of ['setup', 'confirmation'] as const) {
+            const foreign = issueContinuationAuthority({ mnemonic: MNEMONIC, publicKeyHex: signer.publicKeyHex,
+              setupTarget: parent === 'setup' ? { ...setup.value } : setup.value,
+              confirmationTarget: parent === 'confirmation' ? { ...firstConfirmation! } : firstConfirmation!, assertCustody });
+            expect(() => session.continueNativeTrackerCycleV1(foreign)).toThrow(/parent or signer differs/);
+          }
+          const second = session.continueNativeTrackerCycleV1(authority!);
+          const claimed = claims.mock.results.at(-1)!.value as ReturnType<typeof miningCredentials.claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>;
+          expect(() => session.continueNativeTrackerCycleV1(authority!)).toThrow(/completed confirmation/);
+          await expect(session.withCheckpointExtensionMiningTarget('ab'.repeat(64), {}, async () => undefined))
+            .rejects.toThrow(/cycle is no longer current/);
+          const pending = runCycle(second, true);
+          if (fault === 'valid') {
+            const next = await pending;
+            expect(next.receipt.finalSnapshot.fullHeight).toBeGreaterThan(first.receipt.finalSnapshot.fullHeight);
+            expect(callbacks).toEqual(['checkpoint', 'admission', 'transport', 'confirmation']);
+            expect(injected).toBe(0);
+          } else {
+            await expect(pending).rejects.toThrow(/custody lost during await/);
+            expect(injected).toBe(1);
+            expect(consumes.mock.calls).toHaveLength(fault === 'checkpoint' ? 4 : fault === 'confirmation' ? 6 : 5);
+            expect(callbacks).toEqual(fault.startsWith('checkpoint') ? [] : fault === 'admission'
+              ? ['checkpoint'] : ['checkpoint', 'admission']);
+            expect(() => claimed.assertCustody()).toThrow(/revoked/);
+            for (const token of [claimed.checkpointMiningCredential, claimed.trackerAdmissionMiningCredential,
+              claimed.trackerConfirmationMiningCredential]) {
+              expect(() => assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(token, signer.publicKeyHex))
+                .toThrow(/consumed, or revoked/);
+            }
+          }
+        } finally {
+          reads.mockRestore();
+          consumes.mockRestore();
+          claims.mockRestore();
+          if (authority !== undefined) revokeContinuationAuthority(authority);
+          await session.stop();
+        }
+      }, 600_000,
+    );
     it.skipIf(!liveJavaPath || !liveJarPath)(
       'native setup tracker lineage preserves expired setup provenance across owned process phases',
       async () => {

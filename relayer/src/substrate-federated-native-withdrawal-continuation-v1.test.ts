@@ -38,6 +38,9 @@ import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import * as helpers from './ergo-helpers.js';
 import * as fleet from './fleet-signer.js';
 import * as owned from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import { claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 as claimMiningAuthority,
+  assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential }
+  from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
 import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 as createSession }
@@ -331,7 +334,14 @@ const SECOND_PAYOUT_CASES = ['continuation second payout valid', 'continuation s
   'continuation second payout wrong current target', 'continuation second payout stale reserve predecessor',
   'continuation second payout custody during preparation', 'continuation second payout custody during checker'] as const;
 type SecondPayoutFault = typeof SECOND_PAYOUT_CASES[number];
-type ContinuationFault = SecondTrackerFault | SecondPayoutFault | 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
+const MINING_AUTHORITY_CASES = ['continuation mining authority valid',
+  'continuation mining authority unclaimed tracker fee', 'continuation mining authority unclaimed withdrawal fee',
+  'continuation mining authority pending tracker fee', 'continuation mining authority pending withdrawal fee',
+  'continuation mining authority changed tracker input', 'continuation mining authority changed withdrawal input',
+  'continuation mining authority custody during observation', 'continuation mining authority duplicate issuance',
+  'continuation mining authority foreign confirmation'] as const;
+type MiningAuthorityFault = typeof MINING_AUTHORITY_CASES[number];
+type ContinuationFault = SecondTrackerFault | SecondPayoutFault | MiningAuthorityFault | 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
   | 'continuation copied withdrawal attempt' | 'continuation unconfirmed payout' | 'continuation old packet'
   | 'continuation foreign target' | 'continuation duplicate source invocation' | 'continuation disposed during source preparation'
   | 'continuation disposed during source checker' | 'continuation wrong vault packet'
@@ -368,7 +378,7 @@ describe('native FED withdrawal continuation', () => {
     'continuation external fees unclaimed first check', 'continuation external fees copied check',
     'continuation external fees foreign target', 'continuation external fees spent first change',
     'continuation external fees custody during preparation', 'continuation external fees custody during checker',
-    'continuation external fees ambiguous withdrawal', ...SECOND_TRACKER_CASES, ...SECOND_PAYOUT_CASES])(
+    'continuation external fees ambiguous withdrawal', ...SECOND_TRACKER_CASES, ...SECOND_PAYOUT_CASES, ...MINING_AUTHORITY_CASES])(
     'preserves native custody through payout and a second source deposit: %s', async fault => {
     vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValue(testMnemonic);
     const session = await createSession();
@@ -378,8 +388,13 @@ describe('native FED withdrawal continuation', () => {
     const continuation = { stage: 'none' as 'none' | 'builder' | 'source' | 'vault' | 'withdrawal-fee' | 'tracker-fee' };
     const continuationFault = fault.startsWith('continuation ');
     const secondTrackerFault = fault.startsWith('continuation second tracker ');
-    const secondPayoutFault = fault.startsWith('continuation second payout ');
-    const feeContinuationFault = fault.startsWith('continuation external fees ') || secondTrackerFault || secondPayoutFault;
+    const miningAuthorityFault = fault.startsWith('continuation mining authority ');
+    const secondPayoutFault = fault.startsWith('continuation second payout ') || fault === 'continuation mining authority valid';
+    const feeContinuationFault = fault.startsWith('continuation external fees ') || secondTrackerFault || secondPayoutFault || miningAuthorityFault;
+    let miningAuthorityHandled = false;
+    let miningAuthorityObservationPath: string | undefined;
+    let miningAuthority: Awaited<ReturnType<typeof session.issueNativeContinuationMiningAuthorityV1>> | undefined;
+    let miningCredentials: ReturnType<typeof claimMiningAuthority> | undefined;
     let secondTrackerHandled = false;
     let secondPayoutHandled = false;
     let secondPayoutStarted = false;
@@ -436,7 +451,7 @@ describe('native FED withdrawal continuation', () => {
     boundary.sourceActive = true; boundary.setupActive = true; boundary.target = setupTarget;
     boundary.assertSigner = () => assertSigner(session.signer);
     const joinedFault = fault === 'continuation source proof native mint join';
-    const joinedFeeFault = fault === 'continuation external fees valid' || secondTrackerFault || secondPayoutFault;
+    const joinedFeeFault = fault === 'continuation external fees valid' || secondTrackerFault || secondPayoutFault || miningAuthorityFault;
     const joinedSourceFault = joinedFault || joinedFeeFault;
     const joinedSource = joinedSourceFault ? createSourceSession({
       ergoAdmissionThreshold: trackerRequest.profile.ergoAdmissionThreshold,
@@ -623,6 +638,10 @@ describe('native FED withdrawal continuation', () => {
       expect(original).toBe(setupTarget);
       return owned.assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
     });
+    vi.spyOn(owned, 'assertSubstrateFederatedNativeContinuationTrackerLineageV1').mockImplementation((target, original, parent) => {
+      expect(parent).toBe(confirmationTarget);
+      return owned.assertSubstrateFederatedNativeSetupTrackerLineageV1(target, original);
+    });
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2').mockImplementation((target, parent) => {
       if (target === secondFreshnessTarget) {
         expect(parent).toEqual(secondFrozenBinding); expect(phase).toBe('second-freshness'); return secondFreshBinding;
@@ -736,7 +755,14 @@ describe('native FED withdrawal continuation', () => {
         expect(canonicalJson(original)).toBe(first!.snapshot);
       }
     };
-    vi.spyOn(helpers, 'ngetDirect').mockImplementation((path, origin) => read(path, origin!));
+    vi.spyOn(helpers, 'ngetDirect').mockImplementation(async (path, origin) => {
+      const observed = await read(path, origin!);
+      if (path === miningAuthorityObservationPath && origin === WITNESS && injectionCount === 0) {
+        injectionCount++;
+        boundary.sourceActive = false;
+      }
+      return observed;
+    });
     const fundingObservations = new WeakSet<object>();
     vi.spyOn(rewardDiscovery, 'discoverSubstrateFederatedRewardInputsV2').mockImplementation(async () => {
       if (continuationFundingObservation === undefined) throw new Error('synthetic continuation funding unavailable');
@@ -1361,7 +1387,7 @@ describe('native FED withdrawal continuation', () => {
             'continuation external fees copied check', 'continuation external fees foreign target',
             'continuation external fees spent first change', 'continuation external fees custody during preparation',
             'continuation external fees custody during checker', 'continuation external fees ambiguous withdrawal',
-            ...SECOND_TRACKER_CASES, ...SECOND_PAYOUT_CASES,
+            ...SECOND_TRACKER_CASES, ...SECOND_PAYOUT_CASES, ...MINING_AUTHORITY_CASES,
           ]).has(fault as ContinuationFault);
           if (transportCompositionFault) {
             // Seed resolved durable history from the first checked deposit. Its
@@ -1706,10 +1732,12 @@ describe('native FED withdrawal continuation', () => {
                 expect(checkBodies).toHaveLength(beforeCrossPurposeChecks + 2);
                 registerFeeTransaction(secondWithdrawalFee);
                 registerFeeTransaction(secondTrackerFee);
-                const secondWithdrawalExecution = fault === 'continuation second tracker unclaimed withdrawal fee' ? undefined : await executeWithdrawalFeeFunding({
+                const secondWithdrawalExecution = fault === 'continuation second tracker unclaimed withdrawal fee'
+                  || fault === 'continuation mining authority unclaimed withdrawal fee' ? undefined : await executeWithdrawalFeeFunding({
                   target: confirmationTarget, checked: secondWithdrawalFee, state,
                 });
-                const secondTrackerExecution = fault === 'continuation second tracker unclaimed fee' ? undefined : await executeTrackerFeeFunding({
+                const secondTrackerExecution = fault === 'continuation second tracker unclaimed fee'
+                  || fault === 'continuation mining authority unclaimed tracker fee' ? undefined : await executeTrackerFeeFunding({
                   target: confirmationTarget, checked: secondTrackerFee, state,
                 });
                 if (secondWithdrawalExecution !== undefined) {
@@ -1730,6 +1758,45 @@ describe('native FED withdrawal continuation', () => {
                   ...(secondTrackerExecution === undefined ? [] : [secondTrackerFee.transaction.txId]),
                 ]);
                 if (secondWithdrawalExecution !== undefined && secondTrackerExecution !== undefined) assertFirstFeeRowsUnchanged(2);
+                if (miningAuthorityFault) {
+                  const selectedFee = fault.includes('withdrawal') ? secondWithdrawalFee : secondTrackerFee;
+                  if (fault.includes('pending')) confirmed.set(selectedFee.transaction.txId, tip());
+                  if (fault.includes('changed')) {
+                    const otherFee = selectedFee === secondTrackerFee ? secondWithdrawalFee : secondTrackerFee;
+                    boxes.set(selectedFee.transaction.outputs[0]!.boxId, otherFee.transaction.outputs[0]!);
+                  }
+                  if (fault === 'continuation mining authority custody during observation') {
+                    miningAuthorityObservationPath = `/utxo/byId/${secondTrackerFee.transaction.outputs[0]!.boxId}`;
+                  }
+                  const beforeIssuanceSigns = signCalls.mock.calls.length;
+                  const beforeIssuanceChecks = checkBodies.length;
+                  const beforeIssuancePosts = submissionBodies.length;
+                  const pendingAuthority = session.issueNativeContinuationMiningAuthorityV1(
+                    fault === 'continuation mining authority foreign confirmation' ? foreignTarget : confirmationTarget);
+                  const expectedError = fault.includes('unclaimed') || fault.includes('foreign confirmation') ? /two claimed second fees/
+                    : fault.includes('pending') ? /not canonically confirmed/
+                    : fault.includes('changed') ? /fee input changed/
+                    : fault.includes('custody during') ? /source custody disposed/ : undefined;
+                  if (expectedError !== undefined) {
+                    await expect(pendingAuthority).rejects.toThrow(expectedError);
+                    if (miningAuthorityObservationPath) expect(injectionCount).toBe(1);
+                    expect(signCalls).toHaveBeenCalledTimes(beforeIssuanceSigns);
+                    expect(checkBodies).toHaveLength(beforeIssuanceChecks);
+                    expect(submissionBodies).toHaveLength(beforeIssuancePosts);
+                    expect(() => assertSigner(session.signer)).toThrow();
+                    miningAuthorityHandled = true; feeContinuationHandled = true; return;
+                  }
+                  miningAuthority = await pendingAuthority;
+                  expect(Object.keys(miningAuthority).sort()).toEqual(['schema', 'version']);
+                  if (fault === 'continuation mining authority duplicate issuance') {
+                    await expect(session.issueNativeContinuationMiningAuthorityV1(confirmationTarget))
+                      .rejects.toThrow(/two claimed second fees exactly once/);
+                    expect(() => claimMiningAuthority(miningAuthority!, signer.publicKeyHex, setupTarget, confirmationTarget))
+                      .toThrow(/absent, claimed, or revoked/);
+                    expect(() => assertSigner(session.signer)).toThrow();
+                    miningAuthorityHandled = true; feeContinuationHandled = true; return;
+                  }
+                }
                 const continuationCheckpoint = await attestFrontierNativeBurnCheckpointV1({
                   execution: continuationCycle,
                   admissionValidFromErgoHeight: secondTrackerFault || secondPayoutFault ? String(tip() + 1) : '121',
@@ -1798,6 +1865,15 @@ describe('native FED withdrawal continuation', () => {
                   currentTargetActive = false; phase = 'second-frozen';
                   expect(() => owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(confirmationTarget))
                     .toThrow(/target expired/);
+                  if (miningAuthority !== undefined) {
+                    miningCredentials = claimMiningAuthority(miningAuthority, signer.publicKeyHex, setupTarget, confirmationTarget);
+                    expect(() => miningCredentials!.assertCustody()).not.toThrow();
+                    for (const credential of [miningCredentials.checkpointMiningCredential,
+                      miningCredentials.trackerAdmissionMiningCredential, miningCredentials.trackerConfirmationMiningCredential]) {
+                      expect(() => assertMiningCredential(credential, signer.publicKeyHex)).not.toThrow();
+                    }
+                    miningAuthorityHandled = true;
+                  }
                   const beforeSecondChecks = checkBodies.length;
                   const beforeSecondPosts = submissionBodies.length;
                   const pendingSecond = session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner({
@@ -1967,6 +2043,13 @@ describe('native FED withdrawal continuation', () => {
                         .toBe(BigInt(secondPayout.packet.reserve.outputValueNanoErg)
                           - BigInt(secondPayout.packet.reserve.outputLiabilityNanoErg));
                       expect(() => assertSigner(session.signer)).toThrow();
+                      if (miningCredentials !== undefined) {
+                        expect(() => miningCredentials!.assertCustody()).toThrow(/revoked/);
+                        for (const credential of [miningCredentials.checkpointMiningCredential,
+                          miningCredentials.trackerAdmissionMiningCredential, miningCredentials.trackerConfirmationMiningCredential]) {
+                          expect(() => assertMiningCredential(credential, signer.publicKeyHex)).toThrow(/consumed, or revoked/);
+                        }
+                      }
                       const secondAuthorization = await authorizeWithdrawal(secondPayout, secondConfirmationTarget);
                       const secondPayoutAttempt = reserveWithdrawal(secondAuthorization, state);
                       const secondSubmission = await submitWithdrawal(secondConfirmationTarget, secondPayoutAttempt);
@@ -2118,6 +2201,7 @@ describe('native FED withdrawal continuation', () => {
       if (feeContinuationFault && !joinedFailed) expect(feeContinuationHandled).toBe(true);
       if (secondTrackerFault && !joinedFailed) expect(secondTrackerHandled).toBe(true);
       if (secondPayoutFault && !joinedFailed) expect(secondPayoutHandled).toBe(true);
+      if (miningAuthorityFault && !joinedFailed) expect(miningAuthorityHandled).toBe(true);
     }
   }, 60_000);
 });

@@ -654,6 +654,72 @@ describe('managed native continuation tracker lifecycle', () => {
   });
 });
 
+describe('managed native continuation mining authority lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.registerSignerBinding.mockReturnValue(SIGNER_BINDING);
+  });
+
+  async function ready() {
+    const execution = executionSession();
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+    await session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+    await session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never);
+    return { execution, session };
+  }
+
+  it('issues only after both continuation fee checks and retains tracker checking', async () => {
+    const { execution, session } = await ready();
+    const authority = await session.issueNativeContinuationMiningAuthorityV1(TARGET as never);
+
+    expect(execution.issueNativeContinuationMiningAuthorityV1)
+      .toHaveBeenCalledExactlyOnceWith(TARGET);
+    expect(execution.checkNativeContinuationTrackerFeeFundingV1.mock.invocationCallOrder[0])
+      .toBeLessThan(execution.issueNativeContinuationMiningAuthorityV1.mock.invocationCallOrder[0]!);
+    expect(authority).toEqual({ schema: 'synthetic-mining-authority', version: 1 });
+    await expect(session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, TARGET as never,
+    )).resolves.toBe(V2_TRACKER_CHECK);
+  });
+
+  it.each(['before fees', 'after first fee', 'disposed'] as const)(
+    'rejects issuance before inner dispatch when continuation is %s', async fault => {
+      const execution = executionSession();
+      mocks.createExecutionSession.mockResolvedValue(execution);
+      const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      await advanceNativeContinuationToVault(session);
+      if (fault !== 'before fees') {
+        await session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+      }
+      if (fault === 'disposed') {
+        await session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never);
+        session.dispose();
+      }
+
+      await expect(session.issueNativeContinuationMiningAuthorityV1(TARGET as never))
+        .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+      expect(execution.issueNativeContinuationMiningAuthorityV1).not.toHaveBeenCalled();
+    },
+  );
+
+  it('closes continuation custody after an inner issuance failure', async () => {
+    const { execution, session } = await ready();
+    execution.issueNativeContinuationMiningAuthorityV1
+      .mockRejectedValueOnce(new Error('synthetic mining authority failure'));
+
+    await expect(session.issueNativeContinuationMiningAuthorityV1(FOREIGN_TARGET as never))
+      .rejects.toThrow(/synthetic mining authority failure/);
+    await expect(session.issueNativeContinuationMiningAuthorityV1(TARGET as never))
+      .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(execution.issueNativeContinuationMiningAuthorityV1)
+      .toHaveBeenCalledExactlyOnceWith(FOREIGN_TARGET);
+    expect(execution.dispose).toHaveBeenCalledOnce();
+    expect(mocks.revokeSignerBinding).toHaveBeenCalledExactlyOnceWith(SIGNER_BINDING);
+  });
+});
+
 describe('managed native continuation withdrawal lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1049,6 +1115,8 @@ function executionSession() {
       vi.fn(async (_input: unknown, _target: unknown) => V2_TRACKER_CHECK),
     checkNativeContinuationWithdrawalV2:
       vi.fn(async (_claim: unknown, _target: unknown) => WITHDRAWAL_CHECK),
+    issueNativeContinuationMiningAuthorityV1:
+      vi.fn(async (_target: unknown) => Object.freeze({ schema: 'synthetic-mining-authority', version: 1 })),
     runForExecutionV3RetainingPegInAndTrackerSigner: vi.fn(async () => V3_SETUP_BATCH),
     checkPegInSourceLockV2RetainingSigner: vi.fn(async () => V2_SOURCE_LOCK_RECEIPT),
     checkPegInCommittedVaultV2RetainingSigner: vi.fn(async () => V2_COMMITTED_VAULT_RECEIPT),

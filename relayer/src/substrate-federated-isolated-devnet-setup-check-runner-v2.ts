@@ -93,6 +93,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
   readonly checkNativeContinuationWithdrawalV2:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2'];
+  readonly issueNativeContinuationMiningAuthorityV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['issueNativeContinuationMiningAuthorityV1'];
   readonly runForExecutionV3RetainingPegInAndTrackerSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
   readonly checkPegInSourceLockV2RetainingSigner:
@@ -475,6 +477,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       () => execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target), 'native-continuation-withdrawal-ready'),
     checkNativeContinuationWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2']>) => consume('native-continuation-withdrawal-ready',
       () => execution.checkNativeContinuationWithdrawalV2(claim, target), 'closed'),
+    issueNativeContinuationMiningAuthorityV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['issueNativeContinuationMiningAuthorityV1']>) => consume('native-continuation-tracker-fee-checked',
+      () => execution.issueNativeContinuationMiningAuthorityV1(target), 'native-continuation-tracker-fee-checked'),
     runForExecutionV3RetainingPegInAndTrackerSigner: async (
       ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
     ) => consume(

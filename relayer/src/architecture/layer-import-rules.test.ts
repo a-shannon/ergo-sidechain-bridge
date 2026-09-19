@@ -1471,6 +1471,46 @@ describe('layer import rules', () => {
     ]);
   });
 
+  it.each([
+    [
+      'issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1',
+      ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts'],
+    ],
+    [
+      'claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1',
+      ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts'],
+    ],
+    [
+      'revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1',
+      [
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
+      ],
+    ],
+  ] as const)('reserves %s to its exact native-continuation authority owners', (binding, owners) => {
+    const credentialModule = 'substrate-federated-isolated-devnet-mining-credential-v1.ts';
+    const sources: Record<string, string> = {
+      [credentialModule]: `export const ${binding} = () => {};`,
+    };
+    for (const owner of owners) {
+      sources[owner] = `
+        import { ${binding} } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+        ${binding}();
+      `;
+    }
+
+    expect(inspect(sources)).toEqual([]);
+    expect(inspect({
+      [credentialModule]: `export const ${binding} = () => {};`,
+      'forged-native-continuation-authority.ts': `
+        import { ${binding} } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+        ${binding}();
+      `,
+    }).map(violation => violation.message)).toEqual([
+      `exclusive authority import has the wrong owner: ./substrate-federated-isolated-devnet-mining-credential-v1.js#${binding}`,
+    ]);
+  });
+
   it('reserves node-startup phase projection to the reviewed composition root', () => {
     const processModule =
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
