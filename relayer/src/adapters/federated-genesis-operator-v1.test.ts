@@ -1,13 +1,31 @@
+import { readFileSync } from 'node:fs';
 import { HDNodeWallet, Wallet, SigningKey, Interface, Transaction, keccak256, recoverAddress } from 'ethers';
 import blakejs from 'blakejs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createFederatedGenesisOperatorV1, assertFederatedGenesisOperatorV1,
   disposeFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
   signFederatedGenesisApproveV1, signFederatedGenesisBurnV1,
+  signFederatedGenesisContinuationReservationV1,
 } from './federated-genesis-operator-v1.js';
+import { assertFederatedNativeContinuationParentV1, type FederatedNativeContinuationParentV1 }
+  from './federated-native-reservation-execution-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from '../federated-native-mint-runtime-state-v1.js';
+import { deriveValidityApplicationPooledReserveMintIdentityV4Hex,
+  encodeValidityApplicationPooledReserveMintReservationStatementV4Hex,
+  type ValidityApplicationPooledReserveMintReservationStatementV4 }
+  from '../validity-application-pooled-reserve-mint-reservation-v4.js';
 
+vi.mock('./federated-native-reservation-execution-v1.js', () => ({
+  assertFederatedNativeContinuationParentV1: vi.fn(),
+}));
+
+const authenticatedContinuationParents = new WeakSet<object>();
+beforeEach(() => vi.mocked(assertFederatedNativeContinuationParentV1).mockReset().mockImplementation(parent => {
+  if (parent === null || typeof parent !== 'object' || !authenticatedContinuationParents.has(parent)) {
+    throw new Error('FED continuation parent is not authenticated');
+  }
+}));
 afterEach(() => vi.restoreAllMocks());
 
 describe('FED native post-mint withdrawal signing', () => {
@@ -464,6 +482,148 @@ describe('FED native reservation signing', () => {
       return original.call(fault === 'other signer' ? other.signingKey : this, digest);
     });
     expect(() => signFederatedGenesisReservationV1(owner, input)).toThrow(/failure|different signer|custody/);
+    expect(() => assertFederatedGenesisOperatorV1(owner)).toThrow(/custody/);
+  });
+});
+
+describe('FED first continuation reservation signing', () => {
+  type MutableContinuationParent = {
+    -readonly [Key in keyof FederatedNativeContinuationParentV1]: FederatedNativeContinuationParentV1[Key];
+  };
+  const GENESIS = `0x${'62'.repeat(32)}`;
+  const BRIDGE = `0x${'33'.repeat(20)}`, TOKEN = `0x${'44'.repeat(20)}`;
+  const ERGO = `0x0008cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`;
+  const vector = JSON.parse(readFileSync(new URL(
+    '../../test-vectors/validity-application-pooled-reserve-mint-reservation-v4.json', import.meta.url), 'utf8')) as {
+      statement: ValidityApplicationPooledReserveMintReservationStatementV4;
+      expected: { statementHex: string };
+    };
+  const FIRST_MINT_ID = vector.statement.mintIdentityHex;
+  const nextLockBoxIdHex = `0x${'73'.repeat(32)}`;
+  const continuationStatement = Object.freeze({ ...vector.statement, sourceLockBoxIdHex: nextLockBoxIdHex,
+    mintIdentityHex: deriveValidityApplicationPooledReserveMintIdentityV4Hex({
+      lineageProfileIdHex: vector.statement.lineageProfileIdHex, sourceLockBoxIdHex: nextLockBoxIdHex,
+      depositCommitmentHex: vector.statement.depositCommitmentHex,
+    }) });
+  const continuationStatementHex = encodeValidityApplicationPooledReserveMintReservationStatementV4Hex(continuationStatement);
+  const proof = `0x04${'53'.repeat(622)}`;
+
+  async function originalBurn() {
+    const owner = createFederatedGenesisOperatorV1();
+    try {
+      signFederatedGenesisReservationV1(owner, { genesisHashHex: GENESIS, nonce: 0,
+        statementHex: `0x04${'37'.repeat(602)}`, sourceProofEnvelopeScaleHex: proof });
+      await signFederatedGenesisMintV1(owner, { nonce: 1, bridgeAddressHex: BRIDGE,
+        recipientAddressHex: `0x${owner.addressHex}`, amountNanoErg: '20000000', mintIdentityHex: FIRST_MINT_ID });
+      const withdrawal = { bridgeAddressHex: BRIDGE, tokenAddressHex: TOKEN,
+        grossAmountNanoErg: '20000000', recipientErgoTreeHex: ERGO };
+      await signFederatedGenesisApproveV1(owner, { nonce: 2, parentNativeHeight: 2, ...withdrawal });
+      const burn = await signFederatedGenesisBurnV1(owner, { nonce: 3, parentNativeHeight: 3, ...withdrawal });
+      return { owner, burn };
+    } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+  }
+
+  function parent(owner: ReturnType<typeof createFederatedGenesisOperatorV1>, burnHash: string,
+    changed: Partial<MutableContinuationParent> = {}): Readonly<FederatedNativeContinuationParentV1> {
+    const result = Object.freeze({ genesisHashHex: GENESIS, blockHashHex: `0x${'71'.repeat(32)}`,
+      ethereumBlockHashHex: `0x${'72'.repeat(32)}`, blockHeight: 4, nonce: 4,
+      operatorAddressHex: `0x${owner.addressHex}`, previousMintIdentityHex: FIRST_MINT_ID,
+      previousBurnTransactionHashHex: burnHash, operatorStorageKeyHex: owner.nativeFunding.storageKeyHex,
+      operatorAccountInfoHex: `0x${'00'.repeat(80)}`, expectedStorage: Object.freeze({}), ...changed });
+    authenticatedContinuationParents.add(result);
+    return result;
+  }
+
+  const input = (parentValue: Readonly<FederatedNativeContinuationParentV1>, statementHex = continuationStatementHex) => ({
+    parent: parentValue, statementHex, sourceProofEnvelopeScaleHex: proof,
+  });
+
+  it('signs nonce four from the authenticated original-burn parent and permanently consumes the continuation slot', async () => {
+    const { owner, burn } = await originalBurn();
+    const approved = parent(owner, burn.transactionHashHex);
+    try {
+      const result = signFederatedGenesisContinuationReservationV1(owner, input(approved));
+      expect(result.genesisHashHex).toBe(GENESIS); expect(result.nonce).toBe(4);
+      expect(result.signerAddressHex).toBe(owner.addressHex);
+      expect(result.callScaleHex).toContain(continuationStatementHex.slice(2));
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(assertFederatedNativeContinuationParentV1).toHaveBeenCalledTimes(5);
+      expect(() => signFederatedGenesisContinuationReservationV1(owner, input(approved))).toThrow(/consumed/);
+      expect(() => signFederatedGenesisReservationV1(owner, { genesisHashHex: GENESIS, nonce: 4,
+        statementHex: vector.expected.statementHex, sourceProofEnvelopeScaleHex: proof })).toThrow(/consumed/);
+      assertFederatedGenesisOperatorV1(owner);
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['genesis', 'mint', 'burn hash', 'nonce', 'height', 'operator'] as const)
+    ('rejects authenticated %s drift from the retained original operation before signing', async fault => {
+      const { owner, burn } = await originalBurn();
+      const changed: Partial<MutableContinuationParent> = {};
+      if (fault === 'genesis') changed.genesisHashHex = `0x${'63'.repeat(32)}`;
+      if (fault === 'mint') changed.previousMintIdentityHex = `0x${'65'.repeat(32)}`;
+      if (fault === 'burn hash') changed.previousBurnTransactionHashHex = `0x${'66'.repeat(32)}`;
+      if (fault === 'nonce') changed.nonce = 5;
+      if (fault === 'height') changed.blockHeight = 5;
+      if (fault === 'operator') changed.operatorAddressHex = `0x${'67'.repeat(20)}`;
+      const sign = vi.spyOn(SigningKey.prototype, 'sign');
+      try {
+        expect(() => signFederatedGenesisContinuationReservationV1(owner,
+          input(parent(owner, burn.transactionHashHex, changed)))).toThrow(/retained original operation/);
+        expect(sign).not.toHaveBeenCalled();
+      } finally { disposeFederatedGenesisOperatorV1(owner); }
+    });
+
+  it.each(['copied parent', 'copied owner', 'disposed owner'] as const)('rejects %s before signing', async fault => {
+    const { owner, burn } = await originalBurn();
+    const approved = parent(owner, burn.transactionHashHex);
+    if (fault === 'disposed owner') disposeFederatedGenesisOperatorV1(owner);
+    const sign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      expect(() => signFederatedGenesisContinuationReservationV1(
+        fault === 'copied owner' ? { ...owner } : owner,
+        input(fault === 'copied parent' ? { ...approved } : approved))).toThrow(/authenticated|custody/);
+      expect(sign).not.toHaveBeenCalled();
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['null input', 'extra field', 'accessor field'] as const)('rejects %s without inspecting parent authority', async fault => {
+    const { owner, burn } = await originalBurn();
+    const candidate: any = input(parent(owner, burn.transactionHashHex));
+    if (fault === 'extra field') candidate.nonce = 4;
+    if (fault === 'accessor field') Object.defineProperty(candidate, 'parent', { enumerable: true, get() { throw new Error('getter executed'); } });
+    vi.mocked(assertFederatedNativeContinuationParentV1).mockClear();
+    const sign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      expect(() => signFederatedGenesisContinuationReservationV1(owner,
+        fault === 'null input' ? null as never : candidate)).toThrow(/own-data/);
+      expect(assertFederatedNativeContinuationParentV1).not.toHaveBeenCalled();
+      expect(sign).not.toHaveBeenCalled();
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it('rejects a duplicate mint identity before signing', async () => {
+    const { owner, burn } = await originalBurn();
+    const sign = vi.spyOn(SigningKey.prototype, 'sign');
+    try {
+      expect(() => signFederatedGenesisContinuationReservationV1(owner,
+        input(parent(owner, burn.transactionHashHex), vector.expected.statementHex))).toThrow(/fresh nonzero mint identity/);
+      expect(sign).not.toHaveBeenCalled();
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it('disposes custody when authenticated parent authority fails immediately after signing', async () => {
+    const { owner, burn } = await originalBurn();
+    const approved = parent(owner, burn.transactionHashHex);
+    let assertions = 0;
+    vi.mocked(assertFederatedNativeContinuationParentV1).mockImplementation(value => {
+      if (!authenticatedContinuationParents.has(value)) throw new Error('not authenticated');
+      assertions++;
+      if (assertions === 4) throw new Error('parent authority changed after signing');
+    });
+    const sign = vi.spyOn(SigningKey.prototype, 'sign');
+    expect(() => signFederatedGenesisContinuationReservationV1(owner, input(approved)))
+      .toThrow(/authority changed/);
+    expect(sign).toHaveBeenCalledOnce();
     expect(() => assertFederatedGenesisOperatorV1(owner)).toThrow(/custody/);
   });
 });

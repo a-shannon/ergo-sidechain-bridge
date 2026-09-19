@@ -28,16 +28,26 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect the native operator's next reservation/mint/approve/burn
-operation to observed nonce and parent state. Start with
+**Now:** connect the next native mint/approve/burn operation to the retained
+continuation reservation, observed nonce/parent and accumulated token balances. Start with
 `federated-genesis-operator-v1.ts`, `federated-native-reservation-execution-v1.ts`
 and their proof-bound caller. Preserve the existing one-shot APIs and durable
 ambiguous-attempt holds. The deciding component checks must accept a later
 operation on the retained chain and reject stale parents, wrong nonces, mixed
 operation receipts, duplicates and disposed custody before further signing or
-transport. Stop at that independently reviewed producer-consumer join; the
+transport. Close that independently reviewed producer-consumer join; the
 setup signer's lifetime and reserve/DUP/tracker successor construction remain
 separate dependencies before a full two-cycle campaign.
+
+The first continuation reservation is implemented in the proof-bound caller:
+an original confirmed burn at native height four anchors the next signature
+at observed nonce four and reservation inclusion at height five. It preserves
+the previous consumed mint record, exact native/Ethereum parents, current
+source-operation custody and durable ambiguous-attempt holds. This bounded
+entry point does not execute the next mint. Its composed tests use an explicit
+double for the second Ergo deposit packet/observation producer; codecs, source
+signatures, operator signing and native execution checks remain exercised.
+The root still runs one cycle, and no second cycle has run on nodes.
 
 The source-quorum join is implemented: individual mint/checkpoint operations
 share retained federation custody and keep the original live target, genesis

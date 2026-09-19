@@ -5,6 +5,8 @@ import { Interface, SigningKey, Transaction } from 'ethers';
 import blakejs from 'blakejs';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import { buildTrustlessBurnInclusionProof, deriveTrustlessBurnIdHex } from '../profiles/substrate-grandpa-v1/trustless-burn-proof.js';
+import { POOLED_RESERVE_MINT_RESERVATION_PENDING_KEYS_STORAGE_KEY_V4_HEX }
+  from '../pooled-reserve-mint-reservation-runtime-state-v4.js';
 
 const PRIMARY = 'http://127.0.0.1:19955';
 const WITNESS = 'http://127.0.0.1:19956';
@@ -12,6 +14,7 @@ const ATTEMPT_FILE = 'native-reservation-attempt.json';
 const MAX_RESPONSE_BYTES = 34 * 1024 * 1024;
 const attempts = new WeakMap<object, {
   directory: string; bytes: string; submitted: boolean; accepted: boolean; sealed: boolean; blockHash?: string;
+  continuation?: Readonly<FederatedNativeContinuationParentV1>;
 }>();
 
 export interface FederatedNativeReservationAttemptV1 {
@@ -68,6 +71,102 @@ const withdrawals = new WeakMap<object, { context: Readonly<FederatedNativeWithd
   phase: 'approve' | 'burn'; directory: string; bytes: string; submitted: boolean; accepted: boolean;
   sealed: boolean; observed: boolean; blockHash?: string; ethereumBlockHash?: string;
   observedReceipt?: NativeWithdrawalReceipt }>();
+
+/** Original paired observation of the first completed native cycle. */
+export interface FederatedNativeContinuationParentV1 {
+  readonly genesisHashHex: string;
+  readonly blockHashHex: string;
+  readonly ethereumBlockHashHex: string;
+  readonly blockHeight: number;
+  readonly nonce: number;
+  readonly operatorAddressHex: string;
+  readonly previousMintIdentityHex: string;
+  readonly previousBurnTransactionHashHex: string;
+  readonly operatorStorageKeyHex: string;
+  readonly operatorAccountInfoHex: string;
+  readonly expectedStorage: Readonly<Record<string, string | null>>;
+}
+const continuationParents = new WeakMap<object, { attempt: Readonly<MintAttempt>; authorize: () => void; claimed: boolean }>();
+const continuationBurns = new WeakMap<object, Readonly<FederatedNativeContinuationParentV1>>();
+
+export function assertFederatedNativeContinuationParentV1(parent: Readonly<FederatedNativeContinuationParentV1>): void {
+  const state = continuationParents.get(parent);
+  if (!state) throw new Error('native continuation requires original observed burn provenance');
+  state.authorize();
+  const burn = assertWithdrawal(state.attempt);
+  if (burn.phase !== 'burn' || !burn.observed || !burn.observedReceipt || burn.blockHash !== parent.blockHashHex
+    || burn.ethereumBlockHash !== parent.ethereumBlockHashHex) throw new Error('native continuation burn is not observed');
+}
+
+/** No signing or transport; retain the original custody callback across later consumers. */
+export async function observeFederatedNativeContinuationParentV1(attempt: Readonly<MintAttempt>, authorize: () => void) {
+  const burn = assertWithdrawal(attempt);
+  if (burn.phase !== 'burn' || !burn.observed || !burn.observedReceipt || !burn.blockHash || !burn.ethereumBlockHash
+    || typeof authorize !== 'function') throw new Error('native continuation requires the original confirmed burn');
+  const prior = continuationBurns.get(attempt);
+  if (prior) {
+    if (continuationParents.get(prior)!.claimed) throw new Error('native continuation is already claimed');
+    await reobserveFederatedNativeContinuationParentV1(prior, authorize);
+    return prior;
+  }
+  const app = assertMintAttempt(burn.context.mintAttempt);
+  const check = () => { authorize(); assertWithdrawal(attempt); };
+  let account: string | undefined;
+  for (const url of [PRIMARY, WITNESS]) {
+    await checkWithdrawalApplication(url, burn.context, burn.ethereumBlockHash, 4, check);
+    await checkWithdrawalHead(url, burn.context, burn.blockHash, 4, check);
+    check();
+    const current = await rpc(url, 'state_getStorage', [app.context.reservation.operatorStorageKeyHex, burn.blockHash]);
+    check();
+    if (typeof current !== 'string' || !/^0x[0-9a-f]{160}$/.test(current)
+      || Buffer.from(current.slice(2), 'hex').readUInt32LE() !== 4
+      || account !== undefined && account !== current) throw new Error('native continuation operator account differs');
+    account = current;
+  }
+  const parent = Object.freeze({ genesisHashHex: app.context.reservation.attempt.genesisHashHex,
+    blockHashHex: burn.blockHash, ethereumBlockHashHex: burn.ethereumBlockHash, blockHeight: 4, nonce: 4,
+    operatorAddressHex: app.context.recipientAddressHex, previousMintIdentityHex: app.context.mintIdentityHex,
+    previousBurnTransactionHashHex: attempt.transactionHashHex,
+    operatorStorageKeyHex: app.context.reservation.operatorStorageKeyHex, operatorAccountInfoHex: account!,
+    expectedStorage: app.confirmedStorage! });
+  check();
+  // A concurrent observer must converge on the same capability, never create another reservation slot.
+  const concurrent = continuationBurns.get(attempt);
+  if (concurrent) {
+    if (continuationParents.get(concurrent)!.claimed) throw new Error('native continuation is already claimed');
+    await reobserveFederatedNativeContinuationParentV1(concurrent, authorize);
+    return concurrent;
+  }
+  continuationParents.set(parent, { attempt, authorize, claimed: false });
+  continuationBurns.set(attempt, parent);
+  await reobserveFederatedNativeContinuationParentV1(parent, authorize);
+  return parent;
+}
+
+export async function reobserveFederatedNativeContinuationParentV1(parent: Readonly<FederatedNativeContinuationParentV1>,
+  authorize: () => void, poolExtrinsic?: string): Promise<void> {
+  if (typeof authorize !== 'function') throw new Error('native continuation authorization is absent');
+  const check = () => { authorize(); assertFederatedNativeContinuationParentV1(parent); };
+  check();
+  const burn = assertWithdrawal(continuationParents.get(parent)!.attempt);
+  for (const url of [PRIMARY, WITNESS]) {
+    const ethereum = record(await rpc(url, 'eth_getBlockByNumber', ['0x4', false]));
+    check();
+    if (ethereum.hash !== parent.ethereumBlockHashHex || ethereum.number !== '0x4'
+      || ethereum.parentHash !== withdrawalParent(burn.context).ethereum
+      || !Array.isArray(ethereum.transactions) || ethereum.transactions.length !== 1
+      || ethereum.transactions[0] !== parent.previousBurnTransactionHashHex) throw new Error('native continuation Ethereum parent differs');
+    await waitForEthereumHash(url, parent.ethereumBlockHashHex, '0x4', [parent.previousBurnTransactionHashHex], check);
+    await checkWithdrawalApplication(url, burn.context, parent.ethereumBlockHashHex, 4, check);
+    await checkWithdrawalHead(url, burn.context, parent.blockHashHex, 4, check, poolExtrinsic);
+    check();
+    if (await rpc(url, 'state_getStorage', [parent.operatorStorageKeyHex, parent.blockHashHex]) !== parent.operatorAccountInfoHex) {
+      throw new Error('native continuation retained account changed');
+    }
+    check();
+  }
+  check();
+}
 
 /** Fresh paired parent observation, not authority to release Ergo funds. */
 export async function observeFederatedNativeWithdrawalParentV1(input: Readonly<FederatedNativeWithdrawalContextV1>, authorize: () => void) {
@@ -747,6 +846,17 @@ function assertMintAttempt(attempt: Readonly<MintAttempt>) {
 export function reserveFederatedNativeReservationAttemptV1(
   directory: string, candidate: Readonly<FederatedNativeReservationAttemptV1>,
 ): Readonly<FederatedNativeReservationAttemptV1> {
+  return reserveReservation(directory, candidate);
+}
+
+export function reserveFederatedNativeContinuationReservationAttemptV1(directory: string,
+  parent: Readonly<FederatedNativeContinuationParentV1>, candidate: Readonly<FederatedNativeReservationAttemptV1>) {
+  assertFederatedNativeContinuationParentV1(parent);
+  return reserveReservation(directory, candidate, parent);
+}
+
+function reserveReservation(directory: string, candidate: Readonly<FederatedNativeReservationAttemptV1>,
+  parent?: Readonly<FederatedNativeContinuationParentV1>) {
   exact(candidate, ['genesisHashHex', 'extrinsicHashHex', 'signedExtrinsicHex']);
   const { genesisHashHex, extrinsicHashHex, signedExtrinsicHex } = candidate;
   hash(genesisHashHex); hash(extrinsicHashHex);
@@ -758,11 +868,24 @@ export function reserveFederatedNativeReservationAttemptV1(
     || lstatSync(directory).isSymbolicLink() || resolve(realpathSync(directory)) !== resolve(directory)) {
     throw new Error('native reservation requires a direct existing attempt directory');
   }
+  if (parent) {
+    assertFederatedNativeContinuationParentV1(parent);
+    const continuation = continuationParents.get(parent)!;
+    if (continuation.claimed || genesisHashHex !== parent.genesisHashHex) throw new Error('native continuation is claimed or has a different genesis');
+    // Pinned signed-v4 layout: AccountId20, EthereumSignature, immortal era, nonce four, zero tip, call 12/6.
+    const encoded = Buffer.from(signedExtrinsicHex.slice(2), 'hex');
+    const body = encoded.subarray([1, 2, 4, 5][encoded[0]! & 3]!);
+    if (body[0] !== 0x84 || `0x${body.subarray(1, 21).toString('hex')}` !== parent.operatorAddressHex
+      || body.subarray(86, 91).toString('hex') !== '0010000c06') throw new Error('native continuation call or operator nonce differs');
+    continuation.claimed = true;
+  }
   const attempt = Object.freeze({ genesisHashHex, extrinsicHashHex, signedExtrinsicHex });
-  const bytes = JSON.stringify({ schema: 'e2s.fed-native-reservation-attempt.v1', status: 'reserved', ...attempt });
+  const bytes = JSON.stringify({ schema: 'e2s.fed-native-reservation-attempt.v1', status: 'reserved', ...attempt,
+    ...(parent ? { parentBlockHashHex: parent.blockHashHex, parentEthereumBlockHashHex: parent.ethereumBlockHashHex,
+      parentNativeHeight: parent.blockHeight, nonce: parent.nonce, previousBurnTransactionHashHex: parent.previousBurnTransactionHashHex } : {}) });
   const fd = openSync(join(directory, ATTEMPT_FILE), 'wx');
   try { writeFileSync(fd, bytes, 'utf8'); fsyncSync(fd); } finally { closeSync(fd); }
-  attempts.set(attempt, { directory, bytes, submitted: false, accepted: false, sealed: false });
+  attempts.set(attempt, { directory, bytes, submitted: false, accepted: false, sealed: false, continuation: parent });
   assertAttempt(attempt);
   return attempt;
 }
@@ -774,6 +897,7 @@ export async function submitFederatedNativeReservationV1(
   const state = assertAttempt(attempt);
   if (state.submitted || typeof authorize !== 'function') throw new Error('native reservation submission is consumed or unauthorized');
   state.submitted = true;
+  if (state.continuation) await reobserveFederatedNativeContinuationParentV1(state.continuation, authorize);
   authorize();
   assertAttempt(attempt);
   if (await rpc(PRIMARY, 'author_submitExtrinsic', [attempt.signedExtrinsicHex]) !== attempt.extrinsicHashHex) {
@@ -789,7 +913,9 @@ export async function sealFederatedNativeReservationV1(
   const state = assertAttempt(attempt);
   if (!state.accepted || state.sealed || typeof authorize !== 'function') throw new Error('native reservation sealing is not available');
   state.sealed = true;
-  for (const url of [PRIMARY, WITNESS]) {
+  if (state.continuation) {
+    await reobserveFederatedNativeContinuationParentV1(state.continuation, authorize, attempt.signedExtrinsicHex);
+  } else for (const url of [PRIMARY, WITNESS]) {
     authorize();
     if (await rpc(url, 'chain_getBlockHash', [0]) !== attempt.genesisHashHex
       || record(await rpc(url, 'chain_getHeader', [])).number !== '0x0') {
@@ -800,9 +926,10 @@ export async function sealFederatedNativeReservationV1(
       || pool.some(value => value !== attempt.signedExtrinsicHex)) throw new Error('native reservation pool is not exclusive');
   }
   authorize(); assertAttempt(attempt);
-  const result = record(await rpc(PRIMARY, 'engine_createBlock', [false, false, attempt.genesisHashHex]));
+  const parentHash = state.continuation?.blockHashHex ?? attempt.genesisHashHex;
+  const result = record(await rpc(PRIMARY, 'engine_createBlock', [false, false, parentHash]));
   hash(result.hash);
-  if (result.hash === attempt.genesisHashHex) throw new Error('native reservation seal returned its parent');
+  if (result.hash === attempt.genesisHashHex || result.hash === parentHash) throw new Error('native reservation seal returned its parent');
   state.blockHash = result.hash;
   return result.hash as string;
 }
@@ -826,14 +953,23 @@ export async function observeFederatedNativeReservationInclusionV1(input: Readon
     throw new Error('native reservation operator state is malformed');
   }
   const original = Buffer.from(originalOperatorAccountHex.slice(2), 'hex');
-  if (original.readUInt32LE(0) !== 0) throw new Error('native reservation original nonce must be zero');
+  const parent = state.continuation;
+  const parentHeight = parent?.blockHeight ?? 0, height = parentHeight + 1;
+  const parentHash = parent?.blockHashHex ?? attempt.genesisHashHex;
+  if (original.readUInt32LE(0) !== parentHeight || parent && (originalOperatorAccountHex !== parent.operatorAccountInfoHex
+    || operatorStorageKeyHex !== parent.operatorStorageKeyHex)) throw new Error('native reservation original nonce or account differs');
+  if (parent) for (const [key, value] of Object.entries(parent.expectedStorage)) {
+    if (key !== POOLED_RESERVE_MINT_RESERVATION_PENDING_KEYS_STORAGE_KEY_V4_HEX && storage[key] !== value) {
+      throw new Error('native continuation lost preceding mint state');
+    }
+  }
   let agreed: string | undefined;
   let agreedAccount: string | undefined;
   for (const url of [PRIMARY, WITNESS]) {
     // Only witness propagation may lag. No resubmission or second sealing attempt.
     for (let probe = 0; ; probe++) {
       assertCurrent(); assertAttempt(attempt);
-      const found = await rpc(url, 'chain_getBlockHash', [1]);
+      const found = await rpc(url, 'chain_getBlockHash', [height]);
       if (found === blockHashHex) break;
       if (url !== WITNESS || found !== null || probe === 19) throw new Error('native reservation inclusion block is absent or divergent');
       await new Promise(resolveWait => setTimeout(resolveWait, 100));
@@ -846,7 +982,7 @@ export async function observeFederatedNativeReservationInclusionV1(input: Readon
     const logs = record(header.digest).logs;
     if (!Array.isArray(logs) || logs.length > 32 || logs.some(value => typeof value !== 'string'
       || !/^0x(?:[0-9a-f]{2}){1,16384}$/.test(value))
-      || header.number !== '0x1' || header.parentHash !== attempt.genesisHashHex) {
+      || header.number !== `0x${height.toString(16)}` || header.parentHash !== parentHash) {
       throw new Error('native reservation header differs from the selected first block');
     }
     const extrinsics = block.extrinsics;
@@ -863,7 +999,7 @@ export async function observeFederatedNativeReservationInclusionV1(input: Readon
     if (typeof accountHex !== 'string' || !/^0x[0-9a-f]{160}$/.test(accountHex)) throw new Error('native reservation operator account is absent');
     const account = Buffer.from(accountHex.slice(2), 'hex');
     const free = (bytes: Buffer) => bytes.readBigUInt64LE(16) + (bytes.readBigUInt64LE(24) << 64n);
-    if (account.readUInt32LE(0) !== 1 || !account.subarray(4, 16).equals(original.subarray(4, 16))
+    if (account.readUInt32LE(0) !== height || !account.subarray(4, 16).equals(original.subarray(4, 16))
       || !account.subarray(32).equals(original.subarray(32)) || free(account) === 0n || free(account) > free(original)) {
       throw new Error('native reservation operator nonce or funding differs after inclusion');
     }
@@ -874,17 +1010,19 @@ export async function observeFederatedNativeReservationInclusionV1(input: Readon
     assertCurrent(); assertAttempt(attempt);
     const pool = await rpc(url, 'author_pendingExtrinsics', []);
     if (!Array.isArray(pool) || pool.length !== 0 || await rpc(url, 'chain_getBlockHash', [0]) !== attempt.genesisHashHex
-      || await rpc(url, 'chain_getBlockHash', [1]) !== blockHashHex
+      || parent && await rpc(url, 'chain_getBlockHash', [parentHeight]) !== parentHash
+      || await rpc(url, 'chain_getBlockHash', [height]) !== blockHashHex
       || await rpc(url, 'chain_getBlockHash', []) !== blockHashHex) throw new Error('native reservation target changed during inclusion observation');
   }
   assertCurrent(); assertAttempt(attempt);
-  return Object.freeze({ blockHashHex, blockHeight: 1 as const, extrinsicIndex: 1 as const,
+  return Object.freeze({ blockHashHex, blockHeight: height, extrinsicIndex: 1 as const,
     extrinsicHashHex: attempt.extrinsicHashHex, sourceFinalityEstablished: false as const, mintAuthorized: false as const });
 }
 
 function assertAttempt(attempt: Readonly<FederatedNativeReservationAttemptV1>) {
   const state = attempts.get(attempt);
   if (!state) throw new Error('native reservation attempt is not original');
+  if (state.continuation) assertFederatedNativeContinuationParentV1(state.continuation);
   const path = join(state.directory, ATTEMPT_FILE);
   const stat = lstatSync(path);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== Buffer.byteLength(state.bytes)

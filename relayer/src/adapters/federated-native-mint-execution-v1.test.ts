@@ -16,6 +16,9 @@ import { reserveFederatedNativeReservationAttemptV1, submitFederatedNativeReserv
   observeFederatedNativeWithdrawalParentV1, reserveFederatedNativeWithdrawalAttemptV1,
   submitFederatedNativeWithdrawalV1, sealFederatedNativeWithdrawalV1, observeFederatedNativeWithdrawalInclusionV1,
   collectFederatedNativeBurnCommitmentV1,
+  observeFederatedNativeContinuationParentV1, assertFederatedNativeContinuationParentV1,
+  reobserveFederatedNativeContinuationParentV1, reserveFederatedNativeContinuationReservationAttemptV1,
+  observeFederatedNativeReservationInclusionV1,
   type FederatedNativeWithdrawalContextV1 } from './federated-native-reservation-execution-v1.js';
 
 const hash = (byte: string) => `0x${byte.repeat(32)}`;
@@ -294,6 +297,147 @@ async function prepareWithdrawal(phase: WithdrawalPhase) {
   const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, signed);
   return { context, signed, attempt };
 }
+
+describe('native FED continuation reservation', () => {
+  async function parent() {
+    const { attempt } = await prepareWithdrawal('burn');
+    await executeWithdrawal(attempt);
+    return { burn: attempt, parent: await observeFederatedNativeContinuationParentV1(attempt, withdrawalAuthorize) };
+  }
+  function nextCandidate() {
+    // Execution-boundary fixture only. Composed tests use the real proof-bound continuation signer.
+    const bytes = Buffer.from(native.signedExtrinsicHex.slice(2), 'hex');
+    const offset = [1, 2, 4, 5][bytes[0]! & 3]!;
+    bytes[offset + 87] = 16;
+    return { genesisHashHex: GENESIS, signedExtrinsicHex: `0x${bytes.toString('hex')}`,
+      extrinsicHashHex: `0x${Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')}` };
+  }
+  function childFixture(candidate: ReturnType<typeof nextCandidate>) {
+    const nextHash = hash('79');
+    const expectedStorage: Record<string, string | null> = { ...terminal, '0x09': '0x04' };
+    let pending = false, included = false;
+    const priorFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const { method, params } = JSON.parse(init.body as string);
+      let handled = true, result: unknown;
+      if (method === 'author_submitExtrinsic') { expect(params).toEqual([candidate.signedExtrinsicHex]); pending = true; result = candidate.extrinsicHashHex; }
+      else if (method === 'engine_createBlock') { expect(params).toEqual([false, false, NATIVE_BLOCKS[4]]); pending = false; included = true; result = { hash: nextHash }; }
+      else if (method === 'author_pendingExtrinsics') result = pending ? [candidate.signedExtrinsicHex] : [];
+      else if (method === 'chain_getBlockHash' && (params[0] === 5 || included && params.length === 0)) result = included ? nextHash : null;
+      else if (method === 'chain_getBlock' && params[0] === nextHash) result = { block: { header: {
+        parentHash: NATIVE_BLOCKS[4], number: '0x5', stateRoot: hash('66'), extrinsicsRoot: hash('67'), digest: { logs: [] } },
+      extrinsics: ['0x1005010028', candidate.signedExtrinsicHex] } };
+      else if (method === 'state_getStorage' && params[1] === nextHash) {
+        const account = Buffer.from(owner.nativeFunding.accountInfoScaleHex.slice(2), 'hex'); account.writeUInt32LE(5);
+        result = params[0] === owner.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}` : expectedStorage[params[0]] ?? null;
+      } else handled = false;
+      if (!handled) return priorFetch(url, init);
+      calls.push(method);
+      if (fault) result = fault(method, params, result, url);
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
+    }));
+    return { nextHash, expectedStorage };
+  }
+
+  it('reserves once on confirmed burn four, seals five and preserves the previous consumed state', async () => {
+    const observed = await parent(), before = [...writes()];
+    expect(observed.parent).toMatchObject({ genesisHashHex: GENESIS, blockHashHex: NATIVE_BLOCKS[4],
+      ethereumBlockHashHex: ETH_BLOCKS[4], nonce: 4, blockHeight: 4, previousMintIdentityHex: MINT,
+      previousBurnTransactionHashHex: observed.burn.transactionHashHex });
+    const repeated = await observeFederatedNativeContinuationParentV1(observed.burn, withdrawalAuthorize);
+    expect(repeated).toBe(observed.parent); expect(writes()).toEqual(before);
+    const candidate = nextCandidate(), fixture = childFixture(candidate);
+    const childDirectory = mkdtempSync(join(directory, 'next-'));
+    const attempt = reserveFederatedNativeContinuationReservationAttemptV1(childDirectory, observed.parent, candidate);
+    expect(JSON.parse(readFileSync(join(childDirectory, 'native-reservation-attempt.json'), 'utf8')))
+      .toMatchObject({ parentBlockHashHex: NATIVE_BLOCKS[4], parentEthereumBlockHashHex: ETH_BLOCKS[4], nonce: 4 });
+    await submitFederatedNativeReservationV1(attempt, withdrawalAuthorize);
+    const blockHashHex = await sealFederatedNativeReservationV1(attempt, withdrawalAuthorize);
+    const result = await observeFederatedNativeReservationInclusionV1({ attempt, blockHashHex,
+      expectedStorage: fixture.expectedStorage, operatorStorageKeyHex: observed.parent.operatorStorageKeyHex,
+      originalOperatorAccountHex: observed.parent.operatorAccountInfoHex }, withdrawalAuthorize);
+    expect(result).toMatchObject({ blockHeight: 5, blockHashHex: fixture.nextHash, mintAuthorized: false, sourceFinalityEstablished: false });
+    expect(() => reserveFederatedNativeContinuationReservationAttemptV1(childDirectory, observed.parent, candidate)).toThrow(/claimed/);
+    await expect(submitFederatedNativeReservationV1(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed/);
+    await expect(observeFederatedNativeContinuationParentV1(observed.burn, withdrawalAuthorize)).rejects.toThrow(/claimed/);
+  });
+
+  it.each(['copy', 'approval', 'unobserved burn', 'disposed'])('rejects %s as continuation provenance', async defect => {
+    const { attempt, context: withdrawal } = await prepareWithdrawal('burn');
+    if (defect !== 'unobserved burn') await executeWithdrawal(attempt);
+    if (defect === 'disposed') disposeFederatedGenesisOperatorV1(owner);
+    const selected = defect === 'copy' ? { ...attempt } : defect === 'approval' ? withdrawal.approvalAttempt! : attempt;
+    const before = [...calls];
+    await expect(observeFederatedNativeContinuationParentV1(selected, withdrawalAuthorize)).rejects.toThrow(/original|confirmed|disposed/);
+    expect(calls).toEqual(before);
+  });
+
+  it.each(['native head', 'genesis', 'ethereum parent', 'ethereum nonce', 'native nonce', 'account disagreement', 'consumed state', 'balance'])
+    ('rejects observed-parent drift: %s', async defect => {
+      const { parent: observed } = await parent(), before = [...writes()];
+      fault = (method, params, value, url) => {
+        if (defect === 'native head' && method === 'chain_getBlockHash' && !params.length) return hash('ee');
+        if (defect === 'genesis' && method === 'chain_getBlockHash' && params[0] === 0) return hash('ee');
+        if (defect === 'ethereum parent' && method === 'eth_getBlockByNumber') return { ...(value as object), parentHash: hash('ee') };
+        if (defect === 'ethereum nonce' && method === 'eth_getTransactionCount') return '0x3';
+        if (method === 'state_getStorage' && params[0] === owner.nativeFunding.storageKeyHex) {
+          const bytes = Buffer.from((value as string).slice(2), 'hex');
+          if (defect === 'native nonce') { bytes.writeUInt32LE(3); return `0x${bytes.toString('hex')}`; }
+          if (defect === 'account disagreement' && url.endsWith('19956')) { bytes[16] = bytes[16]! ^ 1; return `0x${bytes.toString('hex')}`; }
+        }
+        if (defect === 'consumed state' && method === 'state_getStorage' && params[0] === Object.keys(terminal)[0]) return '0xff';
+        if (defect === 'balance' && method === 'eth_call' && ABI.parseTransaction({ data: (params[0] as { data: string }).data })!.name === 'totalSupply') return ABI.encodeFunctionResult('totalSupply', [0n]);
+        return value;
+      };
+      await expect(reobserveFederatedNativeContinuationParentV1(observed, withdrawalAuthorize)).rejects.toThrow(/differs|changed/);
+      expect(writes()).toEqual(before);
+    });
+
+  it('keeps original custody after a copied parent or caller replacement', async () => {
+    const { parent: observed } = await parent();
+    expect(() => assertFederatedNativeContinuationParentV1({ ...observed })).toThrow(/original/);
+    active = false;
+    await expect(reobserveFederatedNativeContinuationParentV1(observed, () => {})).rejects.toThrow();
+    expect(() => reserveFederatedNativeContinuationReservationAttemptV1(directory, observed, nextCandidate())).toThrow();
+  });
+
+  it.each(['before submit', 'before seal', 'changed hold', 'changed predecessor hold', 'wrong nonce', 'wrong child parent', 'lost consumed state'])
+    ('holds a failed continuation without retry: %s', async defect => {
+      const { parent: observed } = await parent(), candidate = nextCandidate(), fixture = childFixture(candidate);
+      const childDirectory = mkdtempSync(join(directory, 'next-'));
+      if (defect === 'wrong nonce') {
+        const bytes = Buffer.from(candidate.signedExtrinsicHex.slice(2), 'hex'); bytes[[1, 2, 4, 5][bytes[0]! & 3]! + 87] = 12;
+        candidate.signedExtrinsicHex = `0x${bytes.toString('hex')}`;
+        candidate.extrinsicHashHex = `0x${Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')}`;
+        expect(() => reserveFederatedNativeContinuationReservationAttemptV1(childDirectory, observed, candidate)).toThrow(/nonce/); return;
+      }
+      const attempt = reserveFederatedNativeContinuationReservationAttemptV1(childDirectory, observed, candidate);
+      const path = join(childDirectory, 'native-reservation-attempt.json'), held = readFileSync(path, 'utf8');
+      if (defect === 'changed hold') writeFileSync(path, '{}');
+      if (defect === 'changed predecessor hold') writeFileSync(holdPath('burn'), '{}');
+      if (defect === 'before submit') fault = (method, params, value) => method === 'chain_getBlockHash' && !params.length ? hash('ee') : value;
+      if (['before submit', 'changed hold', 'changed predecessor hold'].includes(defect)) {
+        await expect(submitFederatedNativeReservationV1(attempt, withdrawalAuthorize)).rejects.toThrow(/changed/);
+        if (defect === 'before submit') { fault = undefined; await expect(submitFederatedNativeReservationV1(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed/); }
+        return;
+      }
+      await submitFederatedNativeReservationV1(attempt, withdrawalAuthorize);
+      if (defect === 'before seal') {
+        fault = (method, params, value) => method === 'chain_getBlockHash' && !params.length ? hash('ee') : value;
+        await expect(sealFederatedNativeReservationV1(attempt, withdrawalAuthorize)).rejects.toThrow(/changed/);
+        fault = undefined; await expect(sealFederatedNativeReservationV1(attempt, withdrawalAuthorize)).rejects.toThrow(/not available/); return;
+      }
+      const blockHashHex = await sealFederatedNativeReservationV1(attempt, withdrawalAuthorize);
+      if (defect === 'wrong child parent') fault = (method, params, value) => method === 'chain_getBlock'
+        ? { block: { ...(value as any).block, header: { ...(value as any).block.header, parentHash: GENESIS } } } : value;
+      const expectedStorage = { ...fixture.expectedStorage };
+      if (defect === 'lost consumed state') delete expectedStorage[Object.keys(terminal)[0]!];
+      await expect(observeFederatedNativeReservationInclusionV1({ attempt, blockHashHex, expectedStorage,
+        operatorStorageKeyHex: observed.operatorStorageKeyHex, originalOperatorAccountHex: observed.operatorAccountInfoHex }, withdrawalAuthorize))
+        .rejects.toThrow(/header|preceding/);
+      expect(readFileSync(path, 'utf8')).toBe(held);
+    });
+});
 
 describe('native FED burn commitment collector', () => {
   async function observedBurn() {

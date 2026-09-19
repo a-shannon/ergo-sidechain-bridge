@@ -319,7 +319,8 @@ describe('layer import rules', () => {
     'sealFederatedNativeMintV1', 'observeFederatedNativeMintInclusionV1', 'observeFederatedNativeMintStateV1',
     'observeFederatedNativeWithdrawalParentV1', 'reserveFederatedNativeWithdrawalAttemptV1',
     'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1',
-    'collectFederatedNativeBurnCommitmentV1'])
+    'collectFederatedNativeBurnCommitmentV1', 'observeFederatedNativeContinuationParentV1',
+    'reobserveFederatedNativeContinuationParentV1', 'reserveFederatedNativeContinuationReservationAttemptV1'])
     ('keeps native execution capability in its proof-bound consumer: %s', binding => {
       const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
       const specifier = '../../adapters/federated-native-reservation-execution-v1.js';
@@ -879,6 +880,33 @@ describe('layer import rules', () => {
       'adapters must not import an unclassified legacy module: legacy-state.ts',
       'apps must not import an unclassified legacy module: legacy-daemon.ts',
     ]);
+  });
+
+  it.each([
+    [FEDERATED_GENESIS_OPERATOR, 'validity-application-pooled-reserve-mint-reservation-v4', 'decodeValidityApplicationPooledReserveMintReservationStatementV4Hex'],
+    ['adapters/federated-native-reservation-execution-v1.ts', 'pooled-reserve-mint-reservation-runtime-state-v4', 'POOLED_RESERVE_MINT_RESERVATION_PENDING_KEYS_STORAGE_KEY_V4_HEX'],
+  ])('restricts the native adapter codec seam to its exact source and binding: %s', (file, target, binding) => {
+    const declaration = `import { ${binding} } from '../${target}.js';`;
+    expect(inspect(staticAppFixture(file, declaration))).toEqual([]);
+    expect(inspect(staticAppFixture('adapters/other.ts', declaration)).map(item => item.message))
+      .toContain(`adapters must not import an unclassified legacy module: ${target}.ts`);
+    for (const changed of [declaration.replace(binding, 'authorize'), `import * as codec from '../${target}.js';`,
+      `export { ${binding} } from '../${target}.js';`, `const codec = await import('../${target}.js');`,
+      `import '../${target}.js';`]) {
+      const files = { ...staticAppFixture(file, changed), [`${target}.ts`]: 'export {};' };
+      expect(inspect(files).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('grants only the continuation-parent assertion to the operator', () => {
+    const specifier = './federated-native-reservation-execution-v1.js';
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_OPERATOR,
+      `import { assertFederatedNativeContinuationParentV1 } from '${specifier}';`))).toEqual([]);
+    for (const binding of ['observeFederatedNativeContinuationParentV1', 'reserveFederatedNativeContinuationReservationAttemptV1',
+      'submitFederatedNativeReservationV1', 'sealFederatedNativeReservationV1']) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_OPERATOR, `import { ${binding} } from '${specifier}';`))
+        .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    }
   });
 
   it('allows only the exact reviewed Gate 5 app-to-legacy composition seam', () => {

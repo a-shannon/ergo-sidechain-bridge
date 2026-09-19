@@ -206,6 +206,16 @@ const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
 const FEDERATED_NATIVE_RESERVATION_SIGNING = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
 const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
 const FEDERATED_NATIVE_RESERVATION_EXECUTION = 'adapters/federated-native-reservation-execution-v1.ts';
+// Two read-only codec bindings needed by the native continuation consumer.
+// This is not an adapter escape to legacy signing, authorization or transport.
+const REVIEWED_NATIVE_ADAPTER_CODEC_BINDINGS: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>> = new Map([
+  [FEDERATED_GENESIS_OPERATOR, new Map([
+    ['validity-application-pooled-reserve-mint-reservation-v4.ts', new Set(['decodeValidityApplicationPooledReserveMintReservationStatementV4Hex'])],
+  ])],
+  [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Map([
+    ['pooled-reserve-mint-reservation-runtime-state-v4.ts', new Set(['POOLED_RESERVE_MINT_RESERVATION_PENDING_KEYS_STORAGE_KEY_V4_HEX'])],
+  ])],
+]);
 const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['validity-application-pooled-reserve-mint-reservation-v4.ts', new Set(['decodeValidityApplicationPooledReserveMintReservationStatementV4Hex'])],
   ['peg-in-causal-admission-v2.ts', new Set(['decodePegInSourceIntentV2Hex'])],
@@ -241,6 +251,8 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
     'observeFederatedNativeWithdrawalParentV1', 'reserveFederatedNativeWithdrawalAttemptV1',
     'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1',
     'collectFederatedNativeBurnCommitmentV1',
+    'observeFederatedNativeContinuationParentV1', 'reobserveFederatedNativeContinuationParentV1',
+    'reserveFederatedNativeContinuationReservationAttemptV1', 'FederatedNativeContinuationParentV1',
   ])],
   ['../../adapters/federated-genesis-target-observation-v1.js', new Set(['observeFederatedGenesisReservationTargetV1'])],
   ...[...REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS].map(
@@ -249,6 +261,7 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
   ['../../adapters/federated-genesis-operator-v1.js', new Set([
     'assertFederatedGenesisOperatorV1', 'signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'FederatedGenesisOperatorV1',
     'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1',
+    'signFederatedGenesisContinuationReservationV1',
   ])],
 ]);
 
@@ -1569,6 +1582,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
 > = new Map([
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     'signFrontierNativeProofBoundReservationV1', 'executeFrontierNativeProofBoundReservationV1',
+    'executeFrontierNativeProofBoundContinuationReservationV1',
     'executeFrontierNativeProofBoundReservationAndMintV1',
     'executeFrontierNativeProofBoundReservationMintAndBurnV1',
     'attestFrontierNativeBurnCheckpointV1', 'assertFrontierNativeBurnCheckpointV1',
@@ -1819,6 +1833,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['signFederatedGenesisReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisContinuationReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisApproveV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisBurnV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -1826,12 +1841,17 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Map([
     ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['executeFrontierNativeProofBoundContinuationReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationAndMintV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['attestFrontierNativeBurnCheckpointV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['assertFrontierNativeBurnCheckpointV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
   [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Map([
+    ['assertFederatedNativeContinuationParentV1', new Set([FEDERATED_GENESIS_OPERATOR])],
+    ['observeFederatedNativeContinuationParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['reobserveFederatedNativeContinuationParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['reserveFederatedNativeContinuationReservationAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['reserveFederatedNativeReservationAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['submitFederatedNativeReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['sealFederatedNativeReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -2216,7 +2236,7 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
-  [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+  [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_OPERATOR])],
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-tracker-v2-campaign-root.ts',
     new Set(['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts']),
@@ -3312,6 +3332,12 @@ export function inspectLayerImports(
         }
       }
       if (targetLayer === null) {
+        const codecBindings = sourceLayer === 'adapters'
+          ? REVIEWED_NATIVE_ADAPTER_CODEC_BINDINGS.get(file)?.get(resolved) : undefined;
+        if (codecBindings) {
+          violations.push(...inspectRestrictedImportBindings(file, imported, codecBindings));
+          continue;
+        }
         if (
           sourceLayer === 'apps'
           && REVIEWED_APP_LEGACY_COMPOSITION_SEAMS.get(file)?.has(resolved)

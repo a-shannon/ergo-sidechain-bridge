@@ -67,6 +67,7 @@ import * as feeAuthority from './substrate-federated-isolated-devnet-tracker-fee
 import * as checkedTransport from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
 import { executeFrontierNativeProofBoundReservationAndMintV1, executeFrontierNativeProofBoundReservationMintAndBurnV1,
+  executeFrontierNativeProofBoundContinuationReservationV1,
   attestFrontierNativeBurnCheckpointV1, assertFrontierNativeBurnCheckpointV1 }
   from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from './federated-native-mint-runtime-state-v1.js';
@@ -93,6 +94,7 @@ import { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1
   from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 import { assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1 as assertNativeVaultOutputs }
   from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
+import * as nativeVaultObserver from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 import {
   buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeMintDraft,
@@ -1667,13 +1669,17 @@ describe('native FED managed setup session', () => {
     'after approval submission', 'after burn signing', 'checkpoint', 'checkpoint clone', 'checkpoint source disposal',
     'checkpoint setup disposal', 'checkpoint operator disposal', 'checkpoint frontier disposal', 'checkpoint runtime mismatch',
     'checkpoint during storage disposal', 'checkpoint concurrent', 'checkpoint operation', 'checkpoint operation disposal',
-    'checkpoint operation during storage disposal'])
+    'checkpoint operation during storage disposal', 'continuation', 'continuation copy execution',
+    'continuation foreign execution', 'continuation same operation', 'continuation foreign operation', 'continuation duplicate',
+    'continuation operation disposal before signature', 'continuation operation disposal before transport',
+    'continuation source disposal before transport', 'continuation expiry at child'])
     ('composes native reservation and mint from the retained reserve proof with %s', async defect => {
       const operator = mintOperator = createFederatedGenesisOperatorV1();
       if (defect !== 'recipient mismatch') nativeMintRecipient = operator.addressHex;
       await withNativeMintProof(async ({ source, proofInput }) => {
         const observed = reservationTarget(operator);
-        const operation = defect.startsWith('checkpoint operation') ? createNativeSourceOperation(source) : undefined;
+        const continuationCase = defect.startsWith('continuation');
+        const operation = defect.startsWith('checkpoint operation') || continuationCase ? createNativeSourceOperation(source) : undefined;
         const proof = operation ? produceNativeOperationMintProof(operation, proofInput) : produceNativeMintProof(source, proofInput);
         const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
         const digest = (bytes: Uint8Array) => `0x${Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')}`;
@@ -1689,12 +1695,13 @@ describe('native FED managed setup session', () => {
         const state: Record<string, string | null> = { ...observed.fields.expectedStorage,
           [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`, [keys.pendingReservationStorageKeyHex]: pending };
         const parent = `0x${'a1'.repeat(32)}`, child = `0x${'a2'.repeat(32)}`, ethParent = `0x${'a3'.repeat(32)}`, ethChild = `0x${'a4'.repeat(32)}`;
-        const nativeBlocks = [observed.fields.expectedGenesisHashHex, parent, child, `0x${'b3'.repeat(32)}`, `0x${'b4'.repeat(32)}`];
+        const nativeBlocks = [observed.fields.expectedGenesisHashHex, parent, child, `0x${'b3'.repeat(32)}`, `0x${'b4'.repeat(32)}`,
+          `0x${'b5'.repeat(32)}`];
         const ethBlocks = ['', ethParent, ethChild, `0x${'c3'.repeat(32)}`, `0x${'c4'.repeat(32)}`];
         const nativeCalls: string[] = [], txHashes: string[] = [];
         const ergoRecipient = `0x0008cd${new SigningKey(`0x${'01'.repeat(32)}`).compressedPublicKey.slice(2)}`;
         const burnPreflightCase = ['burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve'].includes(defect);
-        const checkpointCase = defect.startsWith('checkpoint');
+        const checkpointCase = defect.startsWith('checkpoint') || continuationCase;
         const burnCase = checkpointCase || burnPreflightCase || ['full burn', 'after approval submission', 'after burn signing'].includes(defect);
         const bridge = `0x${'33'.repeat(20)}`, token = `0x${'44'.repeat(20)}`, recipient = `0x${operator.addressHex}`, amount = 20000000n;
         const abi = new Interface(['function owner() view returns(address)', 'function sergToken() view returns(address)',
@@ -1704,7 +1711,10 @@ describe('native FED managed setup session', () => {
           'function accumulatedFees() view returns(uint256)', 'event Approval(address indexed owner,address indexed spender,uint256 value)',
           'event PegOut(address indexed from,uint256 amount,bytes ergoRecipientPubKey)',
           'event Transfer(address indexed from,address indexed to,uint256 value)', 'event PegIn(address indexed to,uint256 amount,bytes32 ergoBoxId)']);
-        let height = 0, reservationSubmitted = false, mintSubmitted = false, nativeCall = '', mintCall = '', txHash = '', consumed = '';
+        let height = 0, reservationSubmitted = false, mintSubmitted = false, continuationSubmitted = false;
+        let nativeCall = '', mintCall = '', continuationCall = '', txHash = '', consumed = '';
+        let continuationKeys: ReturnType<typeof derivePooledReserveMintReservationRuntimeStorageKeysV4> | undefined;
+        let continuationPending: string | undefined, continuationMintIdentity: string | undefined;
         let checkpointCollection = false;
         const commitmentKey = '0xaf86fef4216ac2bcd1c592b204011ad00d2d4fb825af1fcd4c2be9f955a780c5';
         const leavesKey = '0xaf86fef4216ac2bcd1c592b204011ad08ba92642ec2dee14a0170da020901c7f';
@@ -1742,7 +1752,12 @@ describe('native FED managed setup session', () => {
         observed.fetcher.mockImplementation(async (url, init) => {
           const { method, params } = JSON.parse(init.body as string);
           let result: unknown;
-          if (method === 'author_submitExtrinsic') { reservationSubmitted = true; nativeCall = params[0]; result = digest(raw(nativeCall)); }
+          if (method === 'author_submitExtrinsic') {
+            if (height === 4) {
+              continuationSubmitted = true; continuationCall = params[0]; nativeCalls[5] = continuationCall;
+              result = digest(raw(continuationCall));
+            } else { reservationSubmitted = true; nativeCall = params[0]; result = digest(raw(nativeCall)); }
+          }
           else if (method === 'eth_sendRawTransaction') {
             const tx = Transaction.from(params[0]); expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(height);
             expect(tx.from?.toLowerCase()).toBe(recipient);
@@ -1771,7 +1786,9 @@ describe('native FED managed setup session', () => {
               if (defect === 'after mint sealing') source.dispose();
             }
           } else if (method === 'author_pendingExtrinsics') result = height === 0 && reservationSubmitted ? [nativeCall]
-            : height === 1 && mintSubmitted ? [mintCall] : nativeCalls[height + 1] ? [nativeCalls[height + 1]] : [];
+            : height === 1 && mintSubmitted ? [mintCall]
+              : height === 4 && continuationSubmitted ? [continuationCall]
+                : nativeCalls[height + 1] ? [nativeCalls[height + 1]] : [];
           else if (height === 0) return genesisRpc(url, init);
           else if (method === 'chain_getBlockHash') result = nativeBlocks[params.length === 0 ? height : params[0]];
           else if (method === 'chain_getHeader') result = { number: `0x${height}` };
@@ -1785,7 +1802,11 @@ describe('native FED managed setup session', () => {
             if (checkpointCollection && defect === 'checkpoint operation during storage disposal' && params[0] === commitmentKey) operation!.dispose();
             result = at === 4 && [commitmentKey, leavesKey, eventsKey].includes(params[0]) ? nativeCommitmentStorage()[params[0]]
               : params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
-              : at >= 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
+              : at >= 5 && continuationKeys && params[0] === continuationKeys.pendingKeysStorageKeyHex
+                ? `0x04${continuationMintIdentity!.slice(2)}`
+                : at >= 5 && continuationKeys && params[0] === continuationKeys.pendingReservationStorageKeyHex ? continuationPending!
+                  : at >= 5 && continuationKeys && params[0] === continuationKeys.consumedReservationStorageKeyHex ? null
+                    : at >= 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
                 : at >= 2 && params[0] === keys.pendingReservationStorageKeyHex ? null
                   : at >= 2 && params[0] === keys.consumedReservationStorageKeyHex ? consumed : state[params[0]] ?? null;
           } else if (method === 'eth_chainId') result = '0x1092';
@@ -1865,7 +1886,7 @@ describe('native FED managed setup session', () => {
                 if (defect === 'checkpoint setup disposal') session.dispose();
                 if (defect === 'checkpoint operator disposal') disposeFederatedGenesisOperatorV1(operator);
                 if (defect === 'checkpoint frontier disposal') observed.dispose();
-                if (defect === 'checkpoint' || defect === 'checkpoint concurrent' || defect === 'checkpoint operation') {
+                if (defect === 'checkpoint' || defect === 'checkpoint concurrent' || defect === 'checkpoint operation' || continuationCase) {
                   const pending = attestFrontierNativeBurnCheckpointV1(checkpointInput);
                   if (defect === 'checkpoint concurrent') await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/consumed/);
                   const result = await pending;
@@ -1880,9 +1901,118 @@ describe('native FED managed setup session', () => {
                   expect(result.ergoPayoutExecuted).toBe(false);
                   expect(() => assertFrontierNativeBurnCheckpointV1({ ...result })).toThrow(/provenance/);
                   await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/consumed/);
-                  if (operation) operation.dispose();
-                  else source.dispose();
-                  expect(() => assertFrontierNativeBurnCheckpointV1(result)).toThrow(/disposed/);
+                  if (continuationCase) {
+                    checkpointCollection = false;
+                    const secondPacketValue: any = structuredClone(proofInput.draftInputs.packet);
+                    secondPacketValue.depositCommitmentHex = '8c'.repeat(32);
+                    const secondPacket = freezeFixture(secondPacketValue) as typeof proofInput.draftInputs.packet;
+                    const secondDraftInputs = Object.freeze({ ...proofInput.draftInputs, packet: secondPacket });
+                    // The next source deposit/successor producer is outside this batch. Double only that missing
+                    // packet-to-observation join; draft/evidence codecs, operation receipts and signatures stay real.
+                    const assertVaultObservation = nativeVaultObserver
+                      .assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1;
+                    vi.spyOn(nativeVaultObserver, 'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1')
+                      .mockImplementation((value, currentTarget, batch, packet) =>
+                        value === secondDraftInputs.committedVaultObservation && currentTarget === target
+                          && batch === secondDraftInputs.batch && packet === secondPacket
+                          ? secondPacket : assertVaultObservation(value, currentTarget, batch, packet));
+                    const secondDraft = buildNativeMintDraft(secondDraftInputs);
+                    const secondEvidence = collectNativeReserveEvidence({ ...secondDraftInputs, draft: secondDraft });
+                    const secondOperation = createNativeSourceOperation(source);
+                    let foreignSource: ReturnType<typeof createSourceSession> | undefined;
+                    let foreignOperation: ReturnType<typeof createNativeSourceOperation> | undefined;
+                    const continuationDirectory = mkdtempSync(join(tmpdir(), 'bridge-native-continuation-reservation-'));
+                    try {
+                      const secondProof = produceNativeOperationMintProof(secondOperation, {
+                        draftInputs: secondDraftInputs, draft: secondDraft, evidenceReceipt: secondEvidence,
+                        issuedAtNativeHeight: '4', expiresAtNativeHeight: defect === 'continuation expiry at child' ? '5' : '32',
+                      });
+                      continuationMintIdentity = secondProof.mintIdentityHex;
+                      continuationKeys = derivePooledReserveMintReservationRuntimeStorageKeysV4(secondProof.mintIdentityHex);
+                      continuationPending = defect === 'continuation expiry at child' ? undefined
+                        : encodePooledReserveMintReservationPendingV4ScaleHex({
+                        profileIdHex: secondProof.runtimeProfileIdHex, statementHex: secondProof.request.statementHex,
+                        statementIdHex: secondProof.mintReservationStatementIdHex, mintIdentityHex: secondProof.mintIdentityHex,
+                        sourceStatementBytesDigestHex: digest(raw(secondProof.request.statementHex)),
+                        sourceProofSystemIdHex: secondProof.request.runtimeProfile.sourceProofSystemIdHex,
+                        sourceProofProfileIdHex: secondProof.sourceProofProfileIdHex,
+                        sourceProofIssuedAtNativeHeight: secondProof.result.issuedAtNativeHeight,
+                        sourceProofRequestDigestHex: secondProof.requestDigestHex,
+                        sourceProofResultIdHex: secondProof.signatureVerification.resultIdHex,
+                        sourceProofDigestHex: digest(Buffer.concat([
+                          Buffer.from('E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_ENVELOPE_V1', 'ascii'),
+                          raw(secondProof.signatureVerification.resultIdHex),
+                          raw(secondProof.signatureVerification.signatureSetDigestHex),
+                        ])), reservedAtNativeHeight: '5', expiresAtNativeHeight: secondProof.result.expiresAtNativeHeight,
+                      });
+                      let sourceOperation = secondOperation;
+                      if (defect === 'continuation same operation') sourceOperation = operation!;
+                      if (defect === 'continuation foreign operation') {
+                        foreignSource = createSourceSession({ ergoAdmissionThreshold: 1,
+                          ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] });
+                        foreignOperation = createNativeSourceOperation(foreignSource);
+                        sourceOperation = foreignOperation;
+                      }
+                      if (defect === 'continuation operation disposal before signature') secondOperation.dispose();
+                      const originalSign = SigningKey.prototype.sign;
+                      const signatureProbe = vi.spyOn(SigningKey.prototype, 'sign').mockImplementation(function (this: SigningKey, hash) {
+                        const signed = originalSign.call(this, hash);
+                        if (defect === 'continuation operation disposal before transport') secondOperation.dispose();
+                        if (defect === 'continuation source disposal before transport') source.dispose();
+                        return signed;
+                      });
+                      const signatureCount = signatureProbe.mock.calls.length;
+                      const submissionCount = observed.fetcher.mock.calls.filter(([, init]) =>
+                        JSON.parse(init.body as string).method === 'author_submitExtrinsic').length;
+                      const continuationInput: Parameters<typeof executeFrontierNativeProofBoundContinuationReservationV1>[0] = {
+                        previousExecution: executionResult, signing: { operator, sourceOperation, draft: secondDraft,
+                          proof: secondProof, compiled, target, ...observed.fields }, attemptDirectory: continuationDirectory,
+                        broadcastScope: 'fed-native-local-synthetic-continuation-reservation-only',
+                      };
+                      if (defect === 'continuation copy execution') {
+                        (continuationInput as any).previousExecution = { ...executionResult };
+                      }
+                      if (defect === 'continuation foreign execution') {
+                        (continuationInput as any).previousExecution = Object.freeze({ burnExecuted: true });
+                      }
+                      if (defect === 'continuation' || defect === 'continuation duplicate') {
+                        const continuation = await executeFrontierNativeProofBoundContinuationReservationV1(continuationInput);
+                        expect(continuation).toMatchObject({ blockHashHex: nativeBlocks[5], blockHeight: 5, extrinsicIndex: 1,
+                          runtimeReservationObserved: true, mintExecuted: false, mintIdentityHex: secondProof.mintIdentityHex,
+                          pendingReservationScaleHex: continuationPending });
+                        expect(secondProof.mintIdentityHex).not.toBe(proof.mintIdentityHex);
+                        expect(height).toBe(5);
+                        expect(readdirSync(continuationDirectory)).toEqual(['native-reservation-attempt.json']);
+                        if (defect === 'continuation duplicate') {
+                          const duplicateDirectory = mkdtempSync(join(tmpdir(), 'bridge-native-continuation-duplicate-'));
+                          try {
+                            await expect(executeFrontierNativeProofBoundContinuationReservationV1({
+                              ...continuationInput, attemptDirectory: duplicateDirectory,
+                            })).rejects.toThrow(/unused|consumed|claimed/);
+                            expect(readdirSync(duplicateDirectory)).toEqual([]);
+                          } finally { rmSync(duplicateDirectory, { recursive: true, force: true }); }
+                        }
+                      } else {
+                        await expect(executeFrontierNativeProofBoundContinuationReservationV1(continuationInput))
+                          .rejects.toThrow(/provenance|operation|disposed|inactive|unused|original|cover|differs/);
+                        expect(continuationSubmitted).toBe(false);
+                        expect(readdirSync(continuationDirectory)).toEqual([]);
+                      }
+                      const finalSubmissions = observed.fetcher.mock.calls.filter(([, init]) =>
+                        JSON.parse(init.body as string).method === 'author_submitExtrinsic').length;
+                      expect(finalSubmissions - submissionCount).toBe(defect === 'continuation' || defect === 'continuation duplicate' ? 1 : 0);
+                      expect(signatureProbe.mock.calls.length - signatureCount).toBe(
+                        ['continuation', 'continuation duplicate', 'continuation operation disposal before transport',
+                          'continuation source disposal before transport'].includes(defect) ? 1 : 0);
+                    } finally {
+                      secondOperation.dispose(); foreignOperation?.dispose(); foreignSource?.dispose();
+                      rmSync(continuationDirectory, { recursive: true, force: true });
+                    }
+                  } else {
+                    if (operation) operation.dispose();
+                    else source.dispose();
+                    expect(() => assertFrontierNativeBurnCheckpointV1(result)).toThrow(/disposed/);
+                  }
                 } else await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/provenance|disposed|inactive|commitment/);
               }
             } else await expect(executeFrontierNativeProofBoundReservationMintAndBurnV1(full)).rejects.toThrow(/scope|differs|disposed/);

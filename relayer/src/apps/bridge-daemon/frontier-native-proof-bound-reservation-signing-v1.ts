@@ -1,6 +1,7 @@
 import {
   assertFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
   signFederatedGenesisApproveV1, signFederatedGenesisBurnV1,
+  signFederatedGenesisContinuationReservationV1,
   type FederatedGenesisOperatorV1,
 } from '../../adapters/federated-genesis-operator-v1.js';
 import { observeFederatedGenesisReservationTargetV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
@@ -12,6 +13,9 @@ import {
   observeFederatedNativeWithdrawalParentV1, reserveFederatedNativeWithdrawalAttemptV1,
   submitFederatedNativeWithdrawalV1, sealFederatedNativeWithdrawalV1, observeFederatedNativeWithdrawalInclusionV1,
   collectFederatedNativeBurnCommitmentV1,
+  observeFederatedNativeContinuationParentV1, reobserveFederatedNativeContinuationParentV1,
+  reserveFederatedNativeContinuationReservationAttemptV1,
+  type FederatedNativeContinuationParentV1,
 } from '../../adapters/federated-native-reservation-execution-v1.js';
 import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
   from '../../validity-application-pooled-reserve-mint-reservation-v4.js';
@@ -66,6 +70,7 @@ const burnExecutions = new WeakMap<object, {
   attestationStarted: boolean;
 }>();
 const burnCheckpoints = new WeakMap<object, () => void>();
+const continuedBurns = new WeakSet<object>();
 
 /** Bind one original burn to its exact native commitment and the retained source quorum. */
 export async function attestFrontierNativeBurnCheckpointV1(input: Readonly<{
@@ -131,6 +136,61 @@ export async function executeFrontierNativeProofBoundReservationV1(input: Readon
   if (broadcastScope !== 'fed-native-local-synthetic-reservation-only') throw new Error('native reservation broadcast scope is absent');
   const retained = capture(input.signing);
   return (await executeReservation(retained, attemptDirectory)).result;
+}
+
+/** Reserve the next deposit on the same live native chain after its original confirmed burn. */
+export async function executeFrontierNativeProofBoundContinuationReservationV1(input: Readonly<{
+  previousExecution: Awaited<ReturnType<typeof executeFrontierNativeProofBoundReservationMintAndBurnV1>>;
+  signing: Readonly<SigningInput>;
+  attemptDirectory: string;
+  broadcastScope: 'fed-native-local-synthetic-continuation-reservation-only';
+}>) {
+  exact(input, ['previousExecution', 'signing', 'attemptDirectory', 'broadcastScope']);
+  const { previousExecution, attemptDirectory, broadcastScope } = input;
+  if (broadcastScope !== 'fed-native-local-synthetic-continuation-reservation-only') throw new Error('native continuation broadcast scope is absent');
+  const previous = burnExecutions.get(previousExecution);
+  if (!previous || continuedBurns.has(previousExecution)) throw new Error('native continuation requires an unused original burn execution');
+  const next = capture(input.signing), prior = previous.retained.input;
+  const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(next.input.proof.request.statementHex);
+  const intent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
+  const assertCurrent = () => {
+    previous.retained.assertCurrent(); next.assertCurrent();
+    const current = next.input;
+    if (!('sourceOperation' in prior) || !('sourceOperation' in current) || current.sourceOperation === prior.sourceOperation
+      || current.operator !== prior.operator || current.compiled !== prior.compiled || current.target !== prior.target
+      || current.frontierTarget !== prior.frontierTarget || current.expectedGenesisHashHex !== prior.expectedGenesisHashHex
+      || current.proof.mintIdentityHex === prior.proof.mintIdentityHex
+      || statement.mintIdentityHex !== current.proof.mintIdentityHex
+      || intent.recipientAddressHex !== `0x${current.operator.addressHex}`
+      || intent.bridgeAddressHex !== `0x${current.compiled.preparation.application.bridgeAddressHex}`
+      || intent.tokenAddressHex !== `0x${current.compiled.preparation.application.tokenAddressHex}`
+      || intent.sourceNetworkIdHex !== `0x${current.compiled.preparation.application.sourceNetworkIdHex}`
+      || intent.sidechainIdHex !== `0x${current.compiled.preparation.application.sidechainIdHex}`
+      || intent.settlementProfileIdHex !== `0x${current.compiled.preparation.application.settlementProfileIdHex}`
+      || intent.sourceAssetIdHex !== `0x${'00'.repeat(32)}`
+      || current.proof.runtimeProfileIdHex !== prior.proof.runtimeProfileIdHex
+      || current.proof.runtimeProfileScaleHex !== prior.proof.runtimeProfileScaleHex) {
+      throw new Error('native continuation differs from its retained chain, custody or new source operation');
+    }
+  };
+  assertCurrent();
+  // Claim before the first await; an ambiguous observation, signing or transport never reopens this route.
+  if (continuedBurns.has(previousExecution)) throw new Error('native continuation is already consumed');
+  continuedBurns.add(previousExecution);
+  const parent = await observeFederatedNativeContinuationParentV1(previous.attempt, assertCurrent);
+  assertCurrent();
+  if (parent.genesisHashHex !== next.input.expectedGenesisHashHex
+    || parent.previousMintIdentityHex !== prior.proof.mintIdentityHex
+    || next.input.expectedStorage['0x3a636f6465'] !== parent.expectedStorage['0x3a636f6465']) {
+    throw new Error('native continuation parent differs from its proof or runtime code');
+  }
+  const retained = { ...next, assertCurrent,
+    observe: async () => {
+      await reobserveFederatedNativeContinuationParentV1(parent, assertCurrent);
+      assertCurrent();
+      return { genesisHashHex: parent.genesisHashHex, nonce: parent.nonce };
+    } };
+  return (await executeReservation(retained, attemptDirectory, parent)).result;
 }
 
 /** The same retained proof and custody cross reservation and mint; no owner-mint fallback. */
@@ -250,10 +310,15 @@ async function executeMint(retained: ReturnType<typeof capture>, attemptDirector
   return { result, attempt };
 }
 
-async function executeReservation(retained: ReturnType<typeof capture>, attemptDirectory: string) {
+async function executeReservation(retained: ReturnType<typeof capture>, attemptDirectory: string,
+  parent?: Readonly<FederatedNativeContinuationParentV1>) {
   retained.assertCurrent();
   const { proof, operator } = retained.input;
-  // This consumer seals the first native block, not an arbitrary-height reservation.
+  const reservedAtNativeHeight = parent ? parent.blockHeight + 1 : 1;
+  if (BigInt(proof.result.issuedAtNativeHeight) > BigInt(reservedAtNativeHeight)
+    || BigInt(proof.result.expiresAtNativeHeight) <= BigInt(reservedAtNativeHeight)) {
+    throw new Error('native reservation proof does not cover its observed child height');
+  }
   const pending = encodePooledReserveMintReservationPendingV4ScaleHex({
     profileIdHex: proof.runtimeProfileIdHex, statementHex: proof.request.statementHex,
     statementIdHex: proof.mintReservationStatementIdHex, mintIdentityHex: proof.mintIdentityHex,
@@ -265,13 +330,20 @@ async function executeReservation(retained: ReturnType<typeof capture>, attemptD
     sourceProofDigestHex: blake(Buffer.concat([Buffer.from('E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_ENVELOPE_V1', 'ascii'),
       Buffer.from(proof.signatureVerification.resultIdHex.slice(2), 'hex'),
       Buffer.from(proof.signatureVerification.signatureSetDigestHex.slice(2), 'hex')])),
-    reservedAtNativeHeight: '1', expiresAtNativeHeight: proof.result.expiresAtNativeHeight,
+    reservedAtNativeHeight: String(reservedAtNativeHeight), expiresAtNativeHeight: proof.result.expiresAtNativeHeight,
   });
   const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
-  const signed = await signCaptured(retained);
-  const attempt = reserveFederatedNativeReservationAttemptV1(attemptDirectory, {
+  const signed = parent ? await (async () => {
+    await retained.observe(); retained.assertCurrent();
+    return signFederatedGenesisContinuationReservationV1(operator, { parent,
+      statementHex: proof.request.statementHex, sourceProofEnvelopeScaleHex: proof.sourceProofEnvelopeScaleHex });
+  })() : await signCaptured(retained);
+  retained.assertCurrent();
+  const candidate = {
     genesisHashHex: signed.genesisHashHex, extrinsicHashHex: signed.extrinsicHashHex, signedExtrinsicHex: signed.signedExtrinsicHex,
-  });
+  };
+  const attempt = parent ? reserveFederatedNativeContinuationReservationAttemptV1(attemptDirectory, parent, candidate)
+    : reserveFederatedNativeReservationAttemptV1(attemptDirectory, candidate);
   // Keep the durable hold through any failure; reobserve both targets after signing and before transport.
   await retained.observe();
   const authorize = () => { retained.assertCurrent(); };
@@ -281,14 +353,15 @@ async function executeReservation(retained: ReturnType<typeof capture>, attemptD
   retained.assertCurrent();
   const observation = Object.freeze({ attempt, blockHashHex,
     expectedStorage: {
+      ...parent?.expectedStorage,
       [keys.runtimeCodeStorageKeyHex]: retained.input.expectedStorage[keys.runtimeCodeStorageKeyHex]!,
       [keys.currentProfileStorageKeyHex]: proof.runtimeProfileScaleHex, [keys.enforcementStorageKeyHex]: '0x01',
       [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`,
       [keys.pendingReservationStorageKeyHex]: pending,
       [keys.consumedReservationStorageKeyHex]: null, [keys.invalidatedReservationStorageKeyHex]: null,
       '0x5c0d1176a568c1f92944340dbfed9e9c530ebca703c85910e7164cb7d1c9e47b': null,
-    }, operatorStorageKeyHex: operator.nativeFunding.storageKeyHex,
-    originalOperatorAccountHex: operator.nativeFunding.accountInfoScaleHex,
+    }, operatorStorageKeyHex: parent?.operatorStorageKeyHex ?? operator.nativeFunding.storageKeyHex,
+    originalOperatorAccountHex: parent?.operatorAccountInfoHex ?? operator.nativeFunding.accountInfoScaleHex,
   });
   const observed = await observeFederatedNativeReservationInclusionV1(observation, authorize);
   retained.assertCurrent();
