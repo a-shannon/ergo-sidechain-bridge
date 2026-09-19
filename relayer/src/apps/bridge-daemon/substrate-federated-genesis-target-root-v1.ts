@@ -29,7 +29,11 @@ import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenan
 import { revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1, type SubstrateFederatedIsolatedDevnetMiningCredentialV1 }
   from '../../substrate-federated-isolated-devnet-mining-credential-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2,
-  produceSubstrateFederatedNativeGenesisMintSourceProofV1, type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  createSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1,
+  type SubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   type SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import { compileObservedSubstrateFederatedGenesisV1, type ObservedSubstrateFederatedGenesisV1 } from '../../substrate-federated-observed-genesis-v1.js';
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1, assertSubstrateFederatedNativeGenesisSetupReadCustodyV1 }
@@ -102,6 +106,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
   }
   const setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
   let source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2> | undefined;
+  let sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
   let operator: Readonly<FederatedGenesisOperatorV1> | undefined;
   let ergo: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2> | undefined;
   let retainedState: NativeJournalState | undefined;
@@ -118,6 +123,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       assertFederatedGenesisOperatorV1(retainedOperator);
       assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup.signer);
       readSubstrateFederatedGenesisProfilesFromSessionV2(retainedSource);
+      if (sourceOperation) assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(sourceOperation, retainedSource);
     };
     // Compile before starting the bounded Ergo mining lifetime.
     const frontier = await buildSubstrateFederatedGenesisNodeV1({ ...frontierInput, sourceSession: retainedSource });
@@ -354,12 +360,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           const draftInputs = Object.freeze({ target, batch, packet, committedVaultObservation: reserve.outputObservation });
           const draft = buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draftInputs);
           const evidenceReceipt = collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1({ ...draftInputs, draft });
-          const proof = produceSubstrateFederatedNativeGenesisMintSourceProofV1(retainedSource, {
+          sourceOperation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(retainedSource);
+          const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(sourceOperation, {
             draftInputs, draft, evidenceReceipt, issuedAtNativeHeight: '0', expiresAtNativeHeight: '32',
           });
           assertActive();
           const burn = await executeFrontierNativeProofBoundReservationMintAndBurnV1({
-            signing: { operator: retainedOperator, sourceSession: retainedSource, draft, proof, compiled, target,
+            signing: { operator: retainedOperator, sourceOperation, draft, proof, compiled, target,
               frontierTarget: endpoints, expectedStorage: expected, expectedGenesisHashHex: genesis },
             attemptDirectory: mkdtempSync(join(journalDirectory, 'native-mint-')),
             broadcastScope: 'fed-native-local-synthetic-reservation-mint-and-burn-only',
@@ -423,8 +430,9 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) }) });
     });
     if (retainedState === undefined) throw new Error('FED native continuation journal is absent');
+    if (sourceOperation === undefined) throw new Error('FED native continuation source operation is absent');
     const withdrawal = await completeNativeReturn({ node: ergo, setup, source: retainedSource, operator: retainedOperator,
-      state: retainedState, prepared: executed.value.continuation, priorSnapshot: executed.receipt.finalSnapshot });
+      sourceOperation, state: retainedState, prepared: executed.value.continuation, priorSnapshot: executed.receipt.finalSnapshot });
     return Object.freeze({ status: 'fresh-federated-round-trip-confirmed' as const,
       ...executed.value.summary, ergoExecution: executed.receipt, withdrawal,
       singletonIssuanceEstablished: true as const, operationalMintEstablished: true as const,
@@ -435,7 +443,10 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     finally {
       for (const credential of Object.values(mining ?? {})) revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
       try { if (operator) disposeFederatedGenesisOperatorV1(operator); }
-      finally { try { source?.dispose(); } finally { try { setup.dispose(); } finally { retainedState?.close(); } } }
+      finally {
+        try { sourceOperation?.dispose(); }
+        finally { try { source?.dispose(); } finally { try { setup.dispose(); } finally { retainedState?.close(); } } }
+      }
     }
   }
 }
@@ -540,6 +551,7 @@ async function completeNativeReturn(input: Readonly<{
   node: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2>;
   setup: NativeSetup;
   source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
   operator: Readonly<FederatedGenesisOperatorV1>;
   state: NativeJournalState;
   prepared: Readonly<NativeReturnContinuation>;
@@ -549,6 +561,7 @@ async function completeNativeReturn(input: Readonly<{
   const remainingCustody = () => {
     assertFederatedGenesisOperatorV1(input.operator);
     readSubstrateFederatedGenesisProfilesFromSessionV2(input.source);
+    assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(input.sourceOperation, input.source);
   };
   const readCustody = () => {
     remainingCustody();
@@ -655,6 +668,7 @@ async function completeNativeReturn(input: Readonly<{
       } catch { /* Progress capture cannot suppress V1 evidence or delay cleanup. */ }
       throw failure;
     }
+    readCustody();
     const tracker = await confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target, confirmation);
     readCustody();
     const checked = await setup.checkNativeWithdrawalV2(claim, target);
@@ -669,6 +683,7 @@ async function completeNativeReturn(input: Readonly<{
     remainingCustody();
     const payoutConfirmation = await waitForCanonicalConfirmation(observer, payoutAttempt.expectedTxId,
       performance.now() + 2 * 60_000, 'native-withdrawal', remainingCustody);
+    remainingCustody();
     const payout = await confirmSubstrateFederatedIsolatedDevnetWithdrawalV2(payoutAttempt, target, payoutConfirmation);
     remainingCustody();
     if (payout.status !== 'confirmed' || payout.expectedTxId !== checked.packet.transaction.txId

@@ -28,33 +28,71 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** close two decisions from existing source and evidence: the supported
-greenfield environment and the FED evidence-to-validator mapping. Both remain
-open. The result must name supported and unestablished behavior, reusable
-consumers, required adaptations and their deciding checks. If a source
-inspection cannot decide a question, select one bounded discriminating check;
-do not turn it into an unrestricted investigation or a stronger support claim.
+**Now:** connect the native operator's next reservation/mint/approve/burn
+operation to observed nonce and parent state. Start with
+`federated-genesis-operator-v1.ts`, `federated-native-reservation-execution-v1.ts`
+and their proof-bound caller. Preserve the existing one-shot APIs and durable
+ambiguous-attempt holds. The deciding component checks must accept a later
+operation on the retained chain and reject stale parents, wrong nonces, mixed
+operation receipts, duplicates and disposed custody before further signing or
+transport. Stop at that independently reviewed producer-consumer join; the
+setup signer's lifetime and reserve/DUP/tracker successor construction remain
+separate dependencies before a full two-cycle campaign.
 
-This decision batch ends with two concise records here or in the task handoff:
-the exact selected environment/pins and its demonstrated versus intended
-support; and the FED claims mapped to named evidence producers/validators,
-including the smallest required adaptations. Each unresolved item names its
-consumer impact, one deciding check and a stop condition. Selection does not
-establish compatibility. Distinguish the fresh sidechain from the Ergo
-settlement network and distinguish miner integration from validator support.
-Do not implement the whole release-gate adaptation or prove every future
-environment before starting independent successor work. Block only the work
-whose deciding input is actually unresolved.
+The source-quorum join is implemented: individual mint/checkpoint operations
+share retained federation custody and keep the original live target, genesis
+and application. The actual caller/root uses exact operation provenance and
+checks its lifetime through later tracker/payout waits. Legacy APIs stay
+one-shot. Source-level sequential operation tests use explicit boundary
+doubles with real codecs and signatures; the composed native tests exercise
+one original operation through checkpoint. This is not evidence of a second
+complete chain cycle. Exact closeout evidence is in the active task handoff.
 
-Start with the existing native FED profile and pinned local build recipe;
-compare another route only if a named incompatibility makes that necessary.
-The decision records own this plan and the existing task handoff, not runtime
-changes. Their bounded read scope and completion conditions are:
+The two prerequisite selection decisions are closed below. Compatibility and
+release obligations that require new evidence remain open; they do not block
+this component join.
 
-| Open decision | Initial sources / consumer | Stop condition |
-|---|---|---|
-| Environment | Consensus source lock, source-baseline documentation and native target root | Record exact selected pins, settlement-network and miner requirements, observed versus intended support, and any blocking dependency. Each unestablished compatibility claim retains one bounded falsifier; selecting pins alone does not close it |
-| FED acceptance | Existing release gate, checklist and native lifecycle receipt producers | Map each intended FED claim to the deciding consumer, its accepted discriminator and the smallest adaptation. Stop at that map; implement a gate change only when its consumer becomes due |
+### Selected Environment
+
+Use the existing native FED profile on isolated Windows x64 local nodes with
+synthetic funds. Frontier is pinned to
+`75329a2df49e2cc7981485392c31160929d1bd48`, with patches 0001, 0004, 0005
+and 0006 and reconstructed source tree
+`8dca3c37da8e24cb37d40c8121465e5d14e8a58c` in
+`substrate-federated-genesis-node-build-v1.ts`. Keep the exact Rust 1.82.0
+tool identities in `sources/native-verifier-toolchain-lock.json` and the
+offline locked `bridge-federated-v4-genesis-node` build recipe.
+
+The local Ergo settlement nodes use base
+`2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (v6.0.2) and the candidate-recovery
+extension-producer patch from `sources/consensus-source-lock.json`; Java,
+SBT and process-owner pins remain in
+`sources/substrate-federated-isolated-devnet-node-build-lock-v1.json`.
+This is a new sidechain against a controlled local Ergo settlement network.
+Its miner produces the required extension fields; ordinary Ergo validator
+compatibility is a separate property. Campaign 23 demonstrates one roundtrip
+with these components, with source quorum 2-of-3 and a separate local admission
+signer. It does not demonstrate independent operator custody.
+
+Before claiming unmodified Ergo-node compatibility, test the exact emitted
+extension-bearing candidate against the selected unmodified validator; one
+rejection stops that claim and identifies the required integration. Before
+claiming portable builds, compare a separately built clean-root artifact with
+the expected runtime identity; one mismatch stops that claim. Public-network
+miner participation, non-Windows support, complete hermetic tool closure and
+independent custody are unestablished. No public-network rehearsal is selected.
+
+### FED Evidence Consumers
+
+| Intended claim | Producer and accepting consumer | Reuse / smallest required adaptation | Due |
+|---|---|---|---|
+| Public research alpha | `audit:alpha` manifest -> `validatePublicAuditReleaseGateProcess` | Keep `public-research-alpha`, supported release blocked, and zero-structural-issue `EXPECTED_BLOCKED`; this does not establish FED release support | Exact source promotion |
+| Local FED lifecycle | `runSubstrateFederatedGenesisTargetRootV1` -> direct lifecycle tests | Reuse exact pins, transaction identities, custody receipts and false finality/trustless fields. A durable versioned report must bind the clean candidate and selected environment; direct assertions are not a release consumer | Stable lifecycle and operator entry point |
+| Supported FED reference | FED report -> dedicated release-gate profile branch | Gate 3 currently accepts only `authenticated-external-fee-v1 / ACTIVATED / gate3-lifecycle-closure`. Register a separate FED discriminator/schema, validator, release input and checklist binding; preserve the existing branch. Never relabel FED evidence | FED-7 candidate evidence capture |
+| Independent FED assurance | Exact-candidate review, recovery, external integration and custody evidence -> applicable Gate 4/6/8 validators | Reuse hygiene, identity joins and reviewer structure. Historical integration evidence and simulated actors cannot establish current external reproduction or independent custody | Final FED-7 promotion |
+
+The final FED discriminator and report schema are selected with their actual
+consumer; a gate-wide refactor is not a prerequisite for successor work.
 
 **Next candidate:** consume the first cycle's reserve/DUP/tracker successors
 in a second normal cycle. A focused component join can use the pinned local
@@ -62,9 +100,8 @@ profile while unrelated release mapping remains open. Reassess the smallest
 useful join as the deciding evidence arrives; prepare the invocation where the
 work is independent and serves the same delivery result.
 
-First resolve the operation-lifetime boundary inside that candidate. The
-current source session permits only one mint proof and checkpoint, the setup
-signer closes after the withdrawal check, and the operator binds the first
+The source-quorum operation boundary is now connected. The setup
+signer still closes after the withdrawal check, and the operator binds the first
 approval/burn nonces and parents. A second cycle needs separately scoped
 operation authority under the selected federation/profile as well as observed
 successor state. Do not clear consumed flags, reopen a closed signer, recreate
@@ -350,7 +387,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Local first cycle -> explicit FED delivery acceptance | Map the selected profile to its evidence producers and final validators; fix one supported build/runtime environment and identify the node/miner integration needed by it | The existing Gate 3 contract names `authenticated-external-fee-v1`; do not relabel FED evidence or defer this mismatch until final review. Patched local execution does not establish unmodified-node or public-network compatibility |
+| **Now** | Observed native successor -> next operator sequence | Replace first-cycle nonce/parent assumptions with operation-bound observed state through the native execution caller | Reject stale parent, wrong nonce, foreign operation and replay before new signing/transport; preserve durable ambiguous holds and old one-shot APIs |
 | Next candidate | First-cycle successors -> another normal operation | Connect observed reserve, DUP and tracker successors to the next deposit, mint, burn, checkpoint and payout on the same greenfield chain | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

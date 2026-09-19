@@ -64,7 +64,7 @@ describe('layer import rules', () => {
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1'],
     ['../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js', 'buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1'],
     ['../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', 'collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'],
-    ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'produceSubstrateFederatedNativeGenesisMintSourceProofV1'],
+    ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationMintAndBurnV1'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'attestFrontierNativeBurnCheckpointV1'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'assertFrontierNativeBurnCheckpointV1'],
@@ -265,6 +265,25 @@ describe('layer import rules', () => {
     expect(inspect(staticAppFixture(composition, `import { produceSubstrateFederatedNativeGenesisMintSourceProofV1 } from '${proofSpecifier}';`))
       .map(item => item.message)).toContain(
         `restricted capability import binding is not allowlisted: ${proofSpecifier}#produceSubstrateFederatedNativeGenesisMintSourceProofV1`);
+  });
+
+  it.each([
+    ['createSubstrateFederatedNativeGenesisSourceAttestationOperationV1', FEDERATED_GENESIS_TARGET_ROOT],
+    ['assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1', FEDERATED_GENESIS_TARGET_ROOT],
+    ['produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1', FEDERATED_GENESIS_TARGET_ROOT],
+    ['assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
+    ['produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
+    ['assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
+  ])('keeps source-operation capability %s at its reviewed consumer', (binding, owner) => {
+    const specifier = '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(owner, `${declaration} ${binding}({}, {});`))).toEqual([]);
+    const other = owner === FEDERATED_GENESIS_TARGET_ROOT
+      ? 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts' : FEDERATED_GENESIS_TARGET_ROOT;
+    expect(inspect(staticAppFixture(other, declaration)).map(item => item.message))
+      .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture(owner, `${declaration} const escaped = ${binding};`)).map(item => item.message))
+      .toContainEqual(expect.stringMatching(/restricted capability binding must not/));
   });
 
   it.each([

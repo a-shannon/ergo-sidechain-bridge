@@ -29,7 +29,11 @@ import {
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
   produceSubstrateFederatedNativeGenesisCheckpointAttestationV1,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationV1,
+  assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1,
+  produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
+  assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  type SubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   type SubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import type { SubstrateFederatedNativeGenesisPegInMintReservationDraftV1 }
@@ -40,9 +44,8 @@ import {
 import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 }
   from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 
-interface SigningInput {
+interface SigningContext {
   readonly operator: Readonly<FederatedGenesisOperatorV1>;
-  readonly sourceSession: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
   readonly draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
   readonly proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>;
   readonly compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
@@ -51,6 +54,11 @@ interface SigningInput {
   readonly expectedStorage: Readonly<Record<string, string>>;
   readonly expectedGenesisHashHex: string;
 }
+
+type SigningInput = SigningContext & (
+  | { readonly sourceSession: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2> }
+  | { readonly sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> }
+);
 
 const burnExecutions = new WeakMap<object, {
   retained: ReturnType<typeof capture>;
@@ -72,18 +80,26 @@ export async function attestFrontierNativeBurnCheckpointV1(input: Readonly<{
   state.retained.assertCurrent();
   if (state.attestationStarted) throw new Error('native burn checkpoint attempt is already consumed');
   state.attestationStarted = true;
-  const { sourceSession, proof, compiled } = state.retained.input;
+  const authority = state.retained.input;
+  const { proof, compiled } = authority;
   const authorize = () => state.retained.assertCurrent();
   const commitment = await collectFederatedNativeBurnCommitmentV1(state.attempt,
     `0x${compiled.preparation.application.sidechainIdHex}`, authorize);
   authorize();
-  const attestation = produceSubstrateFederatedNativeGenesisCheckpointAttestationV1(sourceSession, { proof,
+  const request = { proof,
     checkpoint: { sourceNativeBlockHeight: commitment.blockHeight, sourceNativeBlockHashHex: commitment.blockHashHex,
       executionBlockHashHex: commitment.ethereumBlockHashHex, bridgeEventRootHex: commitment.bridgeEventRootHex,
-      burnLeafCount: commitment.burnLeafCount, admissionValidFromErgoHeight, admissionExpiresAtErgoHeight } });
+      burnLeafCount: commitment.burnLeafCount, admissionValidFromErgoHeight, admissionExpiresAtErgoHeight } };
+  const attestation = 'sourceOperation' in authority
+    ? produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(authority.sourceOperation, request)
+    : produceSubstrateFederatedNativeGenesisCheckpointAttestationV1(authority.sourceSession, request);
   const assertCurrent = () => {
     authorize();
-    assertSubstrateFederatedNativeGenesisCheckpointAttestationV1(attestation, sourceSession, proof);
+    if ('sourceOperation' in authority) {
+      assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(attestation, authority.sourceOperation, proof);
+    } else {
+      assertSubstrateFederatedNativeGenesisCheckpointAttestationV1(attestation, authority.sourceSession, proof);
+    }
   };
   assertCurrent();
   const result = Object.freeze({ execution, commitment, attestation, checkpointAttested: true as const,
@@ -283,15 +299,21 @@ async function executeReservation(retained: ReturnType<typeof capture>, attemptD
 }
 
 function capture(input: Readonly<SigningInput>) {
-  const fields = ['operator', 'sourceSession', 'draft', 'proof', 'compiled', 'target', 'frontierTarget', 'expectedStorage', 'expectedGenesisHashHex'];
+  const authorityField = input !== null && typeof input === 'object' && Object.hasOwn(input, 'sourceOperation')
+    ? 'sourceOperation' : 'sourceSession';
+  const fields = ['operator', authorityField, 'draft', 'proof', 'compiled', 'target', 'frontierTarget', 'expectedStorage', 'expectedGenesisHashHex'];
   exact(input, fields);
   exact(input.expectedStorage, Object.getOwnPropertyNames(input.expectedStorage));
   input = Object.freeze({ ...input, expectedStorage: Object.freeze({ ...input.expectedStorage }) });
-  const { operator, sourceSession, draft, proof, compiled, target, frontierTarget, expectedStorage, expectedGenesisHashHex } = input;
+  const { operator, draft, proof, compiled, target, frontierTarget, expectedStorage, expectedGenesisHashHex } = input;
   const assertCurrent = () => {
     assertFederatedGenesisOperatorV1(operator);
     assertObservedSubstrateFederatedGenesisV1(compiled, target);
-    assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(proof, sourceSession, draft);
+    if ('sourceOperation' in input) {
+      assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(proof, input.sourceOperation, draft);
+    } else {
+      assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(proof, input.sourceSession, draft);
+    }
     assertOwnedFederatedGenesisDevnetTargetV1(frontierTarget);
     if (compiled.preparation.operatorAddressHex !== operator.addressHex
       || compiled.preparation.launchDomainHex !== operator.launchDomainHex

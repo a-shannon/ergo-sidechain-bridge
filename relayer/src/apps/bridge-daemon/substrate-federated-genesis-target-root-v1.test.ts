@@ -142,10 +142,12 @@ const wasm = Buffer.from('0061736d01000000', 'hex');
 const sha256 = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex');
 const makeSetup = setups.createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2;
 const makeSource = sources.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2;
+const makeSourceOperation = sources.createSubstrateFederatedNativeGenesisSourceAttestationOperationV1;
 const makeOperator = operators.createFederatedGenesisOperatorV1;
 const claimMining = setups.claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2;
 let setup: Awaited<ReturnType<typeof makeSetup>> | undefined;
 let source: ReturnType<typeof makeSource> | undefined;
+let sourceOperation: ReturnType<typeof makeSourceOperation> | undefined;
 let operator: ReturnType<typeof makeOperator> | undefined;
 let miningCredential: ReturnType<typeof claimMining> | undefined;
 let compiledGenesisBytes: Buffer | undefined;
@@ -302,7 +304,13 @@ beforeEach(() => {
     mintIdentityHex: proof.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex,
     sourceFinalityEstablished: false, trustless: false });
   burn = Object.freeze({ mint, burn: Object.freeze({ netAmountNanoErg: '10000000', grossAmountNanoErg: '15000000' }), burnExecuted: true });
-  vi.spyOn(sources, 'produceSubstrateFederatedNativeGenesisMintSourceProofV1').mockImplementation(mocked.proof);
+  sourceOperation = undefined;
+  vi.spyOn(sources, 'produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1').mockImplementation(mocked.proof);
+  vi.spyOn(sources, 'createSubstrateFederatedNativeGenesisSourceAttestationOperationV1').mockImplementation(value => {
+    expect(value).toBe(source);
+    sourceOperation = makeSourceOperation(value);
+    return sourceOperation;
+  });
   order = []; calls = []; active = false; started = false;
   directory = mkdtempSync(join(tmpdir(), 'fed-root-component-'));
   const bridgeRoot = join(directory, 'bridge');
@@ -578,8 +586,8 @@ beforeEach(() => {
     expect(value.draft).toBe(draft); expect(value.packet).toBe(packet);
     expect(value.committedVaultObservation).toBe(committedVault.outputObservation); return evidence;
   });
-  mocked.proof.mockImplementation((session, value) => {
-    order.push('proof'); expect(session).toBe(source);
+  mocked.proof.mockImplementation((operation, value) => {
+    order.push('proof'); expect(operation).toBe(sourceOperation); expect(operation).toBeDefined();
     expect(value).toEqual({ draftInputs, draft, evidenceReceipt: evidence, issuedAtNativeHeight: '0', expiresAtNativeHeight: '32' });
     expect(value.draftInputs).toBe(draftInputs); expect(value.draft).toBe(draft); expect(value.evidenceReceipt).toBe(evidence);
     return proof;
@@ -587,9 +595,9 @@ beforeEach(() => {
   mocked.mint.mockImplementation(async value => {
     order.push('mint');
     expect(Object.keys(value).sort()).toEqual(['attemptDirectory', 'broadcastScope', 'grossAmountNanoErg', 'recipientErgoTreeHex', 'signing']);
-    expect(value.signing).toEqual({ operator, sourceSession: source, draft, proof, compiled, target,
+    expect(value.signing).toEqual({ operator, sourceOperation, draft, proof, compiled, target,
       frontierTarget: frontierEndpoints, expectedStorage: top, expectedGenesisHashHex: genesis });
-    for (const [key, original] of Object.entries({ operator, sourceSession: source, draft, proof, compiled, target, frontierTarget: frontierEndpoints })) {
+    for (const [key, original] of Object.entries({ operator, sourceOperation, draft, proof, compiled, target, frontierTarget: frontierEndpoints })) {
       expect(value.signing[key]).toBe(original);
     }
     expect(value.broadcastScope).toBe('fed-native-local-synthetic-reservation-mint-and-burn-only');
@@ -878,13 +886,17 @@ describe('fresh FED target composition', () => {
     });
 
   for (const stage of ['anchor', 'trackerCheck', 'trackerFreshness', 'trackerSubmit'] as const) {
-    it.each(['source', 'setup', 'operator'] as const)(`holds the native return after %s disposal at awaited ${stage}`, async owner => {
+    it.each(['source', 'setup', 'operator', 'operation'] as const)(`holds the native return after %s disposal at awaited ${stage}`, async owner => {
       const original = mocked[stage].getMockImplementation()!;
       mocked[stage].mockImplementation(async (...args) => {
         const value = await original(...args);
         if (owner === 'source') source!.dispose();
         if (owner === 'setup') setup!.dispose();
         if (owner === 'operator') operators.disposeFederatedGenesisOperatorV1(operator!);
+        if (owner === 'operation') {
+          sourceOperation!.dispose();
+          expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).not.toThrow();
+        }
         return value;
       });
       await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/disposed|active process provenance/);
@@ -894,11 +906,52 @@ describe('fresh FED target composition', () => {
     });
   }
 
-  it.each(['source', 'operator'] as const)('records the payout response then holds confirmation after %s disposal', async owner => {
+  it.each(['payoutCheck', 'payoutAuthorize'] as const)
+    ('holds payout after operation disposal at awaited %s with setup custody already retired', async stage => {
+      const original = mocked[stage].getMockImplementation()!;
+      mocked[stage].mockImplementation(async (...args) => {
+        const value = await original(...args);
+        expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer))
+          .toThrow(/active process provenance/);
+        sourceOperation!.dispose();
+        expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).not.toThrow();
+        return value;
+      });
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/operation is disposed/);
+      expect(mocked[stage]).toHaveBeenCalledOnce();
+      if (stage === 'payoutCheck') expect(mocked.payoutAuthorize).not.toHaveBeenCalled();
+      expect(mocked.payoutReserve).not.toHaveBeenCalled(); expect(mocked.payoutSubmit).not.toHaveBeenCalled();
+      assertDownstreamCleanup();
+    });
+
+  it.each(['native-tracker-admission', 'native-withdrawal'] as const)
+    ('rejects operation disposal on successful %s wait before recording confirmation', async stage => {
+      const original = mocked.wait.getMockImplementation()!;
+      mocked.wait.mockImplementation(async (...args) => {
+        const value = await original(...args);
+        if (args[3] === stage) {
+          sourceOperation!.dispose();
+          expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).not.toThrow();
+        }
+        return value;
+      });
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/operation is disposed/);
+      expect(mocked[stage === 'native-tracker-admission' ? 'trackerConfirm' : 'payoutConfirm']).not.toHaveBeenCalled();
+      if (stage === 'native-tracker-admission') expect(mocked.payoutCheck).not.toHaveBeenCalled();
+      else { expect(mocked.payoutSubmit).toHaveBeenCalledOnce(); expect(mocked.payoutFinalize).toHaveBeenCalledOnce(); }
+      assertDownstreamCleanup();
+    });
+
+  it.each(['source', 'operator', 'operation'] as const)('records the payout response then holds confirmation after %s disposal', async owner => {
     const original = mocked.payoutSubmit.getMockImplementation()!;
     mocked.payoutSubmit.mockImplementation(async (...args) => {
       const value = await original(...args);
-      if (owner === 'source') source!.dispose(); else operators.disposeFederatedGenesisOperatorV1(operator!);
+      if (owner === 'source') source!.dispose();
+      else if (owner === 'operator') operators.disposeFederatedGenesisOperatorV1(operator!);
+      else {
+        sourceOperation!.dispose();
+        expect(() => sources.readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).not.toThrow();
+      }
       return value;
     });
     await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/disposed/);
@@ -1212,8 +1265,10 @@ describe('fresh FED target composition', () => {
         });
         await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(
           /disposed|active process provenance|target inactive|batch inactive/);
-        // Synchronous doubles can finish, but no new transaction may follow them.
-        assertDownstreamPrefix('proof'); assertDownstreamCleanup();
+        // Creating an operation checks source custody before the proof double.
+        // Other synchronous doubles may finish, but no transaction can follow.
+        assertDownstreamPrefix(owner === 'source' && stage !== 'proof' ? 'evidence' : 'proof');
+        assertDownstreamCleanup();
         expect(readdirSync(journalDirectory).filter(name => name.startsWith('native-mint-'))).toEqual([]);
       });
   }

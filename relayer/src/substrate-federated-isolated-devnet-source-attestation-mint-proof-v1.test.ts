@@ -6,6 +6,15 @@ const mocks = vi.hoisted(() => ({
   failNextSignature: false,
   failNextVerification: false,
   launchStatements: new WeakSet<object>(),
+  nativeDraftInputs: new WeakMap<object, Readonly<Record<string, object>>>(),
+  nativeContexts: new WeakMap<object, Readonly<{ target: object; context: object }>>(),
+  nativeTargets: new WeakMap<object, object>(),
+  nativeSourceContexts: new WeakMap<object, Readonly<{
+    candidate: Readonly<Record<string, unknown>>;
+    application: Readonly<Record<string, unknown>>;
+  }>>(),
+  nativeEvidence: new WeakMap<object, Readonly<{ draft: object; evidence: object }>>(),
+  consumedNativeEvidence: new WeakSet<object>(),
 }));
 
 vi.mock('node:crypto', async importOriginal => {
@@ -39,6 +48,63 @@ vi.mock(
       ...actual,
       consumeSubstrateFederatedIsolatedDevnetCommittedReserveEvidenceForDraftV1:
         mocks.consumeCommittedReserveEvidenceForDraft,
+      consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1:
+        vi.fn((receipt: object, draft: object) => {
+          const retained = mocks.nativeEvidence.get(receipt);
+          if (retained === undefined || retained.draft !== draft) {
+            throw new Error('native committed-reserve evidence provenance missing');
+          }
+          if (mocks.consumedNativeEvidence.has(receipt)) {
+            throw new Error('native committed-reserve evidence is already consumed');
+          }
+          mocks.consumedNativeEvidence.add(receipt);
+          return retained.evidence;
+        }),
+    };
+  },
+);
+
+vi.mock(
+  './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js')
+    >();
+    return {
+      ...actual,
+      // Operation-lifetime tests double only the native same-process custody
+      // boundary; the statement and all downstream codecs remain real.
+      assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1:
+        vi.fn((draft: object, input: Readonly<Record<string, object>>) => {
+          const retained = mocks.nativeDraftInputs.get(draft);
+          const fields = ['batch', 'target', 'packet', 'committedVaultObservation'];
+          if (retained === undefined || Reflect.ownKeys(input).length !== fields.length
+            || fields.some(field => input[field] !== retained[field])) {
+            throw new Error('native mint-reservation draft lacks boundary provenance');
+          }
+        }),
+    };
+  },
+);
+
+vi.mock(
+  './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-setup-check-execution-v2.js')
+    >();
+    return {
+      ...actual,
+      // The real setup execution composes this context in its own suite. Here
+      // only the exact batch/target ownership boundary is doubled.
+      getSubstrateFederatedNativeGenesisAttestationContextV1:
+        vi.fn((batch: object, target: object) => {
+          const retained = mocks.nativeContexts.get(batch);
+          if (retained === undefined || retained.target !== target) {
+            throw new Error('native attestation context lacks boundary provenance');
+          }
+          return retained.context;
+        }),
     };
   },
 );
@@ -89,6 +155,7 @@ import {
 } from './peg-in-pooled-reserve-lineage-profile-v4.js';
 import {
   derivePooledReserveMintReservationRuntimeProfileV4IdHex,
+  encodePooledReserveMintReservationRuntimeProfileV4ScaleHex,
 } from './pooled-reserve-mint-reservation-runtime-profile-v4-codec.js';
 import {
   buildSubstrateFederatedCheckpointProfileV1,
@@ -111,9 +178,15 @@ import {
 import {
   assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance,
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1Provenance,
+  assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
+  assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1,
+  assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  createSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   readSubstrateFederatedGenesisProfilesFromSessionV2,
+  produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1,
   produceSubstrateFederatedNativeGenesisMintSourceProofV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
@@ -172,6 +245,15 @@ beforeEach(() => {
   mocks.failNextSignature = false;
   mocks.failNextVerification = false;
   mocks.launchStatements = new WeakSet<object>();
+  mocks.nativeDraftInputs = new WeakMap<object, Readonly<Record<string, object>>>();
+  mocks.nativeContexts = new WeakMap<object, Readonly<{ target: object; context: object }>>();
+  mocks.nativeTargets = new WeakMap<object, object>();
+  mocks.nativeSourceContexts = new WeakMap<object, Readonly<{
+    candidate: Readonly<Record<string, unknown>>;
+    application: Readonly<Record<string, unknown>>;
+  }>>();
+  mocks.nativeEvidence = new WeakMap<object, Readonly<{ draft: object; evidence: object }>>();
+  mocks.consumedNativeEvidence = new WeakSet<object>();
   vi.clearAllMocks();
   mocks.assertCommittedVaultForCandidate.mockImplementation(
     (observation, batch, candidate, target) => {
@@ -524,6 +606,427 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     session.dispose();
   });
 
+  it('scopes explicit native operations without reopening legacy or LAB authority', () => {
+    const session = sessionV2();
+    const first =
+      createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    try {
+      expect(Object.keys(first)).toEqual(['dispose']);
+      expect(Object.isFrozen(first)).toBe(true);
+      expect(() =>
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session)
+      ).toThrow(/already active/u);
+      expect(() => session.signLaunchStatement({} as never))
+        .toThrow(/already signed/u);
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofV1(
+        session,
+        {} as never,
+      )).toThrow(/bound to explicit operations/u);
+      expect(() =>
+        produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+          { ...first },
+          {} as never,
+        )
+      ).toThrow(/lacks exact provenance/u);
+    } finally {
+      first.dispose();
+    }
+
+    const second =
+      createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    second.dispose();
+    expect(() =>
+      produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        second,
+        {} as never,
+      )
+    ).toThrow(/disposed/u);
+    session.dispose();
+  });
+
+  it('asserts exact operation-parent provenance and current lifetime', () => {
+    const session = sessionV2();
+    const foreignSession = sessionV2();
+    const operation =
+      createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    try {
+      expect(() => assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+        operation,
+        session,
+      )).not.toThrow();
+      expect(() => assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+        { ...operation },
+        session,
+      )).toThrow(/lacks exact provenance/u);
+      expect(() => assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+        operation,
+        foreignSession,
+      )).toThrow(/different parent session/u);
+      operation.dispose();
+      expect(() => assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+        operation,
+        session,
+      )).toThrow(/operation is disposed/u);
+    } finally {
+      foreignSession.dispose();
+      session.dispose();
+    }
+  });
+
+  it('does not consume legacy authority or block LAB after malformed native input', () => {
+    const session = sessionV2();
+    try {
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofV1(
+        session,
+        {} as never,
+      )).toThrow(/input/u);
+      expect(() => signLaunch(session)).not.toThrow();
+      expect(() =>
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session)
+      ).toThrow(/LAB launch/u);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('invalidates explicit operations when the parent custody is disposed', () => {
+    const session = sessionV2();
+    const operation =
+      createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+    session.dispose();
+    expect(() =>
+      produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        operation,
+        {} as never,
+      )
+    ).toThrow(/session is disposed/u);
+  });
+
+  it('completes two sequential native operations while retaining the first receipts', () => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 1);
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+        first.proof,
+        first.operation,
+        first.fixture.draft as never,
+      )).not.toThrow();
+      expect(() => assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      )).not.toThrow();
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        first.operation,
+        first.fixture.input as never,
+      )).toThrow(/already consumed/u);
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        first.operation,
+        nativeCheckpointInput(first.proof, 1) as never,
+      )).toThrow(/already consumed/u);
+
+      const secondFixture = nativeOperationInput(session, 2);
+      const secondOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      expect(() => assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      )).not.toThrow();
+      const secondProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        secondOperation,
+        secondFixture.input as never,
+      );
+      const secondCheckpoint =
+        produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+          secondOperation,
+          nativeCheckpointInput(secondProof, 2) as never,
+        );
+      const second = Object.freeze({
+        fixture: secondFixture,
+        operation: secondOperation,
+        proof: secondProof,
+        checkpoint: secondCheckpoint,
+      });
+      expect(second.proof.receiptDigestHex).not.toBe(first.proof.receiptDigestHex);
+      expect(second.proof.mintIdentityHex).not.toBe(first.proof.mintIdentityHex);
+      expect(second.checkpoint.receiptDigestHex).not.toBe(first.checkpoint.receiptDigestHex);
+      expect(second.proof.sourceProofProfileIdHex).toBe(first.proof.sourceProofProfileIdHex);
+      expect(second.proof.signatureVerification.signatures.map(value => value.signerPublicKeyHex))
+        .toEqual(first.proof.signatureVerification.signatures.map(value => value.signerPublicKeyHex));
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+        first.proof,
+        first.operation,
+        first.fixture.draft as never,
+      )).not.toThrow();
+      expect(() => assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      )).not.toThrow();
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+        first.proof,
+        first.operation,
+        second.fixture.draft as never,
+      )).toThrow(/operation\/draft provenance/u);
+      expect(() => assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        first.checkpoint,
+        first.operation,
+        second.proof,
+      )).toThrow(/operation provenance/u);
+      second.operation.dispose();
+      first.operation.dispose();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it.each([
+    ['target identity', { foreignTarget: true }],
+    ['candidate identity', { cloneCandidate: true }],
+    ['application identity', { cloneApplication: true }],
+    ['genesis identity', { genesisJsonSha256Hex: '91'.repeat(32) }],
+    ['source runtime', { sourceRuntimeCodeSha256Hex: 'a1'.repeat(32) }],
+  ] as const)(
+    'rejects a foreign %s without consuming the next operation',
+    (_label, overrides) => {
+      const session = sessionV2();
+      try {
+        const first = completeNativeOperation(session, 15);
+        const operation =
+          createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+        const foreignFixture = nativeOperationInput(session, 16, overrides);
+        expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+          operation,
+          foreignFixture.input as never,
+        )).toThrow(/different retained genesis or application/u);
+
+        const validFixture = nativeOperationInput(session, 17);
+        const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+          operation,
+          validFixture.input as never,
+        );
+        expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+          operation,
+          nativeCheckpointInput(proof, 17) as never,
+        )).not.toThrow();
+        operation.dispose();
+        first.operation.dispose();
+      } finally {
+        session.dispose();
+      }
+    },
+  );
+
+  it.each([
+    ['genesis digest', 'candidate', 'genesisJsonSha256Hex', '92'.repeat(32)],
+    ['source-runtime digest', 'application', 'sourceRuntimeCodeSha256Hex', 'a2'.repeat(32)],
+  ] as const)(
+    'rejects in-place %s drift without consuming the next operation',
+    (_label, owner, field, changedValue) => {
+      const session = sessionV2();
+      try {
+        // Deliberately mutable boundary double: production statement codecs,
+        // receipt digests, signatures, and verification remain real.
+        const first = completeNativeOperation(session, 22, {
+          mutableSourceContext: true,
+        });
+        const retained = mocks.nativeSourceContexts.get(session)!;
+        const mutableContext = retained[owner] as Record<string, unknown>;
+        const originalValue = mutableContext[field];
+        expect(Reflect.set(mutableContext, field, changedValue)).toBe(true);
+
+        expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+          first.proof,
+          first.operation,
+          first.fixture.draft as never,
+        )).toThrow(/retained genesis or application changed|targets a different retained genesis or application/u);
+        expect(() => assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+          first.checkpoint,
+          first.operation,
+          first.proof,
+        )).toThrow(/retained genesis or application changed|targets a different retained genesis or application/u);
+
+        const operation =
+          createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+        const driftedFixture = nativeOperationInput(session, 23);
+        expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+          operation,
+          driftedFixture.input as never,
+        )).toThrow(/different retained genesis or application/u);
+
+        expect(Reflect.set(mutableContext, field, originalValue)).toBe(true);
+        const validFixture = nativeOperationInput(session, 24);
+        const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+          operation,
+          validFixture.input as never,
+        );
+        expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+          operation,
+          nativeCheckpointInput(proof, 24) as never,
+        )).not.toThrow();
+        operation.dispose();
+        first.operation.dispose();
+      } finally {
+        session.dispose();
+      }
+    },
+  );
+
+  it('rejects a foreign proof without consuming the current operation', () => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 3);
+      const secondFixture = nativeOperationInput(session, 4);
+      const secondOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        secondOperation,
+        nativeCheckpointInput(first.proof, 4) as never,
+      )).toThrow(/original operation mint proof provenance/u);
+      const secondProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        secondOperation,
+        secondFixture.input as never,
+      );
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        secondOperation,
+        nativeCheckpointInput(secondProof, 4) as never,
+      )).not.toThrow();
+      secondOperation.dispose();
+      first.operation.dispose();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('rejects a duplicate mint identity across operations without consuming the new slot', () => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 5);
+      const secondOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        secondOperation,
+        first.fixture.input as never,
+      )).toThrow(/mint identity is already bound/u);
+      const secondFixture = nativeOperationInput(session, 6);
+      const secondProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        secondOperation,
+        secondFixture.input as never,
+      );
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        secondOperation,
+        nativeCheckpointInput(secondProof, 6) as never,
+      )).not.toThrow();
+      secondOperation.dispose();
+      first.operation.dispose();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('separates unused, midway, and completed operation disposal', () => {
+    const completedSession = sessionV2();
+    try {
+      const completed = completeNativeOperation(completedSession, 7);
+      completed.operation.dispose();
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+        completed.proof,
+        completed.operation,
+        completed.fixture.draft as never,
+      )).toThrow(/operation is disposed/u);
+      const successor = completeNativeOperation(completedSession, 8);
+      successor.operation.dispose();
+    } finally {
+      completedSession.dispose();
+    }
+
+    const midwaySession = sessionV2();
+    const midwayFixture = nativeOperationInput(midwaySession, 9);
+    const midwayOperation =
+      createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(midwaySession);
+    const midwayProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+      midwayOperation,
+      midwayFixture.input as never,
+    );
+    midwayOperation.dispose();
+    expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+      midwayProof,
+      midwayOperation,
+      midwayFixture.draft as never,
+    )).toThrow(/session is disposed/u);
+    expect(() =>
+      createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(midwaySession)
+    ).toThrow(/session is disposed/u);
+  });
+
+  it.each(['signature', 'verification'] as const)(
+    'invalidates the parent after native mint %s failure',
+    fault => {
+      const session = sessionV2();
+      const fixture = nativeOperationInput(session, fault === 'signature' ? 10 : 11);
+      const operation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      if (fault === 'signature') mocks.failNextSignature = true;
+      else mocks.failNextVerification = true;
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        operation,
+        fixture.input as never,
+      )).toThrow(fault === 'signature' ? /injected.*failure/u : /signature/u);
+      expect(() =>
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session)
+      ).toThrow(/session is disposed/u);
+    },
+  );
+
+  it.each(['signature', 'verification'] as const)(
+    'invalidates the parent after native checkpoint %s failure',
+    fault => {
+      const session = sessionV2();
+      const first = completeNativeOperation(session, fault === 'signature' ? 18 : 20);
+      const fixture = nativeOperationInput(session, fault === 'signature' ? 19 : 21);
+      const operation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        operation,
+        fixture.input as never,
+      );
+      if (fault === 'signature') mocks.failNextSignature = true;
+      else mocks.failNextVerification = true;
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        operation,
+        nativeCheckpointInput(proof, fault === 'signature' ? 19 : 21) as never,
+      )).toThrow(fault === 'signature' ? /injected.*failure/u : /signature verification failed/u);
+      expect(() => assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+        proof,
+        operation,
+        fixture.draft as never,
+      )).toThrow(/session is disposed/u);
+      expect(() => assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      )).toThrow(/session is disposed/u);
+    },
+  );
+
+  it('selects legacy native authority only after a valid proof reaches signing', () => {
+    const session = sessionV2();
+    try {
+      const fixture = nativeOperationInput(session, 14);
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofV1(
+        session,
+        fixture.input as never,
+      )).not.toThrow();
+      expect(() =>
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session)
+      ).toThrow(/legacy one-shot authority/u);
+      expect(() => signLaunch(session)).toThrow(/already signed/u);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('keeps mint and checkpoint one-shot capabilities order-independent at session level', () => {
     const session = sessionV2();
     const target = signLaunch(session);
@@ -630,6 +1133,7 @@ function signLaunch(
     | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV1
     | SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
   >,
+  signStatement = true,
 ): any {
   const statementDigestHex = 'f1'.repeat(32);
   const checkpointProfile = buildSubstrateFederatedCheckpointProfileV1({
@@ -727,8 +1231,10 @@ function signLaunch(
       }),
     target,
   });
-  mocks.launchStatements.add(statement);
-  session.signLaunchStatement(statement as never);
+  if (signStatement) {
+    mocks.launchStatements.add(statement);
+    session.signLaunchStatement(statement as never);
+  }
   return target;
 }
 
@@ -744,7 +1250,13 @@ function checkpointInput() {
   });
 }
 
-function draftV2(target: any) {
+function draftV2(target: any, variant = 0) {
+  const variantHex = (base: number) => h32((base + variant).toString(16).padStart(2, '0'));
+  const sourceLockId = variant === 0 ? SOURCE_LOCK_ID : variantHex(0x12);
+  const transitionId = variant === 0 ? TRANSITION_ID : variantHex(0x13);
+  const commitment = variant === 0 ? COMMITMENT : variantHex(0x14);
+  const successorId = variant === 0 ? SUCCESSOR_ID : variantHex(0x15);
+  const successorDigest = variant === 0 ? SUCCESSOR_DIGEST : `0x01${(0x16 + variant).toString(16).padStart(2, '0').repeat(32)}`;
   const sourceIntentHex = encodePegInSourceIntentV2Hex({
     formatVersion: 2,
     sourceNetworkIdHex: target.sourceRuntime.sourceNetworkIdHex,
@@ -761,17 +1273,17 @@ function draftV2(target: any) {
     familyIdHex: target.profile.familyIdHex,
     familyCompiler: Object.freeze({ bindingDigestHex: h32('33') }),
     sourceIntentHex,
-    depositCommitmentHex: COMMITMENT,
+    depositCommitmentHex: commitment,
     reserve: Object.freeze({
-      outputDigestHex: SUCCESSOR_DIGEST,
+      outputDigestHex: successorDigest,
       outputLiabilityNanoErg: '10000000',
     }),
     transactions: Object.freeze({
-      reserveTransition: Object.freeze({ txId: TRANSITION_ID }),
+      reserveTransition: Object.freeze({ txId: transitionId }),
     }),
     boxes: Object.freeze({
-      sourceLock: Object.freeze({ boxId: SOURCE_LOCK_ID }),
-      reserveSuccessor: Object.freeze({ boxId: SUCCESSOR_ID }),
+      sourceLock: Object.freeze({ boxId: sourceLockId }),
+      reserveSuccessor: Object.freeze({ boxId: successorId }),
     }),
   });
   return buildSubstrateFederatedIsolatedDevnetPegInMintReservationDraftV1({
@@ -780,6 +1292,166 @@ function draftV2(target: any) {
     candidate: CANDIDATE as never,
     committedVaultObservation: OBSERVATION as never,
   });
+}
+
+/**
+ * Boundary-double fixture for operation lifetime only. Draft/context/evidence
+ * ownership is registered below; statement/profile codecs and signatures run
+ * through the production implementations.
+ */
+function nativeOperationInput(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  variant: number,
+  overrides: Readonly<{
+    cloneApplication?: boolean;
+    cloneCandidate?: boolean;
+    foreignTarget?: boolean;
+    genesisJsonSha256Hex?: string;
+    mutableSourceContext?: boolean;
+    sourceRuntimeCodeSha256Hex?: string;
+  }> = {},
+) {
+  const profileTarget = signLaunch(session, false);
+  const profiles = readSubstrateFederatedGenesisProfilesFromSessionV2(session);
+  const prefixed = (value: string) => value.startsWith('0x') ? value : `0x${value}`;
+  const unprefixed = (value: string) => value.replace(/^0x/, '');
+  const runtimeProfile = Object.freeze({
+    formatVersion: 4 as const,
+    lineageProfileIdHex: prefixed(profileTarget.profile.familyIdHex),
+    sourceNetworkIdHex: prefixed(profileTarget.sourceRuntime.sourceNetworkIdHex),
+    sidechainIdHex: prefixed(profileTarget.sourceRuntime.sidechainIdHex),
+    bridgeAddressHex: prefixed(profileTarget.sourceRuntime.bridgeAddressHex),
+    tokenAddressHex: prefixed(profileTarget.sourceRuntime.tokenAddressHex),
+    bridgeRuntimeCodeSha256Hex: prefixed(profileTarget.sourceRuntime.bridgeRuntimeCodeSha256Hex),
+    bridgeRuntimeCodeBytes: profileTarget.sourceRuntime.bridgeRuntimeCodeBytes,
+    tokenRuntimeCodeSha256Hex: prefixed(profileTarget.sourceRuntime.tokenRuntimeCodeSha256Hex),
+    tokenRuntimeCodeBytes: profileTarget.sourceRuntime.tokenRuntimeCodeBytes,
+    settlementProfileIdHex: prefixed(profileTarget.profile.settlementProfileIdHex),
+    ergoDepositFinalityPolicyIdHex:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
+    sourceProofSystemIdHex: session.binding.federatedMintProfile.proofSystemIdHex,
+    sourceProofProfileIdHex: session.binding.federatedMintProfile.proofProfileIdHex,
+    activationHeight: '0',
+    maxPendingBlocks: 64,
+  });
+  const runtimeProfileScaleHex =
+    encodePooledReserveMintReservationRuntimeProfileV4ScaleHex(runtimeProfile);
+  const runtimeProfileIdHex =
+    derivePooledReserveMintReservationRuntimeProfileV4IdHex(runtimeProfile);
+  const draft = draftV2(profileTarget, variant);
+  const batch = Object.freeze({ role: `native-operation-batch-${variant}` });
+  let target = mocks.nativeTargets.get(session);
+  if (target === undefined) {
+    target = Object.freeze({ role: 'native-operation-target' });
+    mocks.nativeTargets.set(session, target);
+  }
+  if (overrides.foreignTarget) {
+    target = Object.freeze({ role: 'foreign-native-operation-target' });
+  }
+  const packet = Object.freeze({ role: `native-operation-packet-${variant}` });
+  const committedVaultObservation = Object.freeze({
+    role: `native-operation-observation-${variant}`,
+  });
+  const draftInputs = Object.freeze({ batch, target, packet, committedVaultObservation });
+  mocks.nativeDraftInputs.set(draft, draftInputs);
+  let retainedSourceContext = mocks.nativeSourceContexts.get(session);
+  if (retainedSourceContext === undefined) {
+    const candidate = {
+      runtimeProfile,
+      runtimeProfileScaleHex,
+      runtimeProfileIdHex,
+      genesisJsonSha256Hex: '90'.repeat(32),
+    };
+    const application = {
+      sourceNetworkIdHex: unprefixed(runtimeProfile.sourceNetworkIdHex),
+      sidechainIdHex: unprefixed(runtimeProfile.sidechainIdHex),
+      bridgeAddressHex: unprefixed(runtimeProfile.bridgeAddressHex),
+      tokenAddressHex: unprefixed(runtimeProfile.tokenAddressHex),
+      bridgeRuntimeCodeSha256Hex: unprefixed(runtimeProfile.bridgeRuntimeCodeSha256Hex),
+      bridgeRuntimeCodeBytes: runtimeProfile.bridgeRuntimeCodeBytes,
+      tokenRuntimeCodeSha256Hex: unprefixed(runtimeProfile.tokenRuntimeCodeSha256Hex),
+      tokenRuntimeCodeBytes: runtimeProfile.tokenRuntimeCodeBytes,
+      sourceRuntimeCodeSha256Hex: 'a0'.repeat(32),
+      sourceRuntimeCodeBytes: 300,
+      runtimeProfileIdHex: unprefixed(runtimeProfileIdHex),
+      settlementProfileIdHex: unprefixed(runtimeProfile.settlementProfileIdHex),
+    };
+    retainedSourceContext = Object.freeze({
+      candidate: overrides.mutableSourceContext ? candidate : Object.freeze(candidate),
+      application: overrides.mutableSourceContext ? application : Object.freeze(application),
+    });
+    mocks.nativeSourceContexts.set(session, retainedSourceContext);
+  }
+  const candidate = overrides.cloneCandidate || overrides.genesisJsonSha256Hex
+    ? Object.freeze({
+      ...retainedSourceContext.candidate,
+      genesisJsonSha256Hex: overrides.genesisJsonSha256Hex
+        ?? retainedSourceContext.candidate.genesisJsonSha256Hex,
+    })
+    : retainedSourceContext.candidate;
+  const application = overrides.cloneApplication || overrides.sourceRuntimeCodeSha256Hex
+    ? Object.freeze({
+      ...retainedSourceContext.application,
+      sourceRuntimeCodeSha256Hex: overrides.sourceRuntimeCodeSha256Hex
+        ?? retainedSourceContext.application.sourceRuntimeCodeSha256Hex,
+    })
+    : retainedSourceContext.application;
+  const context = Object.freeze({
+    candidate,
+    checkpointProfile: profiles.checkpointProfile,
+    application,
+  });
+  mocks.nativeContexts.set(batch, Object.freeze({ target, context }));
+  const evidenceReceipt = Object.freeze({
+    receiptDigestHex: h32((0xb0 + variant).toString(16).padStart(2, '0')),
+  });
+  mocks.nativeEvidence.set(evidenceReceipt, Object.freeze({ draft, evidence: EVIDENCE }));
+  return Object.freeze({
+    draft,
+    input: Object.freeze({
+      draftInputs,
+      draft,
+      evidenceReceipt,
+      issuedAtNativeHeight: '0',
+      expiresAtNativeHeight: '32',
+    }),
+  });
+}
+
+function nativeCheckpointInput(proof: object, variant: number) {
+  const byte = (base: number) => h32((base + variant).toString(16).padStart(2, '0'));
+  return Object.freeze({
+    proof,
+    checkpoint: Object.freeze({
+      sourceNativeBlockHeight: String(4 + variant),
+      sourceNativeBlockHashHex: byte(0xc0),
+      executionBlockHashHex: byte(0xc4),
+      bridgeEventRootHex: byte(0xc8),
+      burnLeafCount: 1 + variant,
+      admissionValidFromErgoHeight: String(2000 + variant * 100),
+      admissionExpiresAtErgoHeight: String(2064 + variant * 100),
+    }),
+  });
+}
+
+function completeNativeOperation(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  variant: number,
+  overrides: Parameters<typeof nativeOperationInput>[2] = {},
+) {
+  const fixture = nativeOperationInput(session, variant, overrides);
+  const operation =
+    createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+  const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+    operation,
+    fixture.input as never,
+  );
+  const checkpoint =
+    produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+      operation,
+      nativeCheckpointInput(proof, variant) as never,
+    );
+  return Object.freeze({ fixture, operation, proof, checkpoint });
 }
 
 function draftV1(

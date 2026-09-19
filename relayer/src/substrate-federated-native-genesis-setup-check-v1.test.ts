@@ -108,6 +108,8 @@ import {
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 as createSourceSession,
   readSubstrateFederatedGenesisProfilesFromSessionV2 as readSourceProfiles,
   produceSubstrateFederatedNativeGenesisMintSourceProofV1 as produceNativeMintProof,
+  createSubstrateFederatedNativeGenesisSourceAttestationOperationV1 as createNativeSourceOperation,
+  produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1 as produceNativeOperationMintProof,
   produceSubstrateFederatedNativeGenesisCheckpointAttestationV1 as produceNativeCheckpoint,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationV1 as assertNativeCheckpoint,
   assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance as assertLegacyCheckpoint,
@@ -1664,13 +1666,15 @@ describe('native FED managed setup session', () => {
     'full burn', 'burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve',
     'after approval submission', 'after burn signing', 'checkpoint', 'checkpoint clone', 'checkpoint source disposal',
     'checkpoint setup disposal', 'checkpoint operator disposal', 'checkpoint frontier disposal', 'checkpoint runtime mismatch',
-    'checkpoint during storage disposal', 'checkpoint concurrent'])
+    'checkpoint during storage disposal', 'checkpoint concurrent', 'checkpoint operation', 'checkpoint operation disposal',
+    'checkpoint operation during storage disposal'])
     ('composes native reservation and mint from the retained reserve proof with %s', async defect => {
       const operator = mintOperator = createFederatedGenesisOperatorV1();
       if (defect !== 'recipient mismatch') nativeMintRecipient = operator.addressHex;
       await withNativeMintProof(async ({ source, proofInput }) => {
         const observed = reservationTarget(operator);
-        const proof = produceNativeMintProof(source, proofInput);
+        const operation = defect.startsWith('checkpoint operation') ? createNativeSourceOperation(source) : undefined;
+        const proof = operation ? produceNativeOperationMintProof(operation, proofInput) : produceNativeMintProof(source, proofInput);
         const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
         const digest = (bytes: Uint8Array) => `0x${Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')}`;
         const raw = (hex: string) => Buffer.from(hex.slice(2), 'hex');
@@ -1778,6 +1782,7 @@ describe('native FED managed setup session', () => {
           else if (method === 'state_getStorage') {
             const at = nativeBlocks.indexOf(params[1]), account = raw(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(at);
             if (checkpointCollection && defect === 'checkpoint during storage disposal' && params[0] === commitmentKey) source.dispose();
+            if (checkpointCollection && defect === 'checkpoint operation during storage disposal' && params[0] === commitmentKey) operation!.dispose();
             result = at === 4 && [commitmentKey, leavesKey, eventsKey].includes(params[0]) ? nativeCommitmentStorage()[params[0]]
               : params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
               : at >= 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
@@ -1828,7 +1833,8 @@ describe('native FED managed setup session', () => {
         }
         const directory = mkdtempSync(join(tmpdir(), 'bridge-native-composed-mint-'));
         try {
-          const input = { signing: { operator, sourceSession: source, draft: proofInput.draft, proof, compiled, target, ...observed.fields },
+          const input = { signing: { operator, ...(operation ? { sourceOperation: operation } : { sourceSession: source }),
+            draft: proofInput.draft, proof, compiled, target, ...observed.fields },
             attemptDirectory: directory, broadcastScope: 'fed-native-local-synthetic-reservation-and-mint-only' as const };
           if (defect === 'missing scope') (input as any).broadcastScope = 'fed-native-local-synthetic-reservation-only';
           if (burnCase) {
@@ -1855,10 +1861,11 @@ describe('native FED managed setup session', () => {
                 const checkpointInput = { execution: executionResult, admissionValidFromErgoHeight: '100', admissionExpiresAtErgoHeight: '120' };
                 if (defect === 'checkpoint clone') checkpointInput.execution = { ...executionResult };
                 if (defect === 'checkpoint source disposal') source.dispose();
+                if (defect === 'checkpoint operation disposal') operation!.dispose();
                 if (defect === 'checkpoint setup disposal') session.dispose();
                 if (defect === 'checkpoint operator disposal') disposeFederatedGenesisOperatorV1(operator);
                 if (defect === 'checkpoint frontier disposal') observed.dispose();
-                if (defect === 'checkpoint' || defect === 'checkpoint concurrent') {
+                if (defect === 'checkpoint' || defect === 'checkpoint concurrent' || defect === 'checkpoint operation') {
                   const pending = attestFrontierNativeBurnCheckpointV1(checkpointInput);
                   if (defect === 'checkpoint concurrent') await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/consumed/);
                   const result = await pending;
@@ -1873,7 +1880,8 @@ describe('native FED managed setup session', () => {
                   expect(result.ergoPayoutExecuted).toBe(false);
                   expect(() => assertFrontierNativeBurnCheckpointV1({ ...result })).toThrow(/provenance/);
                   await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/consumed/);
-                  source.dispose();
+                  if (operation) operation.dispose();
+                  else source.dispose();
                   expect(() => assertFrontierNativeBurnCheckpointV1(result)).toThrow(/disposed/);
                 } else await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/provenance|disposed|inactive|commitment/);
               }
@@ -1896,7 +1904,36 @@ describe('native FED managed setup session', () => {
           if (['chain mismatch', 'recipient mismatch', 'missing scope', 'after mint signing'].includes(defect)) expect(mintSubmitted).toBe(false);
           if (defect === 'after mint submission') expect(height).toBe(1);
           if (defect === 'none') expect(readdirSync(directory).sort()).toEqual(['native-mint-attempt.json', 'native-reservation-attempt.json']);
-        } finally { rmSync(directory, { recursive: true, force: true }); }
+        } finally { operation?.dispose(); rmSync(directory, { recursive: true, force: true }); }
+      });
+    });
+
+  it.each(['clone', 'foreign operation', 'disposed operation', 'disposed parent', 'legacy authority', 'both authorities', 'accessor'])
+    ('rejects operation-scoped native signing with %s before RPC or signing', async fault => {
+      await withNativeMintProof(async ({ source, proofInput }) => {
+        const operator = createFederatedGenesisOperatorV1();
+        const observed = reservationTarget(operator);
+        const operation = createNativeSourceOperation(source);
+        let foreign: ReturnType<typeof createSourceSession> | undefined;
+        try {
+          const proof = produceNativeOperationMintProof(operation, proofInput);
+          const changed: any = { operator, sourceOperation: operation, draft: proofInput.draft, proof, compiled, target,
+            ...observed.fields };
+          const getter = vi.fn(() => operation);
+          if (fault === 'clone') changed.sourceOperation = { ...operation };
+          if (fault === 'foreign operation') {
+            foreign = createSourceSession({ ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [session.signer.publicKeyHex] });
+            changed.sourceOperation = createNativeSourceOperation(foreign);
+          }
+          if (fault === 'disposed operation') operation.dispose();
+          if (fault === 'disposed parent') source.dispose();
+          if (fault === 'legacy authority') { delete changed.sourceOperation; changed.sourceSession = source; }
+          if (fault === 'both authorities') changed.sourceSession = source;
+          if (fault === 'accessor') Object.defineProperty(changed, 'sourceOperation', { enumerable: true, get: getter });
+          const sign = vi.spyOn(SigningKey.prototype, 'sign');
+          await expect(signFrontierNativeProofBoundReservationV1(changed)).rejects.toThrow(/provenance|operation|disposed|own-data/);
+          expect(sign).not.toHaveBeenCalled(); expect(observed.fetcher).not.toHaveBeenCalled(); expect(getter).not.toHaveBeenCalled();
+        } finally { operation.dispose(); foreign?.dispose(); disposeFederatedGenesisOperatorV1(operator); }
       });
     });
 
@@ -2034,7 +2071,7 @@ describe('native FED managed setup session', () => {
         if (fault === 'source system') profile.sourceProofSystemIdHex = `0x${'fe'.repeat(32)}`;
         Object.assign(compiled, { candidate: { ...original, runtimeProfileScaleHex: encodeRuntimeProfile(profile),
           runtimeProfileIdHex: fault === 'profile ID' ? `0x${'fe'.repeat(32)}` : runtimeProfileId(profile) } });
-        if (fault === 'checkpoint federation') Object.assign(compiled, { preparation: {
+        if (fault === 'checkpoint federation') Object.assign(compiled, { preparation: { ...originalPreparation,
           checkpointProfile: { ...originalPreparation.checkpointProfile, ergoAdmissionThreshold: 2 } } });
         expect(() => produceNativeMintProof(source, proofInput)).toThrow(/height-zero federation profile/);
         Object.assign(compiled, { candidate: original, preparation: originalPreparation });

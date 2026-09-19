@@ -123,11 +123,20 @@ const V2_GENESIS_PROFILES = new WeakMap<object, () => Readonly<{
 const MINT_SOURCE_PROOF_RECEIPTS = new WeakSet<object>();
 const MINT_SOURCE_PROOF_V2_RECEIPTS = new WeakSet<object>();
 const NATIVE_MINT_PROOF_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_MINT_SOURCE_PROOF_V1';
+const NATIVE_OPERATION_FACTORIES = new WeakMap<object, () => Readonly<
+  SubstrateFederatedNativeGenesisSourceAttestationOperationV1
+>>();
+const NATIVE_OPERATIONS = new WeakMap<object, Readonly<{
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  assertCurrent: () => void;
+}>>();
 const NATIVE_MINT_PRODUCERS = new WeakMap<object, (
   input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input>,
 ) => Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>>();
 const NATIVE_MINT_RECEIPTS = new WeakMap<object, Readonly<{
   session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+  explicit: boolean;
   draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
   assertCurrent: () => void;
   context: () => ReturnType<typeof getSubstrateFederatedNativeGenesisAttestationContextV1>;
@@ -138,6 +147,8 @@ const NATIVE_CHECKPOINT_PRODUCERS = new WeakMap<object, (
 ) => Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1>>();
 const NATIVE_CHECKPOINT_RECEIPTS = new WeakMap<object, Readonly<{
   session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+  explicit: boolean;
   proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>;
   assertCurrent: () => void;
 }>>();
@@ -235,6 +246,14 @@ export interface SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 {
   ) => Readonly<
     SubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1
   >;
+  readonly dispose: () => void;
+}
+
+/**
+ * Opaque authority for one native mint-proof -> checkpoint operation under a
+ * retained V2 federation session. It contains no portable signing material.
+ */
+export interface SubstrateFederatedNativeGenesisSourceAttestationOperationV1 {
   readonly dispose: () => void;
 }
 
@@ -886,6 +905,55 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       | SubstrateFederatedIsolatedDevnetTargetDescriptorV2> | undefined;
   let mintProofProduced = false;
   let checkpointAttestationProduced = false;
+  let nativeOperationMode: 'unselected' | 'legacy' | 'explicit' = 'unselected';
+  let activeExplicitNativeOperation:
+    Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
+  let legacyNativeOperation:
+    Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
+  const producedNativeMintIdentities = new Set<string>();
+  let retainedNativeTarget: object | undefined;
+  let retainedNativeCandidate: object | undefined;
+  let retainedNativeApplication: object | undefined;
+  let retainedNativeCandidateDigestHex: string | undefined;
+  let retainedNativeApplicationDigestHex: string | undefined;
+  const assertNativeContextMatchesParent = (
+    target: object,
+    candidate: object,
+    application: object,
+    candidateDigestHex: string,
+    applicationDigestHex: string,
+  ): void => {
+    if (retainedNativeTarget !== undefined
+      && (target !== retainedNativeTarget
+        || candidate !== retainedNativeCandidate
+        || application !== retainedNativeApplication
+        || candidateDigestHex !== retainedNativeCandidateDigestHex
+        || applicationDigestHex !== retainedNativeApplicationDigestHex)) {
+      throw new Error('native source-attestation operation targets a different retained genesis or application');
+    }
+  };
+  const retainNativeContext = (
+    target: object,
+    candidate: object,
+    application: object,
+    candidateDigestHex: string,
+    applicationDigestHex: string,
+  ): void => {
+    assertNativeContextMatchesParent(
+      target,
+      candidate,
+      application,
+      candidateDigestHex,
+      applicationDigestHex,
+    );
+    if (retainedNativeTarget === undefined) {
+      retainedNativeTarget = target;
+      retainedNativeCandidate = candidate;
+      retainedNativeApplication = application;
+      retainedNativeCandidateDigestHex = candidateDigestHex;
+      retainedNativeApplicationDigestHex = applicationDigestHex;
+    }
+  };
   const session = Object.freeze({
     binding,
     signLaunchStatement: (
@@ -895,7 +963,8 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
       >,
     ) => {
       assertOpen(state);
-      if (launchSigningStarted || nativeMintSigningStarted) {
+      if (launchSigningStarted || nativeMintSigningStarted
+        || nativeOperationMode !== 'unselected') {
         throw new Error('isolated-devnet launch attestation is already signed');
       }
       assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance(statement);
@@ -1372,8 +1441,52 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     }
     return Object.freeze({ checkpointProfile, mintProofProfile: mintProfileInput });
   });
-  NATIVE_MINT_PRODUCERS.set(session, input => {
-    assertOpen(state);
+  const invalidateParentCustody = (): void => {
+    signers = [];
+    signedTarget = undefined;
+    activeExplicitNativeOperation = undefined;
+    state = 'disposed';
+  };
+  const registerNativeOperation = (
+    explicit: boolean,
+  ): Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> => {
+    let operationState: 'open' | 'completed' | 'disposed' = 'open';
+    let mintProofProduced = false;
+    let checkpointAttestationProduced = false;
+    let operation!:
+      Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+    const assertOperationCurrent = (): void => {
+      assertOpen(state);
+      if (operationState === 'disposed') {
+        throw new Error('native source-attestation operation is disposed');
+      }
+    };
+    const completeOperation = (): void => {
+      operationState = 'completed';
+      if (explicit && activeExplicitNativeOperation === operation) {
+        activeExplicitNativeOperation = undefined;
+      }
+    };
+    operation = Object.freeze({
+      dispose: () => {
+        if (operationState === 'disposed') return;
+        if (operationState === 'open' && mintProofProduced) {
+          operationState = 'disposed';
+          invalidateParentCustody();
+          return;
+        }
+        operationState = 'disposed';
+        if (explicit && activeExplicitNativeOperation === operation) {
+          activeExplicitNativeOperation = undefined;
+        }
+      },
+    });
+    NATIVE_OPERATIONS.set(operation, Object.freeze({
+      session,
+      assertCurrent: assertOperationCurrent,
+    }));
+    NATIVE_MINT_PRODUCERS.set(operation, input => {
+      assertOperationCurrent();
     if (launchSigningStarted) throw new Error('native mint proof cannot use a LAB launch session');
     if (mintProofProduced) throw new Error('native mint source-proof capability is already consumed');
     exactRecord(input, ['draftInputs', 'draft', 'evidenceReceipt', 'issuedAtNativeHeight', 'expiresAtNativeHeight'],
@@ -1382,8 +1495,13 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(input.draft, input.draftInputs);
     input = Object.freeze({ ...input, draftInputs: Object.freeze({ ...input.draftInputs }) });
     const { draft, draftInputs, evidenceReceipt } = input;
+    if (producedNativeMintIdentities.has(draft.reservationKeyHex)) {
+      throw new Error('native mint identity is already bound to another source-attestation operation');
+    }
     const context = getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target);
     const candidate = context.candidate;
+    const candidateDigestHex = sha256CanonicalJson(candidate);
+    const applicationDigestHex = sha256CanonicalJson(context.application);
     const runtimeProfile = decodePooledReserveMintReservationRuntimeProfileV4ScaleHex(candidate.runtimeProfileScaleHex);
     const runtimeProfileIdHex = derivePooledReserveMintReservationRuntimeProfileV4IdHex(runtimeProfile);
     if (runtimeProfile.activationHeight !== '0'
@@ -1398,17 +1516,46 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     assertMintSourceProofWindow(issued, expires, 0n, BigInt(runtimeProfile.maxPendingBlocks),
       BigInt(federatedMintProfile.maxValidityBlocks));
     const assertCurrent = () => {
-      assertOpen(state);
+      assertOperationCurrent();
       assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draft, draftInputs);
       const current = getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target);
       if (current.candidate !== candidate
+        || current.application !== context.application
+        || sha256CanonicalJson(current.application) !== applicationDigestHex
         || sha256CanonicalJson(current.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
-        throw new Error('native mint proof retained genesis changed');
+        throw new Error('native mint proof retained genesis or application changed');
       }
+      assertNativeContextMatchesParent(
+        draftInputs.target,
+        current.candidate,
+        current.application,
+        sha256CanonicalJson(current.candidate),
+        sha256CanonicalJson(current.application),
+      );
     };
-    // The native and LAB mint routes share one signing budget, but not a launch identity.
+    // Selecting native signing excludes the LAB launch route under this parent;
+    // explicit native operations then receive separate one-shot slots.
+    if (producedNativeMintIdentities.has(draft.reservationKeyHex)) {
+      throw new Error('native mint identity is already bound to another source-attestation operation');
+    }
+    assertCurrent();
+    retainNativeContext(
+      draftInputs.target,
+      candidate,
+      context.application,
+      candidateDigestHex,
+      applicationDigestHex,
+    );
+    assertCurrent();
+    if (!explicit) {
+      if (nativeOperationMode === 'explicit') {
+        throw new Error('native source-attestation session is bound to explicit operations');
+      }
+      nativeOperationMode = 'legacy';
+    }
     nativeMintSigningStarted = true;
     mintProofProduced = true;
+    producedNativeMintIdentities.add(draft.reservationKeyHex);
     try {
       const evidence = consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1(evidenceReceipt, draft);
       const request = deepFreeze({ runtimeProfile, statementHex: draft.statementHex,
@@ -1454,18 +1601,17 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         boundary: mintSourceProofBoundaryV2(),
       });
       const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_MINT_PROOF_DOMAIN) });
-      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, draft, assertCurrent,
+      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, operation, explicit, draft, assertCurrent,
         context: () => { assertCurrent(); return getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target); } }));
       return receipt;
     } catch (error) {
-      signers = [];
-      state = 'disposed';
+      invalidateParentCustody();
       throw error;
     }
   });
-  NATIVE_CHECKPOINT_PRODUCERS.set(session, input => {
+  NATIVE_CHECKPOINT_PRODUCERS.set(operation, input => {
     const assertAvailable = () => {
-      assertOpen(state);
+      assertOperationCurrent();
       if (launchSigningStarted) throw new Error('native checkpoint cannot use a LAB launch session');
       if (checkpointAttestationProduced) throw new Error('native checkpoint-attestation capability is already consumed');
     };
@@ -1474,7 +1620,9 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     if (Reflect.ownKeys(input).length !== 2) throw new Error('native checkpoint requires exact own-data fields');
     const { proof } = input;
     const retained = NATIVE_MINT_RECEIPTS.get(proof);
-    if (!retained || retained.session !== session) throw new Error('native checkpoint requires the original session mint proof provenance');
+    if (!retained || retained.session !== session || retained.operation !== operation) {
+      throw new Error('native checkpoint requires the original operation mint proof provenance');
+    }
     const fields = ['sourceNativeBlockHeight', 'sourceNativeBlockHashHex', 'executionBlockHashHex',
       'bridgeEventRootHex', 'burnLeafCount', 'admissionValidFromErgoHeight', 'admissionExpiresAtErgoHeight'];
     const raw = exactRecord(input.checkpoint, fields, 'native checkpoint fields');
@@ -1484,7 +1632,19 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     const app = context.application;
     const appDigest = sha256CanonicalJson(app);
     const assertCurrent = () => {
-      assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(proof, session, retained.draft);
+      if (explicit) {
+        assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+          proof,
+          operation,
+          retained.draft,
+        );
+      } else {
+        assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(
+          proof,
+          session,
+          retained.draft,
+        );
+      }
       const current = retained.context();
       if (current.candidate !== context.candidate || sha256CanonicalJson(current.application) !== appDigest
         || sha256CanonicalJson(current.checkpointProfile) !== sha256CanonicalJson(checkpointProfile)) {
@@ -1527,15 +1687,141 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         signatureSetDigestHex: sha256CanonicalJson(signatures, CHECKPOINT_ATTESTATION_SIGNATURE_SET_DIGEST_DOMAIN),
         sourceFinalityEstablished: false as const, ergoPayoutAuthorized: false as const, trustless: false as const });
       const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_CHECKPOINT_DOMAIN) });
-      NATIVE_CHECKPOINT_RECEIPTS.set(receipt, Object.freeze({ session, proof, assertCurrent }));
+      NATIVE_CHECKPOINT_RECEIPTS.set(receipt, Object.freeze({ session, operation, explicit, proof, assertCurrent }));
+      completeOperation();
       return receipt;
     } catch (error) {
-      signers = [];
-      state = 'disposed';
+      invalidateParentCustody();
       throw error;
     }
   });
+    return operation;
+  };
+  const claimLegacyNativeOperation = () => {
+    assertOpen(state);
+    if (nativeOperationMode === 'explicit') {
+      throw new Error('native source-attestation session is bound to explicit operations');
+    }
+    legacyNativeOperation ??= registerNativeOperation(false);
+    return legacyNativeOperation;
+  };
+  NATIVE_MINT_PRODUCERS.set(session, input =>
+    NATIVE_MINT_PRODUCERS.get(claimLegacyNativeOperation())!(input));
+  NATIVE_CHECKPOINT_PRODUCERS.set(session, input =>
+    NATIVE_CHECKPOINT_PRODUCERS.get(claimLegacyNativeOperation())!(input));
+  NATIVE_OPERATION_FACTORIES.set(session, () => {
+    assertOpen(state);
+    if (launchSigningStarted) {
+      throw new Error('native source-attestation operation cannot use a LAB launch session');
+    }
+    if (nativeOperationMode === 'legacy') {
+      throw new Error('native source-attestation session is bound to legacy one-shot authority');
+    }
+    if (activeExplicitNativeOperation !== undefined) {
+      throw new Error('native source-attestation operation is already active');
+    }
+    nativeOperationMode = 'explicit';
+    const operation = registerNativeOperation(true);
+    activeExplicitNativeOperation = operation;
+    return operation;
+  });
   return session;
+}
+
+export function createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+): Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> {
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(session);
+  return NATIVE_OPERATION_FACTORIES.get(session)!();
+}
+
+export function assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+): void {
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(session);
+  const retained = getNativeGenesisSourceAttestationOperationV1(operation);
+  if (retained.session !== session) {
+    throw new Error('native source-attestation operation belongs to a different parent session');
+  }
+  retained.assertCurrent();
+}
+
+export function produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input>,
+): Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1> {
+  const retained = getNativeGenesisSourceAttestationOperationV1(operation);
+  retained.assertCurrent();
+  return NATIVE_MINT_PRODUCERS.get(operation)!(input);
+}
+
+export function assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+  value: unknown,
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>,
+): asserts value is Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1> {
+  const owner = getNativeGenesisSourceAttestationOperationV1(operation);
+  const retained = value !== null && typeof value === 'object'
+    ? NATIVE_MINT_RECEIPTS.get(value)
+    : undefined;
+  if (retained === undefined || !retained.explicit
+    || retained.session !== owner.session || retained.operation !== operation
+    || retained.draft !== draft) {
+    throw new Error('native mint proof lacks exact operation/draft provenance');
+  }
+  retained.assertCurrent();
+  const { receiptDigestHex, ...body } = value as Readonly<
+    SubstrateFederatedNativeGenesisMintSourceProofReceiptV1
+  >;
+  if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_MINT_PROOF_DOMAIN)) {
+    throw new Error('native mint proof receipt digest changed');
+  }
+}
+
+export function produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  input: Readonly<ProduceSubstrateFederatedNativeGenesisCheckpointAttestationV1Input>,
+): Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1> {
+  const retained = getNativeGenesisSourceAttestationOperationV1(operation);
+  retained.assertCurrent();
+  return NATIVE_CHECKPOINT_PRODUCERS.get(operation)!(input);
+}
+
+export function assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+  receipt: unknown,
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>,
+): asserts receipt is Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1> {
+  const owner = getNativeGenesisSourceAttestationOperationV1(operation);
+  const retained = receipt !== null && typeof receipt === 'object'
+    ? NATIVE_CHECKPOINT_RECEIPTS.get(receipt)
+    : undefined;
+  if (!retained || !retained.explicit || retained.session !== owner.session
+    || retained.operation !== operation || retained.proof !== proof) {
+    throw new Error('native checkpoint lacks exact operation provenance');
+  }
+  retained.assertCurrent();
+  const { receiptDigestHex, ...body } = receipt as
+    SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1;
+  if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_CHECKPOINT_DOMAIN)) {
+    throw new Error('native checkpoint receipt digest changed');
+  }
+}
+
+function getNativeGenesisSourceAttestationOperationV1(
+  operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+): Readonly<{
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  assertCurrent: () => void;
+}> {
+  const retained = operation !== null && typeof operation === 'object'
+    ? NATIVE_OPERATIONS.get(operation)
+    : undefined;
+  if (retained === undefined) {
+    throw new Error('native source-attestation operation lacks exact provenance');
+  }
+  return retained;
 }
 
 /** Synthetic quorum decision; the composition separately binds observed burn fields. */
@@ -1553,7 +1839,10 @@ export function assertSubstrateFederatedNativeGenesisCheckpointAttestationV1(
   proof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>,
 ): asserts receipt is Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1> {
   const retained = receipt !== null && typeof receipt === 'object' ? NATIVE_CHECKPOINT_RECEIPTS.get(receipt) : undefined;
-  if (!retained || retained.session !== session || retained.proof !== proof) throw new Error('native checkpoint lacks exact provenance');
+  if (!retained || retained.explicit || retained.session !== session
+    || retained.proof !== proof) {
+    throw new Error('native checkpoint lacks exact provenance');
+  }
   retained.assertCurrent();
   const { receiptDigestHex, ...body } = receipt as SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1;
   if (receiptDigestHex !== sha256CanonicalJson(body, NATIVE_CHECKPOINT_DOMAIN)) throw new Error('native checkpoint receipt digest changed');
@@ -1573,7 +1862,8 @@ export function assertSubstrateFederatedNativeGenesisMintSourceProofReceiptV1(
   draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>,
 ): asserts value is Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1> {
   const retained = value !== null && typeof value === 'object' ? NATIVE_MINT_RECEIPTS.get(value) : undefined;
-  if (retained === undefined || retained.session !== session || retained.draft !== draft) {
+  if (retained === undefined || retained.explicit || retained.session !== session
+    || retained.draft !== draft) {
     throw new Error('native mint proof lacks exact session/draft provenance');
   }
   retained.assertCurrent();
