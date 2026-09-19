@@ -122,3 +122,48 @@ quorums or authorization rules. Its due closure is the documentation claim/link
 checks, exact diff review and publication guards. Existing runtime, build and
 CI evidence keeps its original input scope; a documentation review does not
 justify replaying those expensive gates.
+
+## September 19 follow-up: bound the next decision
+
+The repository remained at `914c52016d67e8de1745aaea41292f3ab06cf794` with
+unchanged plan/process fingerprints before this review. The adaptive direction,
+greenfield selection and FED/STARK separation remain appropriate. Existing
+runtime validation was reused, not replayed. The following refinements affect
+planning scope, not protocol correctness or release status.
+
+The next successor batch crosses an operation-authority boundary, not only a
+state-flow boundary. The
+[source-attestation session](../relayer/src/substrate-federated-isolated-devnet-source-attestation-session-v1.ts)
+rejects a second native mint proof or checkpoint. The
+[setup runner](../relayer/src/substrate-federated-isolated-devnet-setup-check-runner-v2.ts)
+closes signing custody after the native withdrawal check. The
+[operator](../relayer/src/adapters/federated-genesis-operator-v1.ts) binds the
+first approval/burn to nonces and parent heights two and three. These checks
+are intentional one-shot boundaries. Retaining successor box IDs alone cannot
+make that same consumer process another cycle. Define separately scoped
+operation authority without resetting consumed handles or reviving destroyed
+custody, and test that boundary before broad composition. This source finding
+does not demonstrate an exploit or justify relaxing existing predicates.
+
+The two open decisions need finite outputs. Record the exact environment and
+its evidence limits, then map the intended FED claims to their actual evidence
+consumers and smallest adaptations. A chosen environment is not a compatibility
+proof. A fresh sidechain also does not imply a new Ergo settlement network;
+miner integration and validator compatibility need separate treatment. Any
+unresolved question must identify the work it blocks and one bounded deciding
+check. A complete release-validator implementation is not a prerequisite for
+independent successor work.
+
+A bounded independent plan review reached the same dependency and acceptance
+concerns. The queue now names the initial source set and stopping conditions
+for each decision, includes operation authority in successor acceptance, and
+defines the external integrator's observable journey. Requiring undocumented
+maintainer assistance leaves repository-only reproduction open; a local
+reproduction still does not establish independent operator custody.
+
+Likewise, the next live discriminator needs a minimal documented invocation,
+not a finished operator package. The package and external reproduction remain
+delivery obligations. Keep the next full run wholly fresh and distinguishing;
+do not repeat the first-cycle campaign or reopen a terminal attempt. Continue
+from these refinements without another broad roadmap rewrite. The historical
+detail already marked as reference need not be reread to select the next lot.

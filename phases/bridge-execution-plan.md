@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-15
+Updated: 2026-09-19
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -14,7 +14,8 @@ The first delivery targets a **new greenfield sidechain**. Read Current Focus,
 Delivery Contract, Critical Path and Next Executable Batches for current work; the
 completed implementation and reference checkpoints below retain scoped
 historical evidence. The [September 15 plan review](../docs/plan-review-2026-09-15.md)
-explains the revised sequence and is not a second execution queue.
+and its September 19 follow-up explain the revised sequence and are not a
+second execution queue.
 
 The [execution history](bridge-execution-history-2026-09-05.md) retains the
 previous package specifications, decisions and checkpoint records. Its old
@@ -34,10 +35,42 @@ consumers, required adaptations and their deciding checks. If a source
 inspection cannot decide a question, select one bounded discriminating check;
 do not turn it into an unrestricted investigation or a stronger support claim.
 
+This decision batch ends with two concise records here or in the task handoff:
+the exact selected environment/pins and its demonstrated versus intended
+support; and the FED claims mapped to named evidence producers/validators,
+including the smallest required adaptations. Each unresolved item names its
+consumer impact, one deciding check and a stop condition. Selection does not
+establish compatibility. Distinguish the fresh sidechain from the Ergo
+settlement network and distinguish miner integration from validator support.
+Do not implement the whole release-gate adaptation or prove every future
+environment before starting independent successor work. Block only the work
+whose deciding input is actually unresolved.
+
+Start with the existing native FED profile and pinned local build recipe;
+compare another route only if a named incompatibility makes that necessary.
+The decision records own this plan and the existing task handoff, not runtime
+changes. Their bounded read scope and completion conditions are:
+
+| Open decision | Initial sources / consumer | Stop condition |
+|---|---|---|
+| Environment | Consensus source lock, source-baseline documentation and native target root | Record exact selected pins, settlement-network and miner requirements, observed versus intended support, and any blocking dependency. Each unestablished compatibility claim retains one bounded falsifier; selecting pins alone does not close it |
+| FED acceptance | Existing release gate, checklist and native lifecycle receipt producers | Map each intended FED claim to the deciding consumer, its accepted discriminator and the smallest adaptation. Stop at that map; implement a gate change only when its consumer becomes due |
+
 **Next candidate:** consume the first cycle's reserve/DUP/tracker successors
-in a second normal cycle. Reassess the smallest useful join after the two
-decisions above; prepare the operator invocation alongside it only where the
+in a second normal cycle. A focused component join can use the pinned local
+profile while unrelated release mapping remains open. Reassess the smallest
+useful join as the deciding evidence arrives; prepare the invocation where the
 work is independent and serves the same delivery result.
+
+First resolve the operation-lifetime boundary inside that candidate. The
+current source session permits only one mint proof and checkpoint, the setup
+signer closes after the withdrawal check, and the operator binds the first
+approval/burn nonces and parents. A second cycle needs separately scoped
+operation authority under the selected federation/profile as well as observed
+successor state. Do not clear consumed flags, reopen a closed signer, recreate
+destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
+validate the new operation boundary with focused duplicate, disposed-custody,
+foreign-operation and wrong-parent negatives before composing another cycle.
 
 **Replan when:** a batch closes, a deciding assumption fails, or a dependency
 changes. Record what was learned and why the next result changed. Preserve the
@@ -304,9 +337,12 @@ target is explicitly selected. Their formats and safety obligations remain
 binding on that route. Cross-profile rejection, durable input holds and global
 replay isolation remain required for greenfield operation.
 
-Campaign 23 supplies the first local roundtrip baseline. The current dependency
-hypothesis is: resolve acceptance/environment questions, connect normal
-successor use, then exercise recovery on accumulated state. Operator packaging
+Campaign 23 supplies the first local roundtrip baseline. Resolve environment
+compatibility before claiming it or relying on it in a target rehearsal; map
+FED evidence consumers before producing their final release evidence. These
+decisions do not block independent component work against the pinned local
+profile. Connect normal successor use, then exercise recovery on accumulated
+state. Operator packaging
 and reviewer preparation can proceed alongside independent implementation.
 Adapt the batch sequence when evidence changes that hypothesis. FED-7 still
 requires all applicable lifecycle, recovery, reproducibility, custody and
@@ -321,7 +357,10 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
 Campaigns through 23 are terminal. The next full local campaign must exercise
-the changed successor consumer through the reusable invocation. Add ready
+the changed successor consumer through a minimal documented and reproducible
+invocation. A finished operator package is not a prerequisite for this
+deciding run; private historical campaign scripts or custody are not reusable
+inputs. Add ready
 recovery cases when they share that evidence closure; do not wait for the
 entire recovery matrix when a live second-cycle result decides further work.
 Create a fresh chain and custody, perform both cycles there, and never resume
@@ -340,14 +379,20 @@ existing task handoff.
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
-| Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation | Focused composed positives and isolated replay, foreign-profile, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
+| Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation, with separately scoped operation authority, custody lifetime, nonce and parent binding | Focused composed positives and isolated replay, disposed-handle, foreign-operation/profile, wrong-parent, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
 | Reproducible operator delivery | A fresh external context can use repository instructions and the packaged entry point without campaign-specific maintainer scripts | Separate-root exact source/tool/runtime checks, then one distinguishing packaged lifecycle/recovery rehearsal. Reuse the historical campaign only as evidence, never as an execution session |
 | FED-7 decision | Exact evidence reaches the proper release consumer, with due independent review and current promotion checks | Reuse unchanged gates. Keep public research availability, reference support, independent custody and production claims distinct |
 
 Prepare the operator entry point and reviewer onboarding alongside successor
 work where file ownership is disjoint. Packaging is complete only after it
-consumes the working lifecycle and recovery path. Measure the selected path's
+consumes the working lifecycle and recovery path. External acceptance must name
+an integrator using only repository instructions and declared public
+prerequisites, a fresh greenfield setup, two confirmed cycles from successor
+state, one declared recovery exercise and complete teardown. Record actual
+assistance and results; required undocumented maintainer steps leave repository-
+only reproduction open. Local actors still do not establish independent custody.
+Measure the selected path's
 transaction sizes, fees, confirmation latency and resource requirements for
 its documented limits. Broader batching, sharded lanes and comparative scaling
 remain later milestones of the ultimate objective, reopened after the
