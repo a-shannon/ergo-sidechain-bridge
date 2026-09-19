@@ -253,6 +253,7 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
     'collectFederatedNativeBurnCommitmentV1',
     'observeFederatedNativeContinuationParentV1', 'reobserveFederatedNativeContinuationParentV1',
     'reserveFederatedNativeContinuationReservationAttemptV1', 'FederatedNativeContinuationParentV1',
+    'observeFederatedNativeContinuationMintParentV1', 'observeFederatedNativeContinuationWithdrawalParentV1',
   ])],
   ['../../adapters/federated-genesis-target-observation-v1.js', new Set(['observeFederatedGenesisReservationTargetV1'])],
   ...[...REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS].map(
@@ -262,6 +263,7 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
     'assertFederatedGenesisOperatorV1', 'signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'FederatedGenesisOperatorV1',
     'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1',
     'signFederatedGenesisContinuationReservationV1',
+    'signFederatedGenesisContinuationMintV1', 'signFederatedGenesisContinuationApproveV1', 'signFederatedGenesisContinuationBurnV1',
   ])],
 ]);
 
@@ -372,6 +374,7 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
   ])],
   ['./frontier-native-proof-bound-reservation-signing-v1.js', new Set([
     'executeFrontierNativeProofBoundReservationMintAndBurnV1', 'attestFrontierNativeBurnCheckpointV1', 'assertFrontierNativeBurnCheckpointV1',
+    'executeFrontierNativeProofBoundContinuationReservationV1', 'executeFrontierNativeProofBoundContinuationMintAndBurnV1',
   ])],
   ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys', 'canonicalJson'])],
   ['node:crypto', new Set(['createHash'])],
@@ -1583,6 +1586,7 @@ const REVIEWED_APP_PUBLIC_EXPORT_BINDINGS: ReadonlyMap<
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([
     'signFrontierNativeProofBoundReservationV1', 'executeFrontierNativeProofBoundReservationV1',
     'executeFrontierNativeProofBoundContinuationReservationV1',
+    'executeFrontierNativeProofBoundContinuationMintAndBurnV1',
     'executeFrontierNativeProofBoundReservationAndMintV1',
     'executeFrontierNativeProofBoundReservationMintAndBurnV1',
     'attestFrontierNativeBurnCheckpointV1', 'assertFrontierNativeBurnCheckpointV1',
@@ -1834,6 +1838,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['disposeFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['signFederatedGenesisReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisContinuationReservationV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisContinuationMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisContinuationApproveV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['signFederatedGenesisContinuationBurnV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisMintV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisApproveV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['signFederatedGenesisBurnV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -1842,6 +1849,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['signFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundContinuationReservationV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
+    ['executeFrontierNativeProofBoundContinuationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationAndMintV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['executeFrontierNativeProofBoundReservationMintAndBurnV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['attestFrontierNativeBurnCheckpointV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
@@ -1849,6 +1857,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   ])],
   [FEDERATED_NATIVE_RESERVATION_EXECUTION, new Map([
     ['assertFederatedNativeContinuationParentV1', new Set([FEDERATED_GENESIS_OPERATOR])],
+    ['assertFederatedNativeContinuationStepParentV1', new Set([FEDERATED_GENESIS_OPERATOR])],
+    ['observeFederatedNativeContinuationMintParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
+    ['observeFederatedNativeContinuationWithdrawalParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['observeFederatedNativeContinuationParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['reobserveFederatedNativeContinuationParentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
     ['reserveFederatedNativeContinuationReservationAttemptV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],

@@ -67,7 +67,7 @@ import * as feeAuthority from './substrate-federated-isolated-devnet-tracker-fee
 import * as checkedTransport from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import * as compiledGenesis from './substrate-federated-observed-genesis-v1.js';
 import { executeFrontierNativeProofBoundReservationAndMintV1, executeFrontierNativeProofBoundReservationMintAndBurnV1,
-  executeFrontierNativeProofBoundContinuationReservationV1,
+  executeFrontierNativeProofBoundContinuationReservationV1, executeFrontierNativeProofBoundContinuationMintAndBurnV1,
   attestFrontierNativeBurnCheckpointV1, assertFrontierNativeBurnCheckpointV1 }
   from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from './federated-native-mint-runtime-state-v1.js';
@@ -1672,13 +1672,25 @@ describe('native FED managed setup session', () => {
     'checkpoint operation during storage disposal', 'continuation', 'continuation copy execution',
     'continuation foreign execution', 'continuation same operation', 'continuation foreign operation', 'continuation duplicate',
     'continuation operation disposal before signature', 'continuation operation disposal before transport',
-    'continuation source disposal before transport', 'continuation expiry at child'])
+    'continuation source disposal before transport', 'continuation expiry at child',
+    'continuation cycle', 'continuation cycle cumulative gross', 'continuation cycle copy reservation',
+    'continuation cycle mixed reservation', 'continuation cycle repeated reservation', 'continuation cycle source disposal',
+    'continuation cycle operation disposal', 'continuation cycle request mutation',
+    'continuation cycle approve parent', 'continuation cycle burn parent', 'continuation cycle approval allowance',
+    'continuation cycle approve nonce', 'continuation cycle burn nonce',
+    'continuation cycle approve base fee', 'continuation cycle burn base fee',
+    'continuation cycle burn fees', 'continuation cycle new consumed', 'continuation cycle new processed',
+    'continuation cycle final supply', 'continuation cycle final owner balance', 'continuation cycle final bridge balance',
+    'continuation cycle final allowance', 'continuation cycle previous consumed after mint',
+    'continuation cycle amount over balance', 'continuation cycle amount over i64',
+    'continuation cycle checkpoint runtime mismatch', 'continuation cycle checkpoint fee over bound'])
     ('composes native reservation and mint from the retained reserve proof with %s', async defect => {
       const operator = mintOperator = createFederatedGenesisOperatorV1();
       if (defect !== 'recipient mismatch') nativeMintRecipient = operator.addressHex;
       await withNativeMintProof(async ({ source, proofInput }) => {
         const observed = reservationTarget(operator);
         const continuationCase = defect.startsWith('continuation');
+        const continuationCycleCase = defect.startsWith('continuation cycle');
         const operation = defect.startsWith('checkpoint operation') || continuationCase ? createNativeSourceOperation(source) : undefined;
         const proof = operation ? produceNativeOperationMintProof(operation, proofInput) : produceNativeMintProof(source, proofInput);
         const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
@@ -1696,8 +1708,9 @@ describe('native FED managed setup session', () => {
           [keys.pendingKeysStorageKeyHex]: `0x04${proof.mintIdentityHex.slice(2)}`, [keys.pendingReservationStorageKeyHex]: pending };
         const parent = `0x${'a1'.repeat(32)}`, child = `0x${'a2'.repeat(32)}`, ethParent = `0x${'a3'.repeat(32)}`, ethChild = `0x${'a4'.repeat(32)}`;
         const nativeBlocks = [observed.fields.expectedGenesisHashHex, parent, child, `0x${'b3'.repeat(32)}`, `0x${'b4'.repeat(32)}`,
-          `0x${'b5'.repeat(32)}`];
-        const ethBlocks = ['', ethParent, ethChild, `0x${'c3'.repeat(32)}`, `0x${'c4'.repeat(32)}`];
+          `0x${'b5'.repeat(32)}`, `0x${'b6'.repeat(32)}`, `0x${'b7'.repeat(32)}`, `0x${'b8'.repeat(32)}`];
+        const ethBlocks = ['', ethParent, ethChild, `0x${'c3'.repeat(32)}`, `0x${'c4'.repeat(32)}`,
+          `0x${'c5'.repeat(32)}`, `0x${'c6'.repeat(32)}`, `0x${'c7'.repeat(32)}`, `0x${'c8'.repeat(32)}`];
         const nativeCalls: string[] = [], txHashes: string[] = [];
         const ergoRecipient = `0x0008cd${new SigningKey(`0x${'01'.repeat(32)}`).compressedPublicKey.slice(2)}`;
         const burnPreflightCase = ['burn scope', 'burn amount', 'burn amount low', 'burn recipient', 'burn recipient curve'].includes(defect);
@@ -1714,37 +1727,46 @@ describe('native FED managed setup session', () => {
         let height = 0, reservationSubmitted = false, mintSubmitted = false, continuationSubmitted = false;
         let nativeCall = '', mintCall = '', continuationCall = '', txHash = '', consumed = '';
         let continuationKeys: ReturnType<typeof derivePooledReserveMintReservationRuntimeStorageKeysV4> | undefined;
-        let continuationPending: string | undefined, continuationMintIdentity: string | undefined;
-        let checkpointCollection = false;
+        let continuationPending: string | undefined, continuationConsumed: string | undefined;
+        let continuationMintIdentity: string | undefined, continuationStatementId: string | undefined;
+        let checkpointCollection = false, continuationCycleStarted = false, continuationRequestMutated = false;
+        let continuationMintReceiptReads = 0, continuationApprovalReceiptReads = 0, activeCycleInput: any;
         const commitmentKey = '0xaf86fef4216ac2bcd1c592b204011ad00d2d4fb825af1fcd4c2be9f955a780c5';
         const leavesKey = '0xaf86fef4216ac2bcd1c592b204011ad08ba92642ec2dee14a0170da020901c7f';
         const eventsKey = '0x26aa394eea5630e07c48ae0c9558cef780d41e5e16056765bc8461851072c9d7';
-        const nativeCommitmentStorage = (): Record<string, string> => {
+        const nativeCommitmentStorage = (burnHeight: 4 | 8): Record<string, string> => {
           const le = (value: bigint, size: number) => { const result = Buffer.alloc(size); result.writeBigUInt64LE(value); return result; };
           const compact = (size: number) => size < 64 ? Buffer.from([size * 4]) : Buffer.from([(size * 4 + 1) & 255, (size * 4 + 1) >>> 8]);
           const sidechain = raw(`0x${compiled.preparation.application.sidechainIdHex}`), eventIndex = Buffer.from('00000002', 'hex');
-          const burnId = raw(digest(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_ID_V1'), sidechain, raw(txHashes[4]), eventIndex])));
-          const leaf = Buffer.concat([Buffer.from([1]), sidechain, raw(ethBlocks[4]), burnId, raw(txHashes[4]), eventIndex,
-            raw(digest(raw(ergoRecipient))), Buffer.from('0000000000989680', 'hex'), Buffer.alloc(32)]);
+          const net = burnHeight === 8 && defect === 'continuation cycle cumulative gross' ? 20_000_000n : 10_000_000n;
+          const netBytes = Buffer.alloc(8); netBytes.writeBigUInt64BE(net);
+          const burnId = raw(digest(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_ID_V1'), sidechain, raw(txHashes[burnHeight]), eventIndex])));
+          const leaf = Buffer.concat([Buffer.from([1]), sidechain, raw(ethBlocks[burnHeight]), burnId, raw(txHashes[burnHeight]), eventIndex,
+            raw(digest(raw(ergoRecipient))), netBytes, Buffer.alloc(32)]);
           const root = raw(digest(Buffer.concat([Buffer.from('E2S_TRUSTLESS_BURN_LEAF_V1'), leaf])));
-          const commitment = Buffer.concat([Buffer.from([1]), sidechain, le(4n, 8), raw(ethBlocks[4]), root, Buffer.from('01000000', 'hex')]);
-          if (defect === 'checkpoint runtime mismatch') raw(nativeBlocks[0]).copy(commitment, 1);
+          const commitment = Buffer.concat([Buffer.from([1]), sidechain, le(BigInt(burnHeight), 8), raw(ethBlocks[burnHeight]), root,
+            Buffer.from('01000000', 'hex')]);
+          if (defect === 'checkpoint runtime mismatch' && burnHeight === 4
+            || defect === 'continuation cycle checkpoint runtime mismatch' && burnHeight === 8) raw(nativeBlocks[0]).copy(commitment, 1);
           const apply = (index: number) => Buffer.from([0, index, 0, 0, 0]);
           const event = (phase: Buffer, pallet: number, variant: number, ...fields: Buffer[]) =>
             Buffer.concat([phase, Buffer.from([pallet, variant]), ...fields, Buffer.from([0])]);
           const operatorBytes = raw(recipient), phase = apply(1);
+          const signedFeeBound = burnHeight === 8 ? 11_403_486_740_000_000n : 7_119_140_625_000_000n;
+          const withdrawal = defect === 'continuation cycle checkpoint fee over bound' && burnHeight === 8
+            ? signedFeeBound + 1n : signedFeeBound;
           const records = [event(apply(0), 0, 0, Buffer.from([0, 0, 2, 0])),
-            event(phase, 4, 8, operatorBytes, le(7_119_140_625_000_000n, 16)),
+            event(phase, 4, 8, operatorBytes, le(withdrawal, 16)),
             event(phase, 4, 7, operatorBytes, le(7_000_000_000_000_000n, 16)),
             event(phase, 4, 7, Buffer.alloc(20), le(0n, 16))];
-          const logs = [ { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, `0x${'00'.repeat(20)}`, 10000000n]) },
+          const logs = [ { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, `0x${'00'.repeat(20)}`, net]) },
             { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, bridge, 5000000n]) },
-            { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegOut')!, [recipient, 10000000n, ergoRecipient]) } ];
+            { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegOut')!, [recipient, net, ergoRecipient]) } ];
           for (const log of logs) records.push(event(phase, 8, 0, raw(log.address), compact(log.topics.length),
             ...log.topics.map(raw), compact(raw(log.data).length), raw(log.data)));
-          records.push(event(phase, 7, 0, operatorBytes, raw(bridge), raw(txHashes[4]), Buffer.from([0, 0, 0])),
+          records.push(event(phase, 7, 0, operatorBytes, raw(bridge), raw(txHashes[burnHeight]), Buffer.from([0, 0, 0])),
             event(phase, 0, 0, Buffer.from([0, 0, 0, 1])),
-            event(Buffer.from([1]), 12, 1, Buffer.from([1]), raw(ethBlocks[4]), root, Buffer.from('01000000', 'hex')));
+            event(Buffer.from([1]), 12, 1, Buffer.from([1]), raw(ethBlocks[burnHeight]), root, Buffer.from('01000000', 'hex')));
           return { [commitmentKey]: `0x${commitment.toString('hex')}`, [leavesKey]: `0x04${root.toString('hex')}`,
             [eventsKey]: `0x${Buffer.concat([compact(records.length), ...records]).toString('hex')}` };
         };
@@ -1761,11 +1783,15 @@ describe('native FED managed setup session', () => {
           else if (method === 'eth_sendRawTransaction') {
             const tx = Transaction.from(params[0]); expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(height);
             expect(tx.from?.toLowerCase()).toBe(recipient);
-            if (height === 1) {
-              expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [recipient, amount, proof.mintIdentityHex]));
+            if (height === 1 || height === 5) {
+              expect(tx.data).toBe(abi.encodeFunctionData('mintSERG', [recipient, amount,
+                height === 1 ? proof.mintIdentityHex : continuationMintIdentity!]));
               mintSubmitted = true; txHash = tx.hash!; mintCall = encodeFederatedNativeMintExtrinsicV1Hex(params[0]);
-            } else expect(tx.data).toBe(height === 2 ? abi.encodeFunctionData('approve', [bridge, 15000000n])
-              : abi.encodeFunctionData('pegOut', [15000000n, ergoRecipient]));
+            } else {
+              const gross = height >= 6 && defect === 'continuation cycle cumulative gross' ? 25000000n : 15000000n;
+              expect(tx.data).toBe(height === 2 || height === 6 ? abi.encodeFunctionData('approve', [bridge, gross])
+                : abi.encodeFunctionData('pegOut', [gross, ergoRecipient]));
+            }
             nativeCalls[height + 1] = encodeFederatedNativeMintExtrinsicV1Hex(params[0]); txHashes[height + 1] = tx.hash!;
             result = tx.hash!;
             if (defect === 'after mint submission') source.dispose();
@@ -1785,6 +1811,13 @@ describe('native FED managed setup session', () => {
               consumed = `0x${bytes.toString('hex')}`;
               if (defect === 'after mint sealing') source.dispose();
             }
+            if (height === 6) {
+              const heightBytes = Buffer.alloc(8); heightBytes.writeBigUInt64LE(6n);
+              const eventBytes = Buffer.alloc(4); eventBytes.writeUInt32LE(1);
+              const bytes = Buffer.concat([Buffer.from([4]), raw(proof.runtimeProfileIdHex), raw(continuationStatementId!),
+                raw(continuationMintIdentity!), heightBytes, raw(ethBlocks[6]), raw(txHashes[6]), eventBytes]);
+              continuationConsumed = `0x${bytes.toString('hex')}`;
+            }
           } else if (method === 'author_pendingExtrinsics') result = height === 0 && reservationSubmitted ? [nativeCall]
             : height === 1 && mintSubmitted ? [mintCall]
               : height === 4 && continuationSubmitted ? [continuationCall]
@@ -1800,46 +1833,96 @@ describe('native FED managed setup session', () => {
             const at = nativeBlocks.indexOf(params[1]), account = raw(operator.nativeFunding.accountInfoScaleHex); account.writeUInt32LE(at);
             if (checkpointCollection && defect === 'checkpoint during storage disposal' && params[0] === commitmentKey) source.dispose();
             if (checkpointCollection && defect === 'checkpoint operation during storage disposal' && params[0] === commitmentKey) operation!.dispose();
-            result = at === 4 && [commitmentKey, leavesKey, eventsKey].includes(params[0]) ? nativeCommitmentStorage()[params[0]]
+            result = [4, 8].includes(at) && [commitmentKey, leavesKey, eventsKey].includes(params[0])
+              ? nativeCommitmentStorage(at as 4 | 8)[params[0]]
               : params[0] === operator.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}`
               : at >= 5 && continuationKeys && params[0] === continuationKeys.pendingKeysStorageKeyHex
-                ? `0x04${continuationMintIdentity!.slice(2)}`
-                : at >= 5 && continuationKeys && params[0] === continuationKeys.pendingReservationStorageKeyHex ? continuationPending!
-                  : at >= 5 && continuationKeys && params[0] === continuationKeys.consumedReservationStorageKeyHex ? null
+                ? at === 5 ? `0x04${continuationMintIdentity!.slice(2)}` : '0x00'
+                : at >= 5 && continuationKeys && params[0] === continuationKeys.pendingReservationStorageKeyHex
+                  ? at === 5 ? continuationPending! : null
+                  : at >= 5 && continuationKeys && params[0] === continuationKeys.consumedReservationStorageKeyHex
+                    ? at >= 6 ? defect === 'continuation cycle new consumed' ? null : continuationConsumed! : null
                     : at >= 2 && params[0] === keys.pendingKeysStorageKeyHex ? '0x00'
                 : at >= 2 && params[0] === keys.pendingReservationStorageKeyHex ? null
-                  : at >= 2 && params[0] === keys.consumedReservationStorageKeyHex ? consumed : state[params[0]] ?? null;
+                  : at >= 2 && params[0] === keys.consumedReservationStorageKeyHex
+                    ? defect === 'continuation cycle previous consumed after mint' && at >= 6 ? null : consumed
+                    : state[params[0]] ?? null;
           } else if (method === 'eth_chainId') result = '0x1092';
-          else if (method === 'eth_getBlockByNumber') result = { number: params[0], hash: ethBlocks[Number(params[0])],
-            parentHash: ethBlocks[Number(params[0]) - 1], baseFeePerGas: '0x3b9aca00',
-            transactions: params[0] === '0x1' ? [] : [txHashes[Number(params[0])]] };
-          else if (method === 'eth_getBlockByHash') result = { number: `0x${ethBlocks.indexOf(params[0])}`, hash: params[0],
-            transactions: params[0] === ethParent ? [] : [txHashes[ethBlocks.indexOf(params[0])]] };
-          else if (method === 'eth_getTransactionCount') result = `0x${ethBlocks.indexOf(params[1].blockHash)}`;
+          else if (method === 'eth_getBlockByNumber') {
+            const at = Number(params[0]);
+            if (continuationCycleStarted && defect === 'continuation cycle request mutation' && at === 5
+              && !continuationRequestMutated) {
+              continuationRequestMutated = true;
+              activeCycleInput.grossAmountNanoErg = '25000000';
+              activeCycleInput.recipientErgoTreeHex = `0x0008cd${new SigningKey(`0x${'02'.repeat(32)}`).compressedPublicKey.slice(2)}`;
+            }
+            const changedParent = defect === 'continuation cycle approve parent' && at === 6 && continuationMintReceiptReads >= 2
+              || defect === 'continuation cycle burn parent' && at === 7 && continuationApprovalReceiptReads >= 2;
+            const ceiling = at === 5 ? 1_802_032_472n : at === 6 ? 2_027_286_531n : at === 7 ? 2_280_697_348n : 1_125_000_000n;
+            const largestBaseFee = ceiling * 8n / 9n;
+            const baseFee = defect === 'continuation cycle approve base fee' && at === 6 && continuationMintReceiptReads >= 2
+              || defect === 'continuation cycle burn base fee' && at === 7 && continuationApprovalReceiptReads >= 2
+              ? largestBaseFee + 1n : largestBaseFee;
+            result = { number: params[0], hash: changedParent ? ethBlocks[at - 1] : ethBlocks[at],
+              parentHash: ethBlocks[at - 1], baseFeePerGas: `0x${baseFee.toString(16)}`,
+              transactions: txHashes[at] ? [txHashes[at]] : [] };
+          }
+          else if (method === 'eth_getBlockByHash') {
+            const at = ethBlocks.indexOf(params[0]);
+            result = { number: `0x${at.toString(16)}`, hash: params[0], transactions: txHashes[at] ? [txHashes[at]] : [] };
+          }
+          else if (method === 'eth_getTransactionCount') {
+            const at = ethBlocks.indexOf(params[1].blockHash);
+            const changedNonce = defect === 'continuation cycle approve nonce' && at === 6 && continuationMintReceiptReads >= 2
+              || defect === 'continuation cycle burn nonce' && at === 7 && continuationApprovalReceiptReads >= 2;
+            result = `0x${(changedNonce ? at - 1 : at).toString(16)}`;
+          }
           else if (method === 'eth_getCode') result = `0x${'60'.repeat(params[0] === bridge ? 100 : 200)}`;
           else if (method === 'eth_call') {
             const call = abi.parseTransaction({ data: params[0].data })!, name = call.name;
-            const at = ethBlocks.indexOf(params[1].blockHash), minted = at >= 2;
-            result = abi.encodeFunctionResult(name, [name === 'owner' ? params[0].to === bridge ? recipient : bridge
-              : name === 'sergToken' ? token : name === 'paused' ? false : name === 'processedPegIns' ? minted
-                : name === 'allowance' ? at === 2 ? 0n : at === 3 ? 15000000n : 10000000n
-                  : name === 'accumulatedFees' ? at === 4 ? 5000000n : 0n
-                    : name === 'balanceOf' && call.args[0].toLowerCase() === bridge ? at === 4 ? 5000000n : 0n
-                      : at === 4 ? name === 'totalSupply' ? 10000000n : 5000000n : minted ? amount : 0n]);
-          } else if (method === 'eth_getTransactionReceipt' && params[0] !== txHash) {
+            const at = ethBlocks.indexOf(params[1].blockHash), firstMinted = at >= 2, secondMinted = at >= 6;
+            const gross = defect === 'continuation cycle cumulative gross' ? 25000000n : 15000000n;
+            let value: string | boolean | bigint;
+            if (name === 'owner') value = params[0].to === bridge ? recipient : bridge;
+            else if (name === 'sergToken') value = token;
+            else if (name === 'paused') value = false;
+            else if (name === 'processedPegIns') value = call.args[0] === proof.mintIdentityHex ? firstMinted : secondMinted;
+            else if (name === 'allowance') value = at === 2 ? 0n : at === 3 ? 15000000n : at < 7 ? 10000000n
+              : at === 7 ? gross : gross - 5000000n;
+            else if (name === 'accumulatedFees') value = at >= 8 ? 10000000n : at >= 4 ? 5000000n : 0n;
+            else if (name === 'balanceOf' && call.args[0].toLowerCase() === bridge) value = at >= 8 ? 10000000n : at >= 4 ? 5000000n : 0n;
+            else if (name === 'totalSupply') value = at >= 8 ? 35000000n - gross : at >= 6 ? 30000000n : at >= 4 ? 10000000n
+              : firstMinted ? amount : 0n;
+            else value = at >= 8 ? 25000000n - gross : at >= 6 ? 25000000n : at >= 4 ? 5000000n : firstMinted ? amount : 0n;
+            if (defect === 'continuation cycle approval allowance' && at === 7 && name === 'allowance') value = 14_000_000n;
+            if (defect === 'continuation cycle burn fees' && at === 8 && name === 'accumulatedFees') value = 9_000_000n;
+            if (defect === 'continuation cycle new processed' && at === 6 && name === 'processedPegIns'
+              && call.args[0] === continuationMintIdentity) value = false;
+            if (defect === 'continuation cycle final supply' && at === 8 && name === 'totalSupply') value = 19_000_000n;
+            if (defect === 'continuation cycle final owner balance' && at === 8 && name === 'balanceOf'
+              && call.args[0].toLowerCase() === recipient) value = 9_000_000n;
+            if (defect === 'continuation cycle final bridge balance' && at === 8 && name === 'balanceOf'
+              && call.args[0].toLowerCase() === bridge) value = 9_000_000n;
+            if (defect === 'continuation cycle final allowance' && at === 8 && name === 'allowance') value = 9_000_000n;
+            result = abi.encodeFunctionResult(name, [value]);
+          } else if (method === 'eth_getTransactionReceipt') {
             const at = txHashes.indexOf(params[0]);
-            const logs = at === 3 ? [{ address: token, ...abi.encodeEventLog(abi.getEvent('Approval')!, [recipient, bridge, 15000000n]) }]
-              : [{ address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, `0x${'00'.repeat(20)}`, 10000000n]) },
-              { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, bridge, 5000000n]) },
-              { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegOut')!, [recipient, 10000000n, ergoRecipient]) }];
+            if (at === 6) continuationMintReceiptReads++;
+            if (at === 7) continuationApprovalReceiptReads++;
+            const gross = defect === 'continuation cycle cumulative gross' && at >= 7 ? 25000000n : 15000000n;
+            const logs = at === 2 || at === 6
+              ? [{ address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [`0x${'00'.repeat(20)}`, recipient, amount]) },
+                { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegIn')!, [recipient, amount,
+                  at === 2 ? proof.mintIdentityHex : continuationMintIdentity!]) }]
+              : at === 3 || at === 7
+                ? [{ address: token, ...abi.encodeEventLog(abi.getEvent('Approval')!, [recipient, bridge, gross]) }]
+                : [{ address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, `0x${'00'.repeat(20)}`, gross - 5000000n]) },
+                  { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [recipient, bridge, 5000000n]) },
+                  { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegOut')!, [recipient, gross - 5000000n, ergoRecipient]) }];
             result = { transactionHash: params[0], blockHash: ethBlocks[at], blockNumber: `0x${at}`, transactionIndex: '0x0', status: '0x1',
-              from: recipient, to: at === 3 ? token : bridge, logs: logs.map((log, index) => ({ ...log, transactionHash: params[0],
+              from: recipient, to: at === 3 || at === 7 ? token : bridge, logs: logs.map((log, index) => ({ ...log, transactionHash: params[0],
                 blockHash: ethBlocks[at], blockNumber: `0x${at}`, transactionIndex: '0x0', logIndex: `0x${index}`, removed: false })) };
-          } else if (method === 'eth_getTransactionReceipt') result = { transactionHash: txHash, blockHash: ethChild, blockNumber: '0x2',
-            transactionIndex: '0x0', status: '0x1', from: recipient, to: bridge,
-            logs: [ { address: token, ...abi.encodeEventLog(abi.getEvent('Transfer')!, [`0x${'00'.repeat(20)}`, recipient, amount]) },
-              { address: bridge, ...abi.encodeEventLog(abi.getEvent('PegIn')!, [recipient, amount, proof.mintIdentityHex]) } ].map((log, index) => ({ ...log,
-              transactionHash: txHash, blockHash: ethChild, blockNumber: '0x2', transactionIndex: '0x0', logIndex: `0x${index}`, removed: false })) };
+          }
           else throw new Error(`unexpected composed mint RPC ${method}`);
           return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
         });
@@ -1928,6 +2011,7 @@ describe('native FED managed setup session', () => {
                         issuedAtNativeHeight: '4', expiresAtNativeHeight: defect === 'continuation expiry at child' ? '5' : '32',
                       });
                       continuationMintIdentity = secondProof.mintIdentityHex;
+                      continuationStatementId = secondProof.mintReservationStatementIdHex;
                       continuationKeys = derivePooledReserveMintReservationRuntimeStorageKeysV4(secondProof.mintIdentityHex);
                       continuationPending = defect === 'continuation expiry at child' ? undefined
                         : encodePooledReserveMintReservationPendingV4ScaleHex({
@@ -1961,6 +2045,7 @@ describe('native FED managed setup session', () => {
                         if (defect === 'continuation source disposal before transport') source.dispose();
                         return signed;
                       });
+                      const walletTransactionProbe = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
                       const signatureCount = signatureProbe.mock.calls.length;
                       const submissionCount = observed.fetcher.mock.calls.filter(([, init]) =>
                         JSON.parse(init.body as string).method === 'author_submitExtrinsic').length;
@@ -1975,7 +2060,7 @@ describe('native FED managed setup session', () => {
                       if (defect === 'continuation foreign execution') {
                         (continuationInput as any).previousExecution = Object.freeze({ burnExecuted: true });
                       }
-                      if (defect === 'continuation' || defect === 'continuation duplicate') {
+                      if (defect === 'continuation' || defect === 'continuation duplicate' || continuationCycleCase) {
                         const continuation = await executeFrontierNativeProofBoundContinuationReservationV1(continuationInput);
                         expect(continuation).toMatchObject({ blockHashHex: nativeBlocks[5], blockHeight: 5, extrinsicIndex: 1,
                           runtimeReservationObserved: true, mintExecuted: false, mintIdentityHex: secondProof.mintIdentityHex,
@@ -1992,6 +2077,86 @@ describe('native FED managed setup session', () => {
                             expect(readdirSync(duplicateDirectory)).toEqual([]);
                           } finally { rmSync(duplicateDirectory, { recursive: true, force: true }); }
                         }
+                        if (continuationCycleCase) {
+                          continuationCycleStarted = true;
+                          const cycleTransportCount = observed.fetcher.mock.calls.filter(([, init]) =>
+                            JSON.parse(init.body as string).method === 'eth_sendRawTransaction').length;
+                          const cycleWalletSignCount = walletTransactionProbe.mock.calls.length;
+                          const cycleInput: Parameters<typeof executeFrontierNativeProofBoundContinuationMintAndBurnV1>[0] = {
+                            reservationExecution: continuation,
+                            grossAmountNanoErg: defect === 'continuation cycle cumulative gross' ? '25000000'
+                              : defect === 'continuation cycle amount over balance' ? '25000001'
+                                : defect === 'continuation cycle amount over i64' ? '9223372036854775808' : '15000000',
+                            recipientErgoTreeHex: ergoRecipient,
+                            broadcastScope: 'fed-native-local-synthetic-continuation-mint-and-burn-only',
+                          };
+                          activeCycleInput = cycleInput;
+                          if (defect === 'continuation cycle copy reservation') {
+                            (cycleInput as any).reservationExecution = { ...continuation };
+                          }
+                          if (defect === 'continuation cycle mixed reservation') {
+                            (cycleInput as any).reservationExecution = executionResult;
+                          }
+                          if (defect === 'continuation cycle source disposal') source.dispose();
+                          if (defect === 'continuation cycle operation disposal') secondOperation.dispose();
+                          const positiveCycle = ['continuation cycle', 'continuation cycle cumulative gross',
+                            'continuation cycle repeated reservation', 'continuation cycle request mutation',
+                            'continuation cycle checkpoint runtime mismatch', 'continuation cycle checkpoint fee over bound'].includes(defect);
+                          if (positiveCycle) {
+                            const cycle = await executeFrontierNativeProofBoundContinuationMintAndBurnV1(cycleInput);
+                            const gross = defect === 'continuation cycle cumulative gross' ? '25000000' : '15000000';
+                            expect(cycle).toMatchObject({
+                              mint: { blockHashHex: nativeBlocks[6], ethereumBlockHashHex: ethBlocks[6], blockHeight: 6,
+                                transactionHashHex: txHashes[6], mintIdentityHex: secondProof.mintIdentityHex,
+                                amountNanoErg: '20000000', consumedReservationScaleHex: continuationConsumed,
+                                mintExecuted: true, runtimeReservationConsumed: true },
+                              burn: { phase: 'burn', blockHashHex: nativeBlocks[8], ethereumBlockHashHex: ethBlocks[8], blockHeight: 8,
+                                eventIndex: 2, transactionHashHex: txHashes[8], grossAmountNanoErg: gross,
+                                netAmountNanoErg: String(BigInt(gross) - 5000000n), recipientErgoTreeHex: ergoRecipient },
+                              burnExecuted: true, checkpointAttested: false, ergoPayoutExecuted: false, trustless: false,
+                            });
+                            expect(cycle.mint.ethereumBlockHashHex).not.toBe(cycle.mint.blockHashHex);
+                            expect(cycle.burn.ethereumBlockHashHex).not.toBe(cycle.burn.blockHashHex);
+                            expect(height).toBe(8);
+                            expect(readdirSync(continuationDirectory).sort()).toEqual(['native-approve-attempt.json',
+                              'native-burn-attempt.json', 'native-mint-attempt.json', 'native-reservation-attempt.json']);
+                            if (defect === 'continuation cycle repeated reservation') {
+                              await expect(executeFrontierNativeProofBoundContinuationMintAndBurnV1(cycleInput))
+                                .rejects.toThrow(/unused|original|consumed/);
+                            }
+                            checkpointCollection = true;
+                            const checkpointInput = { execution: cycle, admissionValidFromErgoHeight: '121',
+                              admissionExpiresAtErgoHeight: '140' };
+                            if (defect === 'continuation cycle checkpoint runtime mismatch'
+                              || defect === 'continuation cycle checkpoint fee over bound') {
+                              await expect(attestFrontierNativeBurnCheckpointV1(checkpointInput)).rejects.toThrow(/commitment|differs|fee|exceeds/);
+                            } else {
+                              const secondCheckpoint = await attestFrontierNativeBurnCheckpointV1(checkpointInput);
+                              assertFrontierNativeBurnCheckpointV1(secondCheckpoint);
+                              expect(secondCheckpoint.attestation.checkpointStatement).toMatchObject({ sourceNativeBlockHeight: '8',
+                                sourceNativeBlockHashHex: nativeBlocks[8].slice(2), executionBlockHashHex: ethBlocks[8].slice(2),
+                                bridgeEventRootHex: secondCheckpoint.commitment.bridgeEventRootHex.slice(2), burnLeafCount: 1,
+                                runtimeProfileIdHex: compiled.preparation.application.runtimeProfileIdHex });
+                              expect(secondCheckpoint.commitment.burnEvent.eventIndex).toBe(2);
+                              expect(secondCheckpoint.commitment.burnProof.leafIndex).toBe(0);
+                              expect(secondCheckpoint.commitment.blockHashHex).not.toBe(secondCheckpoint.commitment.ethereumBlockHashHex);
+                            }
+                          } else {
+                            await expect(executeFrontierNativeProofBoundContinuationMintAndBurnV1(cycleInput))
+                              .rejects.toThrow(/provenance|inactive|disposed|unused|original|parent|nonce|state|balance|consumed|bounded|differs|absent|divergent/);
+                            const approveParentFault = ['continuation cycle approve parent', 'continuation cycle approve nonce',
+                              'continuation cycle approve base fee'].includes(defect);
+                            const burnParentFault = ['continuation cycle burn parent', 'continuation cycle burn nonce',
+                              'continuation cycle burn base fee'].includes(defect);
+                            if (approveParentFault || burnParentFault) {
+                              const expectedCompletedPhases = approveParentFault ? 1 : 2;
+                              const cycleTransports = observed.fetcher.mock.calls.filter(([, init]) =>
+                                JSON.parse(init.body as string).method === 'eth_sendRawTransaction').length - cycleTransportCount;
+                              expect(cycleTransports).toBe(expectedCompletedPhases);
+                              expect(walletTransactionProbe.mock.calls.length - cycleWalletSignCount).toBe(expectedCompletedPhases);
+                            }
+                          }
+                        }
                       } else {
                         await expect(executeFrontierNativeProofBoundContinuationReservationV1(continuationInput))
                           .rejects.toThrow(/provenance|operation|disposed|inactive|unused|original|cover|differs/);
@@ -2000,8 +2165,9 @@ describe('native FED managed setup session', () => {
                       }
                       const finalSubmissions = observed.fetcher.mock.calls.filter(([, init]) =>
                         JSON.parse(init.body as string).method === 'author_submitExtrinsic').length;
-                      expect(finalSubmissions - submissionCount).toBe(defect === 'continuation' || defect === 'continuation duplicate' ? 1 : 0);
-                      expect(signatureProbe.mock.calls.length - signatureCount).toBe(
+                      expect(finalSubmissions - submissionCount).toBe(
+                        defect === 'continuation' || defect === 'continuation duplicate' || continuationCycleCase ? 1 : 0);
+                      if (!continuationCycleCase) expect(signatureProbe.mock.calls.length - signatureCount).toBe(
                         ['continuation', 'continuation duplicate', 'continuation operation disposal before transport',
                           'continuation source disposal before transport'].includes(defect) ? 1 : 0);
                     } finally {

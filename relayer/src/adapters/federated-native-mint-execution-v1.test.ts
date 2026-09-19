@@ -19,6 +19,7 @@ import { reserveFederatedNativeReservationAttemptV1, submitFederatedNativeReserv
   observeFederatedNativeContinuationParentV1, assertFederatedNativeContinuationParentV1,
   reobserveFederatedNativeContinuationParentV1, reserveFederatedNativeContinuationReservationAttemptV1,
   observeFederatedNativeReservationInclusionV1,
+  observeFederatedNativeContinuationMintParentV1, assertFederatedNativeContinuationStepParentV1,
   type FederatedNativeWithdrawalContextV1 } from './federated-native-reservation-execution-v1.js';
 
 const hash = (byte: string) => `0x${byte.repeat(32)}`;
@@ -314,6 +315,7 @@ describe('native FED continuation reservation', () => {
   }
   function childFixture(candidate: ReturnType<typeof nextCandidate>) {
     const nextHash = hash('79');
+    const nextEthereum = hash('7a');
     const expectedStorage: Record<string, string | null> = { ...terminal, '0x09': '0x04' };
     let pending = false, included = false;
     const priorFetch = globalThis.fetch;
@@ -330,13 +332,173 @@ describe('native FED continuation reservation', () => {
       else if (method === 'state_getStorage' && params[1] === nextHash) {
         const account = Buffer.from(owner.nativeFunding.accountInfoScaleHex.slice(2), 'hex'); account.writeUInt32LE(5);
         result = params[0] === owner.nativeFunding.storageKeyHex ? `0x${account.toString('hex')}` : expectedStorage[params[0]] ?? null;
+      } else if (method === 'eth_getBlockByNumber' && params[0] === '0x5'
+        || method === 'eth_getBlockByHash' && params[0] === nextEthereum) {
+        result = { hash: nextEthereum, number: '0x5', parentHash: ETH_BLOCKS[4], baseFeePerGas: '0x3b9aca00', transactions: [] };
+      } else if (['eth_getTransactionCount', 'eth_getCode', 'eth_call'].includes(method) && params[1].blockHash === nextEthereum) {
+        if (method === 'eth_getTransactionCount') result = '0x5';
+        else if (method === 'eth_getCode') result = CODE;
+        else {
+          const call = ABI.parseTransaction({ data: params[0].data })!;
+          const value = call.name === 'owner' ? params[0].to === BRIDGE ? `0x${owner.addressHex}` : BRIDGE
+            : call.name === 'sergToken' ? TOKEN : call.name === 'paused' ? false
+              : call.name === 'processedPegIns' ? call.args[0] === MINT
+                : call.name === 'totalSupply' ? BigInt(context.amountNanoErg) - 10_000_000n
+                  : call.name === 'balanceOf' ? call.args[0].toLowerCase() === BRIDGE ? 5_000_000n : BigInt(context.amountNanoErg) - 15_000_000n
+                    : call.name === 'allowance' ? 10_000_000n : 5_000_000n;
+          result = ABI.encodeFunctionResult(call.name, [value]);
+        }
       } else handled = false;
       if (!handled) return priorFetch(url, init);
       calls.push(method);
       if (fault) result = fault(method, params, result, url);
       return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result }));
     }));
-    return { nextHash, expectedStorage };
+    return { nextHash, nextEthereum, expectedStorage };
+  }
+
+  async function continuationMintContext() {
+    context = { ...context, amountNanoErg: '20000000' };
+    const observed = await parent(), candidate = nextCandidate(), fixture = childFixture(candidate);
+    const childDirectory = mkdtempSync(join(directory, 'next-'));
+    const attempt = reserveFederatedNativeContinuationReservationAttemptV1(childDirectory, observed.parent, candidate);
+    await submitFederatedNativeReservationV1(attempt, withdrawalAuthorize);
+    const blockHashHex = await sealFederatedNativeReservationV1(attempt, withdrawalAuthorize);
+    return { ...fixture, childDirectory, context: Object.freeze({ ...context, mintIdentityHex: hash('7b'),
+      reservation: { attempt, blockHashHex, expectedStorage: fixture.expectedStorage,
+        operatorStorageKeyHex: observed.parent.operatorStorageKeyHex, originalOperatorAccountHex: observed.parent.operatorAccountInfoHex } }) };
+  }
+
+  async function continuationMintCandidate() {
+    let signer: HDNodeWallet | undefined;
+    const original = HDNodeWallet.prototype.signTransaction;
+    vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(function (this: HDNodeWallet, tx) {
+      signer = this; return original.call(this, tx);
+    });
+    const next = await continuationMintContext();
+    const parent = await observeFederatedNativeContinuationMintParentV1(next.context, withdrawalAuthorize);
+    const tx = { type: 0, chainId: 4242, nonce: parent.nonce, to: BRIDGE, value: 0n,
+      gasPrice: BigInt(parent.gasPriceWei), gasLimit: 5_000_000n,
+      data: new Interface(['function mintSERG(address,uint256,bytes32)']).encodeFunctionData('mintSERG',
+        [next.context.recipientAddressHex, next.context.amountNanoErg, next.context.mintIdentityHex]) };
+    const sign = async (overrides: Partial<typeof tx> = {}) => {
+      // Isolate the execution adapter with a real signature; the composed suite uses its actual signer.
+      const signedTransactionHex = await original.call(signer!, { ...tx, ...overrides });
+      return { signedTransactionHex, transactionHashHex: Transaction.from(signedTransactionHex).hash!,
+        nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(signedTransactionHex) };
+    };
+    return { ...next, tx, sign };
+  }
+
+  it('retains the second mint claim across directories and a failed durable write', async () => {
+    const next = await continuationMintCandidate(), signed = await next.sign();
+    writeFileSync(join(next.childDirectory, 'native-mint-attempt.json'), 'existing hold');
+    expect(() => reserveFederatedNativeMintAttemptV1(next.childDirectory, next.context, signed)).toThrow(/EEXIST/);
+    const other = mkdtempSync(join(directory, 'other-'));
+    expect(() => reserveFederatedNativeMintAttemptV1(other, next.context, signed)).toThrow(/unused/);
+    expect(existsSync(join(other, 'native-mint-attempt.json'))).toBe(false);
+    expect(readFileSync(join(next.childDirectory, 'native-mint-attempt.json'), 'utf8')).toBe('existing hold');
+  });
+
+  it('rejects a coherently changed Ethereum-five mapping after signing and retains the mint hold', async () => {
+    const next = await continuationMintCandidate(), signed = await next.sign();
+    const attempt = reserveFederatedNativeMintAttemptV1(next.childDirectory, next.context, signed);
+    const previousFetch = globalThis.fetch, changedHash = hash('ee'), before = [...writes()];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const request = JSON.parse(init.body as string), { method, params } = request;
+      const ethereumBlock = method === 'eth_getBlockByNumber' && params[0] === '0x5'
+        || method === 'eth_getBlockByHash' && params[0] === changedHash;
+      // Both endpoints consistently serve the alternate mapping and its unchanged application views.
+      // Only the original observation pin distinguishes it from a new otherwise valid parent.
+      if (method === 'eth_getBlockByHash' && params[0] === changedHash) params[0] = next.nextEthereum;
+      if (params[1]?.blockHash === changedHash) params[1].blockHash = next.nextEthereum;
+      const response = await previousFetch(url, { ...init, body: JSON.stringify(request) });
+      const envelope = await response.json() as any;
+      if (ethereumBlock) envelope.result.hash = changedHash;
+      return new Response(JSON.stringify(envelope));
+    }));
+    await expect(submitFederatedNativeMintV1(attempt, withdrawalAuthorize)).rejects.toThrow('native continuation retained Ethereum parent changed');
+    await expect(submitFederatedNativeMintV1(attempt, withdrawalAuthorize)).rejects.toThrow(/consumed/);
+    expect(writes()).toEqual(before);
+    expect(JSON.parse(readFileSync(join(next.childDirectory, 'native-mint-attempt.json'), 'utf8')).transactionHashHex)
+      .toBe(signed.transactionHashHex);
+  });
+
+  it.each(['old nonce', 'future nonce', 'low gas price', 'high gas price', 'gas limit', 'bridge', 'value', 'data', 'native bytes'])
+    ('rejects exact second mint transaction mismatch: %s', async defect => {
+      const next = await continuationMintCandidate();
+      const overrides: Partial<typeof next.tx> = {};
+      if (defect === 'old nonce') overrides.nonce = 1;
+      if (defect === 'future nonce') overrides.nonce = 6;
+      if (defect === 'low gas price') overrides.gasPrice = next.tx.gasPrice - 1n;
+      if (defect === 'high gas price') overrides.gasPrice = next.tx.gasPrice + 1n;
+      if (defect === 'gas limit') overrides.gasLimit = next.tx.gasLimit - 1n;
+      if (defect === 'bridge') overrides.to = TOKEN;
+      if (defect === 'value') overrides.value = 1n;
+      if (defect === 'data') overrides.data = '0x';
+      const signed = await next.sign(overrides);
+      if (defect === 'native bytes') signed.nativeExtrinsicHex = signed.nativeExtrinsicHex.slice(0, -2) + 'ee';
+      const before = [...calls];
+      expect(() => reserveFederatedNativeMintAttemptV1(next.childDirectory, next.context, signed)).toThrow(/bytes|extrinsic/);
+      expect(calls).toEqual(before);
+      expect(existsSync(join(next.childDirectory, 'native-mint-attempt.json'))).toBe(false);
+    });
+
+  it('binds an opaque second mint parent to nonce five and retained custody while keeping the legacy observer one-shot', async () => {
+    const next = await continuationMintContext(), before = [...writes()];
+    const observed = await observeFederatedNativeContinuationMintParentV1(next.context, withdrawalAuthorize);
+    expect(observed).toMatchObject({ phase: 'mint', nonce: 5, parentNativeHeight: 5, parentNativeBlockHashHex: next.nextHash,
+      parentEthereumBlockHashHex: next.nextEthereum, gasPriceWei: '1802032472', mintIdentityHex: hash('7b'),
+      previousTransactionHashHex: null, grossAmountNanoErg: null, recipientErgoTreeHex: null });
+    expect(Object.isFrozen(observed)).toBe(true);
+    expect(() => assertFederatedNativeContinuationStepParentV1({ ...observed })).toThrow(/original/);
+    await expect(observeFederatedNativeMintParentV1(next.context, withdrawalAuthorize)).rejects.toThrow(/first reservation/);
+    active = false;
+    expect(() => assertFederatedNativeContinuationStepParentV1(observed)).toThrow(/disposed/);
+    expect(writes()).toEqual(before);
+  });
+
+  it.each(['bridgeAddressHex', 'tokenAddressHex', 'recipientAddressHex', 'bridgeCodeSha256Hex', 'bridgeCodeBytes',
+    'tokenCodeSha256Hex', 'tokenCodeBytes', 'mintIdentityHex'] as const)('rejects changed second mint lineage %s before observation', async key => {
+    const next = await continuationMintContext(), before = [...calls];
+    const value = key === 'mintIdentityHex' ? MINT : key.endsWith('Bytes') ? 3 : key.endsWith('AddressHex')
+      ? `0x${'ea'.repeat(20)}` : 'ea'.repeat(32);
+    await expect(observeFederatedNativeContinuationMintParentV1({ ...next.context, [key]: value }, withdrawalAuthorize)).rejects.toThrow(/differs|consumed/);
+    expect(calls).toEqual(before);
+  });
+
+  for (const node of ['19955', '19956']) {
+    it.each(['Ethereum parent', 'fee ceiling', 'Ethereum nonce', 'native nonce', 'old native parent', 'old consumed record',
+      'totalSupply', 'recipient balance', 'bridge balance', 'allowance', 'accumulatedFees', 'old processed identity', 'new processed identity'])
+      (`rejects second mint parent ${node} drift: %s`, async defect => {
+        const next = await continuationMintContext(), before = [...writes()];
+        fault = (method, params, result, url) => {
+          if (!url.endsWith(node)) return result;
+          if (method === 'eth_getBlockByNumber' && params[0] === '0x5') {
+            if (defect === 'Ethereum parent') return { ...result, parentHash: hash('ee') };
+            if (defect === 'fee ceiling') return { ...result, baseFeePerGas: '0xffffffff' };
+          }
+          if (defect === 'Ethereum nonce' && method === 'eth_getTransactionCount') return '0x4';
+          if (defect === 'old native parent' && method === 'chain_getBlockHash' && params[0] === 4) return hash('ee');
+          if (method === 'state_getStorage' && params[1] === next.nextHash) {
+            if (defect === 'native nonce' && params[0] === owner.nativeFunding.storageKeyHex) {
+              const account = Buffer.from(result.slice(2), 'hex'); account.writeUInt32LE(4); return `0x${account.toString('hex')}`;
+            }
+            if (defect === 'old consumed record' && params[0] === '0x06') return null;
+          }
+          if (method === 'eth_call') {
+            const call = ABI.parseTransaction({ data: (params[0] as any).data })!;
+            const selected = call.name === defect || call.name === 'balanceOf' && defect === (call.args[0].toLowerCase() === BRIDGE ? 'bridge balance' : 'recipient balance');
+            if (selected) return ABI.encodeFunctionResult(call.name, [0n]);
+            if (call.name === 'processedPegIns' && defect === (call.args[0] === MINT ? 'old processed identity' : 'new processed identity')) {
+              return ABI.encodeFunctionResult(call.name, [call.args[0] !== MINT]);
+            }
+          }
+          return result;
+        };
+        await expect(observeFederatedNativeContinuationMintParentV1(next.context, withdrawalAuthorize)).rejects.toThrow();
+        expect(writes()).toEqual(before);
+      });
   }
 
   it('reserves once on confirmed burn four, seals five and preserves the previous consumed state', async () => {

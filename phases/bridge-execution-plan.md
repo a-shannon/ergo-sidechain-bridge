@@ -28,35 +28,37 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect the next native mint/approve/burn operation to the retained
-continuation reservation, observed nonce/parent and accumulated token balances. Start with
-`federated-genesis-operator-v1.ts`, `federated-native-reservation-execution-v1.ts`
-and their proof-bound caller. Preserve the existing one-shot APIs and durable
-ambiguous-attempt holds. The deciding component checks must accept a later
-operation on the retained chain and reject stale parents, wrong nonces, mixed
-operation receipts, duplicates and disposed custody before further signing or
-transport. Close that independently reviewed producer-consumer join; the
-setup signer's lifetime and reserve/DUP/tracker successor construction remain
-separate dependencies before a full two-cycle campaign.
+**Now:** connect retained setup custody and observed Ergo successors to the
+second source deposit. Trace the first payout's reserve/DUP/tracker observations
+through the setup execution and deposit packet builders before selecting the
+smallest implementation join. Start at `substrate-federated-genesis-target-root-v1.ts`,
+`substrate-federated-isolated-devnet-setup-check-execution-v2.ts` and
+`substrate-federated-pooled-reserve-deposit-v2.ts`. The deciding consumer must
+produce the next deposit from the observed reserve successor, preserve the first
+replay key, retain the required original custody and reject stale or foreign
+state. Keep each operation's authority separate; never reopen a disposed signer
+or reset a consumed legacy API. Connect the second tracker/payout and root before
+the fresh two-cycle campaign.
 
-The first continuation reservation is implemented in the proof-bound caller:
-an original confirmed burn at native height four anchors the next signature
-at observed nonce four and reservation inclusion at height five. It preserves
-the previous consumed mint record, exact native/Ethereum parents, current
-source-operation custody and durable ambiguous-attempt holds. This bounded
-entry point does not execute the next mint. Its composed tests use an explicit
-double for the second Ergo deposit packet/observation producer; codecs, source
-signatures, operator signing and native execution checks remain exercised.
-The root still runs one cycle, and no second cycle has run on nodes.
+The native continuation path now connects an original confirmed burn at height
+four to reservation five, mint six, approve seven, burn eight and checkpoint
+attestation eight in the same retained custody. The caller consumes the original
+reservation result once. Paired native/Ethereum parents, nonces, cumulative token
+balances, both consumed mint records and transaction-specific fee bounds remain
+checked. The exact commitment retains global event index two and a single burn
+leaf; formats, domains and quorum are unchanged. Composed tests still use an
+explicit double for the second Ergo deposit packet/observation producer, with
+real codecs, source signatures, operator signing and native execution consumers.
+The root still runs one cycle; no second complete cycle has run on nodes.
 
 The source-quorum join is implemented: individual mint/checkpoint operations
 share retained federation custody and keep the original live target, genesis
 and application. The actual caller/root uses exact operation provenance and
 checks its lifetime through later tracker/payout waits. Legacy APIs stay
-one-shot. Source-level sequential operation tests use explicit boundary
-doubles with real codecs and signatures; the composed native tests exercise
-one original operation through checkpoint. This is not evidence of a second
-complete chain cycle. Exact closeout evidence is in the active task handoff.
+one-shot. Source-level sequential operation tests and the composed native
+continuation use explicit boundary doubles with real codecs and signatures.
+These are component evidence, not a second complete chain cycle. Exact closeout
+evidence is in the active task handoff.
 
 The two prerequisite selection decisions are closed below. Compatibility and
 release obligations that require new evidence remain open; they do not block
@@ -110,11 +112,10 @@ profile while unrelated release mapping remains open. Reassess the smallest
 useful join as the deciding evidence arrives; prepare the invocation where the
 work is independent and serves the same delivery result.
 
-The source-quorum operation boundary is now connected. The setup
-signer still closes after the withdrawal check, and the operator binds the first
-approval/burn nonces and parents. A second cycle needs separately scoped
-operation authority under the selected federation/profile as well as observed
-successor state. Do not clear consumed flags, reopen a closed signer, recreate
+The source-quorum and native operator operation boundaries are connected. The
+setup signer still closes after the withdrawal check. A second complete cycle
+needs retained setup custody and observed Ergo successor state as well as the
+new native continuation. Do not clear consumed flags, reopen a closed signer, recreate
 destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
 validate the new operation boundary with focused duplicate, disposed-custody,
 foreign-operation and wrong-parent negatives before composing another cycle.
@@ -397,8 +398,8 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Observed native successor -> next operator sequence | Replace first-cycle nonce/parent assumptions with operation-bound observed state through the native execution caller | Reject stale parent, wrong nonce, foreign operation and replay before new signing/transport; preserve durable ambiguous holds and old one-shot APIs |
-| Next candidate | First-cycle successors -> another normal operation | Connect observed reserve, DUP and tracker successors to the next deposit, mint, burn, checkpoint and payout on the same greenfield chain | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
+| **Now** | Retained setup custody and reserve successor -> next source deposit | Connect the observed first payout's reserve state to a separately scoped second deposit packet and execution | Reject disposed custody, stale predecessor and foreign operation before new signing/transport; preserve durable ambiguous holds and old one-shot APIs |
+| Next candidate | Second native checkpoint and Ergo successors -> next settlement | Connect the continuation checkpoint to the retained tracker/DUP/reserve successors and compose both cycles in the root | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |

@@ -6,9 +6,11 @@ import {
   createFederatedGenesisOperatorV1, assertFederatedGenesisOperatorV1,
   disposeFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
   signFederatedGenesisApproveV1, signFederatedGenesisBurnV1,
-  signFederatedGenesisContinuationReservationV1,
+  signFederatedGenesisContinuationReservationV1, signFederatedGenesisContinuationMintV1,
+  signFederatedGenesisContinuationApproveV1, signFederatedGenesisContinuationBurnV1,
 } from './federated-genesis-operator-v1.js';
-import { assertFederatedNativeContinuationParentV1, type FederatedNativeContinuationParentV1 }
+import { assertFederatedNativeContinuationParentV1, assertFederatedNativeContinuationStepParentV1,
+  type FederatedNativeContinuationParentV1, type FederatedNativeContinuationStepParentV1 }
   from './federated-native-reservation-execution-v1.js';
 import { encodeFederatedNativeMintExtrinsicV1Hex } from '../federated-native-mint-runtime-state-v1.js';
 import { deriveValidityApplicationPooledReserveMintIdentityV4Hex,
@@ -18,12 +20,19 @@ import { deriveValidityApplicationPooledReserveMintIdentityV4Hex,
 
 vi.mock('./federated-native-reservation-execution-v1.js', () => ({
   assertFederatedNativeContinuationParentV1: vi.fn(),
+  assertFederatedNativeContinuationStepParentV1: vi.fn(),
 }));
 
 const authenticatedContinuationParents = new WeakSet<object>();
+const authenticatedContinuationStepParents = new WeakSet<object>();
 beforeEach(() => vi.mocked(assertFederatedNativeContinuationParentV1).mockReset().mockImplementation(parent => {
   if (parent === null || typeof parent !== 'object' || !authenticatedContinuationParents.has(parent)) {
     throw new Error('FED continuation parent is not authenticated');
+  }
+}));
+beforeEach(() => vi.mocked(assertFederatedNativeContinuationStepParentV1).mockReset().mockImplementation(parent => {
+  if (parent === null || typeof parent !== 'object' || !authenticatedContinuationStepParents.has(parent)) {
+    throw new Error('FED continuation step parent is not authenticated');
   }
 }));
 afterEach(() => vi.restoreAllMocks());
@@ -625,5 +634,260 @@ describe('FED first continuation reservation signing', () => {
       .toThrow(/authority changed/);
     expect(sign).toHaveBeenCalledOnce();
     expect(() => assertFederatedGenesisOperatorV1(owner)).toThrow(/custody/);
+  });
+});
+
+describe('FED retained continuation mint, approval and burn signing', () => {
+  type MutableStepParent = {
+    -readonly [Key in keyof FederatedNativeContinuationStepParentV1]: FederatedNativeContinuationStepParentV1[Key];
+  };
+  const GENESIS = `0x${'62'.repeat(32)}`;
+  const BRIDGE = `0x${'33'.repeat(20)}`, TOKEN = `0x${'44'.repeat(20)}`;
+  const ERGO = `0x0008cd0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798`;
+  const vector = JSON.parse(readFileSync(new URL(
+    '../../test-vectors/validity-application-pooled-reserve-mint-reservation-v4.json', import.meta.url), 'utf8')) as {
+      statement: ValidityApplicationPooledReserveMintReservationStatementV4;
+      expected: { statementHex: string };
+    };
+  const FIRST_MINT_ID = vector.statement.mintIdentityHex;
+  const nextLockBoxIdHex = `0x${'83'.repeat(32)}`;
+  const secondStatement = Object.freeze({ ...vector.statement, sourceLockBoxIdHex: nextLockBoxIdHex,
+    mintIdentityHex: deriveValidityApplicationPooledReserveMintIdentityV4Hex({
+      lineageProfileIdHex: vector.statement.lineageProfileIdHex, sourceLockBoxIdHex: nextLockBoxIdHex,
+      depositCommitmentHex: vector.statement.depositCommitmentHex,
+    }) });
+  const SECOND_MINT_ID = secondStatement.mintIdentityHex;
+  const secondStatementHex = encodeValidityApplicationPooledReserveMintReservationStatementV4Hex(secondStatement);
+  const proof = `0x04${'53'.repeat(622)}`;
+  const abi = new Interface(['function mintSERG(address,uint256,bytes32)',
+    'function approve(address,uint256)', 'function pegOut(uint256,bytes)']);
+
+  async function retained(firstAmount = '30000000', firstGross = '20000000') {
+    const owner = createFederatedGenesisOperatorV1();
+    try {
+      signFederatedGenesisReservationV1(owner, { genesisHashHex: GENESIS, nonce: 0,
+        statementHex: `0x04${'37'.repeat(602)}`, sourceProofEnvelopeScaleHex: proof });
+      await signFederatedGenesisMintV1(owner, { nonce: 1, bridgeAddressHex: BRIDGE,
+        recipientAddressHex: `0x${owner.addressHex}`, amountNanoErg: firstAmount, mintIdentityHex: FIRST_MINT_ID });
+      const withdrawal = { bridgeAddressHex: BRIDGE, tokenAddressHex: TOKEN,
+        grossAmountNanoErg: firstGross, recipientErgoTreeHex: ERGO };
+      await signFederatedGenesisApproveV1(owner, { nonce: 2, parentNativeHeight: 2, ...withdrawal });
+      const burn = await signFederatedGenesisBurnV1(owner, { nonce: 3, parentNativeHeight: 3, ...withdrawal });
+      const originalParent = Object.freeze({ genesisHashHex: GENESIS, blockHashHex: `0x${'71'.repeat(32)}`,
+        ethereumBlockHashHex: `0x${'72'.repeat(32)}`, blockHeight: 4, nonce: 4,
+        operatorAddressHex: `0x${owner.addressHex}`, previousMintIdentityHex: FIRST_MINT_ID,
+        previousBurnTransactionHashHex: burn.transactionHashHex, operatorStorageKeyHex: owner.nativeFunding.storageKeyHex,
+        operatorAccountInfoHex: `0x${'00'.repeat(80)}`, expectedStorage: Object.freeze({}) });
+      authenticatedContinuationParents.add(originalParent);
+      const reservation = signFederatedGenesisContinuationReservationV1(owner, {
+        parent: originalParent, statementHex: secondStatementHex, sourceProofEnvelopeScaleHex: proof,
+      });
+      return { owner, reservation };
+    } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+  }
+
+  function step(owner: ReturnType<typeof createFederatedGenesisOperatorV1>, reservationHash: string,
+    phase: 'mint' | 'approve' | 'burn', previousTransactionHashHex: string | null,
+    changed: Partial<MutableStepParent> = {}): Readonly<FederatedNativeContinuationStepParentV1> {
+    const nonce = phase === 'mint' ? 5 : phase === 'approve' ? 6 : 7;
+    const result = Object.freeze({ phase, genesisHashHex: GENESIS,
+      parentNativeBlockHashHex: `0x${nonce.toString(16).padStart(2, '0').repeat(32)}`,
+      parentEthereumBlockHashHex: `0x${(nonce + 16).toString(16).padStart(2, '0').repeat(32)}`,
+      parentNativeHeight: nonce, nonce, reservationExtrinsicHashHex: reservationHash,
+      mintIdentityHex: SECOND_MINT_ID, recipientAddressHex: `0x${owner.addressHex}`,
+      bridgeAddressHex: BRIDGE, tokenAddressHex: TOKEN, amountNanoErg: '20000000',
+      gasPriceWei: phase === 'mint' ? '1802032472' : phase === 'approve' ? '2027286531' : '2280697348',
+      previousTransactionHashHex, grossAmountNanoErg: phase === 'mint' ? null : '30000000',
+      recipientErgoTreeHex: phase === 'mint' ? null : ERGO, ...changed });
+    authenticatedContinuationStepParents.add(result);
+    return result;
+  }
+
+  it('signs the exact second mint, cumulative approval and burn chain under retained custody', async () => {
+    const { owner, reservation } = await retained();
+    const fetch = vi.spyOn(globalThis, 'fetch'), connect = vi.spyOn(HDNodeWallet.prototype, 'connect');
+    try {
+      const mintParent = step(owner, reservation.extrinsicHashHex, 'mint', null);
+      const mint = await signFederatedGenesisContinuationMintV1(owner, mintParent);
+      const approvalParent = step(owner, reservation.extrinsicHashHex, 'approve', mint.transactionHashHex);
+      const approval = await signFederatedGenesisContinuationApproveV1(owner, approvalParent);
+      const burnParent = step(owner, reservation.extrinsicHashHex, 'burn', approval.transactionHashHex);
+      const burn = await signFederatedGenesisContinuationBurnV1(owner, burnParent);
+      for (const [result, nonce, gasPrice, target, data] of [
+        [mint, 5, 1802032472n, BRIDGE, abi.encodeFunctionData('mintSERG', [`0x${owner.addressHex}`, '20000000', SECOND_MINT_ID])],
+        [approval, 6, 2027286531n, TOKEN, abi.encodeFunctionData('approve', [BRIDGE, '30000000'])],
+        [burn, 7, 2280697348n, BRIDGE, abi.encodeFunctionData('pegOut', ['30000000', ERGO])],
+      ] as const) {
+        const tx = Transaction.from(result.signedTransactionHex);
+        expect(tx.hash).toBe(result.transactionHashHex); expect(result.nonce).toBe(nonce);
+        expect(tx.from?.toLowerCase()).toBe(`0x${owner.addressHex}`);
+        expect(tx.type).toBe(0); expect(tx.chainId).toBe(4242n); expect(tx.nonce).toBe(nonce);
+        expect(tx.to?.toLowerCase()).toBe(target); expect(tx.data).toBe(data);
+        expect(tx.gasPrice).toBe(gasPrice); expect(tx.gasLimit).toBe(5000000n); expect(tx.value).toBe(0n);
+        expect(Object.isFrozen(result)).toBe(true);
+      }
+      expect(fetch).not.toHaveBeenCalled(); expect(connect).not.toHaveBeenCalled();
+      assertFederatedGenesisOperatorV1(owner);
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['phase', 'height', 'nonce', 'gas price', 'genesis', 'reservation', 'identity',
+    'recipient', 'bridge', 'token', 'amount', 'native block', 'ethereum block'] as const)
+    ('rejects mint %s drift before Ethereum signing', async fault => {
+      const { owner, reservation } = await retained();
+      const changed: Partial<MutableStepParent> = {};
+      if (fault === 'phase') changed.phase = 'approve';
+      if (fault === 'height') changed.parentNativeHeight = 6;
+      if (fault === 'nonce') changed.nonce = 6;
+      if (fault === 'gas price') changed.gasPriceWei = '1802032471';
+      if (fault === 'genesis') changed.genesisHashHex = `0x${'63'.repeat(32)}`;
+      if (fault === 'reservation') changed.reservationExtrinsicHashHex = `0x${'64'.repeat(32)}`;
+      if (fault === 'identity') changed.mintIdentityHex = FIRST_MINT_ID;
+      if (fault === 'recipient') changed.recipientAddressHex = `0x${'55'.repeat(20)}`;
+      if (fault === 'bridge') changed.bridgeAddressHex = `0x${'55'.repeat(20)}`;
+      if (fault === 'token') changed.tokenAddressHex = `0x${'55'.repeat(20)}`;
+      if (fault === 'amount') changed.amountNanoErg = '9223372036854775808';
+      if (fault === 'native block') changed.parentNativeBlockHashHex = `0x${'00'.repeat(32)}`;
+      if (fault === 'ethereum block') changed.parentEthereumBlockHashHex = `0x${'00'.repeat(32)}`;
+      const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
+      try {
+        await expect(signFederatedGenesisContinuationMintV1(owner,
+          step(owner, reservation.extrinsicHashHex, 'mint', null, changed))).rejects.toThrow(/scope|parent/);
+        expect(signer).not.toHaveBeenCalled();
+      } finally { disposeFederatedGenesisOperatorV1(owner); }
+    });
+
+  it.each(['mint previous hash', 'mint gross', 'mint recipient', 'approval previous hash',
+    'approval amount', 'approval gross below minimum', 'approval gross above balance',
+    'approval recipient', 'burn previous hash', 'burn gross', 'burn recipient'] as const)
+    ('rejects %s drift at its exact predecessor join', async fault => {
+      const { owner, reservation } = await retained();
+      const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
+      try {
+        if (fault.startsWith('mint')) {
+          const changed: Partial<MutableStepParent> = {};
+          if (fault === 'mint previous hash') changed.previousTransactionHashHex = `0x${'91'.repeat(32)}`;
+          if (fault === 'mint gross') changed.grossAmountNanoErg = '30000000';
+          if (fault === 'mint recipient') changed.recipientErgoTreeHex = ERGO;
+          await expect(signFederatedGenesisContinuationMintV1(owner,
+            step(owner, reservation.extrinsicHashHex, 'mint', null, changed))).rejects.toThrow(/parent/);
+        } else {
+          const mint = await signFederatedGenesisContinuationMintV1(owner,
+            step(owner, reservation.extrinsicHashHex, 'mint', null));
+          if (fault.startsWith('approval')) {
+            const changed: Partial<MutableStepParent> = {};
+            if (fault === 'approval previous hash') changed.previousTransactionHashHex = `0x${'91'.repeat(32)}`;
+            if (fault === 'approval amount') changed.amountNanoErg = '20000001';
+            if (fault === 'approval gross below minimum') changed.grossAmountNanoErg = '14999999';
+            if (fault === 'approval gross above balance') changed.grossAmountNanoErg = '30000001';
+            if (fault === 'approval recipient') changed.recipientErgoTreeHex = `0x0008cd02${'ff'.repeat(32)}`;
+            signer.mockClear();
+            await expect(signFederatedGenesisContinuationApproveV1(owner,
+              step(owner, reservation.extrinsicHashHex, 'approve', mint.transactionHashHex, changed)))
+              .rejects.toThrow(/balance scope|curve point/);
+          } else {
+            const approval = await signFederatedGenesisContinuationApproveV1(owner,
+              step(owner, reservation.extrinsicHashHex, 'approve', mint.transactionHashHex));
+            const changed: Partial<MutableStepParent> = {};
+            if (fault === 'burn previous hash') changed.previousTransactionHashHex = mint.transactionHashHex;
+            if (fault === 'burn gross') changed.grossAmountNanoErg = '29999999';
+            if (fault === 'burn recipient') changed.recipientErgoTreeHex = `0x0008cd03${ERGO.slice(10)}`;
+            signer.mockClear();
+            await expect(signFederatedGenesisContinuationBurnV1(owner,
+              step(owner, reservation.extrinsicHashHex, 'burn', approval.transactionHashHex, changed)))
+              .rejects.toThrow(/balance scope|approval scope/);
+          }
+        }
+        expect(signer).not.toHaveBeenCalled();
+      } finally { disposeFederatedGenesisOperatorV1(owner); }
+    });
+
+  it('rejects gross above signed i64 even when the accumulated token balance covers it', async () => {
+    const maximum = '9223372036854775807';
+    const { owner, reservation } = await retained(maximum, '15000000');
+    try {
+      const mint = await signFederatedGenesisContinuationMintV1(owner,
+        step(owner, reservation.extrinsicHashHex, 'mint', null, { amountNanoErg: maximum }));
+      const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
+      await expect(signFederatedGenesisContinuationApproveV1(owner,
+        step(owner, reservation.extrinsicHashHex, 'approve', mint.transactionHashHex,
+          { amountNanoErg: maximum, grossAmountNanoErg: '9223372036854775808' })))
+        .rejects.toThrow(/accumulated balance scope/);
+      expect(signer).not.toHaveBeenCalled();
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['copied parent', 'copied owner', 'disposed owner', 'extra field', 'accessor field'] as const)
+    ('rejects %s before signing', async fault => {
+      const { owner, reservation } = await retained();
+      const parent: any = { ...step(owner, reservation.extrinsicHashHex, 'mint', null) };
+      if (fault !== 'copied parent') authenticatedContinuationStepParents.add(parent);
+      if (fault === 'extra field') parent.extra = true;
+      if (fault === 'accessor field') Object.defineProperty(parent, 'nonce', { enumerable: true, get() { throw new Error('getter executed'); } });
+      if (fault === 'disposed owner') disposeFederatedGenesisOperatorV1(owner);
+      const signer = vi.spyOn(HDNodeWallet.prototype, 'signTransaction');
+      try {
+        await expect(signFederatedGenesisContinuationMintV1(
+          fault === 'copied owner' ? { ...owner } : owner, parent)).rejects.toThrow(/custody|authenticated|own-data/);
+        expect(signer).not.toHaveBeenCalled();
+      } finally { disposeFederatedGenesisOperatorV1(owner); }
+    });
+
+  it('claims before awaiting the signer and rejects simultaneous or repeated use', async () => {
+    const { owner, reservation } = await retained();
+    const parent = step(owner, reservation.extrinsicHashHex, 'mint', null);
+    const original = HDNodeWallet.prototype.signTransaction;
+    let release!: () => void;
+    const wait = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(async function (this: HDNodeWallet, tx) {
+      await wait; return original.call(this, tx);
+    });
+    try {
+      const pending = signFederatedGenesisContinuationMintV1(owner, parent);
+      await expect(signFederatedGenesisContinuationMintV1(owner, parent)).rejects.toThrow(/unused/);
+      release(); await pending;
+      await expect(signFederatedGenesisContinuationMintV1(owner, parent)).rejects.toThrow(/unused/);
+      assertFederatedGenesisOperatorV1(owner);
+    } finally { release(); disposeFederatedGenesisOperatorV1(owner); }
+  });
+
+  it.each(['signer failure', 'async disposal', 'changed parent', 'capability loss', 'wrong output'] as const)
+    ('revokes custody on %s after claiming the step', async fault => {
+      const { owner, reservation } = await retained();
+      const parent: MutableStepParent = { ...step(owner, reservation.extrinsicHashHex, 'mint', null) };
+      authenticatedContinuationStepParents.add(parent);
+      const original = HDNodeWallet.prototype.signTransaction;
+      vi.spyOn(HDNodeWallet.prototype, 'signTransaction').mockImplementation(async function (this: HDNodeWallet, tx) {
+        if (fault === 'signer failure') throw new Error('synthetic signer failure');
+        if (fault === 'async disposal') disposeFederatedGenesisOperatorV1(owner);
+        if (fault === 'changed parent') parent.gasPriceWei = '1802032471';
+        if (fault === 'capability loss') authenticatedContinuationStepParents.delete(parent);
+        return original.call(this, fault === 'wrong output' ? { ...tx, nonce: 4 } : tx);
+      });
+      await expect(signFederatedGenesisContinuationMintV1(owner, parent)).rejects.toThrow(/failure|custody|changed|authenticated|exact transaction/);
+      expect(() => assertFederatedGenesisOperatorV1(owner)).toThrow(/custody/);
+    });
+
+  it('keeps every legacy slot one-shot after the retained continuation chain', async () => {
+    const { owner, reservation } = await retained();
+    try {
+      const mint = await signFederatedGenesisContinuationMintV1(owner,
+        step(owner, reservation.extrinsicHashHex, 'mint', null));
+      const approval = await signFederatedGenesisContinuationApproveV1(owner,
+        step(owner, reservation.extrinsicHashHex, 'approve', mint.transactionHashHex));
+      await signFederatedGenesisContinuationBurnV1(owner,
+        step(owner, reservation.extrinsicHashHex, 'burn', approval.transactionHashHex));
+      await expect(signFederatedGenesisMintV1(owner, { nonce: 1, bridgeAddressHex: BRIDGE,
+        recipientAddressHex: `0x${owner.addressHex}`, amountNanoErg: '1', mintIdentityHex: FIRST_MINT_ID }))
+        .rejects.toThrow(/unused/);
+      await expect(signFederatedGenesisApproveV1(owner, { nonce: 2, parentNativeHeight: 2,
+        bridgeAddressHex: BRIDGE, tokenAddressHex: TOKEN, grossAmountNanoErg: '20000000', recipientErgoTreeHex: ERGO }))
+        .rejects.toThrow(/unused/);
+      await expect(signFederatedGenesisBurnV1(owner, { nonce: 3, parentNativeHeight: 3,
+        bridgeAddressHex: BRIDGE, tokenAddressHex: TOKEN, grossAmountNanoErg: '20000000', recipientErgoTreeHex: ERGO }))
+        .rejects.toThrow(/unused/);
+      expect(() => signFederatedGenesisContinuationReservationV1(owner, {} as never)).toThrow(/consumed/);
+      assertFederatedGenesisOperatorV1(owner);
+    } finally { disposeFederatedGenesisOperatorV1(owner); }
   });
 });

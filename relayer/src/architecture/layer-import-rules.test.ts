@@ -66,6 +66,8 @@ describe('layer import rules', () => {
     ['../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js', 'collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1'],
     ['../../substrate-federated-isolated-devnet-source-attestation-session-v1.js', 'produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundReservationMintAndBurnV1'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundContinuationReservationV1'],
+    ['./frontier-native-proof-bound-reservation-signing-v1.js', 'executeFrontierNativeProofBoundContinuationMintAndBurnV1'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'attestFrontierNativeBurnCheckpointV1'],
     ['./frontier-native-proof-bound-reservation-signing-v1.js', 'assertFrontierNativeBurnCheckpointV1'],
     ['../../substrate-federated-isolated-devnet-setup-check-runner-v2.js', 'claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2'],
@@ -244,7 +246,9 @@ describe('layer import rules', () => {
       .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
   });
 
-  it.each(['signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1'])
+  it.each(['signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1',
+    'signFederatedGenesisContinuationReservationV1', 'signFederatedGenesisContinuationMintV1',
+    'signFederatedGenesisContinuationApproveV1', 'signFederatedGenesisContinuationBurnV1'])
     ('restricts %s to its proof-bound composition, not the target root', binding => {
     const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
     const specifier = FEDERATED_GENESIS_OPERATOR_SPECIFIER;
@@ -320,7 +324,8 @@ describe('layer import rules', () => {
     'observeFederatedNativeWithdrawalParentV1', 'reserveFederatedNativeWithdrawalAttemptV1',
     'submitFederatedNativeWithdrawalV1', 'sealFederatedNativeWithdrawalV1', 'observeFederatedNativeWithdrawalInclusionV1',
     'collectFederatedNativeBurnCommitmentV1', 'observeFederatedNativeContinuationParentV1',
-    'reobserveFederatedNativeContinuationParentV1', 'reserveFederatedNativeContinuationReservationAttemptV1'])
+    'reobserveFederatedNativeContinuationParentV1', 'reserveFederatedNativeContinuationReservationAttemptV1',
+    'observeFederatedNativeContinuationMintParentV1', 'observeFederatedNativeContinuationWithdrawalParentV1'])
     ('keeps native execution capability in its proof-bound consumer: %s', binding => {
       const composition = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
       const specifier = '../../adapters/federated-native-reservation-execution-v1.js';
@@ -898,12 +903,14 @@ describe('layer import rules', () => {
     }
   });
 
-  it('grants only the continuation-parent assertion to the operator', () => {
+  it.each(['assertFederatedNativeContinuationParentV1', 'assertFederatedNativeContinuationStepParentV1'])
+    ('grants only the continuation-parent assertion to the operator: %s', assertion => {
     const specifier = './federated-native-reservation-execution-v1.js';
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_OPERATOR,
-      `import { assertFederatedNativeContinuationParentV1 } from '${specifier}';`))).toEqual([]);
+      `import { ${assertion} } from '${specifier}';`))).toEqual([]);
     for (const binding of ['observeFederatedNativeContinuationParentV1', 'reserveFederatedNativeContinuationReservationAttemptV1',
-      'submitFederatedNativeReservationV1', 'sealFederatedNativeReservationV1']) {
+      'submitFederatedNativeReservationV1', 'sealFederatedNativeReservationV1',
+      'observeFederatedNativeContinuationMintParentV1', 'observeFederatedNativeContinuationWithdrawalParentV1']) {
       expect(inspect(staticAppFixture(FEDERATED_GENESIS_OPERATOR, `import { ${binding} } from '${specifier}';`))
         .map(item => item.message)).toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
     }

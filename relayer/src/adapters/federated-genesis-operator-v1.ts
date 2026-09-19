@@ -3,7 +3,8 @@ import { Interface, SigningKey, Transaction, Wallet, keccak256, recoverAddress, 
 import blakejs from 'blakejs';
 import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
   from '../validity-application-pooled-reserve-mint-reservation-v4.js';
-import { assertFederatedNativeContinuationParentV1, type FederatedNativeContinuationParentV1 }
+import { assertFederatedNativeContinuationParentV1, assertFederatedNativeContinuationStepParentV1,
+  type FederatedNativeContinuationParentV1, type FederatedNativeContinuationStepParentV1 }
   from './federated-native-reservation-execution-v1.js';
 
 const SYSTEM_ACCOUNT_PREFIX = '26aa394eea5630e07c48ae0c9558cef7b99d880ec681799c0cf30e8886371da9';
@@ -36,6 +37,17 @@ const completedContinuationReservations = new WeakMap<object, Readonly<{
   mintIdentityHex: string;
   extrinsicHashHex: string;
   signedExtrinsicHex: string;
+}>>();
+const continuationMintSigners = new WeakSet<object>();
+const continuationApproveSigners = new WeakSet<object>();
+const continuationBurnSigners = new WeakSet<object>();
+const completedContinuationMints = new WeakMap<object, Readonly<{
+  parent: Readonly<FederatedNativeContinuationStepParentV1>;
+  transactionHashHex: string;
+}>>();
+const completedContinuationApprovals = new WeakMap<object, Readonly<{
+  parent: Readonly<FederatedNativeContinuationStepParentV1>;
+  transactionHashHex: string;
 }>>();
 const mintAbi = new Interface(['function mintSERG(address recipient,uint256 amount,bytes32 mintIdentity)']);
 const withdrawalAbi = new Interface(['function approve(address,uint256)', 'function pegOut(uint256,bytes)']);
@@ -261,6 +273,158 @@ export function signFederatedGenesisContinuationReservationV1(
   completedContinuationReservations.set(owner, Object.freeze({ parent, mintIdentityHex: next.mintIdentityHex,
     extrinsicHashHex: result.extrinsicHashHex, signedExtrinsicHex: result.signedExtrinsicHex }));
   return result;
+}
+
+const continuationStepFields = ['phase', 'genesisHashHex', 'parentNativeBlockHashHex',
+  'parentEthereumBlockHashHex', 'parentNativeHeight', 'nonce', 'reservationExtrinsicHashHex',
+  'mintIdentityHex', 'recipientAddressHex', 'bridgeAddressHex', 'tokenAddressHex',
+  'amountNanoErg', 'gasPriceWei', 'previousTransactionHashHex', 'grossAmountNanoErg',
+  'recipientErgoTreeHex'] as const;
+
+/** Sign the retained operation's second mint from its authenticated reservation inclusion. */
+export async function signFederatedGenesisContinuationMintV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>,
+) {
+  return signContinuationEthereumStep(owner, parent, 'mint');
+}
+
+/** Sign the retained operation's second approval from its authenticated mint inclusion. */
+export async function signFederatedGenesisContinuationApproveV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>,
+) {
+  return signContinuationEthereumStep(owner, parent, 'approve');
+}
+
+/** Sign the retained operation's second burn from its authenticated approval inclusion. */
+export async function signFederatedGenesisContinuationBurnV1(
+  owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>,
+) {
+  return signContinuationEthereumStep(owner, parent, 'burn');
+}
+
+async function signContinuationEthereumStep(owner: Readonly<FederatedGenesisOperatorV1>,
+  parent: Readonly<FederatedNativeContinuationStepParentV1>, phase: 'mint' | 'approve' | 'burn') {
+  assertFederatedGenesisOperatorV1(owner);
+  assertExactContinuationStepParent(parent);
+  assertFederatedNativeContinuationStepParentV1(parent);
+  const reservation = completedReservations.get(owner);
+  const firstMint = completedMints.get(owner);
+  const firstApproval = completedApprovals.get(owner);
+  const firstBurn = completedBurns.get(owner);
+  const continuationReservation = completedContinuationReservations.get(owner);
+  const continuationMint = completedContinuationMints.get(owner);
+  const continuationApproval = completedContinuationApprovals.get(owner);
+  const used = phase === 'mint' ? continuationMintSigners
+    : phase === 'approve' ? continuationApproveSigners : continuationBurnSigners;
+  const expectedNonce = phase === 'mint' ? 5 : phase === 'approve' ? 6 : 7;
+  const expectedGasPriceWei = phase === 'mint' ? '1802032472'
+    : phase === 'approve' ? '2027286531' : '2280697348';
+  if (!reservation || !firstMint || !firstApproval || !firstBurn || !continuationReservation
+    || used.has(owner) || phase === 'approve' && !continuationMint || phase === 'burn' && !continuationApproval) {
+    throw new Error('FED continuation signing requires its unused retained predecessor slot');
+  }
+  const snapshot = Object.freeze({ ...parent });
+  const priorStep = phase === 'approve' ? continuationMint : phase === 'burn' ? continuationApproval : undefined;
+  if (parent.phase !== phase || parent.genesisHashHex !== reservation.genesisHashHex
+    || parent.genesisHashHex !== continuationReservation.parent.genesisHashHex
+    || parent.parentNativeHeight !== expectedNonce || parent.nonce !== expectedNonce
+    || parent.reservationExtrinsicHashHex !== continuationReservation.extrinsicHashHex
+    || parent.mintIdentityHex !== continuationReservation.mintIdentityHex
+    || parent.recipientAddressHex !== `0x${owner.addressHex}`
+    || parent.bridgeAddressHex !== firstMint.bridgeAddressHex
+    || parent.tokenAddressHex !== firstApproval.tokenAddressHex
+    || parent.gasPriceWei !== expectedGasPriceWei
+    || typeof parent.amountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(parent.amountNanoErg)
+    || BigInt(parent.amountNanoErg) > 0x7fff_ffff_ffff_ffffn
+    || typeof parent.parentNativeBlockHashHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(parent.parentNativeBlockHashHex)
+    || /^0x0+$/.test(parent.parentNativeBlockHashHex)
+    || typeof parent.parentEthereumBlockHashHex !== 'string' || !/^0x[0-9a-f]{64}$/.test(parent.parentEthereumBlockHashHex)
+    || /^0x0+$/.test(parent.parentEthereumBlockHashHex)) {
+    throw new Error('FED continuation signing differs from its retained operation scope');
+  }
+  if (phase === 'mint') {
+    if (parent.previousTransactionHashHex !== null || parent.grossAmountNanoErg !== null
+      || parent.recipientErgoTreeHex !== null) {
+      throw new Error('FED continuation mint differs from its reservation parent');
+    }
+  } else {
+    if (parent.previousTransactionHashHex !== priorStep!.transactionHashHex
+      || parent.amountNanoErg !== continuationMint!.parent.amountNanoErg
+      || parent.bridgeAddressHex !== continuationMint!.parent.bridgeAddressHex
+      || parent.tokenAddressHex !== continuationMint!.parent.tokenAddressHex
+      || parent.mintIdentityHex !== continuationMint!.parent.mintIdentityHex
+      || typeof parent.grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(parent.grossAmountNanoErg)
+      || BigInt(parent.grossAmountNanoErg) < 15_000_000n
+      || BigInt(parent.grossAmountNanoErg) > 0x7fff_ffff_ffff_ffffn
+      || BigInt(parent.grossAmountNanoErg) > BigInt(firstMint.amountNanoErg)
+        - BigInt(firstApproval.grossAmountNanoErg) + BigInt(parent.amountNanoErg)
+      || typeof parent.recipientErgoTreeHex !== 'string'
+      || !/^0x0008cd0[23][0-9a-f]{64}$/.test(parent.recipientErgoTreeHex)) {
+      throw new Error('FED continuation withdrawal differs from its accumulated balance scope');
+    }
+    try {
+      const key = `0x${parent.recipientErgoTreeHex.slice(8)}`;
+      if (SigningKey.computePublicKey(key, true).toLowerCase() !== key) throw new Error('noncanonical key');
+    } catch { throw new Error('FED continuation withdrawal recipient is not a valid P2PK curve point'); }
+    if (phase === 'burn' && (parent.grossAmountNanoErg !== continuationApproval!.parent.grossAmountNanoErg
+      || parent.recipientErgoTreeHex !== continuationApproval!.parent.recipientErgoTreeHex)) {
+      throw new Error('FED continuation burn differs from its retained approval scope');
+    }
+  }
+  const transaction = Object.freeze({ type: 0, chainId: 4242, nonce: parent.nonce,
+    to: phase === 'approve' ? parent.tokenAddressHex : parent.bridgeAddressHex,
+    gasPrice: BigInt(parent.gasPriceWei), gasLimit: 5_000_000n, value: 0n,
+    data: phase === 'mint'
+      ? mintAbi.encodeFunctionData('mintSERG', [parent.recipientAddressHex, parent.amountNanoErg, parent.mintIdentityHex])
+      : phase === 'approve'
+        ? withdrawalAbi.encodeFunctionData('approve', [parent.bridgeAddressHex, parent.grossAmountNanoErg])
+        : withdrawalAbi.encodeFunctionData('pegOut', [parent.grossAmountNanoErg, parent.recipientErgoTreeHex]) });
+  // Parsing or encoding can invoke external code. Claim only after current custody and capability are rechecked.
+  assertFederatedGenesisOperatorV1(owner);
+  assertFederatedNativeContinuationStepParentV1(parent);
+  assertContinuationStepUnchanged(parent, snapshot);
+  if (used.has(owner)) throw new Error('FED continuation signing requires its unused retained predecessor slot');
+  used.add(owner);
+  try {
+    const signedTransactionHex = await owners.get(owner)!.signTransaction(transaction);
+    assertFederatedGenesisOperatorV1(owner);
+    assertFederatedNativeContinuationStepParentV1(parent);
+    assertContinuationStepUnchanged(parent, snapshot);
+    const parsed = Transaction.from(signedTransactionHex);
+    if (parsed.serialized !== signedTransactionHex || parsed.signature === null || !parsed.signature.isValid()
+      || parsed.signature.networkV === null || parsed.from?.toLowerCase() !== `0x${owner.addressHex}`
+      || parsed.type !== 0 || parsed.chainId !== 4242n || parsed.nonce !== parent.nonce
+      || parsed.to?.toLowerCase() !== transaction.to || parsed.data !== transaction.data
+      || parsed.gasPrice !== transaction.gasPrice || parsed.gasLimit !== transaction.gasLimit || parsed.value !== 0n) {
+      throw new Error('FED continuation signature differs from its exact transaction');
+    }
+    assertFederatedGenesisOperatorV1(owner);
+    assertFederatedNativeContinuationStepParentV1(parent);
+    assertContinuationStepUnchanged(parent, snapshot);
+    const completed = Object.freeze({ parent: snapshot, transactionHashHex: parsed.hash! });
+    if (phase === 'mint') completedContinuationMints.set(owner, completed);
+    else if (phase === 'approve') completedContinuationApprovals.set(owner, completed);
+    return Object.freeze({ signedTransactionHex, transactionHashHex: parsed.hash!, nonce: parent.nonce });
+  } catch (error) { disposeFederatedGenesisOperatorV1(owner); throw error; }
+}
+
+function assertExactContinuationStepParent(parent: Readonly<FederatedNativeContinuationStepParentV1>): void {
+  if (parent === null || typeof parent !== 'object' || Object.getPrototypeOf(parent) !== Object.prototype
+    || Reflect.ownKeys(parent).length !== continuationStepFields.length || continuationStepFields.some(key => {
+      const descriptor = Object.getOwnPropertyDescriptor(parent, key);
+      return !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value');
+    })) throw new Error('FED continuation signing requires exact own-data parent fields');
+}
+
+function assertContinuationStepUnchanged(parent: Readonly<FederatedNativeContinuationStepParentV1>,
+  snapshot: Readonly<FederatedNativeContinuationStepParentV1>): void {
+  assertExactContinuationStepParent(parent);
+  if (continuationStepFields.some(key => parent[key] !== snapshot[key])) {
+    throw new Error('FED continuation signing parent changed during signing');
+  }
 }
 
 function signReservation(owner: Readonly<FederatedGenesisOperatorV1>, input: Readonly<FederatedGenesisReservationInputV1>,

@@ -2,6 +2,7 @@ import {
   assertFederatedGenesisOperatorV1, signFederatedGenesisReservationV1, signFederatedGenesisMintV1,
   signFederatedGenesisApproveV1, signFederatedGenesisBurnV1,
   signFederatedGenesisContinuationReservationV1,
+  signFederatedGenesisContinuationMintV1, signFederatedGenesisContinuationApproveV1, signFederatedGenesisContinuationBurnV1,
   type FederatedGenesisOperatorV1,
 } from '../../adapters/federated-genesis-operator-v1.js';
 import { observeFederatedGenesisReservationTargetV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
@@ -15,6 +16,7 @@ import {
   collectFederatedNativeBurnCommitmentV1,
   observeFederatedNativeContinuationParentV1, reobserveFederatedNativeContinuationParentV1,
   reserveFederatedNativeContinuationReservationAttemptV1,
+  observeFederatedNativeContinuationMintParentV1, observeFederatedNativeContinuationWithdrawalParentV1,
   type FederatedNativeContinuationParentV1,
 } from '../../adapters/federated-native-reservation-execution-v1.js';
 import { decodeValidityApplicationPooledReserveMintReservationStatementV4Hex }
@@ -71,6 +73,13 @@ const burnExecutions = new WeakMap<object, {
 }>();
 const burnCheckpoints = new WeakMap<object, () => void>();
 const continuedBurns = new WeakSet<object>();
+const continuationReservations = new WeakMap<object, {
+  retained: ReturnType<typeof capture>;
+  reservation: Awaited<ReturnType<typeof executeReservation>>;
+  attemptDirectory: string;
+  availableBeforeMint: bigint;
+  consumed: boolean;
+}>();
 
 /** Bind one original burn to its exact native commitment and the retained source quorum. */
 export async function attestFrontierNativeBurnCheckpointV1(input: Readonly<{
@@ -190,7 +199,34 @@ export async function executeFrontierNativeProofBoundContinuationReservationV1(i
       assertCurrent();
       return { genesisHashHex: parent.genesisHashHex, nonce: parent.nonce };
     } };
-  return (await executeReservation(retained, attemptDirectory, parent)).result;
+  const reservation = await executeReservation(retained, attemptDirectory, parent);
+  retained.assertCurrent();
+  continuationReservations.set(reservation.result, { retained, reservation, attemptDirectory, consumed: false,
+    availableBeforeMint: BigInt(previousExecution.mint.amountNanoErg) - BigInt(previousExecution.burn.grossAmountNanoErg) });
+  return reservation.result;
+}
+
+/** Continue only the original retained second reservation, without signing or submitting it again. */
+export async function executeFrontierNativeProofBoundContinuationMintAndBurnV1(input: Readonly<{
+  reservationExecution: Awaited<ReturnType<typeof executeFrontierNativeProofBoundContinuationReservationV1>>;
+  grossAmountNanoErg: string;
+  recipientErgoTreeHex: string;
+  broadcastScope: 'fed-native-local-synthetic-continuation-mint-and-burn-only';
+}>) {
+  exact(input, ['reservationExecution', 'grossAmountNanoErg', 'recipientErgoTreeHex', 'broadcastScope']);
+  const { reservationExecution, grossAmountNanoErg, recipientErgoTreeHex, broadcastScope } = input;
+  if (broadcastScope !== 'fed-native-local-synthetic-continuation-mint-and-burn-only') {
+    throw new Error('native continuation mint and burn scope is absent');
+  }
+  const state = continuationReservations.get(reservationExecution);
+  if (!state || state.consumed) throw new Error('native continuation requires an unused original reservation execution');
+  state.retained.assertCurrent();
+  const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(state.retained.input.proof.request.statementHex);
+  const intent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
+  validateBurnRequest(grossAmountNanoErg, recipientErgoTreeHex, state.availableBeforeMint + BigInt(intent.amountNanoErg));
+  state.consumed = true;
+  const minted = await executeMint(state.retained, state.attemptDirectory, state.reservation);
+  return executeWithdrawals(state.retained, minted, grossAmountNanoErg, recipientErgoTreeHex, true);
 }
 
 /** The same retained proof and custody cross reservation and mint; no owner-mint fallback. */
@@ -220,26 +256,43 @@ export async function executeFrontierNativeProofBoundReservationMintAndBurnV1(in
   const retained = capture(input.signing);
   const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(retained.input.proof.request.statementHex);
   const intent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
+  validateBurnRequest(grossAmountNanoErg, recipientErgoTreeHex, BigInt(intent.amountNanoErg));
+  retained.assertCurrent();
+  const minted = await executeMint(retained, attemptDirectory);
+  return executeWithdrawals(retained, minted, grossAmountNanoErg, recipientErgoTreeHex, false);
+}
+
+function validateBurnRequest(grossAmountNanoErg: string, recipientErgoTreeHex: string, available: bigint) {
   if (typeof grossAmountNanoErg !== 'string' || !/^[1-9][0-9]{0,18}$/.test(grossAmountNanoErg)
-    || BigInt(grossAmountNanoErg) < 15_000_000n || BigInt(grossAmountNanoErg) > BigInt(intent.amountNanoErg)
+    || BigInt(grossAmountNanoErg) < 15_000_000n || BigInt(grossAmountNanoErg) > available
+    || BigInt(grossAmountNanoErg) > 0x7fff_ffff_ffff_ffffn
     || typeof recipientErgoTreeHex !== 'string' || !/^0x0008cd0[23][0-9a-f]{64}$/.test(recipientErgoTreeHex)) {
     throw new Error('native burn request differs from the bounded mint or P2PK recipient');
   }
   try { computeAddress(`0x${recipientErgoTreeHex.slice(8)}`); }
   catch { throw new Error('native burn request differs from a valid P2PK curve point'); }
-  retained.assertCurrent();
-  const minted = await executeMint(retained, attemptDirectory);
+}
+
+async function executeWithdrawals(retained: ReturnType<typeof capture>, minted: Awaited<ReturnType<typeof executeMint>>,
+  grossAmountNanoErg: string, recipientErgoTreeHex: string, continuation: boolean) {
   const authorize = () => retained.assertCurrent();
   let approvalAttempt: Readonly<{ transactionHashHex: string; signedTransactionHex: string; nativeExtrinsicHex: string }> | null = null;
   const app = retained.input.compiled.preparation.application;
   for (const phase of ['approve', 'burn'] as const) {
     const context = Object.freeze({ mintAttempt: minted.attempt, approvalAttempt, grossAmountNanoErg, recipientErgoTreeHex });
-    const parent = await observeFederatedNativeWithdrawalParentV1(context, authorize);
-    authorize();
-    const signingInput = { ...parent, bridgeAddressHex: `0x${app.bridgeAddressHex}`,
-      tokenAddressHex: `0x${app.tokenAddressHex}`, grossAmountNanoErg, recipientErgoTreeHex };
-    const signed = phase === 'approve' ? await signFederatedGenesisApproveV1(retained.input.operator, signingInput)
-      : await signFederatedGenesisBurnV1(retained.input.operator, signingInput);
+    const signed = continuation ? await (async () => {
+      const parent = await observeFederatedNativeContinuationWithdrawalParentV1(context, authorize);
+      authorize();
+      return phase === 'approve' ? signFederatedGenesisContinuationApproveV1(retained.input.operator, parent)
+        : signFederatedGenesisContinuationBurnV1(retained.input.operator, parent);
+    })() : await (async () => {
+      const parent = await observeFederatedNativeWithdrawalParentV1(context, authorize);
+      authorize();
+      const signingInput = { ...parent, bridgeAddressHex: `0x${app.bridgeAddressHex}`,
+        tokenAddressHex: `0x${app.tokenAddressHex}`, grossAmountNanoErg, recipientErgoTreeHex };
+      return phase === 'approve' ? signFederatedGenesisApproveV1(retained.input.operator, signingInput)
+        : signFederatedGenesisBurnV1(retained.input.operator, signingInput);
+    })();
     authorize();
     const attempt = reserveFederatedNativeWithdrawalAttemptV1(context, { transactionHashHex: signed.transactionHashHex,
       signedTransactionHex: signed.signedTransactionHex, nativeExtrinsicHex: encodeFederatedNativeMintExtrinsicV1Hex(signed.signedTransactionHex) });
@@ -258,7 +311,8 @@ export async function executeFrontierNativeProofBoundReservationMintAndBurnV1(in
   throw new Error('native burn execution did not complete');
 }
 
-async function executeMint(retained: ReturnType<typeof capture>, attemptDirectory: string) {
+async function executeMint(retained: ReturnType<typeof capture>, attemptDirectory: string,
+  retainedReservation?: Awaited<ReturnType<typeof executeReservation>>) {
   retained.assertCurrent();
   const { operator, proof, compiled } = retained.input;
   const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(proof.request.statementHex);
@@ -268,21 +322,28 @@ async function executeMint(retained: ReturnType<typeof capture>, attemptDirector
     || intent.bridgeAddressHex !== `0x${app.bridgeAddressHex}` || intent.tokenAddressHex !== `0x${app.tokenAddressHex}`
     || intent.sourceNetworkIdHex !== `0x${app.sourceNetworkIdHex}` || intent.sidechainIdHex !== `0x${app.sidechainIdHex}`
     || intent.settlementProfileIdHex !== `0x${app.settlementProfileIdHex}` || intent.sourceAssetIdHex !== `0x${'00'.repeat(32)}`
-    || statement.mintIdentityHex !== proof.mintIdentityHex || BigInt(proof.result.expiresAtNativeHeight) <= 2n) {
+    || statement.mintIdentityHex !== proof.mintIdentityHex
+    || BigInt(proof.result.expiresAtNativeHeight) <= BigInt(retainedReservation ? retainedReservation.result.blockHeight + 1 : 2)) {
     throw new Error('native mint intent differs from the retained FED application or child-block window');
   }
-  const reservation = await executeReservation(retained, attemptDirectory);
+  const reservation = retainedReservation ?? await executeReservation(retained, attemptDirectory);
   const context = Object.freeze({ reservation: reservation.observation,
     bridgeAddressHex: intent.bridgeAddressHex, tokenAddressHex: intent.tokenAddressHex,
     recipientAddressHex: intent.recipientAddressHex, amountNanoErg: String(intent.amountNanoErg), mintIdentityHex: proof.mintIdentityHex,
     bridgeCodeSha256Hex: app.bridgeRuntimeCodeSha256Hex, bridgeCodeBytes: app.bridgeRuntimeCodeBytes,
     tokenCodeSha256Hex: app.tokenRuntimeCodeSha256Hex, tokenCodeBytes: app.tokenRuntimeCodeBytes });
   const authorize = () => { retained.assertCurrent(); };
-  const parent = await observeFederatedNativeMintParentV1(context, authorize);
-  retained.assertCurrent();
-  const signed = await signFederatedGenesisMintV1(operator, { nonce: parent.nonce,
-    bridgeAddressHex: intent.bridgeAddressHex, recipientAddressHex: intent.recipientAddressHex,
-    amountNanoErg: context.amountNanoErg, mintIdentityHex: proof.mintIdentityHex });
+  const signed = retainedReservation ? await (async () => {
+    const parent = await observeFederatedNativeContinuationMintParentV1(context, authorize);
+    authorize();
+    return signFederatedGenesisContinuationMintV1(operator, parent);
+  })() : await (async () => {
+    const parent = await observeFederatedNativeMintParentV1(context, authorize);
+    authorize();
+    return signFederatedGenesisMintV1(operator, { nonce: parent.nonce,
+      bridgeAddressHex: intent.bridgeAddressHex, recipientAddressHex: intent.recipientAddressHex,
+      amountNanoErg: context.amountNanoErg, mintIdentityHex: proof.mintIdentityHex });
+  })();
   retained.assertCurrent();
   const attempt = reserveFederatedNativeMintAttemptV1(attemptDirectory, context, {
     transactionHashHex: signed.transactionHashHex, signedTransactionHex: signed.signedTransactionHex,
@@ -297,7 +358,7 @@ async function executeMint(retained: ReturnType<typeof capture>, attemptDirector
   const keys = derivePooledReserveMintReservationRuntimeStorageKeysV4(proof.mintIdentityHex);
   const consumed = encodeFederatedNativeMintConsumedV4ScaleHex({ profileIdHex: proof.runtimeProfileIdHex,
     statementIdHex: proof.mintReservationStatementIdHex, mintIdentityHex: proof.mintIdentityHex,
-    consumedAtNativeHeight: '2', executionBlockHashHex: minted.ethereumBlockHashHex,
+    consumedAtNativeHeight: String(minted.blockHeight), executionBlockHashHex: minted.ethereumBlockHashHex,
     transactionHashHex: minted.transactionHashHex, eventIndex: minted.eventIndex });
   await observeFederatedNativeMintStateV1(attempt, { ...reservation.observation.expectedStorage,
     [keys.pendingKeysStorageKeyHex]: '0x00', [keys.pendingReservationStorageKeyHex]: null,
