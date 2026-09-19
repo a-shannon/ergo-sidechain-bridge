@@ -89,6 +89,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalFeeFundingV1'];
   readonly checkNativeContinuationTrackerFeeFundingV1:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationTrackerFeeFundingV1'];
+  readonly checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
   readonly runForExecutionV3RetainingPegInAndTrackerSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
   readonly checkPegInSourceLockV2RetainingSigner:
@@ -248,6 +250,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
     | 'native-continuation-vault-checked'
     | 'native-continuation-withdrawal-fee-checked'
     | 'native-continuation-tracker-fee-checked'
+    | 'native-continuation-withdrawal-ready'
     | 'native-vault-checked'
     | 'v2-source-lock-check-complete'
     | 'v2-committed-vault-check-complete'
@@ -308,6 +311,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'native-continuation-vault-checked'
       | 'native-continuation-withdrawal-fee-checked'
       | 'native-continuation-tracker-fee-checked'
+      | 'native-continuation-withdrawal-ready'
       | 'setup-complete'
       | 'source-lock-check-complete'
       | 'committed-vault-check-complete'
@@ -336,6 +340,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       | 'native-continuation-vault-checked'
       | 'native-continuation-withdrawal-fee-checked'
       | 'native-continuation-tracker-fee-checked'
+      | 'native-continuation-withdrawal-ready'
       | 'native-vault-checked'
       | 'v2-source-lock-check-complete'
       | 'v2-committed-vault-check-complete'
@@ -416,6 +421,7 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
           || state === 'native-continuation-vault-checked'
           || state === 'native-continuation-withdrawal-fee-checked'
           || state === 'native-continuation-tracker-fee-checked'
+          || state === 'native-continuation-withdrawal-ready'
           || state === 'v2-source-lock-check-complete'
           || state === 'v2-committed-vault-check-complete'
           || state === 'v3-withdrawal-fee-check-complete'
@@ -463,6 +469,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       () => execution.checkNativeContinuationWithdrawalFeeFundingV1(target), 'native-continuation-withdrawal-fee-checked'),
     checkNativeContinuationTrackerFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationTrackerFeeFundingV1']>) => consume('native-continuation-withdrawal-fee-checked',
       () => execution.checkNativeContinuationTrackerFeeFundingV1(target), 'native-continuation-tracker-fee-checked'),
+    checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner']>) => consume('native-continuation-tracker-fee-checked',
+      () => execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target), 'native-continuation-withdrawal-ready'),
     runForExecutionV3RetainingPegInAndTrackerSigner: async (
       ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
     ) => consume(

@@ -44,7 +44,7 @@ import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 as createSess
   from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertSigner }
   from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
-import { materializeUnsignedTransaction, type Eip12Box } from './unsigned-ergo-transaction.js';
+import { materializeUnsignedTransaction, type Eip12Box, type Eip12UnsignedTransaction } from './unsigned-ergo-transaction.js';
 import { materializeSubstrateFederatedSingletonIssuanceV1 } from './substrate-federated-genesis-issuance-materialization-v1.js';
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
@@ -67,7 +67,8 @@ import { buildBridgeValidityTrackerCanonicalHeaderContextV1, buildBridgeValidity
   serializeCanonicalErgoHeaderV2 }
   from './bridge-validity-tracker-header-context-v1.js';
 import { buildWasmSimplifiedUpcomingPreHeaderCarrier } from './ergo-upcoming-state-context.js';
-import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context } from './substrate-federated-tracker-v2.js';
+import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context,
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext } from './substrate-federated-tracker-v2.js';
 import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substrate-federated-tracker-v2-external-fee.js';
 import { authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission as authorizeTracker,
   reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission as reserveTracker,
@@ -162,6 +163,12 @@ const confirmBinding = binding('91');
 const transportBinding = Object.freeze({ ...binding('81'),
   reservationFreshnessProcessBindingDigestHex: freshBinding.processBindingDigestHex,
   reservationFreshnessExecutionTargetIdentityDigestHex: freshBinding.executionTargetIdentityDigestHex });
+const secondFrozenBinding = binding('52');
+const secondFreshBinding = binding('72');
+const secondConfirmBinding = binding('93');
+const secondTransportBinding = Object.freeze({ ...binding('82'),
+  reservationFreshnessProcessBindingDigestHex: secondFreshBinding.processBindingDigestHex,
+  reservationFreshnessExecutionTargetIdentityDigestHex: secondFreshBinding.executionTargetIdentityDigestHex });
 let wasm: any;
 let testMnemonic: Mnemonic;
 let signer: Awaited<ReturnType<typeof deriveLocalWasmRootSignerPublicIdentity>>;
@@ -309,7 +316,14 @@ type Fault = 'valid' | 'foreign native origin' | 'source disposed during tracker
   | 'source disposed inside tracker preparation' | 'source disposed inside tracker checker'
   | 'source disposed inside payout preparation' | 'source disposed inside payout checker' | 'tracker WASM expiry';
 
-type ContinuationFault = 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
+const SECOND_TRACKER_CASES = ['continuation second tracker valid', 'continuation second tracker foreign parent',
+  'continuation second tracker substituted predecessor', 'continuation second tracker first fee',
+  'continuation second tracker unclaimed fee', 'continuation second tracker unclaimed withdrawal fee',
+  'continuation second tracker custody during preparation',
+  'continuation second tracker custody during checker', 'continuation second tracker target during preparation',
+  'continuation second tracker custody before transport', 'continuation second tracker foreign origin'] as const;
+type SecondTrackerFault = typeof SECOND_TRACKER_CASES[number];
+type ContinuationFault = SecondTrackerFault | 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
   | 'continuation copied withdrawal attempt' | 'continuation unconfirmed payout' | 'continuation old packet'
   | 'continuation foreign target' | 'continuation duplicate source invocation' | 'continuation disposed during source preparation'
   | 'continuation disposed during source checker' | 'continuation wrong vault packet'
@@ -346,7 +360,7 @@ describe('native FED withdrawal continuation', () => {
     'continuation external fees unclaimed first check', 'continuation external fees copied check',
     'continuation external fees foreign target', 'continuation external fees spent first change',
     'continuation external fees custody during preparation', 'continuation external fees custody during checker',
-    'continuation external fees ambiguous withdrawal'])(
+    'continuation external fees ambiguous withdrawal', ...SECOND_TRACKER_CASES])(
     'preserves native custody through payout and a second source deposit: %s', async fault => {
     vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValue(testMnemonic);
     const session = await createSession();
@@ -355,7 +369,10 @@ describe('native FED withdrawal continuation', () => {
     let payoutStarted = false;
     const continuation = { stage: 'none' as 'none' | 'builder' | 'source' | 'vault' | 'withdrawal-fee' | 'tracker-fee' };
     const continuationFault = fault.startsWith('continuation ');
-    const feeContinuationFault = fault.startsWith('continuation external fees ');
+    const secondTrackerFault = fault.startsWith('continuation second tracker ');
+    const feeContinuationFault = fault.startsWith('continuation external fees ') || secondTrackerFault;
+    let secondTrackerHandled = false;
+    let secondFrozenActive = true;
     let signingHeaders = headerContext(1000);
     let injectionCount = 0;
     let injectedSignCalls: number | undefined;
@@ -394,14 +411,21 @@ describe('native FED withdrawal continuation', () => {
     const freshnessTarget = Object.freeze({ ...frozenTarget, reservationFreshnessRevalidation: true as const });
     let transportTarget: Parameters<typeof submitTracker>[0];
     const confirmationTarget = Object.freeze({ ...setupTarget });
+    const secondFrozenTarget = Object.freeze({ ...frozenTarget });
+    const secondFreshnessTarget = Object.freeze({ ...freshnessTarget });
+    const secondConfirmationTarget = Object.freeze({ ...confirmationTarget });
+    let secondTransportTarget: Parameters<typeof submitTracker>[0];
+    let secondTrackerTxId: string | undefined;
     const foreignTarget = Object.freeze({ ...confirmationTarget });
     const foreignSetupTarget = Object.freeze({ ...setupTarget });
     const nativeParents = new WeakMap<object, object>([[frozenTarget,
       fault === 'foreign native origin' ? foreignSetupTarget : setupTarget]]);
+    nativeParents.set(secondFrozenTarget,
+      fault === 'continuation second tracker foreign origin' ? foreignSetupTarget : setupTarget);
     boundary.sourceActive = true; boundary.setupActive = true; boundary.target = setupTarget;
     boundary.assertSigner = () => assertSigner(session.signer);
     const joinedFault = fault === 'continuation source proof native mint join';
-    const joinedFeeFault = fault === 'continuation external fees valid';
+    const joinedFeeFault = fault === 'continuation external fees valid' || secondTrackerFault;
     const joinedSourceFault = joinedFault || joinedFeeFault;
     const joinedSource = joinedSourceFault ? createSourceSession({
       ergoAdmissionThreshold: trackerRequest.profile.ergoAdmissionThreshold,
@@ -420,7 +444,9 @@ describe('native FED withdrawal continuation', () => {
           bridgeRuntimeCodeSha256Hex: createHash('sha256').update(Buffer.alloc(100, 0x60)).digest('hex'),
           bridgeRuntimeCodeBytes: 100,
           tokenRuntimeCodeSha256Hex: createHash('sha256').update(Buffer.alloc(200, 0x60)).digest('hex'),
-          tokenRuntimeCodeBytes: 200 },
+          tokenRuntimeCodeBytes: 200,
+          sourceRuntimeCodeSha256Hex: createHash('sha256').update(Buffer.from('0061736d01000000', 'hex')).digest('hex'),
+          sourceRuntimeCodeBytes: 8 },
         template: template('contracts/SPVTrackerSubstrateFederatedV2.es'),
       });
       const nodeOptions = process.env.NODE_OPTIONS;
@@ -488,7 +514,7 @@ describe('native FED withdrawal continuation', () => {
         tokenRuntimeCodeBytes: activeTrackerRequest.application.tokenRuntimeCodeBytes,
         sourceRuntimeCodeSha256Hex: createHash('sha256').update(sourceRuntime).digest('hex'),
         sourceRuntimeCodeBytes: sourceRuntime.length,
-        runtimeProfileIdHex: '',
+        runtimeProfileIdHex: activeTrackerRequest.application.runtimeProfileIdHex,
       });
       const runtimeProfileScaleHex = encodeRuntimeProfile({
         formatVersion: 4,
@@ -510,8 +536,7 @@ describe('native FED withdrawal continuation', () => {
       });
       const runtimeProfile = decodeRuntimeProfile(runtimeProfileScaleHex);
       const candidateRuntimeProfileIdHex = runtimeProfileId(runtimeProfile);
-      const exactApplication = Object.freeze({ ...application,
-        runtimeProfileIdHex: candidateRuntimeProfileIdHex.replace(/^0x/, '') });
+      const exactApplication = application;
       const candidate = Object.freeze({ runtimeProfile, runtimeProfileScaleHex,
         runtimeProfileIdHex: candidateRuntimeProfileIdHex,
         genesisJsonSha256Hex: sha256CanonicalJson({ runtimeProfileScaleHex, application: exactApplication }) });
@@ -521,7 +546,10 @@ describe('native FED withdrawal continuation', () => {
           application: exactApplication }),
         candidate,
       });
-      expect(candidate.runtimeProfileIdHex).toBe(`0x${exactApplication.runtimeProfileIdHex}`);
+      // The application identity is compiled before the candidate's V4 runtime
+      // profile, which includes that compiled settlement family's identity.
+      expect(exactApplication).toEqual(activeTrackerRequest.application);
+      expect(candidate.runtimeProfileIdHex).not.toBe(`0x${exactApplication.runtimeProfileIdHex}`);
       expect(runtimeProfile.lineageProfileIdHex).toBe(`0x${activeFamilyReceipt.profile.familyIdHex}`);
       expect(runtimeProfile.sourceNetworkIdHex).toBe(`0x${family.sourceNetworkIdHex}`);
       expect(runtimeProfile.sourceProofProfileIdHex).toBe(joinedSource.binding.federatedMintProfile.proofProfileIdHex);
@@ -571,9 +599,11 @@ describe('native FED withdrawal continuation', () => {
       if (target === setupTarget && boundary.setupActive) return setupBinding;
       if (phase === 'confirmation' && target === confirmationTarget && currentTargetActive) return confirmBinding;
       if (phase === 'confirmation' && target === foreignTarget) return binding('92');
+      if (phase === 'second-confirmation' && target === secondConfirmationTarget) return secondConfirmBinding;
       throw new Error('synthetic initial execution target expired');
     });
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2').mockImplementation(target => {
+      if (phase === 'second-frozen' && secondFrozenActive && target === secondFrozenTarget) return secondFrozenBinding;
       if (phase !== 'frozen' || target !== frozenTarget) throw new Error('synthetic frozen target expired');
       return frozenBinding;
     });
@@ -583,18 +613,29 @@ describe('native FED withdrawal continuation', () => {
       return owned.assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
     });
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2').mockImplementation((target, parent) => {
+      if (target === secondFreshnessTarget) {
+        expect(parent).toEqual(secondFrozenBinding); expect(phase).toBe('second-freshness'); return secondFreshBinding;
+      }
       expect(target).toBe(freshnessTarget); expect(parent).toEqual(frozenBinding); expect(phase).toBe('freshness'); return freshBinding;
     });
     vi.spyOn(owned, 'issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1').mockImplementation(target => {
-      expect(target).toBe(freshnessTarget);
+      expect(target).toBe(phase === 'second-freshness' ? secondFreshnessTarget : freshnessTarget);
       return Object.freeze({ schema: 'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1', version: 1 });
     });
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2').mockImplementation(target => {
+      if (target === secondTransportTarget && secondTransportTarget !== undefined) {
+        expect(phase).toBe('second-transport'); return secondTransportBinding;
+      }
       expect(target).toBe(transportTarget); expect(phase).toBe('transport'); return transportBinding;
     });
     let trackerTxId: string | undefined;
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2').mockImplementation((target, parent, txId) => {
       const currentBinding = owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      if (target === secondConfirmationTarget) {
+        expect(parent).toEqual(secondTransportBinding); expect(txId).toBe(secondTrackerTxId);
+        expect(phase).toBe('second-confirmation'); expect(currentBinding).toEqual(secondConfirmBinding);
+        return currentBinding;
+      }
       expect(parent).toEqual(transportBinding); expect(txId).toBe(trackerTxId); expect(phase).toBe('confirmation');
       if (target !== confirmationTarget) throw new Error('synthetic foreign confirmation lineage');
       expect(currentBinding).toEqual(confirmBinding);
@@ -725,6 +766,14 @@ describe('native FED withdrawal continuation', () => {
       if (continuationFeeInternal?.[1] === 'preparation' && continuation.stage === 'withdrawal-fee') {
         disposeInside(input.assertActive);
       }
+      if (phase === 'second-frozen' && fault === 'continuation second tracker custody during preparation') {
+        disposeInside(input.assertActive);
+      }
+      if (phase === 'second-frozen' && fault === 'continuation second tracker target during preparation') {
+        expect(input.assertActive).not.toThrow();
+        injectionCount++; injectedSignCalls = signCalls.mock.calls.length;
+        injectedCheckCalls = checkBodies.length; secondFrozenActive = false;
+      }
       return pending;
     });
     vi.spyOn(fleet, 'prepareLocalWasmRootCheckCandidatesFromNode').mockImplementation(async input => {
@@ -744,10 +793,13 @@ describe('native FED withdrawal continuation', () => {
       if (continuationFeeInternal?.[1] === 'checker' && continuation.stage === 'withdrawal-fee') {
         disposeInside(args[3]);
       }
+      if (phase === 'second-frozen' && fault === 'continuation second tracker custody during checker') {
+        disposeInside(args[3]);
+      }
       return pending;
     });
     if (internalFault?.[2] === 'checker' || continuationInternal?.[2] === 'checker'
-      || continuationFeeInternal?.[1] === 'checker') {
+      || continuationFeeInternal?.[1] === 'checker' || fault === 'continuation second tracker custody during checker') {
       vi.spyOn(console, 'error').mockImplementation(() => {});
     }
     vi.spyOn(axios, 'create').mockImplementation(config => ({
@@ -788,7 +840,7 @@ describe('native FED withdrawal continuation', () => {
         if (loseFeeTransportResponse) throw new Error('synthetic continuation fee response lost');
         return { status: 200, data: id };
       }
-      expect(['transport', 'confirmation']).toContain(phase);
+      expect(['transport', 'confirmation', 'second-transport']).toContain(phase);
       submissionBodies.push(payload);
       if (id === secondContinuationPacket?.transactions.sourceLockCreation.txId) {
         secondSourceInclusionHeight = tip() + 1;
@@ -1291,6 +1343,7 @@ describe('native FED withdrawal continuation', () => {
             'continuation external fees copied check', 'continuation external fees foreign target',
             'continuation external fees spent first change', 'continuation external fees custody during preparation',
             'continuation external fees custody during checker', 'continuation external fees ambiguous withdrawal',
+            ...SECOND_TRACKER_CASES,
           ]).has(fault as ContinuationFault);
           if (transportCompositionFault) {
             // Seed resolved durable history from the first checked deposit. Its
@@ -1635,31 +1688,172 @@ describe('native FED withdrawal continuation', () => {
                 expect(checkBodies).toHaveLength(beforeCrossPurposeChecks + 2);
                 registerFeeTransaction(secondWithdrawalFee);
                 registerFeeTransaction(secondTrackerFee);
-                const secondWithdrawalExecution = await executeWithdrawalFeeFunding({
+                const secondWithdrawalExecution = fault === 'continuation second tracker unclaimed withdrawal fee' ? undefined : await executeWithdrawalFeeFunding({
                   target: confirmationTarget, checked: secondWithdrawalFee, state,
                 });
-                const secondTrackerExecution = await executeTrackerFeeFunding({
+                const secondTrackerExecution = fault === 'continuation second tracker unclaimed fee' ? undefined : await executeTrackerFeeFunding({
                   target: confirmationTarget, checked: secondTrackerFee, state,
                 });
-                expect(secondWithdrawalExecution).toMatchObject({
-                  expectedTxId: secondWithdrawalFee.transaction.txId,
-                  feeInputBox: secondWithdrawalFee.transaction.outputs[0],
-                });
-                expect(secondTrackerExecution).toMatchObject({
-                  expectedTxId: secondTrackerFee.transaction.txId,
-                  feeInputBox: secondTrackerFee.transaction.outputs[0],
-                });
+                if (secondWithdrawalExecution !== undefined) {
+                  expect(secondWithdrawalExecution).toMatchObject({
+                    expectedTxId: secondWithdrawalFee.transaction.txId,
+                    feeInputBox: secondWithdrawalFee.transaction.outputs[0],
+                  });
+                }
+                if (secondTrackerExecution !== undefined) {
+                  expect(secondTrackerExecution).toMatchObject({
+                    expectedTxId: secondTrackerFee.transaction.txId,
+                    feeInputBox: secondTrackerFee.transaction.outputs[0],
+                  });
+                }
                 expect(feeSubmissionBodies.map(signedId)).toEqual([
                   withdrawalFee.transaction.txId, trackerFee.transaction.txId,
-                  secondWithdrawalFee.transaction.txId, secondTrackerFee.transaction.txId,
+                  ...(secondWithdrawalExecution === undefined ? [] : [secondWithdrawalFee.transaction.txId]),
+                  ...(secondTrackerExecution === undefined ? [] : [secondTrackerFee.transaction.txId]),
                 ]);
-                assertFirstFeeRowsUnchanged(2);
+                if (secondWithdrawalExecution !== undefined && secondTrackerExecution !== undefined) assertFirstFeeRowsUnchanged(2);
                 const continuationCheckpoint = await attestFrontierNativeBurnCheckpointV1({
                   execution: continuationCycle,
-                  admissionValidFromErgoHeight: '121', admissionExpiresAtErgoHeight: '140',
+                  admissionValidFromErgoHeight: secondTrackerFault ? String(tip() + 1) : '121',
+                  admissionExpiresAtErgoHeight: secondTrackerFault ? String(tip() + 20) : '140',
                 });
                 expect(continuationCheckpoint.attestation.checkpointStatement.sourceNativeBlockHeight).toBe('8');
                 feeContinuationHandled = true;
+                if (secondTrackerFault) {
+                  const firstRow = state.getErgoOperationalTransactionAttempt(attempt.expectedTxId);
+                  expect(firstRow?.status).toBe('confirmed');
+                  const firstRowSnapshot = canonicalJson(firstRow);
+                  const secondStatement = continuationCheckpoint.attestation.checkpointStatement;
+                  const secondMembership = buildErgoExtensionMembershipProof([{ key: Buffer.from('0401', 'hex'),
+                    value: Buffer.from(encodeSubstrateFederatedCheckpointExtensionValueV1(secondStatement.encodedStatementHex), 'hex'),
+                  }], Buffer.from('0401', 'hex'));
+                  signingHeaders = headerContext(tip() + 3, secondMembership.root.toString('hex'), 1);
+                  const secondHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+                    rawHeaders: signingHeaders, anchorContextIndex: 1,
+                    expectedAnchorHeaderIdHex: String(signingHeaders[1]!.id),
+                    expectedAnchorExtensionRootHex: secondMembership.root.toString('hex'),
+                  });
+                  let previousContext = context;
+                  if (fault === 'continuation second tracker foreign parent') {
+                    previousContext = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
+                      compilerRequest: activeTrackerRequest, compilerReceipt: activeTrackerReceipt,
+                      trackerInputBox: activeIssuances[0]!.outputs[0]!, observedHeaderContext,
+                      encodedStatementHex: statement.encodedStatementHex,
+                      extensionMembershipProofHex: membership.proof.toString('hex'),
+                    });
+                    expect(previousContext).toEqual(context); expect(previousContext).not.toBe(context);
+                  }
+                  let secondTrackerInput = result.packet.boxes.trackerDataInput;
+                  if (fault === 'continuation second tracker substituted predecessor') {
+                    const foreignBody = structuredClone(transaction.eip12UnsignedTransaction) as unknown as Eip12UnsignedTransaction;
+                    const foreignPredecessor = await materializeUnsignedTransaction({
+                      ...foreignBody,
+                      outputs: foreignBody.outputs.map((output, index) =>
+                        index === 1 ? { ...output, creationHeight: output.creationHeight + 1 } : output),
+                    }, 'canonical foreign tracker predecessor');
+                    secondTrackerInput = foreignPredecessor.outputs[0]!;
+                    expect(secondTrackerInput.boxId).not.toBe(result.packet.boxes.trackerDataInput.boxId);
+                    expect(secondTrackerInput.additionalRegisters).toEqual(result.packet.boxes.trackerDataInput.additionalRegisters);
+                  }
+                  const secondContext = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext({
+                    previousContext, compilerRequest: activeTrackerRequest, compilerReceipt: activeTrackerReceipt,
+                    trackerInputBox: secondTrackerInput, observedHeaderContext: secondHeaders,
+                    encodedStatementHex: secondStatement.encodedStatementHex,
+                    extensionMembershipProofHex: secondMembership.proof.toString('hex'),
+                  });
+                  expect(secondContext.trackerTransition.inputDigestHex).toBe(context.trackerTransition.successorDigestHex);
+                  expect(secondContext.trackerTransition.trackerKeyHex).not.toBe(context.trackerTransition.trackerKeyHex);
+                  expect(secondContext.trackerTransition.successorDigestHex).toBe(getSubstrateFederatedTrackerDigestV1Hex([
+                    { key: context.trackerTransition.trackerKeyHex, value: context.trackerTransition.trackerValueHex },
+                    { key: secondContext.trackerTransition.trackerKeyHex, value: secondContext.trackerTransition.trackerValueHex },
+                  ]));
+                  const secondTransaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({
+                    trackerContext: secondContext, trackerInputBox: secondTrackerInput,
+                    feeInputBox: fault === 'continuation second tracker first fee'
+                      ? trackerFee.transaction.outputs[0]! : secondTrackerFee.transaction.outputs[0]!,
+                    feePayerPublicKeyHex: signer.publicKeyHex,
+                  });
+                  secondTrackerTxId = secondTransaction.unsignedTransactionIdHex;
+                  secondTransportTarget = Object.freeze({ ...transportTarget, expectedTransactionIdHex: secondTrackerTxId });
+                  // The original confirmation callback has returned. Its target must
+                  // fail even though the private read custody is retained.
+                  currentTargetActive = false; phase = 'second-frozen';
+                  expect(() => owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(confirmationTarget))
+                    .toThrow(/target expired/);
+                  const beforeSecondChecks = checkBodies.length;
+                  const beforeSecondPosts = submissionBodies.length;
+                  const pendingSecond = session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner({
+                    context: secondContext, transaction: secondTransaction, observedHeaderContext: secondHeaders,
+                  }, secondFrozenTarget);
+                  const earlyErrors: Partial<Record<SecondTrackerFault, RegExp>> = {
+                    'continuation second tracker foreign parent': /parent differs/,
+                    'continuation second tracker substituted predecessor': /inputs differ from retained/,
+                    'continuation second tracker first fee': /inputs differ from retained/,
+                    'continuation second tracker unclaimed fee': /claimed second fees/,
+                    'continuation second tracker unclaimed withdrawal fee': /claimed second fees/,
+                    'continuation second tracker foreign origin': /private native origin differs/,
+                    'continuation second tracker custody during preparation': /source custody disposed/,
+                    'continuation second tracker custody during checker': /JVM node check rejected/,
+                    'continuation second tracker target during preparation': /frozen target expired/,
+                  };
+                  const earlyError = earlyErrors[fault as SecondTrackerFault];
+                  if (earlyError !== undefined) {
+                    await expect(pendingSecond).rejects.toThrow(earlyError);
+                    expect(checkBodies).toHaveLength(beforeSecondChecks);
+                    expect(submissionBodies).toHaveLength(beforeSecondPosts);
+                    expect(state.getErgoOperationalTransactionAttempt(secondTrackerTxId)).toBeNull();
+                    expect(canonicalJson(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId))).toBe(firstRowSnapshot);
+                    if (fault.includes('during')) {
+                      expect(injectionCount).toBe(1); expect(injectedCheckCalls).toBe(beforeSecondChecks);
+                      if (fault.endsWith('preparation')) expect(signCalls).toHaveBeenCalledTimes(injectedSignCalls!);
+                    }
+                    expect(() => assertSigner(session.signer)).toThrow();
+                    secondTrackerHandled = true; return;
+                  }
+                  const secondChecked = await pendingSecond;
+                  const secondCheckedBody = canonicalJson(checkBodies.at(-1));
+                  expect(verifyRetainedTrackerAtHeaders({ signedBody: checkBodies.at(-1)!,
+                    signedCandidate: secondChecked.result.signedCandidate,
+                    boxes: secondTransaction.inputBoxes, headers: signingHeaders,
+                  })).toEqual({ proofs: [true, true], transactionError: null });
+                  const secondAuthorization = await authorizeTracker(secondChecked, secondFrozenTarget);
+                  const secondAttempt = reserveTracker(secondAuthorization, state);
+                  expect(state.getErgoOperationalTransactionAttempt(secondTrackerTxId)?.status).toBe('pending');
+                  phase = 'second-freshness'; secondFrozenActive = false;
+                  expect(() => owned.assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(secondFrozenTarget))
+                    .toThrow(/frozen target expired/);
+                  await revalidateTracker(secondAttempt, secondFreshnessTarget);
+                  phase = 'second-transport';
+                  if (fault === 'continuation second tracker custody before transport') {
+                    const reserved = state.getErgoOperationalTransactionAttempt(secondTrackerTxId);
+                    const checksBeforeLoss = checkBodies.length;
+                    boundary.sourceActive = false;
+                    await expect(submitTracker(secondTransportTarget, secondAttempt)).rejects.toThrow(/source custody disposed/);
+                    expect(checkBodies).toHaveLength(checksBeforeLoss);
+                    expect(submissionBodies).toHaveLength(beforeSecondPosts);
+                    expect(state.getErgoOperationalTransactionAttempt(secondTrackerTxId)).toEqual(reserved);
+                  } else {
+                    const secondSubmitted = await submitTracker(secondTransportTarget, secondAttempt);
+                    expect(secondSubmitted.status).toBe('accepted');
+                    expect(canonicalJson(submissionBodies.at(-1))).toBe(secondCheckedBody);
+                    finalizeTracker(secondAttempt, secondSubmitted);
+                    const secondAdmitted = await materializeUnsignedTransaction(
+                      secondTransaction.eip12UnsignedTransaction as never, 'native second admitted tracker');
+                    for (const input of secondTransaction.inputBoxes) boxes.delete(input.boxId);
+                    publish(secondAdmitted.outputs[0]!);
+                    phase = 'second-confirmation';
+                    const secondConfirmation = await createObserver(secondConfirmationTarget, GENESIS)
+                      .observe(secondAttempt.expectedTxId, PRIMARY);
+                    expect(secondConfirmation?.status).toBe('confirmed');
+                    await confirmTracker(secondAttempt, secondConfirmationTarget, secondConfirmation!);
+                    expect(state.getErgoOperationalTransactionAttempt(secondTrackerTxId)?.status).toBe('confirmed');
+                    expect(secondAdmitted.outputs[0]!.additionalRegisters.R5)
+                      .toBe(secondContext.trackerTransition.successorRegisters.R5);
+                    assertFirstFeeRowsUnchanged(2);
+                  }
+                  expect(canonicalJson(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId))).toBe(firstRowSnapshot);
+                  secondTrackerHandled = true;
+                }
               }
               joinedCompleted = true;
               return;
@@ -1761,6 +1955,7 @@ describe('native FED withdrawal continuation', () => {
       state.close();
       if (joinedFault && !joinedFailed) expect(joinedCompleted).toBe(true);
       if (feeContinuationFault && !joinedFailed) expect(feeContinuationHandled).toBe(true);
+      if (secondTrackerFault && !joinedFailed) expect(secondTrackerHandled).toBe(true);
     }
   }, 60_000);
 });

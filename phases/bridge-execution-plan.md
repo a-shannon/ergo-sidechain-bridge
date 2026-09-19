@@ -28,13 +28,12 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect the continuation checkpoint and new external fee inputs to the
-retained tracker/DUP/reserve successors. Start with nonempty tracker context
-construction and its setup-session consumer: they still require genesis state
-and the first operation's checks. Use separately scoped continuation authority,
-preserving the first confirmed payout and its nonempty replay state. Confirm
-both new external fee inputs before fixing the second anchor. Then connect the second payout and
-compose both cycles in the root before a fresh two-cycle campaign. Keep both
+**Now:** connect the admitted second tracker and funded withdrawal fee to the
+second payout, consuming the retained reserve and nonempty DUP successors.
+Then add separately scoped sequential process authority and compose both cycles
+in the root before a fresh two-cycle campaign. Preserve the first confirmed
+payout and both replay histories. Confirm both new external fee inputs before
+fixing the second anchor. Keep both
 node groups and original source custody alive through both returns; never reopen
 a disposed signer, reset a consumed API or reconstruct historical keys.
 
@@ -54,7 +53,7 @@ attempts still block replacement. Composed tests use real compilers, AVL
 witnesses, WASM signatures and these consumers against explicit node/process and
 funding-discovery doubles. They cover copied or foreign evidence, consumed evidence,
 target/custody loss and an ambiguous response without resubmission. The second
-tracker/payout remains unconnected; the current root still executes one cycle.
+payout remains unconnected; the current root still executes one cycle.
 
 The original second-deposit evidence now feeds an explicit source-attestation
 operation and the actual continuation reservation, mint and burn callers after
@@ -78,8 +77,20 @@ journals and transports confirm two fee transactions per purpose without changin
 the first rows. Composed tests reach both new fee outputs and native checkpoint
 eight in the retained session, and reject copied checks, foreign targets, spent
 sources, custody loss and ambiguous resubmission. The old one-shot APIs remain
-unchanged. These tests use simulated RPCs; second tracker admission, payout and
-root composition remain open.
+unchanged. These tests use simulated RPCs; second payout and root composition
+remain open.
+
+The continuation tracker constructor now retains its exact parent context and
+compiler identities, reproduces the nonempty AVL history, and inserts the new
+checkpoint after strictly increasing source and admission heights. Its separate
+setup-session consumer binds the first payout's tracker data input and the
+claimed second tracker fee. The composed positive reaches WASM verification,
+authorization, durable reservation, checked transport and canonical confirmation
+through the existing tracker consumers, preserving the first journal row and
+both AVL entries. The old confirmation and frozen-check targets expire before
+their successor actions; original read custody remains live. Node/process and
+initial-vault observations in this test are explicit doubles. This establishes
+the component join, not sequential process support or a two-cycle node campaign.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -440,7 +451,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Second native checkpoint, funded fees and Ergo successors -> next settlement | Build the nonempty tracker context and connect separately scoped tracker/payout consumers to retained successors | Preserve the first replay key, insert the new key, confirm both external fee inputs before the anchor, check cumulative value/liability conservation, and reject stale predecessors and either burn's replay |
+| **Now** | Admitted second tracker, funded fee and Ergo successors -> second payout | Connect the payout to retained reserve/DUP history, then add sequential process authority and root composition | Preserve both tracker entries and the first burn's replay key, consume exact successors, check cumulative value/liability conservation, and reject stale predecessors and either burn's replay |
 | Next candidate | Both component cycles -> one root and fresh chain | Keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Do not reset genesis, substitute historical custody, reuse ambiguous attempts or repeat an equivalent one-cycle campaign |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

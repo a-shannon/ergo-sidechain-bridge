@@ -563,6 +563,97 @@ describe('managed native continuation fee funding lifecycle', () => {
   });
 });
 
+describe('managed native continuation tracker lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.registerSignerBinding.mockReturnValue(SIGNER_BINDING);
+  });
+
+  async function ready() {
+    const execution = executionSession();
+    mocks.createExecutionSession.mockResolvedValue(execution);
+    const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await advanceNativeContinuationToVault(session);
+    await session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+    await session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never);
+    return { execution, session };
+  }
+
+  it('forwards the second tracker input and target once after both second fee checks', async () => {
+    const { execution, session } = await ready();
+    await expect(session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, TARGET as never,
+    )).resolves.toBe(V2_TRACKER_CHECK);
+    const check = execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner;
+    expect(check).toHaveBeenCalledExactlyOnceWith(V2_TRACKER_INPUT, TARGET);
+    expect(execution.checkNativeContinuationTrackerFeeFundingV1.mock.invocationCallOrder[0])
+      .toBeLessThan(check.mock.invocationCallOrder[0]!);
+    await expect(session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, TARGET as never,
+    )).rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(check).toHaveBeenCalledOnce();
+    expect(execution.dispose).toHaveBeenCalledOnce();
+  });
+
+  it.each(['before fees', 'after first fee', 'disposed', 'old tracker API'] as const)(
+    'fails closed before inner second tracker dispatch: %s', async fault => {
+      const execution = executionSession();
+      mocks.createExecutionSession.mockResolvedValue(execution);
+      const session = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      await advanceNativeContinuationToVault(session);
+      if (fault !== 'before fees') {
+        await session.checkNativeContinuationWithdrawalFeeFundingV1(TARGET as never);
+      }
+      if (fault === 'disposed' || fault === 'old tracker API') {
+        await session.checkNativeContinuationTrackerFeeFundingV1(TARGET as never);
+      }
+      if (fault === 'disposed') session.dispose();
+      const method = fault === 'old tracker API'
+        ? session.checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner
+        : session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner;
+      await expect(method(V2_TRACKER_INPUT as never, TARGET as never))
+        .rejects.toThrow(/continuation is absent, consumed, or disposed/);
+      expect(execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner)
+        .not.toHaveBeenCalled();
+      expect(execution.dispose).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('closes after an inner second tracker failure and does not retry', async () => {
+    const { execution, session } = await ready();
+    execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner
+      .mockRejectedValueOnce(new Error('synthetic second tracker failure'));
+    await expect(session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, FOREIGN_TARGET as never,
+    )).rejects.toThrow(/synthetic second tracker failure/);
+    await expect(session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, TARGET as never,
+    )).rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    expect(execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner)
+      .toHaveBeenCalledExactlyOnceWith(V2_TRACKER_INPUT, FOREIGN_TARGET);
+    expect(execution.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates an in-flight second tracker when a concurrent call closes custody', async () => {
+    const { execution, session } = await ready();
+    const gate = deferred<typeof V2_TRACKER_CHECK>();
+    execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner
+      .mockImplementationOnce(() => gate.promise);
+    const pending = session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, TARGET as never,
+    );
+    await expect(session.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(
+      V2_TRACKER_INPUT as never, TARGET as never,
+    )).rejects.toThrow(/continuation is absent, consumed, or disposed/);
+    gate.resolve(V2_TRACKER_CHECK);
+    await expect(pending).rejects.toThrow(/invalidated by a concurrent transition/);
+    expect(execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner)
+      .toHaveBeenCalledOnce();
+    // Cancellation closes immediately; unwinding the suspended call closes again.
+    expect(execution.dispose).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('managed facade V3 setup -> V2 tracker admission continuation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -885,6 +976,8 @@ function executionSession() {
       vi.fn(async (_target: unknown) => NATIVE_CONTINUATION_WITHDRAWAL_FEE_CHECK),
     checkNativeContinuationTrackerFeeFundingV1:
       vi.fn(async (_target: unknown) => NATIVE_CONTINUATION_TRACKER_FEE_CHECK),
+    checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner:
+      vi.fn(async (_input: unknown, _target: unknown) => V2_TRACKER_CHECK),
     runForExecutionV3RetainingPegInAndTrackerSigner: vi.fn(async () => V3_SETUP_BATCH),
     checkPegInSourceLockV2RetainingSigner: vi.fn(async () => V2_SOURCE_LOCK_RECEIPT),
     checkPegInCommittedVaultV2RetainingSigner: vi.fn(async () => V2_COMMITTED_VAULT_RECEIPT),

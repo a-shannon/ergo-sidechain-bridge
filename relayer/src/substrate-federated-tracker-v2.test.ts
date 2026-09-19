@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   tracker_application_v2_empty_digest,
+  tracker_application_v2_insert,
   tracker_application_v2_verify_insert,
 } from '../../wasm-avl/pkg/bridge_avl.js';
 import {
@@ -37,11 +38,15 @@ import {
 } from './substrate-federated-tracker-jvm-compiler-v2.js';
 import {
   assertExactSubstrateFederatedTrackerV2InputBox,
+  assertSubstrateFederatedTrackerV2ContinuationContext,
   assertSubstrateFederatedTrackerV2Context,
   buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context as build,
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext as buildContinuation,
   type BuildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Input as BuildInput,
+  type BuildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationInput as ContinuationInput,
   type SubstrateFederatedTrackerV2Context,
 } from './substrate-federated-tracker-v2.js';
+import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substrate-federated-tracker-v2-external-fee.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import type { Eip12Box } from './unsigned-ergo-transaction.js';
 
@@ -60,6 +65,10 @@ let receiptV1: Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV1>;
 let trackerInputBox: Eip12Box;
 let input: BuildInput;
 let context: Readonly<SubstrateFederatedTrackerV2Context>;
+let firstSuccessor: Eip12Box;
+let secondStatement: typeof statement;
+let continuationInput: ContinuationInput;
+let continuationContext: Readonly<SubstrateFederatedTrackerV2Context>;
 
 type Candidate = Pick<Eip12Box, 'value' | 'ergoTree' | 'assets' | 'additionalRegisters' | 'creationHeight'>;
 
@@ -117,6 +126,24 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
       ...anchorInput(statement.encodedStatementHex),
     };
     context = await build(input);
+    firstSuccessor = boxFromCandidate(trackerOutputCandidate(context));
+    secondStatement = buildSubstrateFederatedCheckpointStatementV1({
+      ...vector.input.statement,
+      sourceNativeBlockHeight: '1001',
+      sourceNativeBlockHashHex: '13'.repeat(32),
+      executionBlockHashHex: '14'.repeat(32),
+      bridgeEventRootHex: '15'.repeat(32),
+      profile,
+    });
+    continuationInput = {
+      compilerRequest,
+      compilerReceipt,
+      previousContext: context,
+      trackerInputBox: firstSuccessor,
+      encodedStatementHex: secondStatement.encodedStatementHex,
+      ...anchorInput(secondStatement.encodedStatementHex, '0401', 1_040),
+    };
+    continuationContext = await buildContinuation(continuationInput);
   }, 90_000);
 
   it('binds genuine V2 compiled bytes and absolute height, preserving V1 admission512/370', async () => {
@@ -325,6 +352,263 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
     exactBox.value = '1';
     await expect(exactPending).resolves.toEqual(trackerInputBox);
   });
+
+  it('replays the retained nonempty AVL history and preserves the public V2 shape', () => {
+    expect(() => assertSubstrateFederatedTrackerV2ContinuationContext(
+      continuationContext, context,
+    )).not.toThrow();
+    expect(Object.keys(continuationContext).sort()).toEqual(Object.keys(context).sort());
+    expect(continuationContext.trackerTransition.inputDigestHex)
+      .toBe(context.trackerTransition.successorDigestHex);
+    expect(continuationContext.trackerTransition.inputRegisters)
+      .toEqual(context.trackerTransition.successorRegisters);
+    expect(continuationContext.trackerTransition.successorRegisters).toEqual({
+      ...context.trackerTransition.successorRegisters,
+      R5: encodeAvlTreeRegister(
+        Buffer.from(continuationContext.trackerTransition.successorDigestHex, 'hex'), 1, 370,
+      ),
+      R7: encodeLongRegister(1_001n),
+      R8: encodeIntRegister(1_040),
+    });
+    const direct = JSON.parse(tracker_application_v2_insert(JSON.stringify([{
+      key: context.trackerTransition.trackerKeyHex,
+      value: context.trackerTransition.trackerValueHex,
+    }]), continuationContext.trackerTransition.trackerKeyHex,
+    continuationContext.trackerTransition.trackerValueHex));
+    expect(direct.new_digest_hex).toBe(continuationContext.trackerTransition.successorDigestHex);
+    expect(direct.insert_proof_hex).toBe(continuationContext.trackerTransition.avlInsertProofHex);
+    expect(JSON.parse(tracker_application_v2_verify_insert(
+      context.trackerTransition.successorDigestHex,
+      continuationContext.trackerTransition.trackerKeyHex,
+      continuationContext.trackerTransition.trackerValueHex,
+      continuationContext.trackerTransition.avlInsertProofHex,
+    )).new_digest_hex).toBe(continuationContext.trackerTransition.successorDigestHex);
+    expectDeepFrozen(continuationContext);
+  });
+
+  it('feeds the exact nonempty transition body to the existing external-fee composer', async () => {
+    const feePayerPublicKeyHex = profile.ergoAdmissionPublicKeysHex[0]!;
+    const feeBox = boxFromCandidate({
+      value: '1100000',
+      ergoTree: `0008cd${feePayerPublicKeyHex}`,
+      assets: [], additionalRegisters: {}, creationHeight: 1_039,
+    });
+    const composed = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({
+      trackerContext: continuationContext,
+      trackerInputBox: firstSuccessor,
+      feeInputBox: feeBox,
+      feePayerPublicKeyHex,
+    });
+    expect(composed.inputBoxes[0]).toEqual(firstSuccessor);
+    expect(composed.eip12UnsignedTransaction.inputs[0].extension)
+      .toEqual(continuationContext.contextExtension.eip12Values);
+    expect(composed.eip12UnsignedTransaction.outputs[0])
+      .toEqual(trackerOutputCandidate(continuationContext));
+    expect(composed.trackerUnsignedTransactionIdHex)
+      .toBe(continuationContext.unsignedTransactionIdHex);
+  });
+
+  it('requires a previous context even when every genesis input is valid', async () => {
+    const outcome = await buildContinuation({ ...input, previousContext: undefined as never })
+      .then(() => 'accepted without a parent', (error: Error) => error.message);
+    expect(outcome).toMatch(/continuation previous context is required/);
+  });
+
+  it('binds continuation provenance to the exact parent object', async () => {
+    const equalButForeignParent = await build(input);
+    expect(equalButForeignParent).toEqual(context);
+    expect(equalButForeignParent).not.toBe(context);
+    expect(() => assertSubstrateFederatedTrackerV2ContinuationContext(
+      continuationContext, equalButForeignParent,
+    )).toThrow(/parent differs/);
+    expect(() => assertSubstrateFederatedTrackerV2ContinuationContext(
+      continuationContext, structuredClone(context),
+    )).toThrow(/provenance/);
+    expect(() => assertSubstrateFederatedTrackerV2ContinuationContext(
+      context, context,
+    )).toThrow(/parent differs/);
+    await expect(buildContinuation({
+      ...continuationInput,
+      previousContext: structuredClone(context),
+    })).rejects.toThrow(/provenance/);
+  });
+
+  const predecessorRegisterMutations: Array<[string, (box: Candidate) => void]> = [
+    ['R4 profile', box => { box.additionalRegisters.R4 = encodeCollByteRegister(Buffer.alloc(32, 1)); }],
+    ['R5 empty history', box => { box.additionalRegisters.R5 = encodeAvlTreeRegister(
+      Buffer.from(tracker_application_v2_empty_digest(), 'hex'), 1, 370,
+    ); }],
+    ['R5 substituted digest', box => { box.additionalRegisters.R5 = encodeAvlTreeRegister(
+      Buffer.alloc(33, 1), 1, 370,
+    ); }],
+    ['R6 chain', box => { box.additionalRegisters.R6 = encodeCollByteRegister(Buffer.alloc(32, 1)); }],
+    ['R7 source height', box => { box.additionalRegisters.R7 = encodeLongRegister(0n); }],
+    ['R8 admission height', box => { box.additionalRegisters.R8 = encodeIntRegister(0); }],
+    ['R9 keys', box => { box.additionalRegisters.R9 = encodeCollByteRegister(Buffer.alloc(32, 1)); }],
+  ];
+  it.each(predecessorRegisterMutations)(
+    'rejects retained predecessor register/history drift: %s', async (_name, mutate) => {
+      const candidate = candidateFromBox(firstSuccessor);
+      mutate(candidate);
+      await expect(buildContinuation({
+        ...continuationInput, trackerInputBox: boxFromCandidate(candidate),
+      }))
+        .rejects.toThrow(/retained predecessor state/);
+    },
+  );
+
+  const predecessorShapeMutations: Array<[string, (box: Candidate) => void]> = [
+    ['value', box => { box.value = '10000001'; }],
+    ['tree', box => { box.ergoTree = identity.propositionHex; }],
+    ['token id', box => { box.assets[0]!.tokenId = 'ff'.repeat(32); }],
+    ['token amount', box => { box.assets[0]!.amount = '2'; }],
+    ['creation height', box => { box.creationHeight = 1_039; }],
+  ];
+  it.each(predecessorShapeMutations)(
+    'rejects retained predecessor candidate drift: %s', async (_name, mutate) => {
+      const candidate = candidateFromBox(firstSuccessor);
+      mutate(candidate);
+      await expect(buildContinuation({
+        ...continuationInput, trackerInputBox: boxFromCandidate(candidate),
+      }))
+        .rejects.toThrow(/retained predecessor state/);
+    },
+  );
+
+  it.each(['1000', '999'])(
+    'rejects duplicate or reversed source-native height: %s', async sourceNativeBlockHeight => {
+      const changed = buildSubstrateFederatedCheckpointStatementV1({
+        ...vector.input.statement,
+        sourceNativeBlockHeight,
+        sourceNativeBlockHashHex: '23'.repeat(32),
+        executionBlockHashHex: '24'.repeat(32),
+        bridgeEventRootHex: '25'.repeat(32),
+        profile,
+      });
+      await expect(buildContinuation({
+        ...continuationInput,
+        encodedStatementHex: changed.encodedStatementHex,
+        ...anchorInput(changed.encodedStatementHex, '0401', 1_040),
+      })).rejects.toThrow(/heights must strictly increase/);
+    },
+  );
+
+  it('rejects a non-increasing admission stamp and a stale predecessor box', async () => {
+    await expect(buildContinuation({
+      ...continuationInput,
+      ...anchorInput(secondStatement.encodedStatementHex, '0401', 1_030),
+    })).rejects.toThrow(/heights must strictly increase/);
+    const later = buildSubstrateFederatedCheckpointStatementV1({
+      ...vector.input.statement,
+      sourceNativeBlockHeight: '1002',
+      sourceNativeBlockHashHex: '43'.repeat(32),
+      executionBlockHashHex: '44'.repeat(32),
+      bridgeEventRootHex: '45'.repeat(32),
+      profile,
+    });
+    await expect(buildContinuation({
+      ...continuationInput,
+      previousContext: continuationContext,
+      trackerInputBox: firstSuccessor,
+      encodedStatementHex: later.encodedStatementHex,
+      ...anchorInput(later.encodedStatementHex, '0401', 1_050),
+    })).rejects.toThrow(/retained predecessor state/);
+  });
+
+  it('rejects a second genuine receipt for the same compiler request', async () => {
+    if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
+      throw new Error('Vitest parent NODE_OPTIONS is not the reviewed harness value');
+    }
+    const testNodeOptions = process.env.NODE_OPTIONS;
+    delete process.env.NODE_OPTIONS;
+    let secondReceipt: Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV2>;
+    try {
+      secondReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(compilerRequest);
+    } finally {
+      process.env.NODE_OPTIONS = testNodeOptions;
+    }
+    expect(secondReceipt).toEqual(compilerReceipt);
+    expect(secondReceipt).not.toBe(compilerReceipt);
+    await expect(buildContinuation({ ...continuationInput, compilerReceipt: secondReceipt }))
+      .rejects.toThrow(/compiler lineage differs/);
+  }, 30_000);
+
+  it('rejects compiler, observed-header and compiled-application lineage drift', async () => {
+    await expect(buildContinuation({
+      ...continuationInput,
+      compilerRequest: structuredClone(compilerRequest),
+    })).rejects.toThrow(/provenance/);
+    await expect(buildContinuation({
+      ...continuationInput,
+      compilerReceipt: structuredClone(compilerReceipt),
+    })).rejects.toThrow(/provenance/);
+    const equalButForeignRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+      trackerGenesisInputBoxIdHex: vector.input.tracker.trackerNftIdHex,
+      profile,
+      application: identity.application,
+      template: {
+        relativePath: 'contracts/SPVTrackerSubstrateFederatedV2.es',
+        source: readFileSync(new URL(
+          '../../contracts/SPVTrackerSubstrateFederatedV2.es', import.meta.url,
+        ), 'utf8'),
+      },
+    });
+    expect(equalButForeignRequest).toEqual(compilerRequest);
+    expect(equalButForeignRequest).not.toBe(compilerRequest);
+    await expect(buildContinuation({
+      ...continuationInput,
+      compilerRequest: equalButForeignRequest,
+    })).rejects.toThrow(/compiler lineage differs/);
+    await expect(buildContinuation({
+      ...continuationInput,
+      observedHeaderContext: structuredClone(continuationInput.observedHeaderContext),
+    })).rejects.toThrow(/provenance/);
+    const changed = buildSubstrateFederatedCheckpointStatementV1({
+      ...vector.input.statement,
+      sourceNativeBlockHeight: '1001',
+      sidechainIdHex: 'ee'.repeat(32),
+      profile,
+    });
+    await expect(buildContinuation({
+      ...continuationInput,
+      encodedStatementHex: changed.encodedStatementHex,
+      ...anchorInput(changed.encodedStatementHex, '0401', 1_040),
+    })).rejects.toThrow(/compiled application/);
+  });
+
+  it('snapshots continuation parent, mutable ingress and predecessor before awaiting', async () => {
+    const third = buildSubstrateFederatedCheckpointStatementV1({
+      ...vector.input.statement,
+      sourceNativeBlockHeight: '1002',
+      sourceNativeBlockHashHex: '33'.repeat(32),
+      executionBlockHashHex: '34'.repeat(32),
+      bridgeEventRootHex: '35'.repeat(32),
+      profile,
+    });
+    const secondSuccessor = boxFromCandidate(trackerOutputCandidate(continuationContext));
+    const caller = {
+      compilerRequest, compilerReceipt,
+      previousContext: continuationContext,
+      trackerInputBox: secondSuccessor,
+      encodedStatementHex: third.encodedStatementHex,
+      ...anchorInput(third.encodedStatementHex, '0401', 1_050),
+    };
+    const pending = buildContinuation(caller);
+    secondSuccessor.value = '1';
+    secondSuccessor.additionalRegisters.R5 = encodeAvlTreeRegister(Buffer.alloc(33, 1), 1, 370);
+    caller.previousContext = context;
+    caller.encodedStatementHex = '00';
+    caller.extensionMembershipProofHex = 'ff';
+    caller.observedHeaderContext = structuredClone(caller.observedHeaderContext);
+    caller.compilerRequest = structuredClone(compilerRequest);
+    caller.compilerReceipt = structuredClone(compilerReceipt);
+    const thirdContext = await pending;
+    expect(() => assertSubstrateFederatedTrackerV2ContinuationContext(
+      thirdContext, continuationContext,
+    )).not.toThrow();
+    expect(thirdContext.trackerTransition.inputDigestHex)
+      .toBe(continuationContext.trackerTransition.successorDigestHex);
+  });
 });
 
 function anchorInput(encodedHex: string, keyHex = '0401', currentHeight = 1_030) {
@@ -348,6 +632,16 @@ function anchorInput(encodedHex: string, keyHex = '0401', currentHeight = 1_030)
 function candidateFromBox(box: Eip12Box): Candidate {
   return structuredClone({ value: box.value, ergoTree: box.ergoTree, assets: box.assets,
     additionalRegisters: box.additionalRegisters, creationHeight: box.creationHeight });
+}
+
+function trackerOutputCandidate(
+  trackerContext: Readonly<SubstrateFederatedTrackerV2Context>,
+): Candidate {
+  const outputs = (trackerContext.eip12UnsignedTransaction as { readonly outputs?: unknown }).outputs;
+  if (!Array.isArray(outputs) || outputs.length !== 1) {
+    throw new Error('tracker context must have exactly one output candidate');
+  }
+  return structuredClone(outputs[0]) as Candidate;
 }
 
 function boxFromCandidate(candidate: Candidate): Eip12Box {
