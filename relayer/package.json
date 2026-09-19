@@ -48,6 +48,7 @@
     "federated:authority-safe:accept": "npm run node:guard && tsx src/scripts/accept-substrate-federated-authority-safe-devnet-v1.ts",
     "federated:authority-safe:history": "npm run node:guard && tsx src/scripts/accept-substrate-federated-authority-safe-devnet-v1.ts --operation history",
     "federated:greenfield:replay": "npm run node:guard && tsx src/scripts/replay-substrate-federated-greenfield-launch-v1.ts",
+    "federated:native:two-cycle": "tsx src/scripts/run-substrate-federated-native-two-cycle-v1.ts",
     "federated:isolated:assemble": "npm run node:guard && tsx src/scripts/assemble-substrate-federated-isolated-devnet-portable-bundle-v1.ts",
     "federated:isolated:relayer-artifacts": "npm run node:guard && tsx src/scripts/build-substrate-federated-isolated-devnet-relayer-artifacts-v1.ts",
     "federated:isolated:bootstrap:request:create": "npm run node:guard && tsx src/scripts/create-substrate-federated-isolated-devnet-bootstrap-request-v1.ts",

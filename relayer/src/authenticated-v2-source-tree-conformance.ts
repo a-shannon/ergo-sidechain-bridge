@@ -903,6 +903,19 @@ function validatePinnedParentRuntime(paths: CompilerLockPaths): VerifiedParentRu
   });
 }
 
+/**
+ * Validate the exact Node, tsx, package-lock and pinned Git closure used by a
+ * repository-owned TypeScript entry point. Loading the compiler lock also
+ * preserves its compiler-project and consensus-source binding checks.
+ */
+export function validatePinnedAuthenticatedV2ParentRuntime(
+  bridgeRootInput: string,
+): VerifiedParentRuntime {
+  return validatePinnedParentRuntime(
+    loadAuthenticatedV2CompilerLock(bridgeRootInput),
+  );
+}
+
 export function assertNoParentRuntimeOverrides(
   env: NodeJS.ProcessEnv,
   forbidden: readonly string[],

@@ -8,13 +8,24 @@ sidechain on Ergo.
 > without EIP-0045. Campaign 23 completed one isolated local native round trip:
 > Ergo deposit, sidechain mint, approval and burn, runtime commitment,
 > federated checkpoint, tracker admission and Ergo payout, with separately
-> funded miner fees. Repeated operation from successor state, composed recovery
-> and a reproducible operator package remain open. The separate
+> funded miner fees. Two-cycle successor composition now passes local component
+> tests; a complete two-cycle node run, composed recovery and a reproducible
+> operator package remain open. The separate
 > trustless upgrade requires
 > an activated Ergo-verifiable profile and full Gate 5 acceptance. Neither
 > public source availability nor green CI supports production or mainnet use.
 
 ## Latest Milestone
+
+The retained-session root now connects two ordinary deposit-to-payout cycles.
+Component tests cover successor consumption, retained custody, separate miner
+fees, ambiguous transport holds and complete teardown. Process and RPC doubles
+in these tests leave full two-cycle node acceptance pending.
+
+The repository provides a fixed [local two-cycle command](docs/federated-native-two-cycle.md)
+with exact source/runtime checks, a fresh consumed attempt and contained worker
+cleanup. Its invocation boundaries pass focused tests and independent review;
+the complete two-cycle node campaign remains pending.
 
 Campaign 23 completed the native two-way path in one disposable custody
 session. Both local Ergo nodes agreed on the payout, remaining reserve and
@@ -189,9 +200,9 @@ singleton checkpoint `observedAt` timestamp must be ISO UTC and no older than
 
 ## Open Blockers
 
-For the **federated reference**, the next steps are operational mint,
-composed two-way recovery and global replay cutover, followed by exact
-target/custody rehearsal and the FED-7 reference package. Local tracker
+For the **federated reference**, the next steps are two complete cycles through
+the repository command on fresh local nodes and recovery on the accumulated state,
+followed by exact target/custody rehearsal and the FED-7 reference package. Local tracker
 admission and withdrawal do not close those wider obligations. Exact
 target/custody approval, key-loss/rotation rehearsal, alert/recovery actions,
 reproducibility and independent review remain due for the selected profile.

@@ -28,14 +28,23 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** provide the minimal repository invocation for the composed two-cycle
-root, then run one fresh complete campaign. The second
+**Now:** run one fresh complete campaign through the repository invocation for
+the composed two-cycle root. The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
 payout and both replay histories. Confirm both new external fee inputs before
 fixing the second anchor. Keep both
 node groups and original source custody alive through both returns; never reopen
 a disposed signer, reset a consumed API or reconstruct historical keys.
+
+The fixed `federated:native:two-cycle` command and
+[local runbook](../docs/federated-native-two-cycle.md) now connect the existing
+root to an exact clean checkout, pinned runtime/tools and a fresh contained
+worker. Config capture, consumed attempts, worker entry, terminal publication
+and changed-input failures have focused component coverage and independent
+review. The command has not yet completed a two-cycle node campaign. Its TSX
+bootstrap, trusted host/cache assumptions and synthetic profile are explicit;
+operator recovery, separate-context reproduction and release acceptance remain open.
 
 An explicit retained-withdrawal branch now keeps the original setup signer for
 the second deposit. Its builder requires the original successfully confirmed
@@ -497,7 +506,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Two-cycle root -> fresh chain | Provide a minimal repository invocation, keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse ambiguous attempts |
+| **Now** | Two-cycle invocation -> fresh chain | Run the repository command once with a clean exact candidate, keeping both node groups and original custody alive through two confirmed returns | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |

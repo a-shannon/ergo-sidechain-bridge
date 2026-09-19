@@ -202,6 +202,8 @@ const REVIEWED_TRACKER_V2_APP_LEGACY_IMPORT_BINDINGS: ReadonlyMap<
 
 const FEDERATED_GENESIS_TARGET_ROOT =
   'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts';
+const FEDERATED_NATIVE_TWO_CYCLE_WORKER =
+  'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts';
 const FEDERATED_GENESIS_OPERATOR = 'adapters/federated-genesis-operator-v1.ts';
 const FEDERATED_NATIVE_RESERVATION_SIGNING = 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts';
 const FEDERATED_GENESIS_TARGET_OBSERVATION = 'adapters/federated-genesis-target-observation-v1.ts';
@@ -1852,6 +1854,9 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, new Map([
+    ['runSubstrateFederatedGenesisTargetRootV1', new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
+  ])],
   [FEDERATED_GENESIS_OPERATOR, new Map([
     ['createFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['assertFederatedGenesisOperatorV1', new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -1982,6 +1987,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       [
         'resolveBridgeRepositoryRootsFromCheckoutLayout',
         new Set([
+          'substrate-federated-native-two-cycle-invocation-v1.ts',
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
           'bridge-repository-layout.test.ts',
           'scripts/accept-substrate-federated-authority-safe-devnet-v1.ts',
@@ -2304,6 +2310,8 @@ const EXCLUSIVE_RUNTIME_MODULE_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlySet<string>
 > = new Map([
+  [FEDERATED_GENESIS_TARGET_ROOT, new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
+  [FEDERATED_NATIVE_TWO_CYCLE_WORKER, new Set<string>()],
   [FEDERATED_GENESIS_OPERATOR, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
   [FEDERATED_NATIVE_RESERVATION_SIGNING, new Set([FEDERATED_GENESIS_TARGET_ROOT])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Set([FEDERATED_GENESIS_TARGET_ROOT, FEDERATED_NATIVE_RESERVATION_SIGNING])],
@@ -2778,6 +2786,10 @@ function collectReviewedAppExportViolations(
 }
 
 const FIXED_CAMPAIGN_SCRIPT_EXPORTS = new Map([
+  [FEDERATED_NATIVE_TWO_CYCLE_WORKER,
+    new Set(['runSubstrateFederatedNativeTwoCycleWorkerFromArguments'])],
+  ['scripts/run-substrate-federated-native-two-cycle-v1.ts',
+    new Set(['runSubstrateFederatedNativeTwoCycleFromArguments'])],
   ['scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.ts',
     new Set(['runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments',
       'formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure'])],

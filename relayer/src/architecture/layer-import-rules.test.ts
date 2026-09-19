@@ -46,6 +46,53 @@ function staticAppFixture(file: string, source: string): Record<string, string> 
 }
 
 describe('layer import rules', () => {
+  it('reserves the complete native root to the contained two-cycle worker', () => {
+    const worker = 'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts';
+    const specifier = '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js';
+    const binding = 'runSubstrateFederatedGenesisTargetRootV1';
+    expect(inspect(staticAppFixture(worker,
+      `import { ${binding} } from '${specifier}'; await ${binding}({});`))).toEqual([]);
+    for (const foreign of ['scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'scripts/foreign.ts', 'adapters/foreign.ts', 'foreign.ts']) {
+      const relative = `./${path.posix.relative(path.posix.dirname(foreign), FEDERATED_GENESIS_TARGET_ROOT)
+        .replace(/\.ts$/, '.js')}`;
+      expect(inspect(staticAppFixture(foreign, `import { ${binding} } from '${relative}';`))
+        .map(value => value.message)).toContain(`exclusive authority import has the wrong owner: ${relative}#${binding}`);
+    }
+    for (const source of [
+      `import * as root from '${specifier}';`, `export { ${binding} } from '${specifier}';`,
+      `const root = await import('${specifier}');`, `const root = require('${specifier}');`,
+    ]) {
+      expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};', [worker]: source })
+        .map(value => value.message)).toContain(`exclusive authority module must use named runtime imports: ${specifier}`);
+    }
+    for (const value of [`const escaped = ${binding};`, `capture(${binding});`,
+      `export { ${binding} };`, `function expose() { return ${binding}; }`]) {
+      expect(inspect(staticAppFixture(worker, `import { ${binding} } from '${specifier}'; ${value}`))
+        .map(item => item.message)).toContain(`fixed campaign capability must only be called directly: ${binding}`);
+    }
+  });
+
+  it('keeps the native campaign worker unavailable as an imported launcher', () => {
+    const worker = 'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts';
+    const binding = 'runSubstrateFederatedNativeTwoCycleWorkerFromArguments';
+    for (const caller of ['scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'scripts/foreign.ts', 'apps/bridge-daemon/foreign.ts']) {
+      const specifier = `./${path.posix.relative(path.posix.dirname(caller), worker).replace(/\.ts$/, '.js')}`;
+      expect(inspect(staticAppFixture(caller, `import { ${binding} } from '${specifier}'; ${binding}([]);`))
+        .map(item => item.message)).toContain(`exclusive runtime module import has the wrong owner: ${specifier}`);
+    }
+  });
+
+  it.each([
+    ['scripts/run-substrate-federated-native-two-cycle-v1.ts', 'runSubstrateFederatedNativeTwoCycleFromArguments'],
+    ['scripts/run-substrate-federated-native-two-cycle-worker-v1.ts', 'runSubstrateFederatedNativeTwoCycleWorkerFromArguments'],
+  ])('limits native invocation exports in %s', (file, binding) => {
+    expect(inspect({ [file]: `export async function ${binding}(args: string[]) {}` })).toEqual([]);
+    expect(inspect({ [file]: `export function expose() {}` }).map(item => item.message))
+      .toContain('reviewed app root export is not allowlisted: expose');
+  });
+
   it('accepts the actual FED genesis source without executing the root', () => {
     const file = FEDERATED_GENESIS_TARGET_ROOT;
     const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
@@ -1030,6 +1077,13 @@ describe('layer import rules', () => {
     const reviewedRoot =
       'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
     const layoutTarget = 'bridge-repository-layout.ts';
+    expect(inspect({
+      'substrate-federated-native-two-cycle-invocation-v1.ts': `
+        import { resolveBridgeRepositoryRootsFromCheckoutLayout } from './bridge-repository-layout.js';
+        resolveBridgeRepositoryRootsFromCheckoutLayout('bridge');
+      `,
+      [layoutTarget]: 'export function resolveBridgeRepositoryRootsFromCheckoutLayout(_root: string) {}',
+    })).toEqual([]);
     expect(inspect({
       [reviewedRoot]: `
         import { resolveBridgeRepositoryRootsFromCheckoutLayout } from '../../bridge-repository-layout.js';
