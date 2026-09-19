@@ -58,6 +58,7 @@ describe('layer import rules', () => {
     ['../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', 'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'],
     ['../../authenticated-spv-tracker-read-only-node-client.js', 'createBoundedAuthenticatedSpvTrackerReadOnlySource'],
     ['../../substrate-federated-authority-safe-devnet-process-v1.js', 'assertOwnedFederatedGenesisDevnetTargetV1'],
+    ['../../substrate-federated-authority-safe-devnet-process-v1.js', 'createOwnedFederatedGenesisDevnetProcessSessionV1'],
     ['../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', 'assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1'],
     ['../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', 'buildSubstrateFederatedNativeGenesisPegInPacketV1'],
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisPegInSourceLockV1'],

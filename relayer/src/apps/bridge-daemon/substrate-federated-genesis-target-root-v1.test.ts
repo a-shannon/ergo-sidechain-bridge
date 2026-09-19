@@ -44,7 +44,7 @@ vi.mock('../../substrate-federated-authority-safe-devnet-build-environment-v1.js
   buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1: mocked.environment,
 }));
 vi.mock('../../substrate-federated-authority-safe-devnet-process-v1.js', () => ({
-  withOwnedFederatedGenesisDevnetProcessesV1: mocked.nodes,
+  createOwnedFederatedGenesisDevnetProcessSessionV1: mocked.nodes,
   assertOwnedFederatedGenesisDevnetTargetV1: mocked.frontierOwned,
 }));
 vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', () => ({
@@ -172,6 +172,8 @@ let readErgoAnchor: (origin: string, height: number) => unknown;
 let retainedSetup: any;
 let frontierEndpoints: Readonly<{ primaryRpcUrl: string; witnessRpcUrl: string }>;
 let frontierActive: boolean;
+let closeNative: ReturnType<typeof vi.fn>;
+let nativeAction: ReturnType<typeof vi.fn>;
 let batchActive: boolean;
 let journalDirectory: string;
 let attemptFiles: string[];
@@ -523,7 +525,7 @@ beforeEach(() => {
     expect(JSON.parse(readFileSync(join(directory, 'target', 'fed-genesis.json'), 'utf8')).operatorAddressHex).toBe(operator!.addressHex);
     return { stdout: JSON.stringify(rawSpec()), stderr: '' };
   });
-  mocked.nodes.mockImplementation(async (value, callback) => {
+  mocked.nodes.mockImplementation(async value => {
     order.push('nodes'); assertCustodyActive(); expect(active).toBe(true);
     expect(value.primaryRpcUrl).toBe(PRIMARY); expect(value.witnessRpcUrl).toBe(WITNESS);
     expect(value.nodeBinaryPath).toBe(join(directory, 'node.exe'));
@@ -533,8 +535,26 @@ beforeEach(() => {
       .toEqual([30355, 30356, 19615, 19616]);
     expect(sha256(value.genesisJsonBytes)).toBe(value.expectedGenesisJsonSha256Hex);
     frontierActive = true;
-    try { return { value: await callback(frontierEndpoints), receipt: { component: 'FED process stub' } }; }
-    finally { frontierActive = false; order.push('nodes-stop'); }
+    let closing: Promise<{ component: string }> | undefined;
+    closeNative = vi.fn(() => {
+      if (closing) return closing;
+      frontierActive = false;
+      order.push('nodes-stop');
+      closing = Promise.resolve({ component: 'FED process stub' });
+      return closing;
+    });
+    nativeAction = vi.fn(async callback => {
+      mocked.frontierOwned(frontierEndpoints);
+      try {
+        const result = await callback(frontierEndpoints);
+        mocked.frontierOwned(frontierEndpoints);
+        return result;
+      } catch (error) {
+        await closeNative();
+        throw error;
+      }
+    });
+    return Object.freeze({ withTarget: nativeAction, close: closeNative });
   });
   mocked.frontierOwned.mockImplementation(value => {
     if (!frontierActive || value !== frontierEndpoints) throw new Error('FED target inactive');
@@ -1172,10 +1192,13 @@ describe('fresh FED target composition', () => {
     expect(result.storageKeysChecked).toBe(6); expect(Object.isFrozen(result)).toBe(true);
     expect(order).toEqual(['setup', 'source', 'operator', 'frontier-build', 'ergo-build', 'process', 'mine',
       'discover', 'history', 'compile', 'materialize', 'nodes', 'check', 'execute',
-      ...downstreamStages, 'withdrawalFeeCheck', 'withdrawalFee', 'trackerFeeCheck', 'trackerFee', 'checkpoint', 'nodes-stop',
+      ...downstreamStages, 'withdrawalFeeCheck', 'withdrawalFee', 'trackerFeeCheck', 'trackerFee', 'checkpoint',
       'anchor-phase', 'anchor', 'frozen-phase', 'frozenObservation', 'context', 'trackerTx', 'trackerCheck', 'trackerAuthorize', 'trackerReserve',
       'freshness-phase', 'trackerFreshness', 'transport-phase', 'trackerSubmit', 'trackerFinalize', 'confirmation-phase', 'trackerConfirm',
-      'payoutCheck', 'payoutAuthorize', 'payoutReserve', 'payoutSubmit', 'payoutFinalize', 'payoutConfirm', 'stop']);
+      'payoutCheck', 'payoutAuthorize', 'payoutReserve', 'payoutSubmit', 'payoutFinalize', 'payoutConfirm', 'nodes-stop', 'stop']);
+    expect(nativeAction).toHaveBeenCalledTimes(2);
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    expect(result.frontierProcess).toEqual({ component: 'FED process stub' });
     expect(calls.filter(call => call.method === 'state_getStorage')).toHaveLength(28);
     expect(new Set(calls.map(call => call.url))).toEqual(new Set([PRIMARY, WITNESS]));
     expect(mocked.pin).toHaveBeenCalledTimes(2); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
@@ -1206,6 +1229,121 @@ describe('fresh FED target composition', () => {
       }
     };
     visit(result); expect(JSON.parse(JSON.stringify(result))).toEqual(result);
+  });
+
+  it('keeps native ownership through the payout and awaits its final cleanup receipt', async () => {
+    let releaseCleanup!: () => void;
+    let cleanupEntered!: () => void;
+    const entered = new Promise<void>(resolve => { cleanupEntered = resolve; });
+    const held = new Promise<void>(resolve => { releaseCleanup = resolve; });
+    const confirm = mocked.payoutConfirm.getMockImplementation()!;
+    mocked.payoutConfirm.mockImplementation(async (...args) => {
+      expect(frontierActive).toBe(true);
+      expect(order).not.toContain('nodes-stop');
+      const result = await confirm(...args);
+      let closing: Promise<{ component: string }> | undefined;
+      closeNative.mockImplementation(() => {
+        if (closing) return closing;
+        frontierActive = false;
+        order.push('nodes-stop');
+        cleanupEntered();
+        closing = held.then(() => ({ component: 'FED process stub' }));
+        return closing;
+      });
+      return result;
+    });
+    let settled = false;
+    const running = runSubstrateFederatedGenesisTargetRootV1(input)
+      .then(value => { settled = true; return value; });
+    await entered;
+    try {
+      expect(settled).toBe(false);
+      expect(stop).not.toHaveBeenCalled();
+      expect(frontierActive).toBe(false);
+    } finally { releaseCleanup(); }
+    expect((await running).frontierProcess).toEqual({ component: 'FED process stub' });
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    assertDownstreamCleanup();
+  });
+
+  it('closes native ownership when the Ergo setup fails after its first native action', async () => {
+    const createProcess = mocked.process.getMockImplementation()!;
+    const failure = new Error('setup post-action failure');
+    mocked.process.mockImplementation((...args) => {
+      const owner = createProcess(...args);
+      return { ...owner, withMiningActiveExecutionTarget: async (...phaseArgs: any[]) => {
+        await owner.withMiningActiveExecutionTarget(...phaseArgs);
+        expect(frontierActive).toBe(true);
+        throw failure;
+      } };
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toBe(failure);
+    expect(nativeAction).toHaveBeenCalledOnce();
+    expect(closeNative).toHaveBeenCalledOnce();
+    expect(mocked.anchor).not.toHaveBeenCalled();
+    assertDownstreamCleanup();
+  });
+
+  it('rejects native ownership lost during the return instead of reporting success', async () => {
+    const confirm = mocked.payoutConfirm.getMockImplementation()!;
+    mocked.payoutConfirm.mockImplementation(async (...args) => {
+      const result = await confirm(...args);
+      frontierActive = false;
+      return result;
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('FED target inactive');
+    expect(mocked.payoutConfirm).toHaveBeenCalledOnce();
+    expect(nativeAction).toHaveBeenCalledTimes(2);
+    assertDownstreamCleanup();
+  });
+
+  it('preserves the original failure and both process cleanup failures while disposing every owner', async () => {
+    const createProcess = mocked.process.getMockImplementation()!;
+    const primary = new Error('setup post-action failure');
+    const nativeFailure = new Error('native cleanup failed');
+    const ergoFailure = new Error('Ergo cleanup failed');
+    mocked.process.mockImplementation((...args) => {
+      const owner = createProcess(...args);
+      return { ...owner, withMiningActiveExecutionTarget: async (...phaseArgs: any[]) => {
+        await owner.withMiningActiveExecutionTarget(...phaseArgs);
+        closeNative.mockImplementation(() => {
+          frontierActive = false;
+          order.push('nodes-stop');
+          return Promise.reject(nativeFailure);
+        });
+        throw primary;
+      } };
+    });
+    stop.mockRejectedValueOnce(ergoFailure);
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors).toEqual([primary, nativeFailure, ergoFailure]);
+    expect(closeNative).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(StateTracker.prototype.close).toHaveBeenCalledOnce();
+    expect(frontierActive).toBe(false);
+    assertDisposed();
+  });
+
+  it('does not duplicate a memoized native cleanup failure during final cleanup', async () => {
+    const failure = new Error('native cleanup failed');
+    const confirm = mocked.payoutConfirm.getMockImplementation()!;
+    mocked.payoutConfirm.mockImplementation(async (...args) => {
+      const result = await confirm(...args);
+      let closing: Promise<never> | undefined;
+      closeNative.mockImplementation(() => {
+        if (!closing) {
+          frontierActive = false;
+          order.push('nodes-stop');
+          closing = Promise.reject(failure);
+        }
+        return closing;
+      });
+      return result;
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toBe(failure);
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    assertDownstreamCleanup();
   });
 
   for (const stage of ['funding', 'packet', 'sourceLock', 'committedVault', 'mint'] as const) {

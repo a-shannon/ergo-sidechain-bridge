@@ -28,7 +28,7 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** retain native node ownership and compose both component cycles in the
+**Now:** compose both component cycles under the retained native owner in the
 root before a fresh two-cycle campaign. The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
@@ -119,12 +119,14 @@ test completes both process cycles without transaction submission; composed
 tests separately exercise the actual fee and setup-authority producers. This
 does not establish the full two-cycle bridge lifecycle.
 
-The root's native node owner currently closes when the first Ergo setup callback
-returns. The continuation signer requires the same live native target object,
-so another callback with a fresh target cannot replace it. The next join keeps
-one native session and its target continuously live across the Ergo phases,
-serializes its actions and awaits teardown before producing the final receipt.
-Keep the legacy callback API scoped to one action. Then connect the existing
+The root now retains one native process session through its Ergo return. The
+same genuine native target stays continuously registered between serialized
+actions; copied targets, overlap, use after close and process loss fail closed.
+Close revokes the target before teardown and joins the existing process owner's
+cleanup. The root awaits the final receipt and closes every retained owner even
+when execution or cleanup fails. The legacy callback API remains scoped to one
+action. Lifecycle and root tests cover this ownership join with explicit process
+and downstream doubles; the root still executes one cycle. Next connect the existing
 second deposit, source proof, native reservation/mint/burn, funded fees,
 checkpoint, tracker and payout consumers under that retained owner.
 

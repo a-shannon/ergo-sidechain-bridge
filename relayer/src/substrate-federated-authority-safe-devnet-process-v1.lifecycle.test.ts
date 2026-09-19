@@ -29,6 +29,7 @@ import {
   assertOwnedAuthoritySafeDevnetProcessV1Receipt,
   assertOwnedFederatedGenesisDevnetProcessV1Receipt,
   assertOwnedFederatedGenesisDevnetTargetV1,
+  createOwnedFederatedGenesisDevnetProcessSessionV1,
   withOwnedFederatedGenesisDevnetProcessesV1,
   assertOwnedAuthoritySafeDevnetRecoveryLifecycleV1Receipt,
   assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt,
@@ -664,6 +665,141 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     expect(result.receipt.chainSpecSha256Hex).toBe(expectedPin);
     expect(result.value.genesisJsonSha256Hex).toBe(expectedPin);
     expect(() => assertOwnedFederatedGenesisDevnetTargetV1(result.value)).toThrow(/provenance/);
+  });
+
+  it('keeps one genuine FED target live across actions and revokes it once before close cleanup', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    expect(Object.isFrozen(session)).toBe(true);
+    expect(Object.keys(session).sort()).toEqual(['close', 'withTarget']);
+    let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
+    let checkedDuringTeardown = false;
+
+    expect(await session.withTarget(async target => {
+      retained = target;
+      expect(Object.isFrozen(target)).toBe(true);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'first';
+    })).toBe('first');
+    expect(retained).toBeDefined();
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).not.toThrow();
+    expect(await session.withTarget(async target => {
+      expect(target).toBe(retained);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'second';
+    })).toBe('second');
+
+    const witness = children[1]!;
+    vi.mocked(witness.kill).mockImplementation(() => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+      checkedDuringTeardown = true;
+      exitChild(witness, 'SIGKILL');
+      return true;
+    });
+    const firstClose = session.close();
+    const secondClose = session.close();
+    expect(secondClose).toBe(firstClose);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    const receipt = await firstClose;
+    expect(checkedDuringTeardown).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt(receipt)).not.toThrow();
+    expect(await secondClose).toBe(receipt);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    await expect(session.withTarget(async () => 'unreachable'))
+      .rejects.toThrow(/closing or closed/);
+  });
+
+  it('rejects overlapping actions and close without tearing down the active action', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    let releaseAction!: () => void;
+    let reportEntered!: () => void;
+    const actionEntered = new Promise<void>(resolvePromise => {
+      reportEntered = resolvePromise;
+    });
+    const actionReleased = new Promise<void>(resolvePromise => {
+      releaseAction = resolvePromise;
+    });
+    const first = session.withTarget(async target => {
+      reportEntered();
+      await actionReleased;
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'observed';
+    });
+    await actionEntered;
+    await expect(session.withTarget(async () => 'overlap'))
+      .rejects.toThrow(/action is already active/);
+    await expect(session.close()).rejects.toThrow(/while an action is active/);
+    expect(children.every(child => child.alive)).toBe(true);
+    releaseAction();
+    await expect(first).resolves.toBe('observed');
+    await expect(session.close()).resolves.toMatchObject({
+      schema: 'e2s.substrate-federated-genesis-devnet-process.v1',
+    });
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('supports immediate awaited close without starting a target action', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const receipt = await session.close();
+    expect(receipt.schema).toBe('e2s.substrate-federated-genesis-devnet-process.v1');
+    expect(receipt.checks.bothProcessesStoppedAndListenersReleased).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('rejects process death between actions and joins the terminal cleanup outcome', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const target = await session.withTarget(async current => current);
+    exitChild(children[1]!);
+    const next = vi.fn(async () => 'unreachable');
+    const failure = await session.withTarget(next).catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toMatch(/witness process exited unexpectedly/);
+    expect(next).not.toHaveBeenCalled();
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).toThrow(/provenance/);
+    expect(children.every(child => !child.alive)).toBe(true);
+    const firstClose = session.close();
+    expect(session.close()).toBe(firstClose);
+    await expect(firstClose).rejects.toBe(failure);
+  });
+
+  it('retires the FED session and joins cleanup before propagating an action failure', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const failure = new Error('synthetic session action failure');
+    let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
+    await expect(session.withTarget(async target => {
+      retained = target;
+      throw failure;
+    })).rejects.toBe(failure);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    await expect(session.withTarget(async () => 'unreachable'))
+      .rejects.toThrow(/closing or closed/);
+  });
+
+  it('preserves both FED session action and cleanup failures', async () => {
+    retainListenersAfterStop = true;
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    let captured: unknown;
+    try {
+      await session.withTarget(async () => {
+        throw new Error('synthetic session action failure');
+      });
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toBeInstanceOf(AggregateError);
+    expect((captured as AggregateError).errors.map(error => error.message)).toEqual([
+      'synthetic session action failure',
+      expect.stringMatching(/process cleanup failed/),
+    ]);
+  });
+
+  it('joins partial startup cleanup before rejecting FED session creation', async () => {
+    witnessStartupFailure = true;
+    await expect(createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput()))
+      .rejects.toThrow(/witness process exited unexpectedly/);
+    expect(children[0]?.role).toBe('primary');
+    expect(children[0]?.alive).toBe(false);
   });
 
   it('rejects copied FED targets without querying process state', async () => {

@@ -316,7 +316,8 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1',
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
-    'withOwnedFederatedGenesisDevnetProcessesV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
+    'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
+    'OwnedFederatedGenesisDevnetProcessSessionV1',
   ])],
   ['substrate-federated-genesis-node-build-v1.ts', new Set([
     'buildSubstrateFederatedGenesisNodeV1', 'BuildSubstrateFederatedGenesisNodeV1Input',
@@ -1890,6 +1891,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['collectFederatedNativeBurnCommitmentV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING])],
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Map([
+    ['createOwnedFederatedGenesisDevnetProcessSessionV1', new Set([FEDERATED_GENESIS_TARGET_ROOT])],
     ['assertOwnedFederatedGenesisDevnetTargetV1', new Set([FEDERATED_NATIVE_RESERVATION_SIGNING, FEDERATED_GENESIS_TARGET_ROOT])],
   ])],
   [FEDERATED_GENESIS_TARGET_OBSERVATION, new Map([

@@ -52,7 +52,10 @@ const ACCEPTANCE_PROCESS_RECEIPTS = new WeakSet<object>();
 const FEDERATED_GENESIS_PROCESS_RECEIPTS = new WeakSet<object>();
 const FEDERATED_GENESIS_TARGETS = new WeakMap<
   Readonly<OwnedFederatedGenesisDevnetTargetV1>,
-  Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>
+  Readonly<{
+    owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>;
+    revoke(): void;
+  }>
 >();
 const RECOVERY_PROCESS_RECEIPTS = new WeakSet<object>();
 const RECOVERY_RECEIPTS = new WeakSet<object>();
@@ -114,6 +117,14 @@ export interface OwnedFederatedGenesisDevnetTargetV1 {
   readonly primaryRpcUrl: string;
   readonly witnessRpcUrl: string;
   readonly genesisJsonSha256Hex: string;
+}
+
+export interface OwnedFederatedGenesisDevnetProcessSessionV1 {
+  withTarget<T>(
+    action: (target: Readonly<OwnedFederatedGenesisDevnetTargetV1>) => Promise<T>,
+  ): Promise<T>;
+  /** Rejects during an active action; retry after that awaited action settles. */
+  close(): Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
 }
 
 export interface OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
@@ -325,6 +336,105 @@ export async function withOwnedAuthoritySafeDevnetProcessesV1<T>(
   );
 }
 
+/** Own one FED target until explicitly closed; no process handle escapes. */
+export async function createOwnedFederatedGenesisDevnetProcessSessionV1(
+  input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
+): Promise<Readonly<OwnedFederatedGenesisDevnetProcessSessionV1>> {
+  let resolveSession!: (
+    session: Readonly<OwnedFederatedGenesisDevnetProcessSessionV1>,
+  ) => void;
+  let rejectSession!: (error: unknown) => void;
+  const sessionReady = new Promise<
+    Readonly<OwnedFederatedGenesisDevnetProcessSessionV1>
+  >((resolvePromise, rejectPromise) => {
+    resolveSession = resolvePromise;
+    rejectSession = rejectPromise;
+  });
+  let releaseOwner!: () => void;
+  const ownerReleased = new Promise<void>(resolvePromise => {
+    releaseOwner = resolvePromise;
+  });
+  let processLifetime!: Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
+
+  processLifetime = withOwnedFederatedGenesisDevnetProcessesV1(
+    input,
+    async target => {
+      let state: 'active' | 'acting' | 'closing' | 'closed' = 'active';
+      let actionFailed = false;
+      let actionFailure: unknown;
+      let closePromise:
+        Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>
+        | undefined;
+
+      const beginClose = () => {
+        if (closePromise !== undefined) return closePromise;
+        state = 'closing';
+        revokeOwnedFederatedGenesisDevnetTargetV1(target);
+        releaseOwner();
+        closePromise = processLifetime.then(
+          receipt => {
+            state = 'closed';
+            return receipt;
+          },
+          error => {
+            state = 'closed';
+            throw error;
+          },
+        );
+        return closePromise;
+      };
+
+      const session: Readonly<OwnedFederatedGenesisDevnetProcessSessionV1> =
+        Object.freeze({
+          withTarget: async <T>(
+            action: (
+              current: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+            ) => Promise<T>,
+          ): Promise<T> => {
+            if (typeof action !== 'function') {
+              throw new Error('FED genesis session action is required');
+            }
+            if (state === 'acting') {
+              throw new Error('FED genesis session action is already active');
+            }
+            if (state !== 'active') {
+              throw new Error('FED genesis session is closing or closed');
+            }
+            state = 'acting';
+            try {
+              assertOwnedFederatedGenesisDevnetTargetV1(target);
+              const value = await action(target);
+              assertOwnedFederatedGenesisDevnetTargetV1(target);
+              state = 'active';
+              return value;
+            } catch (error) {
+              actionFailed = true;
+              actionFailure = error;
+              const cleanup = beginClose();
+              await cleanup;
+              throw error;
+            }
+          },
+          close: () => {
+            if (state === 'acting') {
+              return Promise.reject(
+                new Error('FED genesis session cannot close while an action is active'),
+              );
+            }
+            return beginClose();
+          },
+        });
+
+      resolveSession(session);
+      await ownerReleased;
+      if (actionFailed) throw actionFailure;
+      return true;
+    },
+  ).then(result => result.receipt);
+  void processLifetime.then(undefined, error => rejectSession(error));
+  return await sessionReady;
+}
+
 /** Own two isolated FED nodes; typed-loader execution is not mint authority. */
 export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
   input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
@@ -359,11 +469,11 @@ export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
       witnessRpcUrl: owner.endpoints.witnessRpcUrl,
       genesisJsonSha256Hex: captured.expectedGenesisJsonSha256Hex,
     });
-    FEDERATED_GENESIS_TARGETS.set(target, owner);
+    const revoke = registerOwnedFederatedGenesisDevnetTargetV1(target, owner);
     try {
       return await action(target);
     } finally {
-      FEDERATED_GENESIS_TARGETS.delete(target);
+      revoke();
     }
   }, 'federated_genesis_observation');
 }
@@ -371,11 +481,34 @@ export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
 export function assertOwnedFederatedGenesisDevnetTargetV1(
   target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
 ): void {
-  const owner = FEDERATED_GENESIS_TARGETS.get(target);
-  if (!owner) {
+  const registration = FEDERATED_GENESIS_TARGETS.get(target);
+  if (!registration) {
     throw new Error('FED genesis target requires original active owned-process provenance');
   }
-  owner.assertActive();
+  registration.owner.assertActive();
+}
+
+function registerOwnedFederatedGenesisDevnetTargetV1(
+  target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+  owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>,
+): () => void {
+  let active = true;
+  const registration = Object.freeze({
+    owner,
+    revoke: () => {
+      if (!active) return;
+      active = false;
+      FEDERATED_GENESIS_TARGETS.delete(target);
+    },
+  });
+  FEDERATED_GENESIS_TARGETS.set(target, registration);
+  return registration.revoke;
+}
+
+function revokeOwnedFederatedGenesisDevnetTargetV1(
+  target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+): void {
+  FEDERATED_GENESIS_TARGETS.get(target)?.revoke();
 }
 
 export async function exerciseOwnedAuthoritySafeDevnetRecoveryLifecycleV1(

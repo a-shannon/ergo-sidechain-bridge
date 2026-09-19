@@ -14,7 +14,8 @@ import type { StateTracker as NativeJournalState } from '../../state-tracker.js'
 import { verifyExecutableSha256 } from '../../native-executable-pin.js';
 import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
-import { withOwnedFederatedGenesisDevnetProcessesV1, assertOwnedFederatedGenesisDevnetTargetV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
+import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
+  type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
 import { collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2 } from '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1, type BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
@@ -109,6 +110,9 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
   let sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
   let operator: Readonly<FederatedGenesisOperatorV1> | undefined;
   let ergo: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2> | undefined;
+  let native: Readonly<OwnedFederatedGenesisDevnetProcessSessionV1> | undefined;
+  let rootFailed = false;
+  let rootFailure: unknown;
   let retainedState: NativeJournalState | undefined;
   let mining: Readonly<Record<'miningCredential' | 'checkpointMiningCredential' | 'trackerAdmissionMiningCredential'
     | 'trackerConfirmationMiningCredential', Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>>> | undefined;
@@ -181,12 +185,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       }
       assertCustody();
       assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
-      const running = await withOwnedFederatedGenesisDevnetProcessesV1({
+      native = await createOwnedFederatedGenesisDevnetProcessSessionV1({
         nodeBinaryPath: frontier.node.path, expectedNodeBinarySha256Hex: frontier.node.sha256Hex,
         genesisJsonBytes: candidateBytes, expectedGenesisJsonSha256Hex: candidate.genesisJsonSha256Hex,
         primaryRpcUrl: PRIMARY, witnessRpcUrl: WITNESS,
         primaryP2pPort: 30355, witnessP2pPort: 30356, primaryPrometheusPort: 19615, witnessPrometheusPort: 19616,
-      }, async endpoints => {
+      });
+      const running = await native.withTarget(async endpoints => {
         assertOwnedFederatedGenesisDevnetTargetV1(endpoints);
         if (endpoints.primaryRpcUrl !== PRIMARY || endpoints.witnessRpcUrl !== WITNESS) {
           throw new Error('FED owned node endpoints changed');
@@ -416,38 +421,56 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
               reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
               mintIdentityHex: mint.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex }) });
       });
-      return Object.freeze({ continuation: running.value.continuation,
-        summary: Object.freeze({ nativeGenesisHashHex: running.value.genesis, frontierProcess: running.receipt,
+      return Object.freeze({ continuation: running.continuation,
+        summary: Object.freeze({ nativeGenesisHashHex: running.genesis,
         typedGenesisSha256Hex: candidate.genesisJsonSha256Hex, rawSpecSha256Hex: sha256(Buffer.from(raw.stdout)),
         runtimeProfileIdHex: candidate.runtimeProfileIdHex, familyIdHex: candidate.familyIdHex,
         sourceProofProfileIdHex: frontier.sourceProofProfileIdHex,
         nodeSha256Hex: frontier.node.sha256Hex, wasmSha256Hex: frontier.wasm.sha256Hex,
         operatorAddressHex: retainedOperator.addressHex, storageKeysChecked: Object.keys(expected).length,
         issuanceInputBoxIds: compiled.discovery.genesisBoxIds,
-        issuedTransactions: running.value.transactions,
-        pegIn: running.value.pegIn, mint: running.value.mint, burn: running.value.burn,
+        issuedTransactions: running.transactions,
+        pegIn: running.pegIn, mint: running.mint, burn: running.burn,
         unsignedIssuance: Object.freeze(compiled.issuance.orderedTransactions.map(({ role, transaction }) =>
           Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) }) });
     });
     if (retainedState === undefined) throw new Error('FED native continuation journal is absent');
     if (sourceOperation === undefined) throw new Error('FED native continuation source operation is absent');
-    const withdrawal = await completeNativeReturn({ node: ergo, setup, source: retainedSource, operator: retainedOperator,
-      sourceOperation, state: retainedState, prepared: executed.value.continuation, priorSnapshot: executed.receipt.finalSnapshot });
+    if (native === undefined) throw new Error('FED native process session is absent');
+    const returnInput = {
+      node: ergo, setup, source: retainedSource, operator: retainedOperator,
+      sourceOperation, state: retainedState, prepared: executed.value.continuation,
+      priorSnapshot: executed.receipt.finalSnapshot };
+    const withdrawal = await native.withTarget(async () => completeNativeReturn(returnInput));
+    const frontierProcess = await native.close();
     return Object.freeze({ status: 'fresh-federated-round-trip-confirmed' as const,
-      ...executed.value.summary, ergoExecution: executed.receipt, withdrawal,
+      ...executed.value.summary, frontierProcess, ergoExecution: executed.receipt, withdrawal,
       singletonIssuanceEstablished: true as const, operationalMintEstablished: true as const,
       canonicalPayoutEstablished: true as const,
       sourceFinalityEstablished: false as const, trustless: false as const });
+  } catch (error) {
+    rootFailed = true;
+    rootFailure = error;
+    throw error;
   } finally {
-    try { if (ergo) await ergo.stop(); }
-    finally {
-      for (const credential of Object.values(mining ?? {})) revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
-      try { if (operator) disposeFederatedGenesisOperatorV1(operator); }
-      finally {
-        try { sourceOperation?.dispose(); }
-        finally { try { source?.dispose(); } finally { try { setup.dispose(); } finally { retainedState?.close(); } } }
-      }
+    const failures: unknown[] = rootFailed ? [rootFailure] : [];
+    for (const dispose of [
+      async () => { await native?.close(); },
+      async () => { await ergo?.stop(); },
+      ...Object.values(mining ?? {}).map(credential => () => revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential)),
+      () => { if (operator) disposeFederatedGenesisOperatorV1(operator); },
+      () => { sourceOperation?.dispose(); },
+      () => { source?.dispose(); },
+      () => { setup.dispose(); },
+      () => { retainedState?.close(); },
+    ]) {
+      try { await dispose(); }
+      catch (error) { if (!failures.includes(error)) failures.push(error); }
     }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, 'FED target execution and cleanup failed');
+    }
+    if (!rootFailed && failures.length === 1) throw failures[0];
   }
 }
 
