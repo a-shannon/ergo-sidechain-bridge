@@ -91,6 +91,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationTrackerFeeFundingV1'];
   readonly checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkNativeContinuationWithdrawalV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2'];
   readonly runForExecutionV3RetainingPegInAndTrackerSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
   readonly checkPegInSourceLockV2RetainingSigner:
@@ -471,6 +473,8 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2(
       () => execution.checkNativeContinuationTrackerFeeFundingV1(target), 'native-continuation-tracker-fee-checked'),
     checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner']>) => consume('native-continuation-tracker-fee-checked',
       () => execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target), 'native-continuation-withdrawal-ready'),
+    checkNativeContinuationWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2']>) => consume('native-continuation-withdrawal-ready',
+      () => execution.checkNativeContinuationWithdrawalV2(claim, target), 'closed'),
     runForExecutionV3RetainingPegInAndTrackerSigner: async (
       ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
     ) => consume(

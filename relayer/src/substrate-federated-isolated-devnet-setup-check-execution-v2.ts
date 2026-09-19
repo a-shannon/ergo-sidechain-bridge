@@ -695,6 +695,8 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 {
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3'];
   readonly checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner:
     SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkNativeContinuationWithdrawalV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
   readonly runForExecutionV3: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV3Input>,
     target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
@@ -2223,21 +2225,45 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
     const checkWithdrawal = async (
       claimValue: Readonly<SubstrateFederatedBurnClaimV1>,
       target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>, activeMnemonic: string,
+      nativeContinuation = false,
     ): Promise<Readonly<SubstrateFederatedIsolatedDevnetWithdrawalV2Check>> => {
       const claim = structuredClone(claimValue);
-      const tracker = retainedWithdrawalTracker;
+      const tracker = nativeContinuation ? retainedContinuationTracker : retainedWithdrawalTracker;
       const deposit = retainedCommittedPegInPacket;
-      const fee = retainedWithdrawalFeeCheck;
+      const fee = nativeContinuation ? retainedContinuationWithdrawalFeeCheck : retainedWithdrawalFeeCheck;
       const compiler = retainedWithdrawalCompiler;
       const continuation = trackerFeeContinuation;
+      const previousTracker = nativeContinuation ? retainedWithdrawalTracker : undefined;
+      const previousWithdrawal = nativeContinuation ? retainedContinuationWithdrawal : undefined;
+      const trackerMaterial = tracker === undefined ? undefined : TRACKER_PROTOCOL_V2_CHECKS.get(tracker);
+      const feeMaterial = fee === undefined ? undefined : WITHDRAWAL_FEE_CHECKS.get(fee);
       const transport = tracker === undefined ? undefined : TRACKER_V2_TRANSPORT_BINDINGS.get(tracker);
       if (tracker === undefined || deposit === undefined || fee === undefined || compiler === undefined
         || continuation === undefined || transport === undefined) {
         throw new Error('withdrawal check lacks retained deposit, fee, compiler or tracker transport');
       }
+      if (nativeContinuation && (continuation.route !== 'native'
+        || previousTracker === undefined || previousWithdrawal === undefined
+        || trackerMaterial?.result !== tracker.result || trackerMaterial.assertCustody === undefined
+        || feeMaterial?.route !== 'native-continuation' || feeMaterial.packet !== deposit
+        || feeMaterial.batch !== continuation.batch || feeMaterial.originalSetupTarget !== continuation.target
+        || !CLAIMED_TRACKER_V2_CHECKS.has(tracker) || !CLAIMED_WITHDRAWAL_FEE_CHECKS.has(fee))) {
+        throw new Error('native continuation withdrawal requires its retained tracker, payout and claimed second fee');
+      }
       const trackerTxId = tracker.result.transaction.unsignedTransactionIdHex;
       const binding = assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport, trackerTxId);
       const assertActive = (): void => {
+        if (nativeContinuation) {
+          if (retainedContinuationTracker !== tracker || retainedCommittedPegInPacket !== deposit
+            || retainedContinuationWithdrawalFeeCheck !== fee || retainedWithdrawalCompiler !== compiler
+            || trackerFeeContinuation !== continuation || retainedWithdrawalTracker !== previousTracker
+            || retainedContinuationWithdrawal !== previousWithdrawal
+            || TRACKER_PROTOCOL_V2_CHECKS.get(tracker) !== trackerMaterial
+            || WITHDRAWAL_FEE_CHECKS.get(fee) !== feeMaterial) {
+            throw new Error('native continuation withdrawal retained lineage changed');
+          }
+          trackerMaterial!.assertCustody!();
+        }
         if (continuation.route === 'native') {
           assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(continuation.batch, continuation.target);
         }
@@ -2249,7 +2275,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         structuredClone(tracker.result.transaction.eip12UnsignedTransaction) as unknown as Eip12UnsignedTransaction,
         'withdrawal admitted tracker',
       );
-      const dup = await materializeUnsignedTransaction(
+      const dup = nativeContinuation ? {
+        txId: previousWithdrawal!.packet.transaction.txId,
+        outputs: [previousWithdrawal!.packet.boxes.duplicatePreventionSuccessor],
+      } : await materializeUnsignedTransaction(
         structuredClone(continuation.batch.orderedTransactions[1]!.issuance.unsignedTransactionBody) as unknown as Eip12UnsignedTransaction,
         'withdrawal DUP genesis',
       );
@@ -2279,12 +2308,17 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
           pooledReserveGenesisInputBoxIdHex: compiler.familyReceipt.profile.pooledReserveNftIdHex,
         },
         familyCompilerReceipt: compiler.familyReceipt,
-        trackerState: { dataInput: admitted.outputs[0]!, history: [{
-          key: tracker.result.context.trackerTransition.trackerKeyHex,
-          value: tracker.result.context.trackerTransition.trackerValueHex,
-        }] },
+        trackerState: { dataInput: admitted.outputs[0]!, history: [
+          ...(previousTracker === undefined ? [] : [{
+            key: previousTracker.result.context.trackerTransition.trackerKeyHex,
+            value: previousTracker.result.context.trackerTransition.trackerValueHex,
+          }]), {
+            key: tracker.result.context.trackerTransition.trackerKeyHex,
+            value: tracker.result.context.trackerTransition.trackerValueHex,
+          }] },
         reserveState: { predecessor: deposit.boxes.reserveSuccessor },
-        duplicatePreventionState: { predecessor: dup.outputs[0]!, historyKeys: [] },
+        duplicatePreventionState: { predecessor: dup.outputs[0]!, historyKeys:
+          previousWithdrawal === undefined ? [] : [previousWithdrawal.packet.burn.duplicatePreventionKeyHex] },
         feeFundingInput: fee.transaction.outputs[0]!, claim,
         currentErgoHeight: height, creationHeight: height,
       });
@@ -2631,6 +2665,10 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         retainedContinuationTracker = checked;
         return checked;
       }, 'native-continuation-withdrawal-ready'),
+      checkNativeContinuationWithdrawalV2: async (
+        ...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2']>
+      ) => consume('native-continuation-withdrawal-ready',
+        activeMnemonic => checkWithdrawal(claim, target, activeMnemonic, true), 'closed'),
       checkWithdrawalFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3']>) => consume('v3-tracker-fee-ready',
         activeMnemonic => checkWithdrawalFeeFunding(target, activeMnemonic), 'v3-tracker-fee-ready'),
       checkTrackerFeeFundingV3: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>) => consume('v3-tracker-fee-ready',

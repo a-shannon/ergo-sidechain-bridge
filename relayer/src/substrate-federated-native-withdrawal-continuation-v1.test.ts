@@ -109,10 +109,12 @@ import * as nativeVaultObserver
 import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1 as REQUIRED_SUCCESSOR_DEPTH }
   from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import { StateTracker } from './state-tracker.js';
+import { buildSubstrateFederatedBurnSettlementV2 } from './substrate-federated-burn-settlement-v2.js';
 import { PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_TRACKER_FEE_FUNDING_OPERATION_PROFILE,
-  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE }
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_FEE_FUNDING_OPERATION_PROFILE,
+  SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE }
   from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
 import {
@@ -212,6 +214,7 @@ function verifyRetainedTrackerAtHeaders(input: Readonly<{
   signedBody: Record<string, unknown>;
   signedCandidate: Readonly<{ txId: string; signedTransactionBytesSha256Hex: string; signedTransactionBytesLength: number }>;
   boxes: readonly Readonly<Eip12Box>[];
+  dataBoxes?: readonly Readonly<Eip12Box>[];
   headers: readonly Readonly<Record<string, unknown>>[];
   minedHeader?: Readonly<Record<string, unknown>>;
 }>) {
@@ -238,7 +241,8 @@ function verifyRetainedTrackerAtHeaders(input: Readonly<{
   const preHeader = wasm.PreHeader.from_block_header(carrier);
   const context = new wasm.ErgoStateContext(preHeader, wasm.BlockHeaders.from_json(headers), wasm.Parameters.default_parameters());
   const inputs = wasm.ErgoBoxes.from_boxes_json(boxes);
-  const dataInputs = wasm.ErgoBoxes.empty();
+  const dataInputs = input.dataBoxes === undefined
+    ? wasm.ErgoBoxes.empty() : wasm.ErgoBoxes.from_boxes_json(input.dataBoxes);
   try {
     const proofs = boxes.map((_box, index) => wasm.verify_tx_input_proof(index, context, tx, inputs, dataInputs));
     let transactionError: string | null = null;
@@ -323,7 +327,11 @@ const SECOND_TRACKER_CASES = ['continuation second tracker valid', 'continuation
   'continuation second tracker custody during checker', 'continuation second tracker target during preparation',
   'continuation second tracker custody before transport', 'continuation second tracker foreign origin'] as const;
 type SecondTrackerFault = typeof SECOND_TRACKER_CASES[number];
-type ContinuationFault = SecondTrackerFault | 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
+const SECOND_PAYOUT_CASES = ['continuation second payout valid', 'continuation second payout replay old claim',
+  'continuation second payout wrong current target', 'continuation second payout stale reserve predecessor',
+  'continuation second payout custody during preparation', 'continuation second payout custody during checker'] as const;
+type SecondPayoutFault = typeof SECOND_PAYOUT_CASES[number];
+type ContinuationFault = SecondTrackerFault | SecondPayoutFault | 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
   | 'continuation copied withdrawal attempt' | 'continuation unconfirmed payout' | 'continuation old packet'
   | 'continuation foreign target' | 'continuation duplicate source invocation' | 'continuation disposed during source preparation'
   | 'continuation disposed during source checker' | 'continuation wrong vault packet'
@@ -360,7 +368,7 @@ describe('native FED withdrawal continuation', () => {
     'continuation external fees unclaimed first check', 'continuation external fees copied check',
     'continuation external fees foreign target', 'continuation external fees spent first change',
     'continuation external fees custody during preparation', 'continuation external fees custody during checker',
-    'continuation external fees ambiguous withdrawal', ...SECOND_TRACKER_CASES])(
+    'continuation external fees ambiguous withdrawal', ...SECOND_TRACKER_CASES, ...SECOND_PAYOUT_CASES])(
     'preserves native custody through payout and a second source deposit: %s', async fault => {
     vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValue(testMnemonic);
     const session = await createSession();
@@ -370,8 +378,11 @@ describe('native FED withdrawal continuation', () => {
     const continuation = { stage: 'none' as 'none' | 'builder' | 'source' | 'vault' | 'withdrawal-fee' | 'tracker-fee' };
     const continuationFault = fault.startsWith('continuation ');
     const secondTrackerFault = fault.startsWith('continuation second tracker ');
-    const feeContinuationFault = fault.startsWith('continuation external fees ') || secondTrackerFault;
+    const secondPayoutFault = fault.startsWith('continuation second payout ');
+    const feeContinuationFault = fault.startsWith('continuation external fees ') || secondTrackerFault || secondPayoutFault;
     let secondTrackerHandled = false;
+    let secondPayoutHandled = false;
+    let secondPayoutStarted = false;
     let secondFrozenActive = true;
     let signingHeaders = headerContext(1000);
     let injectionCount = 0;
@@ -425,7 +436,7 @@ describe('native FED withdrawal continuation', () => {
     boundary.sourceActive = true; boundary.setupActive = true; boundary.target = setupTarget;
     boundary.assertSigner = () => assertSigner(session.signer);
     const joinedFault = fault === 'continuation source proof native mint join';
-    const joinedFeeFault = fault === 'continuation external fees valid' || secondTrackerFault;
+    const joinedFeeFault = fault === 'continuation external fees valid' || secondTrackerFault || secondPayoutFault;
     const joinedSourceFault = joinedFault || joinedFeeFault;
     const joinedSource = joinedSourceFault ? createSourceSession({
       ergoAdmissionThreshold: trackerRequest.profile.ergoAdmissionThreshold,
@@ -769,6 +780,9 @@ describe('native FED withdrawal continuation', () => {
       if (phase === 'second-frozen' && fault === 'continuation second tracker custody during preparation') {
         disposeInside(input.assertActive);
       }
+      if (secondPayoutStarted && fault === 'continuation second payout custody during preparation') {
+        disposeInside(input.assertActive);
+      }
       if (phase === 'second-frozen' && fault === 'continuation second tracker target during preparation') {
         expect(input.assertActive).not.toThrow();
         injectionCount++; injectedSignCalls = signCalls.mock.calls.length;
@@ -796,10 +810,14 @@ describe('native FED withdrawal continuation', () => {
       if (phase === 'second-frozen' && fault === 'continuation second tracker custody during checker') {
         disposeInside(args[3]);
       }
+      if (secondPayoutStarted && fault === 'continuation second payout custody during checker') {
+        disposeInside(args[3]);
+      }
       return pending;
     });
     if (internalFault?.[2] === 'checker' || continuationInternal?.[2] === 'checker'
-      || continuationFeeInternal?.[1] === 'checker' || fault === 'continuation second tracker custody during checker') {
+      || continuationFeeInternal?.[1] === 'checker' || fault === 'continuation second tracker custody during checker'
+      || fault === 'continuation second payout custody during checker') {
       vi.spyOn(console, 'error').mockImplementation(() => {});
     }
     vi.spyOn(axios, 'create').mockImplementation(config => ({
@@ -840,7 +858,7 @@ describe('native FED withdrawal continuation', () => {
         if (loseFeeTransportResponse) throw new Error('synthetic continuation fee response lost');
         return { status: 200, data: id };
       }
-      expect(['transport', 'confirmation', 'second-transport']).toContain(phase);
+      expect(['transport', 'confirmation', 'second-transport', 'second-confirmation']).toContain(phase);
       submissionBodies.push(payload);
       if (id === secondContinuationPacket?.transactions.sourceLockCreation.txId) {
         secondSourceInclusionHeight = tip() + 1;
@@ -1343,7 +1361,7 @@ describe('native FED withdrawal continuation', () => {
             'continuation external fees copied check', 'continuation external fees foreign target',
             'continuation external fees spent first change', 'continuation external fees custody during preparation',
             'continuation external fees custody during checker', 'continuation external fees ambiguous withdrawal',
-            ...SECOND_TRACKER_CASES,
+            ...SECOND_TRACKER_CASES, ...SECOND_PAYOUT_CASES,
           ]).has(fault as ContinuationFault);
           if (transportCompositionFault) {
             // Seed resolved durable history from the first checked deposit. Its
@@ -1714,12 +1732,12 @@ describe('native FED withdrawal continuation', () => {
                 if (secondWithdrawalExecution !== undefined && secondTrackerExecution !== undefined) assertFirstFeeRowsUnchanged(2);
                 const continuationCheckpoint = await attestFrontierNativeBurnCheckpointV1({
                   execution: continuationCycle,
-                  admissionValidFromErgoHeight: secondTrackerFault ? String(tip() + 1) : '121',
-                  admissionExpiresAtErgoHeight: secondTrackerFault ? String(tip() + 20) : '140',
+                  admissionValidFromErgoHeight: secondTrackerFault || secondPayoutFault ? String(tip() + 1) : '121',
+                  admissionExpiresAtErgoHeight: secondTrackerFault || secondPayoutFault ? String(tip() + 20) : '140',
                 });
                 expect(continuationCheckpoint.attestation.checkpointStatement.sourceNativeBlockHeight).toBe('8');
                 feeContinuationHandled = true;
-                if (secondTrackerFault) {
+                if (secondTrackerFault || secondPayoutFault) {
                   const firstRow = state.getErgoOperationalTransactionAttempt(attempt.expectedTxId);
                   expect(firstRow?.status).toBe('confirmed');
                   const firstRowSnapshot = canonicalJson(firstRow);
@@ -1850,6 +1868,149 @@ describe('native FED withdrawal continuation', () => {
                     expect(secondAdmitted.outputs[0]!.additionalRegisters.R5)
                       .toBe(secondContext.trackerTransition.successorRegisters.R5);
                     assertFirstFeeRowsUnchanged(2);
+                    if (secondPayoutFault) {
+                      const firstPayoutRows = state.getConfirmedErgoOperationalTransactionAttempts(
+                        SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE,
+                      );
+                      expect(firstPayoutRows).toHaveLength(1);
+                      const firstPayoutRow = firstPayoutRows.find(row => row.expectedTxId === payoutAttempt.expectedTxId);
+                      expect(firstPayoutRow).toBeDefined();
+                      const firstPayoutSnapshot = canonicalJson(firstPayoutRow);
+                      const secondProof = continuationCheckpoint.commitment.burnProof;
+                      const secondLeaf = secondProof.leaf;
+                      const secondClaim: Parameters<typeof session.checkNativeContinuationWithdrawalV2>[0] = Object.freeze({
+                        trackerIdentity: Object.freeze({
+                          sourceNativeBlockHeight: secondStatement.sourceNativeBlockHeight,
+                          sourceNativeBlockHashHex: secondStatement.sourceNativeBlockHashHex,
+                          executionBlockHashHex: secondStatement.executionBlockHashHex,
+                        }),
+                        burnLeaf: Object.freeze({
+                          sidechainIdHex: secondLeaf.sidechainIdHex,
+                          sidechainBlockHashHex: secondLeaf.sidechainBlockHashHex,
+                          sidechainTxHashHex: secondLeaf.sidechainTxHashHex,
+                          eventIndex: secondLeaf.eventIndex,
+                          burnIdHex: secondLeaf.burnIdHex,
+                          recipientErgoTreeHashHex: secondLeaf.recipientErgoTreeHashHex,
+                          amountNanoErg: secondLeaf.amountNanoErg,
+                          assetIdHex: secondLeaf.assetIdHex,
+                        }),
+                        leafIndex: secondProof.leafIndex,
+                        leafCount: secondProof.leafCount,
+                        burnProof: secondProof.proof,
+                        recipientErgoTreeHex: continuationCheckpoint.commitment.burnEvent.recipientErgoTreeHex,
+                      });
+                      if (fault === 'continuation second payout stale reserve predecessor') {
+                        // A canonical prior box, not a fabricated box with a stale ID.
+                        boxes.set(second.boxes.reserveSuccessor.boxId, result.packet.boxes.reserveSuccessor);
+                      }
+                      secondPayoutStarted = true;
+                      const beforeSecondPayoutChecks = checkBodies.length;
+                      const beforeSecondPayoutPosts = submissionBodies.length;
+                      const pendingPayout = session.checkNativeContinuationWithdrawalV2(
+                        fault === 'continuation second payout replay old claim' ? withdrawalClaim : secondClaim,
+                        fault === 'continuation second payout wrong current target'
+                          ? Object.freeze({ ...secondConfirmationTarget }) : secondConfirmationTarget,
+                      );
+                      const payoutErrors: Partial<Record<SecondPayoutFault, RegExp>> = {
+                        'continuation second payout replay old claim': /already in replay history/,
+                        'continuation second payout wrong current target': /target expired|binding|lineage/,
+                        'continuation second payout stale reserve predecessor': /live input differs/,
+                        'continuation second payout custody during preparation': /source custody disposed|inactive/,
+                        'continuation second payout custody during checker': /withdrawal JVM node check failed|source custody disposed|inactive/,
+                      };
+                      const payoutError = payoutErrors[fault as SecondPayoutFault];
+                      if (payoutError !== undefined) {
+                        await expect(pendingPayout).rejects.toThrow(payoutError);
+                        expect(submissionBodies).toHaveLength(beforeSecondPayoutPosts);
+                        expect(state.getConfirmedErgoOperationalTransactionAttempts(
+                          SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE,
+                        ).map(row => canonicalJson(row))).toEqual([firstPayoutSnapshot]);
+                        if (fault === 'continuation second payout custody during preparation'
+                          || fault === 'continuation second payout custody during checker') {
+                          expect(injectionCount).toBe(1);
+                          expect(checkBodies).toHaveLength(beforeSecondPayoutChecks);
+                          if (fault.endsWith('preparation')) {
+                            expect(signCalls).toHaveBeenCalledTimes(injectedSignCalls!);
+                          }
+                        }
+                        expect(() => assertSigner(session.signer)).toThrow();
+                        secondPayoutHandled = true;
+                        return;
+                      }
+                      const secondPayout = await pendingPayout;
+                      expect(secondPayout.packet.transaction.eip12Tx.inputs.map(box => box.boxId)).toEqual([
+                        second.boxes.reserveSuccessor.boxId,
+                        result.packet.boxes.duplicatePreventionSuccessor.boxId,
+                        secondWithdrawalFee.transaction.outputs[0]!.boxId,
+                      ]);
+                      expect(secondPayout.packet.transaction.eip12Tx.dataInputs.map(box => box.boxId))
+                        .toEqual([secondAdmitted.outputs[0]!.boxId]);
+                      expect(verifyRetainedTrackerAtHeaders({
+                        signedBody: checkBodies.at(-1)!, signedCandidate: secondPayout.signedCandidate,
+                        boxes: secondPayout.packet.transaction.eip12Tx.inputs,
+                        dataBoxes: secondPayout.packet.transaction.eip12Tx.dataInputs,
+                        headers: signingHeaders,
+                      })).toEqual({ proofs: [true, true, true], transactionError: null });
+                      const firstDupKey = result.packet.burn.duplicatePreventionKeyHex;
+                      expect(secondPayout.packet.boxes.duplicatePreventionSuccessor.additionalRegisters.R5)
+                        .toBe(encodeAvlTreeRegister(Buffer.from(getDupTreeDigest([
+                          firstDupKey, secondPayout.packet.burn.duplicatePreventionKeyHex,
+                        ]), 'hex'), 1, 1));
+                      expect(BigInt(secondPayout.packet.reserve.inputValueNanoErg)
+                        - BigInt(secondPayout.packet.reserve.outputValueNanoErg))
+                        .toBe(BigInt(secondLeaf.amountNanoErg));
+                      expect(BigInt(secondPayout.packet.reserve.inputLiabilityNanoErg)
+                        - BigInt(secondPayout.packet.reserve.outputLiabilityNanoErg))
+                        .toBe(BigInt(secondLeaf.amountNanoErg));
+                      expect(BigInt(secondPayout.packet.reserve.inputValueNanoErg)
+                        - BigInt(secondPayout.packet.reserve.inputLiabilityNanoErg))
+                        .toBe(BigInt(secondPayout.packet.reserve.outputValueNanoErg)
+                          - BigInt(secondPayout.packet.reserve.outputLiabilityNanoErg));
+                      expect(() => assertSigner(session.signer)).toThrow();
+                      const secondAuthorization = await authorizeWithdrawal(secondPayout, secondConfirmationTarget);
+                      const secondPayoutAttempt = reserveWithdrawal(secondAuthorization, state);
+                      const secondSubmission = await submitWithdrawal(secondConfirmationTarget, secondPayoutAttempt);
+                      expect(secondSubmission.status).toBe('accepted');
+                      finalizeWithdrawal(secondPayoutAttempt, secondSubmission);
+                      for (const input of secondPayout.packet.transaction.eip12Tx.inputs) boxes.delete(input.boxId);
+                      publish(secondPayout.packet.boxes.reserveSuccessor,
+                        secondPayout.packet.boxes.duplicatePreventionSuccessor,
+                        secondPayout.packet.boxes.payout, secondPayout.packet.boxes.trackerDataInput);
+                      const secondPayoutConfirmation = await createObserver(secondConfirmationTarget, GENESIS)
+                        .observe(secondPayoutAttempt.expectedTxId, PRIMARY);
+                      expect(secondPayoutConfirmation?.status).toBe('confirmed');
+                      await confirmWithdrawal(secondPayoutAttempt, secondConfirmationTarget, secondPayoutConfirmation!);
+                      const payoutRows = state.getConfirmedErgoOperationalTransactionAttempts(
+                        SUBSTRATE_FEDERATED_LOCAL_DEVNET_WITHDRAWAL_V2_OPERATION_PROFILE,
+                      );
+                      expect(payoutRows).toHaveLength(2);
+                      expect(canonicalJson(payoutRows.find(row => row.expectedTxId === payoutAttempt.expectedTxId)))
+                        .toBe(firstPayoutSnapshot);
+                      expect(payoutRows.find(row => row.expectedTxId === secondPayoutAttempt.expectedTxId)?.status)
+                        .toBe('confirmed');
+                      // Construction-only replay probes use the actual accumulated
+                      // successors. They create no authority, signing or transport.
+                      for (const replayClaim of [withdrawalClaim, secondClaim]) {
+                        await expect(buildSubstrateFederatedBurnSettlementV2({
+                          familyCompilerInput: { trackerRequest: activeTrackerRequest,
+                            trackerReceipt: activeTrackerReceipt, templates,
+                            duplicatePreventionGenesisInputBoxIdHex: funding[1]!.boxId,
+                            pooledReserveGenesisInputBoxIdHex: funding[2]!.boxId },
+                          familyCompilerReceipt: activeFamilyReceipt,
+                          trackerState: { dataInput: secondPayout.packet.boxes.trackerDataInput, history: [
+                            { key: context.trackerTransition.trackerKeyHex, value: context.trackerTransition.trackerValueHex },
+                            { key: secondContext.trackerTransition.trackerKeyHex, value: secondContext.trackerTransition.trackerValueHex },
+                          ] },
+                          reserveState: { predecessor: secondPayout.packet.boxes.reserveSuccessor },
+                          duplicatePreventionState: { predecessor: secondPayout.packet.boxes.duplicatePreventionSuccessor,
+                            historyKeys: [firstDupKey, secondPayout.packet.burn.duplicatePreventionKeyHex] },
+                          feeFundingInput: secondWithdrawalFee.transaction.outputs[0]!, claim: replayClaim,
+                          currentErgoHeight: tip() + 1, creationHeight: tip() + 1,
+                        })).rejects.toThrow(/already in replay history/);
+                      }
+                      assertFirstFeeRowsUnchanged(2);
+                      secondPayoutHandled = true;
+                    }
                   }
                   expect(canonicalJson(state.getErgoOperationalTransactionAttempt(attempt.expectedTxId))).toBe(firstRowSnapshot);
                   secondTrackerHandled = true;
@@ -1956,6 +2117,7 @@ describe('native FED withdrawal continuation', () => {
       if (joinedFault && !joinedFailed) expect(joinedCompleted).toBe(true);
       if (feeContinuationFault && !joinedFailed) expect(feeContinuationHandled).toBe(true);
       if (secondTrackerFault && !joinedFailed) expect(secondTrackerHandled).toBe(true);
+      if (secondPayoutFault && !joinedFailed) expect(secondPayoutHandled).toBe(true);
     }
   }, 60_000);
 });
