@@ -231,13 +231,18 @@ const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, Readonly
     'produceSubstrateFederatedNativeGenesisCheckpointAttestationV1',
     'assertSubstrateFederatedNativeGenesisCheckpointAttestationV1',
     'assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1',
+    'assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1',
     'produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1',
     'assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1',
     'SubstrateFederatedNativeGenesisSourceAttestationOperationV1',
     'SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2', 'SubstrateFederatedNativeGenesisMintSourceProofReceiptV1',
+    'SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1',
   ])],
   ['substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.ts', new Set(['SubstrateFederatedNativeGenesisPegInMintReservationDraftV1'])],
-  ['substrate-federated-observed-genesis-v1.ts', new Set(['assertObservedSubstrateFederatedGenesisV1', 'ObservedSubstrateFederatedGenesisV1'])],
+  ['substrate-federated-observed-genesis-v1.ts', new Set([
+    'assertObservedSubstrateFederatedGenesisV1', 'assertObservedSubstrateFederatedGenesisReadCustodyV1',
+    'ObservedSubstrateFederatedGenesisV1',
+  ])],
   ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set(['SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1'])],
 ]);
 const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
@@ -2115,7 +2120,26 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       ['getSubstrateFederatedNativeGenesisReadCompilerInputV1', new Set([
         'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
       ])] as const,
+      ['getSubstrateFederatedNativeGenesisRetainedAttestationContextV1', new Set([
+        'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+      ])] as const,
     ])),
+  ],
+  [
+    'substrate-federated-isolated-devnet-peg-in-candidate-v2.ts',
+    new Map([
+      ['getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1', new Set([
+        'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+      ])],
+    ]),
+  ],
+  [
+    'substrate-federated-isolated-devnet-source-attestation-session-v1.ts',
+    new Map([
+      ['assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1', new Set([
+        FEDERATED_NATIVE_RESERVATION_SIGNING,
+      ])],
+    ]),
   ],
   [
     'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.ts',
@@ -2554,6 +2578,12 @@ function inspectExclusiveRuntimeAuthorityImport(
     && imported.value === '../substrate-federated-isolated-devnet-portable-replay-v1.js'
     && imported.form === 'dynamic-import' && imported.bindings.length === 1
     && imported.bindings[0]!.imported === 'replaySubstrateFederatedIsolatedDevnetPortableV1'
+    && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
+  // Existing setup/packet cycle uses one named continuation check, never a namespace.
+  if (file === 'substrate-federated-isolated-devnet-setup-check-execution-v2.ts'
+    && imported.value === './substrate-federated-isolated-devnet-peg-in-candidate-v2.js'
+    && imported.form === 'dynamic-import' && imported.bindings.length === 1
+    && imported.bindings[0]!.imported === 'assertSubstrateFederatedNativeContinuationPegInPacketV1'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (file === 'scripts/run-substrate-federated-isolated-devnet-tracker-v2-campaign.ts'
     && imported.value === './run-substrate-federated-isolated-devnet-tracker-v2-campaign-worker.js'

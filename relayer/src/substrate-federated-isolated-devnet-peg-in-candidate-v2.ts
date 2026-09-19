@@ -197,6 +197,33 @@ export function assertSubstrateFederatedNativeGenesisPegInPacketV1(
   return packet;
 }
 
+/** Resolve packet ancestry from retained owners only; this grants no signing or transport authority. */
+export function getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1(
+  packet: Packet,
+  batch: NativeBatch,
+  target: Target,
+): Readonly<{ originalSetupTarget: Target; previousPacket: Packet | null }> {
+  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+  const retained = nativePackets.get(packet);
+  const continuation = nativeContinuations.get(packet);
+  if (retained === undefined || retained.batch !== batch || retained.target !== target) {
+    throw new Error('native FED peg-in packet lacks exact process provenance');
+  }
+  let originalSetupTarget = retained.target;
+  let previousPacket: Packet | null = null;
+  if (continuation !== undefined) {
+    const original = nativePackets.get(continuation.previousPacket);
+    if (original === undefined || original.batch !== batch
+      || nativeContinuations.has(continuation.previousPacket)) {
+      throw new Error('native FED continuation lacks its original setup provenance');
+    }
+    originalSetupTarget = original.target;
+    previousPacket = continuation.previousPacket;
+  }
+  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+  return Object.freeze({ originalSetupTarget, previousPacket });
+}
+
 /** Build only from the confirmed payout of the original native deposit. */
 export async function buildSubstrateFederatedNativeContinuationPegInPacketV1(
   input: Readonly<Omit<BuildSubstrateFederatedIsolatedDevnetPegInCandidateV2Input, 'batch'> & {

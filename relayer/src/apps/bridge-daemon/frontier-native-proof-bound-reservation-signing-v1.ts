@@ -36,16 +36,19 @@ import {
   produceSubstrateFederatedNativeGenesisCheckpointAttestationV1,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationV1,
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1,
+  assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1,
   produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
   type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
   type SubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   type SubstrateFederatedNativeGenesisMintSourceProofReceiptV1,
+  type SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1,
 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
 import type { SubstrateFederatedNativeGenesisPegInMintReservationDraftV1 }
   from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
 import {
-  assertObservedSubstrateFederatedGenesisV1, type ObservedSubstrateFederatedGenesisV1,
+  assertObservedSubstrateFederatedGenesisV1, assertObservedSubstrateFederatedGenesisReadCustodyV1,
+  type ObservedSubstrateFederatedGenesisV1,
 } from '../../substrate-federated-observed-genesis-v1.js';
 import type { SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 }
   from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -70,6 +73,7 @@ const burnExecutions = new WeakMap<object, {
   retained: ReturnType<typeof capture>;
   attempt: Readonly<{ transactionHashHex: string; signedTransactionHex: string; nativeExtrinsicHex: string }>;
   attestationStarted: boolean;
+  checkpoint?: Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1>;
 }>();
 const burnCheckpoints = new WeakMap<object, () => void>();
 const continuedBurns = new WeakSet<object>();
@@ -118,6 +122,7 @@ export async function attestFrontierNativeBurnCheckpointV1(input: Readonly<{
   assertCurrent();
   const result = Object.freeze({ execution, commitment, attestation, checkpointAttested: true as const,
     ergoPayoutExecuted: false as const, sourceFinalityEstablished: false as const, trustless: false as const });
+  state.checkpoint = attestation;
   burnCheckpoints.set(result, assertCurrent);
   return result;
 }
@@ -159,14 +164,16 @@ export async function executeFrontierNativeProofBoundContinuationReservationV1(i
   if (broadcastScope !== 'fed-native-local-synthetic-continuation-reservation-only') throw new Error('native continuation broadcast scope is absent');
   const previous = burnExecutions.get(previousExecution);
   if (!previous || continuedBurns.has(previousExecution)) throw new Error('native continuation requires an unused original burn execution');
-  const next = capture(input.signing), prior = previous.retained.input;
+  if (previous.checkpoint === undefined) throw new Error('native continuation requires the completed original checkpoint');
+  const next = captureContinuation(input.signing, previous.retained, previous.checkpoint);
+  const prior = previous.retained.input;
   const statement = decodeValidityApplicationPooledReserveMintReservationStatementV4Hex(next.input.proof.request.statementHex);
   const intent = decodePegInSourceIntentV2Hex(statement.sourceIntentHex);
   const assertCurrent = () => {
-    previous.retained.assertCurrent(); next.assertCurrent();
+    next.assertCurrent();
     const current = next.input;
     if (!('sourceOperation' in prior) || !('sourceOperation' in current) || current.sourceOperation === prior.sourceOperation
-      || current.operator !== prior.operator || current.compiled !== prior.compiled || current.target !== prior.target
+      || current.operator !== prior.operator || current.compiled !== prior.compiled
       || current.frontierTarget !== prior.frontierTarget || current.expectedGenesisHashHex !== prior.expectedGenesisHashHex
       || current.proof.mintIdentityHex === prior.proof.mintIdentityHex
       || statement.mintIdentityHex !== current.proof.mintIdentityHex
@@ -473,6 +480,68 @@ function capture(input: Readonly<SigningInput>) {
     return result;
   };
   return { input, assertCurrent, observe };
+}
+
+function captureContinuation(
+  input: Readonly<SigningInput>,
+  previous: ReturnType<typeof capture>,
+  previousCheckpoint: Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1>,
+) {
+  const fields = ['operator', 'sourceOperation', 'draft', 'proof', 'compiled', 'target', 'frontierTarget',
+    'expectedStorage', 'expectedGenesisHashHex'];
+  exact(input, fields);
+  if (!('sourceOperation' in input) || !('sourceOperation' in previous.input)) {
+    throw new Error('native continuation requires explicit source operations');
+  }
+  exact(input.expectedStorage, Object.getOwnPropertyNames(input.expectedStorage));
+  const frozenInput = Object.freeze({ ...input, expectedStorage: Object.freeze({ ...input.expectedStorage }) });
+  const prior = previous.input;
+  const assertCurrent = () => {
+    assertFederatedGenesisOperatorV1(frozenInput.operator);
+    assertObservedSubstrateFederatedGenesisReadCustodyV1(frozenInput.compiled, prior.target);
+    const paired = assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+      frozenInput.proof,
+      frozenInput.sourceOperation,
+      frozenInput.draft,
+      previousCheckpoint,
+      prior.sourceOperation,
+      prior.proof,
+    );
+    assertOwnedFederatedGenesisDevnetTargetV1(frozenInput.frontierTarget);
+    if (frozenInput.target !== paired.currentTarget
+      || prior.target !== paired.originalSetupTarget
+      || frozenInput.compiled.candidate !== paired.candidate
+      || frozenInput.compiled.preparation.application !== paired.application
+      || frozenInput.operator !== prior.operator || frozenInput.compiled !== prior.compiled
+      || frozenInput.frontierTarget !== prior.frontierTarget
+      || frozenInput.expectedGenesisHashHex !== prior.expectedGenesisHashHex
+      || frozenInput.compiled.preparation.operatorAddressHex !== frozenInput.operator.addressHex
+      || frozenInput.compiled.preparation.launchDomainHex !== frozenInput.operator.launchDomainHex
+      || frozenInput.compiled.candidate.genesisJsonSha256Hex !== frozenInput.proof.genesisJsonSha256Hex
+      || frozenInput.compiled.candidate.runtimeProfileScaleHex !== frozenInput.proof.runtimeProfileScaleHex
+      || frozenInput.compiled.candidate.runtimeProfileIdHex !== frozenInput.proof.runtimeProfileIdHex
+      || frozenInput.frontierTarget.genesisJsonSha256Hex !== frozenInput.compiled.candidate.genesisJsonSha256Hex
+      || frozenInput.frontierTarget.primaryRpcUrl !== 'http://127.0.0.1:19955'
+      || frozenInput.frontierTarget.witnessRpcUrl !== 'http://127.0.0.1:19956') {
+      throw new Error('native continuation proof differs from retained operator or genesis');
+    }
+  };
+  const observe = async () => {
+    assertCurrent();
+    const result = await observeFederatedGenesisReservationTargetV1({
+      expectedStorage: frozenInput.expectedStorage,
+      expectedGenesisHashHex: frozenInput.expectedGenesisHashHex,
+      sourceRuntimeCodeSha256Hex: frozenInput.compiled.preparation.application.sourceRuntimeCodeSha256Hex,
+      sourceRuntimeCodeBytes: frozenInput.compiled.preparation.application.sourceRuntimeCodeBytes,
+      runtimeProfileScaleHex: frozenInput.compiled.candidate.runtimeProfileScaleHex,
+      operatorStorageKeyHex: frozenInput.operator.nativeFunding.storageKeyHex,
+      operatorAccountInfoHex: frozenInput.operator.nativeFunding.accountInfoScaleHex,
+    });
+    assertCurrent();
+    return result;
+  };
+  assertCurrent();
+  return { input: frozenInput, assertCurrent, observe };
 }
 
 function exact(input: unknown, fields: readonly string[]): void {

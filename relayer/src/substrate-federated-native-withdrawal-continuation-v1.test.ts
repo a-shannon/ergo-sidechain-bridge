@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, statfsSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, statfsSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import axios from 'axios';
 import blakejs from 'blakejs';
@@ -94,6 +95,8 @@ import { buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buil
 import { collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 as collectNativeReserveEvidence,
   consumeSubstrateFederatedNativeGenesisCommittedReserveEvidenceForDraftV1 as consumeNativeReserveEvidence }
   from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import * as nativeVaultObserver
+  from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_REQUIRED_SUCCESSOR_DEPTH_V1 as REQUIRED_SUCCESSOR_DEPTH }
   from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import { StateTracker } from './state-tracker.js';
@@ -101,6 +104,31 @@ import { PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
   SUBSTRATE_FEDERATED_LOCAL_DEVNET_PEG_IN_SOURCE_LOCK_OPERATION_PROFILE }
   from './relayer-core/ergo-operational-transaction-lifecycle.js';
 import { canonicalJson, sha256CanonicalJson } from './strict-json.js';
+import {
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2 as createSourceSession,
+  readSubstrateFederatedGenesisProfilesFromSessionV2 as readSourceProfiles,
+  createSubstrateFederatedNativeGenesisSourceAttestationOperationV1 as createNativeSourceOperation,
+  produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1 as produceNativeOperationMintProof,
+  assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1 as assertNativeProofPair,
+} from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import {
+  encodePooledReserveMintReservationRuntimeProfileV4ScaleHex as encodeRuntimeProfile,
+  decodePooledReserveMintReservationRuntimeProfileV4ScaleHex as decodeRuntimeProfile,
+  derivePooledReserveMintReservationRuntimeProfileV4IdHex as runtimeProfileId,
+} from './pooled-reserve-mint-reservation-runtime-profile-v4-codec.js';
+import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX }
+  from './substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import { createFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1 }
+  from './adapters/federated-genesis-operator-v1.js';
+import * as frontierOwner from './substrate-federated-authority-safe-devnet-process-v1.js';
+import {
+  executeFrontierNativeProofBoundReservationMintAndBurnV1,
+  attestFrontierNativeBurnCheckpointV1,
+  executeFrontierNativeProofBoundContinuationReservationV1,
+  executeFrontierNativeProofBoundContinuationMintAndBurnV1,
+} from './apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.js';
+import { createNativeContinuationRpcFixtureV1 }
+  from './test-fixtures/native-continuation-rpc-fixture.js';
 
 const PRIMARY = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
@@ -137,6 +165,20 @@ const headerContext = (height: number, extension = '94'.repeat(32), index = 0) =
   buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
     currentHeight: height, anchorContextIndex: index, anchorExtensionRootHex: extension,
   }).headers.map(header => header.raw);
+
+function createPersistentNativeAttemptDirectory(prefix: string) {
+  const quarantineRoot = process.platform === 'win32'
+    ? join(parse(process.cwd()).root, 'A EFFACER')
+    : join(tmpdir(), 'A EFFACER');
+  mkdirSync(quarantineRoot, { recursive: true });
+  const canonicalRoot = realpathSync(quarantineRoot);
+  const directory = realpathSync(mkdtempSync(join(canonicalRoot, prefix)));
+  const fromRoot = relative(canonicalRoot, directory);
+  if (!fromRoot || fromRoot.startsWith('..') || isAbsolute(fromRoot)) {
+    throw new Error('native attempt directory escaped quarantine root');
+  }
+  return directory;
+}
 
 // Extend the original mined chain; rebuilding a synthetic window at another
 // height would change the attested anchor's ID even if its extension were equal.
@@ -248,7 +290,7 @@ beforeAll(async () => {
 }, 120_000);
 afterAll(() => { console.info('Native continuation JVM preparation:', JSON.stringify(metrics)); });
 afterEach(() => {
-  vi.restoreAllMocks(); boundary.assertSigner = undefined; boundary.request = undefined;
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); boundary.assertSigner = undefined; boundary.request = undefined;
   boundary.target = undefined; boundary.observation = undefined;
 });
 
@@ -267,7 +309,7 @@ type ContinuationFault = 'continuation valid' | 'continuation old terminal signe
   | 'continuation legacy replay' | 'continuation foreign observation before draft'
   | 'continuation copied observation before evidence' | 'continuation mismatched reservation draft'
   | 'continuation current target lost before transport' | 'continuation custody lost after funding await'
-  | 'continuation ambiguous source transport';
+  | 'continuation ambiguous source transport' | 'continuation source proof native mint join';
 
 describe('native FED withdrawal continuation', () => {
   it.each<Fault | ContinuationFault>(['valid', 'foreign native origin', 'source disposed during tracker',
@@ -285,7 +327,8 @@ describe('native FED withdrawal continuation', () => {
     'continuation builder snapshots caller input', 'continuation legacy replay',
     'continuation foreign observation before draft', 'continuation copied observation before evidence',
     'continuation mismatched reservation draft', 'continuation current target lost before transport',
-    'continuation custody lost after funding await', 'continuation ambiguous source transport'])(
+    'continuation custody lost after funding await', 'continuation ambiguous source transport',
+    'continuation source proof native mint join'])(
     'preserves native custody through payout and a second source deposit: %s', async fault => {
     vi.spyOn(Mnemonic, 'fromEntropy').mockReturnValue(testMnemonic);
     const session = await createSession();
@@ -330,10 +373,131 @@ describe('native FED withdrawal continuation', () => {
       fault === 'foreign native origin' ? foreignSetupTarget : setupTarget]]);
     boundary.sourceActive = true; boundary.setupActive = true; boundary.target = setupTarget;
     boundary.assertSigner = () => assertSigner(session.signer);
-    const compiled = { familyCompilerInput: { trackerRequest, trackerReceipt, templates }, familyReceipt,
+    const joinedFault = fault === 'continuation source proof native mint join';
+    const joinedSource = joinedFault ? createSourceSession({
+      ergoAdmissionThreshold: trackerRequest.profile.ergoAdmissionThreshold,
+      ergoAdmissionPublicKeysHex: trackerRequest.profile.ergoAdmissionPublicKeysHex,
+    }) : undefined;
+    const joinedProfiles = joinedSource ? readSourceProfiles(joinedSource) : undefined;
+    let activeTrackerRequest = trackerRequest;
+    let activeTrackerReceipt = trackerReceipt;
+    let activeFamilyReceipt = familyReceipt;
+    let activeIssuances = issuances;
+    if (joinedProfiles) {
+      activeTrackerRequest = buildSubstrateFederatedTrackerCompilerRequestV2({
+        trackerGenesisInputBoxIdHex: funding[0]!.boxId,
+        profile: joinedProfiles.checkpointProfile,
+        application: { ...trackerRequest.application,
+          bridgeRuntimeCodeSha256Hex: createHash('sha256').update(Buffer.alloc(100, 0x60)).digest('hex'),
+          bridgeRuntimeCodeBytes: 100,
+          tokenRuntimeCodeSha256Hex: createHash('sha256').update(Buffer.alloc(200, 0x60)).digest('hex'),
+          tokenRuntimeCodeBytes: 200 },
+        template: template('contracts/SPVTrackerSubstrateFederatedV2.es'),
+      });
+      const nodeOptions = process.env.NODE_OPTIONS;
+      delete process.env.NODE_OPTIONS;
+      try {
+        activeTrackerReceipt = await compileSubstrateFederatedTrackerWithPinnedJvmV2(activeTrackerRequest);
+        activeFamilyReceipt = await compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2({
+          trackerRequest: activeTrackerRequest,
+          trackerReceipt: activeTrackerReceipt,
+          templates,
+          duplicatePreventionGenesisInputBoxIdHex: funding[1]!.boxId,
+          pooledReserveGenesisInputBoxIdHex: funding[2]!.boxId,
+        });
+      } finally { process.env.NODE_OPTIONS = nodeOptions; }
+      const activeFamilyRegister = encodeCollByteRegister(Buffer.from(activeFamilyReceipt.profile.familyIdHex, 'hex'));
+      const activeRegisters: Readonly<Record<string, string>>[] = [
+        { R4: encodeCollByteRegister(Buffer.from(joinedProfiles.checkpointProfile.profileIdHex, 'hex')),
+          R5: encodeAvlTreeRegister(Buffer.from(getSubstrateFederatedTrackerDigestV1Hex([]), 'hex'), 1, 370),
+          R6: encodeCollByteRegister(Buffer.from(activeTrackerRequest.application.sidechainIdHex, 'hex')),
+          R7: encodeLongRegister(0n), R8: encodeIntRegister(0),
+          R9: encodeCollByteRegister(Buffer.from(joinedProfiles.checkpointProfile.ergoAdmissionKeySetDigestHex, 'hex')) },
+        { R4: activeFamilyRegister, R5: encodeAvlTreeRegister(Buffer.from(getDupTreeDigest([]), 'hex'), 1, 1) },
+        { R4: activeFamilyRegister, R5: encodeAvlTreeRegister(Buffer.from(getPooledReserveEmptyDigest(), 'hex'), 1, 32),
+          R6: encodeLongRegister(0n) },
+      ];
+      const activeTrees = [activeTrackerReceipt.contract.propositionHex,
+        activeFamilyReceipt.contracts.duplicatePrevention.propositionHex,
+        activeFamilyReceipt.contracts.pooledReserve.propositionHex];
+      activeIssuances = [];
+      for (const [index, role] of ROLES.entries()) activeIssuances.push(await materializeSubstrateFederatedSingletonIssuanceV1({
+        label: role, genesisInput: funding[index]!, expectedNftIdHex: funding[index]!.boxId,
+        propositionHex: activeTrees[index]!, registers: activeRegisters[index]!, singletonValue: 10_000_000n,
+        fee: 1_100_000n, creationHeight: 1000,
+      }));
+    }
+    const compiled = { familyCompilerInput: { trackerRequest: activeTrackerRequest,
+      trackerReceipt: activeTrackerReceipt, templates }, familyReceipt: activeFamilyReceipt,
       discovery: { signer: session.signer, sources: { primaryNodeOrigin: PRIMARY, witnessNodeOrigin: WITNESS } },
     } as unknown as compiledGenesis.ObservedSubstrateFederatedGenesisV1;
-    const orderedIssuances = issuances.map((tx, ordinal) => ({ ordinal, role: ROLES[ordinal],
+    const family = decodeSubstrateFederatedSettlementFamilyV1Profile(activeFamilyReceipt.profile);
+    let joinedOperator: ReturnType<typeof createFederatedGenesisOperatorV1> | undefined;
+    let joinedPreviousOperation: ReturnType<typeof createNativeSourceOperation> | undefined;
+    let joinedCurrentOperation: ReturnType<typeof createNativeSourceOperation> | undefined;
+    let joinedPreviousProof: ReturnType<typeof produceNativeOperationMintProof> | undefined;
+    let joinedPreviousCheckpoint: Awaited<ReturnType<typeof attestFrontierNativeBurnCheckpointV1>>['attestation'] | undefined;
+    let joinedPreviousExecution: Awaited<ReturnType<typeof executeFrontierNativeProofBoundReservationMintAndBurnV1>> | undefined;
+    let joinedRpc: ReturnType<typeof createNativeContinuationRpcFixtureV1> | undefined;
+    let joinedFrontierTarget: frontierOwner.OwnedFederatedGenesisDevnetTargetV1 | undefined;
+    let joinedForeignCompiled: unknown;
+    let joinedCompleted = false;
+    let joinedFailed = false;
+    if (joinedSource && joinedProfiles) {
+      expect(canonicalJson(joinedProfiles.checkpointProfile)).toBe(canonicalJson(activeTrackerRequest.profile));
+      joinedOperator = createFederatedGenesisOperatorV1();
+      const sourceRuntime = Buffer.from('0061736d01000000', 'hex');
+      const application = Object.freeze({
+        sourceNetworkIdHex: family.sourceNetworkIdHex,
+        sidechainIdHex: family.sidechainIdHex,
+        bridgeAddressHex: family.bridgeAddressHex,
+        tokenAddressHex: family.tokenAddressHex,
+        settlementProfileIdHex: family.settlementProfileIdHex,
+        bridgeRuntimeCodeSha256Hex: activeTrackerRequest.application.bridgeRuntimeCodeSha256Hex,
+        bridgeRuntimeCodeBytes: activeTrackerRequest.application.bridgeRuntimeCodeBytes,
+        tokenRuntimeCodeSha256Hex: activeTrackerRequest.application.tokenRuntimeCodeSha256Hex,
+        tokenRuntimeCodeBytes: activeTrackerRequest.application.tokenRuntimeCodeBytes,
+        sourceRuntimeCodeSha256Hex: createHash('sha256').update(sourceRuntime).digest('hex'),
+        sourceRuntimeCodeBytes: sourceRuntime.length,
+        runtimeProfileIdHex: '',
+      });
+      const runtimeProfileScaleHex = encodeRuntimeProfile({
+        formatVersion: 4,
+        lineageProfileIdHex: `0x${activeFamilyReceipt.profile.familyIdHex}`,
+        sourceNetworkIdHex: `0x${application.sourceNetworkIdHex}`,
+        sidechainIdHex: `0x${application.sidechainIdHex}`,
+        bridgeAddressHex: `0x${application.bridgeAddressHex}`,
+        tokenAddressHex: `0x${application.tokenAddressHex}`,
+        bridgeRuntimeCodeSha256Hex: `0x${application.bridgeRuntimeCodeSha256Hex}`,
+        bridgeRuntimeCodeBytes: application.bridgeRuntimeCodeBytes,
+        tokenRuntimeCodeSha256Hex: `0x${application.tokenRuntimeCodeSha256Hex}`,
+        tokenRuntimeCodeBytes: application.tokenRuntimeCodeBytes,
+        settlementProfileIdHex: `0x${application.settlementProfileIdHex}`,
+        ergoDepositFinalityPolicyIdHex: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_FINALITY_POLICY_ID_V1_HEX,
+        sourceProofSystemIdHex: joinedSource.binding.federatedMintProfile.proofSystemIdHex,
+        sourceProofProfileIdHex: joinedSource.binding.federatedMintProfile.proofProfileIdHex,
+        activationHeight: '0',
+        maxPendingBlocks: 64,
+      });
+      const runtimeProfile = decodeRuntimeProfile(runtimeProfileScaleHex);
+      const candidateRuntimeProfileIdHex = runtimeProfileId(runtimeProfile);
+      const exactApplication = Object.freeze({ ...application,
+        runtimeProfileIdHex: candidateRuntimeProfileIdHex.replace(/^0x/, '') });
+      const candidate = Object.freeze({ runtimeProfile, runtimeProfileScaleHex,
+        runtimeProfileIdHex: candidateRuntimeProfileIdHex,
+        genesisJsonSha256Hex: sha256CanonicalJson({ runtimeProfileScaleHex, application: exactApplication }) });
+      Object.assign(compiled, {
+        preparation: Object.freeze({ checkpointProfile: joinedProfiles.checkpointProfile, evmChainId: '4242',
+          operatorAddressHex: joinedOperator.addressHex, launchDomainHex: joinedOperator.launchDomainHex,
+          application: exactApplication }),
+        candidate,
+      });
+      expect(candidate.runtimeProfileIdHex).toBe(`0x${exactApplication.runtimeProfileIdHex}`);
+      expect(runtimeProfile.lineageProfileIdHex).toBe(`0x${activeFamilyReceipt.profile.familyIdHex}`);
+      expect(runtimeProfile.sourceNetworkIdHex).toBe(`0x${family.sourceNetworkIdHex}`);
+      expect(runtimeProfile.sourceProofProfileIdHex).toBe(joinedSource.binding.federatedMintProfile.proofProfileIdHex);
+    }
+    const orderedIssuances = activeIssuances.map((tx, ordinal) => ({ ordinal, role: ROLES[ordinal],
       genesisInputBoxIdHex: funding[ordinal]!.boxId, requiredInputErgoTreeHex: funding[ordinal]!.ergoTree,
       unsignedTransactionIdHex: tx.txId, unsignedTransactionBody: tx.eip12Tx,
       predictedStateOutput: { boxIdHex: tx.outputs[0]!.boxId, transactionIdHex: tx.txId, index: 0, creationHeight: 1000,
@@ -369,7 +533,9 @@ describe('native FED withdrawal continuation', () => {
       validateCompiled(value, target);
     });
     vi.spyOn(compiledGenesis, 'assertObservedSubstrateFederatedGenesisReadCustodyV1').mockImplementation((value, target) => {
-      if (value !== compiled || target !== setupTarget) throw new Error('synthetic compiled read origin differs');
+      if ((value !== compiled && (!joinedFault || value !== joinedForeignCompiled)) || target !== setupTarget) {
+        throw new Error('synthetic compiled read origin differs');
+      }
       boundary.read();
     });
     vi.spyOn(owned, 'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1').mockImplementation(target => {
@@ -562,15 +728,15 @@ describe('native FED withdrawal continuation', () => {
     });
     try {
       const batch = await session.runNativeGenesisRetainingSigner(compiled, setupTarget);
-      const family = decodeSubstrateFederatedSettlementFamilyV1Profile(familyReceipt.profile);
       const sourceFundingOutputs = (await materializeUnsignedTransaction({ inputs: [{ ...funding[0]!, extension: {} }], dataInputs: [],
         outputs: [{ value: '26000000', ergoTree: signer.p2pkErgoTreeHex, creationHeight: 1000 },
           { value: '24000000', ergoTree: signer.p2pkErgoTreeHex, creationHeight: 1000 }] }, 'native deposit funding')).outputs;
       const sourceFunding = sourceFundingOutputs[0]!;
       const firstSourceIntent = { formatVersion: 2 as const, sourceNetworkIdHex: family.sourceNetworkIdHex,
         sidechainIdHex: family.sidechainIdHex, bridgeAddressHex: family.bridgeAddressHex, tokenAddressHex: family.tokenAddressHex,
-        settlementProfileIdHex: family.settlementProfileIdHex, admissionProfileIdHex: familyReceipt.profile.familyIdHex,
-        sourceAssetIdHex: family.settlementAssetIdHex, amountNanoErg: '20000000', recipientAddressHex: '61'.repeat(20) };
+        settlementProfileIdHex: family.settlementProfileIdHex, admissionProfileIdHex: activeFamilyReceipt.profile.familyIdHex,
+        sourceAssetIdHex: family.settlementAssetIdHex, amountNanoErg: '20000000',
+        recipientAddressHex: joinedOperator?.addressHex ?? '61'.repeat(20) };
       const packet = await buildSubstrateFederatedNativeGenesisPegInPacketV1({ batch, target: setupTarget,
         sourceFundingInput: sourceFunding, sourceIntent: firstSourceIntent,
         depositorErgoTreeHex: signer.p2pkErgoTreeHex,
@@ -580,12 +746,107 @@ describe('native FED withdrawal continuation', () => {
       const firstSourceCheck = await session.checkNativePegInSourceLockRetainingSignerV1(packet, setupTarget);
       publish(packet.boxes.reservePredecessor, packet.boxes.sourceLock, packet.boxes.transitionFeeFunding);
       const firstVaultCheck = await session.checkNativePegInCommittedVaultRetainingSignerV1(packet, setupTarget);
+      if (joinedSource && joinedOperator) {
+        const firstPath = Array.from({ length: REQUIRED_SUCCESSOR_DEPTH + 1 }, (_value, index) => headerId(1001 + index));
+        const firstObservation = Object.freeze({
+          schema: 'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-output-observation.v1' as const,
+          version: 1 as const,
+          status: 'exact_transition_inputs_spent_and_reserve_successor_unspent' as const,
+          expectedTxId: packet.transactions.reserveTransition.txId,
+          sourceFundingBoxIdHex: packet.boxes.sourceFundingInput.boxId,
+          reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+          sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+          transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+          reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
+          confirmationHeight: 1001,
+          confirmationHeaderIdHex: firstPath[0]!,
+          confirmationObservationDigestHex: sha256CanonicalJson({ txId: packet.transactions.reserveTransition.txId, height: 1001 }),
+          finalityTargetHeight: 1011,
+          finalityTargetHeaderIdHex: firstPath.at(-1)!,
+          requiredSuccessorDepth: REQUIRED_SUCCESSOR_DEPTH,
+          finalityPathHeaderIdsHex: firstPath,
+          observedTipHeight: 1011,
+          observedTipHeaderIdHex: firstPath.at(-1)!,
+          processBindingDigestHex: setupBinding.processBindingDigestHex,
+          executionTargetIdentityDigestHex: setupBinding.executionTargetIdentityDigestHex,
+          primaryObservationDigestHex: sha256CanonicalJson({ side: 'primary', txId: packet.transactions.reserveTransition.txId }),
+          witnessObservationDigestHex: sha256CanonicalJson({ side: 'witness', txId: packet.transactions.reserveTransition.txId }),
+          boundaries: Object.freeze({ exactDualLoopbackNodesAgreed: true as const,
+            originalSourceFundingRemainsSpent: true as const, exactReservePredecessorSpent: true as const,
+            exactSourceLockSpent: true as const, exactTransitionFeeFundingSpent: true as const,
+            exactReserveSuccessorUnspent: true as const, sourceLockConsumptionEstablished: true as const,
+            reserveLineageEstablished: true as const, depositCommitmentStateEstablished: true as const,
+            exactRequiredDepthAncestryObserved: true as const, exactFinalityTargetSelected: true as const,
+            ergoPowAuthenticated: false as const, mintAuthorized: false as const,
+            fundsAuthorityEstablished: false as const, gate5Closed: false as const }),
+          observationDigestHex: sha256CanonicalJson({ txId: packet.transactions.reserveTransition.txId, firstPath }),
+        });
+        const assertVaultObservation = nativeVaultObserver
+          .assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1;
+        vi.spyOn(nativeVaultObserver, 'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1')
+          .mockImplementation((value, currentTarget, currentBatch, currentPacket) =>
+            value === firstObservation && currentTarget === setupTarget && currentBatch === batch && currentPacket === packet
+              ? packet : assertVaultObservation(value, currentTarget, currentBatch, currentPacket));
+        const firstDraftInputs = Object.freeze({ target: setupTarget, batch, packet,
+          committedVaultObservation: firstObservation });
+        const firstDraft = buildNativeMintDraft(firstDraftInputs);
+        const firstEvidenceReceipt = collectNativeReserveEvidence({ ...firstDraftInputs, draft: firstDraft });
+        joinedPreviousOperation = createNativeSourceOperation(joinedSource);
+        joinedPreviousProof = produceNativeOperationMintProof(joinedPreviousOperation, {
+          draftInputs: firstDraftInputs, draft: firstDraft, evidenceReceipt: firstEvidenceReceipt,
+          issuedAtNativeHeight: '0', expiresAtNativeHeight: '32',
+        });
+        const sourceRuntimeCodeHex = '0061736d01000000';
+        const joinedRecipientErgoTreeHex = `0x${signer.p2pkErgoTreeHex.replace(/^0x/, '')}`;
+        joinedRpc = createNativeContinuationRpcFixtureV1({
+          operator: joinedOperator,
+          firstProof: joinedPreviousProof,
+          runtimeProfileScaleHex: (compiled as any).candidate.runtimeProfileScaleHex,
+          sourceRuntimeCodeHex,
+          sidechainIdHex: family.sidechainIdHex,
+          bridgeAddressHex: family.bridgeAddressHex,
+          tokenAddressHex: family.tokenAddressHex,
+          ergoRecipientTreeHex: joinedRecipientErgoTreeHex,
+          mintAmountNanoErg: 20_000_000n,
+          burnGrossAmountNanoErg: 15_000_000n,
+          evmChainId: 4242n,
+        });
+        joinedFrontierTarget = Object.freeze({ primaryRpcUrl: 'http://127.0.0.1:19955',
+          witnessRpcUrl: 'http://127.0.0.1:19956',
+          genesisJsonSha256Hex: (compiled as any).candidate.genesisJsonSha256Hex });
+        vi.spyOn(frontierOwner, 'assertOwnedFederatedGenesisDevnetTargetV1').mockImplementation(value => {
+          if (value !== joinedFrontierTarget) throw new Error('joined native target lacks exact fixture provenance');
+        });
+        vi.stubGlobal('fetch', vi.fn(joinedRpc.fetch));
+        const firstDirectory = createPersistentNativeAttemptDirectory('bridge-native-real-source-parent-');
+        joinedPreviousExecution = await executeFrontierNativeProofBoundReservationMintAndBurnV1({
+          signing: { operator: joinedOperator, sourceOperation: joinedPreviousOperation, draft: firstDraft,
+            proof: joinedPreviousProof, compiled, target: setupTarget, frontierTarget: joinedFrontierTarget,
+            expectedStorage: joinedRpc.expectedStorage, expectedGenesisHashHex: joinedRpc.expectedGenesisHashHex },
+          attemptDirectory: firstDirectory,
+          broadcastScope: 'fed-native-local-synthetic-reservation-mint-and-burn-only',
+          grossAmountNanoErg: '15000000', recipientErgoTreeHex: joinedRecipientErgoTreeHex,
+        });
+        const firstCheckpoint = await attestFrontierNativeBurnCheckpointV1({
+          execution: joinedPreviousExecution,
+          admissionValidFromErgoHeight: '100', admissionExpiresAtErgoHeight: '120',
+        });
+        joinedPreviousCheckpoint = firstCheckpoint.attestation;
+        expect(joinedPreviousExecution).toMatchObject({
+          mint: { mintExecuted: true, amountNanoErg: '20000000' },
+          burn: { blockHeight: 4, grossAmountNanoErg: '15000000', netAmountNanoErg: '10000000' },
+          burnExecuted: true,
+        });
+        expect(joinedPreviousCheckpoint.checkpointStatement.sourceNativeBlockHeight).toBe('4');
+        expect(readdirSync(firstDirectory).sort()).toEqual(['native-approve-attempt.json', 'native-burn-attempt.json',
+          'native-mint-attempt.json', 'native-reservation-attempt.json']);
+      }
       signingHeaders = headerContext(1012);
-      publish(issuances[0]!.outputs[1]!, issuances[1]!.outputs[1]!);
+      publish(activeIssuances[0]!.outputs[1]!, activeIssuances[1]!.outputs[1]!);
       const withdrawalFee = await session.checkNativeWithdrawalFeeFundingV1(setupTarget);
       const trackerFee = await session.checkNativeTrackerFeeFundingV1(setupTarget);
-      expect(withdrawalFee.transaction.eip12Tx.inputs[0]!.boxId).toBe(issuances[1]!.outputs[1]!.boxId);
-      expect(trackerFee.transaction.eip12Tx.inputs[0]!.boxId).toBe(issuances[0]!.outputs[1]!.boxId);
+      expect(withdrawalFee.transaction.eip12Tx.inputs[0]!.boxId).toBe(activeIssuances[1]!.outputs[1]!.boxId);
+      expect(trackerFee.transaction.eip12Tx.inputs[0]!.boxId).toBe(activeIssuances[0]!.outputs[1]!.boxId);
       expect(withdrawalFee.transaction.outputs[0]!.boxId).not.toBe(trackerFee.transaction.outputs[0]!.boxId);
       expect(checkBodies).toHaveLength(7);
       const leaf = { sidechainIdHex: family.sidechainIdHex, sidechainBlockHashHex: 'a2'.repeat(32),
@@ -595,7 +856,7 @@ describe('native FED withdrawal continuation', () => {
         amountNanoErg: continuationFault ? '15000000' : '20000000', assetIdHex: '00'.repeat(32) };
       const proof = buildTrustlessBurnInclusionProof([leaf], leaf.burnIdHex);
       const statement = buildSubstrateFederatedCheckpointStatementV1({ ...vector.input.statement,
-        ...trackerRequest.application, profile: trackerRequest.profile, sourceNativeBlockHeight: '4',
+        ...activeTrackerRequest.application, profile: activeTrackerRequest.profile, sourceNativeBlockHeight: '4',
         sourceNativeBlockHashHex: 'a1'.repeat(32), executionBlockHashHex: leaf.sidechainBlockHashHex,
         bridgeEventRootHex: proof.bridgeEventRootHex, burnLeafCount: proof.leafCount,
         ...(fault === 'tracker WASM expiry' ? { admissionExpiresAtErgoHeight: '1031' } : {}) });
@@ -605,12 +866,14 @@ describe('native FED withdrawal continuation', () => {
       const observedHeaderContext = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, { rawHeaders: signingHeaders,
         anchorContextIndex: 1, expectedAnchorHeaderIdHex: String(signingHeaders[1]!.id),
         expectedAnchorExtensionRootHex: membership.root.toString('hex') });
-      publish(issuances[0]!.outputs[0]!, trackerFee.transaction.outputs[0]!);
+      publish(activeIssuances[0]!.outputs[0]!, trackerFee.transaction.outputs[0]!);
       const context = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
-        compilerRequest: trackerRequest, compilerReceipt: trackerReceipt, trackerInputBox: issuances[0]!.outputs[0]!,
+        compilerRequest: activeTrackerRequest, compilerReceipt: activeTrackerReceipt,
+        trackerInputBox: activeIssuances[0]!.outputs[0]!,
         observedHeaderContext, encodedStatementHex: statement.encodedStatementHex, extensionMembershipProofHex: membership.proof.toString('hex') });
       const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({ trackerContext: context,
-        trackerInputBox: issuances[0]!.outputs[0]!, feeInputBox: trackerFee.transaction.outputs[0]!, feePayerPublicKeyHex: signer.publicKeyHex });
+        trackerInputBox: activeIssuances[0]!.outputs[0]!, feeInputBox: trackerFee.transaction.outputs[0]!,
+        feePayerPublicKeyHex: signer.publicKeyHex });
       trackerTxId = transaction.unsignedTransactionIdHex;
       transportTarget = Object.freeze({ ...setupTarget, checkpointBound: true as const,
         reservationFreshnessCheckBound: true as const, trackerTransport: true as const,
@@ -738,8 +1001,9 @@ describe('native FED withdrawal continuation', () => {
       finalizeTracker(attempt, submitted);
       const admitted = await materializeUnsignedTransaction(transaction.eip12UnsignedTransaction as never, 'native admitted tracker');
       signingHeaders = headerContext(1050);
-      publish(admitted.outputs[0]!, packet.boxes.reserveSuccessor, issuances[1]!.outputs[0]!, withdrawalFee.transaction.outputs[0]!);
-      for (const tx of [packet.transactions.reserveTransition, issuances[1]!, withdrawalFee.transaction]) confirmed.set(tx.txId, 1020);
+      publish(admitted.outputs[0]!, packet.boxes.reserveSuccessor, activeIssuances[1]!.outputs[0]!,
+        withdrawalFee.transaction.outputs[0]!);
+      for (const tx of [packet.transactions.reserveTransition, activeIssuances[1]!, withdrawalFee.transaction]) confirmed.set(tx.txId, 1020);
       phase = 'confirmation';
       const confirmation = await createObserver(confirmationTarget, GENESIS).observe(attempt.expectedTxId, PRIMARY);
       expect(confirmation?.status).toBe('confirmed');
@@ -769,7 +1033,8 @@ describe('native FED withdrawal continuation', () => {
         const result = await payout;
         expect(result.checkedResult.txId).toBe(result.packet.transaction.txId);
         expect(result.packet.transaction.eip12Tx.inputs.map(box => box.boxId)).toEqual([
-          packet.boxes.reserveSuccessor.boxId, issuances[1]!.outputs[0]!.boxId, withdrawalFee.transaction.outputs[0]!.boxId]);
+          packet.boxes.reserveSuccessor.boxId, activeIssuances[1]!.outputs[0]!.boxId,
+          withdrawalFee.transaction.outputs[0]!.boxId]);
         expect(result.packet.transaction.eip12Tx.dataInputs.map(box => box.boxId)).toEqual([admitted.outputs[0]!.boxId]);
         expect(BigInt(result.packet.reserve.inputValueNanoErg) - BigInt(result.packet.reserve.outputValueNanoErg))
           .toBe(continuationFault ? 15_000_000n : 20_000_000n);
@@ -807,7 +1072,8 @@ describe('native FED withdrawal continuation', () => {
             batch, target: confirmationTarget, previousPacket: packet,
             withdrawal: { check: result, attempt: payoutAttempt },
             sourceFundingInput: secondSourceFunding,
-            sourceIntent: { ...firstSourceIntent, amountNanoErg: '20000000', recipientAddressHex: '62'.repeat(20) },
+            sourceIntent: { ...firstSourceIntent, amountNanoErg: '20000000',
+              recipientAddressHex: joinedOperator?.addressHex ?? '62'.repeat(20) },
             depositorErgoTreeHex: signer.p2pkErgoTreeHex,
             creationHeights: { currentErgoHeight: 1051, sourceLockCreation: 1051, reserveTransition: 1051 },
           };
@@ -900,7 +1166,7 @@ describe('native FED withdrawal continuation', () => {
           expect(second.reserve.outputDigestHex).not.toBe(packet.reserve.outputDigestHex);
           expect(second.transactions.reserveTransition.eip12Tx.inputs[0]!.assets)
             .toEqual(second.transactions.reserveTransition.outputs[0]!.assets);
-          expect(issuances).toHaveLength(3);
+          expect(activeIssuances).toHaveLength(3);
           expect(() => assertSigner(session.signer)).not.toThrow();
           if (fault === 'continuation old packet') {
             await expect(session.checkNativeContinuationPegInSourceLockRetainingSignerV1(packet, confirmationTarget))
@@ -915,7 +1181,7 @@ describe('native FED withdrawal continuation', () => {
             'continuation valid', 'continuation foreign observation before draft',
             'continuation copied observation before evidence', 'continuation mismatched reservation draft',
             'continuation current target lost before transport', 'continuation custody lost after funding await',
-            'continuation ambiguous source transport',
+            'continuation ambiguous source transport', 'continuation source proof native mint join',
           ]).has(fault as ContinuationFault);
           if (transportCompositionFault) {
             // Seed resolved durable history from the first checked deposit. Its
@@ -1080,6 +1346,84 @@ describe('native FED withdrawal continuation', () => {
                 .toThrow(/different mint-reservation draft/);
               return;
             }
+            if (joinedFault) {
+              expect(joinedSource).toBeDefined();
+              expect(joinedOperator).toBeDefined();
+              expect(joinedPreviousOperation).toBeDefined();
+              expect(joinedPreviousProof).toBeDefined();
+              expect(joinedPreviousExecution).toBeDefined();
+              expect(joinedPreviousCheckpoint).toBeDefined();
+              expect(joinedRpc).toBeDefined();
+              expect(joinedFrontierTarget).toBeDefined();
+              expect(() => execution.assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, setupTarget))
+                .toThrow(/expired|inactive/);
+              expect(() => execution.assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(batch, setupTarget))
+                .not.toThrow();
+              joinedCurrentOperation = createNativeSourceOperation(joinedSource!);
+              const currentProof = produceNativeOperationMintProof(joinedCurrentOperation, {
+                draftInputs: joined, draft, evidenceReceipt,
+                issuedAtNativeHeight: '4', expiresAtNativeHeight: '32',
+              });
+              const pair = assertNativeProofPair(currentProof, joinedCurrentOperation, draft,
+                joinedPreviousCheckpoint!, joinedPreviousOperation!, joinedPreviousProof!);
+              expect(pair.currentTarget).toBe(confirmationTarget);
+              expect(pair.originalSetupTarget).toBe(setupTarget);
+              expect(pair.candidate).toBe((compiled as any).candidate);
+              expect(pair.application).toBe((compiled as any).preparation.application);
+              expect(currentProof.mintIdentityHex).not.toBe(joinedPreviousProof!.mintIdentityHex);
+              expect(currentProof.request.statementHex).toBe(draft.statementHex);
+              expect(currentProof.request.evidence).toEqual(evidenceReceipt.evidence);
+              expect(() => consumeNativeReserveEvidence(evidenceReceipt, draft)).toThrow(/already consumed/);
+              const pendingScaleHex = joinedRpc!.attachCurrentProof(currentProof);
+              const continuationDirectory = createPersistentNativeAttemptDirectory(
+                'bridge-native-real-source-continuation-');
+              const signing = { operator: joinedOperator!, sourceOperation: joinedCurrentOperation, draft,
+                proof: currentProof, compiled, target: confirmationTarget, frontierTarget: joinedFrontierTarget!,
+                expectedStorage: joinedRpc!.expectedStorage,
+                expectedGenesisHashHex: joinedRpc!.expectedGenesisHashHex };
+              const continuationInput = {
+                previousExecution: joinedPreviousExecution!, signing,
+                attemptDirectory: continuationDirectory,
+                broadcastScope: 'fed-native-local-synthetic-continuation-reservation-only' as const,
+              };
+              const beforeRejectedRpc = joinedRpc!.calls.length;
+              await expect(executeFrontierNativeProofBoundContinuationReservationV1({ ...continuationInput,
+                signing: { ...signing, target: { ...confirmationTarget } } as never }))
+                .rejects.toThrow(/native continuation proof differs from retained operator or genesis/);
+              expect(joinedRpc!.calls).toHaveLength(beforeRejectedRpc);
+              const foreignCompiled = { ...compiled, candidate: { ...(compiled as any).candidate },
+                preparation: { ...(compiled as any).preparation,
+                  application: { ...(compiled as any).preparation.application } } };
+              joinedForeignCompiled = foreignCompiled;
+              await expect(executeFrontierNativeProofBoundContinuationReservationV1({ ...continuationInput,
+                signing: { ...signing, compiled: foreignCompiled } as never }))
+                .rejects.toThrow(/native continuation proof differs from retained operator or genesis/);
+              joinedForeignCompiled = undefined;
+              expect(joinedRpc!.calls).toHaveLength(beforeRejectedRpc);
+              const continuationReservation = await executeFrontierNativeProofBoundContinuationReservationV1(continuationInput);
+              expect(continuationReservation).toMatchObject({
+                blockHeight: 5, runtimeReservationObserved: true, mintExecuted: false,
+                mintIdentityHex: currentProof.mintIdentityHex,
+                pendingReservationScaleHex: pendingScaleHex,
+              });
+              const continuationCycle = await executeFrontierNativeProofBoundContinuationMintAndBurnV1({
+                reservationExecution: continuationReservation,
+                grossAmountNanoErg: '15000000', recipientErgoTreeHex: `0x${signer.p2pkErgoTreeHex.replace(/^0x/, '')}`,
+                broadcastScope: 'fed-native-local-synthetic-continuation-mint-and-burn-only',
+              });
+              expect(continuationCycle).toMatchObject({
+                mint: { blockHeight: 6, amountNanoErg: '20000000', mintIdentityHex: currentProof.mintIdentityHex,
+                  mintExecuted: true, runtimeReservationConsumed: true },
+                burn: { blockHeight: 8, grossAmountNanoErg: '15000000', netAmountNanoErg: '10000000' },
+                burnExecuted: true,
+              });
+              expect(joinedRpc!.snapshot()).toMatchObject({ height: 8,
+                currentPendingScaleHex: pendingScaleHex });
+              expect(readdirSync(continuationDirectory).sort()).toEqual(['native-approve-attempt.json',
+                'native-burn-attempt.json', 'native-mint-attempt.json', 'native-reservation-attempt.json']);
+              joinedCompleted = true;
+              return;
+            }
             const evidence = consumeNativeReserveEvidence(evidenceReceipt, draft);
             expect(evidence.sourceLockBoxCanonicalHex.length).toBeGreaterThan(0);
             expect(evidence.reserveTransitionTransactionCanonicalHex.length).toBeGreaterThan(0);
@@ -1165,6 +1509,17 @@ describe('native FED withdrawal continuation', () => {
       }
       expect(statement.sourceNativeBlockHashHex).not.toBe(statement.executionBlockHashHex);
       expect(statement.sourceNetworkIdHex).toBe(GENESIS);
-    } finally { session.dispose(); state.close(); }
+    } catch (error) {
+      joinedFailed = true;
+      throw error;
+    } finally {
+      joinedCurrentOperation?.dispose();
+      joinedPreviousOperation?.dispose();
+      joinedSource?.dispose();
+      if (joinedOperator) disposeFederatedGenesisOperatorV1(joinedOperator);
+      session.dispose();
+      state.close();
+      if (joinedFault && !joinedFailed) expect(joinedCompleted).toBe(true);
+    }
   }, 60_000);
 });

@@ -95,6 +95,7 @@ import { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1
 import { assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1 as assertNativeVaultOutputs }
   from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
 import * as nativeVaultObserver from './substrate-federated-isolated-devnet-peg-in-committed-vault-output-observer-v1.js';
+import * as nativePacketProvenance from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { encodePegInSourceIntentV2Hex } from './peg-in-causal-admission-v2.js';
 import {
   buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 as buildNativeMintDraft,
@@ -1463,7 +1464,8 @@ describe('native FED managed setup session', () => {
       const targetProbe = vi.mocked(owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1);
       const before = targetProbe.mock.calls.length;
       assertNativeMintProof(receipt, source, proofInput.draft);
-      expect(targetProbe.mock.calls.length - before).toBe(2);
+      // Draft custody, the ancestry accessor's entry/exit checks, and original context.
+      expect(targetProbe.mock.calls.length - before).toBe(4);
       const profiles = readSourceProfiles(source);
       const verified = verifySourceSignatures(profiles.mintProofProfile, receipt.request, receipt.result,
         receipt.signatureVerification.signatures);
@@ -1673,6 +1675,7 @@ describe('native FED managed setup session', () => {
     'continuation foreign execution', 'continuation same operation', 'continuation foreign operation', 'continuation duplicate',
     'continuation operation disposal before signature', 'continuation operation disposal before transport',
     'continuation source disposal before transport', 'continuation expiry at child',
+    'continuation target loss during observation',
     'continuation cycle', 'continuation cycle cumulative gross', 'continuation cycle copy reservation',
     'continuation cycle mixed reservation', 'continuation cycle repeated reservation', 'continuation cycle source disposal',
     'continuation cycle operation disposal', 'continuation cycle request mutation',
@@ -1770,9 +1773,15 @@ describe('native FED managed setup session', () => {
           return { [commitmentKey]: `0x${commitment.toString('hex')}`, [leavesKey]: `0x04${root.toString('hex')}`,
             [eventsKey]: `0x${Buffer.concat([compact(records.length), ...records]).toString('hex')}` };
         };
+        let continuationTargetLossInjected = false;
         const genesisRpc = observed.fetcher.getMockImplementation()!;
         observed.fetcher.mockImplementation(async (url, init) => {
           const { method, params } = JSON.parse(init.body as string);
+          if (defect === 'continuation target loss during observation' && !continuationTargetLossInjected
+            && continuationMintIdentity !== undefined && method === 'state_getStorage') {
+            boundary.targetActive = false;
+            continuationTargetLossInjected = true;
+          }
           let result: unknown;
           if (method === 'author_submitExtrinsic') {
             if (height === 4) {
@@ -1990,8 +1999,9 @@ describe('native FED managed setup session', () => {
                     secondPacketValue.depositCommitmentHex = '8c'.repeat(32);
                     const secondPacket = freezeFixture(secondPacketValue) as typeof proofInput.draftInputs.packet;
                     const secondDraftInputs = Object.freeze({ ...proofInput.draftInputs, packet: secondPacket });
-                    // The next source deposit/successor producer is outside this batch. Double only that missing
-                    // packet-to-observation join; draft/evidence codecs, operation receipts and signatures stay real.
+                    // This caller fault matrix doubles the second packet's observation and ancestry.
+                    // The withdrawal-continuation suite covers the real second-deposit producers.
+                    // Draft/evidence codecs, operation receipts and signatures stay real here.
                     const assertVaultObservation = nativeVaultObserver
                       .assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1;
                     vi.spyOn(nativeVaultObserver, 'assertSubstrateFederatedNativeGenesisPegInCommittedVaultOutputObservationV1')
@@ -1999,6 +2009,16 @@ describe('native FED managed setup session', () => {
                         value === secondDraftInputs.committedVaultObservation && currentTarget === target
                           && batch === secondDraftInputs.batch && packet === secondPacket
                           ? secondPacket : assertVaultObservation(value, currentTarget, batch, packet));
+                    const packetAncestry = nativePacketProvenance
+                      .getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1;
+                    vi.spyOn(nativePacketProvenance, 'getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1')
+                      .mockImplementation((packet, batch, currentTarget) => {
+                        if (packet !== secondPacket || batch !== secondDraftInputs.batch || currentTarget !== target) {
+                          return packetAncestry(packet, batch, currentTarget);
+                        }
+                        owned.assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(currentTarget);
+                        return Object.freeze({ originalSetupTarget: target, previousPacket: proofInput.draftInputs.packet });
+                      });
                     const secondDraft = buildNativeMintDraft(secondDraftInputs);
                     const secondEvidence = collectNativeReserveEvidence({ ...secondDraftInputs, draft: secondDraft });
                     const secondOperation = createNativeSourceOperation(source);
@@ -2159,9 +2179,10 @@ describe('native FED managed setup session', () => {
                         }
                       } else {
                         await expect(executeFrontierNativeProofBoundContinuationReservationV1(continuationInput))
-                          .rejects.toThrow(/provenance|operation|disposed|inactive|unused|original|cover|differs/);
+                          .rejects.toThrow(/provenance|operation|disposed|inactive|unused|original|cover|differs|expired/);
                         expect(continuationSubmitted).toBe(false);
                         expect(readdirSync(continuationDirectory)).toEqual([]);
+                        if (defect === 'continuation target loss during observation') expect(continuationTargetLossInjected).toBe(true);
                       }
                       const finalSubmissions = observed.fetcher.mock.calls.filter(([, init]) =>
                         JSON.parse(init.body as string).method === 'author_submitExtrinsic').length;

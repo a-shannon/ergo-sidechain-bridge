@@ -28,17 +28,15 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** connect original second-deposit evidence to the continuation source proof,
-reservation and mint caller. Start at native proof production in
-`substrate-federated-isolated-devnet-source-attestation-session-v1.ts` and its
-`getSubstrateFederatedNativeGenesisAttestationContextV1` consumer. The getter still
-requires the initial setup action, which is closed before the first payout;
-the attestation parent also retains the original target identity. Preserve that
-parent custody and genesis while binding the proven live descendant target.
-Keep each operation's authority separate; never
-reopen a disposed signer or reset a consumed legacy API. Connect the second
-fees, tracker/payout and root before the fresh two-cycle campaign. The root must
-keep both node groups and original source custody alive through both returns.
+**Now:** connect the continuation checkpoint to the second external fee inputs
+and the retained tracker/DUP/reserve successors. Start with the setup session's
+fee and tracker consumers: they still retain the first operation's checks and
+one-shot state. Use separately scoped continuation authority, preserving the
+first confirmed payout and its nonempty replay state. Fund both new external
+fee inputs before fixing the second anchor. Then connect the second payout and
+compose both cycles in the root before a fresh two-cycle campaign. Keep both
+node groups and original source custody alive through both returns; never reopen
+a disposed signer, reset a consumed API or reconstruct historical keys.
 
 An explicit retained-withdrawal branch now keeps the original setup signer for
 the second deposit. Its builder requires the original successfully confirmed
@@ -55,9 +53,21 @@ current transaction and preserves resolved first-deposit history; unresolved
 attempts still block replacement. Composed tests use real compilers, AVL
 witnesses, WASM signatures and these consumers against explicit node/process and
 funding-discovery doubles. They cover copied or foreign evidence, consumed evidence,
-target/custody loss and an ambiguous response without resubmission. Source-proof
-production and the second tracker/payout remain unconnected; the current root
-still executes one cycle.
+target/custody loss and an ambiguous response without resubmission. The second
+tracker/payout remains unconnected; the current root still executes one cycle.
+
+The original second-deposit evidence now feeds an explicit source-attestation
+operation and the actual continuation reservation, mint and burn callers after
+the setup action has closed. The parent keeps its original target, candidate
+and application; the current proof binds the live descendant target and exact
+predecessor packet. A paired assertion requires the previous operation's original
+completed checkpoint and retained read custody. Copied, foreign, disposed and
+wrong-parent inputs fail closed. The old full-action getter and legacy one-shot
+authority remain unchanged. The composed positive reaches reservation five,
+mint six and burn eight using real second-deposit producers, codecs and signatures
+against explicit node/process, compiled-genesis custody and funding doubles.
+Its first vault observation and initial tracker fixture remain simulated.
+This is component evidence, not a two-cycle node campaign.
 
 The native continuation path now connects an original confirmed burn at height
 four to reservation five, mint six, approve seven, burn eight and checkpoint
@@ -65,9 +75,10 @@ attestation eight in the same retained custody. The caller consumes the original
 reservation result once. Paired native/Ethereum parents, nonces, cumulative token
 balances, both consumed mint records and transaction-specific fee bounds remain
 checked. The exact commitment retains global event index two and a single burn
-leaf; formats, domains and quorum are unchanged. Composed tests still use an
-explicit double for the second Ergo deposit packet/observation producer, with
-real codecs, source signatures, operator signing and native execution consumers.
+leaf; formats, domains and quorum are unchanged. The focused native fault matrix
+retains an explicit second-packet/observation/ancestry double with real codecs,
+source signatures, operator signing and execution consumers; the separate
+withdrawal composition exercises the real second-deposit producers.
 The root still runs one cycle; no second complete cycle has run on nodes.
 
 The source-quorum join is implemented: individual mint/checkpoint operations
@@ -133,7 +144,7 @@ work is independent and serves the same delivery result.
 
 The source-quorum, native operator operations and explicitly retained setup
 signer now have separate continuation boundaries. A second complete cycle still
-needs the source-proof/mint join, fees, tracker/payout successor consumers and
+needs the second fees, tracker/payout successor consumers and
 root composition. Do not clear consumed flags, reopen a closed signer, recreate
 destroyed keys or broaden an old receipt. Preserve the old one-shot APIs;
 validate the new operation boundary with focused duplicate, disposed-custody,
@@ -417,8 +428,8 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Checked second deposit -> transport and committed reserve evidence | Deliver original second-deposit observations to the continuation source proof and reservation/mint caller | Reject disposed custody, stale predecessor and foreign operation before transport; preserve durable ambiguous holds and old one-shot APIs |
-| Next candidate | Second native checkpoint and Ergo successors -> next settlement | Connect the continuation checkpoint to the retained tracker/DUP/reserve successors and compose both cycles in the root | Preserve the first replay key, insert the new key, check cumulative value/liability conservation, reject stale predecessors and either burn's replay. Do not reset genesis or substitute historical custody |
+| **Now** | Second native checkpoint and Ergo successors -> next settlement | Connect separately scoped external fee funding and tracker/payout consumers to the retained successors | Preserve the first replay key, insert the new key, fund both external fee inputs before the anchor, check cumulative value/liability conservation, and reject stale predecessors and either burn's replay |
+| Next candidate | Both component cycles -> one root and fresh chain | Keep both node groups and original custody alive through two confirmed returns, then run one complete isolated campaign | Do not reset genesis, substitute historical custody, reuse ambiguous attempts or repeat an equivalent one-cycle campaign |
 | Later candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |

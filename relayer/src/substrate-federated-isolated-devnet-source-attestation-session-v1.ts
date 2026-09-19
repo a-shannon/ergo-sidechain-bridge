@@ -63,7 +63,12 @@ import {
 } from './substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
 import {
   getSubstrateFederatedNativeGenesisAttestationContextV1,
+  getSubstrateFederatedNativeGenesisRetainedAttestationContextV1,
 } from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1,
+  getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import {
   assertSubstrateFederatedIsolatedDevnetLaunchStatementV1Provenance,
   assertSubstrateFederatedIsolatedDevnetLaunchStatementProvenance,
@@ -129,6 +134,7 @@ const NATIVE_OPERATION_FACTORIES = new WeakMap<object, () => Readonly<
 const NATIVE_OPERATIONS = new WeakMap<object, Readonly<{
   session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
   assertCurrent: () => void;
+  status: () => 'open' | 'completed' | 'disposed';
 }>>();
 const NATIVE_MINT_PRODUCERS = new WeakMap<object, (
   input: Readonly<ProduceSubstrateFederatedNativeGenesisMintSourceProofV1Input>,
@@ -138,6 +144,12 @@ const NATIVE_MINT_RECEIPTS = new WeakMap<object, Readonly<{
   operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
   explicit: boolean;
   draft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>;
+  draftInputs: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input>;
+  originalSetupTarget: SubstrateFederatedNativeGenesisPegInMintReservationDraftV1Input['target'];
+  candidate: object;
+  application: object;
+  candidateDigestHex: string;
+  applicationDigestHex: string;
   assertCurrent: () => void;
   context: () => ReturnType<typeof getSubstrateFederatedNativeGenesisAttestationContextV1>;
 }>>();
@@ -1484,6 +1496,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     NATIVE_OPERATIONS.set(operation, Object.freeze({
       session,
       assertCurrent: assertOperationCurrent,
+      status: () => operationState,
     }));
     NATIVE_MINT_PRODUCERS.set(operation, input => {
       assertOperationCurrent();
@@ -1498,7 +1511,21 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     if (producedNativeMintIdentities.has(draft.reservationKeyHex)) {
       throw new Error('native mint identity is already bound to another source-attestation operation');
     }
-    const context = getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target);
+    const packetProvenance = getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1(
+      draftInputs.packet,
+      draftInputs.batch,
+      draftInputs.target,
+    );
+    if (packetProvenance.previousPacket !== null && !explicit) {
+      throw new Error('native continuation source proof requires an explicit operation');
+    }
+    const readContext = () => packetProvenance.previousPacket === null
+      ? getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target)
+      : getSubstrateFederatedNativeGenesisRetainedAttestationContextV1(
+        draftInputs.batch,
+        packetProvenance.originalSetupTarget,
+      );
+    const context = readContext();
     const candidate = context.candidate;
     const candidateDigestHex = sha256CanonicalJson(candidate);
     const applicationDigestHex = sha256CanonicalJson(context.application);
@@ -1518,7 +1545,16 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     const assertCurrent = () => {
       assertOperationCurrent();
       assertSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draft, draftInputs);
-      const current = getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target);
+      const currentProvenance = getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1(
+        draftInputs.packet,
+        draftInputs.batch,
+        draftInputs.target,
+      );
+      if (currentProvenance.originalSetupTarget !== packetProvenance.originalSetupTarget
+        || currentProvenance.previousPacket !== packetProvenance.previousPacket) {
+        throw new Error('native mint proof packet ancestry changed');
+      }
+      const current = readContext();
       if (current.candidate !== candidate
         || current.application !== context.application
         || sha256CanonicalJson(current.application) !== applicationDigestHex
@@ -1526,7 +1562,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         throw new Error('native mint proof retained genesis or application changed');
       }
       assertNativeContextMatchesParent(
-        draftInputs.target,
+        packetProvenance.originalSetupTarget,
         current.candidate,
         current.application,
         sha256CanonicalJson(current.candidate),
@@ -1540,7 +1576,7 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
     }
     assertCurrent();
     retainNativeContext(
-      draftInputs.target,
+      packetProvenance.originalSetupTarget,
       candidate,
       context.application,
       candidateDigestHex,
@@ -1601,8 +1637,10 @@ export function createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2
         boundary: mintSourceProofBoundaryV2(),
       });
       const receipt = deepFreeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, NATIVE_MINT_PROOF_DOMAIN) });
-      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, operation, explicit, draft, assertCurrent,
-        context: () => { assertCurrent(); return getSubstrateFederatedNativeGenesisAttestationContextV1(draftInputs.batch, draftInputs.target); } }));
+      NATIVE_MINT_RECEIPTS.set(receipt, Object.freeze({ session, operation, explicit, draft, draftInputs,
+        originalSetupTarget: packetProvenance.originalSetupTarget, candidate, application: context.application,
+        candidateDigestHex, applicationDigestHex, assertCurrent,
+        context: () => { assertCurrent(); return readContext(); } }));
       return receipt;
     } catch (error) {
       invalidateParentCustody();
@@ -1779,6 +1817,100 @@ export function assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOp
   }
 }
 
+/**
+ * Pair a live continuation proof with its completed original checkpoint. The
+ * historical proof remains read-only custody and cannot itself sign or submit.
+ */
+export function assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+  currentProof: unknown,
+  currentOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  currentDraft: Readonly<SubstrateFederatedNativeGenesisPegInMintReservationDraftV1>,
+  previousCheckpoint: Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1>,
+  previousOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
+  previousProof: Readonly<SubstrateFederatedNativeGenesisMintSourceProofReceiptV1>,
+) {
+  assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1(
+    currentProof,
+    currentOperation,
+    currentDraft,
+  );
+  const currentOwner = getNativeGenesisSourceAttestationOperationV1(currentOperation);
+  const previousOwner = getNativeGenesisSourceAttestationOperationV1(previousOperation);
+  const currentRetained = NATIVE_MINT_RECEIPTS.get(currentProof);
+  const previousRetained = NATIVE_MINT_RECEIPTS.get(previousProof);
+  const checkpointRetained = NATIVE_CHECKPOINT_RECEIPTS.get(previousCheckpoint);
+  previousOwner.assertCurrent();
+  if (currentOperation === previousOperation || currentProof === previousProof
+    || currentRetained === undefined || previousRetained === undefined
+    || checkpointRetained === undefined
+    || !currentRetained.explicit || !previousRetained.explicit || !checkpointRetained.explicit
+    || currentRetained.operation !== currentOperation
+    || previousRetained.operation !== previousOperation
+    || checkpointRetained.operation !== previousOperation
+    || checkpointRetained.proof !== previousProof
+    || currentOwner.session !== previousOwner.session
+    || currentRetained.session !== currentOwner.session
+    || previousRetained.session !== previousOwner.session
+    || checkpointRetained.session !== previousOwner.session
+    || previousOwner.status() !== 'completed') {
+    throw new Error('native continuation requires the completed original checkpoint');
+  }
+  const previousProofBody = { ...previousProof };
+  delete (previousProofBody as { receiptDigestHex?: string }).receiptDigestHex;
+  const previousCheckpointBody = { ...previousCheckpoint };
+  delete (previousCheckpointBody as { receiptDigestHex?: string }).receiptDigestHex;
+  if (previousProof.receiptDigestHex !== sha256CanonicalJson(previousProofBody, NATIVE_MINT_PROOF_DOMAIN)
+    || previousCheckpoint.receiptDigestHex !== sha256CanonicalJson(previousCheckpointBody, NATIVE_CHECKPOINT_DOMAIN)) {
+    throw new Error('native continuation original proof or checkpoint digest changed');
+  }
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(
+    previousRetained.draftInputs.packet,
+    previousRetained.draftInputs.batch,
+    previousRetained.originalSetupTarget,
+  );
+  const previousContext = getSubstrateFederatedNativeGenesisRetainedAttestationContextV1(
+    previousRetained.draftInputs.batch,
+    previousRetained.originalSetupTarget,
+  );
+  const currentContext = currentRetained.context();
+  const currentPacketProvenance = getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1(
+    currentRetained.draftInputs.packet,
+    currentRetained.draftInputs.batch,
+    currentRetained.draftInputs.target,
+  );
+  if (currentPacketProvenance.previousPacket !== previousRetained.draftInputs.packet
+    || currentRetained.originalSetupTarget !== previousRetained.originalSetupTarget
+    || currentRetained.candidate !== previousRetained.candidate
+    || currentRetained.application !== previousRetained.application
+    || currentRetained.candidate !== previousContext.candidate
+    || currentRetained.application !== previousContext.application
+    || currentContext.candidate !== previousContext.candidate
+    || currentContext.application !== previousContext.application
+    || currentRetained.candidateDigestHex !== previousRetained.candidateDigestHex
+    || currentRetained.applicationDigestHex !== previousRetained.applicationDigestHex
+    || sha256CanonicalJson(previousContext.candidate) !== previousRetained.candidateDigestHex
+    || sha256CanonicalJson(previousContext.application) !== previousRetained.applicationDigestHex
+    || previousProof.mintReservationDraftDigestHex !== previousRetained.draft.draftDigestHex
+    || currentProof.mintReservationDraftDigestHex !== currentRetained.draft.draftDigestHex
+    || previousProof.genesisJsonSha256Hex !== previousContext.candidate.genesisJsonSha256Hex
+    || currentProof.genesisJsonSha256Hex !== currentContext.candidate.genesisJsonSha256Hex
+    || previousCheckpoint.genesisJsonSha256Hex !== previousContext.candidate.genesisJsonSha256Hex
+    || previousProof.runtimeProfileIdHex !== previousContext.candidate.runtimeProfileIdHex
+    || currentProof.runtimeProfileIdHex !== currentContext.candidate.runtimeProfileIdHex
+    || previousProof.runtimeProfileScaleHex !== previousContext.candidate.runtimeProfileScaleHex
+    || currentProof.runtimeProfileScaleHex !== currentContext.candidate.runtimeProfileScaleHex
+    || currentProof.mintIdentityHex === previousProof.mintIdentityHex
+    || currentProof.sourceAttestationBindingDigestHex !== previousProof.sourceAttestationBindingDigestHex) {
+    throw new Error('native continuation source proofs do not share the exact original packet lineage');
+  }
+  return Object.freeze({
+    currentTarget: currentRetained.draftInputs.target,
+    originalSetupTarget: currentRetained.originalSetupTarget,
+    candidate: currentContext.candidate,
+    application: currentContext.application,
+  });
+}
+
 export function produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
   operation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>,
   input: Readonly<ProduceSubstrateFederatedNativeGenesisCheckpointAttestationV1Input>,
@@ -1814,6 +1946,7 @@ function getNativeGenesisSourceAttestationOperationV1(
 ): Readonly<{
   session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
   assertCurrent: () => void;
+  status: () => 'open' | 'completed' | 'disposed';
 }> {
   const retained = operation !== null && typeof operation === 'object'
     ? NATIVE_OPERATIONS.get(operation)

@@ -276,6 +276,7 @@ describe('layer import rules', () => {
     ['assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1', FEDERATED_GENESIS_TARGET_ROOT],
     ['produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1', FEDERATED_GENESIS_TARGET_ROOT],
     ['assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
+    ['assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
     ['produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
     ['assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1', 'apps/bridge-daemon/frontier-native-proof-bound-reservation-signing-v1.ts'],
   ])('keeps source-operation capability %s at its reviewed consumer', (binding, owner) => {
@@ -813,6 +814,8 @@ describe('layer import rules', () => {
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-withdrawal-v2-lifecycle'],
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2Check', 'substrate-federated-isolated-devnet-peg-in-candidate-v2'],
     ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'getSubstrateFederatedNativeGenesisReadCompilerInputV1', 'substrate-federated-isolated-devnet-peg-in-candidate-v2'],
+    ['substrate-federated-isolated-devnet-setup-check-execution-v2', 'getSubstrateFederatedNativeGenesisRetainedAttestationContextV1', 'substrate-federated-isolated-devnet-source-attestation-session-v1'],
+    ['substrate-federated-isolated-devnet-peg-in-candidate-v2', 'getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1', 'substrate-federated-isolated-devnet-source-attestation-session-v1'],
     ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'reobserveSubstrateFederatedIsolatedDevnetConfirmedWithdrawalV2', 'substrate-federated-isolated-devnet-peg-in-candidate-v2'],
     ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'claimSubstrateFederatedIsolatedDevnetWithdrawalV2Transport', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
     ['substrate-federated-isolated-devnet-withdrawal-v2-lifecycle', 'assertSubstrateFederatedIsolatedDevnetWithdrawalV2TransportReady', 'substrate-federated-isolated-devnet-checked-submission-transport-v1'],
@@ -827,6 +830,27 @@ describe('layer import rules', () => {
     expect(inspect({ ...producer, 'other-admission-caller.ts': source }).map(item => item.message)).toEqual([
       `exclusive authority import has the wrong owner: ./${module}.js#${symbol}`,
     ]);
+  });
+
+  it('preserves only the exact named dynamic setup-to-packet continuation check', () => {
+    const module = 'substrate-federated-isolated-devnet-peg-in-candidate-v2';
+    const owner = 'substrate-federated-isolated-devnet-setup-check-execution-v2.ts';
+    const symbol = 'assertSubstrateFederatedNativeContinuationPegInPacketV1';
+    const source = `async function check() { const { ${symbol} } = await import('./${module}.js'); ${symbol}(); }`;
+    const producer = { [`${module}.ts`]: `export const ${symbol} = () => {};` };
+    expect(inspect({ ...producer, [owner]: source })).toEqual([]);
+    for (const rejected of [
+      `async function check() { const namespace = await import('./${module}.js'); namespace.${symbol}(); }`,
+      `async function check() { const { ${symbol}: alias } = await import('./${module}.js'); alias(); }`,
+      `async function check() { const { ${symbol}, getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1 } = await import('./${module}.js'); ${symbol}(); }`,
+      `async function check() { const { ${symbol}, ...remaining } = await import('./${module}.js'); ${symbol}(); }`,
+      `async function check() { const { getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1 } = await import('./${module}.js'); }`,
+    ]) {
+      expect(inspect({ ...producer, [owner]: rejected }).map(item => item.message))
+        .toContain(`exclusive authority module must use named runtime imports: ./${module}.js`);
+    }
+    expect(inspect({ ...producer, 'other-continuation-caller.ts': source }).map(item => item.message))
+      .toContain(`exclusive authority module must use named runtime imports: ./${module}.js`);
   });
 
   it.each([

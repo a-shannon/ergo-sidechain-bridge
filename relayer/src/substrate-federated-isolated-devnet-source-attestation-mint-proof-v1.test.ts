@@ -8,6 +8,13 @@ const mocks = vi.hoisted(() => ({
   launchStatements: new WeakSet<object>(),
   nativeDraftInputs: new WeakMap<object, Readonly<Record<string, object>>>(),
   nativeContexts: new WeakMap<object, Readonly<{ target: object; context: object }>>(),
+  nativeRetainedTargets: new WeakMap<object, object>(),
+  nativePacketProvenance: new WeakMap<object, Readonly<{
+    batch: object;
+    target: object;
+    originalSetupTarget: object;
+    previousPacket: object | null;
+  }>>(),
   nativeTargets: new WeakMap<object, object>(),
   nativeSourceContexts: new WeakMap<object, Readonly<{
     candidate: Readonly<Record<string, unknown>>;
@@ -105,6 +112,44 @@ vi.mock(
           }
           return retained.context;
         }),
+      getSubstrateFederatedNativeGenesisRetainedAttestationContextV1:
+        vi.fn((batch: object, target: object) => {
+          const retained = mocks.nativeContexts.get(batch);
+          if (retained === undefined || mocks.nativeRetainedTargets.get(batch) !== target) {
+            throw new Error('native retained attestation context lacks boundary provenance');
+          }
+          return retained.context;
+        }),
+    };
+  },
+);
+
+vi.mock(
+  './substrate-federated-isolated-devnet-peg-in-candidate-v2.js',
+  async importOriginal => {
+    const actual = await importOriginal<
+      typeof import('./substrate-federated-isolated-devnet-peg-in-candidate-v2.js')
+    >();
+    return {
+      ...actual,
+      getSubstrateFederatedNativeGenesisPegInAttestationProvenanceV1:
+        vi.fn((packet: object, batch: object, target: object) => {
+          const retained = mocks.nativePacketProvenance.get(packet);
+          if (retained === undefined || retained.batch !== batch || retained.target !== target) {
+            throw new Error('native FED peg-in packet lacks exact process provenance');
+          }
+          return Object.freeze({ originalSetupTarget: retained.originalSetupTarget,
+            previousPacket: retained.previousPacket });
+        }),
+      assertSubstrateFederatedNativeGenesisPegInReadCustodyV1:
+        vi.fn((packet: object, batch: object, target: object) => {
+          const retained = mocks.nativePacketProvenance.get(packet);
+          if (retained === undefined || retained.batch !== batch
+            || retained.originalSetupTarget !== target || retained.previousPacket !== null) {
+            throw new Error('native FED peg-in packet lacks exact retained read custody');
+          }
+          return packet;
+        }),
     };
   },
 );
@@ -179,6 +224,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetCheckpointAttestationReceiptV1Provenance,
   assertSubstrateFederatedIsolatedDevnetMintSourceProofReceiptV1Provenance,
   assertSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1,
+  assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1,
   assertSubstrateFederatedNativeGenesisMintSourceProofReceiptForOperationV1,
   assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
   createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV1,
@@ -781,6 +827,194 @@ describe('isolated-devnet synthetic FED-1 mint source-proof production', () => {
     }
   });
 
+  it('pairs one live continuation proof with the exact completed original checkpoint and packet', () => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 30);
+      const currentFixture = nativeContinuationOperationInput(session, 31, first.fixture);
+      const currentOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      const currentProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        currentOperation,
+        currentFixture.input as never,
+      );
+      const paired = assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+        currentProof,
+        currentOperation,
+        currentFixture.draft as never,
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      );
+      expect(paired.currentTarget).toBe(currentFixture.input.draftInputs.target);
+      expect(paired.originalSetupTarget).toBe(first.fixture.input.draftInputs.target);
+      expect(paired.candidate).toBe(mocks.nativeSourceContexts.get(session)!.candidate);
+      expect(paired.application).toBe(mocks.nativeSourceContexts.get(session)!.application);
+      expect(() => produceSubstrateFederatedNativeGenesisCheckpointAttestationForOperationV1(
+        currentOperation,
+        nativeCheckpointInput(currentProof, 31) as never,
+      )).not.toThrow();
+      currentOperation.dispose();
+      first.operation.dispose();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it.each([
+    ['copied proof', 'proof'],
+    ['foreign operation', 'operation'],
+    ['foreign draft', 'draft'],
+    ['copied checkpoint', 'checkpoint'],
+  ] as const)('rejects a %s without weakening the paired continuation', (_label, fault) => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 32);
+      const currentFixture = nativeContinuationOperationInput(session, 33, first.fixture);
+      const currentOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      const currentProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        currentOperation,
+        currentFixture.input as never,
+      );
+      expect(() => assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+        fault === 'proof' ? { ...currentProof } : currentProof,
+        fault === 'operation' ? first.operation : currentOperation,
+        fault === 'draft' ? first.fixture.draft as never : currentFixture.draft as never,
+        fault === 'checkpoint' ? { ...first.checkpoint } : first.checkpoint,
+        first.operation,
+        first.proof,
+      )).toThrow(/operation\/draft provenance|completed original checkpoint/u);
+      expect(() => assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+        currentProof,
+        currentOperation,
+        currentFixture.draft as never,
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      )).not.toThrow();
+      currentOperation.dispose();
+      first.operation.dispose();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('rejects wrong original and previous-packet ancestry without consuming a fresh operation', () => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 34);
+      const currentOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      const wrongParent = nativeContinuationOperationInput(session, 35, first.fixture, {
+        originalSetupTarget: Object.freeze({ role: 'foreign-original-target' }),
+      });
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        currentOperation,
+        wrongParent.input as never,
+      )).toThrow(/different retained genesis or application/u);
+
+      const wrongPacket = nativeContinuationOperationInput(session, 36, first.fixture, {
+        previousPacket: Object.freeze({ role: 'foreign-previous-packet' }),
+      });
+      const currentProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        currentOperation,
+        wrongPacket.input as never,
+      );
+      expect(() => assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+        currentProof,
+        currentOperation,
+        wrongPacket.draft as never,
+        first.checkpoint,
+        first.operation,
+        first.proof,
+      )).toThrow(/exact original packet lineage/u);
+      currentOperation.dispose();
+      first.operation.dispose();
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it.each(['previous', 'current', 'parent'] as const)(
+    'rejects isolated %s custody disposal in a paired continuation', fault => {
+    const session = sessionV2();
+    try {
+      const first = completeNativeOperation(session, 37);
+      const currentFixture = nativeContinuationOperationInput(session, 38, first.fixture);
+      const currentOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(session);
+      const currentProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        currentOperation,
+        currentFixture.input as never,
+      );
+      if (fault === 'previous') first.operation.dispose();
+      else if (fault === 'current') currentOperation.dispose();
+      else session.dispose();
+      expect(() => assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+        currentProof, currentOperation, currentFixture.draft as never,
+        first.checkpoint, first.operation, first.proof,
+      )).toThrow(/operation is disposed|session is disposed/u);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('rejects a live previous proof whose own checkpoint is not complete', () => {
+    const incompleteSession = sessionV2();
+    const currentSession = sessionV2();
+    try {
+      const incompleteFixture = nativeOperationInput(incompleteSession, 41);
+      const incompleteOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(incompleteSession);
+      const incompleteProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        incompleteOperation,
+        incompleteFixture.input as never,
+      );
+
+      const completed = completeNativeOperation(currentSession, 42);
+      const currentFixture = nativeContinuationOperationInput(currentSession, 43, completed.fixture);
+      const currentOperation =
+        createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(currentSession);
+      const currentProof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(
+        currentOperation,
+        currentFixture.input as never,
+      );
+      expect(() => assertSubstrateFederatedNativeGenesisContinuationMintSourceProofPairV1(
+        currentProof,
+        currentOperation,
+        currentFixture.draft as never,
+        completed.checkpoint,
+        incompleteOperation,
+        incompleteProof,
+      )).toThrow(/completed original checkpoint/u);
+      incompleteOperation.dispose();
+      currentOperation.dispose();
+      completed.operation.dispose();
+    } finally {
+      incompleteSession.dispose();
+      currentSession.dispose();
+    }
+  });
+
+  it('keeps the legacy route on the original full-action context and rejects continuation packets', () => {
+    const session = sessionV2();
+    try {
+      const original = nativeOperationInput(session, 39);
+      const continuation = nativeContinuationOperationInput(session, 40, original);
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofV1(
+        session,
+        continuation.input as never,
+      )).toThrow(/continuation source proof requires an explicit operation/u);
+      expect(() => produceSubstrateFederatedNativeGenesisMintSourceProofV1(
+        session,
+        original.input as never,
+      )).not.toThrow();
+    } finally {
+      session.dispose();
+    }
+  });
+
   it.each([
     ['target identity', { foreignTarget: true }],
     ['candidate identity', { cloneCandidate: true }],
@@ -1354,6 +1588,13 @@ function nativeOperationInput(
   });
   const draftInputs = Object.freeze({ batch, target, packet, committedVaultObservation });
   mocks.nativeDraftInputs.set(draft, draftInputs);
+  mocks.nativeRetainedTargets.set(batch, target);
+  mocks.nativePacketProvenance.set(packet, Object.freeze({
+    batch,
+    target,
+    originalSetupTarget: target,
+    previousPacket: null,
+  }));
   let retainedSourceContext = mocks.nativeSourceContexts.get(session);
   if (retainedSourceContext === undefined) {
     const candidate = {
@@ -1432,6 +1673,26 @@ function nativeCheckpointInput(proof: object, variant: number) {
       admissionExpiresAtErgoHeight: String(2064 + variant * 100),
     }),
   });
+}
+
+function nativeContinuationOperationInput(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>,
+  variant: number,
+  previousFixture: ReturnType<typeof nativeOperationInput>,
+  overrides: Readonly<{ originalSetupTarget?: object; previousPacket?: object }> = {},
+) {
+  const fixture = nativeOperationInput(session, variant, { foreignTarget: true });
+  const { batch, target, packet } = fixture.input.draftInputs;
+  const originalSetupTarget = overrides.originalSetupTarget
+    ?? previousFixture.input.draftInputs.target;
+  mocks.nativeRetainedTargets.set(batch, originalSetupTarget);
+  mocks.nativePacketProvenance.set(packet, Object.freeze({
+    batch,
+    target,
+    originalSetupTarget,
+    previousPacket: overrides.previousPacket ?? previousFixture.input.draftInputs.packet,
+  }));
+  return fixture;
 }
 
 function completeNativeOperation(
