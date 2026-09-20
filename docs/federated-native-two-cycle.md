@@ -20,8 +20,14 @@ by the existing builders. The campaign does not install missing prerequisites.
 
 The committed locks define the expected identities:
 
-- `sources/authenticated-v2-compiler-lock.json`: Node 24.14.0 and the installed
-  TSX runtime packages, plus the authenticated compiler's dependencies.
+- `sources/authenticated-v2-compiler-lock.json`: Node 24.14.0, pinned Git and
+  the authenticated compiler's project and historical consensus binding.
+- `sources/authenticated-v2-runtime-bundle-build-lock-v2.json`: the current
+  package-lock and three installed TSX/esbuild package directories. The campaign
+  consumes these loader pins with the compiler's Node 24.14.0 host; the separate
+  bundle-build command still requires this lock's Node 24.18.1 host.
+- `sources/substrate-federated-tracker-compiler-lock-v1.json`: the FED JVM
+  compiler, dependencies and Node 24.14.0 host used by genesis materialization.
 - `sources/native-verifier-toolchain-lock.json`: the native Rust and Git tools.
 - `sources/substrate-federated-authority-safe-devnet-protoc-lock-v1.json`:
   the native build's protobuf compiler.

@@ -7,8 +7,8 @@ import { delimiter, dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
-  validatePinnedAuthenticatedV2ParentRuntime,
-} from '../authenticated-v2-source-tree-conformance.js';
+  validatePinnedFederatedCampaignParentRuntime,
+} from '../authenticated-v2-runtime-bundle.js';
 import {
   canonicalPathIdentity,
   readBoundedRegularFile,
@@ -106,7 +106,7 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
     startPublished = true;
 
     const runtimeImmediatelyBeforeLaunch =
-      validatePinnedAuthenticatedV2ParentRuntime(initial.config.bridgeRoot);
+      validatePinnedFederatedCampaignParentRuntime(initial.config.bridgeRoot);
     if (
       runtimeImmediatelyBeforeLaunch.nodeExecutableSha256
         !== environmentBefore.runtime.nodeExecutableSha256

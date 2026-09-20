@@ -46,6 +46,15 @@ review. The command has not yet completed a two-cycle node campaign. Its TSX
 bootstrap, trusted host/cache assumptions and synthetic profile are explicit;
 operator recovery, separate-context reproduction and release acceptance remain open.
 
+The initial real preflight rejected the historical compiler's package-lock pin
+before creating an attempt. The campaign now joins the historical Node 24.14.0
+and Git/compiler-project checks with the current three-package TSX loader pins.
+Both invocation preflight and the immediate pre-spawn check use that fixed
+composition. The historical full compiler validator and the separate Node
+24.18.1 bundle-build validator retain their own runtime requirements; their lock
+files are unchanged. A read-only check of the composed runtime passed. Full
+clean-candidate environment admission and the fresh node campaign remain due.
+
 An explicit retained-withdrawal branch now keeps the original setup signer for
 the second deposit. Its builder requires the original successfully confirmed
 payout attempt and check, verifies the durable confirmation and reobserves the

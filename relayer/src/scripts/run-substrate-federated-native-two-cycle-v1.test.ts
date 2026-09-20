@@ -20,8 +20,8 @@ const mocked = vi.hoisted(() => ({
   runtime: vi.fn(),
 }));
 
-vi.mock('../authenticated-v2-source-tree-conformance.js', () => ({
-  validatePinnedAuthenticatedV2ParentRuntime: mocked.runtime,
+vi.mock('../authenticated-v2-runtime-bundle.js', () => ({
+  validatePinnedFederatedCampaignParentRuntime: mocked.runtime,
 }));
 vi.mock('../pinned-local-native-verifier-build.js', () => ({
   runBoundedProcess: mocked.process,

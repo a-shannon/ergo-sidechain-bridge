@@ -15,10 +15,10 @@ import {
   resolve,
 } from 'node:path';
 
+import type { VerifiedParentRuntime } from './authenticated-v2-source-tree-conformance.js';
 import {
-  validatePinnedAuthenticatedV2ParentRuntime,
-  type VerifiedParentRuntime,
-} from './authenticated-v2-source-tree-conformance.js';
+  validatePinnedFederatedCampaignParentRuntime,
+} from './authenticated-v2-runtime-bundle.js';
 import {
   resolveBridgeRepositoryRootsFromCheckoutLayout,
 } from './bridge-repository-layout.js';
@@ -391,7 +391,7 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
   invocation: Readonly<LoadedSubstrateFederatedNativeTwoCycleInvocationV1>,
 ): Promise<Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>> {
   revalidateLoadedInvocation(invocation);
-  const runtime = validatePinnedAuthenticatedV2ParentRuntime(
+  const runtime = validatePinnedFederatedCampaignParentRuntime(
     invocation.config.bridgeRoot,
   );
   if (
