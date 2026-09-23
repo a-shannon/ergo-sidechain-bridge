@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-19
+Updated: 2026-09-23
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,8 +28,17 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** run one fresh complete campaign through the repository invocation for
-the composed two-cycle root. The second
+**Now:** diagnose the terminal execution failure from the first repository-owned
+two-cycle campaign before admitting another fresh attempt. Campaign 24 passed
+clean-candidate environment admission at `5b901fdd7a8f64a4420a7847ecf6f5235f4abeb5`
+but returned `two_cycle_invocation_failed`, classified as `execution_failure`.
+Its post-failure identity check passed; the bounded receipt does not expose the
+underlying cause or establish root cleanup. No successful result was produced.
+The original process session is no longer available, and a later host check found
+no campaign processes or target listeners. Preserve the consumed attempt; do not
+retry it or treat process absence as proof of custody disposal.
+
+The composed two-cycle root remains the next runtime milestone. The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
 payout and both replay histories. Confirm both new external fee inputs before
@@ -52,8 +61,9 @@ and Git/compiler-project checks with the current three-package TSX loader pins.
 Both invocation preflight and the immediate pre-spawn check use that fixed
 composition. The historical full compiler validator and the separate Node
 24.18.1 bundle-build validator retain their own runtime requirements; their lock
-files are unchanged. A read-only check of the composed runtime passed. Full
-clean-candidate environment admission and the fresh node campaign remain due.
+files are unchanged. The composed runtime and full clean-candidate environment
+admission passed before Campaign 24. Successful two-cycle node execution remains
+due; the campaign failure does not establish that acceptance.
 
 An explicit retained-withdrawal branch now keeps the original setup signer for
 the second deposit. Its builder requires the original successfully confirmed
@@ -515,7 +525,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Two-cycle invocation -> fresh chain | Run the repository command once with a clean exact candidate, keeping both node groups and original custody alive through two confirmed returns | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse ambiguous attempts |
+| **Now** | Two-cycle invocation -> fresh chain | Diagnose Campaign 24's terminal failure, then admit a distinct fresh campaign only after the deciding defect is resolved | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |

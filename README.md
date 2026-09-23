@@ -25,7 +25,9 @@ in these tests leave full two-cycle node acceptance pending.
 The repository provides a fixed [local two-cycle command](docs/federated-native-two-cycle.md)
 with exact source/runtime checks, a fresh consumed attempt and contained worker
 cleanup. Its invocation boundaries pass focused tests and independent review;
-the complete two-cycle node campaign remains pending.
+the complete two-cycle node campaign remains pending. The first run of this
+command passed environment admission but ended with an execution-failure receipt.
+The consumed attempt is retained; no successful two-cycle result is claimed.
 
 Campaign 23 completed the native two-way path in one disposable custody
 session. Both local Ergo nodes agreed on the payout, remaining reserve and

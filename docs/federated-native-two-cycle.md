@@ -119,3 +119,16 @@ failure and establish that its processes and listeners are no longer owned.
 The campaign does not implement restart, database-loss or reorg recovery. Those
 cases must be exercised separately against accumulated state before the wider
 FED delivery can be considered complete.
+
+## Observed campaign status
+
+Campaign 24 invoked this command at
+`5b901fdd7a8f64a4420a7847ecf6f5235f4abeb5` after clean-candidate environment
+admission passed. It produced `two_cycle_invocation_failed` with failure class
+`execution_failure` and a passing post-failure identity check. The terminal
+receipt digest is
+`a7bcbcb1ac14ac3e351dbee2c95f291524be454bab91716ea54684c0136e40d6`.
+No successful two-cycle result was produced. The bounded receipt intentionally
+omits the raw cause and does not establish root cleanup or custody disposal.
+Diagnose that failure before a distinct fresh campaign; the retained attempt
+must never be resumed or retried.
