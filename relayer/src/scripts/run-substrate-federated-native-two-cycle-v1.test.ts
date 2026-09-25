@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -93,16 +94,17 @@ describe('native two-cycle parent and worker V1', () => {
     expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(false);
     expect(mocked.process).toHaveBeenCalledOnce();
     const processInput = mocked.process.mock.calls[0]?.[0];
+    const canonicalAttemptPath = realpathSync.native(fixture.attemptPath);
     expect(processInput.executablePath).toBe(process.execPath);
     expect(processInput.args).toEqual([
       ...process.execArgv,
       expect.stringMatching(/run-substrate-federated-native-two-cycle-worker-v1\.ts$/u),
       '--config',
-      join(fixture.attemptPath, 'config.json'),
+      join(canonicalAttemptPath, 'config.json'),
       '--expected-config-sha256',
       fixture.loaded.configSha256Hex,
       '--attempt',
-      fixture.attemptPath,
+      canonicalAttemptPath,
     ]);
     expect(processInput.env.NODE_OPTIONS).toBeUndefined();
     expect(processInput.env.NODE_PATH).toBeUndefined();
