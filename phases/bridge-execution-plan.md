@@ -28,16 +28,19 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** restore the exact-head validation gate before doing any new runtime
-attempt. Hosted run `35890848092`
-([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/35890848092))
-for `5d0022d36c936b83cf2964b46914654dcd1c6492` passed the Solidity dependency
-audit and pinned-source rebuild, but its public-audit candidate gate failed: the
-focused `run-substrate-federated-native-two-cycle-v1.test.ts` suite reported
-10 failed tests out of 18 plus an unhandled identity-change error. This is a
-current clean-checkout/public-validation blocker. It is not evidence that the
-opaque Campaign 24 runtime cause is known. Do not create Campaign 25 while this
-exact head is red, pending, or pointed at a different commit.
+**Now:** wait for the exact-head validation gate before doing any new runtime
+attempt. The promoted candidate is `165ee86dc3aec681b8850221eeef370b202060a1`.
+Hosted run `36127841139`
+([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36127841139))
+matches that head. Its Solidity dependency audit and pinned Frontier/Ergo
+rebuild are green; the public-audit candidate gate is still pending. Treat a
+pending or non-matching run as a hard stop. Do not create Campaign 25 until
+this exact run is terminal and all required jobs are green.
+
+The preceding red run `35890848092` remains historical diagnosis only. It
+reported 10 failures out of 18 plus an unhandled identity-change error in the
+focused `run-substrate-federated-native-two-cycle-v1.test.ts` suite. The fix is
+already in the promoted candidate; do not use the old run as current evidence.
 
 The first diagnosis batch identified a test-isolation defect: the five
 parameterized identity cases consumed one-time mock implementations left by a
@@ -72,8 +75,8 @@ make Campaign 24 successful, and a successful campaign does not waive the
 recovery or independent-custody obligations.
 
 Run `35890848092` is historical evidence for published parent
-`5d0022d36c936b83cf2964b46914654dcd1c6492` only. It cannot validate local
-any local or later head. Do not start a campaign on a local or otherwise
+`5d0022d36c936b83cf2964b46914654dcd1c6492` only. It cannot validate the current
+candidate or any later head. Do not start a campaign on a local or otherwise
 unpromoted head. After any guarded promotion,
 require a new terminal all-required-jobs-green run for that exact commit before
 campaign admission; a historical run is never a substitute.
@@ -640,6 +643,25 @@ handoff at the deciding milestone; and stop at the stated gate. Reuse a green
 validation result only while its transitive inputs and deciding external state
 are unchanged. The main owner performs the final diff review, closeout gates,
 staging and commit decision.
+
+### Cheaper-model decision gate
+
+Use these states in order; never skip forward because a previous attempt looked
+similar:
+
+| Observed state | Permitted next action | Mandatory stop condition |
+|---|---|---|
+| Exact CI pending or head mismatch | Read-only status inspection and handoff update | No source edit, campaign, retry, push or readiness claim |
+| Exact CI terminal-green | Run the pinned runtime-composition and clean-candidate admission preflight | Stop on any alias, lock, tool, path, loader or package drift |
+| Preflight green; Campaign 24 consumed | Perform one bounded source/receipt diagnosis of Campaign 24 | Stop if evidence is absent or would require private runtime access, custody inference or transport retry |
+| CI, preflight and diagnosis gates closed | Prepare exactly one fresh Campaign 25 admission with unique identity and fresh custody | Stop before admission if any input, fee, key, target, process, cleanup or terminal artifact is ambiguous |
+
+The Campaign 24 diagnosis gate has two valid outcomes: a bounded
+source-supported explanation, or an explicit `unknown` classification that
+preserves the consumed attempt and adds the uncertainty to Campaign 25's fresh
+evidence contract. Neither outcome permits reuse of Campaign 24 state. After
+the fresh campaign, return to the same gate; do not combine recovery, operator
+packaging or FED-7 release mapping into the campaign batch.
 
 Prepare the operator entry point and reviewer onboarding alongside successor
 work where file ownership is disjoint. Packaging is complete only after it
