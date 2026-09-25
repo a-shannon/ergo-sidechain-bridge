@@ -39,6 +39,15 @@ current clean-checkout/public-validation blocker. It is not evidence that the
 opaque Campaign 24 runtime cause is known. Do not create Campaign 25 while this
 exact head is red, pending, or pointed at a different commit.
 
+The first diagnosis batch identified a test-isolation defect: the five
+parameterized identity cases consumed one-time mock implementations left by a
+previous case, which shifted the expected errors and produced the unhandled
+attempt-directory identity rejection. Replacing `vi.clearAllMocks()` with
+`vi.resetAllMocks()` in the focused test file makes the boundary explicit; the
+file passes 18/18 locally under Vitest 3.2.7 and the workspace Node 24 runtime.
+This local result does not close the hosted Node 24.14 gate; a new exact-head CI
+run remains required after guarded promotion.
+
 Campaign 24 passed clean-candidate environment admission at
 `5b901fdd7a8f64a4420a7847ecf6f5235f4abeb5` but returned
 `two_cycle_invocation_failed`, classified as `execution_failure`. Its
@@ -64,8 +73,8 @@ recovery or independent-custody obligations.
 
 Run `35890848092` is historical evidence for published parent
 `5d0022d36c936b83cf2964b46914654dcd1c6492` only. It cannot validate local
-`d73c91b58dbe241477a6c72e020d29eef82645cd` or any later head. Do not start a
-campaign on a local or otherwise unpromoted head. After any guarded promotion,
+any local or later head. Do not start a campaign on a local or otherwise
+unpromoted head. After any guarded promotion,
 require a new terminal all-required-jobs-green run for that exact commit before
 campaign admission; a historical run is never a substitute.
 
