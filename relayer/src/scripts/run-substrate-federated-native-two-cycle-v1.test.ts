@@ -51,7 +51,7 @@ import {
 const temporaryRoots: string[] = [];
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
 });
 
 afterEach(() => {
