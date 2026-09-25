@@ -529,6 +529,24 @@ describe('native source-lock output observation (mocked packet custody, confirma
       expect(consume).toThrow('continuation target provenance changed');
     });
 
+  it.each(['active', 'disposed'] as const)(
+    'checks %s packet custody before a forged native observation getter', async custody => {
+      const original = await observe(input());
+      const getter = vi.fn(() => original.observationDigestHex);
+      const forged = { ...original };
+      Object.defineProperty(forged, 'observationDigestHex', { enumerable: true, get: getter });
+      if (custody === 'disposed') {
+        nativeCustody.mockImplementation(() => { throw new Error('native custody disposed'); });
+      }
+      mocks.assertReadCustody.mockClear();
+      mocks.assertNativePacket.mockClear();
+      expect(() => assertBound(forged)).toThrow(custody === 'disposed'
+        ? 'native custody disposed' : 'native source-lock output observation lacks exact packet and batch provenance');
+      expect(mocks.assertReadCustody).toHaveBeenCalledExactlyOnceWith(packet, batch, TARGET);
+      expect(mocks.assertNativePacket).not.toHaveBeenCalled();
+      expect(getter).not.toHaveBeenCalled();
+    });
+
   it.each(['copy', 'proxy', 'absent', 'absent target', 'foreign target', 'getter'] as const)(
     'keeps direct target validation before inspecting a %s observation', async fault => {
       const original = await observe(input());

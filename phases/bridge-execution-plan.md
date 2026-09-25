@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-25
+Updated: 2026-09-26
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,26 +28,28 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** wait for the exact-head validation gate before doing any new runtime
-attempt. The promoted candidate is `57df86708bd91a2d9e27870001e3ea492b6272dc`.
-Hosted run `36149455802`
-([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36149455802))
-matches that head and is currently in progress. All three required jobs are
-still pending or running; treat a pending, failed, cancelled or non-matching
-run as a hard stop. Do not create Campaign 25 until this exact run is terminal
-and all required jobs are green.
+**Now:** the exact-head run `36149769755`
+([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36149769755))
+matched `c196c7fce0b053802fcfc8ec308ab1a25648540b` and failed its public-audit
+gate on the disposed-custody/forged-observation ordering case. The correction
+checks the native observation's retained identity before inspecting its fields.
+An invalid observation rechecks packet read custody, including continuation
+ancestry, then rejects. An authentic observation keeps the existing complete
+packet and current-target validation. Original setup custody and the descendant
+target remain distinct; a setup-target equality check at the shared vault entry
+would reject the valid second cycle.
+Local validation passed: 185 observer cases, 427 native setup cases, 73
+withdrawal-continuation cases and 127 publication/broadcast cases, plus
+TypeScript and import checks. Tests use the repository's existing Windows
+timeout policy. Independent review of the final source found no blocker.
+Require a new terminal hosted run on the promoted correction's exact head.
+Treat pending, failed, cancelled or non-matching CI
+as a hard stop. Do not create Campaign 25 until all required jobs are green.
 
-The immediately preceding run `36140626169` on `27dfc6421ada4eb96d7805f4e42d5109f70acd3c`
-was terminal failed only because the focused Windows test compared a raw
-temporary-path spelling with the canonical path returned by the implementation.
-The test-only correction now compares `realpathSync.native(fixture.attemptPath)`;
-the focused file passes 18/18 locally and TypeScript passes. This hosted run is
-the only current validation evidence for the promoted correction.
-
-The preceding red run `35890848092` remains historical diagnosis only. It
-reported 10 failures out of 18 plus an unhandled identity-change error in the
-focused `run-substrate-federated-native-two-cycle-v1.test.ts` suite. The fix is
-already in the promoted candidate; do not use the old run as current evidence.
+Failed run `36149455802` on `57df86708bd91a2d9e27870001e3ea492b6272dc` remains historical
+for the earlier Windows path correction. It cannot validate the new custody
+ordering fix. Run `36140626169` and the older `35890848092` remain historical
+diagnosis only.
 
 The first diagnosis batch identified a test-isolation defect: the five
 parameterized identity cases consumed one-time mock implementations left by a
@@ -611,7 +613,7 @@ existing task handoff.
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
-| Exact-head CI restoration | The published candidate passes the public-audit gate on the exact commit, with the failure order and identity fixtures stable in a clean checkout | Reproduce only the 10 failing focused cases and the unhandled identity-change path; inspect the invocation/worker boundary and mock isolation; change no lock, domain, quorum, custody or key-destruction rule; run the affected checks, publication guards and independent review before waiting on hosted CI |
+| Exact-head CI restoration | The published candidate passes the public-audit gate on the exact commit, preserving disposed-custody ordering and the descendant-target continuation | Validate the native source-lock observation assertion and both native setup/withdrawal-continuation consumers; preserve the existing Windows timeout, locks, domains, quorum and key-destruction rules; run affected checks, publication guards and independent review before waiting on hosted CI |
 | Runtime composition and admission preflight | The loader/parent join and the full clean-candidate admission pass under the exact pinned Node/compiler/package/Git inputs, with both historical locks unchanged | Run the focused joined-runtime and environment validators only; reject aliases or drift; do not switch the whole root to Node 24.18, rewrite the historical compiler lock, or claim unchanged evidence after a runtime change |
 | Campaign 24 failure diagnosis | The consumed attempt has a bounded, source-supported explanation or is explicitly retained as unknown without unsafe inference | Read only the terminal public receipt and source path; do not recover absent logs, inspect private runtime state, resume, retry or add a diagnostic that changes custody semantics. If the cause cannot be recovered safely, carry the uncertainty into Campaign 25's fresh evidence contract |
 | Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation, with separately scoped operation authority, custody lifetime, nonce and parent binding | Focused composed positives and isolated replay, disposed-handle, foreign-operation/profile, wrong-parent, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |

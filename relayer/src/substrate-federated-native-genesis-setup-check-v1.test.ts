@@ -2547,7 +2547,7 @@ describe('native FED managed setup session', () => {
         if (fault === 'target clone') changed.target = { ...input.target };
         if (fault === 'source observation clone') changed.sourceLockObservation = { ...input.sourceLockObservation };
         if (fault === 'disposed') session.dispose();
-        await expect(executeNativeVault(changed)).rejects.toThrow(/provenance|inactive/);
+        await expect(executeNativeVault(changed)).rejects.toThrow(/provenance|inactive|retained read custody/);
         expect(post).toHaveBeenCalledTimes(1); expect(helpers.ncheck).toHaveBeenCalledTimes(4);
       });
     });

@@ -407,11 +407,15 @@ export function assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObserv
   batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>,
   packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,
 ): Readonly<SubstrateFederatedPooledReserveDepositV2Packet> {
-  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, target);
   const material = OBSERVATIONS.get(observation);
-  if (material?.assertNativePacket === undefined || material.batch !== batch || material.packet !== packet) {
+  if (material?.assertNativePacket === undefined || material.target !== target
+    || material.batch !== batch || material.packet !== packet) {
+    // Reject revoked packet custody before inspecting any unregistered observation.
+    // The packet owner resolves continuation custody against the original setup target.
+    assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(packet, batch, target);
     throw new Error('native source-lock output observation lacks exact packet and batch provenance');
   }
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(observation, target);
   return packet;
 }
 
