@@ -29,9 +29,9 @@ the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
 **Now:** wait for the exact-head validation gate before doing any new runtime
-attempt. The promoted candidate is `165ee86dc3aec681b8850221eeef370b202060a1`.
-Hosted run `36127841139`
-([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36127841139))
+attempt. The promoted candidate is `7ff6f2b3ecb2328ea335b093db8edd28d9f094a4`.
+Hosted run `36135420339`
+([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36135420339))
 matches that head. Its Solidity dependency audit and pinned Frontier/Ergo
 rebuild are green; the public-audit candidate gate is still pending. Treat a
 pending or non-matching run as a hard stop. Do not create Campaign 25 until
