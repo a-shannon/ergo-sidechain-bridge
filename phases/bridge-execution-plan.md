@@ -29,13 +29,20 @@ the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
 **Now:** wait for the exact-head validation gate before doing any new runtime
-attempt. The promoted candidate is `7ff6f2b3ecb2328ea335b093db8edd28d9f094a4`.
-Hosted run `36135420339`
-([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36135420339))
-matches that head. Its Solidity dependency audit and pinned Frontier/Ergo
-rebuild are green; the public-audit candidate gate is still pending. Treat a
-pending or non-matching run as a hard stop. Do not create Campaign 25 until
-this exact run is terminal and all required jobs are green.
+attempt. The promoted candidate is `57df86708bd91a2d9e27870001e3ea492b6272dc`.
+Hosted run `36149455802`
+([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36149455802))
+matches that head and is currently in progress. All three required jobs are
+still pending or running; treat a pending, failed, cancelled or non-matching
+run as a hard stop. Do not create Campaign 25 until this exact run is terminal
+and all required jobs are green.
+
+The immediately preceding run `36140626169` on `27dfc6421ada4eb96d7805f4e42d5109f70acd3c`
+was terminal failed only because the focused Windows test compared a raw
+temporary-path spelling with the canonical path returned by the implementation.
+The test-only correction now compares `realpathSync.native(fixture.attemptPath)`;
+the focused file passes 18/18 locally and TypeScript passes. This hosted run is
+the only current validation evidence for the promoted correction.
 
 The preceding red run `35890848092` remains historical diagnosis only. It
 reported 10 failures out of 18 plus an unhandled identity-change error in the
