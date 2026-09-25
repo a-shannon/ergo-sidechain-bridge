@@ -427,10 +427,12 @@ function createAttemptDirectory(path: string): string {
   mkdirSync(path, { recursive: false, mode: 0o700 });
   const status = lstatSync(path);
   const canonical = realpathSync.native(path);
+  const canonicalParent = realpathSync.native(dirname(path));
+  const expectedCanonical = join(canonicalParent, parse(path).base);
   if (
     !status.isDirectory()
     || status.isSymbolicLink()
-    || canonicalPathIdentity(canonical) !== canonicalPathIdentity(path)
+    || canonicalPathIdentity(canonical) !== canonicalPathIdentity(expectedCanonical)
   ) throw new Error('native two-cycle attempt directory identity changed');
   return canonical;
 }
