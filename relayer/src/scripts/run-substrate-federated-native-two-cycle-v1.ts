@@ -1,4 +1,5 @@
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   realpathSync,
@@ -9,6 +10,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   validatePinnedFederatedCampaignParentRuntime,
 } from '../authenticated-v2-runtime-bundle.js';
+import {
+  createNativeTwoCycleParentFailureDiagnosticV1,
+  parseNativeTwoCycleWorkerFailureDiagnosticV1,
+} from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
 import {
   canonicalPathIdentity,
   readBoundedRegularFile,
@@ -147,6 +152,9 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
     if (worker.stdout !== '' || worker.stderr !== '') {
       throw new Error('native two-cycle worker emitted output');
     }
+    if (existsSync(join(attemptPath, 'worker-failure.json'))) {
+      throw new Error('native two-cycle worker returned contradictory failure evidence');
+    }
     const transport = readWorkerTransport(workerResultPath, initial.configSha256Hex);
     const environmentAfter =
       await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(captured);
@@ -237,6 +245,31 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
           Buffer.from(`${canonicalJson(failure)}\n`, 'utf8'),
           'native two-cycle terminal failure',
         );
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const workerBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-failure.json'),
+            'native two-cycle worker failure diagnostic',
+            16 * 1024,
+          ).bytes;
+          const workerDiagnostic = parseNativeTwoCycleWorkerFailureDiagnosticV1(
+            new TextDecoder('utf-8', { fatal: true }).decode(workerBytes), bindings,
+          );
+          const diagnostic = createNativeTwoCycleParentFailureDiagnosticV1(
+            bindings, failure.receiptDigestHex, workerDiagnostic,
+          );
+          writeNewFile(
+            join(attemptPath, 'failure-diagnostic.json'),
+            Buffer.from(`${canonicalJson(diagnostic)}\n`, 'utf8'),
+            'native two-cycle parent failure diagnostic',
+          );
+        } catch {
+          // Missing or invalid diagnostics cannot alter the terminal failure.
+        }
       } catch {
         // Preserve the original execution failure. A missing failure artifact
         // leaves the create-only start as a permanently ambiguous attempt.

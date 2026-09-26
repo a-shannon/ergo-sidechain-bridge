@@ -109,12 +109,30 @@ Only the parent's terminal artifact determines the invocation outcome:
 | Attempt directory without a valid `start.json` | Preparation failed before worker launch. The occupied attempt remains consumed and must not be reused. |
 | `worker-start.json` | The worker entry is consumed, including when its environment check fails. It cannot be called again for this attempt. |
 | `worker-result.json` | Internal transport from the worker; it is not the parent's completion result. |
+| `worker-failure.json` | Optional bounded diagnostic written after the worker claim. It identifies the last execution stage and, when available, an existing allowlisted source failure phase. It is not a terminal result or cleanup evidence. |
+| `failure-diagnostic.json` | Optional parent sidecar published only after `failure.json`, binding that receipt to a validated worker diagnostic with matching config, commit and path identities. It grants no execution or retry authority. |
+
+The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
+`post-root-identity` and `transport-publication`. A root exception and a cleanup
+exception share one stage because neither alone establishes successful teardown.
+Diagnostics never include the raw error, stack, filesystem paths or custody
+material. Their cleanup-established flag remains false for every stage.
+
+Both diagnostics use separate schemas and digest domains; the existing terminal
+failure format and digest are unchanged. Missing, invalid or unwritable
+diagnostics leave the original failure and consumed attempt intact. A worker
+failure file accompanying an otherwise successful worker result blocks terminal
+success. A digest detects changed bytes under the declared same-user host
+assumption; it is not authentication or independent attestation.
 
 A receipt contains transaction identities and bounded observations, not signing
 or replay authority. Keep the attempt directory and retained build/journal
 artifacts outside Git. Never reuse disposed custody or reconstruct authorization
-from these files. Before a distinct fresh experiment, resolve the previous
-failure and establish that its processes and listeners are no longer owned.
+from these files. Before a distinct fresh experiment, complete a bounded
+diagnosis and verify the new experiment's admission conditions. If the previous
+cause cannot be recovered safely, retain it as unknown and carry that uncertainty
+into the separately reviewed fresh evidence contract. Check for remaining owned
+processes and listeners without treating their absence as custody-disposal proof.
 
 The campaign does not implement restart, database-loss or reorg recovery. Those
 cases must be exercised separately against accumulated state before the wider
@@ -130,5 +148,9 @@ receipt digest is
 `a7bcbcb1ac14ac3e351dbee2c95f291524be454bab91716ea54684c0136e40d6`.
 No successful two-cycle result was produced. The bounded receipt intentionally
 omits the raw cause and does not establish root cleanup or custody disposal.
-Diagnose that failure before a distinct fresh campaign; the retained attempt
-must never be resumed or retried.
+Source review established that the historical worker flattened post-claim
+exceptions into one generic process failure, losing the deciding phase. The
+cause therefore remains unknown. The new diagnostic addresses that information
+loss for future attempts; it does not identify or repair Campaign 24's cause.
+Its retained attempt must never be resumed or retried. Campaign 25 still needs
+green CI on its exact promoted head and a separate fresh admission.

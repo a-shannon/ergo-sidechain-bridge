@@ -28,40 +28,36 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** the exact-head run `36244439571`
-([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36244439571))
-matched `0a7887077ff688f60736b8fa0fd480d41fcee1f2`. The pinned-source rebuild
-and Solidity audit passed; the public-audit gate failed all 16 invocation
-environment tests before their assertions because the temporary fixture paths
-were not canonical. The direct invocation fixture has the same dependency.
-Both fixtures now resolve their temporary root before constructing config
-paths. The production loader still rejects configured aliases and junctions.
-All 31 environment/invocation cases pass locally both with the ordinary
-temporary directory and through a Windows junction; TypeScript also passes.
-The existing configured-junction rejection case remains unchanged.
+**Now:** close the bounded worker-to-parent failure diagnostic before admitting
+Campaign 25. The worker records an allowlisted execution stage after its
+create-only claim; the parent validates the diagnostic and binds a separate
+sidecar to its existing terminal failure receipt. Neither artifact grants
+execution authority or establishes cleanup. Existing terminal formats, digest
+domains, custody rules and the one-attempt hold remain unchanged. The deciding
+checks cover each worker stage, malformed or foreign diagnostics, write failures,
+unchanged terminal bytes and contradictory success/failure evidence.
 
-The previous custody-ordering correction is unchanged. Its 185 observer cases,
-427 native setup cases, 73 withdrawal-continuation cases and 127
-publication/broadcast cases remain reusable, along with its independent source
-review. These local checks do not establish a green hosted run.
-Require independent review of the fixture correction and a new terminal hosted
-run on its exact promoted head.
-Treat pending, failed, cancelled or non-matching CI
-as a hard stop. Do not create Campaign 25 until all required jobs are green.
+The baseline exact-head run `36254159647`
+([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36254159647))
+passed all three required jobs on
+`1e681fe431a3f28b5d8b3b456bdcfdee6a66c32c`: public-audit candidate gate,
+pinned Frontier/Ergo source rebuild and Solidity dependency audit. The canonical
+temporary-fixture correction also passed independent review. The actual
+invocation loader and environment validator then passed local admission on that
+clean baseline with the original Node 24.14 host and current locked TSX loader.
+The preflight created no attempt, custody or node process.
 
-Failed run `36149455802` on `57df86708bd91a2d9e27870001e3ea492b6272dc` remains historical
-for the earlier Windows path correction. It cannot validate the new custody
-ordering fix. Run `36140626169` and the older `35890848092` remain historical
-diagnosis only.
+These checks close the preceding CI and admission blockers for that baseline.
+The diagnostic change requires its own independent review, exact promoted CI
+and fresh admission. Pending, failed, cancelled or non-matching CI stops campaign
+admission. Earlier failed runs remain historical diagnosis only; they cannot
+validate a later head.
 
-The first diagnosis batch identified a test-isolation defect: the five
-parameterized identity cases consumed one-time mock implementations left by a
-previous case, which shifted the expected errors and produced the unhandled
-attempt-directory identity rejection. Replacing `vi.clearAllMocks()` with
-`vi.resetAllMocks()` in the focused test file makes the boundary explicit; the
-file passes 18/18 locally under Vitest 3.2.7 and the workspace Node 24 runtime.
-This local result does not close the hosted Node 24.14 gate; a new exact-head CI
-run remains required after guarded promotion.
+The custody-ordering correction and its 185 observer, 427 native setup,
+73 withdrawal-continuation and 127 publication/broadcast cases are unchanged.
+Reuse that scoped evidence and its review. The current batch changes the
+invocation failure path, so its parent/worker tests and static import guards are
+due; it does not change the root, signing, VM or source-build predicates.
 
 Campaign 24 passed clean-candidate environment admission at
 `5b901fdd7a8f64a4420a7847ecf6f5235f4abeb5` but returned
@@ -73,16 +69,20 @@ no campaign processes or target listeners. Preserve the consumed attempt; do not
 retry it, read its absent private runtime state, or treat process absence as proof
 of custody disposal.
 
-The shortest reliable order is fixed until new evidence changes it: (1) diagnose
-and repair the exact-head CI regression with the smallest boundary-preserving
-change; (2) rerun only the affected local checks, obtain independent review,
-close the exact pinned runtime-composition and admission preflight, and wait for
-all required hosted jobs to pass on that exact promoted head; (3) perform a
-source-bound, non-custodial diagnosis of the Campaign 24 failure without
-reusing its attempt; (4) admit one distinct Campaign 25 only after the CI,
-runtime-preflight and bounded-diagnosis gates are all green; (5) exercise
-recovery and the reproducible operator path after a real two-cycle result; and
-(6) close FED-7 evidence and release review. A CI repair does not retroactively
+The bounded source review found that Campaign 24's worker collapsed every
+post-claim exception into the same generic process failure. Its receipt cannot
+distinguish environment validation, root execution or cleanup, projection,
+post-root identity checks, or result publication. The cause remains `unknown`;
+this source-supported limit closes the historical diagnosis without a causal
+repair or cleanup claim. No private attempt files are needed to reach it.
+
+The shortest reliable order is: (1) close and independently review the bounded
+diagnostic join; (2) publish through the guards, obtain all required hosted jobs
+green on that exact head and repeat only the invalidated admission checks;
+(3) separately admit one fresh Campaign 25 with the historical uncertainty
+explicit, fresh custody and the new diagnostic contract; (4) exercise recovery
+and the reproducible operator path after a real two-cycle result; and (5) close
+FED-7 evidence and release review. A CI repair does not retroactively
 make Campaign 24 successful, and a successful campaign does not waive the
 recovery or independent-custody obligations.
 
@@ -93,10 +93,11 @@ unpromoted head. After any guarded promotion,
 require a new terminal all-required-jobs-green run for that exact commit before
 campaign admission; a historical run is never a substitute.
 
-Campaign 24 diagnosis remains unresolved until a bounded source/config/receipt
-explanation is available. Absence of processes, listeners or private logs never
-closes that diagnosis. If the raw cause cannot be recovered safely, retain the
-attempt as unknown and stop rather than infer cleanup or authorize Campaign 25.
+An `unknown` historical cause ends the bounded investigation; it does not itself
+authorize Campaign 25. Preserve the consumed attempt and stop at the separate
+fresh-admission gate below. Absence of processes, listeners or private logs is
+never evidence of custody disposal. Any ambiguity in the new attempt's inputs,
+owned processes, custody or terminal outcome still stops that attempt.
 
 Once the exact-head CI, runtime-composition/preflight and Campaign 24 diagnosis
 gates are closed, the composed two-cycle root remains the next runtime milestone.
@@ -616,9 +617,9 @@ existing task handoff.
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
-| Exact-head CI restoration | Canonical temporary fixture roots reach the strict invocation loader on Windows, and the published candidate passes the public-audit gate on the exact commit | Validate both environment and invocation suites with ordinary and aliased temporary parents; retain configured-junction rejection and reuse unchanged custody/continuation evidence; run affected checks, publication guards and independent review before waiting on hosted CI |
+| Worker failure diagnostic | A post-claim worker failure reaches the parent as a bounded, identity-bound diagnostic without changing the authoritative failure receipt or authorizing another attempt | Close isolated field/stage negatives and the composed worker-to-parent join; preserve original errors and create-only files; require independent review, guarded promotion and new exact-head CI |
 | Runtime composition and admission preflight | The loader/parent join and the full clean-candidate admission pass under the exact pinned Node/compiler/package/Git inputs, with both historical locks unchanged | Run the focused joined-runtime and environment validators only; reject aliases or drift; do not switch the whole root to Node 24.18, rewrite the historical compiler lock, or claim unchanged evidence after a runtime change |
-| Campaign 24 failure diagnosis | The consumed attempt has a bounded, source-supported explanation or is explicitly retained as unknown without unsafe inference | Read only the terminal public receipt and source path; do not recover absent logs, inspect private runtime state, resume, retry or add a diagnostic that changes custody semantics. If the cause cannot be recovered safely, carry the uncertainty into Campaign 25's fresh evidence contract |
+| Campaign 25 admission | The integration owner admits one fresh attempt after exact CI, runtime preflight and the bounded historical diagnosis close | Carry Campaign 24's unknown cause and unestablished cleanup explicitly; use fresh custody and unique state, verify the new attempt's prerequisites, and preserve all ambiguous-outcome holds. The diagnostic sidecar supplies no admission or cleanup authority |
 | Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation, with separately scoped operation authority, custody lifetime, nonce and parent binding | Focused composed positives and isolated replay, disposed-handle, foreign-operation/profile, wrong-parent, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
 | Reproducible operator delivery | A fresh external context can use repository instructions and the packaged entry point without campaign-specific maintainer scripts | Separate-root exact source/tool/runtime checks, then one distinguishing packaged lifecycle/recovery rehearsal. Reuse the historical campaign only as evidence, never as an execution session |

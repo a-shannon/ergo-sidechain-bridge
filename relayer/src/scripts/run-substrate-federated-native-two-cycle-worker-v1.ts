@@ -8,6 +8,10 @@ import {
 import { readBoundedRegularFile, writeNewFile } from '../create-only-out-of-repository-artifact.js';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import {
+  createNativeTwoCycleWorkerFailureDiagnosticV1,
+  type NativeTwoCycleFailureStageV1,
+} from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
+import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   projectSubstrateFederatedNativeTwoCycleResultV1,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
@@ -56,49 +60,72 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
     Buffer.from(`${canonicalJson({ configSha256Hex: invocation.configSha256Hex })}\n`, 'utf8'),
     'native two-cycle worker claim',
   );
-  const before =
-    await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
-      invocation,
+  let stage: NativeTwoCycleFailureStageV1 = 'pre-root';
+  try {
+    const before =
+      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
+        invocation,
+      );
+    if (before.repository.tree !== parent.expectedBridgeTree
+      || before.toolIdentityDigestHex !== parent.toolIdentityDigestHex) {
+      throw new Error('native two-cycle worker environment differs from parent start');
+    }
+    stage = 'root-or-cleanup';
+    const rootResult = await runSubstrateFederatedGenesisTargetRootV1(
+      invocation.rootInput,
     );
-  if (before.repository.tree !== parent.expectedBridgeTree
-    || before.toolIdentityDigestHex !== parent.toolIdentityDigestHex) {
-    throw new Error('native two-cycle worker environment differs from parent start');
+    stage = 'projection';
+    const result = projectSubstrateFederatedNativeTwoCycleResultV1(rootResult);
+    stage = 'post-root-identity';
+    const after =
+      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
+        invocation,
+      );
+    if (
+      before.repository.commit !== after.repository.commit
+      || before.repository.tree !== after.repository.tree
+      || before.toolIdentityDigestHex !== after.toolIdentityDigestHex
+      || before.runtime.nodeExecutableSha256
+        !== after.runtime.nodeExecutableSha256
+      || before.runtime.relayerPackageLockSha256
+        !== after.runtime.relayerPackageLockSha256
+      || before.runtime.gitExecutableSha256
+        !== after.runtime.gitExecutableSha256
+    ) throw new Error('native two-cycle worker identities changed during execution');
+    const transport = Object.freeze({
+      schema: WORKER_TRANSPORT_SCHEMA,
+      version: 1 as const,
+      status: 'root_completed_and_cleaned' as const,
+      configSha256Hex: invocation.configSha256Hex,
+      bridgeCommit: after.repository.commit,
+      bridgeTree: after.repository.tree,
+      pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+      toolIdentityDigestHex: after.toolIdentityDigestHex,
+      result,
+    });
+    stage = 'transport-publication';
+    writeNewFile(
+      join(invocation.attemptPath, 'worker-result.json'),
+      Buffer.from(`${canonicalJson(transport)}\n`, 'utf8'),
+      'native two-cycle worker transport',
+    );
+  } catch (primaryFailure) {
+    try {
+      const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
+        configSha256Hex: invocation.configSha256Hex,
+        expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+        pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+      }, stage, primaryFailure);
+      writeNewFile(
+        join(invocation.attemptPath, 'worker-failure.json'),
+        Buffer.from(`${canonicalJson(diagnostic)}\n`, 'utf8'),
+        'native two-cycle worker failure diagnostic',
+      );
+    } catch {
+      // Optional diagnostics never replace the failure or release the worker claim.
+    }
+    throw primaryFailure;
   }
-  const rootResult = await runSubstrateFederatedGenesisTargetRootV1(
-    invocation.rootInput,
-  );
-  const result = projectSubstrateFederatedNativeTwoCycleResultV1(rootResult);
-  const after =
-    await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
-      invocation,
-    );
-  if (
-    before.repository.commit !== after.repository.commit
-    || before.repository.tree !== after.repository.tree
-    || before.toolIdentityDigestHex !== after.toolIdentityDigestHex
-    || before.runtime.nodeExecutableSha256
-      !== after.runtime.nodeExecutableSha256
-    || before.runtime.relayerPackageLockSha256
-      !== after.runtime.relayerPackageLockSha256
-    || before.runtime.gitExecutableSha256
-      !== after.runtime.gitExecutableSha256
-  ) throw new Error('native two-cycle worker identities changed during execution');
-  const transport = Object.freeze({
-    schema: WORKER_TRANSPORT_SCHEMA,
-    version: 1 as const,
-    status: 'root_completed_and_cleaned' as const,
-    configSha256Hex: invocation.configSha256Hex,
-    bridgeCommit: after.repository.commit,
-    bridgeTree: after.repository.tree,
-    pathIdentityDigestHex: invocation.pathIdentityDigestHex,
-    toolIdentityDigestHex: after.toolIdentityDigestHex,
-    result,
-  });
-  writeNewFile(
-    join(invocation.attemptPath, 'worker-result.json'),
-    Buffer.from(`${canonicalJson(transport)}\n`, 'utf8'),
-    'native two-cycle worker transport',
-  );
 }
 
 function parseArguments(argv: readonly string[]): Readonly<{

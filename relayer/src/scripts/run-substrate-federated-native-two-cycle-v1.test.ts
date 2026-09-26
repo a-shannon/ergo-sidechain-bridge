@@ -42,6 +42,8 @@ import {
   canonicalJson,
   sha256CanonicalJson,
 } from '../ergo-settlement-core/strict-json.js';
+import { createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1 } from '../relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
+import { createNativeTwoCycleWorkerFailureDiagnosticV1 } from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
 import {
   runSubstrateFederatedNativeTwoCycleFromArguments,
 } from './run-substrate-federated-native-two-cycle-v1.js';
@@ -198,6 +200,110 @@ describe('native two-cycle parent and worker V1', () => {
       .toBe(false);
   });
 
+  it('binds a worker source-phase diagnostic to the unchanged terminal failure receipt', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    const primary = createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+      'source target Frontier build', new Error('private build failure detail'),
+    );
+    mocked.root.mockRejectedValueOnce(primary);
+    mocked.process.mockImplementationOnce(async input => {
+      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(-6));
+      throw new Error('worker unexpectedly completed');
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toBe(primary);
+    const failure = JSON.parse(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'));
+    expect(Object.keys(failure).sort()).toEqual([
+      'boundaries', 'checks', 'configSha256Hex', 'expectedBridgeCommit',
+      'failureClass', 'receiptDigestHex', 'schema', 'status', 'version',
+    ]);
+    expect(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'))
+      .toBe(expectedTerminalFailure(fixture));
+    const worker = JSON.parse(readFileSync(join(fixture.attemptPath, 'worker-failure.json'), 'utf8'));
+    const sidecarText = readFileSync(join(fixture.attemptPath, 'failure-diagnostic.json'), 'utf8');
+    expect(JSON.parse(sidecarText)).toMatchObject({
+      failureReceiptDigestHex: failure.receiptDigestHex,
+      workerFailureReceiptDigestHex: worker.receiptDigestHex,
+      stage: 'root-or-cleanup', sourceFailurePhase: 'source target Frontier build',
+      rootCleanupEstablished: false, rawCausePublished: false,
+    });
+    expect(sidecarText).not.toContain('private');
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    expect(mocked.root).toHaveBeenCalledOnce();
+  });
+
+  it.each(['missing', 'malformed', 'foreign', 'digest', 'oversized'] as const)(
+    'preserves identical terminal failure bytes with a %s diagnostic', async fault => {
+      const fixture = commandFixture();
+      configureParent(fixture, projectedResult());
+      const primary = new Error('worker execution failed');
+      mocked.process.mockImplementationOnce(async () => {
+        const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
+          ...failureBindings(fixture),
+          ...(fault === 'foreign' ? { configSha256Hex: '9'.repeat(64) } : {}),
+        }, 'root-or-cleanup', primary);
+        const text = fault === 'malformed' ? '{}\n'
+          : fault === 'oversized' ? 'x'.repeat(16 * 1024 + 1)
+          : `${canonicalJson(fault === 'digest'
+            ? { ...diagnostic, receiptDigestHex: '0'.repeat(64) } : diagnostic)}\n`;
+        if (fault !== 'missing') writeFileSync(join(fixture.attemptPath, 'worker-failure.json'), text);
+        throw primary;
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+      expect(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'))
+        .toBe(expectedTerminalFailure(fixture));
+      expect(existsSync(join(fixture.attemptPath, 'failure-diagnostic.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    },
+  );
+
+  it.each(['failure.json', 'failure-diagnostic.json'] as const)(
+    'preserves the primary error and existing bytes when %s cannot be published', async occupied => {
+      const fixture = commandFixture();
+      configureParent(fixture, projectedResult());
+      const primary = new Error('worker execution failed');
+      mocked.process.mockImplementationOnce(async () => {
+        const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1(
+          failureBindings(fixture), 'root-or-cleanup', primary,
+        );
+        writeFileSync(join(fixture.attemptPath, 'worker-failure.json'), `${canonicalJson(diagnostic)}\n`);
+        writeFileSync(join(fixture.attemptPath, occupied), 'retained bytes');
+        throw primary;
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+      expect(readFileSync(join(fixture.attemptPath, occupied), 'utf8')).toBe('retained bytes');
+      if (occupied === 'failure.json') {
+        expect(existsSync(join(fixture.attemptPath, 'failure-diagnostic.json'))).toBe(false);
+      } else {
+        expect(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'))
+          .toBe(expectedTerminalFailure(fixture));
+      }
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    },
+  );
+
+  it('rejects contradictory worker success and failure artifacts', async () => {
+    const fixture = commandFixture();
+    const result = projectedResult();
+    configureParent(fixture, result);
+    mocked.process.mockImplementationOnce(async input => {
+      writeWorkerTransport(fixture, result);
+      writeFileSync(join(fixture.attemptPath, 'worker-failure.json'), '{}\n');
+      return cleanProcessResult(input);
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toThrow(/contradictory failure evidence/iu);
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(true);
+  });
+
   it('withholds success when repository identity drifts after worker exit', async () => {
     const fixture = commandFixture();
     configureParent(fixture, projectedResult());
@@ -244,6 +350,72 @@ describe('native two-cycle parent and worker V1', () => {
       'validate', 'root', 'cleanup-complete', 'project', 'validate',
     ]);
     expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(true);
+    expect(existsSync(join(fixture.attemptPath, 'worker-failure.json'))).toBe(false);
+  });
+
+  it.each(['pre-root', 'root-or-cleanup', 'projection', 'post-root-identity'] as const)(
+    'worker retains the bounded %s failure stage without its raw cause', async stage => {
+      const fixture = workerFixture();
+      mocked.load.mockReturnValue(fixture.loaded);
+      mocked.environment.mockResolvedValue(environment());
+      mocked.root.mockResolvedValue({ root: 'result' });
+      mocked.project.mockReturnValue(projectedResult());
+      const primary = new AggregateError([
+        new Error('private execution detail'), new Error('private cleanup detail'),
+      ], 'private aggregate detail');
+      if (stage === 'pre-root') mocked.environment.mockRejectedValueOnce(primary);
+      if (stage === 'root-or-cleanup') mocked.root.mockRejectedValueOnce(primary);
+      if (stage === 'projection') mocked.project.mockImplementationOnce(() => { throw primary; });
+      if (stage === 'post-root-identity') mocked.environment
+        .mockResolvedValueOnce(environment()).mockRejectedValueOnce(primary);
+
+      await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+        '--config', fixture.configPath, '--expected-config-sha256',
+        fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+      ])).rejects.toBe(primary);
+      const text = readFileSync(join(fixture.attemptPath, 'worker-failure.json'), 'utf8');
+      expect(JSON.parse(text)).toMatchObject({
+        stage, configSha256Hex: fixture.loaded.configSha256Hex,
+        expectedBridgeCommit: fixture.loaded.config.expectedBridgeCommit,
+        pathIdentityDigestHex: fixture.loaded.pathIdentityDigestHex,
+        rootCleanupEstablished: false, rawCausePublished: false, sourceFailurePhase: null,
+      });
+      expect(text).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+      expect(mocked.root).toHaveBeenCalledTimes(stage === 'pre-root' ? 0 : 1);
+    },
+  );
+
+  it('worker records transport publication failure without claiming cleanup', async () => {
+    const fixture = workerFixture();
+    mocked.load.mockReturnValue(fixture.loaded);
+    mocked.environment.mockResolvedValue(environment());
+    mocked.root.mockResolvedValue({ root: 'result' });
+    mocked.project.mockReturnValue(projectedResult());
+    mkdirSync(join(fixture.attemptPath, 'worker-result.json'));
+    await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+      '--config', fixture.configPath, '--expected-config-sha256',
+      fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+    ])).rejects.toThrow();
+    const diagnostic = JSON.parse(readFileSync(join(fixture.attemptPath, 'worker-failure.json'), 'utf8'));
+    expect(diagnostic.stage).toBe('transport-publication');
+    expect(diagnostic.rootCleanupEstablished).toBe(false);
+  });
+
+  it('worker preserves the primary failure and existing diagnostic bytes on a write collision', async () => {
+    const fixture = workerFixture();
+    mocked.load.mockReturnValue(fixture.loaded);
+    mocked.environment.mockResolvedValue(environment());
+    const primary = new Error('root failure');
+    mocked.root.mockRejectedValue(primary);
+    const path = join(fixture.attemptPath, 'worker-failure.json');
+    writeFileSync(path, 'retained diagnostic bytes');
+    await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+      '--config', fixture.configPath, '--expected-config-sha256',
+      fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+    ])).rejects.toBe(primary);
+    expect(readFileSync(path, 'utf8')).toBe('retained diagnostic bytes');
+    expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
   });
 
   it('worker rejects config drift and never retries a failed root', async () => {
@@ -339,6 +511,7 @@ describe('native two-cycle parent and worker V1', () => {
     ])).rejects.toThrow(/parent start differs/iu);
     expect(mocked.environment).not.toHaveBeenCalled();
     expect(mocked.root).not.toHaveBeenCalled();
+    expect(existsSync(join(fixture.attemptPath, 'worker-failure.json'))).toBe(false);
   });
 });
 
@@ -429,6 +602,29 @@ function configureParent(
     writeWorkerTransport(fixture, result);
     return cleanProcessResult(input);
   });
+}
+
+function failureBindings(fixture: ReturnType<typeof commandFixture>) {
+  return {
+    configSha256Hex: fixture.loaded.configSha256Hex,
+    expectedBridgeCommit: fixture.loaded.config.expectedBridgeCommit,
+    pathIdentityDigestHex: fixture.loaded.pathIdentityDigestHex,
+  };
+}
+
+function expectedTerminalFailure(fixture: ReturnType<typeof commandFixture>): string {
+  const body = {
+    schema: 'e2s.substrate-federated-native-two-cycle-failure.v1', version: 1,
+    status: 'two_cycle_invocation_failed',
+    configSha256Hex: fixture.loaded.configSha256Hex,
+    expectedBridgeCommit: fixture.loaded.config.expectedBridgeCommit,
+    failureClass: 'execution_failure',
+    checks: { startRecordPresent: true, automaticRetryOrResumeEnabled: false, postFailureIdentityCheckPassed: true },
+    boundaries: { rootCleanupEstablishedByTimeout: false, startWithoutThisTerminalWouldBeAmbiguous: true, rawCausePublished: false },
+  };
+  return `${canonicalJson({ ...body, receiptDigestHex: sha256CanonicalJson(
+    body, 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_FAILURE_V1',
+  ) })}\n`;
 }
 
 function environment() {
