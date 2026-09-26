@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -239,7 +240,8 @@ describe('native two-cycle invocation environment V1', () => {
 });
 
 function environmentFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'e2s-native-environment-'));
+  // Hosted Windows TEMP may use an alias; fixtures must supply canonical paths.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'e2s-native-environment-')));
   temporaryRoots.push(root);
   const configDirectory = directory(root, 'config-input');
   const bridgeRoot = directory(root, 'bridge-repository');

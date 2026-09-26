@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -224,7 +225,8 @@ describe('native two-cycle invocation V1', () => {
 });
 
 function invocationFixture() {
-  const root = mkdtempSync(join(tmpdir(), 'e2s-native-two-cycle-'));
+  // Hosted Windows TEMP may use an alias; fixtures must supply canonical paths.
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'e2s-native-two-cycle-')));
   temporaryRoots.push(root);
   const bridgeRoot = directory(root, 'bridge');
   directory(bridgeRoot, '.git');
