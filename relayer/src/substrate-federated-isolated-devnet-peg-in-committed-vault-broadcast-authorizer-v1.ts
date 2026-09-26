@@ -1,0 +1,1077 @@
+import { AuthenticatedSpvTrackerReadOnlyNodeClient } from './authenticated-spv-tracker-read-only-node-client.js';
+import {
+  canonicalJson,
+  sha256CanonicalJson,
+} from './ergo-settlement-core/strict-json.js';
+import {
+  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding,
+  assertLocalWasmCheckedSubmissionHandleV1Provenance,
+  assertLocalWasmSignedCheckCandidateProvenance,
+  checkSignedTransaction,
+} from './fleet-signer.js';
+import {
+  PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+  type ErgoOperationalBroadcastAuthorization,
+  type ErgoOperationalCheckedCandidate,
+  type ErgoOperationalRevalidatedCandidate,
+  type ErgoOperationalTransactionExecutionPorts,
+} from './relayer-core/ergo-operational-transaction-lifecycle.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+  type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
+} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV1,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV2,
+  assertSubstrateFederatedNativeGenesisPegInPacketV1,
+  assertSubstrateFederatedNativeGenesisPegInReadCustodyV1,
+  type SubstrateFederatedIsolatedDevnetPegInCandidateV2,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
+  assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2,
+  assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1,
+  type SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1,
+} from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
+import {
+  SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+  SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+} from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1,
+  type SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1,
+  type SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  type SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3,
+  type SubstrateFederatedNativeGenesisSetupExecutionBatchV1,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV2Packet } from './substrate-federated-pooled-reserve-deposit-v2.js';
+import {
+  SUBSTRATE_FEDERATED_SETTLEMENT_MAX_SUCCESSOR_HEIGHT_LAG,
+  SUBSTRATE_FEDERATED_SETTLEMENT_SOURCE_REFUND_DELAY_BLOCKS,
+} from './substrate-federated-settlement-family-v1.js';
+import {
+  normalizeEip12Box,
+  type Eip12Box,
+} from './unsigned-ergo-transaction.js';
+
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer.v1' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_PRE_TRANSPORT_OBSERVATION_V1_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-pre-transport-observation.v1' as const;
+
+const AUTHORIZATION_SCOPE =
+  'fed-6-lab-local-synthetic-peg-in-committed-vault-transition-only' as const;
+const NATIVE_AUTHORIZATION_SCOPE =
+  'fed-6-native-local-synthetic-peg-in-committed-vault-transition-only' as const;
+const OBSERVATION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_PRE_TRANSPORT_OBSERVATION_V1';
+const REVALIDATION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_REVALIDATION_V1';
+const FRESH_JVM_CHECK_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_FRESH_JVM_CHECK_V1';
+const AUTHORIZATION_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZATION_V1';
+const NODE_STATE_OBSERVATION_MAX_ATTEMPTS = 3;
+const JVM_REVALIDATION_MAX_ATTEMPTS = 3;
+const NATIVE_CHECK_MAX_TIP_ADVANCE = 64;
+
+type ObservedTip = Readonly<{ height: number; idHex: string }>;
+class NativeTipAdvance extends Error {}
+
+async function settleNativeReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
+  const results = await Promise.allSettled(reads);
+  const failure = results.find(result => result.status === 'rejected'
+    && !(result.reason instanceof NativeTipAdvance));
+  if (failure?.status === 'rejected') throw failure.reason;
+  return results.map(result => {
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
+  });
+}
+
+type RevalidatorPort = ErgoOperationalTransactionExecutionPorts['revalidator'];
+type AuthorizerPort = ErgoOperationalTransactionExecutionPorts['broadcastAuthorizer'];
+
+export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_PRE_TRANSPORT_OBSERVATION_V1_SCHEMA;
+  readonly version: 1;
+  readonly status: 'exact_transition_inputs_unspent_and_dual_node_equal';
+  readonly expectedTxId: string;
+  readonly reservePredecessorBoxIdHex: string;
+  readonly sourceLockBoxIdHex: string;
+  readonly transitionFeeFundingBoxIdHex: string;
+  readonly sourceLockConfirmationHeight: number;
+  readonly sourceLockConfirmationDigestHex: string;
+  readonly observedTipHeight: number;
+  readonly observedTipHeaderIdHex: string;
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+  readonly primaryObservationDigestHex: string;
+  readonly witnessObservationDigestHex: string;
+  readonly boundaries: Readonly<{
+    readonly exactDualLoopbackNodesAgreed: true;
+    readonly originalSourceFundingRemainsSpent: true;
+    readonly exactReservePredecessorUnspent: true;
+    readonly exactSourceLockUnspent: true;
+    readonly exactTransitionFeeFundingUnspent: true;
+    readonly sourceLockConsumptionEstablished: false;
+    readonly reserveLineageEstablished: false;
+    readonly mintAuthorized: false;
+  }>;
+  readonly observationDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1
+extends AuthorizerPort {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1 {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA;
+  readonly version: 1;
+  readonly authorizationScope: typeof AUTHORIZATION_SCOPE | typeof NATIVE_AUTHORIZATION_SCOPE;
+  readonly expectedTxId: string;
+  readonly reservePredecessorBoxIdHex: string;
+  readonly sourceLockBoxIdHex: string;
+  readonly transitionFeeFundingBoxIdHex: string;
+  readonly authorizationDigestHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1 {
+  readonly revalidator: Readonly<RevalidatorPort>;
+  readonly broadcastAuthorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>;
+  readonly takePreTransportObservation: () => Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
+  >;
+}
+
+interface RevalidationMaterialV1 {
+  readonly checked: ErgoOperationalCheckedCandidate;
+  readonly observation:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1>;
+  readonly freshJvmCheckResponseDigestHex: string;
+  readonly revalidationDigestHex: string;
+}
+
+interface AuthorizerMaterialV1 {
+  readonly target:
+    Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+  readonly binding:
+    Readonly<SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1>;
+  readonly packet: DepositPacket;
+  readonly candidateDigestHex: string;
+  readonly setupRequestDigestHex: string;
+  readonly authorizationScope: typeof AUTHORIZATION_SCOPE | typeof NATIVE_AUTHORIZATION_SCOPE;
+  readonly nativeTips?: {
+    readonly byNode: Map<string, Readonly<{ height: number; idHex: string }>>;
+    readonly byHeight: Map<number, string>;
+    readonly byId: Map<string, number>;
+    readonly parents: Map<string, string>;
+  };
+  readonly assertCandidate: () => DepositPacket;
+  readonly assertReadCustody?: () => DepositPacket;
+  readonly assertSourceObservation: () => void;
+  readonly executionCheck:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1>;
+  readonly sourceLockObservation:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
+  revalidation: RevalidationMaterialV1 | undefined;
+  revalidationState: 'fresh' | 'revalidating' | 'revalidated' | 'failed';
+  authorized: boolean;
+  observationTaken: boolean;
+}
+
+interface AuthorizationMaterialV1 {
+  readonly authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>;
+  readonly revalidated: ErgoOperationalRevalidatedCandidate;
+  readonly authorizationDigestHex: string;
+}
+
+const AUTHORIZERS = new WeakMap<object, AuthorizerMaterialV1>();
+const AUTHORIZATIONS = new WeakMap<object, AuthorizationMaterialV1>();
+const CLAIMED_EXECUTION_CHECKS = new WeakSet<object>();
+
+type DepositPacket = ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV1>
+  | ReturnType<typeof assertSubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+type SessionInput = Pick<AuthorizerMaterialV1,
+  'target' | 'executionCheck' | 'sourceLockObservation'>;
+type BoundSessionInput = SessionInput & Pick<AuthorizerMaterialV1,
+  'candidateDigestHex' | 'setupRequestDigestHex' | 'authorizationScope'>;
+
+export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+  input: Readonly<{
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
+    batch:
+      Readonly<SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2>;
+    candidate:
+      Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV1>;
+    executionCheck:
+      Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1>;
+    sourceLockObservation:
+      Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target, sourceLockObservation } = retained;
+  return createAuthorizationSession({ ...retained, candidateDigestHex: candidate.candidateDigestHex,
+    setupRequestDigestHex: batch.request.requestDigestHex, authorizationScope: AUTHORIZATION_SCOPE },
+    () => assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(candidate, batch, target),
+    () => assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationV1(
+      sourceLockObservation, target));
+}
+
+export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV2(
+  input: Readonly<Omit<SessionInput, 'batch' | 'candidate'> & {
+    batch: Readonly<SubstrateFederatedIsolatedDevnetSetupExecutionBatchV3>;
+    candidate: Readonly<SubstrateFederatedIsolatedDevnetPegInCandidateV2>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
+  const retained = Object.freeze({ ...input });
+  const { candidate, batch, target, sourceLockObservation } = retained;
+  return createAuthorizationSession({ ...retained, candidateDigestHex: candidate.candidateDigestHex,
+    setupRequestDigestHex: batch.request.requestDigestHex, authorizationScope: AUTHORIZATION_SCOPE },
+    () => assertSubstrateFederatedIsolatedDevnetPegInCandidateV2(candidate, batch, target),
+    () => { assertSubstrateFederatedIsolatedDevnetPegInSourceLockOutputObservationForCandidateV2(
+      sourceLockObservation, batch, candidate, target); });
+}
+
+export function createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1(
+  input: Readonly<SessionInput & {
+    batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
+    packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>;
+  }>,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
+  const retained = Object.freeze({ ...input });
+  const { packet, batch, target, sourceLockObservation } = retained;
+  assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
+  return createAuthorizationSession({ ...retained,
+    candidateDigestHex: sha256CanonicalJson({ packet, setupRequestDigestHex: batch.request.requestDigestHex,
+      setupCheckReceiptDigestHex: batch.receipt.receiptDigestHex, target: batch.targetBinding },
+    'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_PACKET_BINDING_V1'),
+    setupRequestDigestHex: batch.request.requestDigestHex, authorizationScope: NATIVE_AUTHORIZATION_SCOPE,
+  }, () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target),
+  () => { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1(sourceLockObservation, target, batch, packet); },
+  () => assertSubstrateFederatedNativeGenesisPegInReadCustodyV1(packet, batch, target));
+}
+
+function createAuthorizationSession(
+  input: Readonly<BoundSessionInput>,
+  assertCandidate: () => DepositPacket,
+  assertSourceObservation: () => void,
+  assertReadCustody?: () => DepositPacket,
+): Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1> {
+  const binding =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(input.target);
+  const packet = assertCandidate();
+  const checkBinding =
+    assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(
+      input.executionCheck,
+      input.target,
+    );
+  assertSourceObservation();
+  const check = input.executionCheck.receipt;
+  const source = input.sourceLockObservation;
+  if (
+    checkBinding.processBindingDigestHex !== binding.processBindingDigestHex
+    || checkBinding.executionTargetIdentityDigestHex
+      !== binding.executionTargetIdentityDigestHex
+    || input.target.primaryNodeOrigin
+      !== SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
+    || input.target.witnessNodeOrigin
+      !== SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN
+    || input.target.primaryMining !== true
+    || input.target.witnessReadOnly !== true
+    || check.unsignedTransactionIdHex
+      !== packet.transactions.reserveTransition.txId
+    || check.signedTransactionIdHex !== packet.transactions.reserveTransition.txId
+    || check.reservePredecessorBoxIdHex
+      !== packet.boxes.reservePredecessor.boxId
+    || check.sourceLockBoxIdHex !== packet.boxes.sourceLock.boxId
+    || check.transitionFeeFundingBoxIdHex
+      !== packet.boxes.transitionFeeFunding.boxId
+    || source.expectedTxId !== packet.transactions.sourceLockCreation.txId
+    || source.sourceFundingBoxIdHex !== packet.boxes.sourceFundingInput.boxId
+    || source.sourceLockBoxIdHex !== packet.boxes.sourceLock.boxId
+    || source.transitionFeeFundingBoxIdHex
+      !== packet.boxes.transitionFeeFunding.boxId
+    || source.processBindingDigestHex !== binding.processBindingDigestHex
+    || source.executionTargetIdentityDigestHex
+      !== binding.executionTargetIdentityDigestHex
+    || source.boundaries.sourceFundingSpent !== true
+    || source.boundaries.sourceLockUnspentAndExact !== true
+    || source.boundaries.transitionFeeFundingUnspentAndExact !== true
+  ) {
+    throw new Error(
+      'isolated committed-vault authorizer input binding is invalid',
+    );
+  }
+  if (CLAIMED_EXECUTION_CHECKS.has(input.executionCheck)) {
+    throw new Error(
+      'isolated committed-vault execution check is already claimed',
+    );
+  }
+  CLAIMED_EXECUTION_CHECKS.add(input.executionCheck);
+
+  let authorizer!:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>;
+  const revalidator: RevalidatorPort = Object.freeze({
+    revalidate: async checked => {
+      const material = assertAuthorizer(authorizer, input.target);
+      if (material.revalidationState !== 'fresh') {
+        throw new Error('isolated committed-vault revalidation is one-shot');
+      }
+      material.revalidationState = 'revalidating';
+      try {
+        validateChecked(material, checked);
+        const {
+          observation,
+          freshJvmCheckResponseDigestHex,
+        } = await recheckAgainstStableTransitionInputs(material, packet);
+        assertAuthorizer(authorizer, input.target);
+        const revalidationDigestHex = sha256CanonicalJson({
+          schema:
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
+          operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+          processBindingDigestHex: material.binding.processBindingDigestHex,
+          executionTargetIdentityDigestHex:
+            material.binding.executionTargetIdentityDigestHex,
+          candidateDigestHex: material.candidateDigestHex,
+          expectedTxId: packet.transactions.reserveTransition.txId,
+          checkedTransactionDigestHex:
+            material.executionCheck.receipt.receiptDigestHex,
+          sourceLockObservationDigestHex:
+            material.sourceLockObservation.observationDigestHex,
+          preTransportObservationDigestHex: observation.observationDigestHex,
+          freshJvmCheckResponseDigestHex,
+        }, material.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+          ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_COMMITTED_VAULT_REVALIDATION_V1'
+          : REVALIDATION_DIGEST_DOMAIN);
+        material.revalidation = Object.freeze({
+          checked,
+          observation,
+          freshJvmCheckResponseDigestHex,
+          revalidationDigestHex,
+        });
+        material.revalidationState = 'revalidated';
+        return Object.freeze({ revalidationDigestHex });
+      } catch (error) {
+        material.revalidationState = 'failed';
+        throw error;
+      }
+    },
+  });
+  authorizer = Object.freeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
+    authorize: (revalidated: ErgoOperationalRevalidatedCandidate) => {
+      const material = assertAuthorizer(authorizer, input.target);
+      if (material.authorized) {
+        throw new Error('isolated committed-vault authorization is one-shot');
+      }
+      validateRevalidated(material, revalidated);
+      const admission = revalidated.checked.signed.admission;
+      const receipt = material.executionCheck.receipt;
+      const handle = material.executionCheck.checkedAcceptance.submissionHandle;
+      const observation = material.revalidation!.observation;
+      const authorizationDigestHex = sha256CanonicalJson({
+        schema:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
+        authorizationScope: material.authorizationScope,
+        processBindingDigestHex: material.binding.processBindingDigestHex,
+        executionTargetIdentityDigestHex:
+          material.binding.executionTargetIdentityDigestHex,
+        candidateDigestHex: material.candidateDigestHex,
+        setupRequestDigestHex: material.setupRequestDigestHex,
+        expectedTxId: admission.expectedTxId,
+        reservePredecessorBoxIdHex: admission.sourceBoxId,
+        inputBoxIds: admission.inputBoxIds,
+        admissionDigestHex: admission.bindingDigestHex,
+        unsignedTransactionDigestHex: receipt.unsignedTransactionDigestHex,
+        signedTransactionDigestHex:
+          receipt.signedTransactionCanonicalJsonSha256Hex,
+        signedTransactionBytesSha256Hex:
+          handle.signedTransactionBytesSha256Hex,
+        signedTransactionBytesLength: handle.signedTransactionBytesLength,
+        checkResponseDigestHex: handle.checkResponseDigestHex,
+        publicCheckReceiptDigestHex: receipt.receiptDigestHex,
+        revalidationDigestHex: revalidated.revalidationDigestHex,
+        preTransportObservationDigestHex: observation.observationDigestHex,
+        freshJvmCheckResponseDigestHex:
+          material.revalidation!.freshJvmCheckResponseDigestHex,
+      }, material.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+        ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZATION_V1'
+        : AUTHORIZATION_DIGEST_DOMAIN);
+      const authorizationArtifact = Object.freeze({
+        schema:
+          SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
+        version: 1 as const,
+        authorizationScope: material.authorizationScope,
+        expectedTxId: admission.expectedTxId,
+        reservePredecessorBoxIdHex: admission.inputBoxIds[0]!,
+        sourceLockBoxIdHex: admission.inputBoxIds[1]!,
+        transitionFeeFundingBoxIdHex: admission.inputBoxIds[2]!,
+        authorizationDigestHex,
+      });
+      material.authorized = true;
+      AUTHORIZATIONS.set(authorizationArtifact, Object.freeze({
+        authorizer,
+        revalidated,
+        authorizationDigestHex,
+      }));
+      return Object.freeze({ authorizationDigestHex, authorizationArtifact });
+    },
+  });
+  AUTHORIZERS.set(authorizer, {
+    target: input.target,
+    binding,
+    packet,
+    candidateDigestHex: input.candidateDigestHex,
+    setupRequestDigestHex: input.setupRequestDigestHex,
+    authorizationScope: input.authorizationScope,
+    ...(input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+      ? { nativeTips: { byNode: new Map(), byHeight: new Map(), byId: new Map(), parents: new Map() } } : {}),
+    assertCandidate,
+    assertReadCustody,
+    assertSourceObservation,
+    executionCheck: input.executionCheck,
+    sourceLockObservation: input.sourceLockObservation,
+    revalidation: undefined,
+    revalidationState: 'fresh',
+    authorized: false,
+    observationTaken: false,
+  });
+  return Object.freeze({
+    revalidator,
+    broadcastAuthorizer: authorizer,
+    takePreTransportObservation: () => {
+      const material = assertAuthorizer(authorizer, input.target);
+      if (
+        !material.authorized
+        || material.revalidation === undefined
+        || material.revalidationState !== 'revalidated'
+        || material.observationTaken
+      ) {
+        throw new Error(
+          'isolated committed-vault pre-transport observation is unavailable or consumed',
+        );
+      }
+      material.observationTaken = true;
+      return material.revalidation.observation;
+    },
+  });
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(
+  authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): void {
+  assertAuthorizer(authorizer, target);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(
+  authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>,
+  authorization: ErgoOperationalBroadcastAuthorization,
+): void {
+  const material = assertAuthorizer(authorizer);
+  const stored = AUTHORIZATIONS.get(authorization.authorizationArtifact);
+  if (
+    stored === undefined
+    || stored.authorizer !== authorizer
+    || stored.revalidated !== authorization.revalidated
+    || stored.authorizationDigestHex !== authorization.authorizationDigestHex
+  ) {
+    throw new Error(
+      'isolated committed-vault authorization lacks exact process provenance',
+    );
+  }
+  validateRevalidated(material, authorization.revalidated);
+  const artifact = authorization.authorizationArtifact as Partial<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1
+  >;
+  const packet = material.packet;
+  if (
+    artifact.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA
+    || artifact.version !== 1
+    || artifact.authorizationScope !== material.authorizationScope
+    || artifact.expectedTxId !== packet.transactions.reserveTransition.txId
+    || artifact.reservePredecessorBoxIdHex
+      !== packet.boxes.reservePredecessor.boxId
+    || artifact.sourceLockBoxIdHex !== packet.boxes.sourceLock.boxId
+    || artifact.transitionFeeFundingBoxIdHex
+      !== packet.boxes.transitionFeeFunding.boxId
+    || artifact.authorizationDigestHex !== authorization.authorizationDigestHex
+    || Object.keys(artifact).sort().join(',')
+      !== 'authorizationDigestHex,authorizationScope,expectedTxId,reservePredecessorBoxIdHex,schema,sourceLockBoxIdHex,transitionFeeFundingBoxIdHex,version'
+  ) {
+    throw new Error('isolated committed-vault authorization shape is invalid');
+  }
+}
+
+function assertAuthorizer(
+  authorizer:
+    Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>,
+  expectedTarget?:
+    Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): AuthorizerMaterialV1 {
+  const material = AUTHORIZERS.get(authorizer);
+  if (
+    material === undefined
+    || authorizer.schema
+      !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA
+    || (expectedTarget !== undefined && material.target !== expectedTarget)
+  ) {
+    throw new Error('isolated committed-vault authorizer lacks provenance');
+  }
+  const current =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(material.target);
+  if (
+    current.processBindingDigestHex !== material.binding.processBindingDigestHex
+    || current.executionTargetIdentityDigestHex
+      !== material.binding.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('isolated committed-vault authorizer process binding changed');
+  }
+  material.assertCandidate();
+  assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultExecutionCheckV1(
+    material.executionCheck,
+    material.target,
+  );
+  material.assertSourceObservation();
+  return material;
+}
+
+function validateChecked(
+  material: AuthorizerMaterialV1,
+  checked: ErgoOperationalCheckedCandidate,
+): void {
+  const packet = material.packet;
+  const executionCheck = material.executionCheck;
+  const admission = checked.signed.admission;
+  const handle = executionCheck.checkedAcceptance.submissionHandle;
+  assertLocalWasmSignedCheckCandidateProvenance(executionCheck.signedCandidate);
+  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+  assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+    handle,
+    material.binding,
+  );
+  const expectedInputs = [
+    packet.boxes.reservePredecessor.boxId,
+    packet.boxes.sourceLock.boxId,
+    packet.boxes.transitionFeeFunding.boxId,
+  ];
+  if (
+    admission.operationProfile !== PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE
+    || admission.expectedTxId !== packet.transactions.reserveTransition.txId
+    || admission.sourceBoxId !== expectedInputs[0]
+    || !sameStrings(admission.inputBoxIds, expectedInputs)
+    || admission.targetSidechainHeight !== null
+    || admission.targetSidechainBlockHashHex !== null
+    || admission.heartbeatKeyHex !== null
+    || admission.unsignedTransaction
+      !== packet.transactions.reserveTransition.eip12Tx
+    || checked.signed.nodeOrigin
+      !== SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
+    || checked.signed.signerArtifact !== executionCheck.signedCandidate
+    || checked.signed.signedTransactionDigestHex
+      !== executionCheck.receipt.signedTransactionCanonicalJsonSha256Hex
+    || checked.checkerArtifact !== handle
+    || checked.checkResponseDigestHex !== handle.checkResponseDigestHex
+  ) {
+    throw new Error('isolated committed-vault checked binding changed');
+  }
+}
+
+function validateRevalidated(
+  material: AuthorizerMaterialV1,
+  revalidated: ErgoOperationalRevalidatedCandidate,
+): void {
+  validateChecked(material, revalidated.checked);
+  if (
+    material.revalidationState !== 'revalidated'
+    || material.revalidation === undefined
+    || material.revalidation.checked !== revalidated.checked
+    || material.revalidation.revalidationDigestHex
+      !== revalidated.revalidationDigestHex
+  ) {
+    throw new Error('isolated committed-vault revalidation binding changed');
+  }
+}
+
+async function observeExactTransitionInputs(
+  material: AuthorizerMaterialV1,
+  packet: DepositPacket,
+  nativeAncestor?: ObservedTip,
+): Promise<Readonly<
+  SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
+>> {
+  const [primaryState, witnessState] = await observeInputPair(material, packet, nativeAncestor);
+  if (canonicalJson(primaryState) !== canonicalJson(witnessState)) {
+    throw new Error('isolated committed-vault input observations disagree');
+  }
+  const current =
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(material.target);
+  if (
+    current.processBindingDigestHex !== material.binding.processBindingDigestHex
+    || current.executionTargetIdentityDigestHex
+      !== material.binding.executionTargetIdentityDigestHex
+  ) {
+    throw new Error(
+      'isolated committed-vault target changed during revalidation',
+    );
+  }
+  const body = Object.freeze({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_PRE_TRANSPORT_OBSERVATION_V1_SCHEMA,
+    version: 1 as const,
+    status: 'exact_transition_inputs_unspent_and_dual_node_equal' as const,
+    expectedTxId: packet.transactions.reserveTransition.txId,
+    reservePredecessorBoxIdHex: packet.boxes.reservePredecessor.boxId,
+    sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+    transitionFeeFundingBoxIdHex: packet.boxes.transitionFeeFunding.boxId,
+    sourceLockConfirmationHeight:
+      material.sourceLockObservation.confirmationHeight,
+    sourceLockConfirmationDigestHex:
+      material.sourceLockObservation.confirmationObservationDigestHex,
+    observedTipHeight: primaryState.tip.height,
+    observedTipHeaderIdHex: primaryState.tip.idHex,
+    processBindingDigestHex: current.processBindingDigestHex,
+    executionTargetIdentityDigestHex:
+      current.executionTargetIdentityDigestHex,
+    primaryObservationDigestHex: primaryState.digestHex,
+    witnessObservationDigestHex: witnessState.digestHex,
+    boundaries: Object.freeze({
+      exactDualLoopbackNodesAgreed: true as const,
+      originalSourceFundingRemainsSpent: true as const,
+      exactReservePredecessorUnspent: true as const,
+      exactSourceLockUnspent: true as const,
+      exactTransitionFeeFundingUnspent: true as const,
+      sourceLockConsumptionEstablished: false as const,
+      reserveLineageEstablished: false as const,
+      mintAuthorized: false as const,
+    }),
+  });
+  return Object.freeze({
+    ...body,
+    observationDigestHex: sha256CanonicalJson(
+      body,
+      OBSERVATION_DIGEST_DOMAIN,
+    ),
+  });
+}
+
+async function observeInputPair(
+  material: AuthorizerMaterialV1,
+  packet: DepositPacket,
+  nativeAncestor?: ObservedTip,
+): Promise<readonly [Awaited<ReturnType<typeof observeNodeInputs>>, Awaited<ReturnType<typeof observeNodeInputs>>]> {
+  const native = material.nativeTips !== undefined;
+  for (let attempt = 0; attempt < (native ? NODE_STATE_OBSERVATION_MAX_ATTEMPTS : 1); attempt += 1) {
+    assertNativeActive(material);
+    try {
+      const reads = [material.target.primaryNodeOrigin, material.target.witnessNodeOrigin]
+        .map((origin, index) => observeNodeInputs(
+          new AuthenticatedSpvTrackerReadOnlyNodeClient(origin),
+          packet.boxes.sourceFundingInput.boxId, packet.boxes.reservePredecessor,
+          packet.boxes.sourceLock, packet.boxes.transitionFeeFunding,
+          index === 0 ? 'primary' : 'witness', material, nativeAncestor,
+        ));
+      const states = await (native ? settleNativeReads(reads) : Promise.all(reads));
+      if (native && states[0]!.tip.height !== states[1]!.tip.height) {
+        throw new NativeTipAdvance('native committed-vault input tips have not converged');
+      }
+      return [states[0]!, states[1]!];
+    } catch (error) {
+      if (!(native && error instanceof NativeTipAdvance)) throw error;
+    } finally {
+      assertNativeActive(material);
+    }
+  }
+  throw new Error('native committed-vault tip did not stabilize during input observation');
+}
+
+async function observeNodeInputs(
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  sourceFundingBoxIdHex: string,
+  expectedReservePredecessor: Eip12Box,
+  expectedSourceLock: Eip12Box,
+  expectedTransitionFeeFunding: Eip12Box,
+  label: string,
+  material: AuthorizerMaterialV1,
+  nativeAncestor?: ObservedTip,
+): Promise<Readonly<{
+  sourceFundingBoxIdHex: string;
+  sourceFundingPresent: false;
+  tip: Readonly<{ height: number; idHex: string }>;
+  reservePredecessor: Eip12Box;
+  sourceLock: Eip12Box;
+  transitionFeeFunding: Eip12Box;
+  digestHex: string;
+}>> {
+  for (let attempt = 0; attempt < (material.nativeTips === undefined ? NODE_STATE_OBSERVATION_MAX_ATTEMPTS : 1); attempt += 1) {
+    const tipBefore = await readObservedTip(material, client, label);
+    if (nativeAncestor !== undefined) {
+      await assertNativeCheckAncestry(material, client, label, nativeAncestor, tipBefore);
+    }
+    assertNativeReadCustody(material);
+    const reads = [
+      client.getBoxByIdOrNull(sourceFundingBoxIdHex),
+      client.getBoxByIdOrNull(expectedReservePredecessor.boxId),
+      client.getBoxByIdOrNull(expectedSourceLock.boxId),
+      client.getBoxByIdOrNull(expectedTransitionFeeFunding.boxId),
+    ];
+    const [sourceFunding, rawReserve, rawSourceLock, rawTransitionFee] =
+      await (material.nativeTips === undefined ? Promise.all(reads) : settleNativeReads(reads));
+    assertNativeReadCustody(material);
+    const tipAfter = await readObservedTip(material, client, label);
+    assertNativeReadCustody(material);
+    if (sourceFunding !== null) {
+      throw new Error(
+        `isolated committed-vault ${label} reports original source funding`,
+      );
+    }
+    if (
+      rawReserve === null
+      || rawSourceLock === null
+      || rawTransitionFee === null
+    ) {
+      throw new Error(
+        `isolated committed-vault ${label} transition input is unavailable`,
+      );
+    }
+    const reservePredecessor = await normalizeEip12Box(
+      rawReserve,
+      `isolated committed-vault ${label} reserve predecessor`,
+    );
+    assertNativeReadCustody(material);
+    const sourceLock = await normalizeEip12Box(
+      rawSourceLock,
+      `isolated committed-vault ${label} source lock`,
+    );
+    assertNativeReadCustody(material);
+    const transitionFeeFunding = await normalizeEip12Box(
+      rawTransitionFee,
+      `isolated committed-vault ${label} transition-fee funding`,
+    );
+    assertNativeReadCustody(material);
+    if (
+      canonicalJson(reservePredecessor)
+        !== canonicalJson(expectedReservePredecessor)
+      || canonicalJson(sourceLock) !== canonicalJson(expectedSourceLock)
+      || canonicalJson(transitionFeeFunding)
+        !== canonicalJson(expectedTransitionFeeFunding)
+    ) {
+      throw new Error(
+        `isolated committed-vault ${label} transition input bytes changed`,
+      );
+    }
+    if (canonicalJson(tipBefore) === canonicalJson(tipAfter)) {
+      assertNativeCommitHeight(material, tipAfter.height);
+      const body = Object.freeze({
+        sourceFundingBoxIdHex,
+        sourceFundingPresent: false as const,
+        tip: tipAfter,
+        reservePredecessor,
+        sourceLock,
+        transitionFeeFunding,
+      });
+      return Object.freeze({
+        ...body,
+        digestHex: sha256CanonicalJson(body, OBSERVATION_DIGEST_DOMAIN),
+      });
+    }
+    assertTipAdvancedWithoutReplacement(tipBefore, tipAfter, label);
+    if (material.nativeTips !== undefined) throw new NativeTipAdvance('native input tip advanced');
+  }
+  throw new Error(
+    `isolated committed-vault ${label} tip did not stabilize during input observation`,
+  );
+}
+
+async function recheckExactSignedCandidate(
+  material: AuthorizerMaterialV1,
+  observation: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
+  >,
+): Promise<string> {
+  assertNativeActive(material);
+  const candidate = material.executionCheck.signedCandidate;
+  const handle = material.executionCheck.checkedAcceptance.submissionHandle;
+  const fresh = await checkSignedTransaction(
+    candidate,
+    'isolated local committed-vault pre-transport recheck',
+    material.target.primaryNodeOrigin,
+  );
+  assertNativeActive(material);
+  if (fresh === null) {
+    throw new Error('isolated committed-vault fresh JVM check rejected');
+  }
+  if (
+    fresh.txId !== handle.txId
+    || fresh.signedTransactionDigestHex !== handle.signedTransactionDigestHex
+    || fresh.signedTransactionBytesSha256Hex
+      !== handle.signedTransactionBytesSha256Hex
+    || fresh.signedTransactionBytesLength !== handle.signedTransactionBytesLength
+    || canonicalJson(fresh.signerContext)
+      !== canonicalJson(candidate.signerContext)
+    || canonicalJson(fresh.checkerIdentity)
+      !== canonicalJson(handle.checkerIdentity)
+    || observation.observedTipHeight < candidate.signerContext.stateContextTipHeight
+  ) {
+    throw new Error('isolated committed-vault fresh JVM check binding changed');
+  }
+
+  return sha256CanonicalJson({
+    schema:
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
+    expectedTxId: handle.txId,
+    observedTipHeight: observation.observedTipHeight,
+    observedTipHeaderIdHex: observation.observedTipHeaderIdHex,
+    signedTransactionDigestHex: fresh.signedTransactionDigestHex,
+    signedTransactionBytesSha256Hex: fresh.signedTransactionBytesSha256Hex,
+    signedTransactionBytesLength: fresh.signedTransactionBytesLength,
+    signerContext: fresh.signerContext,
+    checkerIdentity: fresh.checkerIdentity,
+    checkResult: fresh.checkResult,
+  }, FRESH_JVM_CHECK_DIGEST_DOMAIN);
+}
+
+async function recheckAgainstStableTransitionInputs(
+  material: AuthorizerMaterialV1,
+  packet: DepositPacket,
+): Promise<Readonly<{
+  observation: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
+  >;
+  freshJvmCheckResponseDigestHex: string;
+}>> {
+  let before = await observeExactTransitionInputs(material, packet);
+  if (material.nativeTips !== undefined) {
+    const freshJvmCheckResponseDigestHex = await recheckExactSignedCandidate(material, before);
+    const after = await observeExactTransitionInputs(material, packet, {
+      height: before.observedTipHeight, idHex: before.observedTipHeaderIdHex,
+    });
+    assertObservationDidNotRegressOrReplace(before, after);
+    return Object.freeze({ observation: after, freshJvmCheckResponseDigestHex });
+  }
+  for (let attempt = 0; attempt < JVM_REVALIDATION_MAX_ATTEMPTS; attempt += 1) {
+    const freshJvmCheckResponseDigestHex = await recheckExactSignedCandidate(
+      material,
+      before,
+    );
+    const after = await observeExactTransitionInputs(material, packet);
+    assertObservationDidNotRegressOrReplace(before, after);
+    if (
+      after.observedTipHeight === before.observedTipHeight
+      && after.observedTipHeaderIdHex === before.observedTipHeaderIdHex
+    ) {
+      return Object.freeze({ observation: after, freshJvmCheckResponseDigestHex });
+    }
+    before = after;
+  }
+  throw new Error(
+    'isolated committed-vault tip did not stabilize around fresh JVM check',
+  );
+}
+
+function assertObservationDidNotRegressOrReplace(
+  before: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
+  >,
+  after: Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
+  >,
+): void {
+  if (after.observedTipHeight < before.observedTipHeight) {
+    throw new Error('isolated committed-vault post-check observation regressed');
+  }
+  if (
+    after.observedTipHeight === before.observedTipHeight
+    && after.observedTipHeaderIdHex !== before.observedTipHeaderIdHex
+  ) {
+    throw new Error(
+      'isolated committed-vault post-check observation replaced the same-height tip',
+    );
+  }
+  if (
+    after.observedTipHeight > before.observedTipHeight
+    && after.observedTipHeaderIdHex === before.observedTipHeaderIdHex
+  ) {
+    throw new Error(
+      'isolated committed-vault post-check observation reused one tip ID at another height',
+    );
+  }
+}
+
+function assertTipAdvancedWithoutReplacement(
+  before: Readonly<{ height: number; idHex: string }>,
+  after: Readonly<{ height: number; idHex: string }>,
+  label: string,
+): void {
+  if (after.height < before.height) {
+    throw new Error(
+      `isolated committed-vault ${label} tip regressed during input observation`,
+    );
+  }
+  if (after.height === before.height || after.idHex === before.idHex) {
+    throw new Error(
+      `isolated committed-vault ${label} tip replaced or reused during input observation`,
+    );
+  }
+}
+
+function normalizeBestHeader(
+  value: unknown,
+  label: string,
+): Readonly<{ height: number; idHex: string }> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.height !== 'number'
+    || !Number.isSafeInteger(record.height)
+    || record.height < 0
+  ) {
+    throw new Error(`${label} height must be a nonnegative safe integer`);
+  }
+  if (
+    typeof record.id !== 'string'
+    || !/^[0-9a-fA-F]{64}$/.test(record.id)
+  ) {
+    throw new Error(`${label} id must be 32-byte hex`);
+  }
+  return Object.freeze({
+    height: record.height,
+    idHex: record.id.toLowerCase(),
+  });
+}
+
+function assertNativeActive(material: AuthorizerMaterialV1): void {
+  if (material.nativeTips === undefined) return;
+  const current = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(material.target);
+  if (current.processBindingDigestHex !== material.binding.processBindingDigestHex
+    || current.executionTargetIdentityDigestHex !== material.binding.executionTargetIdentityDigestHex
+    || material.assertCandidate() !== material.packet) {
+    throw new Error('native committed-vault observation lost target or packet custody');
+  }
+  material.assertSourceObservation();
+}
+
+// The caller brackets the entire drained read group with full provenance checks.
+function assertNativeReadCustody(material: AuthorizerMaterialV1): void {
+  if (material.nativeTips === undefined) return;
+  if (material.assertReadCustody?.() !== material.packet) {
+    throw new Error('native committed-vault observation lost read custody');
+  }
+}
+
+function assertNativeCommitHeight(material: AuthorizerMaterialV1, height: number): void {
+  if (material.nativeTips === undefined) return;
+  // Node admission evaluates the upcoming block, not the last mined header.
+  const evaluationHeight = height + 1;
+  if (!Number.isSafeInteger(evaluationHeight) || evaluationHeight > 0x7fff_ffff) {
+    throw new Error('native committed-vault upcoming evaluation height is not representable');
+  }
+  const { sourceLock, reserveSuccessor } = material.packet.boxes;
+  if (evaluationHeight >= sourceLock.creationHeight + SUBSTRATE_FEDERATED_SETTLEMENT_SOURCE_REFUND_DELAY_BLOCKS) {
+    throw new Error('native committed-vault observation reached the source refund timeout');
+  }
+  if (evaluationHeight < reserveSuccessor.creationHeight
+    || evaluationHeight > reserveSuccessor.creationHeight + SUBSTRATE_FEDERATED_SETTLEMENT_MAX_SUCCESSOR_HEIGHT_LAG) {
+    throw new Error('native committed-vault observation exceeds the successor creation-height window');
+  }
+}
+
+async function assertNativeCheckAncestry(
+  material: AuthorizerMaterialV1,
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  label: string,
+  ancestor: ObservedTip,
+  tip: ObservedTip,
+): Promise<void> {
+  if (tip.height === ancestor.height && tip.idHex === ancestor.idHex) return;
+  assertTipAdvancedWithoutReplacement(ancestor, tip, label);
+  if (tip.height - ancestor.height > NATIVE_CHECK_MAX_TIP_ADVANCE) {
+    throw new Error('native committed-vault check ancestry exceeds the bounded tip window');
+  }
+  let cursor = tip;
+  while (cursor.height >= ancestor.height) {
+    assertNativeReadCustody(material);
+    const raw = await client.getBlockHeaderById(cursor.idHex);
+    assertNativeReadCustody(material);
+    const header = normalizeBestHeader(raw, `native committed-vault ${label} ancestry header`);
+    const parentId = (raw as Record<string, unknown>).parentId;
+    if (header.idHex !== cursor.idHex || header.height !== cursor.height) {
+      throw new Error('native committed-vault check ancestry header identity changed');
+    }
+    if (typeof parentId !== 'string' || !/^[0-9a-fA-F]{64}$/.test(parentId)) {
+      throw new Error('native committed-vault check ancestry parent must be 32-byte hex');
+    }
+    recordNativeHeader(material, header, parentId.toLowerCase());
+    if (cursor.height === ancestor.height) {
+      if (cursor.idHex !== ancestor.idHex) throw new Error('native committed-vault check ancestry replaced its predecessor');
+      return;
+    }
+    cursor = { height: cursor.height - 1, idHex: parentId.toLowerCase() };
+  }
+}
+
+function recordNativeHeader(material: AuthorizerMaterialV1, header: ObservedTip, parentId?: string): void {
+  const history = material.nativeTips!;
+  const knownHeight = history.byId.get(header.idHex);
+  if (knownHeight !== undefined && knownHeight !== header.height) {
+    throw new Error('native committed-vault observation reused a historical header ID at another height');
+  }
+  const seen = history.byHeight.get(header.height);
+  if (seen !== undefined && seen !== header.idHex) {
+    throw new Error('native committed-vault observations disagree at a previously observed height');
+  }
+  if (parentId !== undefined) {
+    const previousParent = history.parents.get(header.idHex);
+    if (previousParent !== undefined && previousParent !== parentId) {
+      throw new Error('native committed-vault check ancestry parent changed');
+    }
+    history.parents.set(header.idHex, parentId);
+  }
+  history.byHeight.set(header.height, header.idHex);
+  history.byId.set(header.idHex, header.height);
+}
+
+async function readObservedTip(
+  material: AuthorizerMaterialV1,
+  client: AuthenticatedSpvTrackerReadOnlyNodeClient,
+  label: string,
+): Promise<Readonly<{ height: number; idHex: string }>> {
+  assertNativeReadCustody(material);
+  const tip = normalizeBestHeader(await client.getBestHeader(), `isolated committed-vault ${label} tip`);
+  assertNativeReadCustody(material);
+  const history = material.nativeTips;
+  if (history !== undefined) {
+    const previous = history.byNode.get(label);
+    if (previous !== undefined && (tip.height < previous.height
+      || (tip.height === previous.height && tip.idHex !== previous.idHex)
+      || (tip.height !== previous.height && tip.idHex === previous.idHex))) {
+      throw new Error('native committed-vault observation tip regressed, replaced or reused');
+    }
+    recordNativeHeader(material, tip);
+    history.byNode.set(label, tip);
+  }
+  return tip;
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length
+    && left.every((value, index) => value === right[index]);
+}

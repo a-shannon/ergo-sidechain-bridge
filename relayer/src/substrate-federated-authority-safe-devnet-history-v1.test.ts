@@ -61,6 +61,10 @@ import {
 import {
   collectSubstrateFederatedAuthoritySafeDevnetHistoryActionV1,
 } from './substrate-federated-authority-safe-devnet-history-action-v1.js';
+import {
+  createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1,
+  projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1,
+} from './relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 
 const BRIDGE_ADDRESS = `0x${'06'.repeat(20)}`;
 const TOKEN_ADDRESS = `0x${'07'.repeat(20)}`;
@@ -186,6 +190,64 @@ describe('Substrate federated authority-safe devnet history V1', () => {
     ).toThrow(/provenance/);
   });
 
+  it('forwards explicit source-acceptance build roots without promoting them into evidence', async () => {
+    const buildWorkspace = Object.freeze({
+      temporaryDirectoryRoot: 'D:/reviewed/frontier-builds',
+      sharedCargoHomeRoot: 'D:/reviewed/frontier-cargo-cache',
+    });
+
+    const history = await collectHistory(buildWorkspace);
+
+    expect(mocks.accept).toHaveBeenCalledWith(
+      {},
+      buildWorkspace,
+    );
+    expect(JSON.stringify(history.receipt)).not.toContain('D:/reviewed');
+  });
+
+  it('classifies post-acceptance provenance and materialization failures as source history', async () => {
+    mocks.accept.mockResolvedValueOnce(Object.freeze({
+      acceptance: mocks.acceptance,
+      value: Object.freeze({}),
+    }));
+
+    let failure: unknown;
+    try {
+      await collectHistory();
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source history rpc and finality');
+  });
+
+  it('preserves an earlier classified acceptance failure', async () => {
+    const acceptanceFailure =
+      createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1(
+        'source target readiness and observation',
+        new Error('synthetic private acceptance failure'),
+      );
+    mocks.accept.mockRejectedValueOnce(acceptanceFailure);
+
+    let failure: unknown;
+    try {
+      await collectHistory();
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBe(acceptanceFailure);
+    expect(
+      projectSubstrateFederatedAuthoritySafeDevnetSourceFailurePhaseV1(
+        failure,
+      ),
+    ).toBe('source target readiness and observation');
+  });
+
   it.each([
     ['witness disagreement', { witnessInteriorDisagreement: true }, /origins disagree at height 1/],
     ['broken parent', { parentBreak: true }, /parent linkage failed at 1/],
@@ -234,10 +296,18 @@ describe('Substrate federated authority-safe devnet history V1', () => {
   });
 });
 
-async function collectHistory() {
-  return await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1({
-    acceptance: {} as AcceptSubstrateFederatedAuthoritySafeDevnetV1Input,
-  });
+async function collectHistory(
+  sourceAcceptanceBuildWorkspace?: Readonly<{
+    temporaryDirectoryRoot: string;
+    sharedCargoHomeRoot: string;
+  }>,
+) {
+  return await collectSubstrateFederatedAuthoritySafeDevnetHistoryV1(
+    {
+      acceptance: {} as AcceptSubstrateFederatedAuthoritySafeDevnetV1Input,
+    },
+    sourceAcceptanceBuildWorkspace,
+  );
 }
 
 function acceptance(): Readonly<SubstrateFederatedAuthoritySafeDevnetAcceptanceV1> {

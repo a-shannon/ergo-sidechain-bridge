@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 
 export type BridgeRepositoryMode = 'superproject' | 'standalone';
@@ -11,6 +11,11 @@ export interface BridgeRepositoryLayout {
   gitmodulesPath: string;
   frontierGitlinkPath: string;
   frontierSubmoduleName: string;
+}
+
+export interface CanonicalBridgeRepositoryRoots {
+  readonly bridgeRoot: string;
+  readonly worktreeRoot: string;
 }
 
 const BRIDGE_DIRECTORY_NAME = 'ergo-sidechain-bridge';
@@ -67,6 +72,54 @@ export function discoverBridgeRepositoryRoot(
   const repositoryRoot = path.resolve(output);
   resolveBridgeRepositoryLayout({ repositoryRoot, bridgeRoot });
   return repositoryRoot;
+}
+
+export function resolveCanonicalBridgeRepositoryRoots(
+  bridgeRootInput: string,
+): Readonly<CanonicalBridgeRepositoryRoots> {
+  const bridgeRoot = realpathSync.native(path.resolve(bridgeRootInput));
+  let repositoryRoot: string;
+  try {
+    repositoryRoot = discoverBridgeRepositoryRoot(bridgeRoot);
+  } catch {
+    throw new Error('bridge Git repository root is unavailable');
+  }
+  const worktreeRoot = realpathSync.native(repositoryRoot);
+  resolveBridgeRepositoryLayout({ repositoryRoot: worktreeRoot, bridgeRoot });
+  return Object.freeze({ bridgeRoot, worktreeRoot });
+}
+
+// This establishes path layout only. Funds-facing callers must separately
+// validate the checkout through an exact pinned Git executable.
+export function resolveBridgeRepositoryRootsFromCheckoutLayout(
+  bridgeRootInput: string,
+): Readonly<CanonicalBridgeRepositoryRoots> {
+  const bridgeRoot = realpathSync.native(path.resolve(bridgeRootInput));
+  const candidates = [bridgeRoot, path.dirname(bridgeRoot)];
+  for (const candidate of candidates) {
+    if (!isGitCheckoutMarker(path.join(candidate, '.git'))) continue;
+    const worktreeRoot = realpathSync.native(candidate);
+    try {
+      resolveBridgeRepositoryLayout({ repositoryRoot: worktreeRoot, bridgeRoot });
+      return Object.freeze({ bridgeRoot, worktreeRoot });
+    } catch {
+      continue;
+    }
+  }
+  throw new Error('bridge checkout layout is unavailable');
+}
+
+function isGitCheckoutMarker(markerPath: string): boolean {
+  try {
+    const marker = lstatSync(markerPath);
+    if (marker.isDirectory()) return true;
+    if (!marker.isFile() || marker.size === 0 || marker.size > 4096) return false;
+    return /^gitdir: [^\u0000\r\n]+(?:\r\n|\n)?$/u.test(
+      readFileSync(markerPath, 'utf8'),
+    );
+  } catch {
+    return false;
+  }
 }
 
 function canonicalizeExistingPath(input: string): string {

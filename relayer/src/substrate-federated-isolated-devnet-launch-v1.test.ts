@@ -14,8 +14,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 
-import { beforeAll, describe, expect, it as vitestIt, vi } from 'vitest';
+import ts from 'typescript';
+import { afterAll, beforeAll, describe, expect, it as vitestIt, vi } from 'vitest';
 import { Mnemonic } from 'ethers';
 
 interface IsolatedDevnetLaunchTestShard {
@@ -106,7 +108,11 @@ import {
   deriveLocalWasmRootSignerPublicIdentity,
 } from './local-wasm-root-signer-public-identity.js';
 import {
+  PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+} from './peg-in-causal-admission-v2.js';
+import {
   buildSubstrateFederatedCheckpointProfileV1,
+  buildSubstrateFederatedCheckpointStatementV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
   canonicalJson,
@@ -119,6 +125,7 @@ const mocks = vi.hoisted(() => ({
   familyReceipt: undefined as any,
   trackerCompileWait: undefined as Promise<void> | undefined,
   useActualCompilers: false,
+  useActualFamilyDecoder: false,
   settlementTargetProfile: undefined as any,
   settlementObservation: undefined as any,
   acceptedSettlementObservations: new Set<unknown>(),
@@ -132,7 +139,18 @@ const mocks = vi.hoisted(() => ({
   setupCheckNodeIdOverride: undefined as string | undefined,
   prepareSetupCheckBatch: vi.fn(),
   checkSetupTransaction: vi.fn(),
+  promoteSetupTransaction: vi.fn(),
   getSetupCheckHeaders: vi.fn(),
+  executionTarget: Object.freeze({
+    primaryNodeOrigin: 'http://127.0.0.1:9051' as const,
+    witnessNodeOrigin: 'http://127.0.0.1:9052' as const,
+    primaryMining: true as const,
+    witnessReadOnly: true as const,
+  }),
+  executionTargetBinding: Object.freeze({
+    processBindingDigestHex: '8a'.repeat(32),
+    executionTargetIdentityDigestHex: '8b'.repeat(32),
+  }),
 }));
 
 vi.mock(
@@ -144,7 +162,10 @@ vi.mock(
     return {
       ...actual,
       decodeSubstrateFederatedSettlementFamilyV1Profile: vi.fn(
-        () => mocks.familyProfile,
+        (value: Parameters<typeof actual.decodeSubstrateFederatedSettlementFamilyV1Profile>[0]) =>
+          mocks.useActualFamilyDecoder
+            ? actual.decodeSubstrateFederatedSettlementFamilyV1Profile(value)
+            : mocks.familyProfile,
       ),
     };
   },
@@ -243,9 +264,25 @@ vi.mock('./fleet-signer.js', async importOriginal => {
   return {
     ...actual,
     prepareLocalWasmRootCheckCandidates: mocks.prepareSetupCheckBatch,
+    prepareLocalWasmRootCheckCandidatesFromNode: mocks.prepareSetupCheckBatch,
     checkSignedTransaction: mocks.checkSetupTransaction,
+    promoteLocalWasmCheckedTransactionForSubmissionV1:
+      mocks.promoteSetupTransaction,
   };
 });
+
+vi.mock(
+  './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+  () => ({
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1:
+      (value: unknown) => {
+        if (value !== mocks.executionTarget) {
+          throw new Error('synthetic execution target provenance is missing');
+        }
+        return mocks.executionTargetBinding;
+      },
+  }),
+);
 
 import {
   getSubstrateFederatedTrackerDigestV1Hex,
@@ -294,6 +331,7 @@ import {
 } from './substrate-federated-isolated-devnet-setup-check-request-v2.js';
 import {
   runSubstrateFederatedIsolatedDevnetSetupCheckV2,
+  takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2,
   validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import {
@@ -312,15 +350,40 @@ import {
 } from './substrate-federated-isolated-devnet-portable-replay-files-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
-  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance,
+} from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+  assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1,
+  promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+  buildSubstrateFederatedIsolatedDevnetPegInCandidateV1,
+} from './substrate-federated-isolated-devnet-peg-in-candidate-v1.js';
+import {
   createSubstrateFederatedIsolatedDevnetPacketSessionV1,
 } from './substrate-federated-isolated-devnet-packet-producer-v1.js';
+import * as packetProducer from './substrate-federated-isolated-devnet-packet-producer-v1.js';
+import * as portableReplay from './substrate-federated-isolated-devnet-portable-replay-v1.js';
+import * as isolatedLaunch from './substrate-federated-isolated-devnet-launch-v1.js';
+import * as isolatedGeneration from './substrate-federated-isolated-devnet-generation-v1.js';
+import * as isolatedProvisioning from './substrate-federated-isolated-devnet-provisioning-v1.js';
+import * as sourceHistoryProducer from './substrate-federated-authority-safe-devnet-history-v1.js';
+import * as ergoHistoryProducer from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
+import * as relayerArtifactProducer from './substrate-federated-isolated-devnet-relayer-artifacts-v1.js';
+import * as setupSignerBindings from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import * as trackerCompilerV2 from './substrate-federated-tracker-jvm-compiler-v2.js';
+import * as familyCompilerV2 from './substrate-federated-settlement-family-jvm-compiler-v2.js';
 import {
   buildSubstrateFederatedGreenfieldErgoHistoryV1,
   buildSubstrateFederatedGreenfieldLaunchBaselineV1,
@@ -335,10 +398,14 @@ import {
 import {
   materializeUnsignedTransaction,
   type Eip12Box,
+  type Eip12UnsignedTransaction,
 } from './unsigned-ergo-transaction.js';
 import {
   buildSubstrateFederatedTrackerCompilerRequestV1,
 } from './substrate-federated-tracker-compiler-v1.js';
+import {
+  buildCompilerBoundSubstrateFederatedTrackerV1Context,
+} from './substrate-federated-tracker-v1.js';
 
 const HISTORY_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_HISTORY_V1';
@@ -1555,6 +1622,77 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       expect(mocks.checkSetupTransaction).toHaveBeenCalledTimes(3);
       expect(mocks.settlementReobservations).toHaveLength(0);
 
+      expect(() =>
+        takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2(
+          receipt,
+          request,
+          structuredClone(mocks.executionTarget),
+        )
+      ).toThrow(/execution target provenance is missing/);
+      expect(() =>
+        takeSubstrateFederatedIsolatedDevnetSetupCheckExecutionMaterialV2(
+          structuredClone(receipt),
+          request,
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact process provenance/);
+      expect(() =>
+        promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: receipt,
+          request,
+          expectedTargetBinding: {
+            ...mocks.executionTargetBinding,
+            processBindingDigestHex: 'fc'.repeat(32),
+          },
+          target: mocks.executionTarget,
+        })
+      ).toThrow(/process binding changed/);
+      const executionBatch =
+        promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: receipt,
+          request,
+          expectedTargetBinding: mocks.executionTargetBinding,
+          target: mocks.executionTarget,
+        });
+      expect(executionBatch.receipt).toEqual(receipt);
+      expect(executionBatch.receipt).not.toBe(receipt);
+      expect(executionBatch.targetBinding)
+        .toEqual(mocks.executionTargetBinding);
+      expect(
+        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+          executionBatch,
+          mocks.executionTarget,
+        ),
+      ).toEqual(mocks.executionTargetBinding);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2(
+          structuredClone(executionBatch),
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact process provenance/);
+      expect(executionBatch.orderedTransactions.map(transaction =>
+        transaction.issuance.role
+      )).toEqual([
+        'tracker',
+        'duplicate-prevention',
+        'pooled-reserve',
+      ]);
+      expect(executionBatch.orderedTransactions.every((transaction, index) =>
+        transaction.signedCandidate.txId
+          === receipt.orderedChecks[index]?.signedTransactionIdHex
+        && transaction.checkedAcceptance.checked.txId
+          === receipt.orderedChecks[index]?.nodeTransactionIdHex
+      )).toBe(true);
+      expect(mocks.promoteSetupTransaction).toHaveBeenCalledTimes(3);
+      expect(() =>
+        promoteSubstrateFederatedIsolatedDevnetSetupExecutionBatchV2({
+          executionReceipt: receipt,
+          request,
+          expectedTargetBinding: mocks.executionTargetBinding,
+          target: mocks.executionTarget,
+        })
+      ).toThrow(/lacks exact process provenance/);
+
       expect(
         validateSubstrateFederatedIsolatedDevnetSetupCheckReceiptV2(
           structuredClone(receipt),
@@ -1618,6 +1756,461 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     }, session.signer.publicKeyHex);
   }, 30_000);
 
+  it('carries exact live JVM family and tracker bindings into unsigned producers', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+
+      const batch = await session.runForExecution({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+
+      expect(
+        assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
+          batch,
+          mocks.executionTarget,
+        ),
+      ).toBe(batch.familyCompilerBinding);
+      expect(batch.familyCompilerBinding.provenance).toEqual({
+        kind: 'same-process-pinned-jvm',
+        digestHex: fixture.compilerMocks.familyReceipt.receiptDigestHex,
+      });
+      expect(batch.familyCompilerBinding.profile.familyIdHex)
+        .toBe(fixture.compilerMocks.familyReceipt.profile.familyIdHex);
+      const trackerIssuance = batch.orderedTransactions[0]!.issuance;
+      const trackerSetup = await materializeUnsignedTransaction(
+        trackerIssuance.unsignedTransactionBody as unknown as Eip12UnsignedTransaction,
+        'isolated setup-batch tracker issuance',
+      );
+      const trackerCurrentHeight =
+        trackerIssuance.predictedStateOutput.creationHeight + 1;
+      const trackerRequest = batch.trackerCompilerBinding.request;
+      const trackerStatement = buildSubstrateFederatedCheckpointStatementV1({
+        profile: trackerRequest.profile,
+        ...trackerRequest.application,
+        sourceNativeBlockHeight: '17',
+        sourceNativeBlockHashHex: '51'.repeat(32),
+        executionBlockHashHex: '52'.repeat(32),
+        bridgeEventRootHex: '53'.repeat(32),
+        burnLeafCount: 1,
+        admissionValidFromErgoHeight: trackerCurrentHeight - 1,
+        admissionExpiresAtErgoHeight: trackerCurrentHeight + 1,
+      });
+      const actualTrackerCompiler = await vi.importActual<
+        typeof import('./substrate-federated-tracker-jvm-compiler-v1.js')
+      >('./substrate-federated-tracker-jvm-compiler-v1.js');
+      expect(
+        actualTrackerCompiler.assertSubstrateFederatedTrackerJvmCompilerReceiptV1(
+          batch.trackerCompilerBinding.receipt,
+          trackerRequest,
+        ),
+      ).toBe(batch.trackerCompilerBinding.receipt);
+      const trackerContext =
+        await buildCompilerBoundSubstrateFederatedTrackerV1Context({
+          compilerRequest: trackerRequest,
+          compilerReceipt: batch.trackerCompilerBinding.receipt,
+          trackerInputBox: trackerSetup.outputs[0],
+          encodedStatementHex: trackerStatement.encodedStatementHex,
+          currentErgoHeight: trackerCurrentHeight,
+          anchorContextIndex: 0,
+        });
+      expect(trackerContext.contract.contractIdHex)
+        .toBe(batch.trackerCompilerBinding.receipt.contract.contractIdHex);
+      expect((trackerContext.eip12UnsignedTransaction.inputs as any[])[0].boxId)
+        .toBe(trackerIssuance.predictedStateOutput.boxIdHex);
+      expect(trackerContext.boundaries).toMatchObject({
+        contractIdentityBound: true,
+        statementAndProfileValidated: true,
+        sourceSignaturesVerifiedOnChain: false,
+        jvmReductionAccepted: false,
+        signingPerformed: false,
+        submissionPerformed: false,
+        broadcastPerformed: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+        trustlessStatusEstablished: false,
+      });
+      const actualFamilyModule = await vi.importActual<
+        typeof import('./substrate-federated-settlement-family-v1.js')
+      >('./substrate-federated-settlement-family-v1.js');
+      const profile =
+        actualFamilyModule.decodeSubstrateFederatedSettlementFamilyV1Profile(
+          batch.familyCompilerBinding.profile,
+        );
+      mocks.familyProfile = profile as unknown as Record<string, unknown>;
+      const setupCreationHeight =
+        batch.orderedTransactions[2]!.issuance.predictedStateOutput
+          .creationHeight;
+      const sourceFundingHeight = setupCreationHeight + 1;
+      const transitionHeight = setupCreationHeight + 2;
+      const sourceFundingInput = await isolatedPegInFundingInput(
+        sourceFundingHeight,
+      );
+      const pegInInput = {
+        batch,
+        target: mocks.executionTarget,
+        sourceFundingInput,
+        sourceIntent: {
+          formatVersion: PEG_IN_CAUSAL_ADMISSION_FORMAT_VERSION,
+          sourceNetworkIdHex: profile.sourceNetworkIdHex,
+          sidechainIdHex: profile.sidechainIdHex,
+          bridgeAddressHex: profile.bridgeAddressHex,
+          tokenAddressHex: profile.tokenAddressHex,
+          settlementProfileIdHex: profile.settlementProfileIdHex,
+          admissionProfileIdHex: batch.familyCompilerBinding.profile.familyIdHex,
+          sourceAssetIdHex: profile.settlementAssetIdHex,
+          amountNanoErg: '5000000',
+          recipientAddressHex: 'b1'.repeat(20),
+        },
+        depositorErgoTreeHex: FUNDING_TREE,
+        creationHeights: {
+          currentErgoHeight: transitionHeight,
+          sourceLockCreation: transitionHeight,
+          reserveTransition: transitionHeight,
+        },
+      } as const;
+      const pegInCandidate =
+        await buildSubstrateFederatedIsolatedDevnetPegInCandidateV1(pegInInput);
+      expect(
+        assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+          pegInCandidate,
+          batch,
+          mocks.executionTarget,
+        ),
+      ).toBe(pegInCandidate.depositPacket);
+      expect(pegInCandidate.setup.pooledReserveBoxIdHex).toBe(
+        batch.orderedTransactions[2]!.issuance.predictedStateOutput.boxIdHex,
+      );
+      expect(pegInCandidate.depositPacket.reserve).toMatchObject({
+        predecessorDepositCount: 0,
+        successorDepositCount: 1,
+        inputLiabilityNanoErg: '0',
+        outputLiabilityNanoErg: '5000000',
+      });
+      expect(pegInCandidate.boundaries).toMatchObject({
+        deterministicUnsignedDepositConstructed: true,
+        setupCanonicalConfirmationEstablished: false,
+        mintAuthorized: false,
+        profileActivated: false,
+        targetNodeAcceptanceEstablished: false,
+        nodeCheckPerformed: false,
+        signingAuthorityEstablished: false,
+        submissionAuthorityEstablished: false,
+        broadcastAuthorityEstablished: false,
+        fundsAuthorityEstablished: false,
+        gate5Closed: false,
+      });
+      let batchReads = 0;
+      let targetReads = 0;
+      const accessorCandidate =
+        await buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+          get batch() {
+            batchReads += 1;
+            return batchReads === 1 ? batch : structuredClone(batch);
+          },
+          get target() {
+            targetReads += 1;
+            return targetReads === 1
+              ? mocks.executionTarget
+              : structuredClone(mocks.executionTarget);
+          },
+          sourceFundingInput,
+          sourceIntent: pegInInput.sourceIntent,
+          depositorErgoTreeHex: pegInInput.depositorErgoTreeHex,
+          creationHeights: pegInInput.creationHeights,
+        });
+      expect(batchReads).toBe(1);
+      expect(targetReads).toBe(1);
+      expect(
+        assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+          accessorCandidate,
+          batch,
+          mocks.executionTarget,
+        ),
+      ).toBe(accessorCandidate.depositPacket);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPegInCandidateV1(
+          structuredClone(pegInCandidate),
+          batch,
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks process provenance/);
+      await expect(
+        buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+          ...pegInInput,
+          batch: structuredClone(batch),
+        }),
+      ).rejects.toThrow(/lacks exact process provenance/);
+      await expect(
+        buildSubstrateFederatedIsolatedDevnetPegInCandidateV1({
+          ...pegInInput,
+          familyBinding: batch.familyCompilerBinding,
+        } as any),
+      ).rejects.toThrow(/unknown or missing fields/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2(
+          structuredClone(batch),
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact process provenance/);
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
+  it('retains one synthetic signer continuation for one source-lock JVM check', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+      await session.runForExecutionRetainingPegInSigner({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+
+      const sourceFundingInput = await isolatedPegInFundingInput(803);
+      const sourceLockCreation = await materializeUnsignedTransaction({
+        inputs: [{ ...sourceFundingInput, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: BigInt(sourceFundingInput.value) - BigInt(MINER_FEE),
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in source-lock continuation fixture');
+      const check = await session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget);
+
+      expect(check).toMatchObject({
+        status: 'PASS',
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransactionIdHex: sourceLockCreation.txId,
+        signedTransactionIdHex: sourceLockCreation.txId,
+        checker: {
+          nodeOrigin: 'http://127.0.0.1:9051',
+          path: '/transactions/check',
+        },
+        boundaries: {
+          exactTransactionAndSourceBoxBound: true,
+          localWasmRootSigningPerformed: true,
+          localJvmNodeCheckPassed: true,
+          submissionAuthorityEstablished: false,
+          broadcastAuthorityEstablished: false,
+        },
+      });
+      expect(check).not.toHaveProperty('candidateDigestHex');
+      expect(check).not.toHaveProperty('sourceFundingBoxDigestHex');
+      expect(mocks.prepareSetupCheckBatch).toHaveBeenCalledTimes(2);
+      expect(mocks.checkSetupTransaction).toHaveBeenCalledTimes(4);
+      await expect(session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent, consumed/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          session.signer,
+        )
+      ).toThrow(/lacks active process provenance/);
+      session.dispose();
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          session.signer,
+        )
+      ).toThrow(/lacks active process provenance/);
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
+  it('retains the signer through source-lock check and consumes it after one committed-vault check', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+      await session.runForExecutionRetainingPegInSigner({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+
+      const sourceFundingInput = await isolatedPegInFundingInput(803);
+      const reservePredecessor = await isolatedPegInFundingInput(802);
+      const sourceLockCreation = await materializeUnsignedTransaction({
+        inputs: [{ ...sourceFundingInput, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: 10_000_000n,
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: 7_800_000n,
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in committed-vault source-lock fixture');
+      const sourceLock = sourceLockCreation.outputs[0]!;
+      const transitionFeeFunding = sourceLockCreation.outputs[1]!;
+      const reserveTransition = await materializeUnsignedTransaction({
+        inputs: [{
+          ...reservePredecessor,
+          extension: {
+            '0': encodeCollByteRegister(Buffer.from('00', 'hex')),
+          },
+        }, {
+          ...sourceLock,
+          extension: {},
+        }, {
+          ...transitionFeeFunding,
+          extension: {},
+        }],
+        dataInputs: [],
+        outputs: [{
+          value: 30_000_000n,
+          ergoTree: reservePredecessor.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in committed-vault continuation fixture');
+
+      await session.checkPegInSourceLockRetainingSigner({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget);
+      const check = await session.checkPegInCommittedVault({
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransaction: reserveTransition,
+      }, mocks.executionTarget);
+
+      expect(check).toMatchObject({
+        status: 'PASS',
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransactionIdHex: reserveTransition.txId,
+        signedTransactionIdHex: reserveTransition.txId,
+        checker: {
+          nodeOrigin: 'http://127.0.0.1:9051',
+          path: '/transactions/check',
+        },
+        boundaries: {
+          exactThreeInputTransitionBound: true,
+          localWasmRootSigningPerformed: true,
+          localJvmNodeCheckPassed: true,
+          sourceLockConsumptionEstablished: false,
+          reserveLineageEstablished: false,
+          mintAuthorized: false,
+          fundsAuthorityEstablished: false,
+        },
+      });
+      const promoted =
+        promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+          check,
+          mocks.executionTarget,
+        );
+      expect(promoted.signedCandidate.txId).toBe(reserveTransition.txId);
+      expect(promoted.checkedAcceptance.submissionHandle.txId).toBe(
+        reserveTransition.txId,
+      );
+      expect(() =>
+        promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(
+          check,
+          mocks.executionTarget,
+        )
+      ).toThrow(/lacks exact execution provenance/);
+      expect(mocks.prepareSetupCheckBatch).toHaveBeenCalledTimes(3);
+      expect(mocks.checkSetupTransaction).toHaveBeenCalledTimes(5);
+      await expect(session.checkPegInCommittedVault({
+        reservePredecessorBoxIdHex: reservePredecessor.boxId,
+        sourceLockBoxIdHex: sourceLock.boxId,
+        transitionFeeFundingBoxIdHex: transitionFeeFunding.boxId,
+        unsignedTransaction: reserveTransition,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent/);
+      expect(() => session.dispose()).not.toThrow();
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
+  it('revokes the retained signer when the source-lock JVM check fails', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    await withPortableReplayFixture(async fixture => {
+      configureFixedSetupCheckRunnerRuntime(fixture);
+      await session.runForExecutionRetainingPegInSigner({
+        portableReplayInput: fixture.input,
+        primaryNodeOrigin: 'http://127.0.0.1:9051',
+        witnessNodeOrigin: 'http://127.0.0.1:9052',
+      }, mocks.executionTarget);
+      const sourceFundingInput = await isolatedPegInFundingInput(803);
+      const sourceLockCreation = await materializeUnsignedTransaction({
+        inputs: [{ ...sourceFundingInput, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: BigInt(sourceFundingInput.value) - BigInt(MINER_FEE),
+          ergoTree: sourceFundingInput.ergoTree,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }, {
+          value: BigInt(MINER_FEE),
+          ergoTree: MINER_FEE_TREE,
+          assets: [],
+          additionalRegisters: {},
+          creationHeight: 803,
+        }],
+      }, 'isolated peg-in failed source-lock check fixture');
+      mocks.checkSetupTransaction.mockResolvedValueOnce(null);
+
+      await expect(session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget)).rejects.toThrow(/JVM node check failed/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
+          session.signer,
+        )
+      ).toThrow(/lacks active process provenance/);
+      await expect(session.checkPegInSourceLock({
+        sourceFundingBoxIdHex: sourceFundingInput.boxId,
+        unsignedTransaction: sourceLockCreation,
+      }, mocks.executionTarget)).rejects.toThrow(/continuation is absent, consumed/);
+      expect(() => session.dispose()).not.toThrow();
+    }, session.signer.publicKeyHex);
+  }, 30_000);
+
   it('disposes an unused signer-first session before packet construction', async () => {
     const session =
       await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
@@ -1628,16 +2221,30 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     );
   });
 
-  it('hands one non-serializable mining credential to the static root', async () => {
+  it('atomically hands two independent one-shot mining credentials to the static root', async () => {
     const session =
       await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
-    const credential =
-      claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(session);
+    const pair = claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(
+      session,
+    );
+    const credential = pair.miningCredential;
+    const checkpointCredential = pair.checkpointMiningCredential;
+    expect(Object.isFrozen(pair)).toBe(true);
     expect(Object.keys(credential).sort()).toEqual(['schema', 'version']);
+    expect(Object.keys(checkpointCredential).sort()).toEqual([
+      'schema',
+      'version',
+    ]);
+    expect(checkpointCredential).not.toBe(credential);
     expect(JSON.stringify(credential)).not.toMatch(/mnemonic|secret|test /iu);
+    expect(JSON.stringify(checkpointCredential))
+      .not.toMatch(/mnemonic|secret|test /iu);
     expect(() =>
       claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(session)
     ).toThrow(/absent, claimed, or disposed/);
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(session)
+    ).toThrow(/pair is absent, partially claimed, or disposed/);
     expect(() =>
       assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
         structuredClone(credential),
@@ -1651,6 +2258,32 @@ describe('Substrate federated isolated-devnet launch V1', () => {
         session.signer.publicKeyHex,
       )
     ).toThrow(/absent, consumed, or revoked/);
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        checkpointCredential,
+        session.signer.publicKeyHex,
+      )
+    ).not.toThrow();
+    revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+      checkpointCredential,
+    );
+  });
+
+  it('fails closed when one credential was claimed before the atomic handoff', async () => {
+    const session =
+      await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    const credential =
+      claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(session);
+
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(session)
+    ).toThrow(/pair is absent, partially claimed, or disposed/);
+
+    revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential);
+    session.dispose();
+    expect(() =>
+      claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(session)
+    ).toThrow(/pair is absent, partially claimed, or disposed/);
   });
 
   it('does not transfer signer-first binding provenance through serialization', async () => {
@@ -1756,7 +2389,9 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './strict-data-snapshot.js',
       './strict-json.js',
       './substrate-federated-genesis-observation-v1.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
+      './substrate-federated-native-genesis-setup-check-request-v1.js',
     ]);
     expect(source).not.toMatch(
       /\b(?:signTransactionForSubmission|submitSigned|npost|broadcastTransaction|getSignerKeys)\b/u,
@@ -1785,6 +2420,13 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       ),
       'utf8',
     );
+    const signerBinding = readFileSync(
+      new URL(
+        './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.ts',
+        import.meta.url,
+      ),
+      'utf8',
+    );
     const signerIdentity = readFileSync(
       new URL(
         './local-wasm-root-signer-public-identity.ts',
@@ -1792,43 +2434,94 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       ),
       'utf8',
     );
+    const trackerV2Kernel = readFileSync(new URL(
+      './substrate-federated-isolated-devnet-tracker-v2-check-kernel-v1.ts', import.meta.url,
+    ), 'utf8');
+    expect([...trackerV2Kernel.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu)].map(match => match[1])).toEqual([
+      './bridge-validity-tracker-header-context-v1.js',
+      './ergo-check-profiles.js',
+      './fleet-signer.js',
+      './strict-json.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
+      './substrate-federated-tracker-compiler-v2.js',
+      './substrate-federated-tracker-v2.js',
+      './substrate-federated-tracker-v2-external-fee.js',
+      './unsigned-ergo-transaction.js',
+    ]);
+    expect(trackerV2Kernel).not.toMatch(/\bimport\s*\(/u);
     const runnerImports = [
       ...runner.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
     ].map(match => match[1]);
     expect(runnerImports).toEqual([
       './substrate-federated-isolated-devnet-portable-replay-v1.js',
       './substrate-federated-isolated-devnet-setup-check-v2.js',
+      './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
+      './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
+      './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js',
     ]);
     expect([
       ...runner.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/gu),
-    ].map(match => match[1])).toEqual([
-      './substrate-federated-isolated-devnet-setup-check-execution-v2.js',
-    ]);
+    ].map(match => match[1])).toEqual([]);
     expect(runner).not.toMatch(
-      /\bexport\s+(?:async\s+)?function\s+(?:registerSignerBinding|revokeSignerBinding)\b/u,
+      /\bexport\s+(?:async\s+)?function\s+(?:registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2|revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2)\b/u,
     );
+    expect([
+      ...signerBinding.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
+    ].map(match => match[1])).toEqual([
+      './substrate-federated-isolated-devnet-mining-credential-v1.js',
+    ]);
+    expect(signerBinding).not.toMatch(/\bimport\s*\(/u);
     const executionImports = [
       ...execution.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu),
     ].map(match => match[1]);
     expect(executionImports).toEqual([
       'node:crypto',
       'ethers',
+      './fleet-signer.js',
+      './bridge-validity-tracker-header-context-v1.js',
+      './ergo-unsigned-transaction.js',
+      './substrate-federated-tracker-v1.js',
+      './substrate-federated-isolated-devnet-observed-anchor-tracker-check-kernel-v1.js',
+      './substrate-federated-isolated-devnet-tracker-v2-check-kernel-v1.js',
+      './substrate-federated-tracker-v2.js',
+      './substrate-federated-tracker-compiler-v2.js',
+      './substrate-federated-pooled-reserve-deposit-v2.js',
+      './substrate-federated-tracker-v2-external-fee.js',
+      './substrate-federated-burn-settlement-v2.js',
+      './substrate-federated-burn-settlement-v1.js',
+      './substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js',
+      './substrate-federated-settlement-family-compiler-binding-v1.js',
       './local-wasm-root-signer-public-identity.js',
       './relayer-core/devnet-reward-consolidation.js',
       './substrate-federated-isolated-devnet-mining-credential-v1.js',
       './substrate-federated-genesis-observation-v1.js',
       './substrate-federated-isolated-devnet-local-provisioning-v2.js',
+      './substrate-federated-isolated-devnet-launch-v1.js',
+      './substrate-federated-isolated-devnet-ergo-node-process-v1.js',
       './substrate-federated-isolated-devnet-portable-replay-v1.js',
       './substrate-federated-isolated-devnet-settlement-target-v2.js',
       './substrate-federated-isolated-devnet-setup-check-request-v2.js',
       './substrate-federated-isolated-devnet-setup-check-v2.js',
+      './substrate-federated-native-genesis-setup-check-request-v1.js',
+      './substrate-federated-observed-genesis-v1.js',
       './strict-json.js',
+      './ergo-helpers.js',
+      './substrate-federated-tracker-v2-external-fee.js',
+      './unsigned-ergo-transaction.js',
     ]);
-    expect(`${runner}\n${execution}\n${signerIdentity}`).not.toMatch(
+    expect(execution.match(/import\s*\{([^}]+)\}\s*from\s*'\.\/ergo-helpers\.js'/u)?.[1]?.trim())
+      .toBe('ngetDirect');
+    expect([...execution.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/substrate-federated-tracker-v2-external-fee\.js'/gu)]
+      .map(match => match[1]!.replace(/\s+/gu, ' ').trim())).toEqual([
+      'assertSubstrateFederatedTrackerV2ExternalFeeTransaction, type SubstrateFederatedTrackerV2ExternalFeeTransaction',
+      'buildSubstrateFederatedTrackerV2FeeFunding, buildSubstrateFederatedWithdrawalV2FeeFunding',
+    ]);
+    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}\n${trackerV2Kernel}`).not.toMatch(
       /process\.env|node:(?:fs|http|https|net|tls|child_process)|profile-registry|state-tracker/iu,
     );
-    expect(`${runner}\n${execution}\n${signerIdentity}`).not.toMatch(
+    expect(`${runner}\n${execution}\n${signerBinding}\n${signerIdentity}\n${trackerV2Kernel}`).not.toMatch(
       /\b(?:signTransactionForSubmission|submitSigned|npost|broadcastTransaction|getSignerKeys|fetch\s*\()/u,
     );
     expect(signerIdentity.match(/\bimport\s*\(/gu) ?? []).toHaveLength(1);
@@ -2709,47 +3402,44 @@ describe('Substrate federated isolated-devnet launch V1', () => {
   }, 180_000);
 
   it('rejects malformed child-process argument grammars', async () => {
-    await withPortableReplayFixture(async fixture => {
-      const root = mkdtempSync(join(tmpdir(), 'e2s-isolated-portable-args-'));
-      try {
-        const requestPath = writePortableReplayBundle(root, fixture.input);
-        const valid = portableReplayCliArguments(
-          requestPath,
-          fixture.input.trustPins,
-        );
-        const variants = [
-          valid.slice(0, -1),
-          [...valid, '--unexpected'],
-          [valid[2]!, valid[3]!, valid[0]!, valid[1]!, valid[4]!, valid[5]!],
-          [valid[0]!, valid[1]!, valid[2]!, valid[3]!, valid[2]!, valid[5]!],
-          [valid[0]!, valid[1]!, '--unknown', valid[3]!, valid[4]!, valid[5]!],
-        ];
-        for (const [index, args] of variants.entries()) {
-          await expect(runIsolatedPortableReplayArguments(
-            args,
-            `isolated portable replay argument case ${index}`,
-          )).rejects.toThrow(
-            new RegExp(`isolated portable replay argument case ${index} failed`),
-          );
-        }
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    });
-  }, 60_000);
+    const valid = portableReplayCliArguments(
+      'synthetic-request-that-must-not-be-read.json',
+      {
+        expectedTargetDescriptorDigestHex: '11'.repeat(32),
+        expectedSourceAttestationKeySetDigestHex: '22'.repeat(32),
+      },
+    );
+    const variants = [
+      valid.slice(0, -1),
+      [...valid, '--unexpected'],
+      [valid[2]!, valid[3]!, valid[0]!, valid[1]!, valid[4]!, valid[5]!],
+      [valid[0]!, valid[1]!, valid[2]!, valid[3]!, valid[2]!, valid[5]!],
+      [valid[0]!, valid[1]!, '--unknown', valid[3]!, valid[4]!, valid[5]!],
+    ];
+    for (const [index, args] of variants.entries()) {
+      await expect(runIsolatedPortableReplayArguments(
+        args,
+        `isolated portable replay argument case ${index}`,
+      )).rejects.toThrow(
+        new RegExp(`isolated portable replay argument case ${index} failed`),
+      );
+    }
+  }, 180_000);
 
   it('keeps the child-process CLI config-free and capability-minimal', () => {
     const source = readFileSync(new URL(
       './scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts',
       import.meta.url,
     ), 'utf8');
-    const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)]
-      .map(match => match[1]);
+    const imports = [
+      ...source.matchAll(/from\s+['"]([^'"]+)['"]/g),
+      ...source.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g),
+    ].map(match => match[1]);
 
     expect(imports).toEqual([
+      '../substrate-federated-isolated-devnet-portable-replay-v1.js',
       '../strict-json.js',
       '../substrate-federated-isolated-devnet-portable-replay-files-v1.js',
-      '../substrate-federated-isolated-devnet-portable-replay-v1.js',
     ]);
     expect(source).not.toMatch(/process\.env|dotenv|node:(?:fs|http|https|net|tls)/);
     expect(source).not.toMatch(
@@ -2758,6 +3448,44 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect(source).toContain(
       "process.stderr.write('isolated portable replay failed\\n')",
     );
+  });
+
+  it('sanitizes replay dependency initialization failures in a fresh process', () => {
+    const source = readFileSync(new URL(
+      './scripts/replay-substrate-federated-isolated-devnet-launch-v1.ts', import.meta.url,
+    ), 'utf8');
+    const faultModule = 'data:text/javascript,' + encodeURIComponent(
+      "export function replaySubstrateFederatedIsolatedDevnetPortableV1() {} "
+      + "process.stdout.write('replay-loader-entered' + String.fromCharCode(10)); "
+      + "throw new Error('synthetic-loader-detail');",
+    );
+    let replacements = 0;
+    const compiled = ts.transpileModule(source, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+      transformers: { before: [context => root => {
+        const visit = (node: ts.Node): ts.VisitResult<ts.Node> => {
+          if (ts.isStringLiteral(node)
+            && node.text === '../substrate-federated-isolated-devnet-portable-replay-v1.js') {
+            replacements += 1;
+            return ts.factory.createStringLiteral(faultModule);
+          }
+          return ts.visitEachChild(node, visit, context);
+        };
+        return ts.visitNode(root, visit) as ts.SourceFile;
+      }] },
+    });
+    expect(replacements).toBe(1);
+    const result = spawnSync(process.execPath, [
+      '--input-type=module', '-e', compiled.outputText, '--', 'synthetic-cli.js',
+      ...portableReplayCliArguments('synthetic-unread-request.json', {
+        expectedTargetDescriptorDigestHex: '11'.repeat(32),
+        expectedSourceAttestationKeySetDigestHex: '22'.repeat(32),
+      }),
+    ], { encoding: 'utf8', env: portableChildEnvironment(), timeout: 3_000, maxBuffer: 4_096 });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('replay-loader-entered\n');
+    expect(result.stderr).toBe('isolated portable replay failed\n');
   });
 
   it('rejects isolated replay trust-pin and signed artifact drift', async () => {
@@ -2956,6 +3684,272 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     })).toThrow(/isolated-devnet launch baseline was not built in this process/);
   });
 });
+
+describe('genuine V2 portable packet and provisioning join', () => {
+  let fixture: Awaited<ReturnType<typeof buildGenuineV2PacketFixture>>;
+  beforeAll(async () => {
+    fixture = await buildGenuineV2PacketFixture();
+  }, 60_000);
+  afterAll(() => fixture?.dispose());
+
+  it('rebuilds the genuine packet into the exact three unsigned genesis transactions', async () => {
+    const { packet, genesisInputs } = fixture;
+    packetProducer.assertSubstrateFederatedIsolatedDevnetPacketV3Provenance(packet);
+    expect(packet.receipt.version).toBe(3);
+    expect(packet.replay.version).toBe(2);
+    const external = JSON.parse(Buffer.from(packet.portableReplayInput.artifacts.attestationPacket).toString('utf8'));
+    expect(external.statement.target).toMatchObject({
+      version: 2, settlementNetworkId: 'ergo-local-devnet',
+      compilerProfile: 'absolute-height-tracker-v2',
+    });
+    expect(packet.portableReplayInput.artifacts.trackerTemplate).toEqual(readFileSync(new URL(
+      '../../contracts/SPVTrackerSubstrateFederatedV2.es', import.meta.url,
+    )));
+    expect(() => portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV1(
+      packet.replay as never,
+    )).toThrow(/continuation is unavailable/);
+    expect(() => portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(
+      structuredClone(packet.replay),
+    )).toThrow(/continuation is unavailable/);
+    const continuation = fixture.continuation;
+    const target = isolatedLaunch.deriveSubstrateFederatedIsolatedDevnetTargetDescriptorV2(
+      continuation.sourceAndCompilerInput,
+    );
+    expect(target).toEqual(external.statement.target);
+    const artifacts = packet.portableReplayInput.artifacts;
+    const statement = isolatedLaunch.buildSubstrateFederatedIsolatedDevnetLaunchStatementV2({
+      target,
+      activationGenerationIdHex: external.statement.activationGenerationIdHex,
+      ergoHistory: buildSubstrateFederatedIsolatedDevnetErgoHistoryV1({
+        target, genesisHeaderIdHex: '71'.repeat(32), genesisHeight: 1,
+        setupAnchorHeaderIdHex: '72'.repeat(32), setupAnchorHeight: 120,
+        greatestWorkHeadersManifest: artifacts.ergoGreatestWorkHeadersManifest,
+        transactionsManifest: artifacts.ergoTransactionsManifest,
+        utxoTransitionsManifest: artifacts.ergoUtxoTransitionsManifest,
+      }),
+      relayerClosure: buildSubstrateFederatedIsolatedDevnetRelayerClosureV1({
+        target, gitCommitSha1Hex: '73'.repeat(20),
+        sourceArchive: artifacts.relayerSourceArchive,
+        packageLock: artifacts.relayerPackageLock,
+        runtimeEntrypointsManifest: artifacts.relayerRuntimeEntrypointsManifest,
+        buildArtifact: artifacts.relayerBuildArtifact,
+      }),
+    });
+    expect(statement).toEqual(external.statement);
+    const baseline = isolatedLaunch.buildSubstrateFederatedIsolatedDevnetLaunchBaselineV2({
+      statement, signatures: external.signatures,
+    });
+    const generation = isolatedGeneration.buildSubstrateFederatedIsolatedDevnetGenerationV2({
+      ...continuation.sourceAndCompilerInput, launchBaseline: baseline,
+    });
+    const provisioning = await isolatedProvisioning.buildSubstrateFederatedIsolatedDevnetProvisioningV2({
+      generation, genesisInputs,
+    });
+    isolatedProvisioning.assertSubstrateFederatedIsolatedDevnetProvisioningV2Provenance(provisioning);
+    expect(packet.replay.launch.generationManifestDigestHex).toBe(generation.manifestDigestHex);
+    expect(packet.replay.provisioning).toEqual({
+      planDigestHex: provisioning.planDigestHex,
+      identitySetDigestHex: provisioning.provisioning.identitySetDigestHex,
+      tracker: provisioning.provisioning.tracker.identity,
+      duplicatePrevention: provisioning.provisioning.duplicatePrevention.identity,
+      pooledReserve: provisioning.provisioning.pooledReserve.identity,
+    });
+    expect(packet.replay.boundaries).toMatchObject({
+      targetNodeAcceptanceEstablished: false, fundsAuthorityEstablished: false,
+      sourceConsensusIndependentlyVerified: false, gate5Closed: false,
+    });
+    expect(() => isolatedProvisioning.assertSubstrateFederatedIsolatedDevnetProvisioningV1Provenance(
+      provisioning,
+    )).toThrow(/provenance/);
+    expect(() => isolatedProvisioning.assertSubstrateFederatedIsolatedDevnetProvisioningV2Provenance(
+      structuredClone(provisioning),
+    )).toThrow(/provenance/);
+    await expect(buildSubstrateFederatedIsolatedDevnetProvisioningV1({
+      generation: generation as never, genesisInputs,
+    })).rejects.toThrow(/generation.*process/);
+    await expect(isolatedProvisioning.buildSubstrateFederatedIsolatedDevnetProvisioningV2({
+      generation: structuredClone(generation), genesisInputs,
+    })).rejects.toThrow(/generation.*process/);
+    expect(() => portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(
+      packet.replay,
+    )).toThrow(/continuation is unavailable/);
+  });
+
+  it('does not allow the V1 replay to relabel a V2 packet', async () => {
+    await expect(replaySubstrateFederatedIsolatedDevnetPortableV1(
+      fixture.packet.portableReplayInput,
+    )).rejects.toThrow(/packet schema is unsupported/);
+  });
+
+  it.each(['expectedTargetDescriptorDigestHex', 'expectedSourceAttestationKeySetDigestHex'] as const)(
+    'rejects the wrong explicit %s before compilation', async key => {
+      const input = fixture.packet.portableReplayInput;
+      await expect(portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+        artifacts: input.artifacts, trustPins: { ...input.trustPins, [key]: 'ff'.repeat(32) },
+      })).rejects.toThrow(/pin|key.set/i);
+    },
+  );
+
+  it.each([
+    ['packet schema', (packet: any) => { packet.schema = SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ATTESTATION_PACKET_V1_SCHEMA; }, /packet schema/],
+    ['packet version', (packet: any) => { packet.version = 1; }, /packet schema/],
+    ['statement', (packet: any) => { packet.statement.schema = 'e2s.substrate-federated-isolated-devnet-launch-statement.v1'; }, /statement schema/],
+    ['statement version', (packet: any) => { packet.statement.version = 1; }, /statement schema/],
+    ['target', (packet: any) => { packet.statement.target.schema = 'e2s.substrate-federated-isolated-devnet-target-descriptor.v1'; }, /target descriptor schema/],
+    ['target version', (packet: any) => { packet.statement.target.version = 1; }, /V2 target profile/],
+    ['target network', (packet: any) => { packet.statement.target.settlementNetworkId = 'ergo-testnet'; }, /V2 target profile/],
+    ['compiler profile', (packet: any) => { packet.statement.target.compilerProfile = 'legacy'; }, /V2 target profile/],
+    ['statement network', (packet: any) => { packet.statement.settlementNetworkId = 'ergo-testnet'; }, /V2 target profile/],
+  ] as const)('rejects a cross-version %s', async (_label, mutate, error) => {
+    const input = fixture.packet.portableReplayInput;
+    const packet = JSON.parse(Buffer.from(input.artifacts.attestationPacket).toString('utf8'));
+    mutate(packet);
+    await expect(portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+      trustPins: input.trustPins,
+      artifacts: { ...input.artifacts, attestationPacket: jsonBytes(packet) },
+    })).rejects.toThrow(error);
+  });
+
+  it.each([
+    'trackerTemplate', 'duplicatePreventionTemplate', 'sourceLockTemplate',
+    'pooledReserveTemplate', 'sourceAcceptanceReport', 'sourceReportedFinalizedBlocks',
+    'sourceRuntimeHistory', 'sourceApplicationHistory', 'sourceHistoryReceipt',
+    'ergoGreatestWorkHeadersManifest', 'ergoTransactionsManifest', 'ergoUtxoTransitionsManifest',
+    'relayerSourceArchive', 'relayerPackageLock', 'relayerRuntimeEntrypointsManifest', 'relayerBuildArtifact',
+  ] as const)('rejects exact-byte drift in %s', async key => {
+    const input = fixture.packet.portableReplayInput;
+    await expect(fixture.withFrozenCompilers(() => portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+      trustPins: input.trustPins,
+      artifacts: { ...input.artifacts, [key]: Buffer.concat([input.artifacts[key], Buffer.from('\n')]) },
+    }))).rejects.toThrow(/digest|bytes|artifact|template|canonical|compiler (request|binding)/i);
+  });
+
+  it('revalidates the source quorum after rebuilding the V2 statement', async () => {
+    const input = fixture.packet.portableReplayInput;
+    const packet = JSON.parse(Buffer.from(input.artifacts.attestationPacket).toString('utf8'));
+    packet.signatures[0].signatureHex = '00'.repeat(64);
+    await expect(withoutNodeOptions(() => portableReplay.replaySubstrateFederatedIsolatedDevnetPortableV2({
+      trustPins: input.trustPins,
+      artifacts: { ...input.artifacts, attestationPacket: jsonBytes(packet) },
+    }))).rejects.toThrow(/signature|threshold/);
+  }, 60_000);
+});
+
+async function buildGenuineV2PacketFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'e2s-v2-packet-join-'));
+  const history = historyFixture();
+  const sourceHistory = {
+    receipt: JSON.parse(Buffer.from(history.bundle.historyReceipt).toString('utf8')),
+    artifacts: {
+      acceptanceReport: history.bundle.acceptanceReport,
+      reportedFinalizedBlocksManifest: history.bundle.reportedFinalizedBlocks,
+      runtimeHistoryManifest: history.bundle.runtimeHistory,
+      applicationHistoryManifest: history.bundle.applicationHistory,
+    },
+  };
+  const publicIdentity = await deriveLocalWasmRootSignerPublicIdentity(Mnemonic.fromEntropy(
+    new Uint8Array(32).fill(37),
+  ).phrase);
+  const publicKeyHex = publicIdentity.publicKeyHex;
+  const signer = Object.freeze({
+    publicKeyHex, p2pkErgoTreeHex: `0008cd${publicKeyHex}`, networkPrefix: 16 as const,
+    rewardInputErgoTrees: {
+      delay1: deriveDevnetRewardErgoTreeHexForDelay(publicKeyHex, 1),
+      delay720: deriveDevnetRewardErgoTreeHexForDelay(publicKeyHex, 720),
+    },
+  });
+  const genesisInputs = await isolatedGenesisInputs(signer.rewardInputErgoTrees.delay1);
+  const ergoHistory = {
+    receipt: {
+      schema: 'e2s.substrate-federated-isolated-devnet-ergo-history-artifacts.v2',
+      target: { genesisHeaderIdHex: '71'.repeat(32), genesisHeight: 1,
+        setupAnchorHeaderIdHex: '72'.repeat(32), setupAnchorHeight: 120 },
+      genesisBoxIds: Object.fromEntries(Object.entries(genesisInputs).map(([role, box]) => [role, box.boxId])),
+    },
+    artifacts: {
+      greatestWorkHeadersManifest: 'synthetic-header-history',
+      transactionsManifest: 'synthetic-transaction-history',
+      utxoTransitionsManifest: `${canonicalJson({
+        schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_UTXO_HISTORY_V1_SCHEMA,
+        version: 1, genesisInputs,
+      })}\n`,
+    },
+  };
+  // Only upstream observation/custody and archive production are simulated.
+  // The collector, V2 compiler pair, source signing and replay are real.
+  const spies = [
+    vi.spyOn(sourceHistoryProducer, 'assertSubstrateFederatedAuthoritySafeDevnetHistoryV1Provenance')
+      .mockImplementation(value => { expect(value).toBe(sourceHistory); }),
+    vi.spyOn(ergoHistoryProducer, 'assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance')
+      .mockImplementation(value => { expect(value).toBe(ergoHistory); }),
+    vi.spyOn(setupSignerBindings, 'assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance')
+      .mockImplementation(value => { expect(value).toBe(signer); }),
+    vi.spyOn(relayerArtifactProducer, 'produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1')
+      .mockImplementation(async input => {
+        mkdirSync(input.destinationDirectory);
+        const artifacts = Object.fromEntries(Object.entries(
+          relayerArtifactProducer.SUBSTRATE_FEDERATED_ISOLATED_DEVNET_RELAYER_ARTIFACT_FILES_V1,
+        ).map(([role, file]) => {
+          const bytes = Buffer.from(`synthetic-${role}`);
+          writeFileSync(join(input.destinationDirectory, file), bytes);
+          return [role, { file, sizeBytes: bytes.length, sha256Hex: sha256(bytes) }];
+        }));
+        return {
+          schema: 'e2s.substrate-federated-isolated-devnet-relayer-artifacts.v1', version: 1,
+          headCommitSha1Hex: input.expectedHeadCommitSha1Hex,
+          artifactSetDigestHex: sha256(Buffer.from(canonicalJson(artifacts))), artifacts, boundaries: {},
+        } as Awaited<ReturnType<typeof relayerArtifactProducer.produceSubstrateFederatedIsolatedDevnetRelayerArtifactsV1>>;
+      }),
+  ];
+  const oldDecoder = mocks.useActualFamilyDecoder;
+  mocks.useActualFamilyDecoder = true;
+  const session = packetProducer.createSubstrateFederatedIsolatedDevnetPacketCheckpointContinuationSessionV4(signer);
+  const dispose = () => {
+    session.dispose();
+    spies.forEach(spy => spy.mockRestore());
+    mocks.useActualFamilyDecoder = oldDecoder;
+    rmSync(root, { recursive: true, force: true });
+  };
+  try {
+    const profile = buildSubstrateFederatedCheckpointProfileV1({
+      federationEpoch: '1', maxAdmissionValidityBlocks: '64', ...session.signer,
+    });
+    const packet = await withoutNodeOptions(() => session.produce({
+      sourceHistory: sourceHistory as unknown as sourceHistoryProducer.SubstrateFederatedAuthoritySafeDevnetHistoryV1,
+      ergoHistory: ergoHistory as unknown as ergoHistoryProducer.SubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
+      expectedProfilePins: {
+        federationProfileIdHex: profile.profileIdHex,
+        sourceAttestationKeySetDigestHex: profile.sourceAttestationKeySetDigestHex,
+        ergoAdmissionKeySetDigestHex: profile.ergoAdmissionKeySetDigestHex,
+      },
+      relayerArtifacts: {
+        bridgeRoot: dirname(dirname(process.cwd())), gitExecutable: 'git', wasmPackExecutable: 'wasm-pack',
+        expectedHeadCommitSha1Hex: '73'.repeat(20), destinationDirectory: join(root, 'artifacts'),
+      },
+    }));
+    const continuation = portableReplay.takeSubstrateFederatedIsolatedDevnetPortableReplayContinuationV2(packet.replay);
+    const withFrozenCompilers = async <T>(operation: () => Promise<T>): Promise<T> => {
+      const { trackerReceipt, familyReceipt } = continuation.sourceAndCompilerInput;
+      // Reuse only the exact immutable compiler inputs. Never cache session or replay authority.
+      const trackerSpy = vi.spyOn(trackerCompilerV2, 'compileSubstrateFederatedTrackerWithPinnedJvmV2')
+        .mockImplementation(async request => {
+          trackerCompilerV2.assertSubstrateFederatedTrackerJvmCompilerReceiptV2(trackerReceipt, request);
+          return trackerReceipt;
+        });
+      const familySpy = vi.spyOn(familyCompilerV2, 'compileSubstrateFederatedSettlementFamilyWithPinnedJvmV2')
+        .mockImplementation(async input => {
+          familyCompilerV2.assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV2(familyReceipt, input);
+          return familyReceipt;
+        });
+      try { return await operation(); }
+      finally { familySpy.mockRestore(); trackerSpy.mockRestore(); }
+    };
+    return { packet, genesisInputs, session, continuation, withFrozenCompilers, dispose };
+  } catch (error) {
+    dispose();
+    throw error;
+  }
+}
 
 type MutableTargetInput = {
   trackerRequest: any;
@@ -3750,6 +4744,47 @@ function configureSetupCheckCapabilities(
       },
     };
   });
+  mocks.promoteSetupTransaction.mockReset();
+  mocks.promoteSetupTransaction.mockImplementation((
+    candidate: any,
+    checked: any,
+    executionBinding: any,
+  ) => {
+    if (
+      executionBinding.processBindingDigestHex
+        !== mocks.executionTargetBinding.processBindingDigestHex
+      || executionBinding.executionTargetIdentityDigestHex
+        !== mocks.executionTargetBinding.executionTargetIdentityDigestHex
+    ) {
+      throw new Error('synthetic execution binding changed');
+    }
+    return Object.freeze({
+      checked,
+      submissionHandle: Object.freeze({
+        txId: candidate.txId,
+        nodeOrigin: candidate.nodeOrigin,
+        signedTransactionDigestHex: candidate.signedTransactionDigestHex,
+        signedTransactionBytesSha256Hex:
+          candidate.signedTransactionBytesSha256Hex,
+        signedTransactionBytesLength: candidate.signedTransactionBytesLength,
+        checkResponseDigestHex: checked.signedTransactionDigestHex,
+      }),
+    });
+  });
+}
+
+async function isolatedPegInFundingInput(
+  creationHeight: number,
+): Promise<Eip12Box> {
+  const transaction = await materializeUnsignedTransaction({
+    inputs: [{ ...BASE_GENESIS_INPUT, extension: {} }],
+    dataInputs: [],
+    outputs: [
+      isolatedGenesisSeed('20000000', FUNDING_TREE, creationHeight),
+      isolatedGenesisSeed('280000000', FUNDING_TREE, creationHeight),
+    ],
+  }, 'isolated federated peg-in funding fixture');
+  return transaction.outputs[0]!;
 }
 
 function configureFixedSetupCheckRunnerRuntime(
@@ -3977,13 +5012,17 @@ async function freshLocalSettlementObservation(
   } as any;
 }
 
-function isolatedGenesisSeed(value: string, ergoTree = FUNDING_TREE) {
+function isolatedGenesisSeed(
+  value: string,
+  ergoTree = FUNDING_TREE,
+  creationHeight = 110,
+) {
   return {
     value,
     ergoTree,
     assets: [],
     additionalRegisters: {},
-    creationHeight: 110,
+    creationHeight,
   };
 }
 

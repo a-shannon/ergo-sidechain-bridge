@@ -1,0 +1,1189 @@
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import {
+  createFederatedGenesisOperatorV1, assertFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1,
+  type FederatedGenesisOperatorV1,
+} from '../../adapters/federated-genesis-operator-v1.js';
+import { observeFederatedGenesisTargetsV1 } from '../../adapters/federated-genesis-target-observation-v1.js';
+import { assertNoDuplicateJsonKeys, canonicalJson } from '../../ergo-settlement-core/strict-json.js';
+import { createBoundedAuthenticatedSpvTrackerReadOnlySource } from '../../authenticated-spv-tracker-read-only-node-client.js';
+import { StateTracker } from '../../state-tracker.js';
+import type { StateTracker as NativeJournalState } from '../../state-tracker.js';
+import { verifyExecutableSha256 } from '../../native-executable-pin.js';
+import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
+import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
+import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
+  type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
+import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
+import { collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2 } from '../../substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
+import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1, type BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1, type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
+  type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1, assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+import {
+  createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
+} from '../../substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance } from '../../substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+import { revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1, type SubstrateFederatedIsolatedDevnetMiningCredentialV1 }
+  from '../../substrate-federated-isolated-devnet-mining-credential-v1.js';
+import { createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2, readSubstrateFederatedGenesisProfilesFromSessionV2,
+  createSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1,
+  type SubstrateFederatedNativeGenesisSourceAttestationOperationV1,
+  type SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  type SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1 } from '../../substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import { compileObservedSubstrateFederatedGenesisV1, type ObservedSubstrateFederatedGenesisV1 } from '../../substrate-federated-observed-genesis-v1.js';
+import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1, assertSubstrateFederatedNativeGenesisSetupReadCustodyV1 }
+  from '../../substrate-federated-isolated-devnet-setup-check-execution-v2.js';
+import { createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+  projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import type { SubstrateFederatedIsolatedDevnetConfirmationProgressV1,
+  SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
+import { SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS } from '../../relayer-core/substrate-federated-local-devnet-genesis-execution-v1.js';
+import { normalizeEip12Box, type Eip12Box } from '../../unsigned-ergo-transaction.js';
+import type { TrustlessBurnInclusionProof } from '../../profiles/substrate-grandpa-v1/trustless-burn-proof.js';
+import { buildSubstrateFederatedNativeContinuationPegInPacketV1,
+  buildSubstrateFederatedNativeGenesisPegInPacketV1 } from '../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
+import type { SubstrateFederatedPooledReserveDepositV2Packet } from '../../substrate-federated-pooled-reserve-deposit-v2.js';
+import { buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1 } from '../../substrate-federated-isolated-devnet-peg-in-mint-reservation-draft-v1.js';
+import { collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1 } from '../../substrate-federated-isolated-devnet-committed-reserve-evidence-v1.js';
+import {
+  executeSubstrateFederatedNativeGenesisBatchV1,
+  executeSubstrateFederatedNativeContinuationPegInSourceLockV1,
+  executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1,
+  executeSubstrateFederatedNativeGenesisPegInSourceLockV1,
+  executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1,
+  executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
+  executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  waitForCanonicalConfirmation,
+  projectTrackerCanonicalConfirmationFailureDiagnosticV1,
+} from './substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
+import { executeFrontierNativeProofBoundReservationMintAndBurnV1,
+  executeFrontierNativeProofBoundContinuationReservationV1,
+  executeFrontierNativeProofBoundContinuationMintAndBurnV1,
+  attestFrontierNativeBurnCheckpointV1,
+  assertFrontierNativeBurnCheckpointV1 } from './frontier-native-proof-bound-reservation-signing-v1.js';
+import { encodeSubstrateFederatedCheckpointExtensionValueV1 } from '../../profiles/substrate-federated-v1/checkpoint-statement.js';
+import { observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1, assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1,
+  observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2, assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2 }
+  from '../../substrate-federated-isolated-devnet-checkpoint-anchor-observer-v1.js';
+import { buildBridgeValidityTrackerObservedHeaderContextV1 } from '../../bridge-validity-tracker-header-context-v1.js';
+import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context,
+  buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext } from '../../substrate-federated-tracker-v2.js';
+import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from '../../substrate-federated-tracker-v2-external-fee.js';
+import { authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission, reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission,
+  revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission, confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission }
+  from '../../substrate-federated-isolated-devnet-tracker-v2-admission-lifecycle.js';
+import { submitSubstrateFederatedIsolatedDevnetTrackerV2Admission, finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalV2, finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2,
+  projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic }
+  from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
+import { authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2, reserveSubstrateFederatedIsolatedDevnetWithdrawalV2,
+  confirmSubstrateFederatedIsolatedDevnetWithdrawalV2 } from '../../substrate-federated-isolated-devnet-withdrawal-v2-lifecycle.js';
+
+const PRIMARY = 'http://127.0.0.1:19955';
+const WITNESS = 'http://127.0.0.1:19956';
+const MAX_RESPONSE_BYTES = 34 * 1024 * 1024;
+const KEYS = {
+  code: '0x3a636f6465',
+  profile: '0xaf86fef4216ac2bcd1c592b204011ad0710f901342def5945398fc0e02473bde',
+  enforced: '0xaf86fef4216ac2bcd1c592b204011ad04e000f8baeaa137cf901a9235d7de9a1',
+  bridge: '0xaf86fef4216ac2bcd1c592b204011ad0c1586bde54b249fb7f521faf831ade45',
+  sudo: '0x5c0d1176a568c1f92944340dbfed9e9c530ebca703c85910e7164cb7d1c9e47b',
+} as const;
+
+export interface RunSubstrateFederatedGenesisTargetRootV1Input {
+  readonly frontierBuild: Omit<BuildSubstrateFederatedGenesisNodeV1Input, 'sourceSession'>;
+  readonly ergoBuild: BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input;
+}
+
+/** Static local target composition. No caller callback, signer or transport escapes. */
+export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstrateFederatedGenesisTargetRootV1Input) {
+  const captured = exact(input, ['frontierBuild', 'ergoBuild']);
+  const frontierInput = exact(captured.frontierBuild, ['bridgeRoot', 'frontierSourcePath',
+    'buildParentDirectory', 'cargoHomeDirectory', 'cargoExecutablePath', 'rustcExecutablePath',
+    'gitExecutablePath', 'protocExecutablePath']);
+  const ergoInput = exact(captured.ergoBuild, ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath',
+    'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath']);
+  if (realpathSync(frontierInput.bridgeRoot) !== realpathSync(ergoInput.bridgeRoot)) {
+    throw new Error('FED target builders must use the same bridge repository');
+  }
+  const setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+  let source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2> | undefined;
+  let sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
+  let continuationSourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
+  let operator: Readonly<FederatedGenesisOperatorV1> | undefined;
+  let ergo: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2> | undefined;
+  let native: Readonly<OwnedFederatedGenesisDevnetProcessSessionV1> | undefined;
+  let rootFailed = false;
+  let rootFailure: unknown;
+  let retainedState: NativeJournalState | undefined;
+  let mining: Readonly<Record<'miningCredential' | 'checkpointMiningCredential' | 'trackerAdmissionMiningCredential'
+    | 'trackerConfirmationMiningCredential', Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>>> | undefined;
+  try {
+    source = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+      ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [setup.signer.publicKeyHex],
+    });
+    operator = createFederatedGenesisOperatorV1();
+    const retainedSource = source;
+    const retainedOperator = operator;
+    const assertCustody = () => {
+      assertFederatedGenesisOperatorV1(retainedOperator);
+      assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup.signer);
+      readSubstrateFederatedGenesisProfilesFromSessionV2(retainedSource);
+      if (sourceOperation) assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(sourceOperation, retainedSource);
+    };
+    // Compile before starting the bounded Ergo mining lifetime.
+    const frontier = await buildSubstrateFederatedGenesisNodeV1({ ...frontierInput, sourceSession: retainedSource });
+    assertCustody();
+    const builtErgo = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(ergoInput);
+    assertCustody();
+    mining = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
+    ergo = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2({
+      javaExecutablePath: builtErgo.javaExecutablePath,
+      expectedJavaExecutableSha256Hex: builtErgo.receipt.toolchain.javaExecutableSha256Hex,
+      nodeAssemblyJarPath: builtErgo.nodeAssemblyJarPath,
+      expectedNodeAssemblyJarSha256Hex: builtErgo.receipt.build.artifactSha256Hex,
+      buildIdentityDigestHex: builtErgo.receipt.buildIdentityDigestHex,
+    }, {
+      miningTargetPublicKeyHex: setup.signer.publicKeyHex,
+      p2pkErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+      rewardInputErgoTrees: setup.signer.rewardInputErgoTrees,
+      networkPrefix: 16, primaryNodeOrigin: 'http://127.0.0.1:9051', witnessNodeOrigin: 'http://127.0.0.1:9052',
+    }, mining.miningCredential, mining.checkpointMiningCredential,
+      mining.trackerAdmissionMiningCredential, mining.trackerConfirmationMiningCredential);
+    await ergo.startMining();
+    const executed = await ergo.withMiningActiveExecutionTarget(async target => {
+      const ownedDiscovery = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+      const history = await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(ownedDiscovery.observation);
+      assertCustody();
+      const compiled = await compileObservedSubstrateFederatedGenesisV1({
+        setupSigner: setup.signer, sourceSession: retainedSource, target, ownedDiscovery, history,
+        genesis: {
+          bridgeRoot: frontierInput.bridgeRoot, launchDomainHex: retainedOperator.launchDomainHex,
+          evmChainId: '4242', operatorAddressHex: retainedOperator.addressHex,
+          bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20),
+          runtimeWasm: readFileSync(frontier.wasm.path), expectedRuntimeWasmSha256Hex: frontier.wasm.sha256Hex,
+          endowments: [{ addressHex: retainedOperator.addressHex, balance: retainedOperator.nativeFunding.amountUnits }],
+        },
+      });
+      const candidate = compiled.candidate;
+      if (compiled.preparation.mintProofProfileScaleHex !== frontier.sourceProofProfileScaleHex
+        || compiled.preparation.mintProofProfile.proofProfileIdHex !== frontier.sourceProofProfileIdHex) {
+        throw new Error('FED compiled target federation differs from retained build custody');
+      }
+      const candidateBytes = Buffer.from(candidate.genesisJson);
+      const candidatePath = join(frontier.targetDirectory, 'fed-genesis.json');
+      writeFileSync(candidatePath, candidateBytes, { flag: 'wx' });
+      await verifyExecutableSha256(frontier.node.path, `0x${frontier.node.sha256Hex}`, 'FED node');
+      const raw = await runBoundedProcess({ executablePath: frontier.node.path,
+        args: ['build-spec', '--chain', `fed-genesis:${candidatePath}`, '--disable-default-bootnode', '--raw'],
+        cwd: frontier.sourceDirectory, env: buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1(),
+        timeoutMs: 120_000, maxOutputBytes: MAX_RESPONSE_BYTES, label: 'FED typed genesis materialization' });
+      await verifyExecutableSha256(frontier.node.path, `0x${frontier.node.sha256Hex}`, 'FED node');
+      if (!readFileSync(candidatePath).equals(candidateBytes)) throw new Error('FED typed genesis bytes changed');
+      const expected = materializedStorage(raw.stdout, candidate.runtimeProfileScaleHex,
+        compiled.preparation.application.bridgeAddressHex, frontier.wasm.sha256Hex);
+      if (expected[retainedOperator.nativeFunding.storageKeyHex] !== retainedOperator.nativeFunding.accountInfoScaleHex) {
+        throw new Error('FED materialized operator funding differs from retained custody');
+      }
+      assertCustody();
+      assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      native = await createOwnedFederatedGenesisDevnetProcessSessionV1({
+        nodeBinaryPath: frontier.node.path, expectedNodeBinarySha256Hex: frontier.node.sha256Hex,
+        genesisJsonBytes: candidateBytes, expectedGenesisJsonSha256Hex: candidate.genesisJsonSha256Hex,
+        primaryRpcUrl: PRIMARY, witnessRpcUrl: WITNESS,
+        primaryP2pPort: 30355, witnessP2pPort: 30356, primaryPrometheusPort: 19615, witnessPrometheusPort: 19616,
+      });
+      const running = await native.withTarget(async endpoints => {
+        assertOwnedFederatedGenesisDevnetTargetV1(endpoints);
+        if (endpoints.primaryRpcUrl !== PRIMARY || endpoints.witnessRpcUrl !== WITNESS) {
+          throw new Error('FED owned node endpoints changed');
+        }
+        const genesis = await observeFederatedGenesisTargetsV1(expected);
+        assertCustody();
+        assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+        const batch = await setup.runNativeGenesisRetainingSigner(compiled, target);
+        const assertActive = () => {
+          assertCustody();
+          assertOwnedFederatedGenesisDevnetTargetV1(endpoints);
+          assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1(batch, target);
+        };
+        assertActive();
+        // This fresh journal stays with the build artifacts, including unresolved attempts.
+        const journalDirectory = mkdtempSync(join(frontier.targetDirectory, 'issuance-journal-'));
+        const markerDirectory = join(journalDirectory, 'attempt-markers');
+        mkdirSync(markerDirectory);
+        const state = new StateTracker(join(journalDirectory, 'state-store'));
+        retainedState = state;
+          const transactions = await executeSubstrateFederatedNativeGenesisBatchV1({
+            target, batch, state, markerDirectory,
+          });
+          assertActive();
+          const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+            target, batch.request.target.genesisHeaderIdHex,
+          );
+          const primary = createBoundedAuthenticatedSpvTrackerReadOnlySource(target.primaryNodeOrigin);
+          const witness = createBoundedAuthenticatedSpvTrackerReadOnlySource(target.witnessNodeOrigin);
+          if (transactions.length !== compiled.issuance.orderedTransactions.length) {
+            throw new Error('FED native issuance receipt count differs');
+          }
+          const confirm = async () => {
+            for (const [index, expectedTransaction] of compiled.issuance.orderedTransactions.entries()) {
+              assertActive();
+              const receipt = transactions[index]!;
+              if (receipt.role !== expectedTransaction.role || receipt.ordinal !== index
+                || receipt.expectedTxId !== expectedTransaction.transaction.txId) {
+                throw new Error('FED native issuance receipt identity differs');
+              }
+              const current = await observer.observe(expectedTransaction.transaction.txId, target.primaryNodeOrigin);
+              assertActive();
+              if (current === null || current.status !== 'confirmed'
+                || current.confirmationHeight !== receipt.confirmationHeight
+                || current.confirmationHeaderIdHex !== receipt.confirmationHeaderIdHex) {
+                throw new Error('FED native issuance canonical inclusion changed');
+              }
+            }
+          };
+          const previousTips = new Map<typeof primary, { height: number; id: string }>();
+          const readTip = async (client: typeof primary) => {
+            assertCustody();
+            const tip = record(await client.getBestHeader());
+            assertCustody();
+            if (!Number.isSafeInteger(tip.height) || Number(tip.height) <= 0
+              || typeof tip.id !== 'string' || !/^[0-9a-f]{64}$/.test(tip.id)) {
+              throw new Error('FED native issuance requires a canonical output-observation tip');
+            }
+            const current = { height: Number(tip.height), id: tip.id };
+            const previous = previousTips.get(client);
+            if (previous && (current.height < previous.height
+              || (current.height === previous.height && current.id !== previous.id))) {
+              throw new Error('FED native issuance output-observation tip changed');
+            }
+            previousTips.set(client, current);
+            return current;
+          };
+          const sameTip = (first: { height: number; id: string }, second: { height: number; id: string }) => {
+            if (first.height !== second.height) return false;
+            if (first.id !== second.id) throw new Error('FED native issuance output-observation tips disagree');
+            return true;
+          };
+          let stableOutputs = false;
+          // Only observations retry. The three issued transactions remain one-shot.
+          for (let attempt = 0; attempt < 3; attempt++) {
+            await confirm();
+            assertActive();
+            // Stable visible tips bound these reads, not an atomic header/UTXO state.
+            const before = await settleReads([readTip(primary), readTip(witness)]);
+            const tip = before[0]!;
+            if (!sameTip(tip, before[1]!)) { assertActive(); continue; }
+            await settleReads(compiled.issuance.orderedTransactions.flatMap(({ transaction }, index) => {
+              const expectedOutput = transaction.outputs[0]!;
+              const receipt = transactions[index]!;
+              return [primary, witness].map(async client => {
+                assertCustody();
+                if (!Number.isSafeInteger(receipt.confirmationHeight) || receipt.confirmationHeight <= 0
+                  || tip.height - receipt.confirmationHeight < SUBSTRATE_FEDERATED_LOCAL_DEVNET_GENESIS_CONFIRMATIONS) {
+                  throw new Error('FED native issuance snapshot confirmation depth is insufficient');
+                }
+                const source = await client.getBoxByIdOrNull(batch.orderedTransactions[index]!.issuance.genesisInputBoxIdHex);
+                assertCustody();
+                if (source !== null) throw new Error('FED native issuance funding source remains unspent');
+                const rawOutput = await client.getBoxByIdOrNull(expectedOutput.boxId);
+                assertCustody();
+                if (rawOutput === null) throw new Error('FED native singleton output is unavailable');
+                const output = await normalizeEip12Box(rawOutput, 'FED native singleton output');
+                assertCustody();
+                if (canonicalJson(output) !== canonicalJson(expectedOutput) || output.creationHeight > tip.height) {
+                  throw new Error('FED native singleton output differs from the compiled issuance');
+                }
+                const headers = await client.getBlockHeaderIdsAtHeight(receipt.confirmationHeight);
+                assertCustody();
+                if (headers.length !== 1 || headers[0] !== receipt.confirmationHeaderIdHex) {
+                  throw new Error('FED native issuance snapshot inclusion differs from its confirmed receipt');
+                }
+              });
+            }));
+            const [primaryAfter, witnessAfter] = await settleReads([readTip(primary), readTip(witness)]);
+            assertActive();
+            const primaryStable = sameTip(tip, primaryAfter!);
+            const witnessStable = sameTip(tip, witnessAfter!);
+            // Full confirmation brackets the window; inclusion is also checked
+            // inside it. Preserve its captured anchor across the closing check.
+            await confirm();
+            if (!primaryStable || !witnessStable) continue;
+            const closingBefore = await settleReads([readTip(primary), readTip(witness)]);
+            if (!sameTip(closingBefore[0]!, closingBefore[1]!)) { assertActive(); continue; }
+            await settleReads([primary, witness].map(async client => {
+              assertCustody();
+              const headers = await client.getBlockHeaderIdsAtHeight(tip.height);
+              assertCustody();
+              if (headers.length !== 1 || headers[0] !== tip.id) {
+                throw new Error('FED native issuance captured output anchor changed after confirmation');
+              }
+            }));
+            const closingAfter = await settleReads([readTip(primary), readTip(witness)]);
+            assertActive();
+            if (sameTip(closingBefore[0]!, closingAfter[0]!)
+              && sameTip(closingBefore[0]!, closingAfter[1]!)) {
+              stableOutputs = true; break;
+            }
+          }
+          if (!stableOutputs) throw new Error('FED native issuance output-observation did not stabilize');
+          if (await observeFederatedGenesisTargetsV1(expected) !== genesis) {
+            throw new Error('FED source genesis changed during Ergo issuance');
+          }
+          assertActive();
+          // Issuance funding is spent. Discover a new owned input for this deposit.
+          const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+          assertActive();
+          const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+          if (funding.target.genesisHeaderIdHex !== batch.request.target.genesisHeaderIdHex
+            || funding.target.tipHeight < Math.max(...transactions.map(receipt => receipt.confirmationHeight))) {
+            throw new Error('FED deposit funding does not follow the confirmed genesis issuance');
+          }
+          const profile = candidate.runtimeProfile;
+          const packet = await buildSubstrateFederatedNativeGenesisPegInPacketV1({
+            batch, target, sourceFundingInput: funding.genesisInputs.tracker,
+            sourceIntent: {
+              formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+              sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+              tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+              admissionProfileIdHex: profile.lineageProfileIdHex, sourceAssetIdHex: '00'.repeat(32),
+              amountNanoErg: '20000000', recipientAddressHex: retainedOperator.addressHex,
+            },
+            depositorErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+            creationHeights: { currentErgoHeight: funding.target.tipHeight,
+              sourceLockCreation: funding.target.tipHeight, reserveTransition: funding.target.tipHeight },
+          });
+          assertActive();
+          const sourceLock = await executeSubstrateFederatedNativeGenesisPegInSourceLockV1({
+            target, batch, packet, setupSession: setup, state,
+          });
+          assertActive();
+          const reserve = await executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1({
+            target, batch, packet, sourceLockObservation: sourceLock.outputObservation,
+            setupSession: setup, state,
+          });
+          assertActive();
+          const draftInputs = Object.freeze({ target, batch, packet, committedVaultObservation: reserve.outputObservation });
+          const draft = buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draftInputs);
+          const evidenceReceipt = collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1({ ...draftInputs, draft });
+          sourceOperation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(retainedSource);
+          const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(sourceOperation, {
+            draftInputs, draft, evidenceReceipt, issuedAtNativeHeight: '0', expiresAtNativeHeight: '32',
+          });
+          assertActive();
+          const signing = Object.freeze({ operator: retainedOperator, sourceOperation, draft, proof, compiled, target,
+            frontierTarget: endpoints, expectedStorage: expected, expectedGenesisHashHex: genesis });
+          const burn = await executeFrontierNativeProofBoundReservationMintAndBurnV1({
+            signing,
+            attemptDirectory: mkdtempSync(join(journalDirectory, 'native-mint-')),
+            broadcastScope: 'fed-native-local-synthetic-reservation-mint-and-burn-only',
+            grossAmountNanoErg: '15000000', recipientErgoTreeHex: `0x${setup.signer.p2pkErgoTreeHex}`,
+          });
+          assertActive();
+          const withdrawalCheck = await setup.checkNativeWithdrawalFeeFundingV1(target);
+          assertActive();
+          const withdrawalFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1({
+            target, checked: withdrawalCheck, state,
+          }));
+          assertActive();
+          const trackerCheck = await setup.checkNativeTrackerFeeFundingV1(target);
+          assertActive();
+          const trackerFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1({
+            target, checked: trackerCheck, state,
+          }));
+          assertActive();
+          if (withdrawalFee.feeInputBox.boxId === trackerFee.feeInputBox.boxId
+            || withdrawalFee.expectedTxId !== withdrawalCheck.transaction.txId
+            || trackerFee.expectedTxId !== trackerCheck.transaction.txId
+            || withdrawalFee.feeInputBox.boxId !== withdrawalCheck.transaction.outputs[0]!.boxId
+            || trackerFee.feeInputBox.boxId !== trackerCheck.transaction.outputs[0]!.boxId) {
+            throw new Error('FED native external fee inputs differ from their distinct checked funding');
+          }
+          const freshReserve = await waitForCanonicalConfirmation(observer, reserve.expectedTxId,
+            performance.now() + 2 * 60_000, 'native-checkpoint-admission', assertActive);
+          assertActive();
+          if (freshReserve.confirmationHeight !== reserve.outputObservation.confirmationHeight
+            || freshReserve.confirmationHeaderIdHex !== reserve.outputObservation.confirmationHeaderIdHex
+            || !Number.isSafeInteger(freshReserve.observedAtHeight)
+            || freshReserve.observedAtHeight < Math.max(withdrawalFee.confirmationHeight, trackerFee.confirmationHeight)) {
+            throw new Error('FED native admission window does not follow unchanged reserve and fee confirmations');
+          }
+          const checkpoint = await attestFrontierNativeBurnCheckpointV1({ execution: burn,
+            admissionValidFromErgoHeight: String(freshReserve.observedAtHeight),
+            admissionExpiresAtErgoHeight: String(BigInt(freshReserve.observedAtHeight)
+              + BigInt(compiled.preparation.checkpointProfile.maxAdmissionValidityBlocks)),
+          });
+          assertActive();
+          assertFrontierNativeBurnCheckpointV1(checkpoint);
+          const mint = burn.mint;
+          return Object.freeze({ genesis, transactions, mint, burn: burn.burn,
+            continuation: Object.freeze({ compiled, batch, target, checkpoint, packet, withdrawalFee, trackerFee,
+              firstBurnExecution: burn, firstSigning: signing, firstSourceOperation: sourceOperation, journalDirectory }),
+            pegIn: Object.freeze({ sourceLockTransactionIdHex: sourceLock.expectedTxId,
+              reserveTransitionTransactionIdHex: reserve.expectedTxId, sourceLockBoxIdHex: packet.boxes.sourceLock.boxId,
+              reserveSuccessorBoxIdHex: packet.boxes.reserveSuccessor.boxId,
+              mintIdentityHex: mint.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex }) });
+      });
+      return Object.freeze({ continuation: running.continuation,
+        summary: Object.freeze({ nativeGenesisHashHex: running.genesis,
+        typedGenesisSha256Hex: candidate.genesisJsonSha256Hex, rawSpecSha256Hex: sha256(Buffer.from(raw.stdout)),
+        runtimeProfileIdHex: candidate.runtimeProfileIdHex, familyIdHex: candidate.familyIdHex,
+        sourceProofProfileIdHex: frontier.sourceProofProfileIdHex,
+        nodeSha256Hex: frontier.node.sha256Hex, wasmSha256Hex: frontier.wasm.sha256Hex,
+        operatorAddressHex: retainedOperator.addressHex, storageKeysChecked: Object.keys(expected).length,
+        issuanceInputBoxIds: compiled.discovery.genesisBoxIds,
+        issuedTransactions: running.transactions,
+        pegIn: running.pegIn, mint: running.mint, burn: running.burn,
+        unsignedIssuance: Object.freeze(compiled.issuance.orderedTransactions.map(({ role, transaction }) =>
+          Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) }) });
+    });
+    if (retainedState === undefined) throw new Error('FED native continuation journal is absent');
+    if (sourceOperation === undefined) throw new Error('FED native continuation source operation is absent');
+    if (native === undefined) throw new Error('FED native process session is absent');
+    const returnInput = {
+      node: ergo, setup, source: retainedSource, operator: retainedOperator,
+      sourceOperation, state: retainedState, prepared: executed.value.continuation,
+      priorSnapshot: executed.receipt.finalSnapshot };
+    const first = await native.withTarget(async () => {
+      const result = await completeFirstNativeReturn(returnInput);
+      continuationSourceOperation = result.continuation.sourceOperation;
+      return result;
+    });
+    const betweenCycles = await ergo.withMiningStoppedReadOnlyTarget(async target => {
+      assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(
+        executed.value.continuation.batch,
+        executed.value.continuation.target,
+      );
+      assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(target);
+      return Object.freeze({ stopped: true as const });
+    });
+    assertFederatedGenesisOperatorV1(retainedOperator);
+    readSubstrateFederatedGenesisProfilesFromSessionV2(retainedSource);
+    assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+      executed.value.continuation.firstSourceOperation,
+      retainedSource,
+    );
+    assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+      first.continuation.sourceOperation,
+      retainedSource,
+    );
+    assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(
+      executed.value.continuation.batch,
+      executed.value.continuation.target,
+    );
+    const secondCycleNode = ergo.continueNativeTrackerCycleV1(first.continuation.miningAuthority);
+    const secondCycle = await native.withTarget(async () => completeSecondNativeReturn({
+      node: secondCycleNode, setup, source: retainedSource, operator: retainedOperator,
+      state: returnInput.state, prepared: executed.value.continuation,
+      priorSnapshot: betweenCycles.receipt.finalSnapshot, continuation: first.continuation,
+    }));
+    const frontierProcess = await native.close();
+    return Object.freeze({ status: 'fresh-federated-round-trip-confirmed' as const,
+      ...executed.value.summary, frontierProcess, ergoExecution: executed.receipt, withdrawal: first.summary,
+      completedCycles: 2 as const, secondCycle,
+      singletonIssuanceEstablished: true as const, operationalMintEstablished: true as const,
+      canonicalPayoutEstablished: true as const,
+      sourceFinalityEstablished: false as const, trustless: false as const });
+  } catch (error) {
+    rootFailed = true;
+    rootFailure = error;
+    throw error;
+  } finally {
+    const failures: unknown[] = rootFailed ? [rootFailure] : [];
+    for (const dispose of [
+      async () => { await native?.close(); },
+      async () => { await ergo?.stop(); },
+      ...Object.values(mining ?? {}).map(credential => () => revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(credential)),
+      () => { if (operator) disposeFederatedGenesisOperatorV1(operator); },
+      () => { continuationSourceOperation?.dispose(); },
+      () => { sourceOperation?.dispose(); },
+      () => { source?.dispose(); },
+      () => { setup.dispose(); },
+      () => { retainedState?.close(); },
+    ]) {
+      try { await dispose(); }
+      catch (error) { if (!failures.includes(error)) failures.push(error); }
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, 'FED target execution and cleanup failed');
+    }
+    if (!rootFailed && failures.length === 1) throw failures[0];
+  }
+}
+
+function nativeTrackerConfirmationFailure(input: Readonly<{
+  failure: unknown;
+  submission: unknown;
+  expectedTxId: string;
+  durableAttemptDigestHex: string;
+  confirmationTargetIdentityDigestHex: string;
+}>) {
+  const transport = projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic(input.submission);
+  const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(input.failure);
+  if (transport === null || confirmation === null
+    || transport.expectedTxId !== input.expectedTxId
+    || transport.durableAttemptDigestHex !== input.durableAttemptDigestHex
+    || confirmation.expectedTransactionIdHex !== input.expectedTxId
+    || confirmation.executionTargetIdentityDigestHex !== input.confirmationTargetIdentityDigestHex) return null;
+  const diagnostic = Object.freeze({ transport, confirmation: Object.freeze({ ...confirmation }) });
+  NATIVE_TRACKER_CONFIRMATION_FAILURES.set(confirmation, diagnostic);
+  return diagnostic;
+}
+
+const NATIVE_TRACKER_CONFIRMATION_FAILURES = new WeakMap<object,
+  NonNullable<ReturnType<typeof nativeTrackerConfirmationFailure>>>();
+
+/** Bounded diagnostics from the original failure or its primary cleanup wrappers, never resume authority. */
+export function projectSubstrateFederatedNativeTrackerConfirmationFailureV1(failure: unknown) {
+  try {
+    const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(failure);
+    return confirmation === null ? null : NATIVE_TRACKER_CONFIRMATION_FAILURES.get(confirmation) ?? null;
+  } catch { return null; }
+}
+
+const NATIVE_TRACKER_CONFIRMATION_PROGRESS = new WeakMap<object,
+  Readonly<SubstrateFederatedIsolatedDevnetConfirmationProgressV1>>();
+
+function retainNativeTrackerConfirmationProgress(input: Readonly<{
+  failure: unknown;
+  observer: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>;
+  expectedTxId: string;
+  targetIdentityDigestHex: string;
+  genesisHeaderIdHex: string;
+}>) {
+  const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(input.failure);
+  if (confirmation === null || !NATIVE_TRACKER_CONFIRMATION_FAILURES.has(confirmation)) return;
+  const progress = projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1(
+    input.observer, input.expectedTxId, input.targetIdentityDigestHex);
+  if (progress === null
+    || progress.expectedErgoTransactionIdHex !== input.expectedTxId
+    || progress.executionTargetIdentityDigestHex !== input.targetIdentityDigestHex
+    || progress.targetGenesisHeaderIdHex !== input.genesisHeaderIdHex) return;
+  NATIVE_TRACKER_CONFIRMATION_PROGRESS.set(confirmation, progress);
+}
+
+/** Original-observer progress is diagnostic only and cannot resume the failed attempt. */
+export function projectSubstrateFederatedNativeTrackerConfirmationProgressV1(failure: unknown) {
+  try {
+    const confirmation = projectTrackerCanonicalConfirmationFailureDiagnosticV1(failure);
+    return confirmation === null || !NATIVE_TRACKER_CONFIRMATION_FAILURES.has(confirmation)
+      ? null : NATIVE_TRACKER_CONFIRMATION_PROGRESS.get(confirmation) ?? null;
+  } catch { return null; }
+}
+
+interface NativeFeeFundingReceipt {
+  readonly expectedTxId: string;
+  readonly durableAttemptDigestHex: string;
+  readonly transportStatus: 'accepted' | 'ambiguous';
+  readonly journalDigestHex: string;
+  readonly confirmationDigestHex: string;
+  readonly confirmationHeight: number | null;
+  readonly confirmationHeaderIdHex: string | null;
+  readonly feeInputBox: Eip12Box;
+}
+
+function confirmedFee(value: Readonly<NativeFeeFundingReceipt>) {
+  const { confirmationHeight, confirmationHeaderIdHex } = value;
+  if (confirmationHeight === null || !Number.isSafeInteger(confirmationHeight) || confirmationHeight < 1
+    || confirmationHeaderIdHex === null || !/^[0-9a-f]{64}$/.test(confirmationHeaderIdHex)) {
+    throw new Error('FED native external fee funding lacks canonical confirmation');
+  }
+  return Object.freeze({ ...value, confirmationHeight, confirmationHeaderIdHex });
+}
+
+type NativeSetup = Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
+interface NativeReturnContinuation {
+  readonly compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
+  readonly batch: Awaited<ReturnType<NativeSetup['runNativeGenesisRetainingSigner']>>;
+  readonly target: Parameters<NativeSetup['runNativeGenesisRetainingSigner']>[1];
+  readonly checkpoint: Readonly<{
+    attestation: Readonly<SubstrateFederatedNativeGenesisCheckpointAttestationReceiptV1>;
+    commitment: Readonly<{ blockHashHex: string; burnProof: TrustlessBurnInclusionProof;
+      burnEvent: Readonly<{ recipientErgoTreeHex: string }> }>;
+  }>;
+  readonly packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>;
+  readonly withdrawalFee: ReturnType<typeof confirmedFee>;
+  readonly trackerFee: ReturnType<typeof confirmedFee>;
+  readonly firstBurnExecution: Awaited<ReturnType<typeof executeFrontierNativeProofBoundReservationMintAndBurnV1>>;
+  readonly firstSigning: Parameters<typeof executeFrontierNativeProofBoundReservationMintAndBurnV1>[0]['signing'];
+  readonly firstSourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+  readonly journalDirectory: string;
+}
+
+/** Retained data crosses process phases; each consumer owns its current target authority. */
+async function completeFirstNativeReturn(input: Readonly<{
+  node: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2>;
+  setup: NativeSetup;
+  source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1>;
+  operator: Readonly<FederatedGenesisOperatorV1>;
+  state: NativeJournalState;
+  prepared: Readonly<NativeReturnContinuation>;
+  priorSnapshot: Readonly<{ fullHeight: number; headerIdHex: string }>;
+}>) {
+  const { node, setup, state, prepared, priorSnapshot } = input;
+  const remainingCustody = () => {
+    assertFederatedGenesisOperatorV1(input.operator);
+    readSubstrateFederatedGenesisProfilesFromSessionV2(input.source);
+    assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(input.sourceOperation, input.source);
+  };
+  const readCustody = () => {
+    remainingCustody();
+    assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(prepared.batch, prepared.target);
+  };
+  readCustody();
+  const statement = prepared.checkpoint.attestation.checkpointStatement;
+  const proof = prepared.checkpoint.commitment.burnProof;
+  const native = prepared.checkpoint.commitment;
+  if (proof.leafCount !== 1 || proof.leafIndex !== 0 || proof.leaf.eventIndex !== 2
+    || proof.bridgeEventRootHex !== statement.bridgeEventRootHex || proof.leafCount !== statement.burnLeafCount
+    || proof.leaf.sidechainBlockHashHex !== statement.executionBlockHashHex
+    || native.blockHashHex.replace(/^0x/, '') !== statement.sourceNativeBlockHashHex
+    || proof.leaf.amountNanoErg !== '10000000' || native.burnEvent.recipientErgoTreeHex !== setup.signer.p2pkErgoTreeHex
+    || [prepared.withdrawalFee, prepared.trackerFee].some(fee => fee.confirmationHeight > priorSnapshot.fullHeight
+      || BigInt(statement.admissionValidFromErgoHeight) < BigInt(fee.confirmationHeight))) {
+    throw new Error('FED native withdrawal differs from its attested burn or confirmed fee window');
+  }
+  const leaf = proof.leaf;
+  const claim: Parameters<NativeSetup['checkNativeWithdrawalRetainingContinuationSignerV2']>[0] = Object.freeze({
+    trackerIdentity: Object.freeze({ sourceNativeBlockHeight: statement.sourceNativeBlockHeight,
+      sourceNativeBlockHashHex: statement.sourceNativeBlockHashHex, executionBlockHashHex: statement.executionBlockHashHex }),
+    burnLeaf: Object.freeze({ sidechainIdHex: leaf.sidechainIdHex, sidechainBlockHashHex: leaf.sidechainBlockHashHex,
+      sidechainTxHashHex: leaf.sidechainTxHashHex, eventIndex: leaf.eventIndex, burnIdHex: leaf.burnIdHex,
+      recipientErgoTreeHashHex: leaf.recipientErgoTreeHashHex, amountNanoErg: leaf.amountNanoErg, assetIdHex: leaf.assetIdHex }),
+    leafIndex: proof.leafIndex, leafCount: proof.leafCount, burnProof: proof.proof,
+    recipientErgoTreeHex: native.burnEvent.recipientErgoTreeHex,
+  });
+  const extensionValueHex = encodeSubstrateFederatedCheckpointExtensionValueV1(statement.encodedStatementHex);
+  const genesisHeaderIdHex = prepared.batch.request.target.genesisHeaderIdHex;
+  const anchored = await node.withCheckpointExtensionMiningTarget(extensionValueHex, { minimumTipHeight: 11 }, async target => {
+    readCustody();
+    const result = await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({ target, targetGenesisHeaderIdHex: genesisHeaderIdHex,
+      expectedPriorHeaderIdHex: priorSnapshot.headerIdHex, expectedPriorHeight: priorSnapshot.fullHeight,
+      expectedExtensionValueHex: extensionValueHex });
+    readCustody(); return result;
+  });
+  readCustody(); assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1(anchored.value);
+  const trackerInputBox = prepared.compiled.issuance.orderedTransactions[0]!.transaction.outputs[0]!;
+  const admitted = await node.withCheckpointBoundMiningStoppedExecutionTarget(async target => {
+    readCustody();
+    const observation = await observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2({ target,
+      targetGenesisHeaderIdHex: genesisHeaderIdHex, expectedAnchorHeaderIdHex: anchored.value.anchorHeaderIdHex,
+      expectedAnchorHeight: anchored.value.anchorHeight, expectedAnchorExtensionRootHex: anchored.value.anchorExtensionRootHex,
+      expectedExtensionValueHex: extensionValueHex });
+    readCustody(); assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2(observation);
+    const module = await import('ergo-lib-wasm-nodejs');
+    readCustody();
+    const headers = buildBridgeValidityTrackerObservedHeaderContextV1(module.default ?? module, {
+      rawHeaders: observation.headers.map(header => header.raw), anchorContextIndex: observation.anchorContextIndex,
+      expectedAnchorHeaderIdHex: observation.anchorHeaderIdHex, expectedAnchorExtensionRootHex: observation.anchorExtensionRootHex });
+    const context = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
+      compilerRequest: prepared.compiled.familyCompilerInput.trackerRequest,
+      compilerReceipt: prepared.compiled.familyCompilerInput.trackerReceipt,
+      trackerInputBox, encodedStatementHex: statement.encodedStatementHex, observedHeaderContext: headers,
+      extensionMembershipProofHex: observation.extensionMembershipProofHex });
+    readCustody();
+    const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({ trackerContext: context, trackerInputBox,
+      feeInputBox: prepared.trackerFee.feeInputBox, feePayerPublicKeyHex: setup.signer.publicKeyHex });
+    readCustody();
+    const check = await setup.checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner({
+      context, transaction, observedHeaderContext: headers }, target);
+    readCustody();
+    const authorization = await authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(check, target);
+    readCustody();
+    const attempt = reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission(authorization, state);
+    return { attempt, context, authorizationDigestHex: authorization.authorizationDigestHex,
+      checkDigestHex: check.result.checkDigestHex };
+  });
+  readCustody();
+  const { attempt } = admitted.value;
+  const refreshed = await node.withCheckpointBoundReservationFreshnessRevalidationTarget(async target => {
+    readCustody();
+    const completion = await revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target);
+    readCustody(); return completion;
+  });
+  readCustody();
+  const transported = await node.withCheckpointBoundTrackerTransportTarget(
+    refreshed.value,
+    attempt.expectedTxId,
+    async target => {
+      readCustody();
+      const submission = await submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(target, attempt);
+      const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, submission);
+      readCustody(); return { submission, journalDigestHex: finalized.journalDigestHex };
+    },
+  );
+  readCustody();
+  let continuationSourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
+  try {
+    const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {
+      readCustody();
+      const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, genesisHeaderIdHex, attempt.expectedTxId);
+      let confirmation: Awaited<ReturnType<typeof observer.observe>>;
+      try {
+        confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+          performance.now() + 2 * 60_000, 'native-tracker-admission', readCustody);
+      } catch (failure) {
+        try {
+          nativeTrackerConfirmationFailure({ failure, submission: transported.value.submission,
+            expectedTxId: attempt.expectedTxId, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+            confirmationTargetIdentityDigestHex: observer.reconciliationIdentityDigestHex });
+        } catch { /* Optional diagnostics must not replace the original failure or interrupt cleanup. */ }
+        try {
+          retainNativeTrackerConfirmationProgress({ failure, observer, expectedTxId: attempt.expectedTxId,
+            targetIdentityDigestHex: observer.reconciliationIdentityDigestHex, genesisHeaderIdHex });
+        } catch { /* Progress capture cannot suppress V1 evidence or delay cleanup. */ }
+        throw failure;
+      }
+      readCustody();
+      const tracker = await confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target, confirmation);
+      readCustody();
+      const checked = await setup.checkNativeWithdrawalRetainingContinuationSignerV2(claim, target);
+      readCustody();
+      const authorization = await authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2(checked, target);
+      readCustody();
+      const payoutAttempt = reserveSubstrateFederatedIsolatedDevnetWithdrawalV2(authorization, state);
+      const submission = await submitSubstrateFederatedIsolatedDevnetWithdrawalV2(target, payoutAttempt);
+      const finalized = finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2(payoutAttempt, submission);
+      readCustody();
+      const payoutConfirmation = await waitForCanonicalConfirmation(observer, payoutAttempt.expectedTxId,
+        performance.now() + 2 * 60_000, 'native-withdrawal', readCustody);
+      readCustody();
+      const payout = await confirmSubstrateFederatedIsolatedDevnetWithdrawalV2(payoutAttempt, target, payoutConfirmation);
+      readCustody();
+      if (payout.status !== 'confirmed' || payout.expectedTxId !== checked.packet.transaction.txId
+        || payout.confirmationHeight === null || payout.confirmationHeaderId === null) {
+        throw new Error('FED native return lacks its exact canonical payout');
+      }
+
+      // The second source deposit is built and committed while the first
+      // confirmation target and its retained signer are still current.
+      const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+      readCustody();
+      const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
+      if (funding.target.genesisHeaderIdHex !== genesisHeaderIdHex
+        || funding.target.tipHeight < payout.confirmationHeight) {
+        throw new Error('FED continuation funding does not follow the first confirmed payout');
+      }
+      const profile = prepared.compiled.candidate.runtimeProfile;
+      const secondPacket = await buildSubstrateFederatedNativeContinuationPegInPacketV1({
+        batch: prepared.batch, target, previousPacket: prepared.packet,
+        withdrawal: { check: checked, attempt: payoutAttempt },
+        sourceFundingInput: funding.genesisInputs.tracker,
+        sourceIntent: {
+          formatVersion: 2, sourceNetworkIdHex: profile.sourceNetworkIdHex,
+          sidechainIdHex: profile.sidechainIdHex, bridgeAddressHex: profile.bridgeAddressHex,
+          tokenAddressHex: profile.tokenAddressHex, settlementProfileIdHex: profile.settlementProfileIdHex,
+          admissionProfileIdHex: profile.lineageProfileIdHex, sourceAssetIdHex: '00'.repeat(32),
+          amountNanoErg: '20000000', recipientAddressHex: input.operator.addressHex,
+        },
+        depositorErgoTreeHex: setup.signer.p2pkErgoTreeHex,
+        creationHeights: { currentErgoHeight: funding.target.tipHeight,
+          sourceLockCreation: funding.target.tipHeight, reserveTransition: funding.target.tipHeight },
+      });
+      readCustody();
+      const sourceLock = await executeSubstrateFederatedNativeContinuationPegInSourceLockV1({
+        target, batch: prepared.batch, packet: secondPacket, setupSession: setup, state,
+      });
+      readCustody();
+      const reserve = await executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1({
+        target, batch: prepared.batch, packet: secondPacket,
+        sourceLockObservation: sourceLock.outputObservation, setupSession: setup, state,
+      });
+      readCustody();
+      const draftInputs = Object.freeze({ target, batch: prepared.batch, packet: secondPacket,
+        committedVaultObservation: reserve.outputObservation });
+      const draft = buildSubstrateFederatedNativeGenesisPegInMintReservationDraftV1(draftInputs);
+      const evidenceReceipt = collectSubstrateFederatedNativeGenesisCommittedReserveEvidenceV1({ ...draftInputs, draft });
+      const currentSourceOperation = createSubstrateFederatedNativeGenesisSourceAttestationOperationV1(input.source);
+      continuationSourceOperation = currentSourceOperation;
+      const proof = produceSubstrateFederatedNativeGenesisMintSourceProofForOperationV1(currentSourceOperation, {
+        draftInputs, draft, evidenceReceipt, issuedAtNativeHeight: '4', expiresAtNativeHeight: '32',
+      });
+      readCustody();
+      const continuationReservation = await executeFrontierNativeProofBoundContinuationReservationV1({
+        previousExecution: prepared.firstBurnExecution,
+        signing: { operator: input.operator, sourceOperation: currentSourceOperation, draft, proof,
+          compiled: prepared.compiled, target, frontierTarget: prepared.firstSigning.frontierTarget,
+          expectedStorage: prepared.firstSigning.expectedStorage,
+          expectedGenesisHashHex: prepared.firstSigning.expectedGenesisHashHex },
+        attemptDirectory: mkdtempSync(join(prepared.journalDirectory, 'native-continuation-')),
+        broadcastScope: 'fed-native-local-synthetic-continuation-reservation-only',
+      });
+      readCustody();
+      const continuationExecution = await executeFrontierNativeProofBoundContinuationMintAndBurnV1({
+        reservationExecution: continuationReservation, grossAmountNanoErg: '15000000',
+        recipientErgoTreeHex: `0x${setup.signer.p2pkErgoTreeHex}`,
+        broadcastScope: 'fed-native-local-synthetic-continuation-mint-and-burn-only',
+      });
+      readCustody();
+      const secondWithdrawalCheck = await setup.checkNativeContinuationWithdrawalFeeFundingV1(target);
+      readCustody();
+      const secondWithdrawalFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1({
+        target, checked: secondWithdrawalCheck, state,
+      }));
+      readCustody();
+      const secondTrackerCheck = await setup.checkNativeContinuationTrackerFeeFundingV1(target);
+      readCustody();
+      const secondTrackerFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1({
+        target, checked: secondTrackerCheck, state,
+      }));
+      readCustody();
+      if (secondWithdrawalFee.feeInputBox.boxId === secondTrackerFee.feeInputBox.boxId
+        || secondWithdrawalFee.expectedTxId !== secondWithdrawalCheck.transaction.txId
+        || secondTrackerFee.expectedTxId !== secondTrackerCheck.transaction.txId
+        || secondWithdrawalFee.feeInputBox.boxId !== secondWithdrawalCheck.transaction.outputs[0]!.boxId
+        || secondTrackerFee.feeInputBox.boxId !== secondTrackerCheck.transaction.outputs[0]!.boxId) {
+        throw new Error('FED continuation external fee inputs differ from their distinct checked funding');
+      }
+      const miningAuthority = await setup.issueNativeContinuationMiningAuthorityV1(target);
+      readCustody();
+      const admissionValidFrom = Math.max(reserve.outputObservation.confirmationHeight,
+        secondWithdrawalFee.confirmationHeight, secondTrackerFee.confirmationHeight);
+      const secondCheckpoint = await attestFrontierNativeBurnCheckpointV1({
+        execution: continuationExecution, admissionValidFromErgoHeight: String(admissionValidFrom),
+        admissionExpiresAtErgoHeight: String(BigInt(admissionValidFrom)
+          + BigInt(prepared.compiled.preparation.checkpointProfile.maxAdmissionValidityBlocks)),
+      });
+      readCustody();
+      assertFrontierNativeBurnCheckpointV1(secondCheckpoint);
+      const secondStatement = secondCheckpoint.attestation.checkpointStatement;
+      if (secondStatement.sourceNativeBlockHeight !== '8'
+        || BigInt(secondStatement.admissionValidFromErgoHeight) < BigInt(secondWithdrawalFee.confirmationHeight)
+        || BigInt(secondStatement.admissionValidFromErgoHeight) < BigInt(secondTrackerFee.confirmationHeight)) {
+        throw new Error('FED continuation checkpoint does not follow both confirmed external fees');
+      }
+      return Object.freeze({
+        tracker: Object.freeze({ expectedTxId: tracker.expectedTxId,
+          confirmationHeight: tracker.confirmationHeight, confirmationHeaderIdHex: tracker.confirmationHeaderId }),
+        payout: payoutSummary(checked, payout, payoutConfirmation, authorization, payoutAttempt, submission, finalized),
+        continuation: Object.freeze({ sourceOperation: currentSourceOperation, miningAuthority,
+          previousTrackerContext: admitted.value.context, packet: secondPacket, sourceLock, reserve,
+          proof, execution: continuationExecution, checkpoint: secondCheckpoint,
+          withdrawalFee: secondWithdrawalFee, trackerFee: secondTrackerFee,
+          firstWithdrawalCheck: checked, firstWithdrawalAttempt: payoutAttempt }),
+      });
+    });
+    remainingCustody();
+    return Object.freeze({
+      summary: Object.freeze({ checkpoint: prepared.checkpoint.attestation, feeFunding: Object.freeze({
+        withdrawal: prepared.withdrawalFee, tracker: prepared.trackerFee }),
+        anchor: Object.freeze({ observation: anchored.value, execution: anchored.receipt }),
+        tracker: Object.freeze({ ...confirmed.value.tracker, authorizationDigestHex: admitted.value.authorizationDigestHex,
+          checkDigestHex: admitted.value.checkDigestHex, frozenExecution: admitted.receipt, freshnessExecution: refreshed.receipt,
+          transportExecution: transported.receipt, transportStatus: transported.value.submission.status,
+          journalDigestHex: transported.value.journalDigestHex }),
+        payout: confirmed.value.payout, confirmationExecution: confirmed.receipt }),
+      continuation: confirmed.value.continuation,
+    });
+  } catch (error) {
+    try { continuationSourceOperation?.dispose(); }
+    catch (disposeError) {
+      if (disposeError === error) throw error;
+      throw new AggregateError(
+        [error, disposeError],
+        'FED first return and continuation source-operation cleanup failed',
+      );
+    }
+    throw error;
+  }
+}
+
+type NativeWithdrawalCheck = Awaited<ReturnType<NativeSetup['checkNativeWithdrawalV2']>>;
+type NativeWithdrawalAttempt = ReturnType<typeof reserveSubstrateFederatedIsolatedDevnetWithdrawalV2>;
+type NativeWithdrawalAuthorization = Awaited<ReturnType<typeof authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2>>;
+type NativeWithdrawalSubmission = Awaited<ReturnType<typeof submitSubstrateFederatedIsolatedDevnetWithdrawalV2>>;
+type NativeWithdrawalFinalization = ReturnType<typeof finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2>;
+type NativeWithdrawalConfirmation = NonNullable<Awaited<ReturnType<
+  SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1['observe']>>>;
+type NativeWithdrawalConfirmed = Awaited<ReturnType<typeof confirmSubstrateFederatedIsolatedDevnetWithdrawalV2>>;
+
+function payoutSummary(
+  checked: NativeWithdrawalCheck,
+  payout: NativeWithdrawalConfirmed,
+  confirmation: NativeWithdrawalConfirmation,
+  authorization: NativeWithdrawalAuthorization,
+  attempt: NativeWithdrawalAttempt,
+  submission: NativeWithdrawalSubmission,
+  finalized: NativeWithdrawalFinalization,
+) {
+  return Object.freeze({ expectedTxId: payout.expectedTxId, confirmationHeight: payout.confirmationHeight,
+    confirmationHeaderIdHex: payout.confirmationHeaderId, observationDigestHex: confirmation.observationDigestHex,
+    authorizationDigestHex: authorization.authorizationDigestHex, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+    transportStatus: submission.status, journalDigestHex: finalized.journalDigestHex,
+    payoutBoxIdHex: checked.packet.boxes.payout.boxId, amountNanoErg: checked.packet.burn.leaf.amountNanoErg,
+    reserveSuccessorBoxIdHex: checked.packet.boxes.reserveSuccessor.boxId,
+    duplicatePreventionSuccessorBoxIdHex: checked.packet.boxes.duplicatePreventionSuccessor.boxId });
+}
+
+function feeSummary(fee: ReturnType<typeof confirmedFee>) {
+  return Object.freeze({ expectedTxId: fee.expectedTxId, durableAttemptDigestHex: fee.durableAttemptDigestHex,
+    transportStatus: fee.transportStatus, journalDigestHex: fee.journalDigestHex,
+    confirmationDigestHex: fee.confirmationDigestHex, confirmationHeight: fee.confirmationHeight,
+    confirmationHeaderIdHex: fee.confirmationHeaderIdHex, feeInputBoxIdHex: fee.feeInputBox.boxId });
+}
+
+async function completeSecondNativeReturn(input: Readonly<{
+  node: Readonly<SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1>;
+  setup: NativeSetup;
+  source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
+  operator: Readonly<FederatedGenesisOperatorV1>;
+  state: NativeJournalState;
+  prepared: Readonly<NativeReturnContinuation>;
+  priorSnapshot: Readonly<{ fullHeight: number; headerIdHex: string }>;
+  continuation: Awaited<ReturnType<typeof completeFirstNativeReturn>>['continuation'];
+}>) {
+  const { node, setup, state, prepared, priorSnapshot, continuation } = input;
+  const remainingCustody = () => {
+    assertFederatedGenesisOperatorV1(input.operator);
+    readSubstrateFederatedGenesisProfilesFromSessionV2(input.source);
+    assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(
+      prepared.firstSourceOperation,
+      input.source,
+    );
+    assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(continuation.sourceOperation, input.source);
+  };
+  const readCustody = () => {
+    remainingCustody();
+    assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(prepared.batch, prepared.target);
+  };
+  readCustody();
+  const statement = continuation.checkpoint.attestation.checkpointStatement;
+  const proof = continuation.checkpoint.commitment.burnProof;
+  const native = continuation.checkpoint.commitment;
+  if (proof.leafCount !== 1 || proof.leafIndex !== 0 || proof.leaf.eventIndex !== 2
+    || proof.bridgeEventRootHex !== statement.bridgeEventRootHex || proof.leafCount !== statement.burnLeafCount
+    || proof.leaf.sidechainBlockHashHex !== statement.executionBlockHashHex
+    || native.blockHashHex.replace(/^0x/, '') !== statement.sourceNativeBlockHashHex
+    || proof.leaf.amountNanoErg !== '10000000'
+    || native.burnEvent.recipientErgoTreeHex !== setup.signer.p2pkErgoTreeHex
+    || [continuation.withdrawalFee, continuation.trackerFee].some(fee => fee.confirmationHeight > priorSnapshot.fullHeight
+      || BigInt(statement.admissionValidFromErgoHeight) < BigInt(fee.confirmationHeight))) {
+    throw new Error('FED continuation withdrawal differs from its attested burn or confirmed fee window');
+  }
+  const leaf = proof.leaf;
+  const claim: Parameters<NativeSetup['checkNativeContinuationWithdrawalV2']>[0] = Object.freeze({
+    trackerIdentity: Object.freeze({ sourceNativeBlockHeight: statement.sourceNativeBlockHeight,
+      sourceNativeBlockHashHex: statement.sourceNativeBlockHashHex, executionBlockHashHex: statement.executionBlockHashHex }),
+    burnLeaf: Object.freeze({ sidechainIdHex: leaf.sidechainIdHex, sidechainBlockHashHex: leaf.sidechainBlockHashHex,
+      sidechainTxHashHex: leaf.sidechainTxHashHex, eventIndex: leaf.eventIndex, burnIdHex: leaf.burnIdHex,
+      recipientErgoTreeHashHex: leaf.recipientErgoTreeHashHex, amountNanoErg: leaf.amountNanoErg, assetIdHex: leaf.assetIdHex }),
+    leafIndex: proof.leafIndex, leafCount: proof.leafCount, burnProof: proof.proof,
+    recipientErgoTreeHex: native.burnEvent.recipientErgoTreeHex,
+  });
+  const extensionValueHex = encodeSubstrateFederatedCheckpointExtensionValueV1(statement.encodedStatementHex);
+  const genesisHeaderIdHex = prepared.batch.request.target.genesisHeaderIdHex;
+  const admissionHeight = Number(statement.admissionValidFromErgoHeight);
+  if (!Number.isSafeInteger(admissionHeight) || admissionHeight < 1) {
+    throw new Error('FED continuation checkpoint admission height is invalid');
+  }
+  const anchored = await node.withCheckpointExtensionMiningTarget(extensionValueHex,
+    { minimumTipHeight: Math.max(priorSnapshot.fullHeight + 1, admissionHeight) }, async target => {
+      readCustody();
+      const result = await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({
+        target, targetGenesisHeaderIdHex: genesisHeaderIdHex,
+        expectedPriorHeaderIdHex: priorSnapshot.headerIdHex, expectedPriorHeight: priorSnapshot.fullHeight,
+        expectedExtensionValueHex: extensionValueHex,
+      });
+      readCustody();
+      return result;
+    });
+  readCustody();
+  assertSubstrateFederatedIsolatedDevnetCheckpointAnchorObservationV1(anchored.value);
+  const trackerInputBox = continuation.firstWithdrawalCheck.packet.boxes.trackerDataInput;
+  const admitted = await node.withCheckpointBoundMiningStoppedExecutionTarget(async target => {
+    readCustody();
+    const observation = await observeSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerV2({
+      target, targetGenesisHeaderIdHex: genesisHeaderIdHex,
+      expectedAnchorHeaderIdHex: anchored.value.anchorHeaderIdHex, expectedAnchorHeight: anchored.value.anchorHeight,
+      expectedAnchorExtensionRootHex: anchored.value.anchorExtensionRootHex,
+      expectedExtensionValueHex: extensionValueHex,
+    });
+    readCustody();
+    assertSubstrateFederatedIsolatedDevnetCheckpointBoundTrackerObservationV2(observation);
+    const module = await import('ergo-lib-wasm-nodejs');
+    readCustody();
+    const headers = buildBridgeValidityTrackerObservedHeaderContextV1(module.default ?? module, {
+      rawHeaders: observation.headers.map(header => header.raw), anchorContextIndex: observation.anchorContextIndex,
+      expectedAnchorHeaderIdHex: observation.anchorHeaderIdHex,
+      expectedAnchorExtensionRootHex: observation.anchorExtensionRootHex,
+    });
+    const context = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext({
+      previousContext: continuation.previousTrackerContext,
+      compilerRequest: prepared.compiled.familyCompilerInput.trackerRequest,
+      compilerReceipt: prepared.compiled.familyCompilerInput.trackerReceipt,
+      trackerInputBox, encodedStatementHex: statement.encodedStatementHex, observedHeaderContext: headers,
+      extensionMembershipProofHex: observation.extensionMembershipProofHex,
+    });
+    readCustody();
+    const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({
+      trackerContext: context, trackerInputBox, feeInputBox: continuation.trackerFee.feeInputBox,
+      feePayerPublicKeyHex: setup.signer.publicKeyHex,
+    });
+    readCustody();
+    const check = await setup.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner({
+      context, transaction, observedHeaderContext: headers,
+    }, target);
+    readCustody();
+    const authorization = await authorizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(check, target);
+    readCustody();
+    const attempt = reserveSubstrateFederatedIsolatedDevnetTrackerV2Admission(authorization, state);
+    return { attempt, context, authorizationDigestHex: authorization.authorizationDigestHex,
+      checkDigestHex: check.result.checkDigestHex };
+  });
+  readCustody();
+  const { attempt } = admitted.value;
+  const refreshed = await node.withCheckpointBoundReservationFreshnessRevalidationTarget(async target => {
+    readCustody();
+    const completion = await revalidateSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target);
+    readCustody();
+    return completion;
+  });
+  readCustody();
+  const transported = await node.withCheckpointBoundTrackerTransportTarget(
+    refreshed.value,
+    attempt.expectedTxId,
+    async target => {
+      readCustody();
+      const submission = await submitSubstrateFederatedIsolatedDevnetTrackerV2Admission(target, attempt);
+      const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, submission);
+      readCustody();
+      return { submission, journalDigestHex: finalized.journalDigestHex };
+    },
+  );
+  readCustody();
+  const confirmed = await node.withTrackerTransportConfirmationMiningTarget(attempt.expectedTxId, async target => {
+    readCustody();
+    const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+      target, genesisHeaderIdHex, attempt.expectedTxId,
+    );
+    let confirmation: Awaited<ReturnType<typeof observer.observe>>;
+    try {
+      confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
+        performance.now() + 2 * 60_000, 'native-continuation-tracker-admission', readCustody);
+    } catch (failure) {
+      try {
+        nativeTrackerConfirmationFailure({ failure, submission: transported.value.submission,
+          expectedTxId: attempt.expectedTxId, durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+          confirmationTargetIdentityDigestHex: observer.reconciliationIdentityDigestHex });
+      } catch { /* Optional diagnostics must not replace the original failure or interrupt cleanup. */ }
+      try {
+        retainNativeTrackerConfirmationProgress({ failure, observer, expectedTxId: attempt.expectedTxId,
+          targetIdentityDigestHex: observer.reconciliationIdentityDigestHex, genesisHeaderIdHex });
+      } catch { /* Progress capture cannot suppress V1 evidence or delay cleanup. */ }
+      throw failure;
+    }
+    readCustody();
+    const tracker = await confirmSubstrateFederatedIsolatedDevnetTrackerV2Admission(attempt, target, confirmation);
+    readCustody();
+    const checked = await setup.checkNativeContinuationWithdrawalV2(claim, target);
+    // The terminal check destroys signing custody. Its returned capability keeps
+    // only the exact checked bytes and this second confirmation target.
+    remainingCustody();
+    const authorization = await authorizeSubstrateFederatedIsolatedDevnetWithdrawalV2(checked, target);
+    remainingCustody();
+    const payoutAttempt = reserveSubstrateFederatedIsolatedDevnetWithdrawalV2(authorization, state);
+    const submission = await submitSubstrateFederatedIsolatedDevnetWithdrawalV2(target, payoutAttempt);
+    const finalized = finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2(payoutAttempt, submission);
+    remainingCustody();
+    const payoutConfirmation = await waitForCanonicalConfirmation(observer, payoutAttempt.expectedTxId,
+      performance.now() + 2 * 60_000, 'native-continuation-withdrawal', remainingCustody);
+    remainingCustody();
+    const payout = await confirmSubstrateFederatedIsolatedDevnetWithdrawalV2(
+      payoutAttempt, target, payoutConfirmation,
+    );
+    remainingCustody();
+    if (payout.status !== 'confirmed' || payout.expectedTxId !== checked.packet.transaction.txId
+      || payout.confirmationHeight === null || payout.confirmationHeaderId === null) {
+      throw new Error('FED continuation return lacks its exact canonical payout');
+    }
+    return Object.freeze({
+      tracker: Object.freeze({ expectedTxId: tracker.expectedTxId,
+        confirmationHeight: tracker.confirmationHeight, confirmationHeaderIdHex: tracker.confirmationHeaderId }),
+      payout: payoutSummary(checked, payout, payoutConfirmation, authorization, payoutAttempt, submission, finalized),
+    });
+  });
+  remainingCustody();
+  return Object.freeze({
+    pegIn: Object.freeze({ sourceLockTransactionIdHex: continuation.sourceLock.expectedTxId,
+      reserveTransitionTransactionIdHex: continuation.reserve.expectedTxId,
+      sourceLockBoxIdHex: continuation.packet.boxes.sourceLock.boxId,
+      reserveSuccessorBoxIdHex: continuation.packet.boxes.reserveSuccessor.boxId,
+      mintIdentityHex: continuation.execution.mint.mintIdentityHex,
+      sourceProofReceiptDigestHex: continuation.proof.receiptDigestHex }),
+    mint: continuation.execution.mint, burn: continuation.execution.burn,
+    checkpoint: continuation.checkpoint.attestation,
+    feeFunding: Object.freeze({ withdrawal: feeSummary(continuation.withdrawalFee),
+      tracker: feeSummary(continuation.trackerFee) }),
+    anchor: Object.freeze({ observation: anchored.value, execution: anchored.receipt }),
+    tracker: Object.freeze({ ...confirmed.value.tracker,
+      authorizationDigestHex: admitted.value.authorizationDigestHex,
+      checkDigestHex: admitted.value.checkDigestHex, frozenExecution: admitted.receipt,
+      freshnessExecution: refreshed.receipt, transportExecution: transported.receipt,
+      transportStatus: transported.value.submission.status,
+      journalDigestHex: transported.value.journalDigestHex }),
+    payout: confirmed.value.payout, confirmationExecution: confirmed.receipt,
+  });
+}
+
+async function settleReads<T>(reads: readonly Promise<T>[]): Promise<T[]> {
+  const settled = await Promise.allSettled(reads);
+  const values: T[] = [];
+  for (const result of settled) {
+    if (result.status === 'rejected') throw result.reason;
+    values.push(result.value);
+  }
+  return values;
+}
+
+function materializedStorage(text: string, profile: string, bridge: string, wasmHash: string): Readonly<Record<string, string>> {
+  const spec = record(parseJson(text));
+  if (spec.id !== 'bridge_federated_v4_genesis' || !Array.isArray(spec.bootNodes) || spec.bootNodes.length !== 0) {
+    throw new Error('FED raw spec target or peers differ');
+  }
+  const raw = record(record(spec.genesis).raw);
+  if (Object.keys(record(raw.childrenDefault)).length !== 0) throw new Error('FED unexpected child storage');
+  const top = record(raw.top);
+  if (Object.keys(top).length < 4 || Object.keys(top).length > 256
+    || Object.entries(top).some(([key, value]) => !/^0x(?:[0-9a-f]{2})+$/.test(key)
+      || typeof value !== 'string' || !/^0x(?:[0-9a-f]{2})*$/.test(value))) {
+    throw new Error('FED malformed raw storage');
+  }
+  const result = top as Record<string, string>;
+  if (!result[KEYS.code] || sha256(Buffer.from(result[KEYS.code].slice(2), 'hex')) !== wasmHash
+    || result[KEYS.profile] !== profile || result[KEYS.enforced] !== '0x01'
+    || result[KEYS.bridge] !== `0x${bridge}` || result[KEYS.sudo] !== undefined) {
+    throw new Error('FED raw storage differs from the compiled runtime/profile or authority');
+  }
+  return Object.freeze(result);
+}
+
+function record(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('FED object required');
+  return value as Record<string, unknown>;
+}
+function parseJson(text: string): unknown {
+  assertNoDuplicateJsonKeys(text);
+  return JSON.parse(text) as unknown;
+}
+function exact<T>(value: T, keys: string[]): Readonly<T> {
+  record(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (![Object.prototype, null].includes(Object.getPrototypeOf(value))
+    || Object.getOwnPropertyNames(descriptors).length !== keys.length
+    || Object.getOwnPropertySymbols(descriptors).length !== 0
+    || keys.some(key => !descriptors[key]?.enumerable || !('value' in descriptors[key]!))) {
+    throw new Error('FED target requires exact data fields');
+  }
+  return Object.freeze(Object.fromEntries(keys.map(key => [key, descriptors[key]!.value]))) as Readonly<T>;
+}
+function sha256(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex'); }

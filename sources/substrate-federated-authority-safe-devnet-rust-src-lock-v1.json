@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "substrate-federated-authority-safe-devnet-rust-src-lock",
+  "nativeVerifierToolchainLockSha256": "2480775ab0f14b3389a021e2645e0e082d81ebaaef3e797063fb14d18e67f189",
+  "libraryRelativePath": "lib/rustlib/src/rust/library",
+  "cargoManifestSha256": "8087c942d4595535495a8b9e90028693bf0028a156449807ee017979cafbd08e",
+  "cargoLockSha256": "de6cdc3b08816eeed333936c31b81bc19be043596a75042afff6b5c81e35f210",
+  "boundaries": {
+    "exactRustcLayoutRequired": true,
+    "cargoManifestDigestRequired": true,
+    "cargoLockDigestRequired": true,
+    "beforeAfterObservationRequired": true,
+    "completeBuildToolClosureVerifiedByThisLock": false,
+    "dependencyCacheContentAttestedByThisLock": false,
+    "independentBuildAttestationVerifiedByThisLock": false,
+    "localConformanceOnly": true,
+    "admissionEligible": false
+  }
+}

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -231,8 +232,13 @@ describe('substrate federated tracker process-owned JVM compiler V1', () => {
     }
 
     const javaHome = process.env.JAVA_HOME;
+    const invalidJavaHome = mkdtempSync(resolve(
+      tmpdir(),
+      'bridge-invalid-java-home-',
+    ));
+    writeFileSync(resolve(invalidJavaHome, 'marker'), 'not a Java distribution');
     delete process.env.NODE_OPTIONS;
-    process.env.JAVA_HOME = dirname(process.execPath);
+    process.env.JAVA_HOME = invalidJavaHome;
     try {
       await expect(compileSubstrateFederatedTrackerWithPinnedJvmV1(
         fixtureRequest,
@@ -240,6 +246,7 @@ describe('substrate federated tracker process-owned JVM compiler V1', () => {
     } finally {
       process.env.JAVA_HOME = javaHome;
       process.env.NODE_OPTIONS = nodeOptions;
+      rmSync(invalidJavaHome, { recursive: true, force: true });
     }
   });
 

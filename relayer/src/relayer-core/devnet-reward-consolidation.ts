@@ -821,7 +821,7 @@ function normalizeConfirmation(
       value.confirmationHeight,
       'reward consolidation confirmation height',
     );
-    const derivedConfirmations = observedAtHeight - confirmationHeight + 1;
+    const derivedConfirmations = observedAtHeight - confirmationHeight;
     if (
       derivedConfirmations !== confirmations
       || derivedConfirmations < DEVNET_REWARD_CONSOLIDATION_FINAL_CONFIRMATIONS

@@ -119,7 +119,7 @@ const ergoNode = {
   baseCommit: '2'.repeat(40),
   baseTag: 'v6.0.2',
   patchCommitProvenance: 'e'.repeat(40),
-  patchPath: 'sources/ergo-node/0001-sidechain-extension-fields.patch',
+  patchPath: 'sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch',
   patchSha256: 'f'.repeat(64),
   role: 'operator-provided-ergo-extension-producer',
   commitmentInput: 'operator-provided',
@@ -184,6 +184,28 @@ async function loadCliModule(): Promise<any | undefined> {
   }
 }
 
+function extractAddedPatchFile(patch: string, path: string): string {
+  const marker = `diff --git a/${path} b/${path}\n`;
+  const start = patch.indexOf(marker);
+  if (start < 0) throw new Error(`patch does not add ${path}`);
+  const next = patch.indexOf('\ndiff --git ', start + marker.length);
+  const section = patch.slice(start, next < 0 ? undefined : next);
+  const sourceLines = section
+    .split('\n')
+    .filter(line => line.startsWith('+') && line !== `+++ b/${path}`)
+    .map(line => line.slice(1));
+  if (sourceLines.length === 0) throw new Error(`patch body for ${path} is empty`);
+  return sourceLines.join('\n');
+}
+
+function extractTopLevelRustFunction(source: string, name: string): string {
+  const marker = `fn ${name}(`;
+  const start = source.indexOf(marker);
+  if (start < 0) throw new Error(`Rust function ${name} is absent`);
+  const next = source.indexOf('\nfn ', start + marker.length);
+  return source.slice(start, next < 0 ? undefined : next);
+}
+
 describe('consensus source baseline', () => {
   it('tracks the reachable Frontier submodule and Ergo patch artifacts in the repository', () => {
     const gitmodulesPath = resolve(REPOSITORY_ROOT, '.gitmodules');
@@ -195,7 +217,7 @@ describe('consensus source baseline', () => {
       BRIDGE_ROOT,
       'sources',
       'ergo-node',
-      '0001-sidechain-extension-fields.patch',
+      '0002-sidechain-extension-fields-candidate-recovery.patch',
     );
     const frontierPatchPath = resolve(
       BRIDGE_ROOT,
@@ -247,6 +269,62 @@ describe('consensus source baseline', () => {
       );
       expect(attributes).toContain('sources/consensus-source-lock.json text eol=lf');
     }
+  });
+
+  it('derives the LAB source-proof validity window from the activated runtime profile', () => {
+    const frontierPatch = readFileSync(
+      resolve(
+        BRIDGE_ROOT,
+        'sources',
+        'frontier',
+        '0001-bridge-runtime-commitment.patch',
+      ),
+      'utf8',
+    );
+    const rustSource = extractAddedPatchFile(
+      frontierPatch,
+      'template/node/src/bridge_federated_lab_reservation_tests.rs',
+    );
+    const fixture = extractTopLevelRustFunction(
+      rustSource,
+      'unactivated_fixture',
+    );
+    const admission = extractTopLevelRustFunction(
+      rustSource,
+      'federated_lab_reservation_is_admitted_without_evm_state_change',
+    );
+
+    expect(fixture).toContain(
+      '\tlet issued_at_native_height = profile.activation_height;',
+    );
+    expect(fixture).toContain(
+      '\tlet expires_at_native_height = issued_at_native_height\n'
+        + '\t\t.checked_add(u64::from(profile.max_pending_blocks))\n'
+        + '\t\t.expect("LAB source-proof validity window fits u64");',
+    );
+    expect(fixture).not.toMatch(
+      /let expires_at_native_height\s*=\s*\d[\d_]*;/u,
+    );
+    expect(fixture).toContain(
+      '\tlet proof = source_proof_from_environment_or_fixture(\n'
+        + '\t\t&profile,\n'
+        + '\t\t&statement,\n'
+        + '\t\tissued_at_native_height,\n'
+        + '\t\texpires_at_native_height,\n'
+        + '\t);',
+    );
+    expect(fixture).not.toMatch(
+      /source_proof_from_environment_or_fixture\(\s*&profile,\s*&statement,\s*\d[\d_]*,\s*\d[\d_]*,?\s*\)/u,
+    );
+    expect(admission).toContain(
+      '\t\tfixture\n'
+        + '\t\t\t.profile\n'
+        + '\t\t\t.activation_height\n'
+        + '\t\t\t.checked_add(u64::from(fixture.profile.max_pending_blocks))',
+    );
+    expect(admission).not.toMatch(
+      /assert_eq!\(\s*pending\.expires_at_native_height,\s*\d[\d_]*,?\s*\)/u,
+    );
   });
 
   it('pins effective LF checkout semantics for the external-fee JVM fixture closure', () => {
@@ -583,6 +661,25 @@ describe('consensus source baseline', () => {
     expect(result.errors).toEqual([]);
   });
 
+  it('rejects the historical Ergo patch path with all other bindings unchanged', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+
+    const drifted = structuredClone(validLock);
+    drifted.ergoNode.patchPath = 'sources/ergo-node/0001-sidechain-extension-fields.patch';
+    const result = baseline.validateConsensusSourceLock(drifted, {
+      frontierGitlinkCommit: frontier.commit,
+      frontierSubmoduleUrl: frontier.repository,
+      frontierPatchSha256: frontier.patchSha256,
+      ergoPatchSha256: ergoNode.patchSha256,
+    });
+
+    expect(result.errors).toEqual([
+      'Ergo patch path must identify the tracked sidechain extension and candidate recovery patch',
+    ]);
+  });
+
   it('rejects gitlink, patch, or trust-boundary drift', async () => {
     const baseline = await loadBaselineModule();
     expect(baseline, 'consensus-source-baseline module').toBeDefined();
@@ -810,10 +907,155 @@ describe('consensus source baseline', () => {
       Buffer.from('line one\n'),
     )).toBe(true);
     expect(baseline.isRawOrControlledCrLfEquivalent(
+      'proof-vector.hex',
+      Buffer.from('0123abcd\r\n'),
+      Buffer.from('0123abcd\n'),
+    )).toBe(true);
+    expect(baseline.isRawOrControlledCrLfEquivalent(
       'build.sbt',
       Buffer.from('line one\r\n'),
       Buffer.from('line one\r\n'),
     )).toBe(true);
+  });
+
+  it('preserves the pinned Git blob identity for CRLF-materialized hex vectors', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-hex-checkout-'));
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      writeFileSync(resolve(root, 'proof-vector.hex'), '0123abcd\n');
+      git('add', 'proof-vector.hex');
+      git('commit', '--quiet', '-m', 'fixture');
+      const pinnedBlob = git('rev-parse', 'HEAD:proof-vector.hex').trim();
+
+      writeFileSync(resolve(root, 'proof-vector.hex'), '0123abcd\r\n');
+      const inspected = baseline.inspectRawCheckout(root, ['proof-vector.hex']);
+
+      expect(inspected.status).toBe('');
+      expect(inspected.blobs['proof-vector.hex']).toBe(pinnedBlob);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['unpatched.rs', 'unmodified'],
+    ['patched.rs', 'modified'],
+    ['added.rs', 'added'],
+    ['Cargo.toml', 'modified'],
+    ['Cargo.lock', 'modified'],
+  ])('keeps raw build identity for %s distinct from controlled CRLF identity', async (path, state) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-build-checkout-'));
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: root, encoding: 'utf8', windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const blobId = (bytes: Buffer) => createHash('sha1')
+      .update(Buffer.from(`blob ${bytes.length}\0`)).update(bytes).digest('hex');
+    const original = 'original\n';
+    const expected = Buffer.from(state === 'unmodified' ? original : 'patched\n');
+    try {
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      git('config', 'core.autocrlf', 'false');
+      writeFileSync(resolve(root, 'README.md'), 'fixture\n');
+      if (state !== 'added') writeFileSync(resolve(root, path), original);
+      git('add', 'README.md', ...(state === 'added' ? [] : [path]));
+      git('commit', '--quiet', '-m', 'fixture');
+      writeFileSync(resolve(root, path), expected);
+      const before = baseline.inspectRawCheckout(root, [path], undefined, 'raw');
+      expect(before.blobs[path]).toBe(blobId(expected));
+
+      const materialized = Buffer.from(expected.toString().replaceAll('\n', '\r\n'));
+      writeFileSync(resolve(root, path), materialized);
+      const compatible = baseline.inspectRawCheckout(root, [path]);
+      const exact = baseline.inspectRawCheckout(root, [path], undefined, 'raw');
+      expect(compatible.blobs[path]).toBe(blobId(expected));
+      expect(exact.blobs[path]).toBe(blobId(materialized));
+      expect(exact.blobs[path]).not.toBe(before.blobs[path]);
+      if (state === 'unmodified') {
+        expect(compatible.status).toBe('');
+        expect(exact.status).toBe(` M ${path}`);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('forwards raw policy through the real baseline entry point', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    const root = mkdtempSync(resolve(tmpdir(), 'bridge-raw-policy-forwarding-'));
+    const source = resolve(root, 'frontier');
+    const bridge = resolve(root, 'bridge');
+    const git = (...args: string[]) => execFileSync('git', args, {
+      cwd: source, encoding: 'utf8', windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    try {
+      mkdirSync(source);
+      mkdirSync(resolve(bridge, 'sources'), { recursive: true });
+      const files = ['Cargo.lock', 'rust-toolchain.toml',
+        'template/node/Cargo.toml', 'template/runtime/Cargo.toml'];
+      for (const path of files) {
+        mkdirSync(dirname(resolve(source, path)), { recursive: true });
+        writeFileSync(resolve(source, path), 'source input\n');
+      }
+      git('init', '--quiet');
+      git('config', 'user.name', 'Bridge Test');
+      git('config', 'user.email', 'bridge-test@example.invalid');
+      git('config', 'core.autocrlf', 'false');
+      git('add', ...files);
+      git('commit', '--quiet', '-m', 'fixture');
+      const blob = git('rev-parse', 'HEAD:Cargo.lock').trim();
+      writeFileSync(resolve(bridge, 'sources', 'consensus-source-lock.json'),
+        JSON.stringify({ frontier: {
+          commit: git('rev-parse', 'HEAD').trim(), files: [],
+          cargoLockBlob: blob, rustToolchainBlob: blob,
+          nodeManifestBlob: blob, runtimeManifestBlob: blob,
+        } }));
+      const inspect = (frontierCheckoutBytePolicy?: string) =>
+        baseline.inspectConsensusSourceBaseline({
+          worktreeRoot: bridge, bridgeRoot: bridge, frontierSourcePath: source,
+          requireFrontierCheckout: true, requireErgoCheckout: false,
+          frontierCheckoutBytePolicy,
+        });
+      // This fixture isolates checkout validation; release inputs are absent.
+      const exactLf = inspect('raw');
+      expect(exactLf.checks.lockBindingsValidated).toBe(false);
+      expect(exactLf.checks.frontierCheckoutValidated).toBe(true);
+      writeFileSync(resolve(source, 'Cargo.lock'), 'source input\r\n');
+      expect(inspect().checks.frontierCheckoutValidated).toBe(true);
+      const exactCrLf = inspect('raw');
+      expect(exactCrLf.checks.frontierCheckoutValidated).toBe(false);
+      expect(exactCrLf.errors).toContain('Frontier Cargo.lock does not match the source lock');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an unknown checkout byte policy before reading a checkout', async () => {
+    const baseline = await loadBaselineModule();
+    expect(baseline).toBeDefined();
+    if (!baseline) return;
+    expect(() => baseline.inspectRawCheckout('absent-source', [], undefined, 'unknown'))
+      .toThrow(/checkout byte policy/);
   });
 
   it('detects raw checkout and index drift even when a Git clean filter rewrites the blob identity', async () => {
@@ -1027,7 +1269,7 @@ describe('consensus source baseline', () => {
     expect(workflow).toContain('cargo test --locked -p bridge-state-proof');
     expect(workflow).toContain('https://github.com/ergoplatform/ergo.git');
     expect(workflow).toContain('2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1');
-    expect(workflow).toContain('0001-sidechain-extension-fields.patch');
+    expect(workflow).toContain('0002-sidechain-extension-fields-candidate-recovery.patch');
     expect(workflow).toContain('testOnly org.ergoplatform.mining.CandidateGeneratorSpec');
     expect(workflow).toContain('node-version: "24.14.0"');
     expect(workflow).toContain('distribution: microsoft');

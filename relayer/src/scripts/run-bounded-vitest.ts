@@ -2,6 +2,11 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
+import {
+  buildExactTestNamePatterns,
+  parseListedVitestTests,
+} from './bounded-vitest-name-shards.js';
+
 const DEFAULT_BATCH_SIZE = 1;
 const DEFAULT_REPORTER = 'default';
 const DEFAULT_TEST_TIMEOUT_MS = process.platform === 'win32'
@@ -36,6 +41,9 @@ const SHARDED_TEST_TARGETS = new Map<string, ShardedTestTarget>([
 ]);
 const ISOLATED_TEST_TARGETS = new Set([
   'src/wp06-fixture-backed-lifecycle.test.ts',
+]);
+const NAME_SHARDED_TEST_TARGETS = new Map<string, number>([
+  ['src/adapters/federated-native-mint-execution-v1.test.ts', 50],
 ]);
 
 function collectTestFiles(dir: string): string[] {
@@ -103,9 +111,10 @@ const vitestBin =
   process.platform === 'win32'
     ? path.join(process.cwd(), 'node_modules', '.bin', 'vitest.cmd')
     : path.join(process.cwd(), 'node_modules', '.bin', 'vitest');
+const vitestCli = path.join(process.cwd(), 'node_modules', 'vitest', 'vitest.mjs');
 
-if (!existsSync(vitestBin)) {
-  throw new Error(`Vitest binary not found at ${vitestBin}`);
+if (!existsSync(vitestBin) || !existsSync(vitestCli)) {
+  throw new Error(`Vitest binary or CLI not found at ${vitestBin} / ${vitestCli}`);
 }
 
 const collectedTests = collectTestFiles(srcDir).sort((left, right) =>
@@ -156,6 +165,81 @@ function runVitestBatch(batch: string[], env: NodeJS.ProcessEnv = process.env): 
   }
 }
 
+function runVitestNameShard(target: string, pattern: string, expectedPassed: number): void {
+  const result = spawnSync(process.execPath, [
+    vitestCli,
+    'run',
+    target,
+    '--testNamePattern',
+    pattern,
+    '--hideSkippedTests',
+    '--testTimeout',
+    String(DEFAULT_TEST_TIMEOUT_MS),
+    '--reporter',
+    'json',
+  ], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    process.stderr.write(result.stderr);
+    process.stdout.write(result.stdout);
+    process.exit(result.status ?? 1);
+  }
+  let report: unknown;
+  try {
+    report = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`Vitest name shard returned invalid JSON for ${target}`);
+  }
+  if (!report || typeof report !== 'object' || Array.isArray(report)) {
+    throw new Error(`Vitest name shard returned an invalid report for ${target}`);
+  }
+  const { numPassedTests, numFailedTests } = report as Record<string, unknown>;
+  if (numPassedTests !== expectedPassed || numFailedTests !== 0) {
+    throw new Error(
+      `Vitest name shard coverage mismatch for ${target}: expected ${expectedPassed} passed, got ${String(numPassedTests)} passed and ${String(numFailedTests)} failed`,
+    );
+  }
+  console.log(`Vitest exact-name shard passed ${numPassedTests} tests.`);
+}
+
+function runNameShardedTest(target: string, maximumTestsPerShard: number): void {
+  const listResult = spawnSync(process.execPath, [vitestCli, 'list', target, '--json'], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (listResult.error) throw listResult.error;
+  if (listResult.status !== 0) {
+    throw new Error(`Vitest list failed for ${target} with exit code ${listResult.status ?? 1}`);
+  }
+  let listed: unknown;
+  try {
+    listed = JSON.parse(listResult.stdout);
+  } catch {
+    throw new Error(`Vitest list returned invalid JSON for ${target}`);
+  }
+  const tests = parseListedVitestTests(listed);
+  const expectedFile = path.resolve(process.cwd(), target);
+  const normalize = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
+  if (tests.some(test => normalize(path.resolve(test.file)) !== normalize(expectedFile))) {
+    throw new Error(`Vitest list returned a foreign test file for ${target}`);
+  }
+  const patterns = buildExactTestNamePatterns(tests, maximumTestsPerShard);
+  for (let index = 0; index < patterns.length; index += 1) {
+    console.log(`\nVitest exact-name shard ${index + 1}/${patterns.length}: ${target}`);
+    const expectedPassed = Math.min(maximumTestsPerShard, tests.length - index * maximumTestsPerShard);
+    runVitestNameShard(target, patterns[index]!, expectedPassed);
+  }
+}
+
 function runTestShards(target: string, config: ShardedTestTarget): void {
   for (let shard = 1; shard <= config.shardCount; shard += 1) {
     console.log(
@@ -177,13 +261,19 @@ for (let index = 0; index < tests.length; index += batchSize) {
   const isolatedTests = batch.filter(test => ISOLATED_TEST_TARGETS.has(test));
   const regularTests = batch.filter(test => !ISOLATED_TEST_TARGETS.has(test));
   const shardedTests = regularTests.filter(test => SHARDED_TEST_TARGETS.has(test));
-  const ordinaryTests = regularTests.filter(test => !SHARDED_TEST_TARGETS.has(test));
+  const nameShardedTests = regularTests.filter(test => NAME_SHARDED_TEST_TARGETS.has(test));
+  const ordinaryTests = regularTests.filter(
+    test => !SHARDED_TEST_TARGETS.has(test) && !NAME_SHARDED_TEST_TARGETS.has(test),
+  );
 
   if (ordinaryTests.length > 0) {
     runVitestBatch(ordinaryTests);
   }
   for (const shardedTest of shardedTests) {
     runTestShards(shardedTest, SHARDED_TEST_TARGETS.get(shardedTest)!);
+  }
+  for (const nameShardedTest of nameShardedTests) {
+    runNameShardedTest(nameShardedTest, NAME_SHARDED_TEST_TARGETS.get(nameShardedTest)!);
   }
 
   for (const isolatedTest of isolatedTests) {

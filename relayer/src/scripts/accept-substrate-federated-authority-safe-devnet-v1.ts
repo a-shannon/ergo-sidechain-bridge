@@ -16,6 +16,9 @@ import {
   writeNewFile,
 } from '../create-only-out-of-repository-artifact.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   acceptSubstrateFederatedAuthoritySafeDevnetV1,
 } from '../substrate-federated-authority-safe-devnet-acceptance-v1.js';
 import {
@@ -60,8 +63,9 @@ export async function main(
 ): Promise<void> {
   const args = parseArguments(argv);
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
-  const bridgeRoot = resolve(scriptDirectory, '..', '..', '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(scriptDirectory, '..', '..', '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const baseSpec = readBoundedRegularFile(
     resolve(args.baseSpecPath),
     'authority-safe base chain spec',

@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { Agent as HttpAgent, globalAgent as globalHttpAgent } from 'node:http';
+import { Agent as HttpsAgent, globalAgent as globalHttpsAgent } from 'node:https';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -35,8 +37,31 @@ describe('authenticated tracker read-only node client', () => {
       timeout: 30_000,
       maxRedirects: 0,
       proxy: false,
+      httpAgent: expect.any(HttpAgent),
+      httpsAgent: expect.any(HttpsAgent),
       maxContentLength: AUTHENTICATED_TRACKER_NODE_MAX_RESPONSE_BYTES,
     });
+  });
+
+  it('isolates nonpersistent HTTP and HTTPS agents without changing TLS or global pools', () => {
+    const httpOptions = { ...Reflect.get(globalHttpAgent, 'options') };
+    const httpsOptions = { ...Reflect.get(globalHttpsAgent, 'options') };
+    new AuthenticatedSpvTrackerReadOnlyNodeClient('http://127.0.0.1:9053');
+    new AuthenticatedSpvTrackerReadOnlyNodeClient('https://node.example.test');
+    const [first, second] = vi.mocked(axios.create).mock.calls.map(([options]) => options!);
+    for (const options of [first!, second!]) {
+      expect(options.httpAgent).not.toBe(globalHttpAgent);
+      expect(options.httpsAgent).not.toBe(globalHttpsAgent);
+      expect(options.httpAgent.options.keepAlive).toBe(false);
+      expect(options.httpsAgent.options.keepAlive).toBe(false);
+      expect(options.httpsAgent.options.rejectUnauthorized).not.toBe(false);
+      expect(options.httpsAgent.options.checkServerIdentity).toBeUndefined();
+      expect(options.httpsAgent.options.ca).toBeUndefined();
+    }
+    expect(first!.httpAgent).not.toBe(second!.httpAgent);
+    expect(first!.httpsAgent).not.toBe(second!.httpsAgent);
+    expect(Reflect.get(globalHttpAgent, 'options')).toEqual(httpOptions);
+    expect(Reflect.get(globalHttpsAgent, 'options')).toEqual(httpsOptions);
   });
 
   it('rejects credentials, non-root routes, queries, and internal test endpoint markers', () => {

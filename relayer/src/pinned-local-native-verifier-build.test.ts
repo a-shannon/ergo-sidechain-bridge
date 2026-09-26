@@ -21,12 +21,17 @@ import {
   assertPinnedGeneratedJsonVectorDigest,
   assertNoNativeBuildDescendants,
   assertPinnedGeneratedJsonVectorMatch,
+  BoundedProcessExitError,
   buildPinnedLocalNativeCargoArgs,
   buildPinnedLocalNativeReproducibleRustFlags,
+  buildPinnedLocalWasmPathRemapRustFlags,
   canonicalizePinnedGeneratedJsonVectorBytes,
   createPinnedLocalNativeBuildWorkspace,
   EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256,
+  EXPECTED_FRONTIER_PATCH_SHA256,
   EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256,
+  preparePinnedLocalNativeVerifierBuild,
+  runBoundedProcess,
   runBoundedNativeBuildProcess,
   terminateNativeBuildProcessTree,
   validateNativeVerifierToolchainLock,
@@ -176,15 +181,23 @@ describe('pinned local native verifier build conformance', () => {
   });
 
   it('pins local reproducibility flags and requests deterministic MSVC linking', () => {
+    const rustcExecutablePath = resolve(
+      tmpdir(),
+      'e2s-rust-toolchain',
+      'bin',
+      'rustc.exe',
+    );
     const flags = buildPinnedLocalNativeReproducibleRustFlags({
       frontierSourcePath: resolve(bridgeRoot, '.source-cache', 'frontier-patched'),
       buildTargetPath: resolve(tmpdir(), 'e2s-pinned-local-native-example'),
+      rustcExecutablePath,
       rustTarget: 'x86_64-pc-windows-msvc',
     });
 
     expect(flags).toEqual([
       expect.stringMatching(/^--remap-path-prefix=.*=\/e2s\/frontier-source$/),
       expect.stringMatching(/^--remap-path-prefix=.*=\/e2s\/build-target$/),
+      `--remap-path-prefix=${resolve(dirname(rustcExecutablePath), '..')}=/e2s/rust-toolchain`,
       '-Cdebuginfo=0',
       '-Ccodegen-units=1',
       '-Clink-arg=/Brepro',
@@ -194,10 +207,65 @@ describe('pinned local native verifier build conformance', () => {
     const nonMsvcFlags = buildPinnedLocalNativeReproducibleRustFlags({
       frontierSourcePath: resolve(bridgeRoot, '.source-cache', 'frontier-patched'),
       buildTargetPath: resolve(tmpdir(), 'e2s-pinned-local-native-example'),
+      rustcExecutablePath,
       rustTarget: 'x86_64-unknown-linux-gnu',
     });
     expect(nonMsvcFlags).not.toContain('-Clink-arg=/Brepro');
   });
+
+  it('remaps distinct Rust layouts without claiming equal flag identities', () => {
+    const rootLayout = resolve(tmpdir(), 'e2s-rust-root-layout');
+    const nestedLayout = resolve(
+      tmpdir(),
+      'e2s-rust-nested-layout',
+      'toolchains',
+      '1.82.0-x86_64-pc-windows-msvc',
+    );
+    const input = {
+      frontierSourcePath: resolve(tmpdir(), 'e2s-frontier-source'),
+      buildTargetPath: resolve(tmpdir(), 'e2s-build-target'),
+      rustTarget: 'x86_64-pc-windows-msvc',
+    } as const;
+
+    const rootFlags = buildPinnedLocalNativeReproducibleRustFlags({
+      ...input,
+      rustcExecutablePath: resolve(rootLayout, 'bin', 'rustc.exe'),
+    });
+    const nestedFlags = buildPinnedLocalNativeReproducibleRustFlags({
+      ...input,
+      rustcExecutablePath: resolve(nestedLayout, 'bin', 'rustc.exe'),
+    });
+
+    expect(rootFlags).toContain(
+      `--remap-path-prefix=${rootLayout}=/e2s/rust-toolchain`,
+    );
+    expect(nestedFlags).toContain(
+      `--remap-path-prefix=${nestedLayout}=/e2s/rust-toolchain`,
+    );
+    expect(rootFlags.join(' ')).not.toContain(nestedLayout);
+    expect(nestedFlags.join(' ')).not.toContain(rootLayout);
+    expect(rootFlags).not.toEqual(nestedFlags);
+  });
+
+  it.each([
+    ['Frontier source', 'frontierSourcePath', resolve(tmpdir(), 'frontier source')],
+    ['build target', 'buildTargetPath', resolve(tmpdir(), 'build target')],
+    [
+      'Rust toolchain root',
+      'rustcExecutablePath',
+      resolve(tmpdir(), 'rust toolchain', 'bin', 'rustc.exe'),
+    ],
+  ] as const)(
+    'rejects a non-token %s path before space-delimited WASM flags',
+    (label, field, value) => {
+      expect(() => buildPinnedLocalWasmPathRemapRustFlags({
+        frontierSourcePath: resolve(tmpdir(), 'frontier-source'),
+        buildTargetPath: resolve(tmpdir(), 'build-target'),
+        rustcExecutablePath: resolve(tmpdir(), 'rust-toolchain', 'bin', 'rustc.exe'),
+        [field]: value,
+      })).toThrow(new RegExp(`${label} path must not contain`, 'iu'));
+    },
+  );
 
   it('creates the Windows target suspended inside a kill-on-close Job Object', () => {
     const source = readFileSync(
@@ -236,6 +304,9 @@ describe('pinned local native verifier build conformance', () => {
       'authenticated-v2-compiler-consensus-source-lock-v1.json',
     );
     const currentSourceLock = JSON.parse(readFileSync(currentSourceLockPath, 'utf8')) as {
+      frontier: {
+        patchSha256: string;
+      };
       ergoNode: {
         baseCommit: string;
         patchSha256: string;
@@ -256,16 +327,50 @@ describe('pinned local native verifier build conformance', () => {
       ergoPatchedBlobIds: string[];
     };
 
-    expect(sha256(currentSourceLockPath)).not.toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
-    expect(sha256(historicalSourceLockPath)).toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
-    expect(compilerLock.consensusSourceLockSha256)
-      .toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
-    expect(currentSourceLock.ergoNode).toEqual(historicalSourceLock.ergoNode);
+    expect(sha256(currentSourceLockPath)).toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
+    expect(sha256(historicalSourceLockPath))
+      .toBe(compilerLock.consensusSourceLockSha256);
+    expect(sha256(historicalSourceLockPath)).not.toBe(EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256);
+    expect(currentSourceLock.frontier.patchSha256)
+      .toBe(EXPECTED_FRONTIER_PATCH_SHA256);
+    expect(currentSourceLock.ergoNode.baseCommit)
+      .toBe(historicalSourceLock.ergoNode.baseCommit);
+    expect(currentSourceLock.ergoNode.patchSha256)
+      .not.toBe(historicalSourceLock.ergoNode.patchSha256);
+    expect(currentSourceLock.ergoNode.files.map(file => file.patchedBlob).sort())
+      .not.toEqual(historicalSourceLock.ergoNode.files.map(file => file.patchedBlob).sort());
     expect(historicalSourceLock.ergoNode.baseCommit).toBe(compilerLock.ergoNodeBaseCommit);
     expect(historicalSourceLock.ergoNode.patchSha256).toBe(compilerLock.ergoPatchSha256);
     expect(historicalSourceLock.ergoNode.files.map(file => file.patchedBlob).sort())
       .toEqual([...compilerLock.ergoPatchedBlobIds].sort());
     expect(sha256(toolchainLockPath)).toBe(EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256);
+  });
+
+  it('admits the exact current and compiler source locks before checking caller paths', async () => {
+    const parent = mkdtempSync(join(tmpdir(), 'pinned-local-native-verifier-input-'));
+    const missing = resolve(parent, 'missing');
+    try {
+      let failure: unknown;
+      try {
+        await preparePinnedLocalNativeVerifierBuild({
+          frontierSourcePath: missing,
+          cargoExecutablePath: missing,
+          rustcExecutablePath: missing,
+          gitExecutablePath: missing,
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as NodeJS.ErrnoException).code).toBe('ENOENT');
+      expect((failure as Error).message)
+        .not.toContain('canonical consensus source lock digest is not the pinned identity');
+      expect((failure as Error).message)
+        .not.toContain('authenticated V2 compiler consensus source lock digest is not pinned');
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   it('accepts only the exact pinned platform tool identities', () => {
@@ -373,6 +478,40 @@ describe('pinned local native verifier build conformance', () => {
     }
   });
 
+  it('allocates and cleans a build workspace under an explicit temporary root', () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), 'e2s-build-root-'));
+    const sharedCargoHome = resolve(temporaryRoot, 'shared-cargo-home');
+    const sharedRegistry = resolve(sharedCargoHome, 'registry');
+    mkdirSync(sharedCargoHome);
+    mkdirSync(sharedRegistry);
+    writeFileSync(resolve(sharedRegistry, 'entry.txt'), 'shared-cache', 'utf8');
+    let workspace: ReturnType<typeof createPinnedLocalNativeBuildWorkspace> | undefined;
+    let allocatedTargetPath: string | undefined;
+    try {
+      workspace = createPinnedLocalNativeBuildWorkspace(targetPath => {
+        allocatedTargetPath = targetPath;
+        assertFreshIsolatedNativeBuildTarget(targetPath, temporaryRoot);
+      }, {
+        sharedCargoHomeRoot: sharedCargoHome,
+        temporaryDirectoryRoot: temporaryRoot,
+      });
+      expect(workspace.buildTargetPath).toBe(allocatedTargetPath);
+      expect(dirname(workspace.buildTargetPath)).toBe(temporaryRoot);
+      expect(existsSync(workspace.cargoHomePath)).toBe(true);
+      expect(readFileSync(
+        resolve(workspace.cargoHomePath, 'registry', 'entry.txt'),
+        'utf8',
+      )).toBe('shared-cache');
+      const allocatedPath = workspace.buildTargetPath;
+      workspace.cleanup();
+      workspace = undefined;
+      expect(existsSync(allocatedPath)).toBe(false);
+    } finally {
+      workspace?.cleanup();
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it('rejects process timeouts that exceed the Node timer range', async () => {
     await expect(runBoundedNativeBuildProcess({
       executablePath: process.execPath,
@@ -384,6 +523,106 @@ describe('pinned local native verifier build conformance', () => {
       label: 'test native build',
     })).rejects.toThrow(/timeout exceeds the supported timer range/i);
   });
+
+  it('retains bounded process output on a non-zero exit', async () => {
+    const outcome = await captureProcessOutcome(runBoundedNativeBuildProcess({
+      executablePath: process.execPath,
+      args: [
+        '-e',
+        "process.stdout.write('producer-out'); process.stderr.write('producer-err'); process.exit(23);",
+      ],
+      cwd: bridgeRoot,
+      env: minimalTestProcessEnvironment(),
+      timeoutMs: 5_000,
+      maxOutputBytes: 1_024,
+      label: 'test bounded diagnostics',
+    }));
+
+    expect(outcome.status).toBe('rejected');
+    if (outcome.status !== 'rejected') return;
+    expect(outcome.error).toBeInstanceOf(BoundedProcessExitError);
+    expect(outcome.error).toMatchObject({
+      stdout: 'producer-out',
+      stderr: 'producer-err',
+      message: 'test bounded diagnostics failed',
+    });
+    expect((outcome.error as BoundedProcessExitError).exitCode).not.toBe(0);
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
+
+  it('retains successful process stdout as exact raw bytes', async () => {
+    const expected = Buffer.from([0xff, 0x00, 0x61]);
+    const result = await runBoundedProcess({
+      executablePath: process.execPath,
+      args: [
+        '-e',
+        `process.stdout.write(Buffer.from('${expected.toString('hex')}', 'hex'))`,
+      ],
+      cwd: bridgeRoot,
+      env: minimalTestProcessEnvironment(),
+      timeoutMs: 5_000,
+      maxOutputBytes: 1_024,
+      label: 'test bounded raw output',
+    });
+
+    expect(result.stdoutBytes).toEqual(expected);
+    expect(result.stderrBytes).toEqual(Buffer.alloc(0));
+  }, PROCESS_LIFECYCLE_TEST_TIMEOUT_MS);
+
+  it.each((['stdout', 'stderr'] as const).flatMap(channel =>
+    [1, 2, 3, 4].map(repetition => ({ channel, repetition })),
+  ))(
+    'retains every byte of multi-megabyte $channel writes across pipe buffers (repetition $repetition)',
+    async ({ channel }) => {
+      const size = 3_952_928;
+      const expected = Buffer.alloc(size);
+      for (let index = 0; index < size; index += 1) {
+        expected[index] = 32 + (index * 31) % 95;
+      }
+      const expectedDigest = createHash('sha256').update(expected).digest('hex');
+      const descriptor = channel === 'stdout' ? 1 : 2;
+      const producer = [
+        "const fs = require('fs');",
+        `const bytes = Buffer.alloc(${size});`,
+        'for (let i = 0; i < bytes.length; i++) bytes[i] = 32 + (i * 31) % 95;',
+        '(async () => {',
+        '  let offset = 0;',
+        '  let stalledWrites = 0;',
+        '  while (offset < bytes.length) {',
+        '    const requested = Math.min(131072, bytes.length - offset);',
+        '    const written = await new Promise((resolve, reject) => {',
+        `      fs.write(${descriptor}, bytes, offset, requested, (error, count) =>`,
+        '        error ? reject(error) : resolve(count));',
+        '    });',
+        '    if (!Number.isInteger(written) || written < 0 || written > requested)',
+        "      throw new Error('invalid output write count');",
+        '    if (written === 0) {',
+        '      if (++stalledWrites >= 16)',
+        "        throw new Error('output did not progress');",
+        '      await new Promise(resolve => setImmediate(resolve));',
+        '      continue;',
+        '    }',
+        '    stalledWrites = 0;',
+        '    offset += written;',
+        '  }',
+        '})().catch(error => { console.error(error); process.exitCode = 1; });',
+      ].join('\n');
+      const result = await runBoundedProcess({
+        executablePath: process.execPath,
+        args: ['-e', producer],
+        cwd: bridgeRoot,
+        env: minimalTestProcessEnvironment(),
+        timeoutMs: 5_000,
+        maxOutputBytes: size,
+        label: `test exact ${channel} forwarding`,
+      });
+      const actual = channel === 'stdout' ? result.stdoutBytes : result.stderrBytes;
+      const other = channel === 'stdout' ? result.stderrBytes : result.stdoutBytes;
+      expect(actual.length).toBe(size);
+      expect(createHash('sha256').update(actual).digest('hex')).toBe(expectedDigest);
+      expect(other.length).toBe(0);
+    },
+    PROCESS_LIFECYCLE_TEST_TIMEOUT_MS,
+  );
 
   it('waits for a timed-out process tree to stop before returning cleanup authority', async () => {
     const workspace = createPinnedLocalNativeBuildWorkspace();

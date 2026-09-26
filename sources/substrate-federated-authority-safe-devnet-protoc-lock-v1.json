@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "kind": "substrate-federated-authority-safe-devnet-protoc-lock",
+  "profiles": {
+    "win32-x64": {
+      "version": "libprotoc 35.0",
+      "sha256": "1e5e6cee88d61bed799dd45aa5b45b61f5f30398f15153cd61a8d155b8b8e087"
+    }
+  },
+  "boundaries": {
+    "explicitEnvironmentPathRequired": true,
+    "absoluteToolPathRequired": true,
+    "toolDigestRequired": true,
+    "toolVersionRequired": true,
+    "unsupportedPlatformsFailClosed": true,
+    "completeBuildToolClosureVerifiedByThisLock": false,
+    "dependencyCacheContentAttestedByThisLock": false,
+    "independentBuildAttestationVerifiedByThisLock": false,
+    "localConformanceOnly": true,
+    "admissionEligible": false
+  }
+}

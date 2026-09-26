@@ -9,8 +9,28 @@ machine-readable identity is `sources/consensus-source-lock.json`.
 | Component | Public source | Immutable identity | Bridge-owned material | Current role |
 |---|---|---|---|---|
 | Substrate/Frontier | `https://github.com/polkadot-evm/frontier.git` | Base `75329a2df49e2cc7981485392c31160929d1bd48` | Superproject gitlink plus `sources/frontier/0001-bridge-runtime-commitment.patch` | EVM execution, bridge-native burn commitment production, GRANDPA proof serving, and native finalized-state verification |
-| Ergo node | `https://github.com/ergoplatform/ergo.git` | Base `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (`v6.0.2`) | Versioned patch `sources/ergo-node/0001-sidechain-extension-fields.patch` | Devnet `0x04xx` extension producer from operator-provided bytes |
+| Ergo node | `https://github.com/ergoplatform/ergo.git` | Base `2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1` (`v6.0.2`) | Cumulative patch `sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch` | Devnet `0x04xx` extension producer from operator-provided bytes, with candidate context alignment, semantic-rejection recovery and exact transaction-gated tracker mining |
 | Solidity bridge/token | npm-locked `solc 0.8.35` and OpenZeppelin `5.6.1` | Package lock, exact compiler/settings, normalized source closure, and artifact manifest | `solidity/compile.js`, sources, settings, and generated identities | Reproducible local ABI, creation/runtime bytecode, metadata, and storage-layout closure |
+
+The Ergo patch applies directly to the pinned base. It includes the original
+extension overlay, limits candidate transaction scripts to the predecessor
+window used during full-block application, and clears a solved candidate only
+after a semantic rejection with the same full-block type and ID. Regeneration
+uses normal candidate polling; the rejected block is not retransmitted. A
+tracker-transport primary process can also receive one exact transaction ID.
+It refuses candidates until its current mempool reader contains that ID,
+rejects cached or newly generated candidates that omit it and releases the
+constraint only after the matching locally solved block is applied. Later
+transactions in the same custody session can then be mined normally. Other
+node starts do not receive this setting.
+`patchCommitProvenance` retains the historical extension-origin commit. The
+cumulative patch SHA-256 and resulting Git blob IDs bind the current source.
+Historical compiler locks continue to reference the unchanged `0001` patch.
+
+Recovery after rejection of the initial full block remains outside this
+overlay: the upstream history can retain a pre-genesis best-block identifier
+that prevents a replacement from being applied. The recovery fixture starts
+from an applied first block and includes a stale-solution rejection case.
 
 The source lock v3 binds the Solidity build manifest. A clean local check is:
 
@@ -379,10 +399,33 @@ policy are required:
 
 ```bash
 mkdir -p .source-cache
-git -c core.autocrlf=false -C substrate-node worktree add ../.source-cache/frontier-patched 75329a2df49e2cc7981485392c31160929d1bd48
-git -c core.autocrlf=false -C .source-cache/frontier-patched apply --check --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
-git -c core.autocrlf=false -C .source-cache/frontier-patched apply --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
+git -c core.autocrlf=false -c core.eol=lf -C substrate-node worktree add ../.source-cache/frontier-patched 75329a2df49e2cc7981485392c31160929d1bd48
+git -c core.autocrlf=false -c core.eol=lf -C .source-cache/frontier-patched apply --check --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
+git -c core.autocrlf=false -c core.eol=lf -C .source-cache/frontier-patched apply --unidiff-zero --whitespace=error-all ../../sources/frontier/0001-bridge-runtime-commitment.patch
 ```
+
+Git configuration is a preparation input, not proof of the resulting bytes.
+The reproducible Frontier pin producer and authority-safe target acceptance
+select the raw checkout policy before Cargo and at their source rechecks.
+Unmodified files must match their raw HEAD blobs; declared patched and added
+files must match their exact locked result blobs. A CRLF-equivalent checkout
+can pass the general compatibility source check but fails these build checks.
+The preflight never rewrites a supplied checkout. Reproduce the exact base
+spec and embedded runtime before allocating a campaign owner; do not replace
+runtime pins merely because a differently materialized checkout builds.
+
+Raw source equality alone does not establish build-root independence. The
+pinned nested Cargo build references the original runtime outside its generated
+workspace; absolute path-dependency identity can remain relevant after source
+path remapping. A local control reproduced the full historical base spec at
+its original source root, while another raw-identical root produced a different,
+internally reproducible runtime. This is not a runtime-equivalence result.
+
+A distinct local campaign may select a separately reproduced profile only when
+its exact spec and runtime feed the derived genesis, network and proof-profile
+identities and are rechecked at acceptance. It cannot reuse the old profile's
+runtime evidence. Preserve the locked tools, source checks and fail-closed
+acceptance path; cross-root reproducibility remains a separate delivery task.
 
 Prepare the Ergo source from the locked public base. The cache directory is
 ignored by Git and can be deleted and recreated at any time.
@@ -393,7 +436,7 @@ git -C .source-cache/ergo-node init
 git -C .source-cache/ergo-node remote add origin https://github.com/ergoplatform/ergo.git
 git -C .source-cache/ergo-node fetch --depth=1 origin refs/tags/v6.0.2
 git -C .source-cache/ergo-node checkout --detach 2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1
-git -C .source-cache/ergo-node apply --unidiff-zero ../../sources/ergo-node/0001-sidechain-extension-fields.patch
+git -C .source-cache/ergo-node apply --unidiff-zero ../../sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch
 ```
 
 Validate the tracked identities first, then the complete source checkouts:

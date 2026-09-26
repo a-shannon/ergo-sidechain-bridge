@@ -3,12 +3,17 @@ import blakejs from 'blakejs';
 
 import {
   assertBridgeValidityTrackerCanonicalHeaderContextV1,
+  assertBridgeValidityTrackerObservedHeaderContextV1,
   buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1,
   serializeCanonicalErgoHeaderV2,
 } from './bridge-validity-tracker-header-context-v1.js';
 import {
   loadWp06CanonicalJvmHeaderVector,
 } from './wp06-canonical-jvm-header-chain.js';
+import {
+  serializeErgoHeaderIdentity,
+} from './ergo-settlement-core/ergo-header-id.js';
 
 async function wasmModule(): Promise<any> {
   const imported = await import('ergo-lib-wasm-nodejs');
@@ -82,4 +87,273 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
       },
     })).toThrow(/distance must be zero/i);
   });
+
+  it('binds exactly ten observed node headers to their canonical identities', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const observed = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders: synthetic.headers.map(header => header.raw),
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: synthetic.anchorHeader.id,
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    });
+
+    expect(observed.currentHeight).toBe(2_000);
+    expect(observed.headers.map(header => header.id)).toEqual(
+      synthetic.headers.map(header => header.id),
+    );
+    expect(observed.anchorHeader).toBe(observed.headers[0]);
+    expect(() =>
+      assertBridgeValidityTrackerObservedHeaderContextV1(observed),
+    ).not.toThrow();
+    expect(() =>
+      assertBridgeValidityTrackerObservedHeaderContextV1(
+        structuredClone(observed),
+      ),
+    ).toThrow(/provenance is missing/i);
+  });
+
+  it('accepts current Autolykos V2 block-version 4 node headers', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 4);
+    const observed = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders,
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    });
+
+    expect(observed.headers.map(header => header.raw.version))
+      .toEqual(Array(10).fill(4));
+    expect(observed.headers.every(header => header.serializedHex.length === 438))
+      .toBe(true);
+    expect(() => assertBridgeValidityTrackerObservedHeaderContextV1(observed))
+      .not.toThrow();
+  });
+
+  it('rejects legacy Autolykos V1 node headers from the observed context', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 1);
+
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders,
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    })).toThrow(/version 2 to 4/i);
+  });
+
+  it('canonicalizes uncommitted Autolykos V2 aliases from freshly mined headers', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 4);
+    const expected = {
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    };
+
+    const freshHeaders = rawHeaders.map(header => ({
+      ...header,
+      powSolutions: {
+        ...(header.powSolutions as Readonly<Record<string, unknown>>),
+        w: String(
+          (header.powSolutions as Readonly<Record<string, unknown>>).pk,
+        ),
+        d: '12345678901234567890',
+      },
+    }));
+    const observed = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: freshHeaders,
+    });
+    const canonical = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders,
+    });
+
+    expect(observed.headers.map(header => header.id)).toEqual(
+      rawHeaders.map(header => String(header.id)),
+    );
+    expect(observed.headers.map(header => header.serializedHex)).toEqual(
+      canonical.headers.map(header => header.serializedHex),
+    );
+    expect(observed.headers.map(header => header.jvmHeaderJson)).toEqual(
+      canonical.headers.map(header => header.jvmHeaderJson),
+    );
+    expect(observed.headers.every(header =>
+      header.jvmHeaderJson.includes(`\"powOnetimePk\":\"${
+        String(
+          (synthetic.headers[0]!.raw.powSolutions as Record<string, unknown>).w,
+        )
+      }\"`)
+      && header.jvmHeaderJson.includes('\"powDistance\":0'))).toBe(true);
+  });
+
+  it('rejects malformed observed aliases and Autolykos V2 fields', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = observedHeadersAtVersion(synthetic.headers, 4);
+    const expected = {
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: String(rawHeaders[0]!.id),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    };
+
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? { ...header, extensionRoot: 'cd'.repeat(32) }
+        : header),
+    })).toThrow(/extension root aliases disagree/i);
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? {
+          ...header,
+          powSolutions: {
+            ...(header.powSolutions as Readonly<Record<string, unknown>>),
+            w: '02'.repeat(32),
+          },
+        }
+        : header),
+    })).toThrow(/one-time key must be exactly 33 bytes/i);
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? {
+          ...header,
+          powSolutions: {
+            ...(header.powSolutions as Readonly<Record<string, unknown>>),
+            w: `04${'00'.repeat(32)}`,
+          },
+        }
+        : header),
+    })).toThrow();
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      ...expected,
+      rawHeaders: rawHeaders.map((header, index) => index === 0
+        ? {
+          ...header,
+          powSolutions: {
+            ...(header.powSolutions as Readonly<Record<string, unknown>>),
+            d: '-1',
+          },
+        }
+        : header),
+    })).toThrow(/distance must be a nonnegative decimal integer/i);
+  });
+
+  it('rejects incomplete or falsely identified observed header windows', async () => {
+    const wasm = await wasmModule();
+    const synthetic = buildBridgeValidityTrackerCanonicalHeaderContextV1(
+      wasm,
+      {
+        currentHeight: 2_000,
+        anchorContextIndex: 0,
+        anchorExtensionRootHex: 'ab'.repeat(32),
+      },
+    );
+    const rawHeaders = synthetic.headers.map(header => header.raw);
+
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders: rawHeaders.slice(0, 9),
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: synthetic.anchorHeader.id,
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    })).toThrow(/exactly 10 headers/i);
+    expect(() => buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders,
+      anchorContextIndex: 0,
+      expectedAnchorHeaderIdHex: 'cd'.repeat(32),
+      expectedAnchorExtensionRootHex: synthetic.anchorHeader.extensionRootHex,
+    })).toThrow(/anchor header binding mismatch/i);
+  });
 });
+
+function observedHeadersAtVersion(
+  source: readonly Readonly<{
+    readonly raw: Readonly<Record<string, unknown>>;
+    readonly parentId: string;
+  }>[],
+  version: 1 | 4,
+): Readonly<Record<string, unknown>>[] {
+  const oldestToNewest = [...source].reverse();
+  let parentId = oldestToNewest[0]!.parentId;
+  const rebuilt = oldestToNewest.map(header => {
+    const raw = header.raw;
+    const pow = raw.powSolutions as Readonly<Record<string, unknown>>;
+    const serialized = serializeErgoHeaderIdentity({
+      version,
+      parentId: Buffer.from(parentId, 'hex'),
+      adProofsRoot: Buffer.from(String(raw.adProofsRoot), 'hex'),
+      stateRoot: Buffer.from(String(raw.stateRoot), 'hex'),
+      transactionsRoot: Buffer.from(String(raw.transactionsRoot), 'hex'),
+      timestamp: BigInt(Number(raw.timestamp)),
+      nBits: Number(raw.nBits),
+      height: Number(raw.height),
+      extensionHash: Buffer.from(String(raw.extensionHash), 'hex'),
+      votes: Buffer.from(String(raw.votes), 'hex'),
+      powSolution: {
+        publicKey: Buffer.from(String(pow.pk), 'hex'),
+        nonce: Buffer.from(String(pow.n), 'hex'),
+        ...(version === 1
+          ? {
+            oneTimePublicKey: Buffer.from(String(pow.w), 'hex'),
+            distance: BigInt(String(pow.d)),
+          }
+          : {}),
+      },
+    });
+    const id = Buffer.from(
+      blakejs.blake2b(serialized, undefined, 32),
+    ).toString('hex');
+    const rebuiltRaw = {
+      ...raw,
+      id,
+      parentId,
+      ...(version === 4 ? { unparsedBytes: '' } : {}),
+      version,
+    };
+    parentId = id;
+    return rebuiltRaw;
+  });
+  return rebuilt.reverse();
+}

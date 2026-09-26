@@ -37,12 +37,14 @@ export const PINNED_LOCAL_PEG_IN_CAUSAL_SOURCE_PROOF_RESULT_PRODUCER_V1_EXECUTIO
   'e2s.pinned-local-peg-in-causal-source-proof-result-producer-v1-execution-identity.v1' as const;
 
 export const EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256 =
+  'ddfc4a317d124401d3ebd491e1b62770229ce0d6f6adbd07b61f21910f599aa5';
+const EXPECTED_AUTHENTICATED_V2_COMPILER_CONSENSUS_SOURCE_LOCK_SHA256 =
   'ebc6f342f36e84a98dce6d7bd0930598850ff255f4e7d1850fa930163995ceb4';
 export const EXPECTED_NATIVE_VERIFIER_TOOLCHAIN_LOCK_SHA256 =
   '2480775ab0f14b3389a021e2645e0e082d81ebaaef3e797063fb14d18e67f189';
 const EXPECTED_FRONTIER_COMMIT = '75329a2df49e2cc7981485392c31160929d1bd48';
-const EXPECTED_FRONTIER_PATCH_SHA256 =
-  '9bcfe26d8e367c858f69bfafd58f47de726b95c8884ef7ef1b957bd766d5a68b';
+export const EXPECTED_FRONTIER_PATCH_SHA256 =
+  'bd8500696af4dd7b67dd99c9446f5ef2f23803e58f6669a5e80d8548124d7634';
 const BUILD_TIMEOUT_MS = 10 * 60_000;
 const MAX_BUILD_OUTPUT_BYTES = 1024 * 1024;
 const TOOL_VERSION_TIMEOUT_MS = 10_000;
@@ -1006,21 +1008,35 @@ export function createPinnedLocalNativeBuildWorkspace(
   onTargetAllocated?: (targetPath: string) => void,
   options: {
     cargoDependencyMode?: 'shared-cache' | 'private-copy-offline';
+    sharedCargoHomeRoot?: string;
+    temporaryDirectoryRoot?: string;
   } = {},
 ): {
   buildTargetPath: string;
   cargoHomePath: string;
   cleanup: () => void;
 } {
-  const buildTargetPath = mkdtempSync(join(tmpdir(), BUILD_TARGET_PREFIX));
-  const cleanup = createBuildTargetCleanup(buildTargetPath);
+  const temporaryDirectoryRoot = resolveBuildTargetRoot(
+    options.temporaryDirectoryRoot ?? tmpdir(),
+  );
+  const buildTargetPath = mkdtempSync(
+    join(temporaryDirectoryRoot, BUILD_TARGET_PREFIX),
+  );
+  const cleanup = createBuildTargetCleanup(
+    buildTargetPath,
+    temporaryDirectoryRoot,
+  );
   process.once('exit', cleanup);
   try {
     onTargetAllocated?.(buildTargetPath);
-    assertFreshIsolatedNativeBuildTarget(buildTargetPath);
+    assertFreshIsolatedNativeBuildTarget(
+      buildTargetPath,
+      temporaryDirectoryRoot,
+    );
     const cargoHomePath = prepareIsolatedCargoHome(
       buildTargetPath,
       options.cargoDependencyMode ?? 'shared-cache',
+      options.sharedCargoHomeRoot,
     );
     return { buildTargetPath, cargoHomePath, cleanup };
   } catch (error) {
@@ -1029,9 +1045,15 @@ export function createPinnedLocalNativeBuildWorkspace(
   }
 }
 
-export function assertFreshIsolatedNativeBuildTarget(targetPathInput: string): void {
+export function assertFreshIsolatedNativeBuildTarget(
+  targetPathInput: string,
+  temporaryDirectoryRootInput: string = tmpdir(),
+): void {
   const targetPath = realpathSync(requireAbsolutePath(targetPathInput, 'isolated build target'));
-  assertSafeBuildTargetPath(targetPath);
+  const temporaryDirectoryRoot = resolveBuildTargetRoot(
+    temporaryDirectoryRootInput,
+  );
+  assertSafeBuildTargetPath(targetPath, temporaryDirectoryRoot);
   const stat = lstatSync(targetPath);
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error('isolated native build target must be a regular directory');
@@ -1111,12 +1133,27 @@ function assertCanonicalSourceLocks(): void {
   if (sourceLockSha256 !== EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256) {
     throw new Error('canonical consensus source lock digest is not the pinned identity');
   }
+  const compilerSourceLockPath = resolve(
+    CANONICAL_BRIDGE_ROOT,
+    'sources',
+    'authenticated-v2-compiler-consensus-source-lock-v1.json',
+  );
+  const compilerSourceLockSha256 = fileSha256Hex(compilerSourceLockPath).slice(2);
+  if (
+    compilerSourceLockSha256
+    !== EXPECTED_AUTHENTICATED_V2_COMPILER_CONSENSUS_SOURCE_LOCK_SHA256
+  ) {
+    throw new Error('authenticated V2 compiler consensus source lock digest is not pinned');
+  }
   const compilerLock = parseJsonObject(resolve(
     CANONICAL_BRIDGE_ROOT,
     'sources',
     'authenticated-v2-compiler-lock.json',
   ));
-  if (compilerLock.consensusSourceLockSha256 !== EXPECTED_CONSENSUS_SOURCE_LOCK_SHA256) {
+  if (
+    compilerLock.consensusSourceLockSha256
+    !== EXPECTED_AUTHENTICATED_V2_COMPILER_CONSENSUS_SOURCE_LOCK_SHA256
+  ) {
     throw new Error('authenticated V2 compiler lock does not bind the pinned consensus source lock');
   }
 }
@@ -1498,8 +1535,29 @@ export interface BoundedProcessInput {
 export interface BoundedProcessResult {
   pid: number;
   exitCode: 0;
+  stdoutBytes: Buffer;
+  stderrBytes: Buffer;
   stdout: string;
   stderr: string;
+}
+
+export class BoundedProcessExitError extends Error {
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+
+  constructor(input: Readonly<{
+    label: string;
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  }>) {
+    super(`${input.label} failed`);
+    this.name = 'BoundedProcessExitError';
+    this.exitCode = input.exitCode;
+    this.stdout = input.stdout;
+    this.stderr = input.stderr;
+  }
 }
 
 interface BoundedProcessSpawnSpecification {
@@ -1696,7 +1754,12 @@ export async function runBoundedProcess(
         return;
       }
       if (code !== 0) {
-        finish(new Error(`${input.label} failed`));
+        finish(new BoundedProcessExitError({
+          label: input.label,
+          exitCode: code ?? -1,
+          stdout: Buffer.concat(stdoutChunks).toString('utf8'),
+          stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        }));
         return;
       }
       finish();
@@ -1775,11 +1838,15 @@ export async function runBoundedProcess(
         return;
       }
       settled = true;
+      const stdoutBuffer = Buffer.concat(stdoutChunks);
+      const stderrBuffer = Buffer.concat(stderrChunks);
       resolvePromise({
         pid: child.pid,
         exitCode: 0,
-        stdout: Buffer.concat(stdoutChunks).toString('utf8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf8'),
+        stdoutBytes: stdoutBuffer,
+        stderrBytes: stderrBuffer,
+        stdout: stdoutBuffer.toString('utf8'),
+        stderr: stderrBuffer.toString('utf8'),
       });
     }
   });
@@ -2040,16 +2107,70 @@ function minimalCargoEnvironment(input: {
   environment.CARGO_ENCODED_RUSTFLAGS = buildPinnedLocalNativeReproducibleRustFlags({
     frontierSourcePath: input.frontierSourcePath,
     buildTargetPath: input.buildTargetPath,
+    rustcExecutablePath: input.rustcExecutablePath,
     rustTarget: input.rustTarget,
   }).join('\x1f');
   return environment;
 }
 
-export function buildPinnedLocalNativeReproducibleRustFlags(input: {
+interface PinnedLocalReproducibleRustPathInput {
   frontierSourcePath: string;
   buildTargetPath: string;
-  rustTarget: string;
-}): readonly string[] {
+  rustcExecutablePath: string;
+}
+
+export function buildPinnedLocalNativeReproducibleRustFlags(
+  input: PinnedLocalReproducibleRustPathInput & {
+    rustTarget: string;
+  },
+): readonly string[] {
+  const paths = resolvePinnedLocalReproducibleRustPaths(input);
+  if (typeof input?.rustTarget !== 'string' || input.rustTarget.length === 0) {
+    throw new Error('Rust target for reproducible Rust flags must be non-empty');
+  }
+  const flags = [
+    `--remap-path-prefix=${paths.frontierSourcePath}=/e2s/frontier-source`,
+    `--remap-path-prefix=${paths.buildTargetPath}=/e2s/build-target`,
+    `--remap-path-prefix=${paths.rustToolchainRootPath}=/e2s/rust-toolchain`,
+    '-Cdebuginfo=0',
+    '-Ccodegen-units=1',
+  ];
+  if (input.rustTarget.endsWith('-pc-windows-msvc')) {
+    flags.push('-Clink-arg=/Brepro');
+  }
+  return Object.freeze(flags);
+}
+
+export function buildPinnedLocalWasmPathRemapRustFlags(
+  input: PinnedLocalReproducibleRustPathInput,
+): readonly string[] {
+  const paths = resolvePinnedLocalReproducibleRustPaths(input);
+  const frontierSourcePath = spaceDelimitedRustFlagPath(
+    paths.frontierSourcePath,
+    'Frontier source',
+  );
+  const buildTargetPath = spaceDelimitedRustFlagPath(
+    paths.buildTargetPath,
+    'build target',
+  );
+  const rustToolchainRootPath = spaceDelimitedRustFlagPath(
+    paths.rustToolchainRootPath,
+    'Rust toolchain root',
+  );
+  return Object.freeze([
+    `--remap-path-prefix=${frontierSourcePath}=/e2s/frontier-source`,
+    `--remap-path-prefix=${buildTargetPath}=/e2s/build-target`,
+    `--remap-path-prefix=${rustToolchainRootPath}=/e2s/rust-toolchain`,
+  ]);
+}
+
+function resolvePinnedLocalReproducibleRustPaths(
+  input: PinnedLocalReproducibleRustPathInput,
+): Readonly<{
+  frontierSourcePath: string;
+  buildTargetPath: string;
+  rustToolchainRootPath: string;
+}> {
   const frontierSourcePath = resolve(requireAbsolutePath(
     input?.frontierSourcePath,
     'Frontier source path for reproducible Rust flags',
@@ -2058,19 +2179,25 @@ export function buildPinnedLocalNativeReproducibleRustFlags(input: {
     input?.buildTargetPath,
     'build target path for reproducible Rust flags',
   ));
-  if (typeof input?.rustTarget !== 'string' || input.rustTarget.length === 0) {
-    throw new Error('Rust target for reproducible Rust flags must be non-empty');
+  const rustcExecutablePath = resolve(requireAbsolutePath(
+    input?.rustcExecutablePath,
+    'Rust compiler path for reproducible Rust flags',
+  ));
+  const rustToolchainRootPath = resolve(dirname(rustcExecutablePath), '..');
+  return Object.freeze({
+    frontierSourcePath,
+    buildTargetPath,
+    rustToolchainRootPath,
+  });
+}
+
+function spaceDelimitedRustFlagPath(value: string, label: string): string {
+  if (/[\p{White_Space}\p{Cc}=]/u.test(value)) {
+    throw new Error(
+      `${label} path must not contain Unicode whitespace, control characters, or equals signs in space-delimited Rust flags`,
+    );
   }
-  const flags = [
-    `--remap-path-prefix=${frontierSourcePath}=/e2s/frontier-source`,
-    `--remap-path-prefix=${buildTargetPath}=/e2s/build-target`,
-    '-Cdebuginfo=0',
-    '-Ccodegen-units=1',
-  ];
-  if (input.rustTarget.endsWith('-pc-windows-msvc')) {
-    flags.push('-Clink-arg=/Brepro');
-  }
-  return Object.freeze(flags);
+  return value;
 }
 
 function minimalToolEnvironment(): NodeJS.ProcessEnv {
@@ -2081,11 +2208,14 @@ function minimalToolEnvironment(): NodeJS.ProcessEnv {
   return environment;
 }
 
-function createBuildTargetCleanup(buildTargetPath: string): () => void {
+function createBuildTargetCleanup(
+  buildTargetPath: string,
+  temporaryDirectoryRoot: string,
+): () => void {
   let cleaned = false;
   function cleanup(): void {
     if (cleaned) return;
-    assertSafeBuildTargetPath(buildTargetPath);
+    assertSafeBuildTargetPath(buildTargetPath, temporaryDirectoryRoot);
     rmSync(buildTargetPath, { recursive: true, force: true, maxRetries: 3 });
     cleaned = true;
     process.removeListener('exit', cleanup);
@@ -2096,16 +2226,21 @@ function createBuildTargetCleanup(buildTargetPath: string): () => void {
 function prepareIsolatedCargoHome(
   buildTargetPath: string,
   dependencyMode: 'shared-cache' | 'private-copy-offline',
+  sharedCargoHomeRootInput: string | undefined = undefined,
 ): string {
   const cargoHomePath = resolve(buildTargetPath, 'cargo-home');
   mkdirSync(cargoHomePath);
   const homeRoot = process.env.USERPROFILE ?? process.env.HOME;
-  const sharedCargoHomeValue = process.env.CARGO_HOME
+  const sharedCargoHomeValue = sharedCargoHomeRootInput
+    ?? process.env.CARGO_HOME
     ?? (homeRoot ? join(homeRoot, '.cargo') : undefined);
   if (!sharedCargoHomeValue) {
     throw new Error('shared Cargo cache location is unavailable');
   }
-  const sharedCargoHome = resolve(sharedCargoHomeValue);
+  const sharedCargoHome = resolveRegularDirectory(
+    sharedCargoHomeValue,
+    'shared Cargo home',
+  );
   for (const directory of ['registry', 'git']) {
     const source = resolve(sharedCargoHome, directory);
     if (!existsSync(source)) continue;
@@ -2147,8 +2282,33 @@ function copyRegularDirectoryTree(source: string, target: string): void {
   }
 }
 
-function assertSafeBuildTargetPath(targetPath: string): void {
-  const normalizedTemp = realpathSync(tmpdir());
+function resolveBuildTargetRoot(rootPathInput: string): string {
+  return resolveRegularDirectory(
+    rootPathInput,
+    'isolated build temporary root',
+  );
+}
+
+function resolveRegularDirectory(
+  directoryPathInput: string,
+  label: string,
+): string {
+  const rootPath = realpathSync(requireAbsolutePath(
+    directoryPathInput,
+    label,
+  ));
+  const stat = lstatSync(rootPath);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular directory`);
+  }
+  return rootPath;
+}
+
+function assertSafeBuildTargetPath(
+  targetPath: string,
+  temporaryDirectoryRoot: string,
+): void {
+  const normalizedTemp = resolveBuildTargetRoot(temporaryDirectoryRoot);
   const normalizedTarget = resolve(targetPath);
   const expectedPrefix = `${normalizedTemp}${normalizedTemp.endsWith(sep) ? '' : sep}${BUILD_TARGET_PREFIX}`;
   if (

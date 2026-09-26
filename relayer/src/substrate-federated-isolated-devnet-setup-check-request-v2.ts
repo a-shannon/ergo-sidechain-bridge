@@ -14,9 +14,14 @@ import {
 } from './strict-json.js';
 import {
   assertSubstrateFederatedIsolatedDevnetLocalProvisioningV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetLocalProvisioningV3Provenance,
   getSubstrateFederatedIsolatedDevnetLocalCheckTargetV2,
+  getSubstrateFederatedIsolatedDevnetLocalCheckTargetV3,
   reobserveSubstrateFederatedIsolatedDevnetLocalProvisioningV2,
+  reobserveSubstrateFederatedIsolatedDevnetLocalProvisioningV3,
+  type SubstrateFederatedIsolatedDevnetLocalCheckTargetV2,
   type SubstrateFederatedIsolatedDevnetLocalProvisioningV2,
+  type SubstrateFederatedIsolatedDevnetLocalProvisioningV3,
 } from './substrate-federated-isolated-devnet-local-provisioning-v2.js';
 import type {
   SubstrateFederatedGenesisObservationV1,
@@ -27,9 +32,14 @@ import type {
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-setup-check-request.v2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-setup-check-request.v3' as const;
 
 const REQUEST_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V2';
+const REQUEST_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V3';
+// Data-only output and transaction identities are shared, not request authority.
 const OUTPUT_BODY_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_OUTPUT_BODY_V2';
 const V1_BODY_DIGEST_DOMAIN =
@@ -44,6 +54,10 @@ const CHECK_TRANSACTION_PATH = '/transactions/check';
 const requests = new WeakMap<
   object,
   Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV2>
+>();
+const requestsV3 = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>
 >();
 
 type SetupRole = 'tracker' | 'duplicate-prevention' | 'pooled-reserve';
@@ -162,6 +176,32 @@ export interface SubstrateFederatedIsolatedDevnetSetupCheckRequestV2 {
   }>;
 }
 
+export type SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV3 =
+  SubstrateFederatedIsolatedDevnetSetupCheckIssuanceV2;
+
+export interface SubstrateFederatedIsolatedDevnetSetupCheckRequestV3 extends Omit<
+  SubstrateFederatedIsolatedDevnetSetupCheckRequestV2,
+  'schema' | 'version' | 'sourceBindings'
+> {
+  readonly schema:
+    typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V3_SCHEMA;
+  readonly version: 3;
+  readonly sourceBindings: Readonly<Omit<
+    SubstrateFederatedIsolatedDevnetSetupCheckRequestV2['sourceBindings'],
+    'compatibilityTargetV1AuditDigestHex'
+  > & { readonly compilerProfile: 'absolute-height-tracker-v2' }>;
+}
+
+type ProvisioningCommonData = Omit<
+  SubstrateFederatedIsolatedDevnetLocalProvisioningV2,
+  'schema' | 'version' | 'target'
+> & {
+  readonly target: Omit<
+    SubstrateFederatedIsolatedDevnetLocalProvisioningV2['target'],
+    'compatibilityTargetV1AuditDigestHex'
+  >;
+};
+
 let wasmPromise: Promise<any> | undefined;
 
 async function getWasm(): Promise<any> {
@@ -265,6 +305,125 @@ async function deriveRequest(
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV2>> {
   assertPlanBoundaryAndFreshness(plan);
   const target = getSubstrateFederatedIsolatedDevnetLocalCheckTargetV2(plan);
+  const common = await deriveRequestData(plan, target);
+  assertPlanBoundaryAndFreshness(plan);
+  const body = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V2_SCHEMA,
+    version: 2 as const,
+    ...common,
+    sourceBindings: {
+      provisioningPlanDigestHex: common.sourceBindings.provisioningPlanDigestHex,
+      launchIntentIdHex: common.sourceBindings.launchIntentIdHex,
+      settlementTargetDigestHex: common.sourceBindings.settlementTargetDigestHex,
+      sourceAndCompilerClosureDigestHex:
+        common.sourceBindings.sourceAndCompilerClosureDigestHex,
+      compatibilityTargetV1AuditDigestHex:
+        plan.target.compatibilityTargetV1AuditDigestHex,
+      freshObservationDigestHex: common.sourceBindings.freshObservationDigestHex,
+      genesisPayloadSetDigestHex: common.sourceBindings.genesisPayloadSetDigestHex,
+      provisioningIdentitySetDigestHex:
+        common.sourceBindings.provisioningIdentitySetDigestHex,
+    },
+  });
+  return deepFreeze({
+    ...body,
+    requestDigestHex: sha256CanonicalJson(body, REQUEST_DIGEST_DOMAIN),
+  });
+}
+
+export async function buildSubstrateFederatedIsolatedDevnetSetupCheckRequestV3(
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>> {
+  const request = await deriveRequestV3(plan);
+  requestsV3.set(request, plan);
+  return request;
+}
+
+export async function validateSubstrateFederatedIsolatedDevnetSetupCheckRequestV3(
+  value: unknown,
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>> {
+  const candidate = snapshotStrictData(value, 'V3 isolated local setup-check request');
+  const expected = await deriveRequestV3(plan);
+  if (canonicalJson(candidate) !== canonicalJson(expected)) {
+    throw new Error('V3 isolated local setup-check request does not match the provisioning plan');
+  }
+  return expected;
+}
+
+export async function assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3Provenance(
+  value: unknown,
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): Promise<void> {
+  assertSetupCheckRequestV3ProcessProvenance(value);
+  if (requestsV3.get(value) !== plan) {
+    throw new Error('V3 isolated local setup-check request belongs to another provisioning plan');
+  }
+  await validateSubstrateFederatedIsolatedDevnetSetupCheckRequestV3(value, plan);
+}
+
+export async function assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3RuntimeProvenance(
+  value: unknown,
+): Promise<void> {
+  assertSetupCheckRequestV3ProcessProvenance(value);
+  const plan = requestsV3.get(value);
+  if (plan === undefined) {
+    throw new Error('V3 isolated local setup-check request provisioning plan is unavailable');
+  }
+  await assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3Provenance(value, plan);
+}
+
+export async function reobserveSubstrateFederatedIsolatedDevnetSetupCheckRequestV3(
+  value: unknown,
+): Promise<Readonly<SubstrateFederatedGenesisObservationV1>> {
+  await assertSubstrateFederatedIsolatedDevnetSetupCheckRequestV3RuntimeProvenance(value);
+  return reobserveSubstrateFederatedIsolatedDevnetLocalProvisioningV3(
+    requestsV3.get(value as object)!,
+  );
+}
+
+function assertSetupCheckRequestV3ProcessProvenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3> {
+  if (value === null || typeof value !== 'object' || !requestsV3.has(value)) {
+    throw new Error('V3 isolated local setup-check request was not built in this process');
+  }
+  const request = value as Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>;
+  const { requestDigestHex, ...body } = request;
+  if (!Object.isFrozen(request)
+    || request.schema !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V3_SCHEMA
+    || request.version !== 3
+    || requestDigestHex !== sha256CanonicalJson(body, REQUEST_V3_DIGEST_DOMAIN)) {
+    throw new Error('V3 isolated local setup-check request process identity drifted');
+  }
+}
+
+async function deriveRequestV3(
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckRequestV3>> {
+  assertPlanV3BoundaryAndFreshness(plan);
+  const target = getSubstrateFederatedIsolatedDevnetLocalCheckTargetV3(plan);
+  const common = await deriveRequestData(plan, target);
+  assertPlanV3BoundaryAndFreshness(plan);
+  const body = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V3_SCHEMA,
+    version: 3 as const,
+    ...common,
+    sourceBindings: {
+      ...common.sourceBindings,
+      compilerProfile: plan.target.compilerProfile,
+    },
+  });
+  return deepFreeze({
+    ...body,
+    requestDigestHex: sha256CanonicalJson(body, REQUEST_V3_DIGEST_DOMAIN),
+  });
+}
+
+async function deriveRequestData(
+  plan: Readonly<ProvisioningCommonData>,
+  target: Readonly<SubstrateFederatedIsolatedDevnetLocalCheckTargetV2>,
+) {
   const wasm = await getWasm();
   const orderedIssuances = deepFreeze([
     await issuanceBinding(plan, wasm, 0, 'tracker', 'tracker'),
@@ -277,11 +436,7 @@ async function deriveRequest(
     ),
     await issuanceBinding(plan, wasm, 2, 'pooled-reserve', 'pooledReserve'),
   ] as const);
-  assertPlanBoundaryAndFreshness(plan);
-
-  const body = deepFreeze({
-    schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_SETUP_CHECK_REQUEST_V2_SCHEMA,
-    version: 2 as const,
+  return deepFreeze({
     status: 'exact_non_executable_local_setup_check_request' as const,
     sourceBindings: {
       provisioningPlanDigestHex: plan.planDigestHex,
@@ -289,8 +444,6 @@ async function deriveRequest(
       settlementTargetDigestHex: plan.target.settlementTargetDigestHex,
       sourceAndCompilerClosureDigestHex:
         plan.target.sourceAndCompilerClosureDigestHex,
-      compatibilityTargetV1AuditDigestHex:
-        plan.target.compatibilityTargetV1AuditDigestHex,
       freshObservationDigestHex: plan.freshObservation.reportDigestHex,
       genesisPayloadSetDigestHex: plan.genesisPayloads.payloadSetDigestHex,
       provisioningIdentitySetDigestHex:
@@ -345,14 +498,10 @@ async function deriveRequest(
     },
     boundaries: falseBoundaries(),
   });
-  return deepFreeze({
-    ...body,
-    requestDigestHex: sha256CanonicalJson(body, REQUEST_DIGEST_DOMAIN),
-  });
 }
 
 async function issuanceBinding(
-  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV2>,
+  plan: Readonly<Pick<ProvisioningCommonData, 'provisioning'>>,
   wasm: any,
   ordinal: 0 | 1 | 2,
   role: SetupRole,
@@ -495,6 +644,29 @@ function assertPlanBoundaryAndFreshness(
   plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV2>,
 ): void {
   assertSubstrateFederatedIsolatedDevnetLocalProvisioningV2Provenance(plan);
+  assertPlanDataBoundaryAndFreshness(
+    plan,
+    'isolated local setup-check request requires a non-authorizing V2 plan',
+  );
+}
+
+function assertPlanV3BoundaryAndFreshness(
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): void {
+  assertSubstrateFederatedIsolatedDevnetLocalProvisioningV3Provenance(plan);
+  if (plan.target.compilerProfile !== 'absolute-height-tracker-v2') {
+    throw new Error('V3 isolated local setup-check request compiler profile drifted');
+  }
+  assertPlanDataBoundaryAndFreshness(
+    plan,
+    'V3 isolated local setup-check request requires a non-authorizing V3 plan',
+  );
+}
+
+function assertPlanDataBoundaryAndFreshness(
+  plan: Readonly<ProvisioningCommonData>,
+  boundaryError: string,
+): void {
   if (
     plan.status
       !== 'fresh_observation_bound_non_authorizing_local_provisioning'
@@ -514,9 +686,7 @@ function assertPlanBoundaryAndFreshness(
       && key !== 'currentGenesisInputsObservedUnspent'
       && value !== false)
   ) {
-    throw new Error(
-      'isolated local setup-check request requires a non-authorizing V2 plan',
-    );
+    throw new Error(boundaryError);
   }
   const observedAtMs = Date.parse(plan.freshObservation.observedAt);
   const ageMs = Date.now() - observedAtMs;

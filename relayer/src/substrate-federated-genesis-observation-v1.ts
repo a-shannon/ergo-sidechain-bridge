@@ -20,6 +20,9 @@ export const SUBSTRATE_FEDERATED_GENESIS_OBSERVATION_V1_SCHEMA =
 
 const GENESIS_HEADER_HEIGHT = 1;
 const MAX_SIGMA_BOX_BYTES = 1024 * 1024;
+const MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS = 3;
+const MAX_STABLE_GENESIS_OBSERVATION_ATTEMPTS = 3;
+const MAX_MATCHING_SOURCE_OBSERVATION_ATTEMPTS = 3;
 const ENVIRONMENT_NETWORKS: Readonly<Record<string, string>> = Object.freeze({
   local: 'local',
   development: 'development',
@@ -288,18 +291,39 @@ export async function observeSubstrateFederatedGenesisV1(
     throw new Error('federated target observation requires distinct node source instances');
   }
 
-  const settled = await Promise.allSettled([
-    observeSource(primarySource, profile),
-    observeSource(witnessSource, profile),
-  ]);
-  const primary = settledSourceObservation(settled[0]);
-  const witness = settledSourceObservation(settled[1]);
-  if (canonicalJson(primary.snapshot) !== canonicalJson(witness.snapshot)) {
-    throw new Error('primary and witness Ergo target snapshots disagree');
+  let matchingSources: Readonly<{
+    primary: SourceObservation;
+    witness: SourceObservation;
+  }> | null = null;
+  for (
+    let attempt = 1;
+    attempt <= MAX_MATCHING_SOURCE_OBSERVATION_ATTEMPTS;
+    attempt += 1
+  ) {
+    const settled = await Promise.allSettled([
+      observeSource(primarySource, profile),
+      observeSource(witnessSource, profile),
+    ]);
+    const primary = settledSourceObservation(settled[0]);
+    const witness = settledSourceObservation(settled[1]);
+    if (canonicalJson(primary.boxes) !== canonicalJson(witness.boxes)) {
+      throw new Error('primary and witness Ergo genesis-box observations disagree');
+    }
+    if (canonicalJson(primary.snapshot) === canonicalJson(witness.snapshot)) {
+      matchingSources = Object.freeze({ primary, witness });
+      break;
+    }
+    if (
+      primary.snapshot.tipHeight === witness.snapshot.tipHeight
+      || attempt === MAX_MATCHING_SOURCE_OBSERVATION_ATTEMPTS
+    ) {
+      throw new Error('primary and witness Ergo target snapshots disagree');
+    }
   }
-  if (canonicalJson(primary.boxes) !== canonicalJson(witness.boxes)) {
-    throw new Error('primary and witness Ergo genesis-box observations disagree');
+  if (matchingSources === null) {
+    throw new Error('matching Ergo target observation attempt bound is unreachable');
   }
+  const { primary } = matchingSources;
 
   const observedAt = normalizeObservedAt((options.now ?? (() => new Date()))());
   const withoutDigest: Omit<
@@ -450,9 +474,35 @@ export async function revalidateSubstrateFederatedGenesisBoxObservationV1(
   return revalidated;
 }
 
+export async function validateSubstrateFederatedGenesisBoxPairV1(
+  rawBox: unknown,
+  rawSigmaSerializedHex: unknown,
+  expectedBoxIdHex: string,
+  expectedRole: SubstrateFederatedGenesisRole,
+  tipHeight: number,
+): Promise<Readonly<SubstrateFederatedGenesisBoxObservationV1>> {
+  return validateGenesisBoxPair(
+    rawBox,
+    rawSigmaSerializedHex,
+    fixedHex(expectedBoxIdHex, 32, `${expectedRole} expected genesis box ID`),
+    expectedRole,
+    nonnegativeSafeInteger(
+      tipHeight,
+      `${expectedRole} observed tip height`,
+    ),
+  );
+}
+
 function settledSourceObservation(
   result: PromiseSettledResult<SourceObservation>,
 ): SourceObservation {
+  if (result.status === 'fulfilled') return result.value;
+  throw result.reason;
+}
+
+function settledBoxObservation(
+  result: PromiseSettledResult<SubstrateFederatedGenesisBoxObservationV1>,
+): SubstrateFederatedGenesisBoxObservationV1 {
   if (result.status === 'fulfilled') return result.value;
   throw result.reason;
 }
@@ -474,33 +524,72 @@ async function observeSource(
   }
   source.beginAuthenticatedTrackerReconstruction?.();
   try {
-    const before = await observeNodeSnapshot(source, profile);
-    const tracker = await observeBox(
-      source,
-      profile.genesisBoxIds.tracker,
-      'tracker',
-      before.tipHeight,
-    );
-    const duplicatePrevention = await observeBox(
-      source,
-      profile.genesisBoxIds.duplicatePrevention,
-      'duplicate-prevention',
-      before.tipHeight,
-    );
-    const pooledReserve = await observeBox(
-      source,
-      profile.genesisBoxIds.pooledReserve,
-      'pooled-reserve',
-      before.tipHeight,
-    );
-    const after = await observeNodeSnapshot(source, profile);
-    if (canonicalJson(before) !== canonicalJson(after)) {
-      throw new Error('Ergo target node changed during genesis-box observation');
+    for (
+      let attempt = 1;
+      attempt <= MAX_STABLE_GENESIS_OBSERVATION_ATTEMPTS;
+      attempt += 1
+    ) {
+      const before = await observeNodeSnapshot(source, profile);
+      const settledBoxes = await Promise.allSettled([
+        observeBox(
+          source,
+          profile.genesisBoxIds.tracker,
+          'tracker',
+          before.tipHeight,
+        ),
+        observeBox(
+          source,
+          profile.genesisBoxIds.duplicatePrevention,
+          'duplicate-prevention',
+          before.tipHeight,
+        ),
+        observeBox(
+          source,
+          profile.genesisBoxIds.pooledReserve,
+          'pooled-reserve',
+          before.tipHeight,
+        ),
+      ]);
+      const tracker = settledBoxObservation(settledBoxes[0]);
+      const duplicatePrevention = settledBoxObservation(settledBoxes[1]);
+      const pooledReserve = settledBoxObservation(settledBoxes[2]);
+      const after = await observeNodeSnapshot(source, profile);
+      if (after.tipHeight < before.tipHeight) {
+        throw new Error('Ergo target node height regressed during genesis-box observation');
+      }
+      if (after.tipHeight === before.tipHeight) {
+        if (after.tipHeaderIdHex !== before.tipHeaderIdHex) {
+          throw new Error('Ergo target node changed during genesis-box observation');
+        }
+        return deepFreeze({
+          snapshot: before,
+          boxes: { tracker, duplicatePrevention, pooledReserve },
+        });
+      }
+      const idsAtObservationHeight = await source.getBlockHeaderIdsAtHeight(
+        before.tipHeight,
+      );
+      if (
+        !Array.isArray(idsAtObservationHeight)
+        || idsAtObservationHeight.length === 0
+        || fixedHex(
+          idsAtObservationHeight[0],
+          32,
+          'observation-anchor header ID',
+        ) !== before.tipHeaderIdHex
+      ) {
+        throw new Error(
+          'Ergo target observation anchor left the best chain during genesis-box observation',
+        );
+      }
+      if (attempt === MAX_STABLE_GENESIS_OBSERVATION_ATTEMPTS) {
+        throw new Error(
+          'stable Ergo genesis-box observation remained unavailable after '
+          + `${MAX_STABLE_GENESIS_OBSERVATION_ATTEMPTS} bounded attempts`,
+        );
+      }
     }
-    return deepFreeze({
-      snapshot: before,
-      boxes: { tracker, duplicatePrevention, pooledReserve },
-    });
+    throw new Error('stable Ergo genesis-box observation attempt bound is unreachable');
   } finally {
     source.endAuthenticatedTrackerReconstruction?.();
   }
@@ -510,37 +599,48 @@ async function observeNodeSnapshot(
   source: SubstrateFederatedGenesisNodeSource,
   profile: SubstrateFederatedGenesisTargetProfileV1,
 ): Promise<NodeSnapshot> {
-  const info = record(await source.getInfo(), 'Ergo node info');
-  const network = normalizeAuthenticatedSpvTrackerNodeNetwork(
-    info.network ?? info.networkType,
-    'observed Ergo node',
-  );
-  if (network !== profile.expectedNetwork) {
-    throw new Error('observed Ergo node network does not match the federated target profile');
+  for (
+    let attempt = 1;
+    attempt <= MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS;
+    attempt += 1
+  ) {
+    const info = record(await source.getInfo(), 'Ergo node info');
+    const network = normalizeAuthenticatedSpvTrackerNodeNetwork(
+      info.network ?? info.networkType,
+      'observed Ergo node',
+    );
+    if (network !== profile.expectedNetwork) {
+      throw new Error('observed Ergo node network does not match the federated target profile');
+    }
+    const tipHeight = nonnegativeSafeInteger(info.fullHeight, 'Ergo node full height');
+    const bestHeader = record(await source.getBestHeader(), 'Ergo best header');
+    const bestHeaderHeight = nonnegativeSafeInteger(
+      bestHeader.height,
+      'Ergo best-header height',
+    );
+    if (bestHeaderHeight !== tipHeight) {
+      if (attempt < MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS) continue;
+      throw new Error(
+        'Ergo node info and best-header heights do not match after '
+        + `${MAX_STABLE_NODE_SNAPSHOT_ATTEMPTS} bounded attempts`,
+      );
+    }
+    const tipHeaderIdHex = fixedHex(bestHeader.id, 32, 'Ergo best-header ID');
+    const genesisIds = await source.getBlockHeaderIdsAtHeight(GENESIS_HEADER_HEIGHT);
+    if (!Array.isArray(genesisIds) || genesisIds.length !== 1) {
+      throw new Error('Ergo target must expose exactly one height-1 genesis header');
+    }
+    const genesisHeaderIdHex = fixedHex(
+      genesisIds[0],
+      32,
+      'observed genesis header ID',
+    );
+    if (genesisHeaderIdHex !== profile.expectedGenesisHeaderIdHex) {
+      throw new Error('observed genesis header does not match the federated target profile');
+    }
+    return Object.freeze({ network, genesisHeaderIdHex, tipHeight, tipHeaderIdHex });
   }
-  const tipHeight = nonnegativeSafeInteger(info.fullHeight, 'Ergo node full height');
-  const bestHeader = record(await source.getBestHeader(), 'Ergo best header');
-  const bestHeaderHeight = nonnegativeSafeInteger(
-    bestHeader.height,
-    'Ergo best-header height',
-  );
-  const tipHeaderIdHex = fixedHex(bestHeader.id, 32, 'Ergo best-header ID');
-  if (bestHeaderHeight !== tipHeight) {
-    throw new Error('Ergo node info and best-header heights do not match');
-  }
-  const genesisIds = await source.getBlockHeaderIdsAtHeight(GENESIS_HEADER_HEIGHT);
-  if (!Array.isArray(genesisIds) || genesisIds.length !== 1) {
-    throw new Error('Ergo target must expose exactly one height-1 genesis header');
-  }
-  const genesisHeaderIdHex = fixedHex(
-    genesisIds[0],
-    32,
-    'observed genesis header ID',
-  );
-  if (genesisHeaderIdHex !== profile.expectedGenesisHeaderIdHex) {
-    throw new Error('observed genesis header does not match the federated target profile');
-  }
-  return Object.freeze({ network, genesisHeaderIdHex, tipHeight, tipHeaderIdHex });
+  throw new Error('Ergo node snapshot attempt bound is unreachable');
 }
 
 async function observeBox(

@@ -8,9 +8,16 @@ import {
 } from '../../wasm-avl/pkg/bridge_avl.js';
 import { assertContextExtensionSafe } from './context-extension-guard.js';
 import {
+  BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE,
+  BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
+  assertBridgeValidityTrackerObservedHeaderContextV1,
   buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  type BridgeValidityTrackerObservedHeaderContextV1,
 } from './bridge-validity-tracker-header-context-v1.js';
-import { buildErgoExtensionMembershipProof } from './ergo-extension-membership.js';
+import {
+  buildErgoExtensionMembershipProof,
+  verifyErgoExtensionMembership,
+} from './ergo-settlement-core/ergo-extension-membership.js';
 import {
   encodeAvlTreeRegister,
   encodeCollByteRegister,
@@ -26,6 +33,17 @@ import {
   buildSubstrateFederatedTrackerAdmissionV1,
   SUBSTRATE_FEDERATED_TRACKER_VALUE_V1_BYTES,
 } from './profiles/substrate-federated-v1/tracker-admission.js';
+import type {
+  SubstrateFederatedTrackerCompilerRequestV1,
+} from './substrate-federated-tracker-compiler-v1.js';
+import {
+  assertSubstrateFederatedTrackerJvmCompilerReceiptV1,
+  type SubstrateFederatedTrackerJvmCompilerReceiptV1,
+} from './substrate-federated-tracker-jvm-compiler-v1.js';
+import {
+  normalizeEip12Box,
+  type Eip12Box,
+} from './unsigned-ergo-transaction.js';
 
 export const SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA =
   'e2s.substrate-federated-v1-tracker-context' as const;
@@ -101,6 +119,29 @@ export interface BuildSubstrateFederatedTrackerV1Input {
   readonly anchorContextIndex: number;
 }
 
+export interface BuildCompilerBoundSubstrateFederatedTrackerV1Input {
+  readonly compilerRequest:
+    Readonly<SubstrateFederatedTrackerCompilerRequestV1>;
+  readonly compilerReceipt:
+    Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV1>;
+  readonly trackerInputBox: unknown;
+  readonly encodedStatementHex: string;
+  readonly currentErgoHeight: number;
+  readonly anchorContextIndex: number;
+}
+
+export interface BuildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Input {
+  readonly compilerRequest:
+    Readonly<SubstrateFederatedTrackerCompilerRequestV1>;
+  readonly compilerReceipt:
+    Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV1>;
+  readonly trackerInputBox: unknown;
+  readonly encodedStatementHex: string;
+  readonly observedHeaderContext:
+    Readonly<BridgeValidityTrackerObservedHeaderContextV1>;
+  readonly extensionMembershipProofHex: string;
+}
+
 export interface SubstrateFederatedTrackerV1Context {
   readonly schema: typeof SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA;
   readonly version: 1;
@@ -124,6 +165,9 @@ export interface SubstrateFederatedTrackerV1Context {
       Readonly<Record<'R4' | 'R5' | 'R6' | 'R7' | 'R8' | 'R9', string>>;
     readonly currentErgoHeight: number;
     readonly anchorContextIndex: number;
+    readonly anchorContextProvenance:
+      | typeof BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE
+      | typeof BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE;
     readonly extensionProofHex: string;
     readonly avlInsertProofHex: string;
     readonly transitionProofBundleHex: string;
@@ -165,6 +209,33 @@ export interface SubstrateFederatedTrackerV1Context {
   };
 }
 
+const TRACKER_CONTEXTS = new WeakSet<object>();
+
+export function assertSubstrateFederatedTrackerV1Context(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedTrackerV1Context> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !TRACKER_CONTEXTS.has(value)
+    || !Object.isFrozen(value)
+  ) {
+    throw new Error('substrate federated tracker V1 context provenance is missing');
+  }
+  const context = value as Readonly<SubstrateFederatedTrackerV1Context>;
+  if (
+    context.schema !== SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA
+    || context.version !== 1
+    || context.trackerTransition.headers.length !== 10
+    || ![
+      BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE,
+      BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
+    ].includes(context.trackerTransition.anchorContextProvenance)
+  ) {
+    throw new Error('substrate federated tracker V1 context shape mismatch');
+  }
+}
+
 export function assertSubstrateFederatedTrackerContractV1Identity(
   value: unknown,
 ): asserts value is Readonly<SubstrateFederatedTrackerContractV1Identity> {
@@ -198,6 +269,125 @@ export async function buildSubstrateFederatedTrackerV1Context(
   input: BuildSubstrateFederatedTrackerV1Input,
 ): Promise<Readonly<SubstrateFederatedTrackerV1Context>> {
   const contract = assertContractIdentity(input.contract);
+  return buildTrackerContext({
+    contract,
+    profile: input.profile,
+    encodedStatementHex: input.encodedStatementHex,
+    currentErgoHeight: input.currentErgoHeight,
+    anchorContextIndex: input.anchorContextIndex,
+  });
+}
+
+export async function buildCompilerBoundSubstrateFederatedTrackerV1Context(
+  input: BuildCompilerBoundSubstrateFederatedTrackerV1Input,
+): Promise<Readonly<SubstrateFederatedTrackerV1Context>> {
+  const compilerReceipt = assertSubstrateFederatedTrackerJvmCompilerReceiptV1(
+    input.compilerReceipt,
+    input.compilerRequest,
+  );
+  const contract = compilerBoundContractIdentity(
+    input.compilerRequest,
+    compilerReceipt,
+  );
+  const trackerInputBox = await normalizeEip12Box(
+    input.trackerInputBox,
+    'compiler-bound federated tracker input box',
+  );
+  return buildTrackerContext({
+    contract,
+    profile: input.compilerRequest.profile,
+    encodedStatementHex: input.encodedStatementHex,
+    currentErgoHeight: input.currentErgoHeight,
+    anchorContextIndex: input.anchorContextIndex,
+    trackerInputBox,
+  });
+}
+
+export async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Context(
+  input: BuildObservedAnchorCompilerBoundSubstrateFederatedTrackerV1Input,
+): Promise<Readonly<SubstrateFederatedTrackerV1Context>> {
+  assertBridgeValidityTrackerObservedHeaderContextV1(
+    input.observedHeaderContext,
+  );
+  const compilerReceipt = assertSubstrateFederatedTrackerJvmCompilerReceiptV1(
+    input.compilerReceipt,
+    input.compilerRequest,
+  );
+  const contract = compilerBoundContractIdentity(
+    input.compilerRequest,
+    compilerReceipt,
+  );
+  const trackerInputBox = await normalizeEip12Box(
+    input.trackerInputBox,
+    'observed-anchor compiler-bound federated tracker input box',
+  );
+  return buildTrackerContext({
+    contract,
+    profile: input.compilerRequest.profile,
+    encodedStatementHex: input.encodedStatementHex,
+    currentErgoHeight: input.observedHeaderContext.currentHeight,
+    anchorContextIndex: input.observedHeaderContext.anchorContextIndex,
+    trackerInputBox,
+    observedHeaderContext: input.observedHeaderContext,
+    extensionMembershipProofHex: input.extensionMembershipProofHex,
+  });
+}
+
+export async function assertExactSubstrateFederatedTrackerV1InputBox(
+  context: Readonly<SubstrateFederatedTrackerV1Context>,
+  value: unknown,
+): Promise<Readonly<Eip12Box>> {
+  assertSubstrateFederatedTrackerV1Context(context);
+  const box = await normalizeEip12Box(
+    value,
+    'federated tracker exact input box',
+  );
+  const transactionInputs = (
+    context.eip12UnsignedTransaction as Readonly<{ readonly inputs?: unknown }>
+  ).inputs;
+  const expectedInput = Array.isArray(transactionInputs)
+    ? transactionInputs[0]
+    : undefined;
+  if (
+    transactionInputs === undefined
+    || !Array.isArray(transactionInputs)
+    || transactionInputs.length !== 1
+    || expectedInput === null
+    || typeof expectedInput !== 'object'
+    || Array.isArray(expectedInput)
+    || (expectedInput as Readonly<Record<string, unknown>>).boxId !== box.boxId
+  ) {
+    throw new Error('federated tracker input box ID differs from the context');
+  }
+  const wasm = await getWasm();
+  let parsed: any;
+  try {
+    parsed = wasm.ErgoBox.from_json(JSON.stringify(box));
+    if (canonicalJson(parsed.to_js_eip12()) !== canonicalJson(box)) {
+      throw new Error('federated tracker input box changed during WASM parsing');
+    }
+    const sigmaHex = Buffer.from(parsed.sigma_serialize_bytes()).toString('hex');
+    if (sigmaHex !== context.inputBoxSigmaHex) {
+      throw new Error('federated tracker input box Sigma bytes differ from the context');
+    }
+  } finally {
+    parsed?.free?.();
+  }
+  return deepFreeze(box);
+}
+
+async function buildTrackerContext(input: Readonly<{
+  readonly contract: Readonly<SubstrateFederatedTrackerContractV1Identity>;
+  readonly profile: Readonly<SubstrateFederatedCheckpointProfileV1>;
+  readonly encodedStatementHex: string;
+  readonly currentErgoHeight: number;
+  readonly anchorContextIndex: number;
+  readonly trackerInputBox?: Readonly<Eip12Box>;
+  readonly observedHeaderContext?:
+    Readonly<BridgeValidityTrackerObservedHeaderContextV1>;
+  readonly extensionMembershipProofHex?: string;
+}>): Promise<Readonly<SubstrateFederatedTrackerV1Context>> {
+  const contract = input.contract;
   const statement = decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
     input.encodedStatementHex,
     input.profile,
@@ -207,25 +397,66 @@ export async function buildSubstrateFederatedTrackerV1Context(
   const extensionValueHex = encodeSubstrateFederatedCheckpointExtensionValueV1(
     statement.encodedStatementHex,
   );
-  const extensionProof = buildErgoExtensionMembershipProof([
-    {
-      key: Buffer.from('0100', 'hex'),
-      value: Buffer.from('fixture-side-field', 'ascii'),
-    },
-    {
+  const wasm = await getWasm();
+  const currentErgoHeight = positiveInt(
+    input.currentErgoHeight,
+    'current Ergo height',
+  );
+  const anchorContextIndex = nonnegativeInt(
+    input.anchorContextIndex,
+    'anchor context index',
+  );
+  let extensionProofBytes: Buffer;
+  let headers:
+    | ReturnType<typeof buildBridgeValidityTrackerCanonicalHeaderContextV1>
+    | Readonly<BridgeValidityTrackerObservedHeaderContextV1>;
+  if (input.observedHeaderContext === undefined) {
+    if (input.extensionMembershipProofHex !== undefined) {
+      throw new Error('synthetic tracker context cannot accept an observed proof');
+    }
+    const extensionProof = buildErgoExtensionMembershipProof([
+      {
+        key: Buffer.from('0100', 'hex'),
+        value: Buffer.from('fixture-side-field', 'ascii'),
+      },
+      {
+        key: Buffer.from('0401', 'hex'),
+        value: Buffer.from(extensionValueHex, 'hex'),
+      },
+    ], Buffer.from('0401', 'hex'));
+    extensionProofBytes = extensionProof.proof;
+    headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+      currentHeight: currentErgoHeight,
+      anchorContextIndex,
+      anchorExtensionRootHex: extensionProof.root.toString('hex'),
+    });
+  } else {
+    assertBridgeValidityTrackerObservedHeaderContextV1(
+      input.observedHeaderContext,
+    );
+    if (
+      input.observedHeaderContext.currentHeight !== currentErgoHeight
+      || input.observedHeaderContext.anchorContextIndex !== anchorContextIndex
+    ) {
+      throw new Error('observed tracker header selection changed');
+    }
+    extensionProofBytes = Buffer.from(variableHex(
+      input.extensionMembershipProofHex,
+      'observed extension membership proof',
+    ), 'hex');
+    if (!verifyErgoExtensionMembership({
       key: Buffer.from('0401', 'hex'),
       value: Buffer.from(extensionValueHex, 'hex'),
-    },
-  ], Buffer.from('0401', 'hex'));
-  const wasm = await getWasm();
-  const headers = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
-    currentHeight: positiveInt(input.currentErgoHeight, 'current Ergo height'),
-    anchorContextIndex: nonnegativeInt(
-      input.anchorContextIndex,
-      'anchor context index',
-    ),
-    anchorExtensionRootHex: extensionProof.root.toString('hex'),
-  });
+      proof: extensionProofBytes,
+      root: Buffer.from(
+        input.observedHeaderContext.anchorHeader.extensionRootHex,
+        'hex',
+      ),
+    })) {
+      throw new Error('observed 0x0401 membership proof does not match the anchor');
+    }
+    headers = input.observedHeaderContext;
+  }
   const anchor = headers.anchorHeader;
   const admission = buildSubstrateFederatedTrackerAdmissionV1({
     profile: input.profile,
@@ -257,21 +488,32 @@ export async function buildSubstrateFederatedTrackerV1Context(
     'federated tracker AVL insert proof',
   );
   const transitionProofBundleHex = Buffer.concat([
-    uint64Be(BigInt(extensionProof.proof.length)),
-    extensionProof.proof,
+    uint64Be(BigInt(extensionProofBytes.length)),
+    extensionProofBytes,
     Buffer.from(avlInsertProofHex, 'hex'),
   ]).toString('hex');
-  const inputRegisters = Object.freeze({
+  const genesisRegisters = Object.freeze({
     R4: encodeCollByteRegister(Buffer.from(input.profile.profileIdHex, 'hex')),
     R5: encodeTrackerAvlRegister(inputDigestHex),
     R6: encodeCollByteRegister(Buffer.from(statement.sidechainIdHex, 'hex')),
     R7: encodeLongRegister(0n),
-    R8: encodeIntRegister(input.currentErgoHeight - 1),
+    R8: encodeIntRegister(0),
     R9: encodeCollByteRegister(Buffer.from(
       input.profile.ergoAdmissionKeySetDigestHex,
       'hex',
     )),
   });
+  const inputRegisters = input.trackerInputBox === undefined
+    ? Object.freeze({
+        ...genesisRegisters,
+        R8: encodeIntRegister(input.currentErgoHeight - 1),
+      })
+    : assertCompilerBoundTrackerInputBox(
+        input.trackerInputBox,
+        contract,
+        genesisRegisters,
+        input.currentErgoHeight,
+      );
   const successorRegisters = Object.freeze({
     R4: inputRegisters.R4,
     R5: encodeTrackerAvlRegister(successorDigestHex),
@@ -289,9 +531,10 @@ export async function buildSubstrateFederatedTrackerV1Context(
     successorRegisters,
     currentErgoHeight: input.currentErgoHeight,
     anchorContextIndex: input.anchorContextIndex,
+    trackerInputBox: input.trackerInputBox,
   });
 
-  return deepFreeze({
+  const context: Readonly<SubstrateFederatedTrackerV1Context> = deepFreeze({
     schema: SUBSTRATE_FEDERATED_TRACKER_V1_SCHEMA,
     version: 1 as const,
     trustModel: 'federated_non_trustless' as const,
@@ -312,7 +555,8 @@ export async function buildSubstrateFederatedTrackerV1Context(
       successorRegisters,
       currentErgoHeight: input.currentErgoHeight,
       anchorContextIndex: input.anchorContextIndex,
-      extensionProofHex: extensionProof.proof.toString('hex'),
+      anchorContextProvenance: headers.provenance,
+      extensionProofHex: extensionProofBytes.toString('hex'),
       avlInsertProofHex,
       transitionProofBundleHex,
       headers: headers.headers.map(header => ({
@@ -347,6 +591,8 @@ export async function buildSubstrateFederatedTrackerV1Context(
       trustlessStatusEstablished: false as const,
     },
   });
+  TRACKER_CONTEXTS.add(context);
+  return context;
 }
 
 async function serializeContext(input: {
@@ -358,6 +604,7 @@ async function serializeContext(input: {
   readonly successorRegisters: Readonly<Record<string, string>>;
   readonly currentErgoHeight: number;
   readonly anchorContextIndex: number;
+  readonly trackerInputBox?: Readonly<Eip12Box>;
 }): Promise<{
   readonly contextExtension: SubstrateFederatedTrackerV1Context['contextExtension'];
   readonly inputBoxSigmaHex: string;
@@ -397,26 +644,36 @@ async function serializeContext(input: {
       '1': lowerHex(bundleConstant.encode_to_base16(), 'proof bundle constant'),
       '2': lowerHex(indexConstant.encode_to_base16(), 'header index constant'),
     });
-    setupUnsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
-      inputs: [{ boxId: FIXTURE_SETUP_INPUT_BOX_ID_HEX, extension: {} }],
-      dataInputs: [],
-      outputs: [{
-        value: TRACKER_VALUE,
-        ergoTree: input.contract.propositionHex,
-        assets: [{ tokenId: input.contract.trackerNftIdHex, amount: '1' }],
-        additionalRegisters: input.inputRegisters,
-        creationHeight: input.currentErgoHeight - 1,
-      }],
-    }));
-    setupId = setupUnsigned.id();
-    setupCandidates = setupUnsigned.output_candidates();
-    if (setupCandidates.len() !== 1) {
-      throw new Error('federated tracker setup must contain one output');
+    if (input.trackerInputBox === undefined) {
+      setupUnsigned = wasm.UnsignedTransaction.from_json(JSON.stringify({
+        inputs: [{ boxId: FIXTURE_SETUP_INPUT_BOX_ID_HEX, extension: {} }],
+        dataInputs: [],
+        outputs: [{
+          value: TRACKER_VALUE,
+          ergoTree: input.contract.propositionHex,
+          assets: [{ tokenId: input.contract.trackerNftIdHex, amount: '1' }],
+          additionalRegisters: input.inputRegisters,
+          creationHeight: input.currentErgoHeight - 1,
+        }],
+      }));
+      setupId = setupUnsigned.id();
+      setupCandidates = setupUnsigned.output_candidates();
+      if (setupCandidates.len() !== 1) {
+        throw new Error('federated tracker setup must contain one output');
+      }
+      setupCandidate = setupCandidates.get(0);
+      inputBox = wasm.ErgoBox.from_box_candidate(setupCandidate, setupId, 0);
+      setupCandidate = undefined;
+      setupId = undefined;
+    } else {
+      inputBox = wasm.ErgoBox.from_json(JSON.stringify(input.trackerInputBox));
+      if (
+        canonicalJson(inputBox.to_js_eip12())
+          !== canonicalJson(input.trackerInputBox)
+      ) {
+        throw new Error('compiler-bound federated tracker input box drifted');
+      }
     }
-    setupCandidate = setupCandidates.get(0);
-    inputBox = wasm.ErgoBox.from_box_candidate(setupCandidate, setupId, 0);
-    setupCandidate = undefined;
-    setupId = undefined;
     inputBoxId = inputBox.box_id();
     const inputBoxIdHex = exactHex(inputBoxId.to_str(), 32, 'tracker input box ID');
     const inputBoxSigmaHex = Buffer.from(
@@ -489,6 +746,83 @@ async function serializeContext(input: {
     bundleConstant?.free?.();
     statementConstant?.free?.();
   }
+}
+
+function compilerBoundContractIdentity(
+  request: Readonly<SubstrateFederatedTrackerCompilerRequestV1>,
+  receipt: Readonly<SubstrateFederatedTrackerJvmCompilerReceiptV1>,
+): Readonly<SubstrateFederatedTrackerContractV1Identity> {
+  const profile = request.profile;
+  return deepFreeze({
+    schema: 'e2s.substrate-federated-v1-tracker-contract' as const,
+    version: 1 as const,
+    sigmaStateCommit: request.sigmaStateCommit,
+    templateSourceSha256Hex: request.template.templateSourceSha256Hex,
+    resolvedSourceSha256Hex: receipt.contract.resolvedSourceSha256Hex,
+    propositionBytes: receipt.contract.propositionBytes,
+    propositionSha256Hex: receipt.contract.propositionSha256Hex,
+    propositionHex: receipt.contract.propositionHex,
+    contractIdHex: receipt.contract.contractIdHex,
+    trackerNftIdHex: request.trackerNftIdHex,
+    application: request.application,
+    federationProfileIdHex: profile.profileIdHex,
+    sourceAttestationKeySetDigestHex:
+      profile.sourceAttestationKeySetDigestHex,
+    sourceAttestationThreshold: profile.sourceAttestationThreshold,
+    ergoAdmissionKeySetDigestHex: profile.ergoAdmissionKeySetDigestHex,
+    ergoAdmissionThreshold: profile.ergoAdmissionThreshold,
+    ergoAdmissionPublicKeysHex: profile.ergoAdmissionPublicKeysHex,
+    federationEpoch: profile.federationEpoch,
+    maxAdmissionValidityBlocks: profile.maxAdmissionValidityBlocks,
+    sourceSignaturesVerifiedOnChain: false as const,
+    jvmReductionAccepted: false as const,
+    profileActivated: false as const,
+    signingPerformed: false as const,
+    submissionPerformed: false as const,
+    broadcastPerformed: false as const,
+    fundsAuthorityEstablished: false as const,
+    gate5Closed: false as const,
+    trustlessStatusEstablished: false as const,
+  });
+}
+
+function assertCompilerBoundTrackerInputBox(
+  box: Readonly<Eip12Box>,
+  contract: Readonly<SubstrateFederatedTrackerContractV1Identity>,
+  expectedRegisters: Readonly<
+    Record<'R4' | 'R5' | 'R6' | 'R7' | 'R8' | 'R9', string>
+  >,
+  currentErgoHeight: number,
+): Readonly<Record<'R4' | 'R5' | 'R6' | 'R7' | 'R8' | 'R9', string>> {
+  const registerKeys = Object.keys(box.additionalRegisters).sort();
+  if (
+    box.value !== TRACKER_VALUE
+    || box.ergoTree !== contract.propositionHex
+    || box.assets.length !== 1
+    || box.assets[0]?.tokenId !== contract.trackerNftIdHex
+    || box.assets[0]?.amount !== '1'
+    || registerKeys.join(',') !== 'R4,R5,R6,R7,R8,R9'
+    || registerKeys.some(key => (
+      box.additionalRegisters[key] !== expectedRegisters[
+        key as keyof typeof expectedRegisters
+      ]
+    ))
+    || !Number.isSafeInteger(box.creationHeight)
+    || box.creationHeight < 0
+    || box.creationHeight >= currentErgoHeight
+  ) {
+    throw new Error(
+      'compiler-bound federated tracker input box differs from genesis state',
+    );
+  }
+  return Object.freeze({
+    R4: box.additionalRegisters.R4,
+    R5: box.additionalRegisters.R5,
+    R6: box.additionalRegisters.R6,
+    R7: box.additionalRegisters.R7,
+    R8: box.additionalRegisters.R8,
+    R9: box.additionalRegisters.R9,
+  });
 }
 
 function assertProfileAndApplicationBindings(

@@ -1,0 +1,902 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index c9432f9..aea2232 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3640,6 +3640,57 @@ dependencies = [
+  "substrate-wasm-builder",
+ ]
+ 
++[[package]]
++name = "frontier-template-v4-fed-genesis-runtime"
++version = "0.0.0"
++dependencies = [
++ "bytes",
++ "ergo_avltree_rust",
++ "fp-account",
++ "fp-evm",
++ "fp-rpc",
++ "fp-self-contained",
++ "frame-benchmarking",
++ "frame-executive",
++ "frame-support",
++ "frame-system",
++ "frame-system-benchmarking",
++ "frame-system-rpc-runtime-api",
++ "libsecp256k1",
++ "pallet-aura",
++ "pallet-balances",
++ "pallet-base-fee",
++ "pallet-dynamic-fee",
++ "pallet-ethereum",
++ "pallet-evm",
++ "pallet-evm-chain-id",
++ "pallet-evm-precompile-modexp",
++ "pallet-evm-precompile-sha3fips",
++ "pallet-evm-precompile-simple",
++ "pallet-grandpa",
++ "pallet-sudo",
++ "pallet-timestamp",
++ "pallet-transaction-payment",
++ "pallet-transaction-payment-rpc-runtime-api",
++ "parity-scale-codec",
++ "scale-info",
++ "serde_json",
++ "sp-api",
++ "sp-block-builder",
++ "sp-consensus-aura",
++ "sp-consensus-grandpa",
++ "sp-core",
++ "sp-genesis-builder",
++ "sp-inherents",
++ "sp-io",
++ "sp-offchain",
++ "sp-runtime",
++ "sp-session",
++ "sp-transaction-pool",
++ "sp-version",
++ "substrate-wasm-builder",
++]
++
+ [[package]]
+ name = "frontier-template-v4-lab-runtime"
+ version = "0.0.0"
+diff --git a/Cargo.toml b/Cargo.toml
+index a1cad76..32660ae 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -38,6 +38,7 @@ members = [
+ 	"primitives/self-contained",
+ 	"template/node",
+ 	"template/runtime",
++	"template/runtime-v4-fed-genesis",
+ 	"template/runtime-v4-lab",
+ 	"template/runtime-v4-test",
+ 	"precompiles",
+diff --git a/template/runtime-v4-fed-genesis/Cargo.toml b/template/runtime-v4-fed-genesis/Cargo.toml
+new file mode 100644
+index 0000000..0b4a9e0
+--- /dev/null
++++ b/template/runtime-v4-fed-genesis/Cargo.toml
+@@ -0,0 +1,138 @@
++[package]
++name = "frontier-template-v4-fed-genesis-runtime"
++version = "0.0.0"
++license = "Unlicense"
++description = "Non-publishable bridge V4 runtime with required federated genesis."
++publish = false
++build = "../runtime-v4-lab/build.rs"
++authors = { workspace = true }
++edition = { workspace = true }
++repository = { workspace = true }
++
++[lib]
++test = false
++
++[[test]]
++name = "profile_build"
++path = "../runtime-v4-lab/build.rs"
++
++[package.metadata.docs.rs]
++targets = ["x86_64-unknown-linux-gnu"]
++
++[dependencies]
++scale-codec = { workspace = true }
++scale-info = { workspace = true }
++libsecp256k1 = { workspace = true }
++bytes = { workspace = true }
++ergo-avltree-rust = { workspace = true }
++
++# Substrate
++sp-api = { workspace = true }
++sp-block-builder = { workspace = true }
++sp-consensus-aura = { workspace = true }
++sp-consensus-grandpa = { workspace = true }
++sp-core = { workspace = true }
++sp-genesis-builder = { workspace = true }
++sp-inherents = { workspace = true }
++sp-io = { workspace = true }
++sp-offchain = { workspace = true }
++sp-runtime = { workspace = true }
++sp-session = { workspace = true }
++sp-transaction-pool = { workspace = true }
++sp-version = { workspace = true }
++
++# Substrate FRAME
++frame-benchmarking = { workspace = true, optional = true }
++frame-executive = { workspace = true }
++frame-support = { workspace = true, features = ["experimental"] }
++frame-system = { workspace = true }
++frame-system-benchmarking = { workspace = true, optional = true }
++frame-system-rpc-runtime-api = { workspace = true }
++pallet-aura = { workspace = true }
++pallet-balances = { workspace = true, features = ["insecure_zero_ed"] }
++pallet-grandpa = { workspace = true }
++pallet-sudo = { workspace = true }
++pallet-timestamp = { workspace = true }
++pallet-transaction-payment = { workspace = true }
++pallet-transaction-payment-rpc-runtime-api = { workspace = true }
++
++# Frontier
++fp-account = { workspace = true, features = ["serde"] }
++fp-evm = { workspace = true, features = ["serde"] }
++fp-rpc = { workspace = true }
++fp-self-contained = { workspace = true, features = ["serde"] }
++pallet-base-fee = { workspace = true }
++pallet-dynamic-fee = { workspace = true }
++pallet-ethereum = { workspace = true }
++pallet-evm = { workspace = true }
++pallet-evm-chain-id = { workspace = true }
++pallet-evm-precompile-modexp = { workspace = true }
++pallet-evm-precompile-sha3fips = { workspace = true }
++pallet-evm-precompile-simple = { workspace = true }
++
++[build-dependencies]
++sp-core = { workspace = true, features = ["std"] }
++substrate-wasm-builder = { workspace = true, optional = true }
++
++[dev-dependencies]
++serde_json = { workspace = true }
++
++[features]
++default = ["std", "with-rocksdb-weights"]
++with-rocksdb-weights = []
++with-paritydb-weights = []
++std = [
++	"scale-codec/std",
++	"scale-info/std",
++	"libsecp256k1/std",
++	"sp-api/std",
++	"sp-block-builder/std",
++	"sp-consensus-aura/std",
++	"sp-consensus-grandpa/std",
++	"sp-core/std",
++	"sp-genesis-builder/std",
++	"sp-inherents/std",
++	"sp-io/std",
++	"sp-offchain/std",
++	"sp-runtime/std",
++	"sp-session/std",
++	"sp-transaction-pool/std",
++	"sp-version/std",
++	"substrate-wasm-builder",
++	"frame-benchmarking/std",
++	"frame-executive/std",
++	"frame-support/std",
++	"frame-system/std",
++	"frame-system-rpc-runtime-api/std",
++	"frame-system-benchmarking?/std",
++	"pallet-aura/std",
++	"pallet-balances/std",
++	"pallet-grandpa/std",
++	"pallet-sudo/std",
++	"pallet-timestamp/std",
++	"pallet-transaction-payment/std",
++	"pallet-transaction-payment-rpc-runtime-api/std",
++	"fp-account/std",
++	"fp-evm/std",
++	"fp-rpc/std",
++	"fp-self-contained/std",
++	"pallet-base-fee/std",
++	"pallet-dynamic-fee/std",
++	"pallet-ethereum/std",
++	"pallet-evm/std",
++	"pallet-evm-chain-id/std",
++	"pallet-evm-precompile-modexp/std",
++	"pallet-evm-precompile-sha3fips/std",
++	"pallet-evm-precompile-simple/std",
++]
++runtime-benchmarks = [
++	"frame-benchmarking/runtime-benchmarks",
++	"frame-system-benchmarking/runtime-benchmarks",
++	"frame-system/runtime-benchmarks",
++	"pallet-balances/runtime-benchmarks",
++	"pallet-grandpa/runtime-benchmarks",
++	"pallet-timestamp/runtime-benchmarks",
++	"pallet-sudo/runtime-benchmarks",
++	"pallet-ethereum/runtime-benchmarks",
++	"pallet-evm/runtime-benchmarks",
++]
+diff --git a/template/runtime-v4-fed-genesis/src/lib.rs b/template/runtime-v4-fed-genesis/src/lib.rs
+new file mode 100644
+index 0000000..a0ee2a6
+--- /dev/null
++++ b/template/runtime-v4-fed-genesis/src/lib.rs
+@@ -0,0 +1,68 @@
++//! Non-publishable bridge V4 runtime with required federated genesis.
++
++#![cfg_attr(not(feature = "std"), no_std)]
++#![recursion_limit = "256"]
++#![allow(clippy::new_without_default, clippy::or_fun_call)]
++#![cfg_attr(feature = "runtime-benchmarks", warn(unused_crate_dependencies))]
++
++mod compiled_profile {
++	include!(concat!(
++		env!("OUT_DIR"),
++		"/federated_source_proof_profile.rs"
++	));
++}
++
++pub struct FederatedGenesisPooledReserveSourceProofProfileV1;
++
++impl crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveSourceProofProfileProviderV1
++	for FederatedGenesisPooledReserveSourceProofProfileV1
++{
++	fn profile(
++	) -> crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveSourceProofProfileV1 {
++		let signer_public_keys = compiled_profile::SIGNER_PUBLIC_KEYS
++			.to_vec()
++			.try_into()
++			.expect("the build script enforces the V1 signer bound");
++		crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveSourceProofProfileV1 {
++			format_version: compiled_profile::FORMAT_VERSION,
++			federation_epoch: compiled_profile::FEDERATION_EPOCH,
++			threshold: compiled_profile::THRESHOLD,
++			signer_public_keys,
++			max_validity_blocks: compiled_profile::MAX_VALIDITY_BLOCKS,
++			verifier_profile_id: sp_core::H256::from(compiled_profile::VERIFIER_PROFILE_ID),
++		}
++	}
++}
++
++mod runtime_configuration {
++	pub type ErgoAutolykosCommittedVaultSourceProofConsumer =
++		crate::peg_in_ergo_autolykos_committed_vault::RejectedErgoAutolykosCommittedVaultSourceProofConsumerV1;
++	pub type ErgoAutolykosCommittedVaultRuntimeStatementConsumer =
++		crate::peg_in_ergo_autolykos_committed_vault_runtime_statement::RejectedErgoAutolykosCommittedVaultRuntimeStatementConsumerV2;
++	pub type ErgoAutolykosCommittedVaultUtxoRuntimeStatementConsumer =
++		crate::peg_in_ergo_autolykos_committed_vault_utxo_runtime_statement::RejectedErgoAutolykosCommittedVaultUtxoRuntimeStatementConsumerV3;
++	pub type ErgoAutolykosCommittedVaultUtxoRuntimeStatementActivationAllowed =
++		frame_support::traits::ConstBool<false>;
++	pub type SourceProofVerifier =
++		crate::peg_in_pooled_reserve_reservation::FederatedPooledReserveMintReservationSourceProofV1<
++			crate::FederatedGenesisPooledReserveSourceProofProfileV1,
++		>;
++	pub type ProfileActivationAllowed = frame_support::traits::ConstBool<false>;
++	pub type ProfileExecutionAllowed = frame_support::traits::ConstBool<true>;
++	pub type ProfileGenesisRequired = frame_support::traits::ConstBool<true>;
++	pub type LegacyPegInMintExecutionAllowed = frame_support::traits::ConstBool<false>;
++}
++
++include!("../../runtime/src/runtime_body.rs");
++
++#[sp_version::runtime_version]
++pub const VERSION: RuntimeVersion = RuntimeVersion {
++	spec_name: Cow::Borrowed("frontier-template-v4-fed-genesis"),
++	impl_name: Cow::Borrowed("frontier-template-v4-fed-genesis"),
++	authoring_version: 1,
++	spec_version: 1,
++	impl_version: 1,
++	apis: RUNTIME_API_VERSIONS,
++	transaction_version: 1,
++	system_version: 1,
++};
+diff --git a/template/runtime-v4-fed-genesis/tests/federated_genesis.rs b/template/runtime-v4-fed-genesis/tests/federated_genesis.rs
+new file mode 100644
+index 0000000..fe26222
+--- /dev/null
++++ b/template/runtime-v4-fed-genesis/tests/federated_genesis.rs
+@@ -0,0 +1,275 @@
++use std::{collections::BTreeMap, panic::{catch_unwind, AssertUnwindSafe}};
++
++use frame_support::{assert_noop, assert_ok, traits::BuildGenesisConfig};
++use scale_codec::{Decode, Encode};
++use sp_core::{hashing::sha2_256, H160, H256, U256};
++use sp_runtime::{traits::Header as HeaderT, BuildStorage};
++
++use frontier_template_v4_fed_genesis_runtime::{
++    bridge_commitment::{self, CurrentPooledReserveMintReservationProfileV4,
++        PooledReserveMintReservationEnforcementActivatedV4},
++    peg_in_pooled_reserve_reservation::{
++        PooledReserveMintReservationRuntimeProfileV4,
++        PooledReserveMintReservationSourceProofVerifierV4},
++    BridgeCommitment, Executive, Header, Runtime, RuntimeGenesisConfig, RuntimeOrigin, System, Timestamp,
++};
++
++type SourceProofVerifier = <Runtime as bridge_commitment::Config>::PooledReserveMintReservationSourceProofVerifier;
++
++fn code(hex: &str) -> Vec<u8> {
++    let hex = hex.trim();
++    (0..hex.len()).step_by(2).map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap()).collect()
++}
++
++fn short_string(value: &[u8]) -> H256 {
++    let mut word = [0u8; 32];
++    word[..value.len()].copy_from_slice(value);
++    word[31] = (value.len() * 2) as u8;
++    H256::from(word)
++}
++
++fn fixture() -> (RuntimeGenesisConfig, PooledReserveMintReservationRuntimeProfileV4) {
++    let bridge_code = code(include_str!("../../node/src/tests/res/bridge-atomicity/ErgoBridge.runtime.bin"));
++    let token_code = code(include_str!("../../node/src/tests/res/bridge-atomicity/SERG.runtime.bin"));
++    let mut profile = PooledReserveMintReservationRuntimeProfileV4 {
++        format_version: 4,
++        lineage_profile_id: H256::repeat_byte(0x10),
++        source_network_id: H256::repeat_byte(0x11),
++        sidechain_id: H256::repeat_byte(0x22),
++        bridge_address: H160::repeat_byte(0x33),
++        token_address: H160::repeat_byte(0x44),
++        bridge_runtime_code_sha256: H256::zero(), bridge_runtime_code_bytes: 0,
++        token_runtime_code_sha256: H256::zero(), token_runtime_code_bytes: 0,
++        settlement_profile_id: H256::repeat_byte(0x55),
++        ergo_deposit_finality_policy_id: H256::repeat_byte(0x66),
++        source_proof_system_id: H256::zero(), source_proof_profile_id: H256::zero(),
++        activation_height: 0, max_pending_blocks: 64,
++    };
++    profile.bridge_runtime_code_sha256 = H256::from(sha2_256(&bridge_code));
++    profile.bridge_runtime_code_bytes = bridge_code.len() as u32;
++    profile.token_runtime_code_sha256 = H256::from(sha2_256(&token_code));
++    profile.token_runtime_code_bytes = token_code.len() as u32;
++    profile.source_proof_system_id = SourceProofVerifier::proof_system_id();
++    profile.source_proof_profile_id = SourceProofVerifier::proof_profile_id();
++    let operator = H160::repeat_byte(0x31);
++    let mut config = RuntimeGenesisConfig::default();
++    config.manual_seal.enable = true;
++    config.evm.accounts = BTreeMap::from([
++        (profile.bridge_address, fp_evm::GenesisAccount {
++            nonce: U256::one(), balance: U256::zero(), code: bridge_code,
++            storage: BTreeMap::from([
++                (H256::zero(), H256::from(operator)),
++                (H256::from_low_u64_be(3), H256::from(profile.token_address)),
++            ]),
++        }),
++        (profile.token_address, fp_evm::GenesisAccount {
++            nonce: U256::one(), balance: U256::zero(), code: token_code,
++            storage: BTreeMap::from([
++                (H256::from_low_u64_be(3), short_string(b"Sidechain ERG")),
++                (H256::from_low_u64_be(4), short_string(b"sERG")),
++                (H256::from_low_u64_be(5), H256::from(profile.bridge_address)),
++            ]),
++        }),
++    ]);
++    config.bridge_commitment.legacy_mint_quarantine_address = Some(profile.bridge_address);
++    config.bridge_commitment.pooled_reserve_mint_genesis_v4 = Some((operator, profile.encode().try_into().unwrap()));
++    (config, profile)
++}
++
++#[test]
++fn typed_genesis_initializes_after_evm_and_executes_first_block_without_sudo() {
++    let (config, profile) = fixture();
++    let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++    ext.execute_with(|| {
++        assert_eq!(CurrentPooledReserveMintReservationProfileV4::<Runtime>::get(), Some(profile.clone()));
++        assert!(PooledReserveMintReservationEnforcementActivatedV4::<Runtime>::get());
++        assert!(!sp_io::storage::exists(&frame_support::storage::storage_prefix(b"Sudo", b"Key")));
++        let header = Header::new(1, H256::zero(), H256::zero(), H256::repeat_byte(0x19), Default::default());
++        Executive::initialize_block(&header);
++        assert_ok!(Timestamp::set(RuntimeOrigin::none(), 6_000));
++        let finalized = Executive::finalize_block();
++        assert_eq!(*finalized.number(), 1);
++        assert_eq!(CurrentPooledReserveMintReservationProfileV4::<Runtime>::get(), Some(profile));
++        assert!(bridge_commitment::ConsumedPooledReserveMintReservationsV4::<Runtime>::iter_keys().next().is_none());
++        assert!(bridge_commitment::PendingPooledReserveMintReservationsV4::<Runtime>::iter_keys().next().is_none());
++    });
++}
++
++#[test]
++fn genesis_profile_cannot_be_replaced_by_root_or_initialized_twice() {
++    let (config, profile) = fixture();
++    let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++    ext.execute_with(|| {
++        assert_noop!(BridgeCommitment::activate_pooled_reserve_mint_reservation_profile_v4(RuntimeOrigin::root(), profile.clone()),
++            bridge_commitment::Error::<Runtime>::PooledReserveMintReservationProfileActivationBlocked);
++        let before = sp_io::storage::root(sp_runtime::StateVersion::V1);
++        assert!(catch_unwind(AssertUnwindSafe(|| config.bridge_commitment.build())).is_err());
++        assert_eq!(sp_io::storage::root(sp_runtime::StateVersion::V1), before);
++        assert_eq!(CurrentPooledReserveMintReservationProfileV4::<Runtime>::get(), Some(profile));
++    });
++}
++
++#[test]
++fn rejects_each_incomplete_or_non_greenfield_genesis_without_returning_storage() {
++    for fault in ["missing-profile", "truncated-profile", "wrong-version", "wrong-proof-system", "wrong-proof-profile",
++        "nonzero-height", "zero-lineage", "zero-domain", "sudo", "quarantine", "missing-bridge", "missing-token",
++        "bridge-code", "token-code", "bridge-owner", "zero-operator", "operator-alias", "operator-token-alias", "token-owner", "wrong-token",
++        "paused", "supply", "balance", "allowance", "replay", "fees", "token-name", "token-symbol"] {
++        let (mut config, mut profile) = fixture();
++        let bridge = profile.bridge_address;
++        let token = profile.token_address;
++        match fault {
++            "missing-profile" => config.bridge_commitment.pooled_reserve_mint_genesis_v4 = None,
++            "truncated-profile" => { config.bridge_commitment.pooled_reserve_mint_genesis_v4.as_mut().unwrap().1.pop(); },
++            "wrong-version" => profile.format_version = 5,
++            "wrong-proof-system" => profile.source_proof_system_id = H256::repeat_byte(0x81),
++            "wrong-proof-profile" => profile.source_proof_profile_id = H256::repeat_byte(0x82),
++            "nonzero-height" => profile.activation_height = 1,
++            "zero-lineage" => profile.lineage_profile_id = H256::zero(),
++            "zero-domain" => profile.sidechain_id = H256::zero(),
++            "sudo" => config.sudo.key = Some(H160::repeat_byte(0x77).into()),
++            "quarantine" => config.bridge_commitment.legacy_mint_quarantine_address = Some(token),
++            "missing-bridge" => { config.evm.accounts.remove(&bridge); },
++            "missing-token" => { config.evm.accounts.remove(&token); },
++            "bridge-code" => config.evm.accounts.get_mut(&bridge).unwrap().code[0] ^= 1,
++            "token-code" => config.evm.accounts.get_mut(&token).unwrap().code[0] ^= 1,
++            "zero-operator" | "operator-alias" | "operator-token-alias" => {
++                let bad = match fault { "zero-operator" => H160::zero(), "operator-alias" => bridge, _ => token };
++                config.bridge_commitment.pooled_reserve_mint_genesis_v4.as_mut().unwrap().0 = bad;
++                config.evm.accounts.get_mut(&bridge).unwrap().storage.insert(H256::zero(), H256::from(bad));
++            },
++            "bridge-owner" => { config.evm.accounts.get_mut(&bridge).unwrap().storage.insert(H256::zero(), H256::from(H160::repeat_byte(0x78))); },
++            "token-owner" => { config.evm.accounts.get_mut(&token).unwrap().storage.insert(H256::from_low_u64_be(5), H256::from(token)); },
++            "wrong-token" => { config.evm.accounts.get_mut(&bridge).unwrap().storage.insert(H256::from_low_u64_be(3), H256::from(bridge)); },
++            "paused" => {
++                let value = config.evm.accounts.get_mut(&bridge).unwrap().storage.get_mut(&H256::from_low_u64_be(3)).unwrap();
++                value.0[11] = 1;
++            },
++            "supply" => { config.evm.accounts.get_mut(&token).unwrap().storage.insert(H256::from_low_u64_be(2), H256::from_low_u64_be(1)); },
++            "balance" | "allowance" => { config.evm.accounts.get_mut(&token).unwrap().storage.insert(H256::repeat_byte(if fault == "balance" { 0x88 } else { 0x89 }), H256::from_low_u64_be(1)); },
++            "replay" => { config.evm.accounts.get_mut(&bridge).unwrap().storage.insert(H256::repeat_byte(0x90), H256::from_low_u64_be(1)); },
++            "fees" => { config.evm.accounts.get_mut(&bridge).unwrap().storage.insert(H256::from_low_u64_be(5), H256::from_low_u64_be(1)); },
++            "token-name" | "token-symbol" => { config.evm.accounts.get_mut(&token).unwrap().storage.insert(H256::from_low_u64_be(if fault == "token-name" { 3 } else { 4 }), H256::zero()); },
++            _ => unreachable!(),
++        }
++        if ["wrong-version", "wrong-proof-system", "wrong-proof-profile", "nonzero-height", "zero-lineage", "zero-domain"].contains(&fault) {
++            config.bridge_commitment.pooled_reserve_mint_genesis_v4.as_mut().unwrap().1 = profile.encode().try_into().unwrap();
++        }
++        let reason = match fault {
++            "missing-profile" => "V4 typed genesis is required only",
++            "truncated-profile" => "V4 genesis profile must decode exactly",
++            "wrong-version" | "zero-lineage" | "zero-domain" => "profile contains a zero or aliased field",
++            "wrong-proof-system" | "wrong-proof-profile" => "profile selects an unknown source proof",
++            "nonzero-height" => "profile is not active",
++            "sudo" => "height zero and absent Sudo authority",
++            "quarantine" | "missing-bridge" | "missing-token" | "bridge-code" | "token-code" |
++                "zero-operator" | "operator-alias" | "operator-token-alias" => "operator, quarantine and application code must match",
++            _ => "exact fresh bridge and token constructor storage",
++        };
++        let failure = catch_unwind(AssertUnwindSafe(|| config.build_storage())).expect_err(fault);
++        let message = failure.downcast_ref::<String>().map(String::as_str)
++            .or_else(|| failure.downcast_ref::<&str>().copied()).unwrap_or("");
++        assert!(message.contains(reason), "{fault} rejected for the wrong reason: {message}");
++    }
++}
++
++#[test]
++fn rejects_existing_bridge_namespace_and_nonzero_system_height_without_writes() {
++    for fault in ["legacy-profile", "v4-profile", "replay", "unknown-key", "height"] {
++        let (config, profile) = fixture();
++        let mut storage = frame_system::GenesisConfig::<Runtime>::default().build_storage().unwrap();
++        config.evm.assimilate_storage(&mut storage).unwrap();
++        let mut ext: sp_io::TestExternalities = storage.into();
++        ext.execute_with(|| {
++            if fault == "height" {
++                System::set_block_number(1);
++            } else {
++                let suffix = match fault { "legacy-profile" => "CurrentPegInProfile", "v4-profile" => "CurrentPooledReserveMintReservationProfileV4", "replay" => "ProcessedPegIns", _ => "UnknownState" };
++                sp_io::storage::set(&frame_support::storage::storage_prefix(b"BridgeCommitment", suffix.as_bytes()), &[0]);
++            }
++            let before = sp_io::storage::root(sp_runtime::StateVersion::V1);
++            assert!(catch_unwind(AssertUnwindSafe(|| config.bridge_commitment.build())).is_err(), "accepted {fault}");
++            assert_eq!(sp_io::storage::root(sp_runtime::StateVersion::V1), before, "partial write for {fault}");
++            assert!(!PooledReserveMintReservationEnforcementActivatedV4::<Runtime>::get());
++            assert_ne!(CurrentPooledReserveMintReservationProfileV4::<Runtime>::get(), Some(profile));
++        });
++    }
++}
++
++#[test]
++fn genesis_field_keeps_existing_profile_wire_bytes_and_rejects_oversize() {
++    let (config, profile) = fixture();
++    let (_, bytes) = config.bridge_commitment.pooled_reserve_mint_genesis_v4.unwrap();
++    assert_eq!(bytes.len(), 349);
++    assert_eq!(PooledReserveMintReservationRuntimeProfileV4::decode(&mut &bytes[..]).unwrap(), profile);
++    assert!(frame_support::BoundedVec::<u8, frame_support::traits::ConstU32<349>>::try_from(vec![0u8; 350]).is_err());
++}
++
++
++#[test]
++fn json_genesis_rejects_unknown_and_missing_profile_fields() {
++    let (config, _) = fixture();
++    let canonical = serde_json::to_value(&config).unwrap();
++    let decoded: RuntimeGenesisConfig = serde_json::from_value(canonical.clone()).unwrap();
++    assert!(decoded.build_storage().is_ok());
++    let mut oversized = canonical.clone();
++    oversized["bridgeCommitment"]["pooledReserveMintGenesisV4"][1] = serde_json::json!(vec![0u8; 350]);
++    assert!(serde_json::from_value::<RuntimeGenesisConfig>(oversized).is_err());
++    for target in ["outer", "bridge"] {
++        let mut bad = canonical.clone();
++        let object = if target == "outer" { bad.as_object_mut().unwrap() }
++            else { bad["bridgeCommitment"].as_object_mut().unwrap() };
++        object.insert("verified".to_owned(), serde_json::Value::Bool(true));
++        assert!(serde_json::from_value::<RuntimeGenesisConfig>(bad).is_err(), "{target}");
++    }
++    let mut absent = canonical;
++    absent["bridgeCommitment"].as_object_mut().unwrap().remove("pooledReserveMintGenesisV4");
++    let decoded: RuntimeGenesisConfig = serde_json::from_value(absent).unwrap();
++    assert!(catch_unwind(AssertUnwindSafe(|| decoded.build_storage())).is_err());
++}
++
++#[test]
++fn compiled_authority_matches_the_existing_v1_encoding_without_reference_signers() {
++    use frontier_template_v4_fed_genesis_runtime::{
++        FederatedGenesisPooledReserveSourceProofProfileV1,
++        peg_in_pooled_reserve_reservation::{
++            FederatedPooledReserveSourceProofProfileProviderV1,
++            ReferenceFederatedPooledReserveSourceProofProfileV1,
++            derive_federated_pooled_reserve_source_proof_profile_id_v1,
++            validate_federated_pooled_reserve_source_proof_profile_v1,
++        },
++    };
++    let configured = FederatedGenesisPooledReserveSourceProofProfileV1::profile();
++    validate_federated_pooled_reserve_source_proof_profile_v1(&configured).unwrap();
++    assert_eq!(derive_federated_pooled_reserve_source_proof_profile_id_v1(&configured).unwrap(), SourceProofVerifier::proof_profile_id());
++    let reference = ReferenceFederatedPooledReserveSourceProofProfileV1::profile();
++    assert!(configured.signer_public_keys.iter().all(|key| !reference.signer_public_keys.contains(key)));
++}
++
++#[test]
++fn missing_or_partial_genesis_profile_cannot_fall_back_to_legacy_on_first_block() {
++    use pallet_ethereum::OnBlockStored;
++    for fault in ["missing-both", "missing-profile", "missing-enforcement"] {
++        let (config, _) = fixture();
++        let mut ext: sp_io::TestExternalities = config.build_storage().unwrap().into();
++        ext.execute_with(|| {
++            if fault != "missing-enforcement" {
++                CurrentPooledReserveMintReservationProfileV4::<Runtime>::kill();
++            }
++            if fault != "missing-profile" {
++                PooledReserveMintReservationEnforcementActivatedV4::<Runtime>::kill();
++            }
++            System::set_block_number(1);
++            let before = sp_io::storage::root(sp_runtime::StateVersion::V1);
++            assert_eq!(<BridgeCommitment as OnBlockStored>::on_block_started(),
++                Err("required V4 genesis profile or enforcement is missing"), "{fault}");
++            assert_eq!(sp_io::storage::root(sp_runtime::StateVersion::V1), before);
++            let mut block = pallet_ethereum::CurrentBlock::<Runtime>::get().unwrap();
++            assert!(block.transactions.is_empty());
++            block.header.number = U256::one();
++            assert_eq!(<BridgeCommitment as OnBlockStored>::on_block_stored(&block, &[], &[]),
++                Err("required V4 genesis profile or enforcement is missing"), "{fault}");
++            assert_eq!(sp_io::storage::root(sp_runtime::StateVersion::V1), before);
++        });
++    }
++}
+diff --git a/template/runtime-v4-lab/build.rs b/template/runtime-v4-lab/build.rs
+index 5577641..211305b 100644
+--- a/template/runtime-v4-lab/build.rs
++++ b/template/runtime-v4-lab/build.rs
+@@ -6,6 +6,26 @@ const PROFILE_DOMAIN: &[u8] = b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_PROFIL
+ const SOURCE_KEY_SET_DOMAIN: &[u8] = b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_KEY_SET_V1";
+ const MAX_SIGNERS: usize = 8;
+ 
++// Public fixture keys from ReferenceFederatedPooledReserveSourceProofProfileV1.
++const REFERENCE_SIGNER_PUBLIC_KEYS: [[u8; 32]; 3] = [
++	[
++		0x21, 0x52, 0xf8, 0xd1, 0x9b, 0x79, 0x1d, 0x24, 0x45, 0x32, 0x42, 0xe1,
++		0x5f, 0x2e, 0xab, 0x6c, 0xb7, 0xcf, 0xfa, 0x7b, 0x6a, 0x5e, 0xd3, 0x00,
++		0x97, 0x96, 0x0e, 0x06, 0x98, 0x81, 0xdb, 0x12,
++	],
++	[
++		0x22, 0xfc, 0x29, 0x77, 0x92, 0xf0, 0xb6, 0xff, 0xc0, 0xbf, 0xcf, 0xdb,
++		0x7e, 0xdb, 0x0c, 0x0a, 0xa1, 0x4e, 0x02, 0x5a, 0x36, 0x5e, 0xc0, 0xe3,
++		0x42, 0xe8, 0x6e, 0x38, 0x29, 0xcb, 0x74, 0xb6,
++	],
++	[
++		0xdb, 0x99, 0x5f, 0xe2, 0x51, 0x69, 0xd1, 0x41, 0xca, 0xb9, 0xbb, 0xba,
++		0x92, 0xba, 0xa0, 0x1f, 0x9f, 0x2e, 0x1e, 0xce, 0x7d, 0xf4, 0xcb, 0x2a,
++		0xc0, 0x51, 0x90, 0xf3, 0x7f, 0xcc, 0x1f, 0x9d,
++	],
++];
++
++#[cfg(not(test))]
+ fn main() {
+ 	println!("cargo:rerun-if-env-changed={PROFILE_HEX_ENV}");
+ 	println!("cargo:rerun-if-env-changed={PROFILE_ID_HEX_ENV}");
+@@ -76,6 +96,20 @@ fn parse_profile(bytes: &[u8]) -> Profile {
+ 	if verifier_profile_id == [0u8; 32] {
+ 		panic!("{PROFILE_HEX_ENV} verifier profile ID must be non-zero");
+ 	}
++	if env!("CARGO_PKG_NAME") == "frontier-template-v4-fed-genesis-runtime" {
++		if signer_public_keys
++			.iter()
++			.any(|key| REFERENCE_SIGNER_PUBLIC_KEYS.contains(key))
++		{
++			panic!("{PROFILE_HEX_ENV} federated genesis forbids every static reference signer key");
++		}
++		let canonical_verifier_profile_id = sp_core::hashing::blake2_256(
++			b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_RUNTIME_V1",
++		);
++		if verifier_profile_id != canonical_verifier_profile_id {
++			panic!("{PROFILE_HEX_ENV} federated genesis requires the canonical V1 verifier profile ID");
++		}
++	}
+ 
+ 	Profile {
+ 		format_version,
+@@ -202,3 +236,52 @@ fn render_array(bytes: &[u8]) -> String {
+ 			.join(", ")
+ 	)
+ }
++
++#[cfg(test)]
++mod genesis_build_profile_tests {
++	use super::*;
++	use std::panic::{catch_unwind, AssertUnwindSafe};
++
++	fn canonical_profile(keys: &[[u8; 32]], verifier: [u8; 32]) -> Vec<u8> {
++		let mut bytes = vec![1];
++		bytes.extend_from_slice(&7u64.to_le_bytes());
++		bytes.extend_from_slice(&2u16.to_le_bytes());
++		bytes.push((keys.len() as u8) << 2);
++		for key in keys { bytes.extend_from_slice(key); }
++		bytes.extend_from_slice(&64u64.to_le_bytes());
++		bytes.extend_from_slice(&verifier);
++		bytes
++	}
++
++	#[test]
++	fn configured_federation_keeps_the_existing_v1_profile_identity() {
++		assert_eq!(env!("CARGO_PKG_NAME"), "frontier-template-v4-fed-genesis-runtime");
++		let verifier = sp_core::hashing::blake2_256(b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_RUNTIME_V1");
++		let profile = parse_profile(&canonical_profile(&[[0x41; 32], [0x42; 32]], verifier));
++		assert_eq!(derive_profile_id(&profile), [
++			0x3e, 0x7d, 0x46, 0xee, 0xc3, 0x65, 0x0d, 0x7c,
++			0x19, 0xf1, 0x71, 0x23, 0x23, 0xbb, 0x08, 0xb0,
++			0xf8, 0xdf, 0x19, 0xe7, 0x9f, 0xb6, 0x17, 0xef,
++			0xab, 0x20, 0x24, 0x4c, 0x76, 0x55, 0x85, 0xc5,
++		]);
++	}
++
++	#[test]
++	fn rejects_each_reference_member_even_in_a_different_federation() {
++		let verifier = sp_core::hashing::blake2_256(b"E2S_POOLED_RESERVE_FEDERATED_SOURCE_PROOF_RUNTIME_V1");
++		for key in REFERENCE_SIGNER_PUBLIC_KEYS {
++			let mut keys = [key, [0x41; 32]];
++			keys.sort();
++			let failure = catch_unwind(AssertUnwindSafe(|| parse_profile(&canonical_profile(&keys, verifier))));
++			let panic = failure.err().expect("reference key must be rejected");
++			assert!(panic.downcast_ref::<String>().unwrap().contains("forbids every static reference signer key"));
++		}
++	}
++
++	#[test]
++	fn rejects_a_nonzero_unknown_verifier_instead_of_reinterpreting_v1() {
++		let failure = catch_unwind(AssertUnwindSafe(|| parse_profile(&canonical_profile(&[[0x41; 32], [0x42; 32]], [0x99; 32]))));
++		let panic = failure.err().expect("unknown verifier must be rejected");
++		assert!(panic.downcast_ref::<String>().unwrap().contains("requires the canonical V1 verifier profile ID"));
++	}
++}
+diff --git a/template/runtime-v4-lab/src/lib.rs b/template/runtime-v4-lab/src/lib.rs
+index ff511c3..badd6ac 100644
+--- a/template/runtime-v4-lab/src/lib.rs
++++ b/template/runtime-v4-lab/src/lib.rs
+@@ -48,6 +48,8 @@ mod runtime_configuration {
+ 			crate::LabFederatedPooledReserveSourceProofProfileV1,
+ 		>;
+ 	pub type ProfileActivationAllowed = frame_support::traits::ConstBool<true>;
++	pub type ProfileExecutionAllowed = frame_support::traits::ConstBool<true>;
++	pub type ProfileGenesisRequired = frame_support::traits::ConstBool<false>;
+ 	pub type LegacyPegInMintExecutionAllowed = frame_support::traits::ConstBool<false>;
+ }
+ 
+diff --git a/template/runtime-v4-test/src/lib.rs b/template/runtime-v4-test/src/lib.rs
+index 42da306..39013ce 100644
+--- a/template/runtime-v4-test/src/lib.rs
++++ b/template/runtime-v4-test/src/lib.rs
+@@ -19,6 +19,8 @@ mod runtime_configuration {
+ 			crate::peg_in_pooled_reserve_reservation::ReferenceFederatedPooledReserveSourceProofProfileV1,
+ 		>;
+ 	pub type ProfileActivationAllowed = frame_support::traits::ConstBool<true>;
++	pub type ProfileExecutionAllowed = frame_support::traits::ConstBool<true>;
++	pub type ProfileGenesisRequired = frame_support::traits::ConstBool<false>;
+ 	pub type LegacyPegInMintExecutionAllowed = frame_support::traits::ConstBool<false>;
+ }
+ 
+diff --git a/template/runtime/src/bridge_commitment.rs b/template/runtime/src/bridge_commitment.rs
+index ae7e466..34eb149 100644
+--- a/template/runtime/src/bridge_commitment.rs
++++ b/template/runtime/src/bridge_commitment.rs
+@@ -5,7 +5,7 @@ use alloc::{
+ };
+ use core::marker::PhantomData;
+ 
+-use frame_support::{pallet_prelude::*, traits::ConstU32};
++use frame_support::{pallet_prelude::*, traits::{ConstU32, PalletInfoAccess}};
+ use frame_system::pallet_prelude::*;
+ use pallet_ethereum::{
+ 	Block, Log, OnBlockStored, Receipt, Transaction, TransactionAction, TransactionStatus,
+@@ -402,6 +402,12 @@ pub mod pallet {
+ 		/// Compile-time gate for activating the V4 reservation profile through
+ 		/// the public runtime call.
+ 		type PooledReserveMintReservationProfileActivationAllowed: Get<bool>;
++
++		/// Execution is independent from permission to activate a profile through Root.
++		type PooledReserveMintReservationProfileExecutionAllowed: Get<bool>;
++
++		/// This runtime must be initialized with a typed, greenfield V4 genesis profile.
++		type PooledReserveMintReservationGenesisRequired: Get<bool>;
+ 	}
+ 
+ 	#[pallet::storage]
+@@ -416,6 +422,9 @@ pub mod pallet {
+ 	#[derive(frame_support::DefaultNoBound)]
+ 	pub struct GenesisConfig<T> {
+ 		pub legacy_mint_quarantine_address: Option<H160>,
++		/// Exact mint operator and canonical SCALE V4 profile; not an activation receipt.
++		#[serde(default, skip_serializing_if = "Option::is_none")]
++		pub pooled_reserve_mint_genesis_v4: Option<(H160, BoundedVec<u8, ConstU32<349>>)>,
+ 		#[serde(skip)]
+ 		pub _config: PhantomData<T>,
+ 	}
+@@ -423,6 +432,23 @@ pub mod pallet {
+ 	#[pallet::genesis_build]
+ 	impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+ 		fn build(&self) {
++			assert_eq!(
++				self.pooled_reserve_mint_genesis_v4.is_some(),
++				T::PooledReserveMintReservationGenesisRequired::get(),
++				"V4 typed genesis is required only by its explicitly selected runtime"
++			);
++			if let Some((operator, profile_bytes)) = &self.pooled_reserve_mint_genesis_v4 {
++				let profile = validate_pooled_reserve_mint_genesis_v4::<T>(
++					*operator,
++					profile_bytes,
++					self.legacy_mint_quarantine_address,
++				).expect("invalid greenfield V4 genesis");
++				// All validation precedes writes. A failed build cannot install mint authority.
++				BridgeAddress::<T>::put(profile.bridge_address);
++				CurrentPooledReserveMintReservationProfileV4::<T>::put(profile);
++				PooledReserveMintReservationEnforcementActivatedV4::<T>::put(true);
++				return;
++			}
+ 			if let Some(address) = self.legacy_mint_quarantine_address {
+ 				assert!(
+ 					is_supported_bridge_address(Some(address)),
+@@ -1508,7 +1534,7 @@ fn ensure_causal_peg_in_source_proof_profile_execution_allowed<T: Config>(
+ 
+ fn ensure_pooled_reserve_mint_reservation_profile_execution_allowed<T: Config>(
+ ) -> Result<(), &'static str> {
+-	if T::PooledReserveMintReservationProfileActivationAllowed::get() {
++	if T::PooledReserveMintReservationProfileExecutionAllowed::get() {
+ 		return Ok(());
+ 	}
+ 	#[cfg(test)]
+@@ -1520,6 +1546,82 @@ fn ensure_pooled_reserve_mint_reservation_profile_execution_allowed<T: Config>(
+ 	Err(POOLED_RESERVE_MINT_RESERVATION_PROFILE_EXECUTION_DISABLED)
+ }
+ 
++fn validate_pooled_reserve_mint_genesis_v4<T: Config>(
++	operator: H160,
++	profile_bytes: &[u8],
++	quarantine_address: Option<H160>,
++) -> Result<PooledReserveMintReservationRuntimeProfileV4, &'static str> {
++	if !T::PooledReserveMintReservationGenesisRequired::get()
++		|| !T::PooledReserveMintReservationProfileExecutionAllowed::get()
++		|| T::PooledReserveMintReservationProfileActivationAllowed::get()
++		|| T::LegacyPegInMintExecutionAllowed::get()
++	{
++		return Err("V4 genesis requires execution without Root or legacy activation");
++	}
++	let sudo_key = frame_support::storage::storage_prefix(
++		<pallet_sudo::Pallet<T> as PalletInfoAccess>::name().as_bytes(), b"Key");
++	if !frame_system::Pallet::<T>::block_number().is_zero() || sp_io::storage::exists(&sudo_key) {
++		return Err("V4 genesis requires height zero and absent Sudo authority");
++	}
++	let prefix = sp_core::hashing::twox_128(<Pallet<T> as PalletInfoAccess>::name().as_bytes());
++	if sp_io::storage::exists(&prefix)
++		|| sp_io::storage::next_key(&prefix).map_or(false, |key| key.starts_with(&prefix))
++	{
++		return Err("V4 greenfield genesis requires an empty bridge storage namespace");
++	}
++	let mut input = profile_bytes;
++	let profile = PooledReserveMintReservationRuntimeProfileV4::decode(&mut input)
++		.map_err(|_| "V4 genesis profile must decode exactly")?;
++	if !input.is_empty() || profile.encode().as_slice() != profile_bytes {
++		return Err("V4 genesis profile must use exact canonical SCALE bytes");
++	}
++	validate_pooled_reserve_mint_reservation_runtime_profile_v4::<T>(&profile, 0)?;
++	if operator == H160::zero()
++		|| operator == profile.bridge_address
++		|| operator == profile.token_address
++		|| quarantine_address != Some(profile.bridge_address)
++		|| !validate_runtime_code_expectation::<T>(profile.bridge_address,
++			profile.bridge_runtime_code_sha256, profile.bridge_runtime_code_bytes)
++		|| !validate_runtime_code_expectation::<T>(profile.token_address,
++			profile.token_runtime_code_sha256, profile.token_runtime_code_bytes)
++	{
++		return Err("V4 genesis operator, quarantine and application code must match");
++	}
++	// Exact fresh constructor storage excludes hidden balances, allowances, fee claims
++	// and processed-mint mappings, including entries not enumerable by Solidity.
++	let bridge_storage: BTreeMap<_, _> = pallet_evm::AccountStorages::<T>::iter_prefix(profile.bridge_address).collect();
++	let token_storage: BTreeMap<_, _> = pallet_evm::AccountStorages::<T>::iter_prefix(profile.token_address).collect();
++	let expected_bridge = BTreeMap::from([
++		(H256::from_low_u64_be(BRIDGE_OWNER_SLOT), H256::from(operator)),
++		(H256::from_low_u64_be(BRIDGE_CONFIGURATION_SLOT), H256::from(profile.token_address)),
++	]);
++	let short_string = |value: &[u8]| {
++		let mut word = [0u8; 32];
++		word[..value.len()].copy_from_slice(value);
++		word[31] = (value.len() * 2) as u8;
++		H256::from(word)
++	};
++	let expected_token = BTreeMap::from([
++		(H256::from_low_u64_be(3), short_string(b"Sidechain ERG")),
++		(H256::from_low_u64_be(4), short_string(b"sERG")),
++		(H256::from_low_u64_be(TOKEN_OWNER_SLOT), H256::from(profile.bridge_address)),
++	]);
++	if bridge_storage != expected_bridge || token_storage != expected_token {
++		return Err("V4 genesis requires exact fresh bridge and token constructor storage");
++	}
++	Ok(profile)
++}
++
++fn ensure_required_pooled_reserve_genesis_state<T: Config>() -> Result<(), &'static str> {
++	if T::PooledReserveMintReservationGenesisRequired::get()
++		&& (!PooledReserveMintReservationEnforcementActivatedV4::<T>::get()
++			|| CurrentPooledReserveMintReservationProfileV4::<T>::get().is_none())
++	{
++		return Err("required V4 genesis profile or enforcement is missing");
++	}
++	Ok(())
++}
++
+ fn legacy_peg_in_mint_execution_allowed<T: Config>() -> bool {
+ 	if T::LegacyPegInMintExecutionAllowed::get() {
+ 		return true;
+@@ -2195,6 +2297,7 @@ impl<T: Config> OnBlockStored for Pallet<T> {
+ 	}
+ 
+ 	fn on_block_started() -> Result<(), &'static str> {
++		ensure_required_pooled_reserve_genesis_state::<T>()?;
+ 		if pooled_reserve_mint_reservation_mode_active::<T>()
+ 			&& (CausalPegInEnforcementActivatedV2::<T>::get()
+ 				|| CurrentCausalPegInProfileV2::<T>::get().is_some()
+@@ -2324,6 +2427,9 @@ impl<T: Config> OnBlockStored for Pallet<T> {
+ 		let execution_block_hash = block.header.hash();
+ 		let current_native_height =
+ 			frame_system::Pallet::<T>::block_number().saturated_into::<u64>();
++		if current_native_height > 0 {
++			ensure_required_pooled_reserve_genesis_state::<T>()?;
++		}
+ 		let pooled_reserve_enforcement =
+ 			PooledReserveMintReservationEnforcementActivatedV4::<T>::get();
+ 		let pooled_reserve_profile = CurrentPooledReserveMintReservationProfileV4::<T>::get();
+diff --git a/template/runtime/src/lib.rs b/template/runtime/src/lib.rs
+index 819139e..619a2de 100644
+--- a/template/runtime/src/lib.rs
++++ b/template/runtime/src/lib.rs
+@@ -20,6 +20,8 @@ mod runtime_configuration {
+ 			crate::peg_in_pooled_reserve_reservation::ReferenceFederatedPooledReserveSourceProofProfileV1,
+ 		>;
+ 	pub type ProfileActivationAllowed = frame_support::traits::ConstBool<false>;
++	pub type ProfileExecutionAllowed = frame_support::traits::ConstBool<false>;
++	pub type ProfileGenesisRequired = frame_support::traits::ConstBool<false>;
+ 	pub type LegacyPegInMintExecutionAllowed = frame_support::traits::ConstBool<false>;
+ }
+ 
+diff --git a/template/runtime/src/runtime_body.rs b/template/runtime/src/runtime_body.rs
+index 10daade..ae864c8 100644
+--- a/template/runtime/src/runtime_body.rs
++++ b/template/runtime/src/runtime_body.rs
+@@ -507,6 +507,10 @@ impl bridge_commitment::Config for Runtime {
+ 		runtime_configuration::SourceProofVerifier;
+ 	type PooledReserveMintReservationProfileActivationAllowed =
+ 		runtime_configuration::ProfileActivationAllowed;
++	type PooledReserveMintReservationProfileExecutionAllowed =
++		runtime_configuration::ProfileExecutionAllowed;
++	type PooledReserveMintReservationGenesisRequired =
++		runtime_configuration::ProfileGenesisRequired;
+ }
+ 
+ parameter_types! {

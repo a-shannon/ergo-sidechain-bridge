@@ -10,13 +10,19 @@ The canonical execution order and package status live in
 2. `phases/bridge-execution-plan.md`.
 3. The nearest phase plan, protocol document, and tests for the active package.
 
+Apply `docs/development-process.md` to every continuation. It defines the
+consumer-first batch, behavior-level validation map and safe fixture reuse.
+The execution plan is the only active queue; checkpoint archives are references.
+
 Do not read `.env` files, secrets, mnemonics, wallet material, private runtime
 databases, logs, screenshots, or deployment-state files unless the user
 explicitly authorizes that exact critical operation.
 
 ## Current Direction
 
-- Gate 5 / Phase 011 is the critical path.
+- WP-06-FED is the active EIP-independent delivery path. Gate 5 / Phase 011 is
+  the critical path for the separate trustless WP-06-STARK upgrade and does not
+  block an explicitly federated reference package.
 - Substrate/Frontier provides EVM compatibility and commitment production; it
   is not the final trust layer.
 - Gate 6 governance work is secondary unless a concrete validator requires it.
@@ -101,6 +107,14 @@ into one mega-batch merely because they share a work-package label.
 - Do not duplicate repository exploration, implementation, or test execution
   across agents. The main agent owns shared files, integration, the final diff,
   validation selection, staging, and commits.
+- An import graph is an impact-discovery tool, not an automatic full-suite
+  trigger. Name the changed operations and shared-state consumers; retain
+  exact evidence pins and broaden when impact is uncertain. Run cheap static
+  capability/import guards before expensive integration when imports change.
+- Keep capability boundaries separate without requiring one delivery batch
+  per capability. Prefer a complete deciding consumer over another forwarding
+  wrapper. Prepare static test profiles only when selected; never reuse live
+  custody, claimed handles, observations or check receipts as fresh authority.
 - Keep external-blocker monitoring dormant until an upstream pin, activation
   schedule, node capability, or target environment changes. Passage of time is
   not a reason to rerun the same probe.

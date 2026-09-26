@@ -1,23 +1,50 @@
 import { createHash } from 'node:crypto';
 import {
+  appendFileSync,
+  copyFileSync,
   mkdtempSync,
   readFileSync,
   rmSync,
 } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import {
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
+import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
+import { computeErgoHeaderId } from './ergo-settlement-core/ergo-header-id.js';
 import {
   assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2,
+  assertSubstrateFederatedNativeSetupTrackerLineageV1,
+  assertSubstrateFederatedNativeContinuationTrackerLineageV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2,
+  assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2,
+  assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1,
+  deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1,
+  deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1,
+  issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1,
+  isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V2_SCHEMA,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V2_SCHEMA,
   decideSubstrateFederatedIsolatedDevnetCleanupAuthorityV1,
   type SubstrateFederatedIsolatedDevnetErgoNodeProcessV1Input,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -25,9 +52,15 @@ import type {
   SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1,
 } from './substrate-federated-isolated-devnet-bootstrap-lifecycle-v1.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetMiningCredentialV1,
   issueSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  issueSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 as issueContinuationAuthority,
+  revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 as revokeContinuationAuthority,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+import * as miningCredentials from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 import {
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2,
+  claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2,
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
@@ -46,6 +79,15 @@ const temporaryDirectories: string[] = [];
 describe.skipIf(process.platform !== 'win32')(
   'isolated devnet Ergo owned process V1',
   () => {
+    it.each([
+      [8, 8, false], [9, 9, false], [10, 9, false],
+      [10, 10, true], [11, 10, false], [11, 11, true],
+    ])('setup readiness at full height %i and indexed height %i is %s', (fullHeight, indexedHeight, ready) => {
+      expect(isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1({
+        fullHeight, indexedHeight,
+      })).toBe(ready);
+    });
+
     afterEach(() => {
       for (const path of temporaryDirectories.splice(0)) {
         rmSync(path, { recursive: true, force: true, maxRetries: 3 });
@@ -77,11 +119,13 @@ describe.skipIf(process.platform !== 'win32')(
           'genesisStateDigestHex = "840ca0b8aec2d7a6c4f1589ca6070c8a5ed5924c835cdb8f816aa773b6fe1b6302"',
         );
         if (role === 'primary' && mode === 'mining') {
+          expect(config).toContain('internalMinerPollingInterval = 8s');
           expect(config).toContain(
             'wallet.testMnemonic = ${?E2S_FED6G1DI3B_EPHEMERAL_MINING_MNEMONIC}',
           );
           expect(config).toContain('wallet.testKeysQty = 1');
         } else {
+          expect(config).not.toContain('internalMinerPollingInterval');
           expect(config).not.toMatch(/testMnemonic|testKeysQty/iu);
         }
         expect(config).not.toMatch(/testMnemonic\s*=\s*["']|secretStorage/iu);
@@ -96,26 +140,288 @@ describe.skipIf(process.platform !== 'win32')(
       );
       await expect(session.withMiningStoppedReadOnlyTarget(async () => 'never'))
         .rejects.toThrow(/requires the active mining phase/);
+      await expect(session.withMiningActiveExecutionTarget(async () => 'never'))
+        .rejects.toThrow(/requires the active mining phase/);
+      await expect(session.withCheckpointExtensionMiningTarget(
+        '11'.repeat(64),
+        {},
+        async () => 'never',
+      )).rejects.toThrow(/requires the frozen first execution/);
+      await expect(session.withCheckpointBoundMiningStoppedExecutionTarget(
+        async () => 'never',
+      )).rejects.toThrow(/requires one completed checkpoint observation/);
+      await expect(
+        session.withCheckpointBoundReservationFreshnessRevalidationTarget(
+          async () => 'never',
+        ),
+      ).rejects.toThrow(/requires one completed frozen tracker check/);
+      await expect(
+        session.withCheckpointBoundTrackerTransportTarget(
+          Object.freeze({
+            schema:
+              'e2s.substrate-federated-isolated-devnet-tracker-reservation-freshness-completion.v1',
+            version: 1,
+          }),
+          '11'.repeat(32),
+          async () => 'never',
+        ),
+      ).rejects.toThrow(/requires one completed reservation freshness check/);
+      await expect(
+        session.withTrackerTransportConfirmationMiningTarget(
+          '11'.repeat(32),
+          async () => 'never',
+        ),
+      ).rejects.toThrow(/requires one completed transport attempt/);
+      await expect(session.withCheckpointBoundMiningActiveExecutionTarget(
+        async () => 'never',
+      )).rejects.toThrow(/requires one completed checkpoint observation/);
       await expect(session.stop()).resolves.toBeUndefined();
+      expect(() => assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1({
+        primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+        miningStopped: true,
+      })).toThrow(/not owned by the active managed process action/);
+      expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1({
+        primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+        witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+        primaryMining: true,
+        witnessReadOnly: true,
+      })).toThrow(/not owned by the active mining action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: true,
+          witnessReadOnly: true,
+          checkpointBound: true,
+        })
+      ).toThrow(/not owned by the active tracker-admission action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false,
+          primaryReadOnly: true,
+          witnessReadOnly: true,
+          miningStopped: true,
+          checkpointBound: true,
+        })
+      ).toThrow(/not owned by the active tracker-check action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false,
+          primaryReadOnly: true,
+          witnessReadOnly: true,
+          miningStopped: true,
+          checkpointBound: true,
+          reservationFreshnessRevalidation: true,
+        })
+      ).toThrow(/not owned by the active reservation-freshness action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV1({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: false,
+          witnessReadOnly: true,
+          miningStopped: true,
+          checkpointBound: true,
+          reservationFreshnessCheckBound: true,
+          trackerTransport: true,
+        })
+      ).toThrow(/not owned by the active tracker-transport action/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2({
+          primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
+          witnessNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+          primaryMining: true,
+          witnessReadOnly: true,
+          checkpointBound: true,
+          reservationFreshnessCheckBound: true,
+          trackerTransport: true,
+          sameProcessCanonicalConfirmation: true,
+          candidateMiningRequiresExpectedTransaction: true,
+          expectedTransactionIdHex: '11'.repeat(32),
+        })
+      ).toThrow(/not owned by the active tracker-transport action/);
       await expect(session.startMining()).rejects.toThrow(/exactly once/);
       await expect(session.stop()).resolves.toBeUndefined();
+    });
+
+    it('hands the setup-issued mining credential to the inert process owner', async () => {
+      const setup =
+        await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBindingForSigner(setup.signer),
+        claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(setup),
+      );
+      await expect(session.stop()).resolves.toBeUndefined();
+      expect(() => setup.dispose()).not.toThrow();
+    });
+
+    it('requires an independently one-shot checkpoint mining credential', async () => {
+      const credential = testMiningCredential();
+      expect(() => createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        credential,
+        credential,
+      )).toThrow(/must be independently one-shot/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          credential,
+          PUBLIC_KEY_HEX,
+        )
+      ).toThrow(/absent, consumed, or revoked/);
+    });
+
+    it('requires an independently one-shot tracker-admission mining credential', () => {
+      const setupCredential = testMiningCredential();
+      const checkpointCredential = testMiningCredential();
+      expect(() => createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        setupCredential,
+        checkpointCredential,
+        checkpointCredential,
+      )).toThrow(/tracker-admission mining credential must be independently one-shot/);
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          setupCredential,
+          PUBLIC_KEY_HEX,
+        )
+      ).toThrow(/absent, consumed, or revoked/);
+    });
+
+    it('requires an independently one-shot tracker-confirmation mining credential', () => {
+      const setupCredential = testMiningCredential();
+      const checkpointCredential = testMiningCredential();
+      const trackerAdmissionCredential = testMiningCredential();
+      expect(() => createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        setupCredential,
+        checkpointCredential,
+        trackerAdmissionCredential,
+        trackerAdmissionCredential,
+      )).toThrow(
+        /tracker-confirmation mining credential must be independently one-shot/,
+      );
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+          setupCredential,
+          PUBLIC_KEY_HEX,
+        )
+      ).toThrow(/absent, consumed, or revoked/);
+    });
+
+    it('rejects every relaxed checkpoint-extension observation boundary', () => {
+      const fixture = checkpointExtensionFixture();
+      const primaryDigestHex =
+        deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1(
+          'primary',
+          fixture.checkpoint,
+          fixture.extensionValueHex,
+          fixture.block,
+        );
+      expect(primaryDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+      expect(
+        deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1(
+          fixture.checkpoint,
+          fixture.extensionValueHex,
+          primaryDigestHex,
+          primaryDigestHex,
+        ),
+      ).toMatch(/^[0-9a-f]{64}$/u);
+
+      const changedIdentity = structuredClone(fixture.block);
+      changedIdentity.header.transactionsRoot = 'ff'.repeat(32);
+      expect(() => observeFixture(fixture, changedIdentity))
+        .toThrow(/canonical bytes|block identity changed/);
+
+      const changedHeight = structuredClone(fixture.block);
+      changedHeight.header.height += 1;
+      expect(() => observeFixture(fixture, changedHeight))
+        .toThrow(/canonical bytes|block identity changed/);
+
+      const changedCheckpointValue = structuredClone(fixture.block);
+      changedCheckpointValue.extension.fields[1]![1] = 'cd'.repeat(64);
+      expect(() => observeFixture(fixture, changedCheckpointValue))
+        .toThrow(/does not contain the exact 0x0401 value/);
+
+      const changedSideField = structuredClone(fixture.block);
+      changedSideField.extension.fields[0]![1] = Buffer.from(
+        'changed-side-field',
+        'ascii',
+      ).toString('hex');
+      expect(() => observeFixture(fixture, changedSideField))
+        .toThrow(/extension root changed/);
+
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1(
+          fixture.checkpoint,
+          fixture.extensionValueHex,
+          primaryDigestHex,
+          'ee'.repeat(32),
+        )
+      ).toThrow(/observations disagree/);
+    });
+
+    it('authenticates the checkpoint after the callback and before continuation minting', () => {
+      const source = readFileSync(
+        new URL(
+          './substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+          import.meta.url,
+        ),
+        'utf8',
+      );
+      const methodStart = source.indexOf(
+        'withCheckpointExtensionMiningTarget: async',
+      );
+      const methodEnd = source.indexOf(
+        'withCheckpointBoundMiningActiveExecutionTarget: async',
+        methodStart,
+      );
+      expect(methodStart).toBeGreaterThanOrEqual(0);
+      expect(methodEnd).toBeGreaterThan(methodStart);
+      const method = source.slice(methodStart, methodEnd);
+      const callbackCompletion = method.indexOf(
+        'value = await runCycleAction(action, target);',
+      );
+      const observation = method.indexOf(
+        'await observeExactCheckpointExtensionOnBothNodes(',
+      );
+      const continuation = method.indexOf(
+        'checkpointExecutionContinuation = Object.freeze({',
+      );
+      const observationBinding = method.indexOf(
+        'checkpointExtensionObservationDigestHex,',
+        continuation,
+      );
+
+      expect(callbackCompletion).toBeGreaterThanOrEqual(0);
+      expect(observation).toBeGreaterThan(callbackCompletion);
+      expect(continuation).toBeGreaterThan(observation);
+      expect(observationBinding).toBeGreaterThan(continuation);
     });
 
     it('joins managed action completion before any overrun cleanup', () => {
       expect(
         SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
-      ).toBe(600_000);
+      ).toBe(4_680_000);
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
           1_000,
-          601_000,
+          4_681_000,
           SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
         )
       ).not.toThrow();
       expect(() =>
         assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
           1_000,
-          601_001,
+          4_681_001,
           SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
         )
       ).toThrow(/exceeded its completion budget/);
@@ -139,6 +445,60 @@ describe.skipIf(process.platform !== 'win32')(
       expect(source).not.toContain('Promise.race([');
     });
 
+    it('applies an explicit checkpoint tip floor without changing the generic path', () => {
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(0))
+        .toBe(1);
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(8))
+        .toBe(9);
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(8, 11))
+        .toBe(11);
+      expect(deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(11, 11))
+        .toBe(12);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(-1)
+      ).toThrow(/prior height is invalid/);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
+          Number.MAX_SAFE_INTEGER,
+        )
+      ).toThrow(/prior height is invalid/);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(8, -1)
+      ).toThrow(/minimum tip height is invalid/);
+      expect(() =>
+        deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
+          8,
+          Number.MAX_SAFE_INTEGER + 1,
+        )
+      ).toThrow(/minimum tip height is invalid/);
+      const source = readFileSync(
+        join(
+          import.meta.dirname,
+          'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        ),
+        'utf8',
+      );
+      const checkpointActionIndex = source.indexOf(
+        'withCheckpointExtensionMiningTarget: async',
+      );
+      const policyDerivationIndex = source.indexOf(
+        'const requiredCheckpointTipHeight =',
+        checkpointActionIndex,
+      );
+      const credentialConsumptionIndex = source.indexOf(
+        'checkpointMiningCredential = undefined;',
+        checkpointActionIndex,
+      );
+      const firstNodeStopIndex = source.indexOf(
+        'await stopOwnedNode(primary, true);',
+        checkpointActionIndex,
+      );
+      expect(checkpointActionIndex).toBeGreaterThan(-1);
+      expect(policyDerivationIndex).toBeGreaterThan(-1);
+      expect(firstNodeStopIndex).toBeGreaterThan(policyDerivationIndex);
+      expect(credentialConsumptionIndex).toBeGreaterThan(policyDerivationIndex);
+    });
+
     it('fails stop before runtime cleanup when process termination is unverified', () => {
       expect(decideSubstrateFederatedIsolatedDevnetCleanupAuthorityV1(true, true))
         .toBe('release_cleanup_authority');
@@ -157,7 +517,16 @@ describe.skipIf(process.platform !== 'win32')(
       );
       expect(source).toContain('unverifiedProcessTerminationFailsStop: true');
       expect(source).toContain('return await holdOwnedNodeCleanupAuthority()');
-      expect(source).toContain('Get-NetTCPConnection -State Listen -ErrorAction Stop');
+      expect(source).toContain(
+        'Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop',
+      );
+      expect(source).toContain(
+        'Get-NetTCPConnection -State Listen -OwningProcess $pids -ErrorAction Stop',
+      );
+      expect(source).toContain('CmdletizationQuery_NotFound,Get-NetTCPConnection*');
+      expect(source).toContain('{ $rows=@() } else { throw }');
+      expect(source).not.toContain('Where-Object { $ports -contains $_.LocalPort }');
+      expect(source).not.toContain('Where-Object { $pids -contains $_.OwningProcess }');
       expect(source.indexOf('return await holdOwnedNodeCleanupAuthority()'))
         .toBeLessThan(source.indexOf('removeOwnedRuntime(ownedRuntimeRoot)'));
       expect(source).not.toContain('processDiagnosticHint');
@@ -217,8 +586,368 @@ describe.skipIf(process.platform !== 'win32')(
       }
     });
 
+    it('projects post-construction artifact drift before process launch', async () => {
+      const directory = ownedTestDirectory();
+      const javaPath = join(directory, 'java.exe');
+      const jarPath = join(directory, 'node.jar');
+      copyFileSync(process.execPath, javaPath);
+      copyFileSync(process.execPath, jarPath);
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1({
+        javaExecutablePath: javaPath,
+        expectedJavaExecutableSha256Hex: fileSha256(javaPath),
+        nodeAssemblyJarPath: jarPath,
+        expectedNodeAssemblyJarSha256Hex: fileSha256(jarPath),
+        buildIdentityDigestHex: sha256(Buffer.from('artifact-drift', 'ascii')),
+      }, launchBinding(), testMiningCredential());
+      appendFileSync(jarPath, Buffer.from([0]));
+
+      const failure = await captureStartupFailure(session);
+      expect(
+        projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+          failure,
+        ),
+      ).toBe('ergo node startup artifact recheck');
+      await expect(session.startMining()).rejects.toThrow(/exactly once/);
+      await expect(session.stop()).resolves.toBeUndefined();
+    });
+
+    it('projects reserved-port ownership before runtime creation', async () => {
+      const blocker = createServer();
+      await new Promise<void>((resolvePromise, rejectPromise) => {
+        blocker.once('error', rejectPromise);
+        blocker.listen(9051, '127.0.0.1', resolvePromise);
+      });
+      const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+        processInput(),
+        launchBinding(),
+        testMiningCredential(),
+      );
+      try {
+        const failure = await captureStartupFailure(session);
+        expect(
+          projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(
+            failure,
+          ),
+        ).toBe('ergo node startup port ownership');
+        await expect(session.startMining()).rejects.toThrow(/exactly once/);
+        await expect(session.stop()).resolves.toBeUndefined();
+      } finally {
+        await new Promise<void>((resolvePromise, rejectPromise) => {
+          blocker.close(error => error ? rejectPromise(error) : resolvePromise());
+        });
+      }
+    });
+
+    it('binds every finite startup subphase immediately before its operation', () => {
+      const source = readFileSync(
+        join(
+          import.meta.dirname,
+          'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        ),
+        'utf8',
+      );
+      const orderedBindings = [
+        ['ergo node startup artifact recheck', 'recheckProcessArtifacts(input);'],
+        ['ergo node startup port ownership', 'assertPortsUnowned(OWNED_PORTS);'],
+        ['ergo node startup runtime creation', 'createOwnedRuntimeRoot(value =>'],
+        ['ergo node startup credential consumption', 'const credential = miningCredential;'],
+        ['ergo node primary spawn', 'launchedPrimary = spawnOwnedNode('],
+        ['ergo node primary readiness', 'await waitForBasicNodeReadiness(primary);'],
+        ['ergo node primary identity', 'assertOwnedNodeIdentity(input, runtime, primary);'],
+        ['ergo node witness spawn', "spawnOwnedNode(input, runtime, 'witness', 'mining');"],
+        ['ergo node witness readiness', 'await waitForBasicNodeReadiness(witness);'],
+        ['ergo node witness identity', 'assertOwnedNodeIdentity(input, runtime, witness);'],
+        ['ergo node listener ownership', 'assertOwnedListenerBindings(primary, witness);'],
+      ] as const;
+      let cursor = source.indexOf('startMining: async () => {');
+      expect(cursor).toBeGreaterThan(-1);
+      for (const [phase, operation] of orderedBindings) {
+        const phaseIndex = source.indexOf(`'${phase}'`, cursor);
+        const operationIndex = source.indexOf(operation, phaseIndex);
+        expect(phaseIndex, phase).toBeGreaterThan(cursor);
+        expect(operationIndex, operation).toBeGreaterThan(phaseIndex);
+        cursor = operationIndex;
+      }
+    });
+
+    it('accepts a higher indexed tip when the exact frozen block remains canonical', () => {
+      const frozenSnapshot = Object.freeze({
+        network: 'devnet' as const,
+        fullHeight: 11,
+        indexedHeight: 11,
+        headerIdHex: '11'.repeat(32),
+      });
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1({
+          actionStartSnapshot: Object.freeze({
+            network: 'devnet' as const,
+            fullHeight: 12,
+            indexedHeight: 12,
+            headerIdHex: '22'.repeat(32),
+          }),
+          frozenSnapshot,
+          primaryHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+          witnessHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+        })
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['primary', '33'.repeat(32), '11'.repeat(32)],
+      ['witness', '11'.repeat(32), '33'.repeat(32)],
+    ] as const)(
+      'rejects a %s frozen-block replacement beneath a higher indexed tip',
+      (role, primaryHeaderIdHex, witnessHeaderIdHex) => {
+        const frozenSnapshot = Object.freeze({
+          network: 'devnet' as const,
+          fullHeight: 11,
+          indexedHeight: 11,
+          headerIdHex: '11'.repeat(32),
+        });
+        expect(() =>
+          assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1({
+            actionStartSnapshot: Object.freeze({
+              network: 'devnet' as const,
+              fullHeight: 12,
+              indexedHeight: 12,
+              headerIdHex: '22'.repeat(32),
+            }),
+            frozenSnapshot,
+            primaryHeaderIdsAtFrozenHeight: [primaryHeaderIdHex],
+            witnessHeaderIdsAtFrozenHeight: [witnessHeaderIdHex],
+          })
+        ).toThrow(new RegExp(`${role} frozen snapshot is not canonical`, 'u'));
+      },
+    );
+
+    it('rejects a common indexed tip below the frozen height', () => {
+      const frozenSnapshot = Object.freeze({
+        network: 'devnet' as const,
+        fullHeight: 12,
+        indexedHeight: 12,
+        headerIdHex: '11'.repeat(32),
+      });
+      expect(() =>
+        assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1({
+          actionStartSnapshot: Object.freeze({
+            network: 'devnet' as const,
+            fullHeight: 11,
+            indexedHeight: 11,
+            headerIdHex: '22'.repeat(32),
+          }),
+          frozenSnapshot,
+          primaryHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+          witnessHeaderIdsAtFrozenHeight: [frozenSnapshot.headerIdHex],
+        })
+      ).toThrow(/not an indexed descendant of the frozen target/);
+    });
+
     const liveJavaPath = process.env.G1DI3B_JAVA_PATH;
     const liveJarPath = process.env.G1DI3B_ERGO_JAR_PATH;
+    it.skipIf(!liveJavaPath || !liveJarPath).each(['valid', 'checkpoint', 'admission', 'confirmation', 'checkpoint late'] as const)(
+      'continues two owned process cycles without resetting credentials: %s', async fault => {
+        const identity = await deriveLocalWasmRootSignerPublicIdentity(MNEMONIC);
+        const signer = { ...identity, rewardInputErgoTrees: {
+          delay1: deriveDevnetRewardErgoTreeHexForDelay(identity.publicKeyHex, 1),
+          delay720: deriveDevnetRewardErgoTreeHexForDelay(identity.publicKeyHex, 720),
+        } };
+        const credential = () => issueSubstrateFederatedIsolatedDevnetMiningCredentialV1(MNEMONIC, signer.publicKeyHex);
+        const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1({
+          javaExecutablePath: liveJavaPath!, expectedJavaExecutableSha256Hex: fileSha256(liveJavaPath!),
+          nodeAssemblyJarPath: liveJarPath!, expectedNodeAssemblyJarSha256Hex: fileSha256(liveJarPath!),
+          buildIdentityDigestHex: sha256(Buffer.from('live-native-continuation-process-only')),
+        }, launchBindingForSigner(signer), credential(), credential(), credential(), credential());
+        let live = true;
+        let authority: ReturnType<typeof issueContinuationAuthority> | undefined;
+        let firstConfirmation: Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0] | undefined;
+        let injected = 0;
+        let phase = 'first';
+        const callbacks: string[] = [];
+        const consumes = vi.spyOn(miningCredentials, 'consumeSubstrateFederatedIsolatedDevnetMiningCredentialV1');
+        const claims = vi.spyOn(miningCredentials, 'claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1');
+        const originalFetch = globalThis.fetch;
+        const reads = vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args) => {
+          const response = await originalFetch(...args);
+          const atSelectedRead = fault === 'checkpoint late'
+            ? phase === 'checkpoint' && consumes.mock.calls.length === 5 : phase === fault;
+          if (fault !== 'valid' && atSelectedRead && injected === 0 && String(args[0]).endsWith('/info')) {
+            injected++; live = false;
+          }
+          return response;
+        });
+        const assertCustody = () => { if (!live) throw new Error('synthetic continuation custody lost during await'); };
+        try {
+          await session.startMining();
+          const setup = await session.withMiningActiveExecutionTarget(async target => target);
+          const runCycle = async (scope: Pick<typeof session,
+            'withCheckpointExtensionMiningTarget' | 'withCheckpointBoundMiningStoppedExecutionTarget'
+            | 'withCheckpointBoundReservationFreshnessRevalidationTarget' | 'withCheckpointBoundTrackerTransportTarget'
+            | 'withTrackerTransportConfirmationMiningTarget'>, second: boolean) => {
+            phase = second ? 'checkpoint' : 'first';
+            const anchor = await scope.withCheckpointExtensionMiningTarget(second ? 'cd'.repeat(64) : 'ab'.repeat(64),
+              { minimumTipHeight: 11 }, async () => { if (second) callbacks.push('checkpoint'); });
+            phase = second ? 'admission' : 'first';
+            const frozen = await scope.withCheckpointBoundMiningStoppedExecutionTarget(async target => {
+              if (second) {
+                callbacks.push('admission');
+                expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(firstConfirmation!)).toThrow(/not owned/);
+                const binding = assertSubstrateFederatedNativeContinuationTrackerLineageV1(target, setup.value, firstConfirmation!);
+                expect(() => assertSubstrateFederatedNativeContinuationTrackerLineageV1(target, setup.value,
+                  { ...firstConfirmation! })).toThrow(/first confirmation/);
+                return binding;
+              }
+              return assertSubstrateFederatedNativeSetupTrackerLineageV1(target, setup.value);
+            });
+            let completion: ReturnType<typeof issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1> | undefined;
+            await scope.withCheckpointBoundReservationFreshnessRevalidationTarget(async target => {
+              expect(assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, frozen.value))
+                .toMatchObject({ processBindingDigestHex: expect.any(String) });
+              completion = issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(target);
+            });
+            phase = second ? 'confirmation' : 'first';
+            // No transaction is submitted: this tests process/capability control,
+            // not canonical transaction inclusion or a bridge roundtrip.
+            const txId = second ? 'be'.repeat(32) : 'ac'.repeat(32);
+            const transported = await scope.withCheckpointBoundTrackerTransportTarget(completion!, txId, async target => {
+              if (second) callbacks.push('transport');
+              return assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(target);
+            });
+            await scope.withTrackerTransportConfirmationMiningTarget(txId, async target => {
+              expect(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transported.value, txId))
+                .toMatchObject({ processBindingDigestHex: expect.any(String) });
+              if (second) {
+                callbacks.push('confirmation');
+                // Terminal payout may destroy the signer inside this callback.
+                live = false;
+                revokeContinuationAuthority(authority!);
+                expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target)).not.toThrow();
+              } else {
+                firstConfirmation = target;
+                authority = issueContinuationAuthority({ mnemonic: MNEMONIC, publicKeyHex: signer.publicKeyHex,
+                  setupTarget: setup.value, confirmationTarget: target, assertCustody });
+                expect(() => session.continueNativeTrackerCycleV1(authority!)).toThrow(/completed confirmation/);
+              }
+            });
+            return anchor;
+          };
+          const first = await runCycle(session, false);
+          const frozen = await session.withMiningStoppedReadOnlyTarget(async target => target);
+          expect(frozen.receipt.finalSnapshot.fullHeight).toBeGreaterThanOrEqual(first.receipt.finalSnapshot.fullHeight);
+          expect(() => session.continueNativeTrackerCycleV1({ ...authority! })).toThrow(/authority is absent/);
+          for (const parent of ['setup', 'confirmation'] as const) {
+            const foreign = issueContinuationAuthority({ mnemonic: MNEMONIC, publicKeyHex: signer.publicKeyHex,
+              setupTarget: parent === 'setup' ? { ...setup.value } : setup.value,
+              confirmationTarget: parent === 'confirmation' ? { ...firstConfirmation! } : firstConfirmation!, assertCustody });
+            expect(() => session.continueNativeTrackerCycleV1(foreign)).toThrow(/parent or signer differs/);
+          }
+          const second = session.continueNativeTrackerCycleV1(authority!);
+          const claimed = claims.mock.results.at(-1)!.value as ReturnType<typeof miningCredentials.claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>;
+          expect(() => session.continueNativeTrackerCycleV1(authority!)).toThrow(/completed confirmation/);
+          await expect(session.withCheckpointExtensionMiningTarget('ab'.repeat(64), {}, async () => undefined))
+            .rejects.toThrow(/cycle is no longer current/);
+          const pending = runCycle(second, true);
+          if (fault === 'valid') {
+            const next = await pending;
+            expect(next.receipt.finalSnapshot.fullHeight).toBeGreaterThan(first.receipt.finalSnapshot.fullHeight);
+            expect(callbacks).toEqual(['checkpoint', 'admission', 'transport', 'confirmation']);
+            expect(injected).toBe(0);
+          } else {
+            await expect(pending).rejects.toThrow(/custody lost during await/);
+            expect(injected).toBe(1);
+            expect(consumes.mock.calls).toHaveLength(fault === 'checkpoint' ? 4 : fault === 'confirmation' ? 6 : 5);
+            expect(callbacks).toEqual(fault.startsWith('checkpoint') ? [] : fault === 'admission'
+              ? ['checkpoint'] : ['checkpoint', 'admission']);
+            expect(() => claimed.assertCustody()).toThrow(/revoked/);
+            for (const token of [claimed.checkpointMiningCredential, claimed.trackerAdmissionMiningCredential,
+              claimed.trackerConfirmationMiningCredential]) {
+              expect(() => assertSubstrateFederatedIsolatedDevnetMiningCredentialV1(token, signer.publicKeyHex))
+                .toThrow(/consumed, or revoked/);
+            }
+          }
+        } finally {
+          reads.mockRestore();
+          consumes.mockRestore();
+          claims.mockRestore();
+          if (authority !== undefined) revokeContinuationAuthority(authority);
+          await session.stop();
+        }
+      }, 600_000,
+    );
+    it.skipIf(!liveJavaPath || !liveJarPath)(
+      'native setup tracker lineage preserves expired setup provenance across owned process phases',
+      async () => {
+        type SetupTarget = Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0];
+        type FrozenTarget = Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2>[0];
+        let foreignSetupTarget: SetupTarget | undefined;
+        // Both fresh owners use the fixed devnet genesis configuration and identical origins.
+        // The first owner is fully stopped before the second claims those ports.
+        for (const owner of ['foreign', 'current'] as const) {
+          const setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+          const credentials = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
+          const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1({
+            javaExecutablePath: liveJavaPath!, expectedJavaExecutableSha256Hex: fileSha256(liveJavaPath!),
+            nodeAssemblyJarPath: liveJarPath!, expectedNodeAssemblyJarSha256Hex: fileSha256(liveJarPath!),
+            buildIdentityDigestHex: sha256(Buffer.from('native-setup-tracker-process-only', 'ascii')),
+          }, launchBindingForSigner(setup.signer), credentials.miningCredential,
+          credentials.checkpointMiningCredential, credentials.trackerAdmissionMiningCredential,
+          credentials.trackerConfirmationMiningCredential);
+          let originalSetupTarget: SetupTarget | undefined;
+          let frozenTarget: FrozenTarget | undefined;
+          let checkpointTarget: unknown;
+          try {
+            await session.startMining();
+            await session.withMiningActiveExecutionTarget(async target => {
+              originalSetupTarget = target;
+              assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+              expect(() => assertSubstrateFederatedNativeSetupTrackerLineageV1(
+                target as unknown as FrozenTarget, target,
+              )).toThrow(/not owned by the active tracker-check action/);
+            });
+            expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(originalSetupTarget!))
+              .toThrow(/not owned by the active mining action/);
+            if (owner === 'foreign') {
+              foreignSetupTarget = originalSetupTarget;
+              continue;
+            }
+            expect(originalSetupTarget).toEqual(foreignSetupTarget);
+            expect(originalSetupTarget).not.toBe(foreignSetupTarget);
+            await session.withCheckpointExtensionMiningTarget('ab'.repeat(64), { minimumTipHeight: 11 }, async target => {
+              checkpointTarget = target;
+              expect(() => assertSubstrateFederatedNativeSetupTrackerLineageV1(
+                target as unknown as FrozenTarget, originalSetupTarget!,
+              )).toThrow(/not owned by the active tracker-check action/);
+            });
+            await session.withCheckpointBoundMiningStoppedExecutionTarget(async target => {
+              frozenTarget = target;
+              const binding = assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(target);
+              expect(assertSubstrateFederatedNativeSetupTrackerLineageV1(target, originalSetupTarget!)).toEqual(binding);
+              expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(originalSetupTarget!))
+                .toThrow(/not owned by the active mining action/);
+              const faults = [
+                ['copied tracker', () => assertSubstrateFederatedNativeSetupTrackerLineageV1({ ...target }, originalSetupTarget!), /not owned/],
+                ['copied setup', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, { ...originalSetupTarget! }), /does not descend/],
+                ['other session', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, foreignSetupTarget!), /does not descend/],
+                ['wrong origin phase', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, checkpointTarget as SetupTarget), /does not descend/],
+                ['changed setup origin', () => assertSubstrateFederatedNativeSetupTrackerLineageV1(target, {
+                  ...originalSetupTarget!, primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
+                } as unknown as SetupTarget), /does not descend/],
+              ] as const;
+              for (const [label, attempt, error] of faults) {
+                expect(attempt, label).toThrow(error);
+              }
+              // Failed lineage assertions do not consume the genuine current continuation.
+              expect(assertSubstrateFederatedNativeSetupTrackerLineageV1(target, originalSetupTarget!)).toEqual(binding);
+            });
+            expect(() => assertSubstrateFederatedNativeSetupTrackerLineageV1(frozenTarget!, originalSetupTarget!))
+              .toThrow(/not owned by the active tracker-check action/);
+          } finally {
+            try { await session.stop(); } finally { setup.dispose(); }
+          }
+        }
+      },
+      480_000,
+    );
+
     it.skipIf(!liveJavaPath || !liveJarPath)(
       'owns a real direct-Java mining to non-mining lifecycle without submission',
       async () => {
@@ -250,8 +979,20 @@ describe.skipIf(process.platform !== 'win32')(
           const actionReleased = new Promise<void>(resolvePromise => {
             releaseAction = resolvePromise;
           });
+          let ownedTarget:
+            Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1>[0]
+              | undefined;
+          let actionProcessBindingDigestHex: string | undefined;
           const managed = session.withMiningStoppedReadOnlyTarget(
             async target => {
+              ownedTarget = target;
+              actionProcessBindingDigestHex =
+                assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(target);
+              expect(() =>
+                assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1({
+                  ...target,
+                })
+              ).toThrow(/not owned by the active managed process action/);
               enterAction();
               await actionReleased;
               const discovery =
@@ -279,7 +1020,7 @@ describe.skipIf(process.platform !== 'win32')(
           expect(result.value.discovery.signer.publicKeyHex)
             .toBe(setup.signer.publicKeyHex);
           expect(result.value.history.receipt.target.headerCount)
-            .toBeGreaterThanOrEqual(8);
+            .toBeGreaterThanOrEqual(10);
           const headerManifest = JSON.parse(
             result.value.history.artifacts.greatestWorkHeadersManifest,
           ) as { headers: Array<{ version: number }> };
@@ -289,6 +1030,13 @@ describe.skipIf(process.platform !== 'win32')(
           )).toBe(true);
           expect(result.receipt.miningStoppedBeforeAction).toBe(true);
           expect(result.receipt.processBindingDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+          expect(result.receipt.processBindingDigestHex)
+            .toBe(actionProcessBindingDigestHex);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1(
+              ownedTarget!,
+            )
+          ).toThrow(/not owned by the active managed process action/);
           expect(result.receipt.checks).toMatchObject({
             javaImageAndPinnedFilesRechecked: true,
             ephemeralPowSecretPassedOnlyViaProcessEnvironment: true,
@@ -303,8 +1051,426 @@ describe.skipIf(process.platform !== 'win32')(
       },
       240_000,
     );
+
+    it.skipIf(!liveJavaPath || !liveJarPath)(
+      'owns a mining-active execution capability and freezes the final target',
+      async () => {
+        const setup =
+          await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+        const credentials =
+          claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
+        const session = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1(
+          {
+            javaExecutablePath: liveJavaPath!,
+            expectedJavaExecutableSha256Hex: fileSha256(liveJavaPath!),
+            nodeAssemblyJarPath: liveJarPath!,
+            expectedNodeAssemblyJarSha256Hex: fileSha256(liveJarPath!),
+            buildIdentityDigestHex:
+              sha256(Buffer.from('live-execution-process-only', 'ascii')),
+          },
+          launchBindingForSigner(setup.signer),
+          credentials.miningCredential,
+          credentials.checkpointMiningCredential,
+          credentials.trackerAdmissionMiningCredential,
+          credentials.trackerConfirmationMiningCredential,
+        );
+        let ownedTarget:
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0]
+            | undefined;
+        let freshnessTarget:
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1>[0]
+            | undefined;
+        let transportTarget:
+          Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2>[0]
+            | undefined;
+        let freshnessCompletion:
+          ReturnType<
+            typeof issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1
+          > | undefined;
+        try {
+          await session.startMining();
+          const managed = await session.withMiningActiveExecutionTarget(
+            async target => {
+              ownedTarget = target;
+              const binding =
+                assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+                  target,
+                );
+              expect(binding.processBindingDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+              expect(binding.executionTargetIdentityDigestHex)
+                .toMatch(/^[0-9a-f]{64}$/u);
+              expect(() =>
+                assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1({
+                  ...target,
+                })
+              ).toThrow(/not owned by the active mining action/);
+              const discovery =
+                await discoverSubstrateFederatedRewardInputsV1(setup.signer);
+              return Object.freeze({
+                ...binding,
+                genesisHeaderIdHex: discovery.target.genesisHeaderIdHex,
+              });
+            },
+          );
+          expect(managed.receipt.processBindingDigestHex)
+            .toBe(managed.value.processBindingDigestHex);
+          expect(managed.receipt.executionTargetIdentityDigestHex)
+            .toBe(managed.value.executionTargetIdentityDigestHex);
+          expect(managed.receipt.finalSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(managed.receipt.initialSnapshot.fullHeight);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+              ownedTarget!,
+            )
+          ).toThrow(/not owned by the active mining action/);
+          const anchored = await session.withCheckpointExtensionMiningTarget(
+            'ab'.repeat(64),
+            { minimumTipHeight: 11 },
+            async () => 'checkpoint-callback-no-op',
+          );
+          expect(anchored.value).toBe('checkpoint-callback-no-op');
+          expect(anchored.receipt.extensionKeyHex).toBe('0401');
+          expect(anchored.receipt.extensionValueHex).toBe('ab'.repeat(64));
+          expect(anchored.receipt.priorSnapshot)
+            .toEqual(managed.receipt.finalSnapshot);
+          expect(anchored.receipt.minedSnapshot.fullHeight)
+            .toBeGreaterThan(managed.receipt.finalSnapshot.fullHeight);
+          expect(anchored.receipt.minedSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(11);
+          expect(anchored.receipt.miningStoppedBeforeObservation).toBe(true);
+          expect(anchored.receipt.finalSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(anchored.receipt.minedSnapshot.fullHeight);
+          expect(anchored.receipt.processBindingDigestHex)
+            .not.toBe(managed.receipt.processBindingDigestHex);
+          await expect(session.withCheckpointExtensionMiningTarget(
+            'ab'.repeat(64),
+            { minimumTipHeight: 11 },
+            async () => 'never',
+          )).rejects.toThrow(/absent, consumed, or revoked/);
+          const resumed =
+            await session.withCheckpointBoundMiningStoppedExecutionTarget(
+              async target => {
+                expect(target).toMatchObject({
+                  primaryMining: false,
+                  primaryReadOnly: true,
+                  witnessReadOnly: true,
+                  miningStopped: true,
+                  checkpointBound: true,
+                });
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active mining action/);
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active tracker-admission action/);
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active reservation-freshness action/);
+                return assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(
+                  target,
+                );
+              },
+            );
+          expect(resumed.receipt.checkpointExtensionBoundDuringAction).toBe(true);
+          expect(resumed.receipt.primaryMiningDuringAction).toBe(false);
+          expect(resumed.receipt.primaryReadOnlyDuringAction).toBe(true);
+          expect(resumed.receipt.witnessReadOnlyDuringAction).toBe(true);
+          expect(resumed.receipt.miningStoppedBeforeAction).toBe(true);
+          expect(resumed.receipt.exactFrozenSnapshotStableAcrossAction).toBe(true);
+          expect(resumed.receipt.trackerAdmissionMiningCredentialConsumedOnce)
+            .toBe(true);
+          expect(resumed.receipt.checkpointSnapshotRevalidatedOnBothNodes)
+            .toBe(true);
+          expect(resumed.receipt.checkpointExtensionObservationDigestHex)
+            .toMatch(/^[0-9a-f]{64}$/u);
+          expect(resumed.receipt.extensionKeyHex).toBe('0401');
+          expect(resumed.receipt.extensionValueHex).toBe('ab'.repeat(64));
+          expect(resumed.receipt.checkpointSnapshot)
+            .toEqual(anchored.receipt.finalSnapshot);
+          expect(resumed.receipt.executionTargetIdentityDigestHex)
+            .toBe(anchored.receipt.executionTargetIdentityDigestHex);
+          expect(resumed.receipt.processBindingDigestHex)
+            .not.toBe(anchored.receipt.processBindingDigestHex);
+          expect(resumed.receipt.actionStartSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(resumed.receipt.actionStartSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(
+              resumed.receipt.preFreezeMiningSnapshot.fullHeight,
+            );
+          expect(resumed.value.processBindingDigestHex)
+            .toBe(resumed.receipt.processBindingDigestHex);
+          const freshness = await session
+            .withCheckpointBoundReservationFreshnessRevalidationTarget(
+              async target => {
+                freshnessTarget = target;
+                expect(target).toMatchObject({
+                  primaryMining: false,
+                  primaryReadOnly: true,
+                  witnessReadOnly: true,
+                  miningStopped: true,
+                  checkpointBound: true,
+                  reservationFreshnessRevalidation: true,
+                });
+                expect(() =>
+                  assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2(
+                    target as unknown as Parameters<
+                      typeof assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV2
+                    >[0],
+                  )
+                ).toThrow(/not owned by the active tracker-check action/);
+                const binding =
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+                    target,
+                  );
+                expect(assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, resumed.value)).toEqual(binding);
+                expect(() => assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2({ ...target }, resumed.value))
+                  .toThrow(/not owned/);
+                for (const key of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+                  expect(() => assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(target, {
+                    ...resumed.value, [key]: 'ff'.repeat(32),
+                  })).toThrow(/does not descend/);
+                }
+                freshnessCompletion =
+                  issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
+                    target,
+                  );
+                expect(() =>
+                  issueSubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCompletionV1(
+                    target,
+                  )
+                ).toThrow(/completion is already issued/);
+                return binding;
+              },
+            );
+          expect(freshness.receipt.schema).toBe(
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_RESERVATION_FRESHNESS_EXECUTION_V1_SCHEMA,
+          );
+          expect(freshness.receipt.sameProcessesAsTrackerCheck).toBe(true);
+          expect(freshness.receipt.trackerCheckProcessBindingDigestHex)
+            .toBe(resumed.receipt.processBindingDigestHex);
+          expect(
+            freshness.receipt.trackerCheckExecutionTargetIdentityDigestHex,
+          ).toBe(resumed.receipt.executionTargetIdentityDigestHex);
+          expect(freshness.receipt.processBindingDigestHex)
+            .not.toBe(resumed.receipt.processBindingDigestHex);
+          expect(freshness.receipt.executionTargetIdentityDigestHex)
+            .not.toBe(resumed.receipt.executionTargetIdentityDigestHex);
+          expect(freshness.receipt.trackerCheckSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(freshness.receipt.actionStartSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(freshness.receipt.actionEndSnapshot)
+            .toEqual(resumed.receipt.actionEndSnapshot);
+          expect(freshness.receipt.checkpointSnapshot)
+            .toEqual(resumed.receipt.checkpointSnapshot);
+          expect(freshness.receipt.checkpointExtensionObservationDigestHex)
+            .toBe(resumed.receipt.checkpointExtensionObservationDigestHex);
+          expect(freshness.receipt.extensionValueHex)
+            .toBe(resumed.receipt.extensionValueHex);
+          expect(freshness.value.processBindingDigestHex)
+            .toBe(freshness.receipt.processBindingDigestHex);
+          expect(freshness.value.executionTargetIdentityDigestHex)
+            .toBe(freshness.receipt.executionTargetIdentityDigestHex);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedTrackerReservationFreshnessTargetV1(
+              freshnessTarget!,
+            )
+          ).toThrow(/not owned by the active reservation-freshness action/);
+          await expect(
+            session.withCheckpointBoundTrackerTransportTarget(
+              structuredClone(freshnessCompletion!),
+              'ac'.repeat(32),
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/lacks exact reservation freshness completion/);
+          const confirmationTransactionIdHex = 'ac'.repeat(32);
+          const transport = await session
+            .withCheckpointBoundTrackerTransportTarget(
+              freshnessCompletion!,
+              confirmationTransactionIdHex,
+              async target => {
+                transportTarget = target;
+                expect(target).toMatchObject({
+                  primaryMining: true,
+                  witnessReadOnly: true,
+                  checkpointBound: true,
+                  reservationFreshnessCheckBound: true,
+                  trackerTransport: true,
+                  sameProcessCanonicalConfirmation: true,
+                  candidateMiningRequiresExpectedTransaction: true,
+                  expectedTransactionIdHex: confirmationTransactionIdHex,
+                });
+                const binding =
+                  assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(
+                    target,
+                  );
+                expect(binding.reservationFreshnessProcessBindingDigestHex)
+                  .toBe(freshness.receipt.processBindingDigestHex);
+                expect(
+                  binding.reservationFreshnessExecutionTargetIdentityDigestHex,
+                ).toBe(freshness.receipt.executionTargetIdentityDigestHex);
+                return binding;
+              },
+            );
+          expect(transport.receipt.schema).toBe(
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_TRANSPORT_EXECUTION_V2_SCHEMA,
+          );
+          expect(transport.receipt.sameProcessesAsReservationFreshness)
+            .toBe(false);
+          expect(transport.receipt.primaryMiningDuringAction)
+            .toBe(true);
+          expect(
+            transport.receipt
+              .trackerConfirmationMiningCredentialConsumedBeforeTransportOnce,
+          ).toBe(true);
+          expect(transport.receipt.candidateMiningRequiresExpectedTransaction)
+            .toBe(true);
+          expect(transport.receipt.expectedTransactionIdHex)
+            .toBe(confirmationTransactionIdHex);
+          expect(
+            transport.receipt
+              .exactReservationFreshnessSnapshotRevalidatedBeforeAction,
+          ).toBe(true);
+          expect(transport.receipt.trackerTransportTargetActiveOnlyDuringAction)
+            .toBe(true);
+          expect(transport.receipt.reservationFreshnessProcessBindingDigestHex)
+            .toBe(freshness.receipt.processBindingDigestHex);
+          expect(
+            transport.receipt
+              .reservationFreshnessExecutionTargetIdentityDigestHex,
+          ).toBe(freshness.receipt.executionTargetIdentityDigestHex);
+          expect(transport.receipt.reservationFreshnessSnapshot)
+            .toEqual(freshness.receipt.actionEndSnapshot);
+          expect(transport.receipt.actionStartSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(
+              freshness.receipt.actionEndSnapshot.fullHeight,
+            );
+          expect(transport.receipt.actionStartSnapshot.indexedHeight)
+            .toBe(transport.receipt.actionStartSnapshot.fullHeight);
+          expect(transport.receipt.actionEndSnapshot.fullHeight)
+            .toBeGreaterThanOrEqual(transport.receipt.actionStartSnapshot.fullHeight);
+          expect(transport.value.processBindingDigestHex)
+            .toBe(transport.receipt.processBindingDigestHex);
+          expect(() =>
+            assertSubstrateFederatedIsolatedDevnetOwnedTrackerTransportTargetV2(
+              transportTarget!,
+            )
+          ).toThrow(/not owned by the active tracker-transport action/);
+          await expect(
+            session.withCheckpointBoundTrackerTransportTarget(
+              freshnessCompletion!,
+              confirmationTransactionIdHex,
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/requires one completed reservation freshness check/);
+          await expect(
+            session.withCheckpointBoundReservationFreshnessRevalidationTarget(
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/requires one completed frozen tracker check/);
+          await expect(session.withCheckpointBoundMiningStoppedExecutionTarget(
+            async () => 'never',
+          )).rejects.toThrow(/requires one completed checkpoint observation/);
+          let foreignConfirmationActionInvoked = false;
+          await expect(
+            session.withTrackerTransportConfirmationMiningTarget(
+              'ff'.repeat(32),
+              async () => {
+                foreignConfirmationActionInvoked = true;
+                return 'never';
+              },
+            ),
+          ).rejects.toThrow(/does not match the completed transport/);
+          expect(foreignConfirmationActionInvoked).toBe(false);
+          let confirmationTarget: typeof ownedTarget;
+          const confirmation = await session
+            .withTrackerTransportConfirmationMiningTarget(
+              confirmationTransactionIdHex,
+              async target => {
+                confirmationTarget = target;
+                const binding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+                expect(assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport.value, confirmationTransactionIdHex))
+                  .toEqual(binding);
+                expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2({ ...target }, transport.value, confirmationTransactionIdHex))
+                  .toThrow(/not owned/);
+                expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, transport.value, 'ff'.repeat(32)))
+                  .toThrow(/does not descend/);
+                for (const key of ['processBindingDigestHex', 'executionTargetIdentityDigestHex'] as const) {
+                  expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(target, {
+                    ...transport.value, [key]: 'ff'.repeat(32),
+                  }, confirmationTransactionIdHex)).toThrow(/does not descend/);
+                }
+                return binding;
+              },
+            );
+          expect(() => assertSubstrateFederatedIsolatedDevnetTrackerConfirmationLineageV2(confirmationTarget!, transport.value, confirmationTransactionIdHex))
+            .toThrow(/not owned/);
+          expect(() => assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2(freshnessTarget!, resumed.value))
+            .toThrow(/not owned/);
+          expect(confirmation.receipt.schema).toBe(
+            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_TRACKER_CONFIRMATION_EXECUTION_V2_SCHEMA,
+          );
+          expect(confirmation.receipt.confirmedTransactionIdHex)
+            .toBe(confirmationTransactionIdHex);
+          expect(confirmation.receipt.sameProcessesAsTrackerTransport)
+            .toBe(true);
+          expect(confirmation.receipt.exactTrackerTransportBound).toBe(true);
+          expect(
+            confirmation.receipt.trackerTransportProcessBindingDigestHex,
+          ).toBe(transport.receipt.processBindingDigestHex);
+          expect(
+            confirmation.receipt
+              .trackerTransportExecutionTargetIdentityDigestHex,
+          ).toBe(transport.receipt.executionTargetIdentityDigestHex);
+          expect(confirmation.receipt.transportSnapshot)
+            .toEqual(transport.receipt.actionEndSnapshot);
+          expect(confirmation.value.processBindingDigestHex)
+            .toBe(confirmation.receipt.processBindingDigestHex);
+          await expect(
+            session.withTrackerTransportConfirmationMiningTarget(
+              confirmationTransactionIdHex,
+              async () => 'never',
+            ),
+          ).rejects.toThrow(/requires one completed transport attempt/);
+        } finally {
+          await session.stop();
+          setup.dispose();
+        }
+      },
+      240_000,
+    );
   },
 );
+
+async function captureStartupFailure(
+  session: ReturnType<
+    typeof createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1
+  >,
+): Promise<unknown> {
+  let failure: unknown;
+  try {
+    await session.startMining();
+  } catch (error) {
+    failure = error;
+  }
+  if (failure === undefined) {
+    await session.stop();
+    throw new Error('isolated test process unexpectedly reached mining');
+  }
+  return failure;
+}
 
 function launchBinding(): SubstrateFederatedIsolatedDevnetErgoNodeLaunchBindingV1 {
   return {
@@ -364,6 +1530,97 @@ function ownedTestDirectory(): string {
 
 function fileSha256(path: string): string {
   return sha256(readFileSync(path));
+}
+
+interface CheckpointExtensionFixture {
+  readonly checkpoint: Readonly<{
+    readonly network: 'devnet';
+    readonly fullHeight: number;
+    readonly indexedHeight: number;
+    readonly headerIdHex: string;
+  }>;
+  readonly extensionValueHex: string;
+  readonly block: {
+    header: Record<string, unknown> & { height: number; transactionsRoot: string };
+    extension: { fields: string[][] };
+  };
+}
+
+function checkpointExtensionFixture(): CheckpointExtensionFixture {
+  const extensionValueHex = 'ab'.repeat(64);
+  const fields = [
+    ['0100', Buffer.from('side-field', 'ascii').toString('hex')],
+    ['0401', extensionValueHex],
+  ];
+  const extensionHash = buildErgoExtensionMembershipProof(
+    fields.map(([keyHex, valueHex]) => ({
+      key: Buffer.from(keyHex!, 'hex'),
+      value: Buffer.from(valueHex!, 'hex'),
+    })),
+    Buffer.from('0401', 'hex'),
+  ).root.toString('hex');
+  const height = 11;
+  const identity = {
+    version: 2,
+    parentId: Buffer.alloc(32, 0x40),
+    adProofsRoot: Buffer.alloc(32, 0x41),
+    stateRoot: Buffer.alloc(33, 0x42),
+    transactionsRoot: Buffer.alloc(32, 0x43),
+    timestamp: 1_700_000_000_011n,
+    nBits: 0x01010000,
+    height,
+    extensionHash: Buffer.from(extensionHash, 'hex'),
+    votes: Buffer.alloc(3),
+    powSolution: {
+      publicKey: Buffer.concat([Buffer.from([2]), Buffer.alloc(32, 0x44)]),
+      nonce: Buffer.alloc(8, 0x45),
+    },
+  };
+  const headerIdHex = computeErgoHeaderId(identity).toString('hex');
+  return {
+    checkpoint: Object.freeze({
+      network: 'devnet' as const,
+      fullHeight: height,
+      indexedHeight: height,
+      headerIdHex,
+    }),
+    extensionValueHex,
+    block: {
+      header: {
+        id: headerIdHex,
+        version: identity.version,
+        parentId: identity.parentId.toString('hex'),
+        adProofsRoot: identity.adProofsRoot.toString('hex'),
+        stateRoot: identity.stateRoot.toString('hex'),
+        transactionsRoot: identity.transactionsRoot.toString('hex'),
+        timestamp: Number(identity.timestamp),
+        nBits: identity.nBits,
+        height,
+        extensionHash,
+        votes: identity.votes.toString('hex'),
+        powSolutions: {
+          pk: identity.powSolution.publicKey.toString('hex'),
+          w: Buffer.concat([Buffer.from([2]), Buffer.alloc(32, 0x46)])
+            .toString('hex'),
+          n: identity.powSolution.nonce.toString('hex'),
+          d: 0,
+        },
+      },
+      extension: { fields },
+    },
+  };
+}
+
+function observeFixture(
+  fixture: CheckpointExtensionFixture,
+  block: CheckpointExtensionFixture['block'],
+): string {
+  return deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1(
+    'primary',
+    fixture.checkpoint,
+    fixture.extensionValueHex,
+    block,
+  );
 }
 
 function sha256(value: Uint8Array): string {
