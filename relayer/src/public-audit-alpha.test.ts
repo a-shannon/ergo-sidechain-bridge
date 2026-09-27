@@ -299,10 +299,17 @@ describe('public audit alpha bootstrap', () => {
       path.join(bridgeRoot, 'relayer', 'src', 'scripts', 'public-audit-alpha.ts'),
       'utf8',
     );
-    const boundedVitestRunner = readFileSync(
+    const boundedVitestRunnerEntry = readFileSync(
       path.join(bridgeRoot, 'relayer', 'src', 'scripts', 'run-bounded-vitest.ts'),
       'utf8',
     );
+    const boundedVitestRunner = [
+      boundedVitestRunnerEntry,
+      readFileSync(
+        path.join(bridgeRoot, 'relayer', 'src', 'scripts', 'bounded-vitest-schedule.ts'),
+        'utf8',
+      ),
+    ].join('\n');
     const cleanCheckoutRunner = readFileSync(
       path.join(bridgeRoot, 'relayer', 'src', 'scripts', 'check-clean-checkout.ts'),
       'utf8',
@@ -343,6 +350,21 @@ describe('public audit alpha bootstrap', () => {
     );
     expect(boundedVitestRunner).toContain(
       "parseResumeBoundary(process.argv.slice(2))",
+    );
+    expect(boundedVitestRunnerEntry).toContain(
+      "import { buildBoundedVitestExecutionPlan } from './bounded-vitest-schedule.js'",
+    );
+    expect(boundedVitestRunnerEntry).toContain(
+      'const collectedTests = collectTestFiles(srcDir).map(toVitestTarget)',
+    );
+    expect(boundedVitestRunnerEntry).toContain(
+      'buildBoundedVitestExecutionPlan(collectedTests, resumeBoundary)',
+    );
+    expect(boundedVitestRunnerEntry).toContain(
+      'const tests = executionPlan.selectedTests',
+    );
+    expect(boundedVitestRunnerEntry).toContain(
+      'for (let index = 0; index < tests.length; index += batchSize)',
     );
     expect(boundedVitestRunner).toContain(
       "--start-after must leave at least one collected test file to execute",

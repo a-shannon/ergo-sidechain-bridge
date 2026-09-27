@@ -170,6 +170,14 @@ resource-disjoint groups. A separate runner/CI scheduling change needs its own
 resource map, negative selection tests and complete milestone verification.
 Current required hosted jobs remain required until that change is reviewed.
 
+The bounded Vitest runner executes its fixed cheap-check prefix first, followed
+by every remaining collected file once in lexical order. `--start-after` names
+a boundary in that actual priority-first schedule. Resume only after a full
+batch completed successfully under unchanged inputs, using the last scheduled
+file in that batch. The runner prints a batch before executing it, so a merely
+printed, failing or incomplete batch establishes no resume boundary. A boundary
+from the former all-lexical schedule establishes no coverage under this one.
+
 ## Work In Parallel Without Splitting Authority
 
 Keep one integration owner and at most two bounded agents. Use one worker for

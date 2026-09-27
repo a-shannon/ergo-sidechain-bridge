@@ -6,6 +6,7 @@ import {
   buildExactTestNamePatterns,
   parseListedVitestTests,
 } from './bounded-vitest-name-shards.js';
+import { buildBoundedVitestExecutionPlan } from './bounded-vitest-schedule.js';
 
 const DEFAULT_BATCH_SIZE = 1;
 const DEFAULT_REPORTER = 'default';
@@ -94,18 +95,6 @@ function parseResumeBoundary(args: string[]): string | undefined {
   return args[1].trim().replace(/\\/g, '/');
 }
 
-function selectResumeSuffix(tests: string[], requested: string | undefined): string[] {
-  if (!requested) return tests;
-  const index = tests.findIndex(test => toVitestTarget(test) === requested);
-  if (index < 0) {
-    throw new Error(`--start-after must name an exact collected test file; got ${requested}`);
-  }
-  if (index === tests.length - 1) {
-    throw new Error('--start-after must leave at least one collected test file to execute');
-  }
-  return tests.slice(index + 1);
-}
-
 const srcDir = path.join(process.cwd(), 'src');
 const vitestBin =
   process.platform === 'win32'
@@ -117,11 +106,10 @@ if (!existsSync(vitestBin) || !existsSync(vitestCli)) {
   throw new Error(`Vitest binary or CLI not found at ${vitestBin} / ${vitestCli}`);
 }
 
-const collectedTests = collectTestFiles(srcDir).sort((left, right) =>
-  toVitestTarget(left).localeCompare(toVitestTarget(right)),
-);
+const collectedTests = collectTestFiles(srcDir).map(toVitestTarget);
 const resumeBoundary = parseResumeBoundary(process.argv.slice(2));
-const tests = selectResumeSuffix(collectedTests, resumeBoundary);
+const executionPlan = buildBoundedVitestExecutionPlan(collectedTests, resumeBoundary);
+const tests = executionPlan.selectedTests;
 const batchSize = parseBatchSize();
 
 console.log(
@@ -253,7 +241,7 @@ function runTestShards(target: string, config: ShardedTestTarget): void {
 }
 
 for (let index = 0; index < tests.length; index += batchSize) {
-  const batch = tests.slice(index, index + batchSize).map(toVitestTarget);
+  const batch = tests.slice(index, index + batchSize);
   const batchNumber = Math.floor(index / batchSize) + 1;
   const batchCount = Math.ceil(tests.length / batchSize);
   console.log(`\nVitest batch ${batchNumber}/${batchCount}: ${batch.join(' ')}`);
