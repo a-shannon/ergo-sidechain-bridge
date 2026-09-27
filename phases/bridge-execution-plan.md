@@ -28,12 +28,33 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** distinguish the failing root phase before admitting another full
-two-cycle campaign. Campaign 26 passed the early Ergo build-output guard and
-created one fresh worker attempt, then failed with `execution_failure`. Its
-bounded diagnostic reached `root-or-cleanup` but identified no source phase or
-successful cleanup. The attempt is consumed. Keep existing terminal formats,
-digest domains, custody rules and historical attempt holds unchanged.
+**Now:** publish the reviewed Windows MSVC host-admission correction, then
+require all three CI jobs on its exact commit before considering a fresh
+campaign admission. The parent rejects absent `LIB`, `LIBPATH`, `INCLUDE` or a
+regular linker candidate before attempt creation; the worker rechecks the same
+predicate before the root. Sixty-eight focused cases passed in total, including
+the four added isolated negatives; the final guard test file passes 10/10.
+TypeScript and the architecture check passed across 137 layered modules and
+892 TypeScript files. Independent Sol/high review of the
+six-file change returned GO without P1/P2 findings. The bounded relayer suite
+was interrupted at batch 474/596 after the preceding 96-test batch passed; the
+provisioning test remained CPU-active for several minutes without returning.
+Treat local full-suite closure as pending and use the exact published CI result
+to decide it. Do not run another campaign before that CI is green and a separate
+fresh admission closes.
+
+Campaign 27 passed separate reviewed admission and the
+[exact-head CI](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36317771092)
+on `2a6f127385c87db8251c1b7a3f67a78685b2f3ba`, then failed once with
+`execution_failure`. Its new bounded companion identifies `frontier-build`;
+the attempt is consumed, and cleanup is not established. A fresh build-only
+probe reproduced a Cargo subprocess failure without the MSVC linker environment;
+another fresh build-only probe passed from x64 Developer PowerShell with the
+same locked source and builder. This establishes a pre-attempt host-prerequisite
+gap, not the private raw cause of Campaign 27. The corrected candidate checks
+MSVC discovery inputs before attempt creation and rechecks them in the worker;
+its negatives and independent review are recorded in Current Focus. Preserve
+terminal formats, digest domains, custody rules and all consumed-attempt holds.
 
 The admission correction and six-check early CI order passed all three jobs in
 [run 36302008595](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36302008595)
@@ -51,9 +72,8 @@ JAR; a separate root-prefix setup/source/operator/Frontier build also passed and
 its disposal calls did not throw. Both were fresh build-only probes without a
 node or campaign. They falsify straightforward reproducible failures in those
 isolated builders; they do not explain Campaign 26 or establish an in-session
-two-cycle. The shortest next check is a bounded, non-authorizing phase signal
-from the actual root failure path, with isolated negatives and independent review
-before any further campaign.
+two-cycle. The later bounded phase signal identified Campaign 27's root phase as
+`frontier-build`; the current host-prerequisite correction is tracked above.
 
 Campaign 25 ran once on `e3940543253f36eaaec0337b956a743e816504b4` after
 independent review, exact-head CI and pinned-runtime admission. It failed with
@@ -142,7 +162,7 @@ owned processes, custody or terminal outcome still stops that attempt.
 
 Once all new fresh-admission gates are closed, including exact-head CI,
 runtime composition, build-output readiness and the retained diagnosis limits of
-Campaigns 24, 25 and 26, the composed two-cycle root is the next runtime milestone.
+Campaigns 24 through 27, the composed two-cycle root is the next runtime milestone.
 The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
@@ -636,7 +656,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 26 are terminal; Campaigns 24-26 failed and remain consumed.
+Campaigns through 27 are terminal; Campaigns 24-27 failed and remain consumed.
 The next full local campaign must exercise
 the changed successor consumer through a minimal documented and reproducible
 invocation. A finished operator package is not a prerequisite for this
@@ -663,7 +683,8 @@ existing task handoff.
 | Fresh build-output admission | The parent consumes the builder's existing output-readiness guard before creating an attempt | Reject an existing assembly and existing isolated SBT state independently, with no attempt or worker; retain identity-only postchecks after generated outputs exist |
 | Bounded root failure phase | A root/cleanup failure reaches an optional, identity-bound phase diagnostic without altering terminal authority or existing receipt bytes | Isolate builder, node-start, cycle and cleanup stages; test missing/foreign/malformed diagnostics, primary failure preservation and disposal holds; independently review before publication |
 | Runtime composition and admission preflight | The loader/parent join and the full clean-candidate admission pass under the exact pinned Node/compiler/package/Git inputs, with both historical locks unchanged | Run the focused joined-runtime and environment validators only; reject aliases or drift; do not switch the whole root to Node 24.18, rewrite the historical compiler lock, or claim unchanged evidence after a runtime change |
-| Next campaign admission | The integration owner admits one fresh attempt after exact CI, runtime preflight, build-output readiness and bounded root diagnosis close | Carry Campaigns 24-26's unknown causes and unestablished cleanup explicitly; use fresh custody and unique state, verify new prerequisites, and preserve ambiguous-outcome holds. Diagnostics supply no admission or cleanup authority |
+| MSVC host admission | On Windows, the parent rejects missing Visual Studio build variables or a regular linker candidate before attempt creation; the worker rechecks | Isolate each absent variable and linker shape, then test the invocation join. This is host discovery, not compiler attestation or proof of Campaign 27's raw cause |
+| Next campaign admission | The integration owner admits one fresh attempt after exact CI, runtime preflight, build-output readiness and bounded root diagnosis close | Carry Campaigns 24-27's unknown raw causes and unestablished cleanup explicitly; use fresh custody and unique state, verify new prerequisites, and preserve ambiguous-outcome holds. Diagnostics supply no admission or cleanup authority |
 | Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation, with separately scoped operation authority, custody lifetime, nonce and parent binding | Focused composed positives and isolated replay, disposed-handle, foreign-operation/profile, wrong-parent, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
 | Reproducible operator delivery | A fresh external context can use repository instructions and the packaged entry point without campaign-specific maintainer scripts | Separate-root exact source/tool/runtime checks, then one distinguishing packaged lifecycle/recovery rehearsal. Reuse the historical campaign only as evidence, never as an execution session |

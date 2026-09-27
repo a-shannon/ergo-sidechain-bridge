@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocked = vi.hoisted(() => ({
   ergoLock: vi.fn(),
   frontier: vi.fn(),
+  msvcHost: vi.fn(),
   process: vi.fn(),
   protoc: vi.fn(),
   runtime: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock('./pinned-local-native-verifier-build.js', () => ({
   runBoundedProcess: mocked.process,
 }));
 vi.mock('./substrate-federated-authority-safe-devnet-build-environment-v1.js', () => ({
+  assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1: mocked.msvcHost,
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1: mocked.frontier,
 }));
 vi.mock('./substrate-federated-authority-safe-devnet-protoc-v1.js', () => ({
@@ -159,6 +161,24 @@ describe('native two-cycle invocation environment V1', () => {
       validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(invocation),
     ).rejects.toThrow(/Git paths differ/iu);
     expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing MSVC host before repository inspection or attempt creation', async () => {
+    const fixture = environmentFixture();
+    const invocation = loadSubstrateFederatedNativeTwoCycleInvocationV1(
+      fixture.configPath,
+    );
+    configurePassingInspectors(fixture);
+    mocked.msvcHost.mockImplementationOnce(() => {
+      throw new Error('Frontier native build requires a regular MSVC linker on PATH');
+    });
+
+    await expect(
+      validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(invocation),
+    ).rejects.toThrow(/MSVC linker/iu);
+    expect(mocked.process).not.toHaveBeenCalled();
+    expect(mocked.frontier).not.toHaveBeenCalled();
+    expect(mocked.msvcHost).toHaveBeenCalledOnce();
   });
 
   it.each([

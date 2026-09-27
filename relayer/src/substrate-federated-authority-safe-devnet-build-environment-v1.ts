@@ -110,6 +110,31 @@ export function buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1():
   return environment;
 }
 
+/** Reject a Windows native build host without the MSVC discovery environment. */
+export function assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1(
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  if (process.platform !== 'win32') return;
+  for (const key of ['LIB', 'LIBPATH', 'INCLUDE'] as const) {
+    if (!environment[key]?.trim()) {
+      throw new Error(`Frontier native build requires the Visual Studio ${key} environment`);
+    }
+  }
+  const pathValue = environment.Path ?? environment.PATH;
+  const linkerPresent = pathValue?.split(delimiter).some(directory => {
+    if (!isAbsolute(directory) || directory.includes('\0')) return false;
+    try {
+      const stat = lstatSync(join(directory, 'link.exe'));
+      return stat.isFile() && !stat.isSymbolicLink();
+    } catch {
+      return false;
+    }
+  }) ?? false;
+  if (!linkerPresent) {
+    throw new Error('Frontier native build requires a regular MSVC linker on PATH');
+  }
+}
+
 export function buildSubstrateFederatedAuthoritySafeCargoEnvironmentV1(
   input: Readonly<{
     cargoTargetDirectory: string;

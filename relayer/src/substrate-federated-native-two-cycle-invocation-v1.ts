@@ -34,6 +34,7 @@ import {
 } from './ergo-settlement-core/strict-json.js';
 import { runBoundedProcess } from './pinned-local-native-verifier-build.js';
 import {
+  assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1,
   inspectSubstrateFederatedAuthoritySafePinnedToolchainV1,
 } from './substrate-federated-authority-safe-devnet-build-environment-v1.js';
 import {
@@ -400,6 +401,7 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
   ) {
     throw new Error('invocation Git paths differ from the pinned parent runtime');
   }
+  assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1();
   const repository = await inspectCleanRepository(
     invocation.worktreeRoot,
     runtime.gitExecutablePath,

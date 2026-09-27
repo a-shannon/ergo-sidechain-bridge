@@ -39,6 +39,14 @@ Use the existing source/build validators rather than substituting a downloaded
 node binary. Dependency caches and the exclusive same-user host remain trusted
 inputs; this run is not an independent build attestation.
 
+On Windows, launch from an x64 Visual Studio Developer PowerShell. The parent
+rejects missing `LIB`, `LIBPATH`, `INCLUDE`, or a regular `link.exe` on `PATH`
+before creating the attempt; the worker rechecks the same host prerequisites.
+This is a discovery check for the native build, not an MSVC version pin or a
+complete toolchain attestation. The selected host must still pass the actual
+source-locked build. A failed preflight before attempt creation may be corrected
+with a new shell; an existing attempt must never be resumed or retried.
+
 The selected Ergo source must have no matching assembly under the build lock's
 output directory and no pre-existing isolated SBT state directory. The parent
 checks this after the normal environment and source-tool identity validation,
@@ -199,3 +207,14 @@ remain unestablished. The attempt is consumed. Separate fresh Ergo assembly
 and root-prefix Frontier build probes passed without nodes or a campaign;
 neither identifies Campaign 26's cause. A later candidate must pass its own
 review, exact-head checks and fresh admission before any new attempt.
+
+Campaign 27 used exact head `2a6f127385c87db8251c1b7a3f67a78685b2f3ba`
+after all three hosted jobs passed in
+[run 36317771092](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36317771092)
+and a separate reviewed preflight. It failed once with `execution_failure`;
+the new bounded root-phase companion identifies `frontier-build`. Its attempt
+is consumed and root cleanup remains unestablished. A separate fresh build-only
+probe reproduced a Cargo subprocess failure without the Visual Studio linker
+environment; the same locked builder completed in a new build root from x64
+Developer PowerShell. These probes establish a missing host admission condition,
+not the private raw cause or cleanup state of Campaign 27.
