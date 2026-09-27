@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, parse } from 'node:path';
+import { delimiter, dirname, join, parse, resolve } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -52,6 +52,7 @@ import {
 } from './run-substrate-federated-native-two-cycle-worker-v1.js';
 
 const temporaryRoots: string[] = [];
+const bridgeRoot = resolve(import.meta.dirname, '..', '..', '..');
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -76,6 +77,21 @@ describe('native two-cycle parent and worker V1', () => {
     const blocked = new Promise<void>(resolve => { release = resolve; });
     const started = new Promise<void>(resolve => { entered = resolve; });
     mocked.process.mockImplementationOnce(async input => {
+      mkdirSync(
+        join(
+          fixture.loaded.config.ergoSourcePath,
+          'target',
+          'bridge-sbt-state-v1',
+        ),
+        { recursive: true },
+      );
+      const assemblyDirectory = join(
+        fixture.loaded.config.ergoSourcePath,
+        'target',
+        'scala-2.12',
+      );
+      mkdirSync(assemblyDirectory, { recursive: true });
+      writeFileSync(join(assemblyDirectory, 'ergo-built.jar'), 'fresh assembly');
       writeWorkerTransport(fixture, result);
       entered();
       await blocked;
@@ -128,6 +144,49 @@ describe('native two-cycle parent and worker V1', () => {
       '--config', fixture.configSourcePath,
     ])).rejects.toThrow();
     expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pre-existing matching Ergo assembly before creating an attempt', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    const assemblyDirectory = join(
+      fixture.loaded.config.ergoSourcePath,
+      'target',
+      'scala-2.12',
+    );
+    mkdirSync(assemblyDirectory, { recursive: true });
+    writeFileSync(join(assemblyDirectory, 'ergo-stale.jar'), 'stale assembly');
+
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toThrow(/assembly-free output directory/iu);
+
+    expect(existsSync(fixture.attemptPath)).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'start.json'))).toBe(false);
+    expect(mocked.process).not.toHaveBeenCalled();
+    expect(mocked.root).not.toHaveBeenCalled();
+  });
+
+  it('rejects pre-existing isolated SBT state before creating an attempt', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    mkdirSync(
+      join(
+        fixture.loaded.config.ergoSourcePath,
+        'target',
+        'bridge-sbt-state-v1',
+      ),
+      { recursive: true },
+    );
+
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toThrow(/sbt state directory must not pre-exist/iu);
+
+    expect(existsSync(fixture.attemptPath)).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'start.json'))).toBe(false);
+    expect(mocked.process).not.toHaveBeenCalled();
+    expect(mocked.root).not.toHaveBeenCalled();
   });
 
   it('does not launch when the create-only start record cannot be written', async () => {
@@ -187,7 +246,24 @@ describe('native two-cycle parent and worker V1', () => {
     const fixture = commandFixture();
     configureParent(fixture, projectedResult());
     const primary = new Error('native two-cycle worker timed out after contained process tree termination');
-    mocked.process.mockRejectedValueOnce(primary);
+    mocked.process.mockImplementationOnce(async () => {
+      mkdirSync(
+        join(
+          fixture.loaded.config.ergoSourcePath,
+          'target',
+          'bridge-sbt-state-v1',
+        ),
+        { recursive: true },
+      );
+      const assemblyDirectory = join(
+        fixture.loaded.config.ergoSourcePath,
+        'target',
+        'scala-2.12',
+      );
+      mkdirSync(assemblyDirectory, { recursive: true });
+      writeFileSync(join(assemblyDirectory, 'ergo-built.jar'), 'fresh assembly');
+      throw primary;
+    });
     await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
       '--config', fixture.configSourcePath,
     ])).rejects.toBe(primary);
@@ -196,6 +272,8 @@ describe('native two-cycle parent and worker V1', () => {
       'utf8',
     )) as Record<string, unknown>;
     expect(failure.failureClass).toBe('contained_process_failure');
+    expect((failure.checks as Record<string, unknown>).postFailureIdentityCheckPassed)
+      .toBe(true);
     expect((failure.boundaries as Record<string, unknown>).rootCleanupEstablishedByTimeout)
       .toBe(false);
   });
@@ -518,6 +596,8 @@ describe('native two-cycle parent and worker V1', () => {
 function commandFixture() {
   const root = mkdtempSync(join(tmpdir(), 'e2s-two-cycle-command-'));
   temporaryRoots.push(root);
+  const ergoSourcePath = join(root, 'ergo-source');
+  mkdirSync(ergoSourcePath);
   const outputParentDirectory = join(root, 'attempts');
   mkdirSync(outputParentDirectory);
   const configSourcePath = join(root, 'invocation.json');
@@ -529,6 +609,7 @@ function commandFixture() {
     configBytes,
     outputParentDirectory,
     attemptPath,
+    ergoSourcePath,
   );
   return { root, outputParentDirectory, configSourcePath, attemptPath, loaded };
 }
@@ -536,6 +617,8 @@ function commandFixture() {
 function workerFixture() {
   const root = mkdtempSync(join(tmpdir(), 'e2s-two-cycle-worker-'));
   temporaryRoots.push(root);
+  const ergoSourcePath = join(root, 'ergo-source');
+  mkdirSync(ergoSourcePath);
   const outputParentDirectory = join(root, 'attempts');
   mkdirSync(outputParentDirectory);
   const attemptPath = join(outputParentDirectory, 'fresh-attempt');
@@ -548,6 +631,7 @@ function workerFixture() {
     configBytes,
     outputParentDirectory,
     attemptPath,
+    ergoSourcePath,
   );
   writeFileSync(join(attemptPath, 'start.json'), canonicalJson({
     schema: 'e2s.substrate-federated-native-two-cycle-start.v1', version: 1,
@@ -565,6 +649,7 @@ function loadedInvocation(
   configBytes: Buffer,
   outputParentDirectory: string,
   attemptPath: string,
+  ergoSourcePath: string,
 ) {
   return Object.freeze({
     config: Object.freeze({
@@ -572,7 +657,8 @@ function loadedInvocation(
       version: 1,
       profile: 'synthetic-loopback-two-cycle',
       expectedBridgeCommit: '1'.repeat(40),
-      bridgeRoot: 'D:\\bridge',
+      bridgeRoot,
+      ergoSourcePath,
       ergoJavaExecutablePath: join(outputParentDirectory, 'jdk', 'bin', 'java.exe'),
       frontierCargoHomeDirectory: join(outputParentDirectory, 'cargo-home'),
       outputParentDirectory,
@@ -581,12 +667,12 @@ function loadedInvocation(
     configBytes,
     configSha256Hex: '2'.repeat(64),
     configCanonicalPath: configPath,
-    worktreeRoot: 'D:\\bridge',
+    worktreeRoot: bridgeRoot,
     attemptPath,
     pathIdentityDigestHex: '3'.repeat(64),
     rootInput: Object.freeze({
       frontierBuild: Object.freeze({ source: 'frontier' }),
-      ergoBuild: Object.freeze({ source: 'ergo' }),
+      ergoBuild: Object.freeze({ source: 'ergo', ergoSourcePath }),
     }),
   });
 }

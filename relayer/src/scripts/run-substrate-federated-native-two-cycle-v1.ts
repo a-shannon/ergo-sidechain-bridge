@@ -26,6 +26,9 @@ import {
 } from '../ergo-settlement-core/strict-json.js';
 import { runBoundedProcess } from '../pinned-local-native-verifier-build.js';
 import {
+  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1,
+} from '../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
   type SubstrateFederatedNativeTwoCycleEnvironmentV1,
@@ -63,6 +66,10 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
   const initial = loadSubstrateFederatedNativeTwoCycleInvocationV1(configPath);
   const environmentBefore =
     await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(initial);
+  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+    initial.config.bridgeRoot,
+    initial.config.ergoSourcePath,
+  );
   const attemptPath = createAttemptDirectory(initial.attemptPath);
   const capturedConfigPath = join(attemptPath, 'config.json');
   const startPath = join(attemptPath, 'start.json');

@@ -39,6 +39,14 @@ Use the existing source/build validators rather than substituting a downloaded
 node binary. Dependency caches and the exclusive same-user host remain trusted
 inputs; this run is not an independent build attestation.
 
+The selected Ergo source must have no matching assembly under the build lock's
+output directory and no pre-existing isolated SBT state directory. The parent
+checks this after the normal environment and source-tool identity validation,
+before it creates the attempt directory. A failure at this point consumes no
+attempt, claims no worker and creates no campaign custody. Remove or replace
+stale build state through the separately reviewed source-preparation process;
+do not point the campaign at an old assembly or SBT workspace.
+
 The parent checks its loaded Node/TSX identity before launching the worker. That
 check cannot precede the parent's own initial TSX loading. The worker is launched
 with the verified runtime and rechecks the captured inputs before calling the
@@ -97,6 +105,11 @@ worker. Existing attempts are refused. The worker calls the native root once.
 Both external miner-fee inputs must be confirmed before each corresponding
 checkpoint anchor is frozen.
 
+Build-output freshness is an admission prerequisite only. The identity checks
+after worker success or failure still accept the build outputs created by that
+worker; they verify repository and tool identity and do not demand an empty
+output directory after execution.
+
 ## Interpret The Result
 
 Only the parent's terminal artifact determines the invocation outcome:
@@ -152,5 +165,18 @@ Source review established that the historical worker flattened post-claim
 exceptions into one generic process failure, losing the deciding phase. The
 cause therefore remains unknown. The new diagnostic addresses that information
 loss for future attempts; it does not identify or repair Campaign 24's cause.
-Its retained attempt must never be resumed or retried. Campaign 25 still needs
-green CI on its exact promoted head and a separate fresh admission.
+Its retained attempt must never be resumed or retried.
+
+Campaign 25 was admitted separately and terminated with process exit code 1.
+Its public terminal classified the result as `execution_failure`; the
+post-failure identity check passed. The optional diagnostic remained at
+`root-or-cleanup` with no allowlisted source failure phase, and cleanup was not
+established. The attempt is consumed. Do not retry it or inspect private
+attempt files.
+
+A later check found that the currently selected Ergo source did not satisfy the
+official build-output readiness guard because matching assembly output and
+isolated SBT state were already present. Future invocations now reject either
+condition before creating an attempt. This finding does not establish the
+historical cause of Campaign 25's failure, and the standalone native
+compiler/link and exact-genesis builder probes do not change that conclusion.
