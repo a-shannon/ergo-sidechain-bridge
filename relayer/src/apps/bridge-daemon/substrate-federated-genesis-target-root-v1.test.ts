@@ -140,6 +140,8 @@ import { StateTracker } from '../../state-tracker.js';
 import * as ergoWasm from 'ergo-lib-wasm-nodejs';
 import type { Eip12Box } from '../../unsigned-ergo-transaction.js';
 import { buildSubstrateFederatedCheckpointStatementV1 } from '../../profiles/substrate-federated-v1/checkpoint-statement.js';
+import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 }
+  from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
 
 const KEYS = {
   code: '0x3a636f6465',
@@ -1781,11 +1783,53 @@ describe('fresh FED target composition', () => {
     const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
     expect(failure).toBeInstanceOf(AggregateError);
     expect(failure.errors).toEqual([primary, nativeFailure, ergoFailure]);
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(failure)).toEqual({
+      primaryPhase: 'cycle-1', cleanupErrorCount: 2,
+    });
     expect(closeNative).toHaveBeenCalledOnce();
     expect(stop).toHaveBeenCalledOnce();
     expect(StateTracker.prototype.close).toHaveBeenCalledOnce();
     expect(frontierActive).toBe(false);
     assertDisposed();
+  });
+
+  it('does not infer a primary phase from a non-Error root failure plus cleanup failure', async () => {
+    const cleanup = new Error('setup cleanup failed');
+    vi.mocked(sources.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2)
+      .mockImplementationOnce(() => {
+        const originalDispose = retainedSetup!.dispose;
+        retainedSetup!.dispose = () => { originalDispose(); throw cleanup; };
+        throw 'non-Error root failure';
+      });
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors).toEqual(['non-Error root failure', cleanup]);
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(failure)).toEqual({
+      primaryPhase: null, cleanupErrorCount: 1,
+    });
+  });
+
+  it('does not project a primitive-only cleanup failure because cleanupErrorCount counts Error instances', async () => {
+    stop.mockRejectedValueOnce('primitive cleanup failure');
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBe('primitive cleanup failure');
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(failure)).toBeNull();
+  });
+
+  it('counts only cleanup Error instances while retaining primitive cleanup after a tagged primary Error', async () => {
+    const primary = new Error('frontier build failed');
+    const primitiveCleanup = 'primitive setup cleanup failure';
+    mocked.frontier.mockImplementationOnce(() => {
+      const originalDispose = retainedSetup!.dispose;
+      retainedSetup!.dispose = () => { originalDispose(); throw primitiveCleanup; };
+      throw primary;
+    });
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors).toEqual([primary, primitiveCleanup]);
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(failure)).toEqual({
+      primaryPhase: 'frontier-build', cleanupErrorCount: 0,
+    });
   });
 
   it('does not duplicate a memoized native cleanup failure during final cleanup', async () => {
@@ -2398,6 +2442,28 @@ describe('fresh FED target composition', () => {
       expect(stop).toHaveBeenCalledTimes(['frontier', 'ergoBuild', 'process'].includes(stage) ? 0 : 1);
       if (stage !== 'nodes') expect(mocked.nodes).not.toHaveBeenCalled(); assertDisposed();
     });
+
+  it.each([
+    ['setup-and-custody', 'source'], ['frontier-build', 'frontier'], ['ergo-build', 'ergoBuild'],
+    ['node-start', 'process'], ['cycle-1', 'execute'], ['between-cycles', 'readOnlyOwned'],
+    ['cycle-2', 'continuationTrackerCheck'], ['cleanup', 'stop'],
+  ] as const)('preserves root failure identity and projects the %s phase', async (expectedPhase, injection) => {
+    const trigger = new Error(`failure at ${expectedPhase}`);
+    if (injection === 'source') {
+      vi.mocked(sources.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2)
+        .mockImplementationOnce(() => { throw trigger; });
+    } else if (injection === 'stop') stop.mockRejectedValueOnce(trigger);
+    else mocked[injection].mockImplementationOnce(() => { throw trigger; });
+    let failure: unknown;
+    try { await runSubstrateFederatedGenesisTargetRootV1(input); } catch (error) { failure = error; }
+    expect(failure).toBe(trigger);
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(failure)).toEqual({
+      primaryPhase: expectedPhase === 'cleanup'
+        ? null
+        : expectedPhase,
+      cleanupErrorCount: expectedPhase === 'cleanup' ? 1 : 0,
+    });
+  });
 
   it('disposes every key owner even when process cleanup fails', async () => {
     stop.mockRejectedValueOnce(new Error('cleanup failed'));

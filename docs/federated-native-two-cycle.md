@@ -124,17 +124,26 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `worker-result.json` | Internal transport from the worker; it is not the parent's completion result. |
 | `worker-failure.json` | Optional bounded diagnostic written after the worker claim. It identifies the last execution stage and, when available, an existing allowlisted source failure phase. It is not a terminal result or cleanup evidence. |
 | `failure-diagnostic.json` | Optional parent sidecar published only after `failure.json`, binding that receipt to a validated worker diagnostic with matching config, commit and path identities. It grants no execution or retry authority. |
+| `worker-root-phase.json` | Optional root-only phase signal from a failed worker. It names a primary phase when known and counts bounded cleanup `Error` values. It carries no cause, path or cleanup claim. |
+| `failure-root-phase.json` | Optional parent sidecar after `failure.json`. It binds the terminal failure and both validated worker diagnostics to the same invocation identities. It is not an outcome or admission receipt. |
 
 The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
 `post-root-identity` and `transport-publication`. A root exception and a cleanup
 exception share one stage because neither alone establishes successful teardown.
 Diagnostics never include the raw error, stack, filesystem paths or custody
-material. Their cleanup-established flag remains false for every stage.
+material. Their cleanup-established flag remains false for every stage. The
+root-phase companion distinguishes setup/custody, Frontier build, Ergo build,
+node start, either cycle, the interval between cycles and cleanup. A null
+primary phase means the root evidence cannot assign one; a cleanup exception
+count, including zero, never proves disposal. A primitive value thrown during
+cleanup is not included in this count; a cleanup-only primitive may have no
+root-phase companion. A missing or invalid companion
+does not change the terminal result or permit another attempt.
 
-Both diagnostics use separate schemas and digest domains; the existing terminal
+The diagnostics use separate schemas and digest domains; the existing terminal
 failure format and digest are unchanged. Missing, invalid or unwritable
 diagnostics leave the original failure and consumed attempt intact. A worker
-failure file accompanying an otherwise successful worker result blocks terminal
+failure or root-phase file accompanying an otherwise successful worker result blocks terminal
 success. A digest detects changed bytes under the declared same-user host
 assumption; it is not authentication or independent attestation.
 
@@ -180,3 +189,13 @@ isolated SBT state were already present. Future invocations now reject either
 condition before creating an attempt. This finding does not establish the
 historical cause of Campaign 25's failure, and the standalone native
 compiler/link and exact-genesis builder probes do not change that conclusion.
+
+Campaign 26 used the exact candidate whose three hosted checks passed in
+[run 36302008595](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36302008595).
+It passed separate fresh admission and failed once at `root-or-cleanup` with
+`execution_failure`. Its bounded diagnostic reported no source failure phase;
+the post-failure identity check passed, but root cleanup and custody disposal
+remain unestablished. The attempt is consumed. Separate fresh Ergo assembly
+and root-prefix Frontier build probes passed without nodes or a campaign;
+neither identifies Campaign 26's cause. A later candidate must pass its own
+review, exact-head checks and fresh admission before any new attempt.

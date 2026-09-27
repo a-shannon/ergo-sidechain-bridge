@@ -11,6 +11,8 @@ import {
   createNativeTwoCycleWorkerFailureDiagnosticV1,
   type NativeTwoCycleFailureStageV1,
 } from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
+import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
+import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-v1.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   projectSubstrateFederatedNativeTwoCycleResultV1,
@@ -123,6 +125,27 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       );
     } catch {
       // Optional diagnostics never replace the failure or release the worker claim.
+    }
+    if (stage === 'root-or-cleanup') {
+      try {
+        const projection = projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
+          primaryFailure,
+        );
+        if (projection !== null) {
+          const companion = createNativeTwoCycleWorkerRootPhaseV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, projection);
+          writeNewFile(
+            join(invocation.attemptPath, 'worker-root-phase.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker root phase companion',
+          );
+        }
+      } catch {
+        // The optional root phase cannot change the existing diagnostic or failure.
+      }
     }
     throw primaryFailure;
   }

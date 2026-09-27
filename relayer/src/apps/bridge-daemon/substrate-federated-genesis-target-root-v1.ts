@@ -14,6 +14,8 @@ import type { StateTracker as NativeJournalState } from '../../state-tracker.js'
 import { verifyExecutableSha256 } from '../../native-executable-pin.js';
 import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
+import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1,
+  type SubstrateFederatedNativeTwoCycleRootPhaseV1 } from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
 import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
   type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
@@ -105,16 +107,20 @@ export interface RunSubstrateFederatedGenesisTargetRootV1Input {
 
 /** Static local target composition. No caller callback, signer or transport escapes. */
 export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstrateFederatedGenesisTargetRootV1Input) {
-  const captured = exact(input, ['frontierBuild', 'ergoBuild']);
-  const frontierInput = exact(captured.frontierBuild, ['bridgeRoot', 'frontierSourcePath',
-    'buildParentDirectory', 'cargoHomeDirectory', 'cargoExecutablePath', 'rustcExecutablePath',
-    'gitExecutablePath', 'protocExecutablePath']);
-  const ergoInput = exact(captured.ergoBuild, ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath',
-    'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath']);
-  if (realpathSync(frontierInput.bridgeRoot) !== realpathSync(ergoInput.bridgeRoot)) {
-    throw new Error('FED target builders must use the same bridge repository');
-  }
-  const setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+  let rootPhase: SubstrateFederatedNativeTwoCycleRootPhaseV1 = 'setup-and-custody';
+  let setupAcquired = false;
+  try {
+    const captured = exact(input, ['frontierBuild', 'ergoBuild']);
+    const frontierInput = exact(captured.frontierBuild, ['bridgeRoot', 'frontierSourcePath',
+      'buildParentDirectory', 'cargoHomeDirectory', 'cargoExecutablePath', 'rustcExecutablePath',
+      'gitExecutablePath', 'protocExecutablePath']);
+    const ergoInput = exact(captured.ergoBuild, ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath',
+      'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath']);
+    if (realpathSync(frontierInput.bridgeRoot) !== realpathSync(ergoInput.bridgeRoot)) {
+      throw new Error('FED target builders must use the same bridge repository');
+    }
+    const setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+    setupAcquired = true;
   let source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2> | undefined;
   let sourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
   let continuationSourceOperation: Readonly<SubstrateFederatedNativeGenesisSourceAttestationOperationV1> | undefined;
@@ -140,10 +146,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       if (sourceOperation) assertSubstrateFederatedNativeGenesisSourceAttestationOperationV1(sourceOperation, retainedSource);
     };
     // Compile before starting the bounded Ergo mining lifetime.
+    rootPhase = 'frontier-build';
     const frontier = await buildSubstrateFederatedGenesisNodeV1({ ...frontierInput, sourceSession: retainedSource });
     assertCustody();
+    rootPhase = 'ergo-build';
     const builtErgo = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(ergoInput);
     assertCustody();
+    rootPhase = 'node-start';
     mining = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
     ergo = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2({
       javaExecutablePath: builtErgo.javaExecutablePath,
@@ -202,6 +211,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         primaryP2pPort: 30355, witnessP2pPort: 30356, primaryPrometheusPort: 19615, witnessPrometheusPort: 19616,
       });
       const running = await native.withTarget(async endpoints => {
+        rootPhase = 'cycle-1';
         assertOwnedFederatedGenesisDevnetTargetV1(endpoints);
         if (endpoints.primaryRpcUrl !== PRIMARY || endpoints.witnessRpcUrl !== WITNESS) {
           throw new Error('FED owned node endpoints changed');
@@ -458,6 +468,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       continuationSourceOperation = result.continuation.sourceOperation;
       return result;
     });
+    rootPhase = 'between-cycles';
     const betweenCycles = await ergo.withMiningStoppedReadOnlyTarget(async target => {
       assertSubstrateFederatedNativeGenesisSetupReadCustodyV1(
         executed.value.continuation.batch,
@@ -480,12 +491,14 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       executed.value.continuation.batch,
       executed.value.continuation.target,
     );
+    rootPhase = 'cycle-2';
     const secondCycleNode = ergo.continueNativeTrackerCycleV1(first.continuation.miningAuthority);
     const secondCycle = await native.withTarget(async () => completeSecondNativeReturn({
       node: secondCycleNode, setup, source: retainedSource, operator: retainedOperator,
       state: returnInput.state, prepared: executed.value.continuation,
       priorSnapshot: betweenCycles.receipt.finalSnapshot, continuation: first.continuation,
     }));
+    rootPhase = 'cleanup';
     const frontierProcess = await native.close();
     return Object.freeze({ status: 'fresh-federated-round-trip-confirmed' as const,
       ...executed.value.summary, frontierProcess, ergoExecution: executed.receipt, withdrawal: first.summary,
@@ -495,8 +508,8 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       sourceFinalityEstablished: false as const, trustless: false as const });
   } catch (error) {
     rootFailed = true;
-    rootFailure = error;
-    throw error;
+    rootFailure = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error, rootPhase);
+    throw rootFailure;
   } finally {
     const failures: unknown[] = rootFailed ? [rootFailure] : [];
     for (const dispose of [
@@ -511,12 +524,19 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       () => { retainedState?.close(); },
     ]) {
       try { await dispose(); }
-      catch (error) { if (!failures.includes(error)) failures.push(error); }
+      catch (error) {
+        const cleanupFailure = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error, 'cleanup');
+        if (!failures.includes(cleanupFailure)) failures.push(cleanupFailure);
+      }
     }
     if (failures.length > 1) {
       throw new AggregateError(failures, 'FED target execution and cleanup failed');
     }
     if (!rootFailed && failures.length === 1) throw failures[0];
+  }
+  } catch (error) {
+    if (setupAcquired) throw error;
+    throw tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error, rootPhase);
   }
 }
 

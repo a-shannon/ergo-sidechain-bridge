@@ -28,12 +28,32 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** reject occupied Ergo build outputs before the parent creates a new
-attempt. Reuse the existing builder-owned readiness check; keep post-execution
-identity checks separate because a completed build legitimately leaves outputs.
-The deciding negatives are a preexisting assembly and preexisting isolated SBT
-state, each rejected before attempt creation or worker launch. Preserve existing
-terminal formats, digest domains, custody rules and consumed-attempt holds.
+**Now:** distinguish the failing root phase before admitting another full
+two-cycle campaign. Campaign 26 passed the early Ergo build-output guard and
+created one fresh worker attempt, then failed with `execution_failure`. Its
+bounded diagnostic reached `root-or-cleanup` but identified no source phase or
+successful cleanup. The attempt is consumed. Keep existing terminal formats,
+digest domains, custody rules and historical attempt holds unchanged.
+
+The admission correction and six-check early CI order passed all three jobs in
+[run 36302008595](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36302008595)
+on exact head `51c97b6d5fad4e50a31bb51a162198cba04d75a9`. PR7 matched the head.
+Campaign 26 used this candidate and separate reviewed admission. Its public
+failure receipt digest is
+`f4d9b774742660112844d2d8dda7d997544b91c2a3f0d7ffc37214b575f8a7d9`;
+the optional parent diagnostic digest is
+`91b57367d5dec2fe3af35effcaf21d7de353240235815925866bf2e31150b927`.
+The post-failure identity check passed. These receipts do not establish the
+root's failing operation or disposal.
+
+A separate exact-source Ergo assembly completed, producing one 78,360,320-byte
+JAR; a separate root-prefix setup/source/operator/Frontier build also passed and
+its disposal calls did not throw. Both were fresh build-only probes without a
+node or campaign. They falsify straightforward reproducible failures in those
+isolated builders; they do not explain Campaign 26 or establish an in-session
+two-cycle. The shortest next check is a bounded, non-authorizing phase signal
+from the actual root failure path, with isolated negatives and independent review
+before any further campaign.
 
 Campaign 25 ran once on `e3940543253f36eaaec0337b956a743e816504b4` after
 independent review, exact-head CI and pinned-runtime admission. It failed with
@@ -96,11 +116,12 @@ post-root identity checks, or result publication. The cause remains `unknown`;
 this source-supported limit closes the historical diagnosis without a causal
 repair or cleanup claim. No private attempt files are needed to reach it.
 
-The shortest reliable order is: (1) close and independently review the early
-build-output readiness join; (2) publish through the guards, obtain all required
-hosted jobs green on that exact head and repeat only invalidated admission checks;
-(3) separately admit one fresh Campaign 26 with historical uncertainty explicit,
-fresh custody and fresh build outputs; (4) exercise recovery
+The shortest reliable order is: (1) make the actual root failure phase observable
+without changing existing terminal authority; (2) repair or falsify the named
+boundary through a fresh non-campaign probe, focused negatives and independent
+review; (3) publish through the guards, obtain all required hosted jobs green on
+that exact head, then separately admit one new campaign with fresh custody and
+outputs; (4) exercise recovery
 and the reproducible operator path after a real two-cycle result; and (5) close
 FED-7 evidence and release review. A CI repair does not retroactively
 make Campaign 24 successful, and a successful campaign does not waive the
@@ -114,14 +135,14 @@ require a new terminal all-required-jobs-green run for that exact commit before
 campaign admission; a historical run is never a substitute.
 
 An `unknown` historical cause ends the bounded investigation; it does not itself
-authorize Campaign 26. Preserve consumed attempts and stop at the separate
+authorize another campaign. Preserve consumed attempts and stop at the separate
 fresh-admission gate below. Absence of processes, listeners or private logs is
 never evidence of custody disposal. Any ambiguity in the new attempt's inputs,
 owned processes, custody or terminal outcome still stops that attempt.
 
-Once all Campaign 26 fresh-admission gates are closed, including exact-head CI,
+Once all new fresh-admission gates are closed, including exact-head CI,
 runtime composition, build-output readiness and the retained diagnosis limits of
-Campaigns 24 and 25, the composed two-cycle root is the next runtime milestone.
+Campaigns 24, 25 and 26, the composed two-cycle root is the next runtime milestone.
 The second
 payout now consumes the retained reserve and nonempty DUP successors through
 the admitted second tracker and funded withdrawal fee. Preserve the first confirmed
@@ -609,13 +630,14 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Build-output readiness -> fresh attempt admission | Connect the existing builder guard before attempt creation, then review and promote the correction with the bounded CI-order batch | Reject occupied assembly/SBT outputs before worker or custody creation; preserve post-execution identity rechecks; require new exact-head CI and fresh admission; Campaigns 24 and 25 remain consumed |
-| First runtime candidate | Two-cycle invocation -> fresh chain | Run one fresh Campaign 26 after exact CI, runtime-composition/preflight, fresh build-output, identity, custody and fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
+| **Now** | Root failure -> bounded phase evidence | Expose the current failing root phase, when known, in a separate non-authorizing diagnostic while retaining existing receipt formats, then falsify the named boundary with an isolated fresh probe | A future failure can distinguish builder, node-start, cycle and cleanup scopes without raw causes, paths, custody, retry or cleanup claims; isolated negatives and independent review close the change |
+| First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 23 are terminal. The next full local campaign must exercise
+Campaigns through 26 are terminal; Campaigns 24-26 failed and remain consumed.
+The next full local campaign must exercise
 the changed successor consumer through a minimal documented and reproducible
 invocation. A finished operator package is not a prerequisite for this
 deciding run; private historical campaign scripts or custody are not reusable
@@ -639,8 +661,9 @@ existing task handoff.
 |---|---|---|
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
 | Fresh build-output admission | The parent consumes the builder's existing output-readiness guard before creating an attempt | Reject an existing assembly and existing isolated SBT state independently, with no attempt or worker; retain identity-only postchecks after generated outputs exist |
+| Bounded root failure phase | A root/cleanup failure reaches an optional, identity-bound phase diagnostic without altering terminal authority or existing receipt bytes | Isolate builder, node-start, cycle and cleanup stages; test missing/foreign/malformed diagnostics, primary failure preservation and disposal holds; independently review before publication |
 | Runtime composition and admission preflight | The loader/parent join and the full clean-candidate admission pass under the exact pinned Node/compiler/package/Git inputs, with both historical locks unchanged | Run the focused joined-runtime and environment validators only; reject aliases or drift; do not switch the whole root to Node 24.18, rewrite the historical compiler lock, or claim unchanged evidence after a runtime change |
-| Campaign 26 admission | The integration owner admits one fresh attempt after exact CI, runtime preflight, build-output readiness and bounded diagnosis close | Carry Campaigns 24 and 25's unknown causes and unestablished cleanup explicitly; use fresh custody and unique state, verify new prerequisites, and preserve ambiguous-outcome holds. Diagnostics supply no admission or cleanup authority |
+| Next campaign admission | The integration owner admits one fresh attempt after exact CI, runtime preflight, build-output readiness and bounded root diagnosis close | Carry Campaigns 24-26's unknown causes and unestablished cleanup explicitly; use fresh custody and unique state, verify new prerequisites, and preserve ambiguous-outcome holds. Diagnostics supply no admission or cleanup authority |
 | Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation, with separately scoped operation authority, custody lifetime, nonce and parent binding | Focused composed positives and isolated replay, disposed-handle, foreign-operation/profile, wrong-parent, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
 | Reproducible operator delivery | A fresh external context can use repository instructions and the packaged entry point without campaign-specific maintainer scripts | Separate-root exact source/tool/runtime checks, then one distinguishing packaged lifecycle/recovery rehearsal. Reuse the historical campaign only as evidence, never as an execution session |
@@ -688,12 +711,12 @@ similar:
 | Exact CI pending or head mismatch | Read-only status inspection and handoff update | No source edit, campaign, retry, push or readiness claim |
 | Exact CI terminal-green | Run pinned runtime-composition, clean-candidate and fresh build-output admission checks | Stop on alias, lock, tool, path, loader or package drift, or occupied build outputs |
 | Earlier campaigns consumed | Reuse completed bounded diagnoses and investigate only a new deciding uncertainty | Stop if evidence would require private runtime access, custody inference or transport retry |
-| CI, preflight and diagnosis gates closed | Prepare exactly one fresh Campaign 26 admission with unique identity, fresh custody and build outputs | Stop before admission if any input, fee, key, target, process, cleanup or terminal artifact is ambiguous |
+| CI, preflight and root-diagnosis gates closed | Prepare exactly one new campaign admission with unique identity, fresh custody and build outputs | Stop before admission if any input, fee, key, target, process, cleanup or terminal artifact is ambiguous |
 
 The historical diagnosis gate has two valid outcomes: a bounded
 source-supported explanation, or an explicit `unknown` classification that
-preserves consumed attempts and carries uncertainty into Campaign 26's fresh
-evidence contract. Neither permits reuse of Campaign 24 or 25 state. After
+preserves consumed attempts and carries uncertainty into the next fresh
+evidence contract. Neither permits reuse of Campaign 24, 25 or 26 state. After
 the fresh campaign, return to the same gate; do not combine recovery, operator
 packaging or FED-7 release mapping into the campaign batch.
 

@@ -44,6 +44,8 @@ import {
 } from '../ergo-settlement-core/strict-json.js';
 import { createSubstrateFederatedAuthoritySafeDevnetSourceFailureV1 } from '../relayer-core/substrate-federated-authority-safe-devnet-source-failure-phase-v1.js';
 import { createNativeTwoCycleWorkerFailureDiagnosticV1 } from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
+import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
+import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-v1.js';
 import {
   runSubstrateFederatedNativeTwoCycleFromArguments,
 } from './run-substrate-federated-native-two-cycle-v1.js';
@@ -312,6 +314,79 @@ describe('native two-cycle parent and worker V1', () => {
     expect(mocked.root).toHaveBeenCalledOnce();
   });
 
+  it('binds a root phase companion to the existing failure receipts without changing them', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    const primary = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
+      new Error('private Ergo build detail'), 'ergo-build',
+    );
+    mocked.root.mockRejectedValueOnce(primary);
+    mocked.process.mockImplementationOnce(async input => {
+      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(-6));
+      throw new Error('worker unexpectedly completed');
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toBe(primary);
+    expect(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'))
+      .toBe(expectedTerminalFailure(fixture));
+    const failure = JSON.parse(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'));
+    const workerFailureText = readFileSync(join(fixture.attemptPath, 'worker-failure.json'), 'utf8');
+    const workerRootText = readFileSync(join(fixture.attemptPath, 'worker-root-phase.json'), 'utf8');
+    const parentRootText = readFileSync(join(fixture.attemptPath, 'failure-root-phase.json'), 'utf8');
+    const parentRoot = JSON.parse(parentRootText);
+    expect(parentRoot).toMatchObject({
+      failureReceiptDigestHex: failure.receiptDigestHex,
+      workerFailureReceiptDigestHex: JSON.parse(workerFailureText).receiptDigestHex,
+      workerRootPhaseReceiptDigestHex: JSON.parse(workerRootText).receiptDigestHex,
+      primaryPhase: 'ergo-build', cleanupErrorCount: 0,
+      rootCleanupEstablished: false, rawCausePublished: false,
+    });
+    expect(workerRootText + parentRootText).not.toContain('private Ergo build detail');
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+  });
+
+  it.each(['missing', 'invalid', 'foreign', 'occupied'] as const)(
+    'preserves existing failure receipts when worker root companion is %s', async fault => {
+      const fixture = commandFixture();
+      configureParent(fixture, projectedResult());
+      const primary = new Error('worker execution failed');
+      mocked.process.mockImplementationOnce(async () => {
+        const workerFailure = createNativeTwoCycleWorkerFailureDiagnosticV1(
+          failureBindings(fixture), 'root-or-cleanup', primary,
+        );
+        writeFileSync(join(fixture.attemptPath, 'worker-failure.json'),
+          `${canonicalJson(workerFailure)}\n`);
+        if (fault !== 'missing') {
+          const workerRoot = createNativeTwoCycleWorkerRootPhaseV1(
+            fault === 'foreign'
+              ? { ...failureBindings(fixture), configSha256Hex: '9'.repeat(64) }
+              : failureBindings(fixture),
+            { primaryPhase: 'ergo-build', cleanupErrorCount: 0 },
+          );
+          writeFileSync(join(fixture.attemptPath, 'worker-root-phase.json'),
+            fault === 'invalid' ? '{}\n' : `${canonicalJson(workerRoot)}\n`);
+        }
+        if (fault === 'occupied') {
+          writeFileSync(join(fixture.attemptPath, 'failure-root-phase.json'), 'retained bytes');
+        }
+        throw primary;
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+      expect(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8'))
+        .toBe(expectedTerminalFailure(fixture));
+      expect(existsSync(join(fixture.attemptPath, 'failure-diagnostic.json'))).toBe(true);
+      if (fault === 'occupied') {
+        expect(readFileSync(join(fixture.attemptPath, 'failure-root-phase.json'), 'utf8'))
+          .toBe('retained bytes');
+      } else {
+        expect(existsSync(join(fixture.attemptPath, 'failure-root-phase.json'))).toBe(false);
+      }
+    },
+  );
+
   it.each(['missing', 'malformed', 'foreign', 'digest', 'oversized'] as const)(
     'preserves identical terminal failure bytes with a %s diagnostic', async fault => {
       const fixture = commandFixture();
@@ -380,6 +455,21 @@ describe('native two-cycle parent and worker V1', () => {
     ])).rejects.toThrow(/contradictory failure evidence/iu);
     expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
     expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(true);
+  });
+
+  it('rejects a worker root phase companion alongside a success transport', async () => {
+    const fixture = commandFixture();
+    const result = projectedResult();
+    configureParent(fixture, result);
+    mocked.process.mockImplementationOnce(async input => {
+      writeWorkerTransport(fixture, result);
+      writeFileSync(join(fixture.attemptPath, 'worker-root-phase.json'), '{}\n');
+      return cleanProcessResult(input);
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toThrow(/contradictory failure evidence/iu);
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
   });
 
   it('withholds success when repository identity drifts after worker exit', async () => {
@@ -459,6 +549,7 @@ describe('native two-cycle parent and worker V1', () => {
         rootCleanupEstablished: false, rawCausePublished: false, sourceFailurePhase: null,
       });
       expect(text).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'worker-root-phase.json'))).toBe(false);
       expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
       expect(mocked.root).toHaveBeenCalledTimes(stage === 'pre-root' ? 0 : 1);
     },

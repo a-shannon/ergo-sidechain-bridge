@@ -320,6 +320,10 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['substrate-federated-authority-safe-devnet-build-environment-v1.ts', new Set([
     'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1',
   ])],
+  ['substrate-federated-native-two-cycle-root-phase-v1.ts', new Set([
+    'tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1',
+    'SubstrateFederatedNativeTwoCycleRootPhaseV1',
+  ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
     'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
     'OwnedFederatedGenesisDevnetProcessSessionV1',
