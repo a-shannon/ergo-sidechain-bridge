@@ -317,6 +317,7 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ])],
   ['native-executable-pin.ts', new Set(['verifyExecutableSha256'])],
   ['pinned-local-native-verifier-build.ts', new Set(['runBoundedProcess'])],
+  ['build-wasm-avl.ts', new Set(['runBoundedProcess'])],
   ['substrate-federated-authority-safe-devnet-build-environment-v1.ts', new Set([
     'buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1',
   ])],
@@ -1858,6 +1859,12 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   string,
   ReadonlyMap<string, ReadonlySet<string>>
 > = new Map([
+  ['scripts/build-wasm-avl-pipeline-v2.ts', new Map([
+    ['runWasmAvlBuildPipelineV2', new Set([
+      'scripts/build-wasm-avl.ts',
+      'build-wasm-avl.test.ts',
+    ])],
+  ])],
   [FEDERATED_GENESIS_TARGET_ROOT, new Map([
     ['runSubstrateFederatedGenesisTargetRootV1', new Set([FEDERATED_NATIVE_TWO_CYCLE_WORKER])],
   ])],
@@ -2626,6 +2633,13 @@ function inspectExclusiveRuntimeAuthorityImport(
       && imported.bindings[1]!.imported === 'formatSubstrateFederatedIsolatedDevnetTrackerV2CampaignFailure'
       && imported.bindings[1]!.local === imported.bindings[1]!.imported))
     && imported.bindings[0]!.imported === 'runSubstrateFederatedIsolatedDevnetTrackerV2CampaignWorkerFromArguments'
+    && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
+  // The native two-cycle worker verifies generated WASM bytes before loading its exclusive root.
+  if (file === 'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts'
+    && imported.value === '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
+    && imported.form === 'dynamic-import'
+    && imported.bindings.length === 1
+    && imported.bindings[0]!.imported === 'runSubstrateFederatedGenesisTargetRootV1'
     && imported.bindings[0]!.local === imported.bindings[0]!.imported) return [];
   if (imported.form !== 'named-import') {
     return [{

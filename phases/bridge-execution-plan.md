@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-27
+Updated: 2026-09-29
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,20 +28,121 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** publish the reviewed Windows MSVC host-admission correction, then
-require all three CI jobs on its exact commit before considering a fresh
-campaign admission. The parent rejects absent `LIB`, `LIBPATH`, `INCLUDE` or a
-regular linker candidate before attempt creation; the worker rechecks the same
-predicate before the root. Sixty-eight focused cases passed in total, including
-the four added isolated negatives; the final guard test file passes 10/10.
-TypeScript and the architecture check passed across 137 layered modules and
-892 TypeScript files. Independent Sol/high review of the
-six-file change returned GO without P1/P2 findings. The bounded relayer suite
-was interrupted at batch 474/596 after the preceding 96-test batch passed; the
-provisioning test remained CPU-active for several minutes without returning.
-Treat local full-suite closure as pending and use the exact published CI result
-to decide it. Do not run another campaign before that CI is green and a separate
-fresh admission closes.
+**Now:** Campaign 28 is consumed. The published candidate remains
+`759b3f00e85d6bce328e05617ee797dd7a7b75ec`; its exact-head CI passed in
+[run 36350825445](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36350825445).
+Campaign 28's bounded failure and a later no-attempt reproduction identify the
+missing ignored WASM package as the pre-worker blocker. Its raw cause and private
+runtime state remain out of scope. Do not retry or reuse that attempt.
+
+The current local candidate repairs the generated-package ABI and provenance
+boundary. Its inspector checks seven production exports across Rust parameter
+and return types, public and low-level declarations, WASM function type indices,
+and JS/WASM smoke vectors for DUP and tracker V2 successors. The build resolves
+and hashes wasm-pack 0.14.0, wasm-bindgen 0.2.120, rustc 1.97.1 and Cargo 1.97.1
+against reviewed Windows x64 pins. The generator is from the official release
+archive; both archive and extracted executable hashes are checked. The builder
+uses `--mode no-install`, Cargo offline, a controlled generator path/cache and
+the existing bounded Windows Job Object helper. Source digest is
+`dbade80a5299a37458d4cf9bd18f1df111c6dd387ad2f6a9e806e8798ad067f0`; generated
+package digest is
+`cb368c79c035de6d90091d842c166f92db5e4b5e3f211fc10c1f0d8f9f6be953`.
+
+The first independent review returned **NO-GO** on the earlier 11-file
+manifest (`579f6de7792ec74e1af0095b25dc3c026d4c66fc3e7e76efb908c71078f45a97`).
+It found that the worker accepted any well-formed 64-hex tool hash instead of
+the reviewed executable pins before root execution, and that builder fault
+coverage did not isolate source/tool/helper drift, build timeout and smoke
+failure. The candidate now checks exact pins in the worker before root, adds
+single-fault negatives for those boundaries and all 15 parent plus 10 worker
+sidecar fields, and binds the build-pipeline import to its exact owner. These
+fixes received independent GO reviews on the exact earlier manifests
+`47f1c95f133fec7d06dfc656f8927e6fa82726f2dc74d8852976471758c7bcc8` and
+`05c6a42175bf260bfc34b83294dd12bc6b494c5eef5eca681a25d1f2f7ca9ea5`. A later
+plan-only review identified stale review-state wording and ambiguous publication
+order; those findings are corrected here. The active handoff records the exact
+current manifest and its review result. Earlier verdicts do not transfer to a
+changed candidate.
+
+The package ABI suite passed 28/28, the builder suite 30/30, and the
+parent/worker suite 70/70. The architecture guard passed for 137 runtime modules
+and 895 TypeScript files; `tsc --noEmit` and the two unchanged Windows Job
+Object lifecycle cases also passed. A real local WASM rebuild and seven-export
+smoke passed with exact source/package digests. That build used machine Node
+26.3.0 and a warm Cargo target cache; it is not a clean-cache build, Node
+24.14.0 campaign evidence, or campaign evidence.
+
+The hosted Windows workflow now provisions the exact wasm-bindgen 0.2.120
+release asset, checks its archive and executable hashes, and fetches the locked
+WASM crate dependencies before the candidate gate. A new static test covers
+that ordering and pinning. Hosted CI has not yet exercised this candidate; the
+green run above validates only its published base. The build controls are not a
+general network sandbox for arbitrary compiler or build-script subprocesses.
+
+The candidate is still **not admitted for a campaign**. Independent reviews
+returned GO for the code and campaign-guide candidate on exact 14-path
+manifests `47f1c95f133fec7d06dfc656f8927e6fa82726f2dc74d8852976471758c7bcc8`
+and `05c6a42175bf260bfc34b83294dd12bc6b494c5eef5eca681a25d1f2f7ca9ea5`.
+Those earlier GO reviews do not cover later plan edits or authorize a campaign.
+Use the active handoff's current exact-manifest review state for promotion; all
+due gates and a separate fresh-input admission remain required.
+
+After review GO, the next batch is exact promotion preparation: recheck the
+generated package, source and tool identities; run the staged publication
+guard; create the coherent local commit; then run the commit-range guard before
+the guarded PR 7 update. The local package rebuild used machine Node 26.3.0 and
+a warm Cargo target cache, so it does not satisfy the clean-checkout gate using
+the locked Windows x64 build tools, audit Node 24.18.1 and compiler Node
+24.14.0. If those runtimes are unavailable locally, the exact-head hosted
+public-audit candidate gate is the clean-checkout closeout; do not update PR 7
+before the exact candidate has passed its pre-promotion identity checks and
+publication guards, and do not call the closeout complete before that job is
+terminal-green. All three required exact-head CI jobs must pass.
+
+Only after exact-head CI passes may a separate fresh-input admission authorize
+C29 with disposable custody and synthetic funds. Its two cycles must carry the
+first confirmed reserve/DUP/tracker successors through burn and Ergo payout with
+value and liability conservation. Any failure or ambiguity consumes C29.
+Recovery, operator reproduction and remaining FED acceptance follow that
+deciding run.
+
+The delivery profile remains explicitly federated WP-06-FED, independent of
+EIP-0045. Preserve terminal receipt formats, digest domains, quorum, custody and
+key-destruction rules. Gate 5/STARK is a separate future route; this work and its
+local campaign evidence must not be described as trustless.
+
+The published runtime candidate is
+`759b3f00e85d6bce328e05617ee797dd7a7b75ec`. All three required jobs passed in
+[run 36350825445](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36350825445):
+Public-audit candidate gate, Rebuild pinned Frontier and Ergo sources, and Audit
+Solidity dependencies. The Windows job completed all 596 Vitest files. The
+earlier local suite was interrupted at batch 474/596 and remains an incomplete
+local observation; the later hosted success closes the required hosted suite
+gate. Do not rerun unchanged suites to replace that historical interruption.
+
+The MSVC preflight rejects missing `LIB`, `LIBPATH`, `INCLUDE` or the absence
+of a regular `link.exe` on `PATH` before attempt creation; the worker repeats it
+before the root. Sixty-eight focused cases, TypeScript and the architecture
+check passed. The September 28 independent review found no actionable
+regression and traced environment preservation from parent through worker to
+Cargo. This is host discovery, not complete toolchain attestation or proof of
+a successful campaign on this candidate.
+
+Campaign 28 used this clean published candidate and matching terminal-green CI,
+then failed once with `execution_failure`. Its bounded receipt confirms the
+post-failure identity check, but publishes no raw cause and does not establish
+root cleanup. The public attempt contained no worker-entry or worker-failure
+marker. A no-attempt child-loader reproduction failed before the worker
+entrypoint because the clean checkout lacked the ignored generated
+`wasm-avl/pkg/bridge_avl.js`. Running the official `npm run wasm:build` with
+the pinned wasm-pack 0.14.0 and Rust 1.97.1 generated the package; the same
+child-loader probe then reached the worker's intentional missing-arguments
+guard. This confirms the omitted generated WASM package as the pre-worker
+blocker without exposing the attempt's raw cause. Campaign 28 stays consumed;
+its generated package is diagnostic output only and will not be used as a new
+campaign workspace.
+
+### Completed Admission Work And Retained Campaign Limits
 
 Campaign 27 passed separate reviewed admission and the
 [exact-head CI](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36317771092)
@@ -93,8 +194,8 @@ Prepare fresh build inputs and reject this condition before another attempt.
 The independently reviewed CI-order batch places six cheap checks first and
 retains every remaining test once, existing sharding and serial resource rules.
 This improves failure visibility; it does not establish a total-runtime speedup
-or reduce required milestone coverage. Publish the coherent admission correction
-with that batch instead of inserting a separate diagnostic-only promotion.
+or reduce required milestone coverage. That admission correction and CI-order
+batch were published together; their implementation is complete.
 
 The baseline exact-head run `36254159647`
 ([run](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36254159647))
@@ -115,9 +216,10 @@ non-matching CI stops campaign admission.
 
 The custody-ordering correction and its 185 observer, 427 native setup,
 73 withdrawal-continuation and 127 publication/broadcast cases are unchanged.
-Reuse that scoped evidence and its review. The current batch changes the
-invocation failure path, so its parent/worker tests and static import guards are
-due; it does not change the root, signing, VM or source-build predicates.
+Reuse that scoped evidence and its review. The invocation failure-path change
+also completed its parent/worker tests and static import guards; those checks
+are not due again unless their input closure changes. It did not change the
+root, signing, VM or source-build predicates.
 
 Campaign 24 passed clean-candidate environment admission at
 `5b901fdd7a8f64a4420a7847ecf6f5235f4abeb5` but returned
@@ -136,14 +238,13 @@ post-root identity checks, or result publication. The cause remains `unknown`;
 this source-supported limit closes the historical diagnosis without a causal
 repair or cleanup claim. No private attempt files are needed to reach it.
 
-The shortest reliable order is: (1) make the actual root failure phase observable
-without changing existing terminal authority; (2) repair or falsify the named
-boundary through a fresh non-campaign probe, focused negatives and independent
-review; (3) publish through the guards, obtain all required hosted jobs green on
-that exact head, then separately admit one new campaign with fresh custody and
-outputs; (4) exercise recovery
-and the reproducible operator path after a real two-cycle result; and (5) close
-FED-7 evidence and release review. A CI repair does not retroactively
+The root-phase diagnostic, fresh build-output admission, runtime composition
+and MSVC discovery changes are implemented, reviewed and covered by the
+published candidate's green CI. The remaining shortest reliable order is:
+(1) close fresh admission; (2) obtain a real two-cycle result; (3) exercise
+recovery and the reproducible operator path; and (4) close FED-7 evidence and
+release review. Return to a bounded repair only when new evidence requires it.
+A CI repair does not retroactively
 make Campaign 24 successful, and a successful campaign does not waive the
 recovery or independent-custody obligations.
 
@@ -650,18 +751,19 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Root failure -> bounded phase evidence | Expose the current failing root phase, when known, in a separate non-authorizing diagnostic while retaining existing receipt formats, then falsify the named boundary with an isolated fresh probe | A future failure can distinguish builder, node-start, cycle and cleanup scopes without raw causes, paths, custody, retry or cleanup claims; isolated negatives and independent review close the change |
+| **Now** | Local candidate -> reviewed, promoted candidate | Re-review the exact changed-file manifest; on GO, recheck generated-package/source/tool identities and run the staged guard, create the coherent local commit, run the range guard, update PR 7 through the guarded path, then require the clean-checkout candidate gate and all required jobs on that exact head | No campaign until review, pre-promotion gates and exact-head CI pass and a separate fresh-input admission completes. Campaigns 24-28 remain consumed; prior unknown causes and unestablished cleanup remain unresolved |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 27 are terminal; Campaigns 24-27 failed and remain consumed.
-The next full local campaign must exercise
-the changed successor consumer through a minimal documented and reproducible
-invocation. A finished operator package is not a prerequisite for this
-deciding run; private historical campaign scripts or custody are not reusable
-inputs. Add ready
+Campaigns through 28 are terminal; Campaigns 24-28 failed and remain consumed.
+The next full local campaign is conditional on the current candidate review,
+closeout, guarded promotion, exact-head CI and separate fresh-input admission.
+It must exercise the changed successor consumer through a minimal documented
+and reproducible invocation. A finished operator package is not a prerequisite
+for this deciding run; private historical campaign scripts or custody are not
+reusable inputs. Add ready
 recovery cases when they share that evidence closure; do not wait for the
 entire recovery matrix when a live second-cycle result decides further work.
 Create a fresh chain and custody, perform both cycles there, and never resume
@@ -677,15 +779,17 @@ result may change the approach or order; it cannot remove a delivery obligation
 or its required evidence. Keep batch decisions in Current Focus and the
 existing task handoff.
 
+Fresh build-output rejection, bounded root-phase diagnostics, runtime-composition
+validation and MSVC host discovery are completed prerequisites, not queued
+implementation work. Their fresh-input checks remain part of admission. Reopen
+their implementation only on changed inputs, a concrete defect or a new failure.
+
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
+| Candidate closeout and guarded promotion (selected next) | Fresh independent review accepts the exact manifest; generated-package/source/tool identities and staged guard pass; create the local commit and pass the range guard; update PR 7 through the guarded path; then the clean-checkout candidate gate and all required exact-head CI jobs pass | Reuse unchanged positives; run only gates invalidated by this candidate. The current local build used Node 26.3.0 and a warm Cargo cache, so the pinned clean-checkout gate remains due on the exact hosted head |
+| Fresh campaign admission | The integration owner separately admits one new attempt on the clean promoted candidate after matching CI, actual runtime/host preflight, build-output readiness and fresh isolation/custody checks | Use the existing loader and validators with the selected pinned Node/compiler/package/Git inputs; reject drift, aliases and occupied outputs. Carry Campaigns 24-28's unknown raw causes and unestablished cleanup; diagnostics supply no admission or cleanup authority |
+| Same-session two-cycle acceptance | The connected successor consumers complete the second operation from the first confirmed reserve/DUP/tracker state, with separately scoped operation authority, custody lifetime, nonce and parent binding | Reuse unchanged component positives and negatives; the missing discriminator is one fresh-node two-cycle campaign with nonempty replay state, funded fees and conservation. Nonzero burn-leaf indices remain separately due when supported by the selected checkpoint shape |
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
-| Fresh build-output admission | The parent consumes the builder's existing output-readiness guard before creating an attempt | Reject an existing assembly and existing isolated SBT state independently, with no attempt or worker; retain identity-only postchecks after generated outputs exist |
-| Bounded root failure phase | A root/cleanup failure reaches an optional, identity-bound phase diagnostic without altering terminal authority or existing receipt bytes | Isolate builder, node-start, cycle and cleanup stages; test missing/foreign/malformed diagnostics, primary failure preservation and disposal holds; independently review before publication |
-| Runtime composition and admission preflight | The loader/parent join and the full clean-candidate admission pass under the exact pinned Node/compiler/package/Git inputs, with both historical locks unchanged | Run the focused joined-runtime and environment validators only; reject aliases or drift; do not switch the whole root to Node 24.18, rewrite the historical compiler lock, or claim unchanged evidence after a runtime change |
-| MSVC host admission | On Windows, the parent rejects missing Visual Studio build variables or a regular linker candidate before attempt creation; the worker rechecks | Isolate each absent variable and linker shape, then test the invocation join. This is host discovery, not compiler attestation or proof of Campaign 27's raw cause |
-| Next campaign admission | The integration owner admits one fresh attempt after exact CI, runtime preflight, build-output readiness and bounded root diagnosis close | Carry Campaigns 24-27's unknown raw causes and unestablished cleanup explicitly; use fresh custody and unique state, verify new prerequisites, and preserve ambiguous-outcome holds. Diagnostics supply no admission or cleanup authority |
-| Successor continuation | An independently testable join from observed first-cycle reserve/DUP/tracker state to a second successful operation, with separately scoped operation authority, custody lifetime, nonce and parent binding | Focused composed positives and isolated replay, disposed-handle, foreign-operation/profile, wrong-parent, stale-state and conservation negatives before a new full campaign. Exercise nonempty replay state; nonzero burn-leaf indices are separately due when supported by the selected checkpoint shape |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
 | Reproducible operator delivery | A fresh external context can use repository instructions and the packaged entry point without campaign-specific maintainer scripts | Separate-root exact source/tool/runtime checks, then one distinguishing packaged lifecycle/recovery rehearsal. Reuse the historical campaign only as evidence, never as an execution session |
 | FED-7 decision | Exact evidence reaches the proper release consumer, with due independent review and current promotion checks | Reuse unchanged gates. Keep public research availability, reference support, independent custody and production claims distinct |
@@ -737,7 +841,7 @@ similar:
 The historical diagnosis gate has two valid outcomes: a bounded
 source-supported explanation, or an explicit `unknown` classification that
 preserves consumed attempts and carries uncertainty into the next fresh
-evidence contract. Neither permits reuse of Campaign 24, 25 or 26 state. After
+evidence contract. Neither permits reuse of Campaign 24, 25, 26 or 27 state. After
 the fresh campaign, return to the same gate; do not combine recovery, operator
 packaging or FED-7 release mapping into the campaign batch.
 
@@ -1387,6 +1491,15 @@ invalidated results and remaining blockers. Do not create another tracking
 framework. Full clean-checkout verification (`npm.cmd run check:clean-checkout`
 from `relayer`) belongs at its due milestone, not the ordinary edit loop.
 
+Run local focused checks during implementation and the applicable complete
+closure once per stable milestone; reuse a matching hosted result for the gate
+it actually exercises. The September 28 audit measured the Windows candidate
+job at 201.9 minutes, including approximately 56.79 minutes for provisioning
+and 192 fresh signer-bound compiler preparations. This identifies a cost target,
+not redundant coverage or a proven speedup. Any later optimization must preserve
+fresh custody and provenance, retain every required case and measure preparation
+separately from execution. It is not a prerequisite for the next two-cycle result.
+
 Hosted CI currently runs the audit and pinned-source rebuild jobs broadly.
 Until a separately reviewed change implements dependency-aware selection,
 every required hosted job still must pass at publication. The bounded CI
@@ -1408,12 +1521,15 @@ Diagnostic-only changes, terminal attempts and partial refactors stay local
 until part of such a milestone. Batch documentation corrections with the next
 useful promotion; do not add a publication round between diagnostic edits.
 
-At promotion: freeze the candidate, review the exact diff, run or reuse its due
-closure, run staged/range publication guards, push through the guarded wrapper,
-and wait for the required checks on that exact head. Respect branch protection
-and the authorized merge policy. Verify canonical author/committer identity
-before a local merge; do not repeat the corrected account-email publication.
-Publication is not deployment, broadcast, a supported release or activation.
+At promotion: freeze the candidate and review the exact diff. Before a public
+update, recheck exact generated-package/source/tool identities, run the staged
+guard, create the coherent local commit, and run the commit-range guard before
+the guarded push. If a due closeout requires hosted clean-checkout inputs, run
+it only after the guarded update on that exact head; require every mandated job
+to pass there. Respect branch protection and the authorized merge policy.
+Verify canonical author/committer identity before a local merge; do not repeat
+the corrected account-email publication. Publication is not deployment,
+broadcast, a supported release or activation.
 
 ## Parallel Work And Deferrals
 

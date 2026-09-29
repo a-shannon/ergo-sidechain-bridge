@@ -2,9 +2,6 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import {
-  runSubstrateFederatedGenesisTargetRootV1,
-} from '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js';
 import { readBoundedRegularFile, writeNewFile } from '../create-only-out-of-repository-artifact.js';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
 import {
@@ -12,15 +9,27 @@ import {
   type NativeTwoCycleFailureStageV1,
 } from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
 import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
+import {
+  validateWasmAvlBuildToolHashV2,
+  type WasmAvlBuildToolNameV2,
+} from '../substrate-federated-native-wasm-avl-build-tool-pins-v1.js';
 import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-v1.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   projectSubstrateFederatedNativeTwoCycleResultV1,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
+import {
+  assertSubstrateFederatedNativeWasmAvlPackageMatchesV1,
+  type SubstrateFederatedNativeWasmAvlPackageIdentityV1,
+} from '../substrate-federated-native-wasm-avl-package-v1.js';
 
 const WORKER_TRANSPORT_SCHEMA =
   'e2s.substrate-federated-native-two-cycle-worker-transport.v1';
+const WASM_PACKAGE_EVIDENCE_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-wasm-avl-package.v2';
+const WORKER_WASM_PACKAGE_CHECK_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-worker-wasm-avl-package.v1';
 
 export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
   argv: readonly string[],
@@ -55,6 +64,12 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
     || parent.pathIdentityDigestHex !== invocation.pathIdentityDigestHex) {
     throw new Error('native two-cycle parent start differs from the captured invocation');
   }
+  const wasmPackageEvidence = readWasmAvlPackageEvidence(
+    join(invocation.attemptPath, 'wasm-avl-package.json'),
+    args.expectedWasmAvlPackageSha256Hex,
+    invocation.config.expectedBridgeCommit,
+    String(parent.expectedBridgeTree),
+  );
   // Claim the attempt before entering signing custody. Even a failed root call
   // permanently consumes this worker entry; a retained attempt cannot replay it.
   writeNewFile(
@@ -72,6 +87,17 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       || before.toolIdentityDigestHex !== parent.toolIdentityDigestHex) {
       throw new Error('native two-cycle worker environment differs from parent start');
     }
+    assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+      invocation.config.bridgeRoot,
+      wasmPackageEvidence,
+    );
+    const { runSubstrateFederatedGenesisTargetRootV1 } = await import(
+      '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js'
+    );
+    assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+      invocation.config.bridgeRoot,
+      wasmPackageEvidence,
+    );
     stage = 'root-or-cleanup';
     const rootResult = await runSubstrateFederatedGenesisTargetRootV1(
       invocation.rootInput,
@@ -94,6 +120,28 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       || before.runtime.gitExecutableSha256
         !== after.runtime.gitExecutableSha256
     ) throw new Error('native two-cycle worker identities changed during execution');
+    assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+      invocation.config.bridgeRoot,
+      wasmPackageEvidence,
+    );
+    writeNewFile(
+      join(invocation.attemptPath, 'worker-wasm-avl-package.json'),
+      Buffer.from(`${canonicalJson({
+        schema: WORKER_WASM_PACKAGE_CHECK_SCHEMA,
+        version: 1,
+        status: 'package_identity_revalidated',
+        bridgeCommit: after.repository.commit,
+        bridgeTree: after.repository.tree,
+        sourceSha256Hex: wasmPackageEvidence.sourceSha256Hex,
+        packageSha256Hex: wasmPackageEvidence.packageSha256Hex,
+        checks: {
+          matchedBeforeImport: true,
+          matchedAfterImport: true,
+          matchedAfterRoot: true,
+        },
+      })}\n`, 'utf8'),
+      'native two-cycle worker WASM AVL package check',
+    );
     const transport = Object.freeze({
       schema: WORKER_TRANSPORT_SCHEMA,
       version: 1 as const,
@@ -154,10 +202,11 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
 function parseArguments(argv: readonly string[]): Readonly<{
   configPath: string;
   expectedConfigSha256Hex: string;
+  expectedWasmAvlPackageSha256Hex: string;
   attemptPath: string;
 }> {
   if (
-    argv.length !== 6
+    argv.length !== 8
     || argv[0] !== '--config'
     || argv[1] === undefined
     || argv[1].length === 0
@@ -165,16 +214,104 @@ function parseArguments(argv: readonly string[]): Readonly<{
     || argv[2] !== '--expected-config-sha256'
     || argv[3] === undefined
     || !/^[0-9a-f]{64}$/u.test(argv[3])
-    || argv[4] !== '--attempt'
+    || argv[4] !== '--expected-wasm-avl-package-sha256'
     || argv[5] === undefined
-    || argv[5].length === 0
-    || argv[5].startsWith('--')
+    || !/^[0-9a-f]{64}$/u.test(argv[5])
+    || argv[6] !== '--attempt'
+    || argv[7] === undefined
+    || argv[7].length === 0
+    || argv[7].startsWith('--')
   ) throw new Error('native two-cycle worker arguments are invalid');
   return Object.freeze({
     configPath: argv[1],
     expectedConfigSha256Hex: argv[3],
-    attemptPath: argv[5],
+    expectedWasmAvlPackageSha256Hex: argv[5],
+    attemptPath: argv[7],
   });
+}
+
+function readWasmAvlPackageEvidence(
+  evidencePath: string,
+  expectedPackageSha256Hex: string,
+  expectedBridgeCommit: string,
+  expectedBridgeTree: string,
+): Readonly<SubstrateFederatedNativeWasmAvlPackageIdentityV1> {
+  const bytes = readBoundedRegularFile(
+    evidencePath,
+    'native two-cycle generated WASM AVL package evidence',
+    32 * 1024,
+  ).bytes;
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  assertNoDuplicateJsonKeys(text);
+  let parsed: unknown;
+  try { parsed = JSON.parse(text) as unknown; }
+  catch { throw new Error('native two-cycle WASM AVL package evidence is invalid JSON'); }
+  if (text !== `${canonicalJson(parsed)}\n`) {
+    throw new Error('native two-cycle WASM AVL package evidence must be canonical JSON plus one LF');
+  }
+  const evidence = exactRecord(parsed, [
+    'schema', 'version', 'status', 'bridgeCommit', 'bridgeTree', 'build',
+  ], 'native two-cycle WASM AVL package evidence');
+  const build = exactRecord(evidence.build, [
+    'sourceSha256Hex', 'packageSha256Hex', 'wasmPackVersion',
+    'wasmPackExecutableSha256Hex', 'wasmBindgenVersion',
+    'wasmBindgenExecutableSha256Hex', 'rustcVersion', 'rustcExecutableSha256Hex',
+    'cargoVersion', 'cargoExecutableSha256Hex',
+  ], 'native two-cycle WASM AVL package build identity');
+  const hash = (value: unknown, label: string): string => {
+    if (typeof value !== 'string' || !/^[0-9a-f]{64}$/u.test(value)) {
+      throw new Error(`${label} is invalid`);
+    }
+    return value;
+  };
+  const validateToolHash = (
+    name: WasmAvlBuildToolNameV2,
+    value: unknown,
+    label: string,
+  ): void => {
+    validateWasmAvlBuildToolHashV2(name, hash(value, label), 'win32-x64');
+  };
+  if (
+    evidence.schema !== WASM_PACKAGE_EVIDENCE_SCHEMA
+    || evidence.version !== 1
+    || evidence.status !== 'source-and-tool-bound-package-built'
+    || evidence.bridgeCommit !== expectedBridgeCommit
+    || evidence.bridgeTree !== expectedBridgeTree
+    || build.wasmPackVersion !== 'wasm-pack 0.14.0'
+    || build.wasmBindgenVersion !== 'wasm-bindgen 0.2.120'
+    || build.rustcVersion !== 'rustc 1.97.1 (8bab26f4f 2026-07-14)'
+    || build.cargoVersion !== 'cargo 1.97.1 (c980f4866 2026-06-30)'
+  ) throw new Error('native two-cycle WASM AVL package evidence identity differs');
+  const identity = Object.freeze({
+    sourceSha256Hex: hash(build.sourceSha256Hex, 'WASM AVL source digest'),
+    packageSha256Hex: hash(build.packageSha256Hex, 'WASM AVL package digest'),
+  });
+  validateToolHash('wasmPack', build.wasmPackExecutableSha256Hex, 'wasm-pack executable digest');
+  validateToolHash('wasmBindgen', build.wasmBindgenExecutableSha256Hex, 'wasm-bindgen executable digest');
+  validateToolHash('rustc', build.rustcExecutableSha256Hex, 'rustc executable digest');
+  validateToolHash('cargo', build.cargoExecutableSha256Hex, 'cargo executable digest');
+  if (identity.packageSha256Hex !== expectedPackageSha256Hex) {
+    throw new Error('native two-cycle worker WASM AVL package digest differs from parent');
+  }
+  return identity;
+}
+
+function exactRecord(
+  value: unknown,
+  keys: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  const record = value as Record<string, unknown>;
+  const actual = Object.keys(record).sort();
+  const expected = [...keys].sort();
+  if (actual.length !== expected.length
+    || actual.some((key, index) => key !== expected[index])) {
+    throw new Error(`${label} fields are invalid`);
+  }
+  return record;
 }
 
 async function main(): Promise<void> {

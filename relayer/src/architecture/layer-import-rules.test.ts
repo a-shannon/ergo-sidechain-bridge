@@ -52,6 +52,10 @@ describe('layer import rules', () => {
     const binding = 'runSubstrateFederatedGenesisTargetRootV1';
     expect(inspect(staticAppFixture(worker,
       `import { ${binding} } from '${specifier}'; await ${binding}({});`))).toEqual([]);
+    expect(inspect({
+      [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};',
+      [worker]: `const { ${binding} } = await import('${specifier}'); await ${binding}({});`,
+    })).toEqual([]);
     for (const foreign of ['scripts/run-substrate-federated-native-two-cycle-v1.ts',
       'scripts/foreign.ts', 'adapters/foreign.ts', 'foreign.ts']) {
       const relative = `./${path.posix.relative(path.posix.dirname(foreign), FEDERATED_GENESIS_TARGET_ROOT)
@@ -62,6 +66,8 @@ describe('layer import rules', () => {
     for (const source of [
       `import * as root from '${specifier}';`, `export { ${binding} } from '${specifier}';`,
       `const root = await import('${specifier}');`, `const root = require('${specifier}');`,
+      `const { ${binding}: runRoot } = await import('${specifier}'); runRoot({});`,
+      `const { otherRoot } = await import('${specifier}'); otherRoot({});`,
     ]) {
       expect(inspect({ [FEDERATED_GENESIS_TARGET_ROOT]: 'export {};', [worker]: source })
         .map(value => value.message)).toContain(`exclusive authority module must use named runtime imports: ${specifier}`);
@@ -82,6 +88,39 @@ describe('layer import rules', () => {
       expect(inspect(staticAppFixture(caller, `import { ${binding} } from '${specifier}'; ${binding}([]);`))
         .map(item => item.message)).toContain(`exclusive runtime module import has the wrong owner: ${specifier}`);
     }
+  });
+
+  it('reserves source-locked WASM build execution to its builder and direct tests', () => {
+    const binding = 'runWasmAvlBuildPipelineV2';
+    const builder = 'scripts/build-wasm-avl.ts';
+    const builderSpecifier = './build-wasm-avl-pipeline-v2.js';
+    expect(inspect(staticAppFixture(
+      builder,
+      `import { ${binding} } from '${builderSpecifier}'; await ${binding}({}, {}, {});`,
+    ))).toEqual([]);
+
+    const test = 'build-wasm-avl.test.ts';
+    const testSpecifier = './scripts/build-wasm-avl-pipeline-v2.js';
+    expect(inspect(staticAppFixture(
+      test,
+      `import { ${binding} } from '${testSpecifier}'; await ${binding}({}, {}, {});`,
+    ))).toEqual([]);
+
+    const foreign = 'scripts/foreign-wasm-build.ts';
+    const foreignSpecifier = './build-wasm-avl-pipeline-v2.js';
+    expect(inspect(staticAppFixture(
+      foreign,
+      `import { ${binding} } from '${foreignSpecifier}'; await ${binding}({}, {}, {});`,
+    )).map(item => item.message)).toContain(
+      `exclusive authority import has the wrong owner: ${foreignSpecifier}#${binding}`,
+    );
+
+    expect(inspect(staticAppFixture(
+      builder,
+      `import { ${binding} as execute } from '${builderSpecifier}'; await execute({}, {}, {});`,
+    )).map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${builderSpecifier}#${binding}`,
+    );
   });
 
   it.each([

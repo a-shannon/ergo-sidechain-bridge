@@ -18,6 +18,44 @@ commit being tested. Install the relayer dependencies from its locked package
 set and prepare the source checkouts, toolchains and dependency caches required
 by the existing builders. The campaign does not install missing prerequisites.
 
+Install the relayer dependencies with `npm ci` in this exact checkout and keep
+the pinned Rust dependencies available locally. Before creating an attempt, the
+two-cycle runner rebuilds the WASM AVL package from the clean checkout. The
+reviewed build-tool hashes currently cover Windows x64 only: wasm-pack 0.14.0,
+wasm-bindgen 0.2.120, and the Rust 1.97.1 `rustc` and Cargo executables. The
+generator must match the version in `wasm-avl/Cargo.lock`, and the builder
+checks all four executable hashes and versions around the build. The hosted
+Windows workflow also checks the official generator release archive before
+extracting it; a local build verifies the selected executable's version and
+hash, but does not attest its download archive. Other host architectures have
+no reviewed build-tool pins yet.
+
+The build uses the crate's release profile and disables a separate `wasm-opt`
+pass. `wasm-pack` runs with `--mode no-install`, Cargo runs offline, and rustup
+automatic toolchain installation is disabled. A missing generator or dependency
+therefore fails the preflight instead of installing it during the build. The
+Windows CI provisions the pinned generator and runs `cargo fetch --locked`
+before invoking that offline build. These controls constrain the reviewed tool
+and Cargo dependency paths; they are not a general network sandbox for arbitrary
+compiler or build-script subprocesses. The build writes ignored runtime files
+under `wasm-avl/pkg/`; do not copy them from another checkout.
+
+The runner fingerprints every crate input, checks the exact generated file set,
+and matches all `#[wasm_bindgen]` functions across the Rust source, TypeScript
+declarations, JavaScript bindings and WASM exports. It also requires the
+production bridge AVL functions used by the tracker and duplicate-prevention
+consumers. The attempt retains the crate and package digests plus the exact
+wasm-pack, wasm-bindgen, rustc and Cargo executable hashes. The worker verifies
+the reviewed tool pins before loading the root, then checks source and package
+digests before root execution, after loading it and after root cleanup; the
+parent rechecks the evidence and bytes before publishing success. These checks
+do not change the existing terminal receipt schema or digest domains. A
+preflight build or ABI failure creates no attempt. A mismatch after the start
+marker follows the existing consumed-attempt and no-retry rules.
+
+`npm run wasm:build` remains available for a local build or inspection, but the
+runner always rebuilds the package for its own exact invocation.
+
 The committed locks define the expected identities:
 
 - `sources/authenticated-v2-compiler-lock.json`: Node 24.14.0, pinned Git and

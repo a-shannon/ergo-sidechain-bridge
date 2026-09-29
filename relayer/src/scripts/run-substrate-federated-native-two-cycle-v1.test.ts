@@ -19,6 +19,8 @@ const mocked = vi.hoisted(() => ({
   project: vi.fn(),
   root: vi.fn(),
   runtime: vi.fn(),
+  wasmBuild: vi.fn(),
+  wasmPackageMatches: vi.fn(),
 }));
 
 vi.mock('../authenticated-v2-runtime-bundle.js', () => ({
@@ -32,6 +34,12 @@ vi.mock('../substrate-federated-native-two-cycle-invocation-v1.js', () => ({
   projectSubstrateFederatedNativeTwoCycleResultV1: mocked.project,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1:
     mocked.environment,
+}));
+vi.mock('./build-wasm-avl.js', () => ({
+  buildWasmAvlPackageV2: mocked.wasmBuild,
+}));
+vi.mock('../substrate-federated-native-wasm-avl-package-v1.js', () => ({
+  assertSubstrateFederatedNativeWasmAvlPackageMatchesV1: mocked.wasmPackageMatches,
 }));
 vi.mock(
   '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js',
@@ -55,9 +63,57 @@ import {
 
 const temporaryRoots: string[] = [];
 const bridgeRoot = resolve(import.meta.dirname, '..', '..', '..');
+const WORKER_WASM_PACKAGE_EVIDENCE_FIELDS: readonly {
+  readonly name: string;
+  readonly path: readonly string[];
+  readonly replacement?: string;
+}[] = [
+  { name: 'schema', path: ['schema'] },
+  { name: 'version', path: ['version'] },
+  { name: 'status', path: ['status'] },
+  { name: 'bridgeCommit', path: ['bridgeCommit'] },
+  { name: 'bridgeTree', path: ['bridgeTree'] },
+  { name: 'source digest', path: ['build', 'sourceSha256Hex'] },
+  { name: 'package digest', path: ['build', 'packageSha256Hex'] },
+  { name: 'wasm-pack version', path: ['build', 'wasmPackVersion'] },
+  {
+    name: 'wasm-pack hash', path: ['build', 'wasmPackExecutableSha256Hex'],
+    replacement: '0'.repeat(64),
+  },
+  { name: 'wasm-bindgen version', path: ['build', 'wasmBindgenVersion'] },
+  {
+    name: 'wasm-bindgen hash', path: ['build', 'wasmBindgenExecutableSha256Hex'],
+    replacement: '0'.repeat(64),
+  },
+  { name: 'rustc version', path: ['build', 'rustcVersion'] },
+  {
+    name: 'rustc hash', path: ['build', 'rustcExecutableSha256Hex'],
+    replacement: '0'.repeat(64),
+  },
+  { name: 'Cargo version', path: ['build', 'cargoVersion'] },
+  {
+    name: 'Cargo hash', path: ['build', 'cargoExecutableSha256Hex'],
+    replacement: '0'.repeat(64),
+  },
+];
+const PARENT_WORKER_WASM_CHECK_FIELDS = [
+  { name: 'schema', path: ['schema'] },
+  { name: 'version', path: ['version'] },
+  { name: 'status', path: ['status'] },
+  { name: 'bridgeCommit', path: ['bridgeCommit'] },
+  { name: 'bridgeTree', path: ['bridgeTree'] },
+  { name: 'source digest', path: ['sourceSha256Hex'] },
+  { name: 'package digest', path: ['packageSha256Hex'] },
+  { name: 'pre-import identity', path: ['checks', 'matchedBeforeImport'] },
+  { name: 'post-import identity', path: ['checks', 'matchedAfterImport'] },
+  { name: 'post-root identity', path: ['checks', 'matchedAfterRoot'] },
+] as const;
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocked.wasmBuild.mockReturnValue(wasmPackageIdentity());
+  mocked.wasmPackageMatches.mockImplementation(() => undefined);
+  mocked.environment.mockResolvedValue(environment());
 });
 
 afterEach(() => {
@@ -111,7 +167,12 @@ describe('native two-cycle parent and worker V1', () => {
 
     expect(published.status).toBe('two_cycle_terminal_receipt_published');
     expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(true);
+    expect(existsSync(join(fixture.attemptPath, 'wasm-avl-package.json'))).toBe(true);
+    expect(existsSync(join(fixture.attemptPath, 'worker-wasm-avl-package.json'))).toBe(true);
     expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(false);
+    expect(mocked.environment).toHaveBeenCalledTimes(3);
+    expect(mocked.wasmBuild).toHaveBeenCalledOnce();
+    expect(mocked.wasmPackageMatches).toHaveBeenCalledTimes(2);
     expect(mocked.process).toHaveBeenCalledOnce();
     const processInput = mocked.process.mock.calls[0]?.[0];
     const canonicalAttemptPath = realpathSync.native(fixture.attemptPath);
@@ -123,6 +184,8 @@ describe('native two-cycle parent and worker V1', () => {
       join(canonicalAttemptPath, 'config.json'),
       '--expected-config-sha256',
       fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256',
+      wasmPackageIdentity().packageSha256Hex,
       '--attempt',
       canonicalAttemptPath,
     ]);
@@ -146,6 +209,72 @@ describe('native two-cycle parent and worker V1', () => {
       '--config', fixture.configSourcePath,
     ])).rejects.toThrow();
     expect(mocked.process).not.toHaveBeenCalled();
+  });
+
+  it('fails closed if source or tool build evidence changes during worker execution', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    mocked.process.mockImplementationOnce(async input => {
+      const evidencePath = join(fixture.attemptPath, 'wasm-avl-package.json');
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as {
+        build: { rustcExecutableSha256Hex: string };
+      };
+      evidence.build.rustcExecutableSha256Hex = 'f'.repeat(64);
+      writeFileSync(evidencePath, `${canonicalJson(evidence)}\n`, 'utf8');
+      writeWorkerTransport(fixture, projectedResult());
+      return cleanProcessResult(input);
+    });
+
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toThrow(/build evidence changed/iu);
+
+    expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(true);
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+  });
+
+  it.each(PARENT_WORKER_WASM_CHECK_FIELDS)(
+    'parent rejects a tampered worker WASM check field: $name',
+    async ({ path: fieldPath }) => {
+      const fixture = commandFixture();
+      const result = projectedResult();
+      configureParent(fixture, result);
+      mocked.process.mockImplementationOnce(async input => {
+        writeWorkerTransport(fixture, result);
+        const checkPath = join(fixture.attemptPath, 'worker-wasm-avl-package.json');
+        const check = JSON.parse(readFileSync(checkPath, 'utf8')) as Record<string, unknown>;
+        mutateJsonPath(check, fieldPath);
+        writeCanonicalJson(checkPath, check);
+        return cleanProcessResult(input);
+      });
+
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toThrow();
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    },
+  );
+
+  it('rejects a failed source-locked WASM build before attempt creation', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    mocked.wasmBuild.mockImplementationOnce(() => {
+      throw new Error('generated WASM AVL package build failed');
+    });
+
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toThrow(/generated WASM AVL package/iu);
+
+    expect(mocked.wasmBuild).toHaveBeenCalledWith(
+      fixture.loaded.config.bridgeRoot,
+      { quiet: true },
+    );
+    expect(mocked.environment).toHaveBeenCalledOnce();
+    expect(existsSync(fixture.attemptPath)).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'start.json'))).toBe(false);
+    expect(mocked.process).not.toHaveBeenCalled();
+    expect(mocked.root).not.toHaveBeenCalled();
   });
 
   it('rejects a pre-existing matching Ergo assembly before creating an attempt', async () => {
@@ -231,6 +360,7 @@ describe('native two-cycle parent and worker V1', () => {
     mocked.process.mockRejectedValueOnce(primary);
     mocked.environment
       .mockResolvedValueOnce(environment())
+      .mockResolvedValueOnce(environment())
       .mockRejectedValueOnce(new Error('postcheck identity failed'));
     await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
       '--config', fixture.configSourcePath,
@@ -288,7 +418,7 @@ describe('native two-cycle parent and worker V1', () => {
     );
     mocked.root.mockRejectedValueOnce(primary);
     mocked.process.mockImplementationOnce(async input => {
-      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(-6));
+      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(-8));
       throw new Error('worker unexpectedly completed');
     });
     await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
@@ -322,7 +452,7 @@ describe('native two-cycle parent and worker V1', () => {
     );
     mocked.root.mockRejectedValueOnce(primary);
     mocked.process.mockImplementationOnce(async input => {
-      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(-6));
+      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(-8));
       throw new Error('worker unexpectedly completed');
     });
     await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
@@ -509,6 +639,7 @@ describe('native two-cycle parent and worker V1', () => {
     await runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath,
       '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
       '--attempt', fixture.attemptPath,
     ]);
 
@@ -519,6 +650,51 @@ describe('native two-cycle parent and worker V1', () => {
     ]);
     expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(true);
     expect(existsSync(join(fixture.attemptPath, 'worker-failure.json'))).toBe(false);
+  });
+
+  it('withholds root execution when package bytes change after module import', async () => {
+    const fixture = workerFixture();
+    mocked.load.mockReturnValue(fixture.loaded);
+    mocked.environment.mockResolvedValue(environment());
+    mocked.wasmPackageMatches
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => { throw new Error('package digest changed after import'); });
+
+    await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+      '--config', fixture.configPath,
+      '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
+    ])).rejects.toThrow(/package digest changed/iu);
+
+    expect(mocked.wasmPackageMatches).toHaveBeenCalledTimes(2);
+    expect(mocked.root).not.toHaveBeenCalled();
+    expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'worker-failure.json'))).toBe(true);
+  });
+
+  it('withholds successful transport when package bytes change after root cleanup', async () => {
+    const fixture = workerFixture();
+    mocked.load.mockReturnValue(fixture.loaded);
+    mocked.environment.mockResolvedValue(environment());
+    mocked.root.mockResolvedValue({ root: 'result' });
+    mocked.project.mockReturnValue(projectedResult());
+    mocked.wasmPackageMatches
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => { throw new Error('package digest changed after root'); });
+
+    await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+      '--config', fixture.configPath,
+      '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
+    ])).rejects.toThrow(/package digest changed/iu);
+
+    expect(mocked.root).toHaveBeenCalledOnce();
+    expect(mocked.wasmPackageMatches).toHaveBeenCalledTimes(3);
+    expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'worker-wasm-avl-package.json'))).toBe(false);
   });
 
   it.each(['pre-root', 'root-or-cleanup', 'projection', 'post-root-identity'] as const)(
@@ -539,7 +715,9 @@ describe('native two-cycle parent and worker V1', () => {
 
       await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
         '--config', fixture.configPath, '--expected-config-sha256',
-        fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+        fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+        '--attempt', fixture.attemptPath,
       ])).rejects.toBe(primary);
       const text = readFileSync(join(fixture.attemptPath, 'worker-failure.json'), 'utf8');
       expect(JSON.parse(text)).toMatchObject({
@@ -564,7 +742,9 @@ describe('native two-cycle parent and worker V1', () => {
     mkdirSync(join(fixture.attemptPath, 'worker-result.json'));
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath, '--expected-config-sha256',
-      fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+      fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
     ])).rejects.toThrow();
     const diagnostic = JSON.parse(readFileSync(join(fixture.attemptPath, 'worker-failure.json'), 'utf8'));
     expect(diagnostic.stage).toBe('transport-publication');
@@ -581,7 +761,9 @@ describe('native two-cycle parent and worker V1', () => {
     writeFileSync(path, 'retained diagnostic bytes');
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath, '--expected-config-sha256',
-      fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+      fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
     ])).rejects.toBe(primary);
     expect(readFileSync(path, 'utf8')).toBe('retained diagnostic bytes');
     expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
@@ -596,6 +778,7 @@ describe('native two-cycle parent and worker V1', () => {
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath,
       '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
       '--attempt', fixture.attemptPath,
     ])).rejects.toThrow(/config digest differs/iu);
     expect(mocked.root).not.toHaveBeenCalled();
@@ -607,6 +790,7 @@ describe('native two-cycle parent and worker V1', () => {
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath,
       '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
       '--attempt', fixture.attemptPath,
     ])).rejects.toBe(primary);
     expect(mocked.root).toHaveBeenCalledOnce();
@@ -614,6 +798,7 @@ describe('native two-cycle parent and worker V1', () => {
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath,
       '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
       '--attempt', fixture.attemptPath,
     ])).rejects.toThrow(/exist/iu);
     expect(mocked.root).toHaveBeenCalledOnce();
@@ -633,18 +818,45 @@ describe('native two-cycle parent and worker V1', () => {
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath,
       '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
       '--attempt', fixture.attemptPath,
     ])).rejects.toThrow(/identities changed/iu);
     expect(mocked.root).toHaveBeenCalledOnce();
     expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
   });
 
+  it.each(WORKER_WASM_PACKAGE_EVIDENCE_FIELDS)(
+    'worker rejects a tampered source package evidence field: $name',
+    async ({ path: fieldPath, replacement }) => {
+      const fixture = workerFixture();
+      mocked.load.mockReturnValue(fixture.loaded);
+      const evidencePath = join(fixture.attemptPath, 'wasm-avl-package.json');
+      const evidence = JSON.parse(readFileSync(evidencePath, 'utf8')) as Record<string, unknown>;
+      mutateJsonPath(evidence, fieldPath, replacement);
+      writeCanonicalJson(evidencePath, evidence);
+
+      await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+        '--config', fixture.configPath,
+        '--expected-config-sha256', fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+        '--attempt', fixture.attemptPath,
+      ])).rejects.toThrow();
+
+      expect(mocked.root).not.toHaveBeenCalled();
+      expect(mocked.environment).not.toHaveBeenCalled();
+      expect(existsSync(join(fixture.attemptPath, 'worker-start.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+    },
+  );
+
   it('consumes the worker entry even when environment validation fails', async () => {
     const fixture = workerFixture();
     mocked.load.mockReturnValue(fixture.loaded);
     mocked.environment.mockRejectedValueOnce(new Error('preflight failed'));
     const argv = ['--config', fixture.configPath, '--expected-config-sha256',
-      fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath];
+      fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath];
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments(argv))
       .rejects.toThrow('preflight failed');
     mocked.environment.mockResolvedValue(environment());
@@ -661,7 +873,9 @@ describe('native two-cycle parent and worker V1', () => {
       writeFileSync(join(fixture.attemptPath, terminal), '{}\n');
       await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
         '--config', fixture.configPath, '--expected-config-sha256',
-        fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+        fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+        '--attempt', fixture.attemptPath,
       ])).rejects.toThrow(/terminal artifact/iu);
       expect(mocked.environment).not.toHaveBeenCalled();
       expect(mocked.root).not.toHaveBeenCalled();
@@ -676,7 +890,9 @@ describe('native two-cycle parent and worker V1', () => {
     writeFileSync(path, canonicalJson({ ...start, configSha256Hex: '0'.repeat(64) }));
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
       '--config', fixture.configPath, '--expected-config-sha256',
-      fixture.loaded.configSha256Hex, '--attempt', fixture.attemptPath,
+      fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
     ])).rejects.toThrow(/parent start differs/iu);
     expect(mocked.environment).not.toHaveBeenCalled();
     expect(mocked.root).not.toHaveBeenCalled();
@@ -732,6 +948,7 @@ function workerFixture() {
     pathIdentityDigestHex: loaded.pathIdentityDigestHex,
     toolIdentityDigestHex: environment().toolIdentityDigestHex,
   }));
+  writeWasmPackageEvidence(attemptPath, environment().repository.commit, environment().repository.tree);
   return { root, configPath, attemptPath, loaded };
 }
 
@@ -919,6 +1136,85 @@ function writeWorkerTransport(
     `${canonicalJson(transport)}\n`,
     'utf8',
   );
+  writeFileSync(
+    join(fixture.attemptPath, 'worker-wasm-avl-package.json'),
+    `${canonicalJson({
+      schema: 'e2s.substrate-federated-native-two-cycle-worker-wasm-avl-package.v1',
+      version: 1,
+      status: 'package_identity_revalidated',
+      bridgeCommit: environment().repository.commit,
+      bridgeTree: environment().repository.tree,
+      sourceSha256Hex: wasmPackageIdentity().sourceSha256Hex,
+      packageSha256Hex: wasmPackageIdentity().packageSha256Hex,
+      checks: {
+        matchedBeforeImport: true,
+        matchedAfterImport: true,
+        matchedAfterRoot: true,
+      },
+    })}\n`,
+    'utf8',
+  );
+}
+
+function wasmPackageIdentity() {
+  return Object.freeze({
+    sourceSha256Hex: 'a'.repeat(64),
+    packageSha256Hex: 'b'.repeat(64),
+    wasmPackVersion: 'wasm-pack 0.14.0',
+    wasmPackExecutableSha256Hex: 'c11214a5703a7353c19a3fbc97be99e00aa296650911eb8a21513c338d7abe5e',
+    wasmBindgenVersion: 'wasm-bindgen 0.2.120',
+    wasmBindgenExecutableSha256Hex: '9d669c8c13bb70a37c8518c9476f9b716c7fdf463daaa73742dffb486e7f802a',
+    rustcVersion: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',
+    rustcExecutableSha256Hex: 'cf79cfd77b0a144c56a0a6af6bf10bcdf095a73718cd4bf2b9d4fe2d2cbded55',
+    cargoVersion: 'cargo 1.97.1 (c980f4866 2026-06-30)',
+    cargoExecutableSha256Hex: 'ddfbad20b31b918d3439d070945ec59bbfe037a6ec0ab5b584459e69c8b37d1b',
+  });
+}
+
+function writeWasmPackageEvidence(
+  attemptPath: string,
+  bridgeCommit: string,
+  bridgeTree: string,
+): void {
+  writeFileSync(
+    join(attemptPath, 'wasm-avl-package.json'),
+    `${canonicalJson({
+      schema: 'e2s.substrate-federated-native-two-cycle-wasm-avl-package.v2',
+      version: 1,
+      status: 'source-and-tool-bound-package-built',
+      bridgeCommit,
+      bridgeTree,
+      build: wasmPackageIdentity(),
+    })}\n`,
+    'utf8',
+  );
+}
+
+function mutateJsonPath(
+  record: Record<string, unknown>,
+  fieldPath: readonly string[],
+  replacement?: string,
+): void {
+  if (fieldPath.length === 0) throw new Error('test mutation path is empty');
+  let current = record;
+  for (const field of fieldPath.slice(0, -1)) {
+    const nested = current[field];
+    if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) {
+      throw new Error('test mutation path does not resolve to an object');
+    }
+    current = nested as Record<string, unknown>;
+  }
+  const key = fieldPath.at(-1)!;
+  const original = current[key];
+  if (replacement !== undefined) current[key] = replacement;
+  else if (typeof original === 'string') current[key] = `${original}-tampered`;
+  else if (typeof original === 'number') current[key] = original + 1;
+  else if (typeof original === 'boolean') current[key] = !original;
+  else throw new Error('test mutation field has an unsupported value');
+}
+
+function writeCanonicalJson(path: string, value: Record<string, unknown>): void {
+  writeFileSync(path, `${canonicalJson(value)}\n`, 'utf8');
 }
 
 function cleanProcessResult(input: { maxStdoutBytes: number }) {
