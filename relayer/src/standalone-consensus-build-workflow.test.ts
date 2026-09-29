@@ -378,4 +378,42 @@ describe('standalone consensus-source build workflow', () => {
       'Install relayer dependencies: run step may contain only the reviewed keys',
     );
   });
+
+  it('binds the hosted WASM toolchain provisioning to pinned, locked commands', () => {
+    const brokenPowerShellContinuation = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '          Invoke-WebRequest `\n',
+        '          Invoke-WebRequest ` \n',
+      ),
+      sourceLock,
+    );
+    expect(brokenPowerShellContinuation.errors).toContain(
+      'Provision wasm-bindgen 0.2.120: run command digest must match the reviewed command graph',
+    );
+    expect(brokenPowerShellContinuation.checks.exactCommandGraphValid).toBe(false);
+
+    const driftedArchivePin = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        'd8ebacbfdbee70ffdcda0bbfefd99a645aee35ba31ba77dfa3b083f031674977',
+        '0'.repeat(64),
+      ),
+      sourceLock,
+    );
+    expect(driftedArchivePin.errors).toContain(
+      'Provision wasm-bindgen 0.2.120: run command digest must match the reviewed command graph',
+    );
+    expect(driftedArchivePin.checks.exactCommandGraphValid).toBe(false);
+
+    const unlockedDependencies = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        'run: cargo fetch --locked',
+        'run: cargo fetch',
+      ),
+      sourceLock,
+    );
+    expect(unlockedDependencies.errors).toContain(
+      'Fetch locked WASM AVL dependencies: run command must match the reviewed command graph',
+    );
+    expect(unlockedDependencies.checks.exactCommandGraphValid).toBe(false);
+  });
 });

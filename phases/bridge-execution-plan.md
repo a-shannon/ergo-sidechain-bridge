@@ -74,10 +74,24 @@ smoke passed with exact source/package digests. That build used machine Node
 
 The hosted Windows workflow now provisions the exact wasm-bindgen 0.2.120
 release asset, checks its archive and executable hashes, and fetches the locked
-WASM crate dependencies before the candidate gate. A new static test covers
-that ordering and pinning. Hosted CI has not yet exercised this candidate; the
-green run above validates only its published base. The build controls are not a
-general network sandbox for arbitrary compiler or build-script subprocesses.
+WASM crate dependencies before the candidate gate. Exact-head run
+[36512637223](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36512637223)
+on `d4378a0eb034d4117c59d3c3ddd875af71fb9380` is terminal red: Audit Solidity
+dependencies passed, while Public-audit candidate gate and Rebuild pinned
+Frontier and Ergo sources failed because the validator's exact ordered step
+allowlist had not been updated for those two additions. The current local
+correction adds both steps to the allowlist, pins the provisioning script by
+normalized SHA-256, requires exact `cargo fetch --locked`, and adds negative
+tests for PowerShell continuation whitespace, archive-digest drift and removing
+`--locked`. Its focused 18-test suite, `sources:verify:workflow` report,
+TypeScript build and `git diff --check` pass. Independent review found a P2
+normalization gap: trimming internal trailing spaces could hide a broken
+PowerShell backtick continuation. The validator now preserves those spaces; an
+independent replay confirms the backtick-space mutation fails closed. The exact
+final diff received GO with no further finding. The correction has not yet been
+committed or promoted. The green run above validates only base `759b3f00...`.
+The build controls are not a general network sandbox for arbitrary compiler or
+build-script subprocesses.
 
 The candidate is still **not admitted for a campaign**. Independent reviews
 returned GO for the code and campaign-guide candidate on exact 14-path
@@ -87,17 +101,16 @@ Those earlier GO reviews do not cover later plan edits or authorize a campaign.
 Use the active handoff's current exact-manifest review state for promotion; all
 due gates and a separate fresh-input admission remain required.
 
-After review GO, the next batch is exact promotion preparation: recheck the
-generated package, source and tool identities; run the staged publication
-guard; create the coherent local commit; then run the commit-range guard before
-the guarded PR 7 update. The local package rebuild used machine Node 26.3.0 and
-a warm Cargo target cache, so it does not satisfy the clean-checkout gate using
-the locked Windows x64 build tools, audit Node 24.18.1 and compiler Node
-24.14.0. If those runtimes are unavailable locally, the exact-head hosted
-public-audit candidate gate is the clean-checkout closeout; do not update PR 7
-before the exact candidate has passed its pre-promotion identity checks and
-publication guards, and do not call the closeout complete before that job is
-terminal-green. All three required exact-head CI jobs must pass.
+After review GO, stage only the reviewed validator, its tests and this plan
+status correction; run the staged publication guard; create the coherent local
+commit; then run the exact commit-range guard before the guarded PR 7 update.
+Reuse package/source/tool identity evidence because those inputs are unchanged.
+The local package rebuild used machine Node 26.3.0 and a warm Cargo target
+cache, so it does not satisfy the clean-checkout gate using the locked Windows
+x64 build tools, audit Node 24.18.1 and compiler Node 24.14.0. The corrected
+exact-head hosted candidate gate supplies that clean-checkout result. Do not
+call closeout complete until all three jobs on the corrected exact PR head are
+terminal-green.
 
 Only after exact-head CI passes may a separate fresh-input admission authorize
 C29 with disposable custody and synthetic funds. Its two cycles must carry the

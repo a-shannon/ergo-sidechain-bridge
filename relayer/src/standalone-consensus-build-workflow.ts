@@ -70,6 +70,8 @@ const ERGO_TEST_COMMAND = 'sbt "testOnly org.ergoplatform.mining.CandidateGenera
 const ERGO_BUILD_COMMAND = 'sbt assembly';
 const AUDIT_NODE_ISOLATION_COMMAND_SHA256 =
   '500825e8cb86e4d82215b2d14076eca67ad74f85a8697f2efe12422cf18bef45';
+const WASM_BINDGEN_PROVISION_COMMAND_SHA256 =
+  '6149fbd21aaf2a753ddc9e68a467e688911d2a5963dece14eaa76312bc5f8c1a';
 
 const EXPECTED_AUDIT_STEP_NAMES = [
   'Checkout recursive source graph',
@@ -77,6 +79,8 @@ const EXPECTED_AUDIT_STEP_NAMES = [
   'Isolate audit Node.js',
   'Setup Java 17',
   'Setup Rust 1.97.1',
+  'Provision wasm-bindgen 0.2.120',
+  'Fetch locked WASM AVL dependencies',
   'Install wasm-pack 0.14.0',
   'Install relayer dependencies',
   'Setup compiler Node.js',
@@ -341,6 +345,20 @@ export function validateStandaloneConsensusBuildWorkflow(
   requireUsesStep(errors, concreteAuditSteps, 'Setup Rust 1.97.1', 'dtolnay/rust-toolchain@1.97.1', {
     targets: 'wasm32-unknown-unknown',
   });
+  requireRunStepDigest(
+    errors,
+    concreteAuditSteps,
+    'Provision wasm-bindgen 0.2.120',
+    WASM_BINDGEN_PROVISION_COMMAND_SHA256,
+    '.',
+  );
+  requireRunStep(
+    errors,
+    concreteAuditSteps,
+    'Fetch locked WASM AVL dependencies',
+    'cargo fetch --locked',
+    'wasm-avl',
+  );
   requireRunStep(
     errors,
     concreteAuditSteps,
@@ -822,7 +840,7 @@ function emptyValidation(): Pick<StandaloneConsensusBuildWorkflowReport, 'errors
 
 function normalizeRun(value: unknown): string {
   return typeof value === 'string'
-    ? value.replace(/\r\n/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').trim()
+    ? value.replace(/\r\n/g, '\n').trim()
     : '';
 }
 
