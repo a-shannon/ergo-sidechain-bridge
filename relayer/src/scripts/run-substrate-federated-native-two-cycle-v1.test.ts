@@ -1161,7 +1161,7 @@ function wasmPackageIdentity() {
     sourceSha256Hex: 'a'.repeat(64),
     packageSha256Hex: 'b'.repeat(64),
     wasmPackVersion: 'wasm-pack 0.14.0',
-    wasmPackExecutableSha256Hex: 'c11214a5703a7353c19a3fbc97be99e00aa296650911eb8a21513c338d7abe5e',
+    wasmPackExecutableSha256Hex: '6e569a9bea962dbdc3e30e9aef076b1d559f7819b1cbb7ffce85ece8a7e47da8',
     wasmBindgenVersion: 'wasm-bindgen 0.2.120',
     wasmBindgenExecutableSha256Hex: '9d669c8c13bb70a37c8518c9476f9b716c7fdf463daaa73742dffb486e7f802a',
     rustcVersion: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',

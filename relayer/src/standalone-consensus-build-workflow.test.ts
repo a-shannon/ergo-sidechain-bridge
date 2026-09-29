@@ -416,4 +416,64 @@ describe('standalone consensus-source build workflow', () => {
     );
     expect(unlockedDependencies.checks.exactCommandGraphValid).toBe(false);
   });
+
+  it('pins wasm-pack provisioning to the official Windows release archive and executable', () => {
+    const wasmPackProvision = [
+      'https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz',
+      'd484c8e8bcd9e8c30097fbac78b52dd159598f99d11e43a50f5d143b67c721f1',
+      '6e569a9bea962dbdc3e30e9aef076b1d559f7819b1cbb7ffce85ece8a7e47da8',
+      "if ($version -ne 'wasm-pack 0.14.0')",
+      '$env:GITHUB_PATH',
+    ];
+    for (const expected of wasmPackProvision) expect(workflowText).toContain(expected);
+
+    const digestError =
+      'Install wasm-pack 0.14.0: run command digest must match the reviewed command graph';
+    const driftedArchivePin = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        'd484c8e8bcd9e8c30097fbac78b52dd159598f99d11e43a50f5d143b67c721f1',
+        '0'.repeat(64),
+      ),
+      sourceLock,
+    );
+    expect(driftedArchivePin.errors).toContain(digestError);
+    expect(driftedArchivePin.checks.exactCommandGraphValid).toBe(false);
+
+    const driftedExecutablePin = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '6e569a9bea962dbdc3e30e9aef076b1d559f7819b1cbb7ffce85ece8a7e47da8',
+        '0'.repeat(64),
+      ),
+      sourceLock,
+    );
+    expect(driftedExecutablePin.errors).toContain(digestError);
+    expect(driftedExecutablePin.checks.exactCommandGraphValid).toBe(false);
+
+    const driftedVersionCheck = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        "if ($version -ne 'wasm-pack 0.14.0')",
+        "if ($version -ne 'wasm-pack 0.15.0')",
+      ),
+      sourceLock,
+    );
+    expect(driftedVersionCheck.errors).toContain(digestError);
+    expect(driftedVersionCheck.checks.exactCommandGraphValid).toBe(false);
+
+    const missingPathExport = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace('$env:GITHUB_PATH', '$env:GITHUB_ENV'),
+      sourceLock,
+    );
+    expect(missingPathExport.errors).toContain(digestError);
+    expect(missingPathExport.checks.exactCommandGraphValid).toBe(false);
+
+    const brokenPowerShellContinuation = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        "            -Uri 'https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz' `\n",
+        "            -Uri 'https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz' ` \n",
+      ),
+      sourceLock,
+    );
+    expect(brokenPowerShellContinuation.errors).toContain(digestError);
+    expect(brokenPowerShellContinuation.checks.exactCommandGraphValid).toBe(false);
+  });
 });

@@ -3,7 +3,7 @@ import path, { delimiter } from 'node:path';
 import type {
   BoundedProcessInput,
   BoundedProcessResult,
-} from '../pinned-local-native-verifier-build.js';
+} from '../bounded-process-runner.js';
 import {
   validateWasmAvlBuildToolHashV2,
   type WasmAvlBuildToolNameV2,

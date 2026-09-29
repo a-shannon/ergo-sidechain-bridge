@@ -28,9 +28,14 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaign 28 is consumed. The published candidate remains
-`759b3f00e85d6bce328e05617ee797dd7a7b75ec`; its exact-head CI passed in
-[run 36350825445](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36350825445).
+**Now:** Campaign 28 remains consumed; never retry or reuse it. PR 7 is open on
+`d491385b2d14d111cedf589e0e425a76d513b13e`. Its exact-head run
+[36536095778](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36536095778)
+is terminal red: the public-audit candidate gate failed at the reviewed
+`wasm-pack` executable hash check, while the Frontier/Ergo rebuild and Solidity
+dependency audit passed. The earlier green run on `759b3f00...` remains evidence
+only for that earlier candidate. Campaign 29 is not admitted.
+
 Campaign 28's bounded failure and a later no-attempt reproduction identify the
 missing ignored WASM package as the pre-worker blocker. Its raw cause and private
 runtime state remain out of scope. Do not retry or reuse that attempt.
@@ -72,26 +77,94 @@ smoke passed with exact source/package digests. That build used machine Node
 26.3.0 and a warm Cargo target cache; it is not a clean-cache build, Node
 24.14.0 campaign evidence, or campaign evidence.
 
-The hosted Windows workflow now provisions the exact wasm-bindgen 0.2.120
-release asset, checks its archive and executable hashes, and fetches the locked
-WASM crate dependencies before the candidate gate. Exact-head run
+The hosted Windows workflow provisions the exact wasm-bindgen 0.2.120 release
+asset, checks its archive and executable hashes, and fetches locked WASM crate
+dependencies before the candidate gate. Run
 [36512637223](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36512637223)
-on `d4378a0eb034d4117c59d3c3ddd875af71fb9380` is terminal red: Audit Solidity
-dependencies passed, while Public-audit candidate gate and Rebuild pinned
-Frontier and Ergo sources failed because the validator's exact ordered step
-allowlist had not been updated for those two additions. The current local
-correction adds both steps to the allowlist, pins the provisioning script by
-normalized SHA-256, requires exact `cargo fetch --locked`, and adds negative
-tests for PowerShell continuation whitespace, archive-digest drift and removing
-`--locked`. Its focused 18-test suite, `sources:verify:workflow` report,
-TypeScript build and `git diff --check` pass. Independent review found a P2
-normalization gap: trimming internal trailing spaces could hide a broken
-PowerShell backtick continuation. The validator now preserves those spaces; an
-independent replay confirms the backtick-space mutation fails closed. The exact
-final diff received GO with no further finding. The correction has not yet been
-committed or promoted. The green run above validates only base `759b3f00...`.
-The build controls are not a general network sandbox for arbitrary compiler or
-build-script subprocesses.
+on `d4378a0eb034d4117c59d3c3ddd875af71fb9380` previously failed because the
+validator's exact ordered step allowlist omitted those additions; the correction
+passed its focused 18-test suite, workflow verification, TypeScript build,
+independent review and guarded PR promotion.
+
+The next exact-head run
+[36536095778](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36536095778)
+is terminal on `d491385b2d14d111cedf589e0e425a76d513b13e`. Public-audit
+candidate gate (`109300372049`) failed in `check:clean-checkout` / `wasm:build`
+with `WASM AVL wasmPack executable does not match its reviewed hash`;
+Rebuild pinned Frontier and Ergo sources (`109300372320`) succeeded; Audit
+Solidity dependencies (`109300372429`) succeeded. This is a tool-identity
+failure in the candidate gate, not a failed two-cycle campaign. The workflow
+currently runs `cargo install wasm-pack --version 0.14.0 --locked`, while the
+runtime pin is `c11214a5703a7353c19a3fbc97be99e00aa296650911eb8a21513c338d7abe5e`.
+The public release metadata confirms the official Windows x64 archive digest
+`d484c8e8bcd9e8c30097fbac78b52dd159598f99d11e43a50f5d143b67c721f1`; the
+already verified extracted executable digest is
+`6e569a9bea962dbdc3e30e9aef076b1d559f7819b1cbb7ffce85ece8a7e47da8`. The
+exact CI-selected executable digest was not logged. The bounded correction is
+to provision the official archive, verify archive and executable hashes plus
+the exact version, expose that executable to subsequent steps, and align the
+runtime pin, direct tests, command-graph validator and negative fixtures with
+those bytes. Rebuild and inspect the generated package before independent
+review and guarded promotion. The workflow's containment controls are not a
+general network sandbox for arbitrary compiler or build-script subprocesses.
+
+The bounded correction is implemented across the workflow, its exact-command
+validator and tests, the Windows x64 build-tool pin, and the direct package and
+two-cycle fixtures. It downloads the official archive, checks both digests and
+the exact version, then exports the verified directory through `GITHUB_PATH`.
+The workflow validator binds the full PowerShell run block and rejects isolated
+archive-pin, executable-pin, version, PATH-export and broken-continuation
+mutations. Local validation passes: workflow-validator and builder tests 49/49,
+the two-cycle consumer tests 70/70, package ABI tests 28/28, workflow source
+verification and TypeScript build. The exact workflow PowerShell step was
+executed locally from its YAML-extracted bytes and passed the archive,
+executable, version and PATH checks. A rebuild with the exact official
+wasm-pack and wasm-bindgen binaries passed the integrated seven-export smoke;
+source digest remains `dbade80a...` and package digest remains `cb368c79...`.
+This local build used Node 26.3.0 and a warm Cargo cache; it is not the required
+clean-checkout Node 24 evidence. The complete relayer suite, fresh independent
+review, staged/range publication guards and corrected exact-head CI remain due.
+
+The first full-suite invocation under the machine's Node 26.3.0 is invalid for
+this repository: it conflicts with the pinned compiler-parent executable and
+the installed SQLite native-module ABI. Do not attribute those failures to the
+source candidate. The bounded full suite now runs under the exact official
+Node 24.14.0 binary matching the compiler lock. It exposed a separate stale
+consumer lock: commit `d4378a0` changed the WASM builder to its `--no-opt`
+pipeline but left `sources/authenticated-spv-tracker-jvm-avl-wasm-lock.json`
+bound to the previous builder and generated WASM bytes. The lock and its direct
+artifact assertion now bind builder hash `383dc17e...` and generated WASM hash
+`28a1f941...`; the generated JS glue remains `98dbefbf...`. The targeted
+differential test passes 3 cases and skips its JVM-host case because that host
+is not installed locally. The resumed bounded suite entered the long-running
+provisioning test after batch 397/520; that file passed 287 tests with 2 skipped
+in 2,602,399 ms. The native withdrawal-continuation test then passed 73/73 in
+744.21 s. Batches 413–417 also passed 152 tests across observed genesis,
+reserve deposits, source proofs and runtime genesis. The resumed exact-Node-24
+suite subsequently completed 520/520 batches with exit code 0. The plan-reading
+runtime-bundle test was rerun afterward and passed 7/7. The pinned JVM-host
+differential case was skipped because that host is unavailable locally; no JVM
+differential proof is claimed.
+
+A fresh independent review of the exact nine-path candidate returned **NO-GO**.
+The v3 current-source lock includes `build-wasm-avl.ts`, but omits the delegated
+`build-wasm-avl-pipeline-v2.ts` and its directly imported
+`substrate-federated-native-wasm-avl-build-tool-pins-v1.ts`. Those omitted
+modules own the actual build arguments and executable-resolution boundary, so
+changing them while keeping the entrypoint and generated artifacts fixed still
+passes the current lock check. The current-source differential therefore does
+not yet detect producer drift.
+
+The completed suite covers the candidate before this lock correction. Extend
+the lock's exact ordered producer closure through the runtime build pipeline,
+its tool pins and every runtime helper that can affect build execution or
+artifact acceptance. Update its schema/fixtures and add isolated single-fault
+tests for each independently changing producer boundary. Rebuild and refresh
+artifact hashes only if their bytes change. Run the cadence planner before the
+focused strict closeout; then repeat only affected consumers, including the
+plan reader invalidated by in-run documentation edits. Obtain independent GO
+on the complete corrected candidate before promotion. No commit or push has
+been made.
 
 The candidate is still **not admitted for a campaign**. Independent reviews
 returned GO for the code and campaign-guide candidate on exact 14-path
@@ -101,16 +174,16 @@ Those earlier GO reviews do not cover later plan edits or authorize a campaign.
 Use the active handoff's current exact-manifest review state for promotion; all
 due gates and a separate fresh-input admission remain required.
 
-After review GO, stage only the reviewed validator, its tests and this plan
-status correction; run the staged publication guard; create the coherent local
-commit; then run the exact commit-range guard before the guarded PR 7 update.
-Reuse package/source/tool identity evidence because those inputs are unchanged.
-The local package rebuild used machine Node 26.3.0 and a warm Cargo target
-cache, so it does not satisfy the clean-checkout gate using the locked Windows
-x64 build tools, audit Node 24.18.1 and compiler Node 24.14.0. The corrected
-exact-head hosted candidate gate supplies that clean-checkout result. Do not
-call closeout complete until all three jobs on the corrected exact PR head are
-terminal-green.
+The staged publication guard and final-index review passed before the current
+commit; the range guard and guarded fast-forward to PR 7 passed afterward. The
+new local correction has no commit or PR update yet. Its affected local checks
+are green, but the full relayer suite, fresh independent review and promotion
+guards have not run on this exact diff. Reuse other source and dependency
+evidence only where exact inputs remain unchanged. The local build does not
+satisfy the clean-checkout gate using the locked Windows x64 tools, audit Node
+24.18.1 and compiler Node 24.14.0. Do not call closeout complete until review,
+publication guards and all three required jobs on a corrected exact PR head
+are green.
 
 Only after exact-head CI passes may a separate fresh-input admission authorize
 C29 with disposable custody and synthetic funds. Its two cycles must carry the
@@ -491,6 +564,43 @@ changes. Record what was learned and why the next result changed. Preserve the
 greenfield choice, evidence limits and safety obligations below; a future
 change of approach does not close an unmet obligation.
 
+### Current producer-provenance candidate (2026-09-29)
+
+The v3 WASM source lock's P2 is closed in the local candidate. The build runner
+was extracted verbatim into `relayer/src/bounded-process-runner.ts`, leaving its
+public API re-exported by the legacy native-build module while the WASM builder
+imports the isolated module directly. This removes the unrelated consensus
+module graph from the WASM producer boundary without changing process semantics.
+The v4 lock binds the Rust production inputs, package and TypeScript execution
+configuration, build entrypoint and pipeline, executable pins, bounded runner,
+Windows Job Object script, and package ABI/smoke implementation. Its claim is
+limited to the JS glue and WASM runtime bytes; the README and test-only vector
+are not runtime-byte inputs. Exact Node/tsx identity remains checked by the
+authenticated compiler lock and clean-checkout workflow.
+
+| Producer | Accepting consumer | Failure if relaxed | Independent falsifier |
+|---|---|---|---|
+| Rust toolchain, crate manifest/lock/source and emitted JS/WASM bytes | v4 differential loader | Changed executable semantics accepted as current-source WASM | Mutate each locked input separately; reject each hash drift before module load |
+| Builder entrypoint, pipeline, tool hashes and package execution config | `buildWasmAvlPackageV2` plus v4 lock | Altered args, online behavior, executable resolution, or TS execution can change the package under an unchanged lock | Direct builder tests plus one-file-at-a-time lock drift across all 13 entries |
+| Bounded process runner and Windows Job Object script | WASM build invocation and native-process tests | A timeout, child failure or containment failure can return success or release cleanup authority early | Existing process lifecycle/cancellation negatives through the compatibility re-export; exact Windows script is a separate locked input |
+| Package fingerprint, seven-export ABI and smoke checks | builder package identity and differential runtime loader | A wrong export/signature or malformed generated package can be accepted | Package ABI and builder negative suites; runtime lock checks both loaded JS and WASM hashes |
+
+The hosted exact-head run on PR 7 is still red only for the prior published
+candidate; the verified-archive workflow correction and v4 lock are local, not
+in that run. The earlier exact-Node-24 result of 520/520 files predates this
+runner/lock correction and is not claimed for the current diff. Current exact
+Node 24 validation passes: 27 legacy-runner consumer test files completed with
+1,500 passed and 5 skipped; the lock differential and plan-reader files passed
+11 with one local JVM-host skip; the TypeScript build and workflow source
+validator passed; and all 13 isolated source-drift negatives reject. The real
+WASM rebuild used the exact reviewed wasm-pack, wasm-bindgen, rustc and Cargo
+hashes and reproduced source digest `dbade80a...` and package digest
+`cb368c79...`; the post-build differential test confirms the locked JS/WASM
+bytes. The 520-file result remains reusable for other unchanged inputs; the
+current direct consumer closure is now green. Fresh independent review, exact
+staged/range guards and all three required jobs on the promoted exact head
+remain mandatory. Campaign 29 remains unadmitted.
+
 ## Delivery Contract
 
 | Track | Deliverable | Deciding trust model | State |
@@ -799,7 +909,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Candidate closeout and guarded promotion (selected next) | Fresh independent review accepts the exact manifest; generated-package/source/tool identities and staged guard pass; create the local commit and pass the range guard; update PR 7 through the guarded path; then the clean-checkout candidate gate and all required exact-head CI jobs pass | Reuse unchanged positives; run only gates invalidated by this candidate. The current local build used Node 26.3.0 and a warm Cargo cache, so the pinned clean-checkout gate remains due on the exact hosted head |
+| Bounded wasm-pack provenance correction and exact-head CI closeout (active) | Provision the reviewed official Windows x64 release asset; bind archive and executable bytes plus version; align runtime pin, fixtures, workflow validator and the complete current WASM producer/consumer lock; rebuild and inspect the package; close every affected exact-Node-24 consumer; obtain fresh independent review and guarded promotion; all three required jobs pass on the promoted exact head | Current closure is green: 27 legacy-runner consumers, 1,500 passed/5 skipped; v4 lock/plan-reader tests, 11 passed/1 local JVM skip; TypeScript build; workflow source validation; real Node-24 rebuild with exact pins/digests; all 13 source-drift negatives reject. Fresh-review this frozen manifest; run exact staged/range guards, commit and guarded-push PR 7, then require all three jobs green on the exact promoted head. Do not start C29 until CI and separate fresh-input admission close |
 | Fresh campaign admission | The integration owner separately admits one new attempt on the clean promoted candidate after matching CI, actual runtime/host preflight, build-output readiness and fresh isolation/custody checks | Use the existing loader and validators with the selected pinned Node/compiler/package/Git inputs; reject drift, aliases and occupied outputs. Carry Campaigns 24-28's unknown raw causes and unestablished cleanup; diagnostics supply no admission or cleanup authority |
 | Same-session two-cycle acceptance | The connected successor consumers complete the second operation from the first confirmed reserve/DUP/tracker state, with separately scoped operation authority, custody lifetime, nonce and parent binding | Reuse unchanged component positives and negatives; the missing discriminator is one fresh-node two-cycle campaign with nonempty replay state, funded fees and conservation. Nonzero burn-leaf indices remain separately due when supported by the selected checkpoint shape |
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |

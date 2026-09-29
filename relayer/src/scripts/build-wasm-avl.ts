@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import path, { delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runBoundedProcess } from '../pinned-local-native-verifier-build.js';
+import { runBoundedProcess } from '../bounded-process-runner.js';
 import {
   runWasmAvlBuildPipelineV2,
   type WasmAvlBuildPipelinePlanV2,

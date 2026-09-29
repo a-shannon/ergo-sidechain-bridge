@@ -187,7 +187,33 @@ jobs:
 
       - name: Install wasm-pack 0.14.0
         working-directory: .
-        run: cargo install wasm-pack --version 0.14.0 --locked
+        run: |
+          $toolRoot = Join-Path $env:RUNNER_TEMP "wasm-pack-0.14.0-$([guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Path $toolRoot | Out-Null
+          $archive = Join-Path $toolRoot 'wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz' `
+            -OutFile $archive `
+            -TimeoutSec 300
+          $archiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($archiveSha256 -ne 'd484c8e8bcd9e8c30097fbac78b52dd159598f99d11e43a50f5d143b67c721f1') {
+            throw 'wasm-pack 0.14.0 release archive does not match its reviewed SHA-256'
+          }
+          $member = 'wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe'
+          tar -xzf $archive -C $toolRoot $member
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = Join-Path $toolRoot $member
+          $executableSha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($executableSha256 -ne '6e569a9bea962dbdc3e30e9aef076b1d559f7819b1cbb7ffce85ece8a7e47da8') {
+            throw 'wasm-pack 0.14.0 executable does not match its reviewed SHA-256'
+          }
+          $version = (& $executable --version).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($version -ne 'wasm-pack 0.14.0') {
+            throw 'wasm-pack version does not match its reviewed version'
+          }
+          (Split-Path -Parent $executable) |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install relayer dependencies
         run: |

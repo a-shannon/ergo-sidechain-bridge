@@ -72,6 +72,8 @@ const AUDIT_NODE_ISOLATION_COMMAND_SHA256 =
   '500825e8cb86e4d82215b2d14076eca67ad74f85a8697f2efe12422cf18bef45';
 const WASM_BINDGEN_PROVISION_COMMAND_SHA256 =
   '6149fbd21aaf2a753ddc9e68a467e688911d2a5963dece14eaa76312bc5f8c1a';
+const WASM_PACK_PROVISION_COMMAND_SHA256 =
+  '8ad3ecfa3f8f29c0134d1933f3da96cca3b9525b7bd6a7fed69d8f3ec5485edd';
 
 const EXPECTED_AUDIT_STEP_NAMES = [
   'Checkout recursive source graph',
@@ -359,11 +361,11 @@ export function validateStandaloneConsensusBuildWorkflow(
     'cargo fetch --locked',
     'wasm-avl',
   );
-  requireRunStep(
+  requireRunStepDigest(
     errors,
     concreteAuditSteps,
     'Install wasm-pack 0.14.0',
-    'cargo install wasm-pack --version 0.14.0 --locked',
+    WASM_PACK_PROVISION_COMMAND_SHA256,
     '.',
   );
   requireRunStep(
