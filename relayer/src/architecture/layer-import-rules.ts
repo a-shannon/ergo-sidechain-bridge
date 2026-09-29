@@ -245,7 +245,10 @@ const REVIEWED_NATIVE_RESERVATION_SIGNING_BINDINGS: ReadonlyMap<string, Readonly
     'assertObservedSubstrateFederatedGenesisV1', 'assertObservedSubstrateFederatedGenesisReadCustodyV1',
     'ObservedSubstrateFederatedGenesisV1',
   ])],
-  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set(['SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1'])],
+  ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts', new Set([
+    'SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1',
+    'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
+  ])],
 ]);
 const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['blakejs', new Set(['blake2b'])],
@@ -325,6 +328,9 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1',
     'SubstrateFederatedNativeTwoCycleRootPhaseV1',
   ])],
+  ['substrate-federated-native-two-cycle-root-phase-v2.ts', new Set([
+    'tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2',
+  ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
     'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
     'OwnedFederatedGenesisDevnetProcessSessionV1',
@@ -342,6 +348,7 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2',
     'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
     'assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1',
+    'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
     'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2',
     'SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1',
   ])],
@@ -2286,6 +2293,7 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
         'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
         new Set([
           'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+          FEDERATED_GENESIS_TARGET_ROOT,
         ]),
       ],
       [

@@ -14,8 +14,10 @@ import type { StateTracker as NativeJournalState } from '../../state-tracker.js'
 import { verifyExecutableSha256 } from '../../native-executable-pin.js';
 import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
-import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1,
-  type SubstrateFederatedNativeTwoCycleRootPhaseV1 } from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
+import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 }
+  from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
+import type { SubstrateFederatedNativeTwoCycleRootPhaseV1 }
+  from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
 import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
   type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
@@ -23,7 +25,8 @@ import { collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2 } from '.
 import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1, type BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1, type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
-  type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+  type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1, assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
@@ -508,7 +511,18 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       sourceFinalityEstablished: false as const, trustless: false as const });
   } catch (error) {
     rootFailed = true;
-    rootFailure = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error, rootPhase);
+    let ergoNodeStartupPhase = null;
+    if (rootPhase === 'node-start') {
+      try {
+        ergoNodeStartupPhase =
+          projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1(error);
+      } catch {
+        // Optional startup detail must never replace the original failure.
+      }
+    }
+    rootFailure = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(
+      error, rootPhase, ergoNodeStartupPhase,
+    );
     throw rootFailure;
   } finally {
     const failures: unknown[] = rootFailed ? [rootFailure] : [];
@@ -525,7 +539,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     ]) {
       try { await dispose(); }
       catch (error) {
-        const cleanupFailure = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error, 'cleanup');
+        const cleanupFailure = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(error, 'cleanup');
         if (!failures.includes(cleanupFailure)) failures.push(cleanupFailure);
       }
     }
@@ -536,7 +550,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
   }
   } catch (error) {
     if (setupAcquired) throw error;
-    throw tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error, rootPhase);
+    throw tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(error, rootPhase);
   }
 }
 

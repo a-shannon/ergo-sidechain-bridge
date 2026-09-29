@@ -9,11 +9,13 @@ import {
   type NativeTwoCycleFailureStageV1,
 } from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
 import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
+import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import {
   validateWasmAvlBuildToolHashV2,
   type WasmAvlBuildToolNameV2,
 } from '../substrate-federated-native-wasm-avl-build-tool-pins-v1.js';
 import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-v1.js';
+import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-v2.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   projectSubstrateFederatedNativeTwoCycleResultV1,
@@ -193,6 +195,25 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // The optional root phase cannot change the existing diagnostic or failure.
+      }
+      try {
+        const projection = projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(
+          primaryFailure,
+        );
+        if (projection !== null) {
+          const companion = createNativeTwoCycleWorkerRootPhaseV2({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, projection);
+          writeNewFile(
+            join(invocation.attemptPath, 'worker-root-phase-v2.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker root phase V2 companion',
+          );
+        }
+      } catch {
+        // The optional V2 phase detail cannot change the existing failure or V1 evidence.
       }
     }
     throw primaryFailure;

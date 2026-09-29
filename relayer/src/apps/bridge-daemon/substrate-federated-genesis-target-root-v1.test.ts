@@ -22,6 +22,7 @@ const mocked = vi.hoisted(() => ({
   continuationTrackerCheck: vi.fn(), trackerAuthorize: vi.fn(), trackerReserve: vi.fn(),
   trackerFreshness: vi.fn(), trackerSubmit: vi.fn(), trackerFinalize: vi.fn(), trackerConfirm: vi.fn(),
   projectConfirmation: vi.fn(), projectSubmission: vi.fn(), projectProgress: vi.fn(),
+  projectStartupPhase: vi.fn(),
   payoutCheck: vi.fn(), continuationPayoutCheck: vi.fn(), payoutAuthorize: vi.fn(), payoutReserve: vi.fn(),
   payoutSubmit: vi.fn(), payoutFinalize: vi.fn(), payoutConfirm: vi.fn(), wait: vi.fn(),
 }));
@@ -32,6 +33,7 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', asy
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2: mocked.process,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: mocked.owned,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1: mocked.readOnlyOwned,
+  projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1: mocked.projectStartupPhase,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
   discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1: mocked.discover,
@@ -142,6 +144,12 @@ import type { Eip12Box } from '../../unsigned-ergo-transaction.js';
 import { buildSubstrateFederatedCheckpointStatementV1 } from '../../profiles/substrate-federated-v1/checkpoint-statement.js';
 import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 }
   from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
+import {
+  projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2,
+} from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
+import {
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
+} from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 
 const KEYS = {
   code: '0x3a636f6465',
@@ -314,6 +322,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocked.projectConfirmation.mockReturnValue(null); mocked.projectSubmission.mockReturnValue(null);
   mocked.projectProgress.mockReturnValue(null);
+  mocked.projectStartupPhase.mockReturnValue(null);
   vi.spyOn(StateTracker.prototype, 'close');
   setup = undefined; source = undefined; operator = undefined;
   sourceOperation = undefined; continuationSourceOperation = undefined;
@@ -2463,6 +2472,44 @@ describe('fresh FED target composition', () => {
         : expectedPhase,
       cleanupErrorCount: expectedPhase === 'cleanup' ? 1 : 0,
     });
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(failure)).toEqual({
+      primaryPhase: expectedPhase === 'cleanup' ? null : expectedPhase,
+      cleanupErrorCount: expectedPhase === 'cleanup' ? 1 : 0,
+      ergoNodeStartupPhase: null,
+    });
+    if (expectedPhase === 'node-start') expect(mocked.projectStartupPhase).toHaveBeenCalledOnce();
+    else expect(mocked.projectStartupPhase).not.toHaveBeenCalled();
+  });
+
+  it.each(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1)(
+    'retains the producer-tagged Ergo startup phase %s at the root', async startupPhase => {
+      const trigger = new Error('private Ergo node startup detail');
+      mocked.projectStartupPhase.mockReturnValueOnce(startupPhase);
+      mocked.process.mockImplementationOnce(() => { throw trigger; });
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+      expect(failure).toBe(trigger);
+      expect(mocked.projectStartupPhase).toHaveBeenCalledOnce();
+      expect(mocked.projectStartupPhase).toHaveBeenCalledWith(trigger);
+      expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(failure)).toEqual({
+        primaryPhase: 'node-start', cleanupErrorCount: 0,
+        ergoNodeStartupPhase: startupPhase,
+      });
+      assertDisposed();
+    },
+  );
+
+  it('preserves the original root failure when the optional startup projector throws', async () => {
+    const trigger = new Error('private root startup failure');
+    mocked.projectStartupPhase.mockImplementationOnce(() => {
+      throw new Error('private projector failure');
+    });
+    mocked.process.mockImplementationOnce(() => { throw trigger; });
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBe(trigger);
+    expect(projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(failure)).toEqual({
+      primaryPhase: 'node-start', cleanupErrorCount: 0, ergoNodeStartupPhase: null,
+    });
+    assertDisposed();
   });
 
   it('disposes every key owner even when process cleanup fails', async () => {

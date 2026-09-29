@@ -1632,20 +1632,24 @@ describe('layer import rules', () => {
     ]);
   });
 
-  it('reserves node-startup phase projection to the reviewed composition root', () => {
+  it('reserves node-startup phase projection to the reviewed composition roots', () => {
     const processModule =
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts';
-    const reviewedRoot =
-      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts';
+    const reviewedRoots = [
+      'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
+      'apps/bridge-daemon/substrate-federated-genesis-target-root-v1.ts',
+    ];
     const projector =
       'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1';
-    expect(inspect({
-      [processModule]: `export const ${projector} = () => {};`,
-      [reviewedRoot]: `
-        import { ${projector} } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
-        ${projector}({});
-      `,
-    })).toEqual([]);
+    for (const reviewedRoot of reviewedRoots) {
+      expect(inspect({
+        [processModule]: `export const ${projector} = () => {};`,
+        [reviewedRoot]: `
+          import { ${projector} } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+          ${projector}({});
+        `,
+      })).toEqual([]);
+    }
 
     expect(inspect({
       [processModule]: `export const ${projector} = () => {};`,
@@ -1657,6 +1661,16 @@ describe('layer import rules', () => {
       'apps must not import an unclassified legacy module: substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
       `exclusive authority import has the wrong owner: ../../substrate-federated-isolated-devnet-ergo-node-process-v1.js#${projector}`,
     ]);
+
+    expect(inspect({
+      [processModule]: `export const ${projector} = () => {};`,
+      'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts': `
+        import { ${projector} } from '../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+        ${projector}({});
+      `,
+    }).map(violation => violation.message)).toContain(
+      `exclusive authority import has the wrong owner: ../substrate-federated-isolated-devnet-ergo-node-process-v1.js#${projector}`,
+    );
   });
 
   it('keeps the tracker confirmation receipt type inside the reviewed composition root', () => {

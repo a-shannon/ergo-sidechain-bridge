@@ -172,6 +172,8 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `failure-diagnostic.json` | Optional parent sidecar published only after `failure.json`, binding that receipt to a validated worker diagnostic with matching config, commit and path identities. It grants no execution or retry authority. |
 | `worker-root-phase.json` | Optional root-only phase signal from a failed worker. It names a primary phase when known and counts bounded cleanup `Error` values. It carries no cause, path or cleanup claim. |
 | `failure-root-phase.json` | Optional parent sidecar after `failure.json`. It binds the terminal failure and both validated worker diagnostics to the same invocation identities. It is not an outcome or admission receipt. |
+| `worker-root-phase-v2.json` | Optional V2 root sidecar. It preserves the V1 root phase and adds an allowlisted Ergo node startup phase only when the primary phase is `node-start`; config, commit and path identities remain bound. |
+| `failure-root-phase-v2.json` | Optional parent V2 sidecar. It binds the terminal failure, V1 worker failure and V2 worker root receipts to the same invocation. |
 
 The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
 `post-root-identity` and `transport-publication`. A root exception and a cleanup
@@ -179,19 +181,23 @@ exception share one stage because neither alone establishes successful teardown.
 Diagnostics never include the raw error, stack, filesystem paths or custody
 material. Their cleanup-established flag remains false for every stage. The
 root-phase companion distinguishes setup/custody, Frontier build, Ergo build,
-node start, either cycle, the interval between cycles and cleanup. A null
-primary phase means the root evidence cannot assign one; a cleanup exception
-count, including zero, never proves disposal. A primitive value thrown during
-cleanup is not included in this count; a cleanup-only primitive may have no
-root-phase companion. A missing or invalid companion
-does not change the terminal result or permit another attempt.
+node start, either cycle, the interval between cycles and cleanup. The V2
+sidecars add one existing allowlisted Ergo startup operation label to
+`node-start`; an absent, conflicting or invalid label remains null. They use
+their own schemas and digest domains and do not change the V1 sidecars or
+terminal failure receipt. A null primary phase means the root evidence cannot
+assign one; a cleanup exception count, including zero, never proves disposal.
+A primitive value thrown during cleanup is not included in this count; a
+cleanup-only primitive may have no root-phase companion. A missing or invalid
+companion does not change the terminal result or permit another attempt.
 
 The diagnostics use separate schemas and digest domains; the existing terminal
 failure format and digest are unchanged. Missing, invalid or unwritable
 diagnostics leave the original failure and consumed attempt intact. A worker
-failure or root-phase file accompanying an otherwise successful worker result blocks terminal
-success. A digest detects changed bytes under the declared same-user host
-assumption; it is not authentication or independent attestation.
+failure or root-phase file, including either V2 root sidecar, accompanying an
+otherwise successful worker result blocks terminal success. A digest detects
+changed bytes under the declared same-user host assumption; it is not
+authentication or independent attestation.
 
 A receipt contains transaction identities and bounded observations, not signing
 or replay authority. Keep the attempt directory and retained build/journal

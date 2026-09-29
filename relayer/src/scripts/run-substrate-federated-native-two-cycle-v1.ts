@@ -19,6 +19,10 @@ import {
   parseNativeTwoCycleWorkerRootPhaseV1,
 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
 import {
+  createNativeTwoCycleParentRootPhaseV2,
+  parseNativeTwoCycleWorkerRootPhaseV2,
+} from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
+import {
   canonicalPathIdentity,
   readBoundedRegularFile,
   writeNewFile,
@@ -203,7 +207,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       throw new Error('native two-cycle worker emitted output');
     }
     if (existsSync(join(attemptPath, 'worker-failure.json'))
-      || existsSync(join(attemptPath, 'worker-root-phase.json'))) {
+      || existsSync(join(attemptPath, 'worker-root-phase.json'))
+      || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))) {
       throw new Error('native two-cycle worker returned contradictory failure evidence');
     }
     const retainedWasmEvidence = readBoundedRegularFile(
@@ -371,6 +376,39 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
           );
         } catch {
           // Missing or invalid optional root evidence cannot alter existing receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const workerFailureBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-failure.json'),
+            'native two-cycle worker failure diagnostic',
+            16 * 1024,
+          ).bytes;
+          const workerFailureText = new TextDecoder('utf-8', { fatal: true })
+            .decode(workerFailureBytes);
+          const workerRootBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-root-phase-v2.json'),
+            'native two-cycle worker root phase V2 companion',
+            16 * 1024,
+          ).bytes;
+          const workerRoot = parseNativeTwoCycleWorkerRootPhaseV2(
+            new TextDecoder('utf-8', { fatal: true }).decode(workerRootBytes),
+            bindings,
+          );
+          const companion = createNativeTwoCycleParentRootPhaseV2(
+            bindings, failure.receiptDigestHex, workerFailureText, workerRoot,
+          );
+          writeNewFile(
+            join(attemptPath, 'failure-root-phase-v2.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent root phase V2 companion',
+          );
+        } catch {
+          // Missing or invalid optional V2 phase detail cannot alter terminal/V1 receipts.
         }
       } catch {
         // Preserve the original execution failure. A missing failure artifact

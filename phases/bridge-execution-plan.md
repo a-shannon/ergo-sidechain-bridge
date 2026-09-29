@@ -28,17 +28,56 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaign 28 remains consumed; never retry or reuse it. PR 7 is open on
-`d491385b2d14d111cedf589e0e425a76d513b13e`. Its exact-head run
-[36536095778](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36536095778)
-is terminal red: the public-audit candidate gate failed at the reviewed
-`wasm-pack` executable hash check, while the Frontier/Ergo rebuild and Solidity
-dependency audit passed. The earlier green run on `759b3f00...` remains evidence
-only for that earlier candidate. Campaign 29 is not admitted.
+**Now:** Campaigns 24–29 remain consumed; never retry or reuse them. PR 7 is
+open on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. Exact-head run
+[36582859790](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36582859790)
+is terminal green: Public-audit candidate gate, Rebuild pinned Frontier and
+Ergo sources, and Audit Solidity dependencies all passed on that exact SHA.
+The visible red run 36512637223 was for older SHA `d4378a0e…`; it is not
+evidence against the promoted candidate. CI closes candidate checks only and
+does not erase the failed Campaign 24 two-cycle result or establish runtime,
+production, public-network, real-funds, or trustlessness claims.
 
-Campaign 28's bounded failure and a later no-attempt reproduction identify the
-missing ignored WASM package as the pre-worker blocker. Its raw cause and private
-runtime state remain out of scope. Do not retry or reuse that attempt.
+The separate non-custodial Campaign 29 admission preflight passed on a clean
+checkout of exact commit `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. It verified
+the pinned Node/MSVC/runtime composition, Frontier and Ergo source locks, the
+Ergo build-output guard, and a fresh WASM build with the reviewed tool hashes.
+The package digests matched the reviewed source and generated-package pins; no
+attempt was created at preflight. Independent admission review passed; PR 7 and
+all three required jobs passed on this exact head in run 36582859790. The
+canonical command then created Campaign 29 once and terminated with
+`two_cycle_invocation_failed` / `execution_failure`. The bounded root-phase
+companion identifies `node-start`; `sourceFailurePhase` and the raw cause were
+not published, and root cleanup/custody disposal remain unestablished. The
+post-failure identity check passed. The attempt is consumed; do not retry,
+resume, inspect its private logs or reuse its custody. The post-run process and
+fixed-port check found no matching processes or listeners; this does not prove
+cleanup. This runtime failure is separate from the green candidate CI. Campaigns
+24–28 remain consumed with unknown raw causes and unestablished cleanup; do not
+inspect or reuse their private state.
+
+The source-level diagnosis found a reporting gap, not C29's cause. The local
+candidate now carries the allowlisted Ergo node startup subphase from the
+composition root through the native worker and parent in separate V2 sidecars.
+The sidecars bind config, expected commit and path identity; the parent also
+binds terminal and V1 worker-failure receipts. Canonical JSON, the 16 KiB
+bound, phase correlation, redaction and no-cleanup claims fail closed. Existing
+terminal and V1 bytes/domains remain unchanged. Two independent P2 findings
+were fixed: traversal truncation and nested hostile Error inspection both
+invalidate the fine-grained phase. The final independent review found no other
+actionable defects. TypeScript, the layered import check, and all 788 targeted
+consumer tests pass. The batch is still local and unpromoted; run the exact
+staged/range publication guards, commit and guarded-push the coherent candidate
+to PR 7, then require all three jobs green on that exact head. Preserve C29's
+unknown cause and consumed status. Only then may a separately reviewed fresh-
+input admission authorize C30.
+
+Local `npm ci` also reported two moderate advisories in the Vitest 3.2.7
+development-test dependency tree (`vitest` / `@vitest/mocker`); the suggested
+fix is the breaking Vitest 5.0.2 line. This does not affect the runtime campaign
+path, and `npm audit --omit=dev` returned zero production advisories. Assess the
+upgrade with its full test and hosted-CI closure before a supported release; do
+not apply an automatic major upgrade.
 
 The current local candidate repairs the generated-package ABI and provenance
 boundary. Its inspector checks seven production exports across Rust parameter
@@ -185,11 +224,14 @@ satisfy the clean-checkout gate using the locked Windows x64 tools, audit Node
 publication guards and all three required jobs on a corrected exact PR head
 are green.
 
-Only after exact-head CI passes may a separate fresh-input admission authorize
-C29 with disposable custody and synthetic funds. Its two cycles must carry the
-first confirmed reserve/DUP/tracker successors through burn and Ergo payout with
-value and liability conservation. Any failure or ambiguity consumes C29.
-Recovery, operator reproduction and remaining FED acceptance follow that
+Campaign 29 was separately admitted after exact-head CI and failed once at
+`node-start`; its attempt is consumed, its raw cause and custody cleanup remain
+unknown, and it produced no two-cycle acceptance. Do not retry it. The missing
+runtime milestone remains two same-session cycles carrying the first confirmed
+reserve/DUP/tracker successors through burn and Ergo payout with value and
+liability conservation. Any later campaign must be a separate fresh admission
+with new disposable custody and its own current-input checks. Recovery,
+operator reproduction and remaining FED acceptance follow a successful
 deciding run.
 
 The delivery profile remains explicitly federated WP-06-FED, independent of
@@ -597,9 +639,16 @@ WASM rebuild used the exact reviewed wasm-pack, wasm-bindgen, rustc and Cargo
 hashes and reproduced source digest `dbade80a...` and package digest
 `cb368c79...`; the post-build differential test confirms the locked JS/WASM
 bytes. The 520-file result remains reusable for other unchanged inputs; the
-current direct consumer closure is now green. Fresh independent review, exact
-staged/range guards and all three required jobs on the promoted exact head
-remain mandatory. Campaign 29 remains unadmitted.
+current direct consumer closure is now green. Independent review and all three
+required jobs passed for promoted head `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`.
+Campaign 29 was then attempted once and failed at `node-start`; the bounded
+source failure phase and raw cause are unknown, and cleanup is unestablished.
+Do not retry or reuse the attempt. Source review found that the root phase is
+coarse and the existing Ergo startup-phase producer is not consumed by the
+worker failure diagnostic. The active batch will join those details through a
+separate versioned, bounded companion without changing terminal failure
+formats. Any later public change still requires the exact staged/range
+publication guards and its own applicable CI closure.
 
 ## Delivery Contract
 
@@ -909,8 +958,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Bounded wasm-pack provenance correction and exact-head CI closeout (active) | Provision the reviewed official Windows x64 release asset; bind archive and executable bytes plus version; align runtime pin, fixtures, workflow validator and the complete current WASM producer/consumer lock; rebuild and inspect the package; close every affected exact-Node-24 consumer; obtain fresh independent review and guarded promotion; all three required jobs pass on the promoted exact head | Current closure is green: 27 legacy-runner consumers, 1,500 passed/5 skipped; v4 lock/plan-reader tests, 11 passed/1 local JVM skip; TypeScript build; workflow source validation; real Node-24 rebuild with exact pins/digests; all 13 source-drift negatives reject. Fresh-review this frozen manifest; run exact staged/range guards, commit and guarded-push PR 7, then require all three jobs green on the exact promoted head. Do not start C29 until CI and separate fresh-input admission close |
-| Fresh campaign admission | The integration owner separately admits one new attempt on the clean promoted candidate after matching CI, actual runtime/host preflight, build-output readiness and fresh isolation/custody checks | Use the existing loader and validators with the selected pinned Node/compiler/package/Git inputs; reject drift, aliases and occupied outputs. Carry Campaigns 24-28's unknown raw causes and unestablished cleanup; diagnostics supply no admission or cleanup authority |
+| Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
+| C29 `node-start` diagnostic lineage (promotion gate active) | Preserve the coarse root phase and terminal formats while exposing an allowlisted operation/startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Complete locally on base `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). Node 24.x TypeScript check passed; layered import check passed for 137 modules / 898 files; all 788 targeted producer/consumer tests passed. Next: freeze the path set, run exact staged/range publication guards, commit as A. Shannon and guarded-push PR 7; require all three jobs on that exact head. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. CI plus a separate fresh-input admission must close before C30; neither this diagnostic nor green CI authorizes it. |
 | Same-session two-cycle acceptance | The connected successor consumers complete the second operation from the first confirmed reserve/DUP/tracker state, with separately scoped operation authority, custody lifetime, nonce and parent binding | Reuse unchanged component positives and negatives; the missing discriminator is one fresh-node two-cycle campaign with nonempty replay state, funded fees and conservation. Nonzero burn-leaf indices remain separately due when supported by the selected checkpoint shape |
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
