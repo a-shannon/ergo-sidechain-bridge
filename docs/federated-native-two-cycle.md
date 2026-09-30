@@ -77,6 +77,18 @@ Use the existing source/build validators rather than substituting a downloaded
 node binary. Dependency caches and the exclusive same-user host remain trusted
 inputs; this run is not an independent build attestation.
 
+Prepare the FED compiler's locked runtime before invoking the campaign. Use
+`npm run compiler:runtime-bundle` under its separately pinned Node 24.18.1 host,
+or provide an immutable dependency cache matching every committed FED pin.
+The native parent runs under Node 24.14.0 and does not invoke the bundle
+producer. Its admission checks the actual compiler runtime in that checkout:
+all 30 dependency JAR hashes and the aggregate classpath, compiler source,
+parent Node/environment, and the complete Java home derived from the configured
+Java executable. It checks again after the WASM build and in the worker.
+A missing or altered runtime rejects before the initial WASM build or attempt
+creation. Ordinary compiler execution retains its own runtime and snapshot
+checks; admission does not create a compiler receipt or execution authority.
+
 On Windows, launch from an x64 Visual Studio Developer PowerShell. The parent
 rejects missing `LIB`, `LIBPATH`, `INCLUDE`, or a regular `link.exe` on `PATH`
 before creating the attempt; the worker rechecks the same host prerequisites.

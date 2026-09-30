@@ -96,19 +96,39 @@ admission on that frozen runtime candidate, then ran once and failed with
 and `rootCleanupEstablished=false`; post-failure identities passed. No
 successful result exists and whole custody disposal remains unknown.
 Terminal digest: `a2cc2fadf305266062ad1cd1fa66748470306856011031ce9f61552b92575788`.
-This attempt is held permanently. The next selected decision is a bounded
-source comparison of the actual root arguments and owned compiler join, plus
-independent native materialization/start analysis. A concrete mismatch or
-noncustodial discriminating check must change the hypothesis before any
-separately admitted fresh campaign; no full retry merely for another phase label.
-The bounded source passes found no deterministic invocation mismatch. Further
-diagnosis of held C31 artifacts needs separately scoped access; no such access
-or new campaign follows from the terminal failure. In parallel, the selected
-independently useful recovery discriminator exercises ambiguous withdrawal
-through SQLite reopen: durable input holds must survive and neither reconstructed
-handles nor a fresh genuine authorization may enable a duplicate POST.
-This fixture closes that journal/lifecycle boundary only, not live two-cycle
-acceptance or the wider accumulated recovery matrix.
+This attempt is held permanently. The bounded source passes found no
+deterministic invocation mismatch. A separately authorized inspection found
+no generated public genesis candidate, so no offline build-spec replay ran.
+The clean C31 checkout lacks the FED compiler's 30 locked dependency JARs.
+A no-key, no-node control reproduced the existing compiler's missing-runtime
+rejection before compilation. This establishes a current prerequisite gap;
+it does not establish C31's historical cause or custody disposal.
+
+The current batch connects the FED compiler's exact runtime checks to native
+invocation admission, using the configured Java home, before expensive builds
+or attempt creation. Retain the separate bundle producer's Node 24.18.1 lock;
+do not run that producer from the native parent's Node 24.14.0 host. Missing,
+tampered or mismatched dependencies must fail admission without creating an
+attempt or launching a worker. No format, quorum, domain or custody rule changes.
+Close this boundary with targeted negatives and independent review, then
+promote the coherent candidate through publication guards and its own CI.
+A future campaign requires separate fresh admission; no consumed attempt is
+reused. The separately completed SQLite-reopen fixture closes persistent
+ambiguous withdrawal holds and duplicate-POST rejection only, not live
+two-cycle acceptance or the wider accumulated recovery matrix.
+
+The compiler-runtime admission now checks the same loader used by genuine
+compilation, with an explicit checkout binding and configured Java home. Its
+read-only tests pass 77 cases; the actual unmocked admission control also
+passes without compiling or changing ambient Java. Existing tracker/family
+V1/V2 compiler tests pass 54 cases. Environment/parent tests pass 98 cases,
+including rejection before the first build and after WASM but before attempt
+creation; invocation/config and bundle-orchestration consumers pass 22 cases.
+The four-file JVM run in one reused fork failed the harness's environment
+guard after the first suite; the three affected suites passed separately in
+fresh processes. Retain that failed grouped run; no guard or test was weakened.
+These checks close the admission boundary only. Publication, exact-head CI
+and separately admitted two-cycle acceptance remain distinct obligations.
 
 The separate non-custodial Campaign 29 admission preflight passed on a clean
 checkout of exact commit `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. It verified

@@ -213,6 +213,52 @@ describe('native two-cycle parent and worker V1', () => {
     expect(mocked.process).not.toHaveBeenCalled();
   });
 
+  it.each([
+    'missing compiler dependency root',
+    'tampered direct compiler JAR',
+  ] as const)(
+    'rejects %s before the WASM build or create-only attempt',
+    async condition => {
+      const fixture = commandFixture();
+      configureParent(fixture, projectedResult());
+      const failure = new Error(`${condition} rejected by invocation environment`);
+      mocked.environment.mockRejectedValueOnce(failure);
+
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(failure);
+
+      expect(mocked.environment).toHaveBeenCalledOnce();
+      expect(mocked.wasmBuild).not.toHaveBeenCalled();
+      expect(mocked.wasmPackageMatches).not.toHaveBeenCalled();
+      expect(existsSync(fixture.attemptPath)).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'start.json'))).toBe(false);
+      expect(mocked.process).not.toHaveBeenCalled();
+      expect(mocked.root).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects compiler runtime drift after WASM build before attempt creation or worker launch', async () => {
+    const fixture = commandFixture();
+    configureParent(fixture, projectedResult());
+    const failure = new Error('tampered direct compiler JAR after WASM build');
+    mocked.environment
+      .mockResolvedValueOnce(environment())
+      .mockRejectedValueOnce(failure);
+
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+      '--config', fixture.configSourcePath,
+    ])).rejects.toBe(failure);
+
+    expect(mocked.environment).toHaveBeenCalledTimes(2);
+    expect(mocked.wasmBuild).toHaveBeenCalledOnce();
+    expect(mocked.wasmPackageMatches).toHaveBeenCalledOnce();
+    expect(existsSync(fixture.attemptPath)).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'start.json'))).toBe(false);
+    expect(mocked.process).not.toHaveBeenCalled();
+    expect(mocked.root).not.toHaveBeenCalled();
+  });
+
   it('fails closed if source or tool build evidence changes during worker execution', async () => {
     const fixture = commandFixture();
     configureParent(fixture, projectedResult());

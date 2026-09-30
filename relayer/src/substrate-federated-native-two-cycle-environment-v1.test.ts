@@ -14,6 +14,7 @@ import { join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocked = vi.hoisted(() => ({
+  compilerRuntime: vi.fn(),
   ergoLock: vi.fn(),
   frontier: vi.fn(),
   msvcHost: vi.fn(),
@@ -24,6 +25,9 @@ const mocked = vi.hoisted(() => ({
 
 vi.mock('./authenticated-v2-runtime-bundle.js', () => ({
   validatePinnedFederatedCampaignParentRuntime: mocked.runtime,
+}));
+vi.mock('./substrate-federated-tracker-jvm-compiler-v1.js', () => ({
+  assertPinnedFederatedJvmCompilerRuntimeV1: mocked.compilerRuntime,
 }));
 vi.mock('./pinned-local-native-verifier-build.js', () => ({
   runBoundedProcess: mocked.process,
@@ -54,13 +58,16 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 describe('native two-cycle invocation environment V1', () => {
-  it('validates the exact clean repository and complete pinned tool closure', async () => {
+  it('validates the configured compiler Java home despite unrelated ambient JAVA_HOME', async () => {
+    const ambientJavaHome = 'unreviewed-ambient-java-home';
+    vi.stubEnv('JAVA_HOME', ambientJavaHome);
     const fixture = environmentFixture();
     const invocation = loadSubstrateFederatedNativeTwoCycleInvocationV1(
       fixture.configPath,
@@ -79,6 +86,12 @@ describe('native two-cycle invocation environment V1', () => {
     });
     expect(environment.runtime).toBe(fixture.runtime);
     expect(environment.toolIdentityDigestHex).toMatch(/^[0-9a-f]{64}$/u);
+    expect(mocked.compilerRuntime).toHaveBeenCalledOnce();
+    expect(mocked.compilerRuntime).toHaveBeenCalledWith({
+      bridgeRoot: fixture.config.bridgeRoot,
+      javaHome: fixture.javaHome,
+    });
+    expect(process.env.JAVA_HOME).toBe(ambientJavaHome);
     expect(mocked.process).toHaveBeenCalledTimes(3);
     expect(mocked.process.mock.calls.every(call => (
       call[0].executablePath === fixture.config.frontierGitExecutablePath
@@ -102,6 +115,40 @@ describe('native two-cycle invocation environment V1', () => {
     });
     expect(mocked.ergoLock).toHaveBeenCalledWith(fixture.config.bridgeRoot);
   });
+
+  it.each([
+    'missing compiler dependency root',
+    'tampered direct compiler JAR',
+  ] as const)(
+    'rejects %s before MSVC, native toolchain, or source checks',
+    async condition => {
+      const fixture = environmentFixture();
+      const invocation = loadSubstrateFederatedNativeTwoCycleInvocationV1(
+        fixture.configPath,
+      );
+      configurePassingInspectors(fixture);
+      const failure = new Error(`${condition} rejected by compiler runtime admission`);
+      mocked.compilerRuntime.mockImplementationOnce(input => {
+        expect(input).toEqual({
+          bridgeRoot: fixture.config.bridgeRoot,
+          javaHome: fixture.javaHome,
+        });
+        throw failure;
+      });
+
+      await expect(
+        validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(invocation),
+      ).rejects.toBe(failure);
+
+      expect(mocked.runtime).toHaveBeenCalledWith(fixture.config.bridgeRoot);
+      expect(mocked.compilerRuntime).toHaveBeenCalledOnce();
+      expect(mocked.msvcHost).not.toHaveBeenCalled();
+      expect(mocked.process).not.toHaveBeenCalled();
+      expect(mocked.frontier).not.toHaveBeenCalled();
+      expect(mocked.protoc).not.toHaveBeenCalled();
+      expect(mocked.ergoLock).not.toHaveBeenCalled();
+    },
+  );
 
   it('rejects config-byte drift before invoking any inspector', async () => {
     const fixture = environmentFixture();

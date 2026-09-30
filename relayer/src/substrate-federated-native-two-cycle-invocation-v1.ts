@@ -43,6 +43,9 @@ import {
 import {
   inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1,
 } from './substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import {
+  assertPinnedFederatedJvmCompilerRuntimeV1,
+} from './substrate-federated-tracker-jvm-compiler-v1.js';
 
 export const SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA =
   'e2s.substrate-federated-native-two-cycle-invocation.v1' as const;
@@ -401,6 +404,11 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
   ) {
     throw new Error('invocation Git paths differ from the pinned parent runtime');
   }
+  const javaHome = javaHomeFromExecutable(invocation.config.ergoJavaExecutablePath);
+  assertPinnedFederatedJvmCompilerRuntimeV1({
+    bridgeRoot: invocation.config.bridgeRoot,
+    javaHome,
+  });
   assertSubstrateFederatedAuthoritySafeMsvcBuildHostV1();
   const repository = await inspectCleanRepository(
     invocation.worktreeRoot,
@@ -418,7 +426,6 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
   const ergoLock = inspectSubstrateFederatedIsolatedDevnetErgoNodeBuildLockV1(
     invocation.config.bridgeRoot,
   );
-  const javaHome = javaHomeFromExecutable(invocation.config.ergoJavaExecutablePath);
   if (
     sha256(readFileSync(invocation.config.ergoGitExecutablePath))
       !== ergoLock.gitExecutableSha256Hex
