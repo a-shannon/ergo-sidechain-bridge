@@ -193,6 +193,60 @@ describe('withdrawal V2 durable lifecycle with bounded capability doubles', () =
     expect(mocks.post).not.toHaveBeenCalled();
   });
 
+  it('retains an ambiguous payout hold across restart without restoring transport authority', async () => {
+    const a = await attempt();
+    mocks.post.mockRejectedValueOnce({ isAxiosError: true, response: { status: 503 } });
+    const submission = await submit(f.target, a);
+    expect(submission.status).toBe('ambiguous');
+    finalize(a, submission);
+    const beforeRestart = state.getErgoOperationalTransactionAttempt(a.expectedTxId)!;
+    expect(beforeRestart.status).toBe('ambiguous');
+    expect(beforeRestart.inputBoxIds).toEqual(f.inputs.map(box => box.boxId));
+
+    state.close(); state = new StateTracker(join(root, 'state.db'));
+    const row = state.getErgoOperationalTransactionAttempt(a.expectedTxId)!;
+    expect(row).toEqual(beforeRestart);
+    expect(row.inputBoxIds).toEqual(f.inputs.map(box => box.boxId));
+    const reconstructed = { expectedTxId: row.expectedTxId, durableAttemptDigestHex: row.durableAttemptDigestHex };
+    await expect(submit(f.target, reconstructed)).rejects.toThrow(/provenance/);
+    await expect(confirm(reconstructed, f.target, f.confirmation)).rejects.toThrow(/provenance/);
+
+    f = fixture();
+    const freshAuthorization = await authorize(f.check, f.target);
+    expect(() => reserve(freshAuthorization, state)).toThrow(/already exists/);
+    expect(state.getErgoOperationalTransactionAttempt(row.expectedTxId)).toEqual(row);
+    expect(mocks.post).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an ambiguous payout held when journal finalization fails before restart', async () => {
+    const a = await attempt();
+    mocks.post.mockRejectedValueOnce({ isAxiosError: true, response: { status: 503 } });
+    const submission = await submit(f.target, a);
+    expect(submission.status).toBe('ambiguous');
+    vi.spyOn(state, 'finalizeErgoOperationalTransactionAttempt').mockImplementationOnce(() => {
+      throw new Error('synthetic finalization persistence failure');
+    });
+    expect(() => finalize(a, submission)).toThrow('synthetic finalization persistence failure');
+    const beforeRestart = state.getErgoOperationalTransactionAttempt(a.expectedTxId)!;
+    expect(beforeRestart.status).toBe('pending');
+    expect(beforeRestart.inputBoxIds).toEqual(f.inputs.map(box => box.boxId));
+
+    state.close(); state = new StateTracker(join(root, 'state.db'));
+    const row = state.getErgoOperationalTransactionAttempt(a.expectedTxId)!;
+    expect(row).toEqual(beforeRestart);
+    expect(row.status).toBe('pending');
+    expect(row.inputBoxIds).toEqual(f.inputs.map(box => box.boxId));
+    const reconstructed = { expectedTxId: row.expectedTxId, durableAttemptDigestHex: row.durableAttemptDigestHex };
+    await expect(submit(f.target, reconstructed)).rejects.toThrow(/provenance/);
+    await expect(confirm(reconstructed, f.target, f.confirmation)).rejects.toThrow(/provenance/);
+
+    f = fixture();
+    const freshAuthorization = await authorize(f.check, f.target);
+    expect(() => reserve(freshAuthorization, state)).toThrow(/already exists/);
+    expect(state.getErgoOperationalTransactionAttempt(row.expectedTxId)).toEqual(row);
+    expect(mocks.post).toHaveBeenCalledOnce();
+  });
+
   it.each(['reserve', 'finalize'] as const)('fails closed on %s persistence failure', async stage => {
     const auth = await authorize(f.check, f.target);
     if (stage === 'reserve') {

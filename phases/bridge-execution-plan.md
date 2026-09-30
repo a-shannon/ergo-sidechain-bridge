@@ -28,7 +28,7 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–30 remain consumed; never retry or reuse them. The frozen
+**Now:** Campaigns 24–31 remain consumed; never retry or reuse them. The frozen
 execution candidate is `29785fbc015e0a07d8a6799048bb7a5f7524252c`, matching
 the open PR 7. Exact-head run
 [36629279161](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36629279161)
@@ -88,6 +88,27 @@ standalone materialization probe that repeats Frontier and Ergo/JVM preparation
 without closing acceptance. The fresh run remains conditional on required
 candidate promotion and CI, plus current runtime/source/output/custody/fee
 checks.
+
+Campaign 31 subsequently completed separate fresh-input and independent
+admission on that frozen runtime candidate, then ran once and failed with
+`execution_failure`. Its validated parent/worker lineage again reports
+`primaryPhase=node-start`, `ergoNodeStartupPhase=null`, `sourceFailurePhase=null`
+and `rootCleanupEstablished=false`; post-failure identities passed. No
+successful result exists and whole custody disposal remains unknown.
+Terminal digest: `a2cc2fadf305266062ad1cd1fa66748470306856011031ce9f61552b92575788`.
+This attempt is held permanently. The next selected decision is a bounded
+source comparison of the actual root arguments and owned compiler join, plus
+independent native materialization/start analysis. A concrete mismatch or
+noncustodial discriminating check must change the hypothesis before any
+separately admitted fresh campaign; no full retry merely for another phase label.
+The bounded source passes found no deterministic invocation mismatch. Further
+diagnosis of held C31 artifacts needs separately scoped access; no such access
+or new campaign follows from the terminal failure. In parallel, the selected
+independently useful recovery discriminator exercises ambiguous withdrawal
+through SQLite reopen: durable input holds must survive and neither reconstructed
+handles nor a fresh genuine authorization may enable a duplicate POST.
+This fixture closes that journal/lifecycle boundary only, not live two-cycle
+acceptance or the wider accumulated recovery matrix.
 
 The separate non-custodial Campaign 29 admission preflight passed on a clean
 checkout of exact commit `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. It verified
