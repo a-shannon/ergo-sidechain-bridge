@@ -1,21 +1,34 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   appendFileSync,
   copyFileSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
 
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
+import { assertNoDuplicateJsonKeys } from './ergo-settlement-core/strict-json.js';
+import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
+import { encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister } from './ergo-encoding.js';
+import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
+import { MINER_FEE as NANOERG_MINER_FEE, MINER_FEE_TREE } from './profiles/substrate-grandpa-v1/ergo-settlement-policy.js';
+import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
+import { executePinnedFederatedJvmCompilerV1 } from './substrate-federated-tracker-jvm-compiler-v1.js';
+import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SINGLETON_VALUE_NANOERG } from './substrate-federated-isolated-devnet-generation-v1.js';
+import { buildFederatedPooledReserveSourceProofProfileV1 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
 import {
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
+  collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
+  assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
 import { computeErgoHeaderId } from './ergo-settlement-core/ergo-header-id.js';
@@ -35,6 +48,7 @@ import {
   assertSubstrateFederatedIsolatedDevnetPostRestartContinuityV1,
   buildSubstrateFederatedIsolatedDevnetErgoNodeConfigV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
+  createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2,
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionNodeObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointExtensionObservationDigestV1,
   deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1,
@@ -64,6 +78,25 @@ import {
   claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2,
   createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2,
 } from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
+import {
+  buildSubstrateFederatedIsolatedDevnetErgoNodeV1,
+  type BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input,
+} from './substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import {
+  discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1,
+  assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1,
+} from './substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
+import {
+  assertObservedSubstrateFederatedGenesisReadCustodyV1,
+  assertObservedSubstrateFederatedGenesisV1,
+  compileObservedSubstrateFederatedGenesisV1,
+} from './substrate-federated-observed-genesis-v1.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance,
+  createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2,
+  readSubstrateFederatedGenesisProfilesFromSessionV2,
+} from './substrate-federated-isolated-devnet-source-attestation-session-v1.js';
+import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance } from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 import {
   discoverSubstrateFederatedRewardInputsV1,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
@@ -744,6 +777,400 @@ describe.skipIf(process.platform !== 'win32')(
 
     const liveJavaPath = process.env.G1DI3B_JAVA_PATH;
     const liveJarPath = process.env.G1DI3B_ERGO_JAR_PATH;
+    const liveBuildConfigPath = process.env.E2S_FED6G1DI3B_REAL_BUILD_CONFIG_PATH;
+    it.skipIf(!liveBuildConfigPath)(
+      'builds the pinned node, mines for owned reward discovery, and collects matching history',
+      async () => {
+        type Stage = 'input-claim' | 'build' | 'setup' | 'process-construction'
+          | 'node-start' | 'target-activation' | 'owned-discovery-v2' | 'history-v2'
+          | 'managed-completion' | 'node-stop' | 'custody-disposal';
+        type Event = 'started' | 'passed' | 'failed';
+        const marker = (stage: Stage, event: Event) =>
+          console.log(`G1DI3B_REAL_ROUTE stage=${stage} event=${event}`);
+        let stage: Stage = 'input-claim';
+        let failureStage: Stage | undefined;
+        let cleanupFailed = false;
+        let setup: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>> | undefined;
+        let node: ReturnType<typeof createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2> | undefined;
+        let summary: Readonly<{ anchorHeight: number; headerCount: number; discoveryDigestHex: string; historyDigestHex: string }> | undefined;
+        try {
+          marker(stage, 'started');
+          const configText = readFileSync(liveBuildConfigPath!, 'utf8');
+          assertNoDuplicateJsonKeys(configText);
+          const config: unknown = JSON.parse(configText);
+          assertExactObjectKeys(config, ['schema', 'version', 'expectedBridgeCommit', 'attemptClaimPath', 'buildInput'], 'real route config');
+          const value = config as Record<string, unknown>;
+          if (value.schema !== 'e2s.fed6g1di3b-real-build-owned-history.v1' || value.version !== 1
+            || typeof value.expectedBridgeCommit !== 'string'
+            || !/^[0-9a-f]{40}$/u.test(value.expectedBridgeCommit)
+            || typeof value.attemptClaimPath !== 'string') throw new Error('invalid real route config');
+          assertExactObjectKeys(value.buildInput, ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath', 'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath'], 'build input');
+          const buildInput = value.buildInput as Record<string, string>;
+          for (const field of Object.values(buildInput)) if (typeof field !== 'string' || field.length === 0) throw new Error('invalid build input');
+          const expectedBridgeRoot = resolve(import.meta.dirname, '..', '..');
+          if (resolve(buildInput.bridgeRoot) !== expectedBridgeRoot) throw new Error('bridge root mismatch');
+          const bridgeHead = execFileSync(buildInput.gitExecutablePath, ['-C', buildInput.bridgeRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000 }).trim();
+          if (bridgeHead !== value.expectedBridgeCommit) throw new Error('bridge HEAD mismatch');
+          const claimPath = value.attemptClaimPath;
+          const claimRelativePath = relative(expectedBridgeRoot, resolve(claimPath));
+          const claimIsInsideBridge = claimRelativePath === ''
+            || (claimRelativePath !== '..'
+              && !claimRelativePath.startsWith(`..${sep}`)
+              && !isAbsolute(claimRelativePath));
+          if (!isAbsolute(claimPath) || claimIsInsideBridge) {
+            throw new Error('invalid attempt claim path');
+          }
+          writeFileSync(claimPath, 'claimed\n', { flag: 'wx' });
+          marker(stage, 'passed');
+
+          stage = 'build'; marker(stage, 'started');
+          const built = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
+            buildInput as unknown as BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input,
+          );
+          marker(stage, 'passed');
+
+          stage = 'setup'; marker(stage, 'started');
+          setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+          const credentials = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
+          marker(stage, 'passed');
+
+          stage = 'process-construction'; marker(stage, 'started');
+          node = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2({
+            javaExecutablePath: built.javaExecutablePath,
+            expectedJavaExecutableSha256Hex: built.receipt.toolchain.javaExecutableSha256Hex,
+            nodeAssemblyJarPath: built.nodeAssemblyJarPath,
+            expectedNodeAssemblyJarSha256Hex: built.receipt.build.artifactSha256Hex,
+            buildIdentityDigestHex: built.receipt.buildIdentityDigestHex,
+          }, launchBindingForSigner(setup.signer), credentials.miningCredential,
+          credentials.checkpointMiningCredential, credentials.trackerAdmissionMiningCredential,
+          credentials.trackerConfirmationMiningCredential);
+          marker(stage, 'passed');
+
+          stage = 'node-start'; marker(stage, 'started');
+          await node.startMining();
+          marker(stage, 'passed');
+
+          stage = 'target-activation'; marker(stage, 'started');
+          const managed = await node.withMiningActiveExecutionTarget(async target => {
+            assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+            marker('target-activation', 'passed');
+            stage = 'owned-discovery-v2'; marker(stage, 'started');
+            const owned = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup!.signer, target);
+            const observation = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(owned, target);
+            marker('owned-discovery-v2', 'passed');
+            stage = 'history-v2'; marker('history-v2', 'started');
+            const history = await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(observation);
+            assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(history);
+            expect(history.receipt.rewardInputDiscoveryDigestHex).toBe(observation.reportDigestHex);
+            expect(history.receipt.target.genesisHeaderIdHex).toBe(observation.target.genesisHeaderIdHex);
+            expect(history.receipt.target.setupAnchorHeaderIdHex).toBe(observation.target.tipHeaderIdHex);
+            expect(history.receipt.target.setupAnchorHeight).toBe(observation.target.tipHeight);
+            expect(history.receipt.target.headerCount).toBe(observation.target.tipHeight);
+            const inputIds = [observation.genesisInputs.tracker.boxId,
+              observation.genesisInputs.duplicatePrevention.boxId,
+              observation.genesisInputs.pooledReserve.boxId];
+            const boxIds = [observation.genesisBoxIds.tracker,
+              observation.genesisBoxIds.duplicatePrevention,
+              observation.genesisBoxIds.pooledReserve];
+            expect(boxIds).toEqual(inputIds);
+            expect(boxIds).toHaveLength(3);
+            expect(new Set(boxIds).size).toBe(3);
+            expect(history.receipt.genesisBoxIds).toEqual(observation.genesisBoxIds);
+            marker('history-v2', 'passed');
+            summary = Object.freeze({ anchorHeight: observation.target.tipHeight, headerCount: history.receipt.target.headerCount, discoveryDigestHex: observation.reportDigestHex, historyDigestHex: history.receipt.reportDigestHex });
+            stage = 'managed-completion'; marker(stage, 'started');
+            return summary;
+          });
+          expect(managed.receipt.finalSnapshot.fullHeight).toBeGreaterThanOrEqual(summary!.anchorHeight);
+          expect(managed.receipt.finalSnapshot.indexedHeight).toBe(managed.receipt.finalSnapshot.fullHeight);
+          expect(managed.receipt.finalSnapshot.headerIdHex).toMatch(/^[0-9a-f]{64}$/u);
+          marker(stage, 'passed');
+          console.log(`G1DI3B_REAL_ROUTE summary anchorHeight=${summary!.anchorHeight} headerCount=${summary!.headerCount} discoveryDigestHex=${summary!.discoveryDigestHex} historyDigestHex=${summary!.historyDigestHex}`);
+        } catch {
+          failureStage = stage;
+          marker(stage, 'failed');
+        } finally {
+          if (node !== undefined) {
+            marker('node-stop', 'started');
+            try { await node.stop(); marker('node-stop', 'passed'); }
+            catch { cleanupFailed = true; marker('node-stop', 'failed'); }
+          }
+          if (setup !== undefined) {
+            marker('custody-disposal', 'started');
+            try { await setup.dispose(); marker('custody-disposal', 'passed'); }
+            catch { cleanupFailed = true; marker('custody-disposal', 'failed'); }
+          }
+        }
+        if (failureStage !== undefined || cleanupFailed) throw new Error(
+          failureStage !== undefined && cleanupFailed
+            ? `real route failed at ${failureStage}; cleanup failed`
+            : failureStage !== undefined ? `real route failed at ${failureStage}` : 'real route cleanup failed',
+        );
+      },
+      2_100_000,
+    );
+    it.skipIf(process.env.E2S_FED6G1DI3B_COMPILER_ADMISSION_ONLY !== '1')(
+      'admits the pinned FED compiler runtime before node or custody creation',
+      async () => {
+        assertControlledGenesisCompilerTestEnvironment();
+        console.log('G1DI3B_COMPILER_ADMISSION stage=harness-env event=passed');
+        const harnessNodeOptions = process.env.NODE_OPTIONS;
+        delete process.env.NODE_OPTIONS;
+        let runtimeAdmitted = false;
+        try {
+          // Runtime admission precedes the zero-byte request rejection. This
+          // deliberately never reaches the compiler process or creates custody.
+          await executePinnedFederatedJvmCompilerV1(Buffer.alloc(0));
+        } catch (error) {
+          runtimeAdmitted = error instanceof Error
+            && error.message === 'pinned federated JVM compiler input exceeds its lock';
+        } finally {
+          process.env.NODE_OPTIONS = harnessNodeOptions;
+        }
+        expect(runtimeAdmitted).toBe(true);
+        console.log('G1DI3B_COMPILER_ADMISSION stage=runtime-pins event=passed');
+      },
+      120_000,
+    );
+    const liveGenesisConfigPath = process.env.E2S_FED6G1DI3B_REAL_GENESIS_CONFIG_PATH;
+    it.skipIf(!liveGenesisConfigPath)(
+      'joins real owned observations through FED genesis compilation without executing a native runtime',
+      async () => {
+        type Stage = 'input-claim' | 'build' | 'setup' | 'source-custody'
+          | 'process-construction' | 'node-start' | 'target-activation'
+          | 'owned-discovery-v2' | 'history-v2' | 'genesis-compile'
+          | 'compiled-bindings' | 'live-negatives' | 'managed-completion'
+          | 'expired-target' | 'node-stop' | 'source-disposal'
+          | 'custody-disposal';
+        type Event = 'started' | 'passed' | 'failed';
+        const marker = (stage: Stage, event: Event) =>
+          console.log(`G1DI3B_REAL_GENESIS stage=${stage} event=${event}`);
+        let stage: Stage = 'input-claim';
+        let failureStage: Stage | undefined;
+        let cleanupFailed = false;
+        let setup: Awaited<ReturnType<typeof createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2>> | undefined;
+        let source: ReturnType<typeof createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2> | undefined;
+        let node: ReturnType<typeof createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2> | undefined;
+        let originalTarget: Parameters<typeof assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1>[0] | undefined;
+        let compiled: Awaited<ReturnType<typeof compileObservedSubstrateFederatedGenesisV1>> | undefined;
+        let sourceDisposed = false;
+        let setupDisposed = false;
+        let summary: Readonly<{ anchorHeight: number; headerCount: number; discoveryDigestHex: string; historyDigestHex: string; genesisJsonSha256Hex: string }> | undefined;
+        try {
+          marker(stage, 'started');
+          const configText = readFileSync(liveGenesisConfigPath!, 'utf8');
+          assertNoDuplicateJsonKeys(configText);
+          const config: unknown = JSON.parse(configText);
+          assertExactObjectKeys(config, ['schema', 'version', 'expectedBridgeCommit', 'attemptClaimPath', 'buildInput'], 'real genesis config');
+          const value = config as Record<string, unknown>;
+          if (value.schema !== 'e2s.fed6g1di3b-real-build-observed-genesis.v1' || value.version !== 1
+            || typeof value.expectedBridgeCommit !== 'string'
+            || !/^[0-9a-f]{40}$/u.test(value.expectedBridgeCommit)
+            || typeof value.attemptClaimPath !== 'string') throw new Error('invalid real genesis config');
+          assertExactObjectKeys(value.buildInput, ['worktreeRoot', 'bridgeRoot', 'ergoSourcePath', 'gitExecutablePath', 'javaExecutablePath', 'sbtLauncherJarPath'], 'build input');
+          const buildInput = value.buildInput as Record<string, string>;
+          for (const field of Object.values(buildInput)) if (typeof field !== 'string' || field.length === 0) throw new Error('invalid build input');
+          const expectedBridgeRoot = resolve(import.meta.dirname, '..', '..');
+          if (resolve(buildInput.bridgeRoot) !== expectedBridgeRoot) throw new Error('bridge root mismatch');
+          const bridgeHead = execFileSync(buildInput.gitExecutablePath, ['-C', buildInput.bridgeRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000 }).trim();
+          if (bridgeHead !== value.expectedBridgeCommit) throw new Error('bridge HEAD mismatch');
+          assertControlledGenesisCompilerTestEnvironment();
+          const claimPath = value.attemptClaimPath;
+          const claimRelativePath = relative(expectedBridgeRoot, resolve(claimPath));
+          const claimIsInsideBridge = claimRelativePath === ''
+            || (claimRelativePath !== '..' && !claimRelativePath.startsWith(`..${sep}`) && !isAbsolute(claimRelativePath));
+          if (!isAbsolute(claimPath) || claimIsInsideBridge) throw new Error('invalid attempt claim path');
+          writeFileSync(claimPath, 'claimed\n', { flag: 'wx' });
+          marker(stage, 'passed');
+
+          stage = 'build'; marker(stage, 'started');
+          const built = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(
+            buildInput as unknown as BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input,
+          );
+          marker(stage, 'passed');
+
+          stage = 'setup'; marker(stage, 'started');
+          setup = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
+          marker(stage, 'passed');
+
+          stage = 'source-custody'; marker(stage, 'started');
+          source = createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2({
+            ergoAdmissionThreshold: 1, ergoAdmissionPublicKeysHex: [setup.signer.publicKeyHex],
+          });
+          assertSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2Provenance(source);
+          expect(readSubstrateFederatedGenesisProfilesFromSessionV2(source).checkpointProfile.ergoAdmissionPublicKeysHex)
+            .toEqual([setup.signer.publicKeyHex]);
+          const credentials = claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(setup);
+          marker(stage, 'passed');
+
+          stage = 'process-construction'; marker(stage, 'started');
+          node = createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2({
+            javaExecutablePath: built.javaExecutablePath,
+            expectedJavaExecutableSha256Hex: built.receipt.toolchain.javaExecutableSha256Hex,
+            nodeAssemblyJarPath: built.nodeAssemblyJarPath,
+            expectedNodeAssemblyJarSha256Hex: built.receipt.build.artifactSha256Hex,
+            buildIdentityDigestHex: built.receipt.buildIdentityDigestHex,
+          }, launchBindingForSigner(setup.signer), credentials.miningCredential,
+          credentials.checkpointMiningCredential, credentials.trackerAdmissionMiningCredential,
+          credentials.trackerConfirmationMiningCredential);
+          marker(stage, 'passed');
+
+          stage = 'node-start'; marker(stage, 'started');
+          await node.startMining(); marker(stage, 'passed');
+
+          stage = 'target-activation'; marker(stage, 'started');
+          const managed = await node.withMiningActiveExecutionTarget(async target => {
+            originalTarget = target;
+            assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+            marker('target-activation', 'passed');
+            stage = 'owned-discovery-v2'; marker(stage, 'started');
+            const owned = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup!.signer, target);
+            const observation = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(owned, target);
+            marker(stage, 'passed');
+            stage = 'history-v2'; marker(stage, 'started');
+            const history = await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(observation);
+            assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(history);
+            expect(history.receipt.rewardInputDiscoveryDigestHex).toBe(observation.reportDigestHex);
+            expect(history.receipt.target.setupAnchorHeaderIdHex).toBe(observation.target.tipHeaderIdHex);
+            expect(history.receipt.target.setupAnchorHeight).toBe(observation.target.tipHeight);
+            expect(history.receipt.genesisBoxIds).toEqual(observation.genesisBoxIds);
+            marker(stage, 'passed');
+
+            stage = 'genesis-compile'; marker(stage, 'started');
+            const runtimeWasm = Buffer.from('0061736d01000000', 'hex');
+            assertControlledGenesisCompilerTestEnvironment();
+            const harnessNodeOptions = process.env.NODE_OPTIONS;
+            delete process.env.NODE_OPTIONS;
+            try {
+              compiled = await compileObservedSubstrateFederatedGenesisV1({
+                target, ownedDiscovery: owned, history, setupSigner: setup!.signer, sourceSession: source!,
+                genesis: {
+                  bridgeRoot: expectedBridgeRoot, launchDomainHex: '61'.repeat(32), evmChainId: '4242',
+                  operatorAddressHex: '31'.repeat(20), bridgeAddressHex: '33'.repeat(20), tokenAddressHex: '44'.repeat(20),
+                  runtimeWasm, expectedRuntimeWasmSha256Hex: sha256(runtimeWasm),
+                  endowments: [{ addressHex: '31'.repeat(20), balance: '1000000000000000000' }],
+                },
+              });
+            } finally { process.env.NODE_OPTIONS = harnessNodeOptions; }
+            marker(stage, 'passed');
+
+            stage = 'compiled-bindings'; marker(stage, 'started');
+            assertObservedSubstrateFederatedGenesisV1(compiled, target);
+            assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer);
+            const profiles = readSubstrateFederatedGenesisProfilesFromSessionV2(source!);
+            expect(compiled.discovery).toBe(observation);
+            expect(compiled.history).toBe(history);
+            expect(compiled.preparation.checkpointProfile).toEqual(profiles.checkpointProfile);
+            expect(compiled.preparation.mintProofProfile).toEqual(source!.binding.federatedMintProfile);
+            expect(source!.binding.federatedMintProfile)
+              .toEqual(buildFederatedPooledReserveSourceProofProfileV1(profiles.mintProofProfile));
+            expect(compiled.preparation.mintProofProfileScaleHex).toBe(source!.binding.federatedMintProfileScaleHex);
+            expect(profiles.checkpointProfile.ergoAdmissionThreshold).toBe(1);
+            expect(profiles.checkpointProfile.ergoAdmissionPublicKeysHex).toEqual([setup!.signer.publicKeyHex]);
+            expect(observation.signer.publicKeyHex).toBe(setup!.signer.publicKeyHex);
+            expect(observation.signer.p2pkErgoTreeHex).toBe(setup!.signer.p2pkErgoTreeHex);
+            expect(compiled.candidate.runtimeProfile.sourceProofProfileIdHex)
+              .toBe(source!.binding.federatedMintProfile.proofProfileIdHex);
+            const ordered = compiled.issuance.orderedTransactions;
+            expect(ordered.map(item => item.role)).toEqual(['tracker', 'duplicatePrevention', 'pooledReserve']);
+            expect(compiled.issuance.creationHeight).toBe(observation.target.tipHeight + 1);
+            expect(compiled.issuance.greenfieldReplayBaselineEstablished).toBe(false);
+            expect(compiled.issuance.targetNodeAcceptanceEstablished).toBe(false);
+            expect(compiled.issuance.issuanceEstablished).toBe(false);
+            const familyId = encodeCollByteRegister(Buffer.from(compiled.familyReceipt.profile.familyIdHex, 'hex'));
+            const expectedRegisters = [
+              { R4: encodeCollByteRegister(Buffer.from(profiles.checkpointProfile.profileIdHex, 'hex')),
+                R5: encodeAvlTreeRegister(Buffer.from(getSubstrateFederatedTrackerDigestV1Hex([]), 'hex'), 1, 370),
+                R6: encodeCollByteRegister(Buffer.from(compiled.preparation.application.sidechainIdHex, 'hex')),
+                R7: encodeLongRegister(0n), R8: encodeIntRegister(0),
+                R9: encodeCollByteRegister(Buffer.from(profiles.checkpointProfile.ergoAdmissionKeySetDigestHex, 'hex')) },
+              { R4: familyId, R5: encodeAvlTreeRegister(Buffer.from(getDupTreeDigest([]), 'hex'), 1, 1) },
+              { R4: familyId, R5: encodeAvlTreeRegister(Buffer.from(getPooledReserveEmptyDigest(), 'hex'), 1, 32),
+                R6: encodeLongRegister(0n) },
+            ];
+            const trees = [compiled.familyCompilerInput.trackerReceipt.contract.propositionHex,
+              compiled.familyReceipt.contracts.duplicatePrevention.propositionHex,
+              compiled.familyReceipt.contracts.pooledReserve.propositionHex];
+            expect(compiled.familyCompilerInput.trackerRequest.trackerNftIdHex)
+              .toBe(observation.genesisBoxIds.tracker);
+            expect(compiled.familyCompilerInput.duplicatePreventionGenesisInputBoxIdHex)
+              .toBe(observation.genesisBoxIds.duplicatePrevention);
+            expect(compiled.familyCompilerInput.pooledReserveGenesisInputBoxIdHex)
+              .toBe(observation.genesisBoxIds.pooledReserve);
+            for (const [index, { role, transaction }] of ordered.entries()) {
+              const funding = observation.genesisInputs[role];
+              expect(transaction.eip12Tx.inputs).toEqual([{ ...funding, extension: {} }]);
+              expect(transaction.outputs[0]).toMatchObject({ creationHeight: observation.target.tipHeight + 1,
+                value: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SINGLETON_VALUE_NANOERG,
+                ergoTree: trees[index], assets: [{ tokenId: funding.boxId, amount: '1' }],
+                additionalRegisters: expectedRegisters[index] });
+              expect(transaction.outputs.at(-1)).toMatchObject({ value: String(NANOERG_MINER_FEE), ergoTree: MINER_FEE_TREE });
+              expect(transaction.eip12Tx.outputs.at(-1)?.value).toBe(String(NANOERG_MINER_FEE));
+              expect(transaction.outputs.reduce((sum, output) => sum + BigInt(output.value), 0n)).toBe(BigInt(funding.value));
+            }
+            expect(ordered).toHaveLength(3);
+            marker(stage, 'passed');
+
+            stage = 'live-negatives'; marker(stage, 'started');
+            expect(() => assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1({ ...target })).toThrow();
+            expect(() => assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1({ ...owned }, target)).toThrow();
+            expect(() => assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance({ ...history })).toThrow();
+            expect(() => assertObservedSubstrateFederatedGenesisV1({ ...compiled! }, target)).toThrow();
+            marker(stage, 'passed');
+            stage = 'managed-completion'; marker(stage, 'started');
+            summary = Object.freeze({ anchorHeight: observation.target.tipHeight,
+              headerCount: history.receipt.target.headerCount, discoveryDigestHex: observation.reportDigestHex,
+              historyDigestHex: history.receipt.reportDigestHex,
+              genesisJsonSha256Hex: sha256(Buffer.from(compiled!.candidate.genesisJson, 'utf8')) });
+            return summary;
+          });
+          marker('managed-completion', 'passed');
+          expect(managed.receipt.finalSnapshot.fullHeight).toBeGreaterThanOrEqual(summary!.anchorHeight);
+          expect(managed.receipt.finalSnapshot.indexedHeight).toBe(managed.receipt.finalSnapshot.fullHeight);
+          expect(managed.receipt.finalSnapshot.headerIdHex).toMatch(/^[0-9a-f]{64}$/u);
+          stage = 'expired-target'; marker(stage, 'started');
+          expect(() => assertObservedSubstrateFederatedGenesisV1(compiled, originalTarget!)).toThrow();
+          expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(compiled, originalTarget!)).not.toThrow();
+          marker(stage, 'passed');
+        } catch {
+          failureStage = stage;
+          marker(stage, 'failed');
+        } finally {
+          if (node !== undefined) {
+            marker('node-stop', 'started');
+            try { await node.stop(); marker('node-stop', 'passed'); }
+            catch { cleanupFailed = true; marker('node-stop', 'failed'); }
+          }
+          if (source !== undefined) {
+            marker('source-disposal', 'started');
+            try {
+              await source.dispose(); sourceDisposed = true;
+              expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2(source!)).toThrow();
+              if (compiled !== undefined && originalTarget !== undefined) {
+                expect(() => assertObservedSubstrateFederatedGenesisReadCustodyV1(compiled, originalTarget!)).toThrow();
+              }
+              marker('source-disposal', 'passed');
+            } catch { cleanupFailed = true; marker('source-disposal', 'failed'); }
+          }
+          if (setup !== undefined) {
+            marker('custody-disposal', 'started');
+            try {
+              await setup.dispose(); setupDisposed = true;
+              expect(() => assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(setup!.signer)).toThrow();
+              marker('custody-disposal', 'passed');
+            } catch { cleanupFailed = true; marker('custody-disposal', 'failed'); }
+          }
+        }
+        if (failureStage !== undefined || cleanupFailed) throw new Error(
+          failureStage !== undefined && cleanupFailed
+            ? `real genesis route failed at ${failureStage}; cleanup failed`
+            : failureStage !== undefined ? `real genesis route failed at ${failureStage}` : 'real genesis route cleanup failed',
+        );
+        if (!sourceDisposed || !setupDisposed) throw new Error('real genesis route custody cleanup incomplete');
+        console.log(`G1DI3B_REAL_GENESIS summary anchorHeight=${summary!.anchorHeight} headerCount=${summary!.headerCount} discoveryDigestHex=${summary!.discoveryDigestHex} historyDigestHex=${summary!.historyDigestHex} genesisJsonSha256Hex=${summary!.genesisJsonSha256Hex} unsignedTransactionCount=3 runtimeFixtureOnly=true`);
+      },
+      2_100_000,
+    );
     it.skipIf(!liveJavaPath || !liveJarPath).each(['valid', 'checkpoint', 'admission', 'confirmation', 'checkpoint late'] as const)(
       'continues two owned process cycles without resetting credentials: %s', async fault => {
         const identity = await deriveLocalWasmRootSignerPublicIdentity(MNEMONIC);
@@ -1530,6 +1957,19 @@ function ownedTestDirectory(): string {
 
 function fileSha256(path: string): string {
   return sha256(readFileSync(path));
+}
+
+function assertControlledGenesisCompilerTestEnvironment(): void {
+  if (ORIGINAL_NODE_OPTIONS !== undefined || process.env.NODE_OPTIONS !== '--no-deprecation') {
+    throw new Error('unexpected compiler environment');
+  }
+}
+
+function assertExactObjectKeys(value: unknown, keys: readonly string[], label: string): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join('\0') !== [...keys].sort().join('\0')) {
+    throw new Error(`${label} must contain exactly the required fields`);
+  }
 }
 
 interface CheckpointExtensionFixture {

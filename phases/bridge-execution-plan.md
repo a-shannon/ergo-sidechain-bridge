@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-29
+Updated: 2026-09-30
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,15 +28,66 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–29 remain consumed; never retry or reuse them. PR 7 is
-open on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. Exact-head run
-[36582859790](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36582859790)
+**Now:** Campaigns 24–30 remain consumed; never retry or reuse them. The frozen
+execution candidate is `29785fbc015e0a07d8a6799048bb7a5f7524252c`, matching
+the open PR 7. Exact-head run
+[36629279161](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36629279161)
 is terminal green: Public-audit candidate gate, Rebuild pinned Frontier and
 Ergo sources, and Audit Solidity dependencies all passed on that exact SHA.
-The visible red run 36512637223 was for older SHA `d4378a0e…`; it is not
-evidence against the promoted candidate. CI closes candidate checks only and
+Earlier runs do not establish the status of this candidate.
+CI closes candidate checks only and
 does not erase the failed Campaign 24 two-cycle result or establish runtime,
 production, public-network, real-funds, or trustlessness claims.
+
+Campaign 30 completed its separate fresh-input admission and was invoked once
+on the frozen candidate. It failed with `execution_failure`; the validated V2
+diagnostic reports `primaryPhase=node-start`, `ergoNodeStartupPhase=null` and
+`rootCleanupEstablished=false`. Post-failure identity checks passed. There is
+no successful two-cycle result, and raw cause and custody disposal remain
+unknown. The bounded execution lot stopped at its escalation gate. Subsequent
+source checks refuted signer-shape, early credential/constructor and debug
+WASM identity mismatches. One independently reviewed fresh Ergo-only probe
+then passed on unchanged runtime sources: pinned build, genuine V2 mining
+custody, owned discovery, matching 10-header history, managed non-mining
+freeze, node stop and custody disposal. It ran once in 203,249 ms; exact
+post-input identity checks passed. This establishes that boundary on the
+probe's session, not C30's cause, disposal or two-cycle acceptance.
+The compiler boundary has now passed once on a separately admitted fresh probe
+against runtime candidate `29785fbc015e0a07d8a6799048bb7a5f7524252c`: a genuine
+fresh Ergo build, V2 mining custody, owned discovery and matching 10-header
+history reached the actual pinned JVM-observed genesis/compiler pair. All
+three unsigned issuance checks passed in 194,617 ms with all 34 ordered
+markers. Exact post-input identities, managed freeze, expired-target and
+cloned-owner negatives, node/source/setup disposal checks and whole completion
+passed. Probe test SHA-256: `a448a19503a243269deb07b192046307037ce9bd7b9af301b87af2bd870556fc`.
+This closes only the compiler join. The WASM fixture was eight bytes; no native
+Frontier materialization, target acceptance, native issuance or two-cycle
+result is established. Run 36629279161 covers the unchanged runtime candidate;
+a head carrying the new probe test needs its own exact-head CI before admission.
+
+Both earlier compiler probes remain consumed. The first independently reviewed
+launcher omitted `JAVA_HOME`, although the production campaign parent already
+supplies it; preparation failed before compilation. The corrected probe
+reached genuine compilation, then its assertion compared bigint raw
+mint-profile inputs with canonical string fields. Pure normalization controls
+and independent review confirmed the preparation and assertion defects;
+canonical-builder equality is fixed. These failures do not explain C30. C30's
+raw cause, root cleanup and custody disposal remain unknown, and campaigns
+24–30 remain consumed. The successful compiler probe's disposal checks apply
+only to its own session. A source-only Sol review of pinned SDK `bbc435` found
+no TypeScript/Rust schema, account, profile, funding or scalar mismatch; the
+WASM-debug hypothesis remains refuted. Neither this review nor the compiler
+probe authorizes future execution.
+
+The next selected outcome uses the existing native two-cycle root, subject to
+a separate fresh-input admission and all required current-candidate gates.
+That route must retain the pinned Frontier build-spec/raw-storage path, actual
+native start, real generated WASM and fresh custody. The eight-byte fixture,
+expired target and cloned-owner custody cannot be reused. Do not add a
+standalone materialization probe that repeats Frontier and Ergo/JVM preparation
+without closing acceptance. The fresh run remains conditional on required
+candidate promotion and CI, plus current runtime/source/output/custody/fee
+checks.
 
 The separate non-custodial Campaign 29 admission preflight passed on a clean
 checkout of exact commit `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. It verified
@@ -56,7 +107,7 @@ cleanup. This runtime failure is separate from the green candidate CI. Campaigns
 24–28 remain consumed with unknown raw causes and unestablished cleanup; do not
 inspect or reuse their private state.
 
-The source-level diagnosis found a reporting gap, not C29's cause. The local
+The source-level diagnosis found a reporting gap, not C29's cause. The promoted
 candidate now carries the allowlisted Ergo node startup subphase from the
 composition root through the native worker and parent in separate V2 sidecars.
 The sidecars bind config, expected commit and path identity; the parent also
@@ -66,11 +117,21 @@ terminal and V1 bytes/domains remain unchanged. Two independent P2 findings
 were fixed: traversal truncation and nested hostile Error inspection both
 invalidate the fine-grained phase. The final independent review found no other
 actionable defects. TypeScript, the layered import check, and all 788 targeted
-consumer tests pass. The batch is still local and unpromoted; run the exact
-staged/range publication guards, commit and guarded-push the coherent candidate
-to PR 7, then require all three jobs green on that exact head. Preserve C29's
-unknown cause and consumed status. Only then may a separately reviewed fresh-
-input admission authorize C30.
+consumer tests pass. The staged/range publication guards, guarded promotion
+and all three hosted jobs passed on the frozen execution candidate. Preserve
+C29's unknown cause and consumed status. C30's separately reviewed admission
+closed, but its runtime attempt failed as recorded above. The next diagnosis
+must expose a deciding startup boundary before another admission is considered.
+A full campaign must target the missing two-cycle result; do not run it merely
+to obtain another phase label.
+
+This plan synchronization does not change the frozen runtime candidate. Use a
+separate clean checkout of that exact commit for any admitted execution; local
+plan edits are not campaign inputs. Review and retain the plan diff separately,
+then batch its publication with the next useful milestone. If runtime, build,
+lock or invocation inputs change, reassess the affected gates and candidate
+identity before execution. Run 36629279161 remains evidence only for its own
+head; a later publication still requires every mandated job on its exact head.
 
 Local `npm ci` also reported two moderate advisories in the Vitest 3.2.7
 development-test dependency tree (`vitest` / `@vitest/mocker`); the suggested
@@ -79,7 +140,7 @@ path, and `npm audit --omit=dev` returned zero production advisories. Assess the
 upgrade with its full test and hosted-CI closure before a supported release; do
 not apply an automatic major upgrade.
 
-The current local candidate repairs the generated-package ABI and provenance
+The earlier incorporated correction repairs the generated-package ABI and provenance
 boundary. Its inspector checks seven production exports across Rust parameter
 and return types, public and low-level declarations, WASM function type indices,
 and JS/WASM smoke vectors for DUP and tracker V2 successors. The build resolves
@@ -923,15 +984,16 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Local candidate -> reviewed, promoted candidate | Re-review the exact changed-file manifest; on GO, recheck generated-package/source/tool identities and run the staged guard, create the coherent local commit, run the range guard, update PR 7 through the guarded path, then require the clean-checkout candidate gate and all required jobs on that exact head | No campaign until review, pre-promotion gates and exact-head CI pass and a separate fresh-input admission completes. Campaigns 24-28 remain consumed; prior unknown causes and unestablished cleanup remain unresolved |
+| **Now** | Compiler join -> existing native two-cycle root | Use the existing root only after separate fresh-input admission and all required candidate promotion and exact-head CI gates. Keep the pinned Frontier build-spec/raw-storage and owned native start inside that consumer; do not insert a standalone materialization probe | The fresh compiler probe passed once on runtime candidate `29785fbc015e0a07d8a6799048bb7a5f7524252c`: genuine Ergo build, V2 mining custody, owned discovery and matching history reached the actual pinned JVM-observed genesis/compiler pair; all three unsigned issuance checks passed in 194,617 ms with all 34 ordered markers. Probe test SHA-256: `a448a19503a243269deb07b192046307037ce9bd7b9af301b87af2bd870556fc`. Post-input identities, managed freeze, expired-target and cloned-owner negatives, node/source/setup disposal and whole completion passed. This closes the compiler join only; it establishes no native Frontier materialization, target acceptance, native issuance or two-cycle result, and does not explain C30. The eight-byte fixture WASM and expired/cloned-owner custody cannot be reused; real generated WASM and fresh custody are mandatory. Campaigns 24–30 remain consumed; C30 raw cause, cleanup and custody disposal remain unknown. Run required CI on the exact promoted test head; run 36629279161 covers the unchanged runtime candidate only. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 28 are terminal; Campaigns 24-28 failed and remain consumed.
-The next full local campaign is conditional on the current candidate review,
-closeout, guarded promotion, exact-head CI and separate fresh-input admission.
+Campaigns through 30 are terminal; Campaigns 24–30 failed and remain consumed.
+The next full local campaign is conditional on separate fresh-input admission.
+Candidate review, closeout, guarded promotion and exact-head CI are complete
+for the frozen diagnostic candidate; reopen only an invalidated gate.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
 for this deciding run; private historical campaign scripts or custody are not
@@ -959,7 +1021,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
-| C29 `node-start` diagnostic lineage (promotion gate active) | Preserve the coarse root phase and terminal formats while exposing an allowlisted operation/startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Complete locally on base `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). Node 24.x TypeScript check passed; layered import check passed for 137 modules / 898 files; all 788 targeted producer/consumer tests passed. Next: freeze the path set, run exact staged/range publication guards, commit as A. Shannon and guarded-push PR 7; require all three jobs on that exact head. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. CI plus a separate fresh-input admission must close before C30; neither this diagnostic nor green CI authorizes it. |
+| C29 `node-start` diagnostic lineage (closed 2026-09-30) | Preserve the coarse root phase and terminal formats while exposing an allowlisted Ergo startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Promoted at `29785fbc015e0a07d8a6799048bb7a5f7524252c`; all three jobs passed in run 36629279161. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). TypeScript, the layered import check and 788 targeted producer/consumer tests passed. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. C30 subsequently completed separate fresh-input admission and failed once as recorded in Current Focus. Neither these diagnostics nor green CI authorize another attempt. |
 | Same-session two-cycle acceptance | The connected successor consumers complete the second operation from the first confirmed reserve/DUP/tracker state, with separately scoped operation authority, custody lifetime, nonce and parent binding | Reuse unchanged component positives and negatives; the missing discriminator is one fresh-node two-cycle campaign with nonempty replay state, funded fees and conservation. Nonzero burn-leaf indices remain separately due when supported by the selected checkpoint shape |
 | FED acceptance and environment | One supported greenfield profile, role/epoch model and claim-to-validator map, including explicit legacy-schema incompatibilities and target integration dependencies | Inspect existing consumers and exact pinned artifacts first. Distinguish miner candidate production from unmodified-node validation; resolve compatibility only against the claimed target |
 | FED recovery | The same selected consumer survives the declared interruption matrix or retains a precise non-authorizing hold | Begin with bounded fault injection against the accumulated state. No reconstruction of disposed custody, authorization receipts or ambiguous transport outcomes |
@@ -1053,6 +1115,7 @@ scope. Their historical "next" statements are not executable instructions.
 | Observed anchor -> next-block script context | Local affected checks and independent review complete | With identical signed tracker and input bytes, native upcoming and processed contexts both execute at anchor index eight. At index nine, upcoming execution passes and processed execution rejects the tracker input. Active, frozen and reservation-freshness observations now reject that index while preserving the ten-header observation format. All 30 observer and 15 native cases pass, as do TypeScript and the corrected contained cleanup. This does not guarantee later inclusion or repair a miner stalled after semantic block rejection |
 | Candidate selection -> semantic block result | Local native and locked-build checkpoint; cumulative Ergo overlay 0002 | Actual candidate execution retains at most nine predecessor headers, matching full-block script execution while preserving the other context fields. A semantic rejection clears solved state only for the matching full-block type and ID. Fresh post-genesis actors reject a wrong declared root, regenerate the original parent/root and apply a valid successor; unrelated IDs/types preserve solved state. A stale solution receives an error without crashing the actor or emitting a modifier. All 20 public JVM and 14 native CandidateGenerator cases pass; the current source and build locks produce a bounded local node assembly. Historical compiler locks retain unchanged overlay 0001. Recovery after rejection of the initial full block remains outside this overlay because of the upstream pre-genesis history state |
 | Fresh operational two-way campaign | Campaign 23 passed locally; promotion evidence frozen | One fresh isolated campaign completed deposit, mint, native burn, checkpoint attestation, exact tracker inclusion and canonical Ergo payout in the same disposable-custody session. The two fee inputs confirmed before the anchor and the tracker confirmed before payout. Independent result-to-claim review passed after two documentation P2 corrections. The result remains federated local simulated-funds evidence; source finality, trustless verification, production readiness and public-network operation are not established. Next prepare the operator package and recovery/replay evidence; do not run another equivalent campaign |
+| Owned history -> observed FED genesis/compiler | One separately admitted compiler probe passed on runtime candidate `29785fbc015e0a07d8a6799048bb7a5f7524252c`; probe test SHA-256 `a448a19503a243269deb07b192046307037ce9bd7b9af301b87af2bd870556fc` | Genuine fresh Ergo build, V2 mining custody, owned discovery and matching 10-header history reached the actual pinned JVM-observed genesis/compiler pair. Three unsigned issuance checks passed in 194,617 ms with all 34 ordered markers. Post-input identity checks, managed freeze, expired-target and cloned-owner negatives, node/source/setup disposal checks and whole completion passed. This closes the compiler join only; the eight-byte fixture WASM does not establish native Frontier materialization, target acceptance, native issuance or two-cycle behavior. The result grants no future execution authority; campaigns 24–30 remain consumed, and C30 raw cause, cleanup and custody disposal remain unknown |
 
 The native execution consumer now retains the confirmed mint through one
 approval in block three and one matching burn in block four. It validates the
