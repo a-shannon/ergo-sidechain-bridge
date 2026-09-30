@@ -12,7 +12,7 @@ import type {
 } from './substrate-federated-tracker-v1.js';
 import {
   VALIDITY_APPLICATION_POOLED_RESERVE_SIGMASTATE_COMMIT,
-} from './validity-application-pooled-reserve-instance-v4.js';
+} from './validity-application-compiler-pins.js';
 
 export const SUBSTRATE_FEDERATED_TRACKER_COMPILER_REQUEST_V1_SCHEMA =
   'e2s.substrate-federated-tracker-compiler-request.v1' as const;

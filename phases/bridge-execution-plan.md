@@ -32,21 +32,47 @@ implementation choices are provisional. Only the current result is detailed.
 compiler-admission checkpoint is `9da8de9a88d6111a4ecae8e604b35d6e964289bb`,
 matching open PR 7. Its exact-head
 [run 36722399139](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36722399139)
-has a failed required source-rebuild job: Cargo's Git transport rejected the
+is terminal with a failed required source-rebuild job: Cargo's Git transport
+rejected the
 locked `evm` dependency with an SSL error before reservation tests could run.
-The public-audit gate remains pending; Solidity audit passed. No campaign is
-admitted. The selected correction uses Git CLI fetching only in the Linux
+The public-audit gate and Solidity audit passed on that exact head. No campaign
+is admitted. The local transport correction uses Git CLI fetching only in the
+Linux
 source-rebuild job, with an exact environment allowlist in the workflow
 validator. Preserve TLS verification, dependency revisions, source locks and
-all required jobs. Close focused workflow negatives and independent review;
-await the remaining current job before publishing the corrected candidate.
-Reuse the unchanged compiler-admission runtime checks; new exact-head CI is
-still required, and another campaign needs separate fresh admission.
+all required jobs. Focused workflow negatives and independent review passed.
+Hosted transport recovery remains unproven until the new candidate CI passes.
+Do not poll or rerun the completed failed run.
 The local transport correction passes 64 focused cases across workflow policy,
 source baseline and bundle/plan consumers, plus TypeScript and the actual
 workflow validator. Its negatives reject absent, disabled, non-string or extra
 job environment and a step override. These results establish the selected
 configuration and fail-closed policy; they do not prove hosted TLS recovery.
+
+The local clean-start correction closes an admission defect found while
+preparing a separate fresh checkout: the pure FED compiler imports its Sigma
+commit from the V4 instance, which transitively requires the generated WASM
+package before the parent can build it. Extract only that unchanged static
+commit, preserve the V4 public export, and import the static module from the
+FED compiler. Actual fresh Node/TSX imports must reach the read-only admission
+guard and load its native invocation consumer with WASM explicitly forbidden.
+A deliberate forbidden import must falsify the control even when a generated
+package exists. No copied or fixture WASM, schema change, compiler invocation,
+node, custody or attempt is needed to close this import boundary.
+The new test first reproduced the forbidden WASM import while its isolated
+deny-hook control passed. After correction both cases pass. The affected
+pure compiler, settlement-family and V4 fixture consumers pass 53 cases;
+compiler-runtime admission passes 77 cases, and the bundle/plan consumer passes
+7 cases. TypeScript and the layered import check pass. The unchanged compiler
+source, dependency locks, runtime pins and request contracts retain their prior
+genuine JVM evidence; this static import change does not claim a new JVM or
+native two-cycle execution. Close independent review and verify the same
+read-only admission in the fresh checkout without a generated WASM package,
+then publish the transport and clean-start corrections together once through
+the publication guard. The new exact head needs all three required CI jobs;
+another campaign still requires separate fresh admission. Reuse compiler,
+protocol and historical runtime checks only within their unchanged input
+closures, and never use earlier CI as evidence for the new candidate.
 
 The earlier frozen execution candidate was
 `29785fbc015e0a07d8a6799048bb7a5f7524252c`. Its exact-head run
