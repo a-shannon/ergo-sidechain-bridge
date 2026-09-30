@@ -28,9 +28,28 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–31 remain consumed; never retry or reuse them. The frozen
-execution candidate is `29785fbc015e0a07d8a6799048bb7a5f7524252c`, matching
-the open PR 7. Exact-head run
+**Now:** Campaigns 24–31 remain consumed; never retry or reuse them. The published
+compiler-admission checkpoint is `9da8de9a88d6111a4ecae8e604b35d6e964289bb`,
+matching open PR 7. Its exact-head
+[run 36722399139](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36722399139)
+has a failed required source-rebuild job: Cargo's Git transport rejected the
+locked `evm` dependency with an SSL error before reservation tests could run.
+The public-audit gate remains pending; Solidity audit passed. No campaign is
+admitted. The selected correction uses Git CLI fetching only in the Linux
+source-rebuild job, with an exact environment allowlist in the workflow
+validator. Preserve TLS verification, dependency revisions, source locks and
+all required jobs. Close focused workflow negatives and independent review;
+await the remaining current job before publishing the corrected candidate.
+Reuse the unchanged compiler-admission runtime checks; new exact-head CI is
+still required, and another campaign needs separate fresh admission.
+The local transport correction passes 64 focused cases across workflow policy,
+source baseline and bundle/plan consumers, plus TypeScript and the actual
+workflow validator. Its negatives reject absent, disabled, non-string or extra
+job environment and a step override. These results establish the selected
+configuration and fail-closed policy; they do not prove hosted TLS recovery.
+
+The earlier frozen execution candidate was
+`29785fbc015e0a07d8a6799048bb7a5f7524252c`. Its exact-head run
 [36629279161](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36629279161)
 is terminal green: Public-audit candidate gate, Rebuild pinned Frontier and
 Ergo sources, and Audit Solidity dependencies all passed on that exact SHA.
@@ -104,7 +123,7 @@ A no-key, no-node control reproduced the existing compiler's missing-runtime
 rejection before compilation. This establishes a current prerequisite gap;
 it does not establish C31's historical cause or custody disposal.
 
-The current batch connects the FED compiler's exact runtime checks to native
+The completed batch connects the FED compiler's exact runtime checks to native
 invocation admission, using the configured Java home, before expensive builds
 or attempt creation. Retain the separate bundle producer's Node 24.18.1 lock;
 do not run that producer from the native parent's Node 24.14.0 host. Missing,

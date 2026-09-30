@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { parseDocument } from 'yaml';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -20,10 +21,18 @@ const sourceLock = JSON.parse(readFileSync(
   path.resolve(bridgeRoot, 'sources', 'consensus-source-lock.json'),
   'utf8',
 ));
+const consensusJobEnvironment = [
+  '    env:',
+  '      CARGO_NET_GIT_FETCH_WITH_CLI: "true"',
+  '',
+].join('\n');
 
 describe('standalone consensus-source build workflow', () => {
   it('binds the standalone hosted command graph to the canonical source lock', () => {
     const report = inspectStandaloneConsensusBuildWorkflow({ bridgeRoot });
+    const parsedWorkflow = parseDocument(workflowText).toJS() as {
+      jobs: Record<string, { env?: Record<string, unknown> }>;
+    };
 
     expect(report.status).toBe('PASS');
     expect(report.errors).toEqual([]);
@@ -50,6 +59,11 @@ describe('standalone consensus-source build workflow', () => {
       gate5Closed: false,
       publicationAuthorized: false,
     });
+    expect(parsedWorkflow.jobs['consensus-sources'].env).toEqual({
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true',
+    });
+    expect(parsedWorkflow.jobs['audit-alpha'].env).toBeUndefined();
+    expect(parsedWorkflow.jobs['solidity-audit'].env).toBeUndefined();
   });
 
   it('rejects malformed YAML before interpreting a command graph', () => {
@@ -84,6 +98,61 @@ describe('standalone consensus-source build workflow', () => {
     expect(siblingJob.errors).toContain(
       'workflow jobs must be exactly audit-alpha, solidity-audit, and consensus-sources',
     );
+  });
+
+  it.each([
+    ['missing', ''],
+    ['disabled', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "false"\n'],
+    ['wrong-case string', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "TRUE"\n'],
+    ['boolean value', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: true\n'],
+    ['numeric value', '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: 1\n'],
+    ['non-map value', '    env: "CARGO_NET_GIT_FETCH_WITH_CLI=true"\n'],
+    [
+      'extra TLS-disabling variable',
+      '    env:\n      CARGO_NET_GIT_FETCH_WITH_CLI: "true"\n      GIT_SSL_NO_VERIFY: true\n',
+    ],
+  ])('requires the exact job-level Git CLI fetch environment (%s)', (_name, replacement) => {
+    const mutatedWorkflow = workflowText.replace(consensusJobEnvironment, replacement);
+    expect(mutatedWorkflow).not.toBe(workflowText);
+
+    const result = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
+    expect(result.errors).toContain(
+      'standalone consensus job environment must contain only Git CLI fetch enabled',
+    );
+    if (replacement === '') {
+      expect(result.errors).toContain(
+        'standalone consensus job may contain only its reviewed environment, name, runner, timeout, and exact steps',
+      );
+    } else {
+      expect(result.errors).toEqual([
+        'standalone consensus job environment must contain only Git CLI fetch enabled',
+      ]);
+    }
+    expect(result.checks.exactCommandGraphValid).toBe(false);
+  });
+
+  it('rejects a step-level override of the reviewed Cargo fetch environment', () => {
+    const reviewedStep = [
+      '      - name: Test federated LAB no-value reservation admission',
+      '        working-directory: relayer',
+      '        run: npm run federated:lab:reservation:acceptance -- --frontier-source ../substrate-node',
+    ].join('\n');
+    const overriddenStep = [
+      '      - name: Test federated LAB no-value reservation admission',
+      '        working-directory: relayer',
+      '        env:',
+      '          CARGO_NET_GIT_FETCH_WITH_CLI: "false"',
+      '        run: npm run federated:lab:reservation:acceptance -- --frontier-source ../substrate-node',
+    ].join('\n');
+    const mutatedWorkflow = workflowText.replace(reviewedStep, overriddenStep);
+    expect(mutatedWorkflow).not.toBe(workflowText);
+
+    const result = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
+    expect(result.errors).toEqual([
+      'Test federated LAB no-value reservation admission: environment must match the reviewed command graph',
+      'Test federated LAB no-value reservation admission: run step may contain only the reviewed keys',
+    ]);
+    expect(result.checks.exactCommandGraphValid).toBe(false);
   });
 
   it.each([

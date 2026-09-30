@@ -474,13 +474,19 @@ export function validateStandaloneConsensusBuildWorkflow(
   if (job?.['timeout-minutes'] !== 90) {
     errors.push('standalone consensus job timeout must be 90 minutes');
   }
+  if (JSON.stringify(job?.env) !== JSON.stringify({
+    CARGO_NET_GIT_FETCH_WITH_CLI: 'true',
+  })) {
+    errors.push('standalone consensus job environment must contain only Git CLI fetch enabled');
+  }
   if (job && JSON.stringify(Object.keys(job).sort()) !== JSON.stringify([
+    'env',
     'name',
     'runs-on',
     'steps',
     'timeout-minutes',
   ])) {
-    errors.push('standalone consensus job may contain only its name, runner, timeout, and exact steps');
+    errors.push('standalone consensus job may contain only its reviewed environment, name, runner, timeout, and exact steps');
   }
 
   const steps = Array.isArray(job?.steps) ? job.steps.map(asRecord) : [];

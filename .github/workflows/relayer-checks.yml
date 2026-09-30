@@ -284,6 +284,8 @@ jobs:
     name: Rebuild pinned Frontier and Ergo sources
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
     steps:
       - name: Checkout recursive source graph
