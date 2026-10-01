@@ -360,6 +360,18 @@ describe('layer import rules', () => {
       .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
   });
 
+  it('allows only the diagnostic cycle tag and type at the target root seam', () => {
+    const specifier = '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { tagNativeTwoCycleCycleStepFailureV1, type NativeTwoCycleCycleStepV1 } from '${specifier}';
+       tagNativeTwoCycleCycleStepFailureV1(new Error(), 'cycle-1', 'setup-check');`))).toEqual([]);
+    for (const binding of ['projectNativeTwoCycleCycleStepFailureV1', 'NATIVE_TWO_CYCLE_CYCLE_STEPS_V1']) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+        `import { ${binding} } from '${specifier}';`)).map(item => item.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    }
+  });
+
   it.each(['signFederatedGenesisReservationV1', 'signFederatedGenesisMintV1', 'signFederatedGenesisApproveV1', 'signFederatedGenesisBurnV1',
     'signFederatedGenesisContinuationReservationV1', 'signFederatedGenesisContinuationMintV1',
     'signFederatedGenesisContinuationApproveV1', 'signFederatedGenesisContinuationBurnV1'])

@@ -147,6 +147,8 @@ import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 }
 import {
   projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2,
 } from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
+import { projectNativeTwoCycleCycleStepFailureV1 }
+  from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
@@ -2453,10 +2455,13 @@ describe('fresh FED target composition', () => {
     });
 
   it.each([
-    ['setup-and-custody', 'source'], ['frontier-build', 'frontier'], ['ergo-build', 'ergoBuild'],
-    ['node-start', 'process'], ['cycle-1', 'execute'], ['between-cycles', 'readOnlyOwned'],
-    ['cycle-2', 'continuationTrackerCheck'], ['cleanup', 'stop'],
-  ] as const)('preserves root failure identity and projects the %s phase', async (expectedPhase, injection) => {
+    ['setup-and-custody', 'source', null], ['frontier-build', 'frontier', null],
+    ['ergo-build', 'ergoBuild', null], ['node-start', 'process', null],
+    ['cycle-1', 'execute', { cycle: 'cycle-1', step: 'issuance-execution' }],
+    ['between-cycles', 'readOnlyOwned', null],
+    ['cycle-2', 'continuationTrackerCheck', { cycle: 'cycle-2', step: 'tracker-check' }],
+    ['cleanup', 'stop', null],
+  ] as const)('preserves root failure identity and projects the %s phase', async (expectedPhase, injection, expectedStep) => {
     const trigger = new Error(`failure at ${expectedPhase}`);
     if (injection === 'source') {
       vi.mocked(sources.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2)
@@ -2477,8 +2482,177 @@ describe('fresh FED target composition', () => {
       cleanupErrorCount: expectedPhase === 'cleanup' ? 1 : 0,
       ergoNodeStartupPhase: null,
     });
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual(expectedStep);
     if (expectedPhase === 'node-start') expect(mocked.projectStartupPhase).toHaveBeenCalledOnce();
     else expect(mocked.projectStartupPhase).not.toHaveBeenCalled();
+  });
+
+  const cycleOneStepFailures = [
+    {
+      name: 'genesis observation', step: 'genesis-observation',
+      inject: (failure: Error) => vi.mocked(fetch).mockRejectedValueOnce(failure),
+      assertCalls: () => expect(vi.mocked(fetch)).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'setup check', step: 'setup-check',
+      inject: (failure: Error) => mocked.check.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.check).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'source lock', step: 'source-lock',
+      inject: (failure: Error) => mocked.sourceLock.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.sourceLock).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'committed reserve', step: 'committed-reserve',
+      inject: (failure: Error) => mocked.committedVault.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.committedVault).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'native mint and burn', step: 'native-mint-burn',
+      inject: (failure: Error) => mocked.mint.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.mint).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'withdrawal fee check', step: 'withdrawal-fee-check',
+      inject: (failure: Error) => mocked.withdrawalFeeCheck.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.withdrawalFeeCheck).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'tracker fee funding', step: 'tracker-fee-funding',
+      inject: (failure: Error) => mocked.trackerFee.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.trackerFee).toHaveBeenCalledOnce(),
+    },
+    {
+      name: 'checkpoint attestation', step: 'checkpoint-attestation',
+      inject: (failure: Error) => mocked.checkpoint.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.checkpoint).toHaveBeenCalledOnce(),
+    },
+  ] as const;
+
+  it.each(cycleOneStepFailures)('projects the isolated cycle-1 $name failure', async ({ step, inject, assertCalls }) => {
+    const trigger = new Error(`cycle-1 ${step} failure`);
+    inject(trigger);
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBe(trigger);
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({ cycle: 'cycle-1', step });
+    assertCalls();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    expect(order.at(-1)).toBe('stop');
+    assertDisposed();
+  });
+
+  const cycleTwoStepFailures = [
+    {
+      name: 'tracker transport', step: 'tracker-transport',
+      inject: (failure: Error) => {
+        const original = mocked.trackerSubmit.getMockImplementation()!;
+        mocked.trackerSubmit.mockImplementationOnce((...args) => original(...args));
+        mocked.trackerSubmit.mockRejectedValueOnce(failure);
+      },
+      assertCalls: () => expect(mocked.trackerSubmit).toHaveBeenCalledTimes(2),
+    },
+    {
+      name: 'tracker confirmation', step: 'tracker-confirmation',
+      inject: (failure: Error) => {
+        const original = mocked.wait.getMockImplementation()!;
+        for (let index = 0; index < 3; index++) mocked.wait.mockImplementationOnce((...args) => original(...args));
+        mocked.wait.mockRejectedValueOnce(failure);
+      },
+      assertCalls: () => expect(mocked.wait).toHaveBeenCalledTimes(4),
+    },
+    {
+      name: 'withdrawal transport', step: 'withdrawal-transport',
+      inject: (failure: Error) => {
+        const original = mocked.payoutSubmit.getMockImplementation()!;
+        mocked.payoutSubmit.mockImplementationOnce((...args) => original(...args));
+        mocked.payoutSubmit.mockRejectedValueOnce(failure);
+      },
+      assertCalls: () => expect(mocked.payoutSubmit).toHaveBeenCalledTimes(2),
+    },
+    {
+      name: 'withdrawal confirmation', step: 'withdrawal-confirmation',
+      inject: (failure: Error) => {
+        const original = mocked.wait.getMockImplementation()!;
+        for (let index = 0; index < 4; index++) mocked.wait.mockImplementationOnce((...args) => original(...args));
+        mocked.wait.mockRejectedValueOnce(failure);
+      },
+      assertCalls: () => expect(mocked.wait).toHaveBeenCalledTimes(5),
+    },
+  ] as const;
+
+  it.each(cycleTwoStepFailures)('projects the isolated cycle-2 $name failure', async ({ step, inject, assertCalls }) => {
+    const trigger = new Error(`cycle-2 ${step} failure`);
+    inject(trigger);
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBe(trigger);
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({ cycle: 'cycle-2', step });
+    assertCalls();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    expect(order.at(-1)).toBe('stop');
+    assertDisposed();
+  });
+
+  it('does not leak the cycle step between consecutive failed invocations', async () => {
+    const first = new Error('source lock failed');
+    mocked.sourceLock.mockRejectedValueOnce(first);
+    const firstFailure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(firstFailure).toBe(first);
+    expect(projectNativeTwoCycleCycleStepFailureV1(firstFailure)).toEqual({ cycle: 'cycle-1', step: 'source-lock' });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    assertDisposed();
+
+    const second = new Error('setup check failed on second invocation');
+    // These traces drive the synthetic discovery fixture, not production state.
+    order.length = 0;
+    calls.length = 0;
+    const originalBuild = mocked.frontier.getMockImplementation()!;
+    const freshTargetDirectory = mkdtempSync(join(directory, 'second-target-'));
+    mocked.frontier.mockImplementationOnce(async value => ({
+      ...await originalBuild(value), targetDirectory: freshTargetDirectory,
+    }));
+    mocked.materialize.mockImplementationOnce(async value => {
+      order.push('materialize'); assertCustodyActive(); expect(active).toBe(true);
+      const freshGenesis = join(freshTargetDirectory, 'fed-genesis.json');
+      expect(value.args).toEqual(['build-spec', '--chain', `fed-genesis:${freshGenesis}`,
+        '--disable-default-bootnode', '--raw']);
+      expect(JSON.parse(readFileSync(freshGenesis, 'utf8')).operatorAddressHex).toBe(operator!.addressHex);
+      return { stdout: JSON.stringify(rawSpec()), stderr: '' };
+    });
+    mocked.check.mockRejectedValueOnce(second);
+    const secondFailure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(secondFailure).toBe(second);
+    expect(projectNativeTwoCycleCycleStepFailureV1(secondFailure)).toEqual({ cycle: 'cycle-1', step: 'setup-check' });
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(closeNative).toHaveBeenCalledTimes(2);
+    expect(mocked.sourceLock).toHaveBeenCalledOnce();
+    assertDisposed();
+  });
+
+  it('retains the cycle step when cycle failure and owner cleanup both fail', async () => {
+    const createProcess = mocked.process.getMockImplementation()!;
+    const primary = new Error('post-cycle callback failed');
+    const nativeCleanup = new Error('native close failed');
+    const ergoCleanup = new Error('Ergo stop failed');
+    mocked.process.mockImplementation((...args) => {
+      const owner = createProcess(...args);
+      return { ...owner, withMiningActiveExecutionTarget: async (...phaseArgs: any[]) => {
+        await owner.withMiningActiveExecutionTarget(...phaseArgs);
+        closeNative.mockRejectedValueOnce(nativeCleanup);
+        throw primary;
+      } };
+    });
+    stop.mockRejectedValueOnce(ergoCleanup);
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure.errors).toEqual([primary, nativeCleanup, ergoCleanup]);
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({ cycle: 'cycle-1', step: 'cycle-summary' });
+    expect(stop).toHaveBeenCalledOnce();
+    expect(closeNative).toHaveBeenCalledOnce();
+    assertDisposed();
   });
 
   it.each(SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1)(

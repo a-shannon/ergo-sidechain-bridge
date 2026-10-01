@@ -30,6 +30,14 @@ export function tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1<T>(
   return value;
 }
 
+/** The error's own tag, without recursively borrowing an aggregate child's phase. */
+export function projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
+  value: unknown,
+): SubstrateFederatedNativeTwoCycleRootPhaseV1 | null {
+  const error = asError(value);
+  return error === null ? null : ROOT_FAILURE_PHASES.get(error) ?? null;
+}
+
 export function projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(
   value: unknown,
 ): Readonly<SubstrateFederatedNativeTwoCycleRootFailurePhaseV1> | null {

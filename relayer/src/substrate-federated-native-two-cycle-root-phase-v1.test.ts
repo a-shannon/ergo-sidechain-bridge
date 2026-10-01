@@ -3,10 +3,21 @@ import { describe, expect, it } from 'vitest';
 import {
   SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_ROOT_PHASES_V1,
   projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1,
+  projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1,
   tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1,
 } from './substrate-federated-native-two-cycle-root-phase-v1.js';
 
 describe('native two-cycle root failure phases', () => {
+  it('reads only the own coarse tag without traversing children or errors accessors', () => {
+    const child = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(new Error(), 'cycle-1');
+    const aggregate = new AggregateError([child]);
+    expect(projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(aggregate)).toBeNull();
+    tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(aggregate, 'cleanup');
+    Object.defineProperty(aggregate, 'errors', { get() { throw new Error('must not traverse'); } });
+    expect(projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(aggregate)).toBe('cleanup');
+    expect(projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(child)).toBe('cycle-1');
+    expect(projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1('unknown')).toBeNull();
+  });
   it('freezes the exact bounded phase vocabulary', () => {
     expect(SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_ROOT_PHASES_V1).toEqual([
       'setup-and-custody', 'frontier-build', 'ergo-build', 'node-start',
