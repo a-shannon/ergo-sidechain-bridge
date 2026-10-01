@@ -22,6 +22,8 @@ import {
   createNativeTwoCycleParentRootPhaseV2,
   parseNativeTwoCycleWorkerRootPhaseV2,
 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
+import { createNativeTwoCycleParentCycleStepV1 }
+  from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import {
   canonicalPathIdentity,
   readBoundedRegularFile,
@@ -208,7 +210,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
     }
     if (existsSync(join(attemptPath, 'worker-failure.json'))
       || existsSync(join(attemptPath, 'worker-root-phase.json'))
-      || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))) {
+      || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))
+      || existsSync(join(attemptPath, 'worker-cycle-step.json'))) {
       throw new Error('native two-cycle worker returned contradictory failure evidence');
     }
     const retainedWasmEvidence = readBoundedRegularFile(
@@ -409,6 +412,24 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
           );
         } catch {
           // Missing or invalid optional V2 phase detail cannot alter terminal/V1 receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle cycle step lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCycleStepV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-cycle-step.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent cycle step companion');
+        } catch {
+          // Absent, invalid or occupied step evidence cannot alter the terminal failure.
         }
       } catch {
         // Preserve the original execution failure. A missing failure artifact

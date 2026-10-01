@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-09-30
+Updated: 2026-10-01
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,53 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–31 remain consumed; never retry or reuse them. The published
+**Now:** Campaigns 24–34 remain permanently consumed or held. The published
+candidate is `e89b6e43423c29e2850e699444d10e3edc44ae48`, matching open PR 7.
+Its exact-head [run 36779076167](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36779076167)
+passed all three required jobs. Reuse that candidate evidence; it does not
+establish native two-cycle acceptance. Separately admitted C34 ran once and
+failed with `execution_failure`, `primaryPhase=cycle-1`, unchanged post-failure
+identity and `rootCleanupEstablished=false`. Source failure and Ergo startup
+subphases are null. Raw cause and whole custody disposal remain unknown. No
+mint, burn or payout success follows from this coarse phase.
+
+The selected batch connects a bounded cycle-step failure tag in the actual
+composition root to an optional, canonical worker companion and its validated
+parent consumer. It identifies the operation active when an error escaped,
+not completion. Preserve existing terminal/V1/V2 formats and domains, protocol
+behavior, error identity, cleanup and custody. Reject phase conflicts, unknown
+steps, ambiguous or incomplete aggregate traversal and changed lineage; never
+publish raw errors or private runtime data. Cleanup-only failures cannot inherit
+the previous cycle step. Optional diagnostic failure cannot erase terminal
+failure or make an attempt retryable.
+
+Use two medium producer-to-consumer batches: root/projector with direct tests,
+then codec/worker/parent with direct tests. Close targeted negatives, affected
+legacy error paths, TypeScript/import guards and independent review before
+guarded promotion. Changed runtime inputs need their own exact-head CI. Reuse
+unchanged consensus/JVM/WASM checks; do not repeat them or launch another
+campaign to refine labels. No C35 is admitted. The next campaign needs separate
+fresh admission after this diagnostic closure and all applicable candidate
+gates. Two-cycle success, accumulated recovery, operator reproduction, FED
+release-consumer closure and independent assurance remain due.
+
+The local diagnostic join passes 1,047 cases across its ten affected suites,
+including both cycle mappings, cleanup aggregation, exact ancestor bindings,
+optional-write failures and contradictory success evidence. The root alone
+passes 397 cases. One independent P2 attribution defect was corrected: a
+step-bearing aggregate must have its own matching root tag and cannot borrow
+an ancestor or descendant phase. Existing terminal/V1/V2 formats and projection
+behavior remain unchanged; the V1 module adds a read-only own-tag accessor.
+TypeScript and the layered import check pass. Final frozen review, publication
+guards and exact promoted CI remain due. These mocked/component checks do not
+identify C34's historical cause or close native two-cycle acceptance.
+
+### Historical Admission And Compiler Checkpoints
+
+The following records retain their original evidence limits; their old next
+actions are superseded by Current Focus above.
+
+Campaigns 24–31 remain consumed; never retry or reuse them. The published
 compiler-admission checkpoint is `9da8de9a88d6111a4ecae8e604b35d6e964289bb`,
 matching open PR 7. Its exact-head
 [run 36722399139](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36722399139)
@@ -1106,6 +1152,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
+| C34 cycle-step diagnostic join (selected) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Root/projector isolated negatives, then canonical codec and worker/parent failure-path tests; independent review of exact stable bytes. This is prospective discrimination, not C34 cause or execution authority |
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
 | C29 `node-start` diagnostic lineage (closed 2026-09-30) | Preserve the coarse root phase and terminal formats while exposing an allowlisted Ergo startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Promoted at `29785fbc015e0a07d8a6799048bb7a5f7524252c`; all three jobs passed in run 36629279161. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). TypeScript, the layered import check and 788 targeted producer/consumer tests passed. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. C30 subsequently completed separate fresh-input admission and failed once as recorded in Current Focus. Neither these diagnostics nor green CI authorize another attempt. |
 | Same-session two-cycle acceptance | The connected successor consumers complete the second operation from the first confirmed reserve/DUP/tracker state, with separately scoped operation authority, custody lifetime, nonce and parent binding | Reuse unchanged component positives and negatives; the missing discriminator is one fresh-node two-cycle campaign with nonempty replay state, funded fees and conservation. Nonzero burn-leaf indices remain separately due when supported by the selected checkpoint shape |

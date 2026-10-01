@@ -10,6 +10,8 @@ import {
 } from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
 import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
 import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
+import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import {
   validateWasmAvlBuildToolHashV2,
   type WasmAvlBuildToolNameV2,
@@ -162,6 +164,8 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       'native two-cycle worker transport',
     );
   } catch (primaryFailure) {
+    let workerFailureText: string | undefined;
+    let workerRootPhaseV2Text: string | undefined;
     try {
       const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
         configSha256Hex: invocation.configSha256Hex,
@@ -173,6 +177,7 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         Buffer.from(`${canonicalJson(diagnostic)}\n`, 'utf8'),
         'native two-cycle worker failure diagnostic',
       );
+      workerFailureText = `${canonicalJson(diagnostic)}\n`;
     } catch {
       // Optional diagnostics never replace the failure or release the worker claim.
     }
@@ -211,9 +216,25 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
             Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
             'native two-cycle worker root phase V2 companion',
           );
+          workerRootPhaseV2Text = `${canonicalJson(companion)}\n`;
         }
       } catch {
         // The optional V2 phase detail cannot change the existing failure or V1 evidence.
+      }
+      try {
+        const projection = projectNativeTwoCycleCycleStepFailureV1(primaryFailure);
+        if (projection !== null && workerFailureText !== undefined && workerRootPhaseV2Text !== undefined) {
+          const companion = createNativeTwoCycleWorkerCycleStepV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, projection);
+          writeNewFile(join(invocation.attemptPath, 'worker-cycle-step.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker cycle step companion');
+        }
+      } catch {
+        // Optional step capture cannot replace failure or release the consumed claim.
       }
     }
     throw primaryFailure;
