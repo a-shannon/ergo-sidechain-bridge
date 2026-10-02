@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-01
+Updated: 2026-10-02
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,46 +28,79 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–34 remain permanently consumed or held. The published
-candidate is `e89b6e43423c29e2850e699444d10e3edc44ae48`, matching open PR 7.
-Its exact-head [run 36779076167](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36779076167)
-passed all three required jobs. Reuse that candidate evidence; it does not
-establish native two-cycle acceptance. Separately admitted C34 ran once and
-failed with `execution_failure`, `primaryPhase=cycle-1`, unchanged post-failure
-identity and `rootCleanupEstablished=false`. Source failure and Ergo startup
-subphases are null. Raw cause and whole custody disposal remain unknown. No
-mint, burn or payout success follows from this coarse phase.
+**Now:** Campaigns 24–35 remain permanently consumed or held. The published
+candidate is `aeb8883f2bde0b8f71788c5aa1d0193845f5a09c`, matching open PR 7.
+Its exact-head [run 36920536288](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36920536288)
+passed all three required jobs. Reuse that unchanged candidate evidence;
+it does not establish native two-cycle acceptance.
 
-The selected batch connects a bounded cycle-step failure tag in the actual
-composition root to an optional, canonical worker companion and its validated
-parent consumer. It identifies the operation active when an error escaped,
-not completion. Preserve existing terminal/V1/V2 formats and domains, protocol
-behavior, error identity, cleanup and custody. Reject phase conflicts, unknown
-steps, ambiguous or incomplete aggregate traversal and changed lineage; never
-publish raw errors or private runtime data. Cleanup-only failures cannot inherit
-the previous cycle step. Optional diagnostic failure cannot erase terminal
-failure or make an attempt retryable.
-
-Use two medium producer-to-consumer batches: root/projector with direct tests,
-then codec/worker/parent with direct tests. Close targeted negatives, affected
-legacy error paths, TypeScript/import guards and independent review before
-guarded promotion. Changed runtime inputs need their own exact-head CI. Reuse
-unchanged consensus/JVM/WASM checks; do not repeat them or launch another
-campaign to refine labels. No C35 is admitted. The next campaign needs separate
-fresh admission after this diagnostic closure and all applicable candidate
-gates. Two-cycle success, accumulated recovery, operator reproduction, FED
-release-consumer closure and independent assurance remain due.
-
-The local diagnostic join passes 1,047 cases across its ten affected suites,
+The cycle-step producer, worker and parent join is closed and published.
+Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
+cleanup and custody remain unchanged. Diagnostic projection rejects phase
+conflicts, incomplete or ambiguous graphs, stale cleanup detail and changed
+lineage. Optional diagnostic failure never makes a consumed attempt retryable.
+The join passes 1,047 cases across its ten affected suites,
 including both cycle mappings, cleanup aggregation, exact ancestor bindings,
 optional-write failures and contradictory success evidence. The root alone
 passes 397 cases. One independent P2 attribution defect was corrected: a
 step-bearing aggregate must have its own matching root tag and cannot borrow
 an ancestor or descendant phase. Existing terminal/V1/V2 formats and projection
 behavior remain unchanged; the V1 module adds a read-only own-tag accessor.
-TypeScript and the layered import check pass. Final frozen review, publication
-guards and exact promoted CI remain due. These mocked/component checks do not
+TypeScript, the layered import check, frozen independent review, publication
+guards and exact promoted CI pass. Reuse that source-only closure. It does not
 identify C34's historical cause or close native two-cycle acceptance.
+
+Separately admitted C35 completed current production input checks, independent
+input review and final same-shell preflight, then ran the canonical command
+once with new outputs and custody. It failed with `execution_failure`,
+`primaryPhase=cycle-1`, `step=setup-check`, unchanged post-failure identity and
+no success result. Current parsers reconstructed all ten selected canonical
+receipts; independent in-memory replay confirmed the exact terminal lineage.
+`cleanupErrorCount=0` establishes neither root cleanup nor whole custody
+disposal. Raw cause and operation completion remain unestablished. Do not
+read its private historical runtime state, retry or resume C35.
+
+The selected batch now resolves the native setup-check producer-to-consumer
+boundary: observed native compilation and request provenance into the retained
+signer, pinned JVM checker and exact node check. Begin with public-source
+analysis and the smallest isolated falsifier that can change this route.
+Existing mocked native setup tests do not prove the real JVM/node join. Do not
+guess a fix, fabricate LAB/signedTarget provenance, relax predicates or start
+another campaign merely to refine diagnostics. If a reproducible mismatch is
+found, close it with focused positive and single-fault negative tests and
+independent review. Any necessary additional diagnostic must distinguish a
+named unresolved boundary without publishing raw private errors.
+
+The first bounded falsifiers are closed locally: 14 cases connect the genuine
+native request registry/reobserver to the pre-sign consumer with explicit
+compiler/custody and node-read doubles. Seven cases use the real WASM signer
+for the three issuance shapes against P2PK and mature reward-delay 1/720 inputs.
+An offline SigmaState 6.0.2 differential accepts nine actual WASM-signed
+issuances and rejects eight isolated proof, message and maturity mutants.
+The selected full run passes 22 tests, including that 17-case JVM matrix, in
+6.77 seconds; TypeScript, import checks and independent source review pass.
+These checks establish their synthetic input-script and byte compatibility.
+They do not execute compiled output contracts, establish full transaction
+consensus/node acceptance, identify C35's cause or admit a campaign.
+
+The remaining deciding boundary is the live native setup operation: retained
+compiler/target validation, fresh primary/witness observation, signing context
+and the actual JVM node check. No reproducible source mismatch is supported.
+Select the smallest necessary operation-stage diagnostic in the existing
+consumer and its worker/parent failure join; preserve the original failure,
+existing terminal/V1/V2/cycle-step formats, domains and permanent attempt holds.
+Every emitted stage must identify its actual throwing operation and retain the
+exact current lineage. Unknown, contradictory or unavailable diagnostics grant
+no execution, success or custody authority. Review this bounded join before a
+separately admitted complete fresh campaign; do not add a campaign that only
+tests mint or obtains another broad setup-check label.
+
+No C36 is admitted. A fresh campaign requires separately reviewed inputs and
+all applicable exact-candidate gates after this boundary is resolved. Two-cycle
+success, accumulated recovery, operator reproduction, FED release-consumer
+closure and independent assurance remain due. Prepare and simulate the operator
+package as requested; actual external reproduction and custody remain separate
+final obligations.
 
 ### Historical Admission And Compiler Checkpoints
 
@@ -1152,7 +1185,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C34 cycle-step diagnostic join (selected) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Root/projector isolated negatives, then canonical codec and worker/parent failure-path tests; independent review of exact stable bytes. This is prospective discrimination, not C34 cause or execution authority |
+| C35 native setup-check operation boundary (selected) | Preserve the actual failing setup operation through a bounded own-stage tag and the existing worker/parent failure lineage; distinguish live compiler/custody, observation, signing-context and JVM-node checks while preserving native provenance | The cheaper pre-sign, real-WASM and offline JVM falsifiers pass with their stated synthetic scope. No runtime fix is yet supported. Close the smallest necessary diagnostic producer/consumer join with isolated negatives and independent review before a separately admitted complete fresh campaign; no retry, fake provenance, raw private errors or relaxed predicates |
+| C34 cycle-step diagnostic join (closed 2026-10-02) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Published at aeb8883f2; targeted 1,047 cases, TypeScript/import checks, independent review, guards and all three exact-head CI jobs pass. Fresh C35 validates terminal cycle-1/setup-check lineage, not C34 cause, operation completion or execution authority |
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
 | C29 `node-start` diagnostic lineage (closed 2026-09-30) | Preserve the coarse root phase and terminal formats while exposing an allowlisted Ergo startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Promoted at `29785fbc015e0a07d8a6799048bb7a5f7524252c`; all three jobs passed in run 36629279161. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). TypeScript, the layered import check and 788 targeted producer/consumer tests passed. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. C30 subsequently completed separate fresh-input admission and failed once as recorded in Current Focus. Neither these diagnostics nor green CI authorize another attempt. |
 | Same-session two-cycle acceptance | The connected successor consumers complete the second operation from the first confirmed reserve/DUP/tracker state, with separately scoped operation authority, custody lifetime, nonce and parent binding | Reuse unchanged component positives and negatives; the missing discriminator is one fresh-node two-cycle campaign with nonempty replay state, funded fees and conservation. Nonzero burn-leaf indices remain separately due when supported by the selected checkpoint shape |
