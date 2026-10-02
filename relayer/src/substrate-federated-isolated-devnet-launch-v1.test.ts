@@ -2384,6 +2384,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       'node:crypto',
       './ergo-helpers.js',
       './ergo-unsigned-transaction.js',
+      './substrate-federated-native-genesis-setup-stage-v1.js',
       './fleet-signer.js',
       './relayer-core/devnet-reward-consolidation.js',
       './strict-data-snapshot.js',
@@ -2478,6 +2479,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     ].map(match => match[1]);
     expect(executionImports).toEqual([
       'node:crypto',
+      './substrate-federated-native-genesis-setup-stage-v1.js',
       'ethers',
       './fleet-signer.js',
       './bridge-validity-tracker-header-context-v1.js',

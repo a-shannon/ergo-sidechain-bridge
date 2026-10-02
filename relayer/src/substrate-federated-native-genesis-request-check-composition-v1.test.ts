@@ -62,6 +62,8 @@ import * as requestApi from './substrate-federated-native-genesis-setup-check-re
 import * as checking from './substrate-federated-isolated-devnet-setup-check-v2.js';
 import * as execution from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import * as fleet from './fleet-signer.js';
+import { projectOwnNativeGenesisSetupFailureStageV1 as ownStage }
+  from './substrate-federated-native-genesis-setup-stage-v1.js';
 import { createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2 as createSession }
   from './substrate-federated-isolated-devnet-setup-check-runner-v2.js';
 import { assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance as assertSigner }
@@ -232,8 +234,10 @@ describe('native request producer joined to the checking engine', () => {
         return result;
       });
       try {
-        await expect(session.runNativeGenesisRetainingSigner(input.compiled, input.target))
-          .rejects.toThrow(/inactive|disposed|binding changed/);
+        const failure: unknown = await session.runNativeGenesisRetainingSigner(input.compiled, input.target)
+          .then(() => undefined, error => error);
+        expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(/inactive|disposed|binding changed/);
+        expect(ownStage(failure)).toBe('retained-batch-promotion');
         expect(mutate).toHaveBeenCalledTimes(1);
         expect(helpers.ncheck).toHaveBeenCalledTimes(3);
         expect(promote).toHaveBeenCalledTimes(stage === 'checker return' ? 0 : 3);
@@ -272,7 +276,9 @@ describe('native request producer joined to the checking engine', () => {
       return result;
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    await expect(run(request, mnemonic)).rejects.toThrow(/expired|freshness window/);
+    const failure: unknown = await run(request, mnemonic).then(() => undefined, error => error);
+    expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(/expired|freshness window/);
+    expect(ownStage(failure)).toBe(['tracker-node-check', 'duplicate-prevention-node-check', 'pooled-reserve-node-check'][ordinal]);
     expect(helpers.ncheck).toHaveBeenCalledTimes(ordinal + 1);
     expect(() => assertRequest(request)).toThrow('freshness window');
   });
@@ -291,8 +297,21 @@ describe('native request producer joined to the checking engine', () => {
         }
         return result;
       });
-      await expect(run(request, mnemonic)).rejects.toThrow(fault === 'disposed' ? /disposed/
+      const failure: unknown = await run(request, mnemonic).then(() => undefined, error => error);
+      expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(fault === 'disposed' ? /disposed/
         : fault === 'process drift' ? /binding drifted/ : /freshness window/);
+      expect(ownStage(failure)).toBe('post-check-observation');
       expect(helpers.ncheck).toHaveBeenCalledTimes(3);
     });
+  it.each([0, 1, 2])('identifies failed JVM check %i without checking a sibling or promoting material', async ordinal => {
+    const request = await build(input);
+    const check = vi.mocked(helpers.ncheck).getMockImplementation()!;
+    let count = 0;
+    vi.mocked(helpers.ncheck).mockImplementation(async (...args) => count++ === ordinal ? null : check(...args));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failure: unknown = await run(request, mnemonic).then(() => undefined, error => error);
+    expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(/JVM node check failed/);
+    expect(ownStage(failure)).toBe(['tracker-node-check', 'duplicate-prevention-node-check', 'pooled-reserve-node-check'][ordinal]);
+    expect(helpers.ncheck).toHaveBeenCalledTimes(ordinal + 1);
+  });
 });

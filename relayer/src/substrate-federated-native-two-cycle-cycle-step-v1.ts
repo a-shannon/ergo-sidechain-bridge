@@ -80,6 +80,12 @@ export function tagNativeTwoCycleCycleStepFailureV1<T>(
   return value;
 }
 
+/** Own invocation-local detail only; no aggregate ancestor or descendant borrowing. */
+export function projectOwnNativeTwoCycleCycleStepFailureV1(value: unknown): Readonly<CycleStepFailure> | null {
+  const error = asError(value);
+  return error === null || CONFLICTING_STEP_FAILURES.has(error) ? null : STEP_FAILURES.get(error) ?? null;
+}
+
 export function projectNativeTwoCycleCycleStepFailureV1(
   value: unknown,
 ): Readonly<CycleStepFailure> | null {

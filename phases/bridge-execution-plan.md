@@ -28,8 +28,9 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–35 remain permanently consumed or held. The published
-candidate is `aeb8883f2bde0b8f71788c5aa1d0193845f5a09c`, matching open PR 7.
+**Now:** Campaigns 24–35 remain permanently consumed or held. The preceding
+published candidate is `aeb8883f2bde0b8f71788c5aa1d0193845f5a09c`; it matched
+open PR 7 when its terminal CI was verified on October 2.
 Its exact-head [run 36920536288](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36920536288)
 passed all three required jobs. Reuse that unchanged candidate evidence;
 it does not establish native two-cycle acceptance.
@@ -94,6 +95,28 @@ exact current lineage. Unknown, contradictory or unavailable diagnostics grant
 no execution, success or custody authority. Review this bounded join before a
 separately admitted complete fresh campaign; do not add a campaign that only
 tests mint or obtains another broad setup-check label.
+
+The bounded probe checkpoint is `1da3c676`; the preceding published runtime
+and exact CI baseline is `aeb8883f2`. The selected operation diagnostic
+now tags the original native setup failure at the retained session and checking
+consumer, with a separate optional worker/parent companion. It permits only
+`cycle-1/setup-check`, binds the exact worker failure, root-phase V2, cycle-step
+and terminal ancestry, and rejects unknown or conflicting stages and borrowed
+cleanup attribution. Existing schemas/domains and attempt holds stay unchanged.
+The bounded source join has independent review GO and 343 affected cases pass.
+The first direct native run returned 15 timeouts at Vitest's default 5 seconds;
+two selected cases also fail on the unchanged baseline. The canonical bounded
+runner already declares a 15-second budget on Windows. Replaying with that
+existing configuration passed all 525 native, composition and cycle-step cases
+in 275.52 seconds; TypeScript also passes. Reuse these results while their
+inputs remain unchanged. Synthetic timing found repeated proof validation,
+but does not justify changing runtime checks. Fresh checks around asynchronous
+operations and custody remain unchanged. The complete configured canonical
+607-file suite passes with exit code zero. Its optional-node exclusions remain
+unexecuted and confer no node acceptance. Reuse this closure on unchanged
+inputs. Promote one combined checkpoint through the exact publication guards
+and require all three CI jobs on its new head before fresh campaign admission.
+These diagnostics do not identify C35's cause or establish a runtime correction.
 
 No C36 is admitted. A fresh campaign requires separately reviewed inputs and
 all applicable exact-candidate gates after this boundary is resolved. Two-cycle

@@ -52,6 +52,8 @@ import { materializeSubstrateFederatedSingletonIssuanceV1 }
 import * as helpers from './ergo-helpers.js';
 import * as fleet from './fleet-signer.js';
 import * as unsigned from './ergo-unsigned-transaction.js';
+import { projectOwnNativeGenesisSetupFailureStageV1 as ownStage, type NativeGenesisSetupFailureStageV1 }
+  from './substrate-federated-native-genesis-setup-stage-v1.js';
 
 const NOW = new Date('2026-10-02T12:00:00.000Z');
 const PRIMARY = 'http://127.0.0.1:9051';
@@ -144,8 +146,11 @@ afterEach(() => {
   vi.restoreAllMocks(); vi.useRealTimers();
 });
 
-async function rejectBeforeSigner(request: Awaited<ReturnType<typeof build>>, message: RegExp) {
-  await expect(run(request, SENTINEL_INPUT)).rejects.toThrow(message);
+async function rejectBeforeSigner(request: Awaited<ReturnType<typeof build>>, message: RegExp,
+  stage: NativeGenesisSetupFailureStageV1 = 'request-validation') {
+  const failure: unknown = await run(request, SENTINEL_INPUT).then(() => undefined, error => error);
+  expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(message);
+  expect(ownStage(failure)).toBe(stage);
   expect(prepare).not.toHaveBeenCalled();
 }
 
@@ -154,6 +159,7 @@ describe('native setup producer to pre-sign consumer join', () => {
     const request = await build(input);
     boundary.reads.length = 0;
     await expect(run(request, SENTINEL_INPUT)).rejects.toBe(SIGNER_BOUNDARY);
+    expect(ownStage(SIGNER_BOUNDARY)).toBe('wasm-signing');
     expect(prepare).toHaveBeenCalledTimes(1);
     expect(prepare.mock.calls[0]![0].candidates).toEqual(request.orderedIssuances.map(issuance => ({
       role: issuance.role, eip12Tx: issuance.unsignedTransactionBody, expectedTxId: issuance.unsignedTransactionIdHex,
@@ -193,14 +199,14 @@ describe('native setup producer to pre-sign consumer join', () => {
   it('rejects an input absent from the reobserved UTXO view', async () => {
     const request = await build(input);
     boundary.boxes.delete(funding[0]!.boxId);
-    await rejectBeforeSigner(request, /tracker genesis box is not present in the current UTXO view/);
+    await rejectBeforeSigner(request, /tracker genesis box is not present in the current UTXO view/, 'pre-sign-observation');
     expect(helpers.ngetDirect).not.toHaveBeenCalled();
   });
 
   it('rejects independently mismatched Sigma bytes during real box reobservation', async () => {
     const request = await build(input);
     boundary.binary.set(funding[0]!.boxId, boundary.binary.get(funding[1]!.boxId)!);
-    await rejectBeforeSigner(request, /tracker genesis box JSON and binary observations do not match/);
+    await rejectBeforeSigner(request, /tracker genesis box JSON and binary observations do not match/, 'pre-sign-observation');
     expect(helpers.ngetDirect).not.toHaveBeenCalled();
   });
 
@@ -210,7 +216,7 @@ describe('native setup producer to pre-sign consumer join', () => {
     else if (fault === 'parent link') headers[0] = { ...headers[0], parentId: '96'.repeat(32) };
     else headers[0] = { ...headers[0], id: '97'.repeat(32) };
     await rejectBeforeSigner(request, fault === 'short window' ? /requires exactly 10 headers/
-      : fault === 'parent link' ? /not one contiguous chain/ : /observation tip is absent from signer headers/);
+      : fault === 'parent link' ? /not one contiguous chain/ : /observation tip is absent from signer headers/, 'signing-context');
     expect(helpers.ngetDirect).toHaveBeenCalledTimes(1);
     expect(derive).not.toHaveBeenCalled();
   });
@@ -218,14 +224,14 @@ describe('native setup producer to pre-sign consumer join', () => {
   it('rejects an independently derived ID mismatch after genuine request revalidation', async () => {
     const request = await build(input);
     derive.mockResolvedValueOnce('98'.repeat(32));
-    await rejectBeforeSigner(request, /tracker independently derived transaction ID drifted/);
+    await rejectBeforeSigner(request, /tracker independently derived transaction ID drifted/, 'unsigned-id-validation');
     expect(derive).toHaveBeenCalledTimes(3);
   });
 
   it('rejects fixed freshness expiry before further node reads', async () => {
     const request = await build(input);
     boundary.reads.length = 0; vi.setSystemTime(new Date(NOW.getTime() + 60_001));
-    await rejectBeforeSigner(request, /expired during execution/);
+    await rejectBeforeSigner(request, /expired during execution/, 'check-entry');
     expect(boundary.reads).toHaveLength(0);
   });
 
@@ -233,7 +239,9 @@ describe('native setup producer to pre-sign consumer join', () => {
     const request = await build(input);
     boundary.reads.length = 0;
     const cancellation = new AbortController(); cancellation.abort();
-    await expect(run(request, SENTINEL_INPUT, cancellation.signal)).rejects.toThrow(/session was cancelled/);
+    const failure: unknown = await run(request, SENTINEL_INPUT, cancellation.signal).then(() => undefined, error => error);
+    expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(/session was cancelled/);
+    expect(ownStage(failure)).toBe('check-entry');
     expect(boundary.reads).toHaveLength(0); expect(prepare).not.toHaveBeenCalled();
     expect(derive).not.toHaveBeenCalled(); expect(helpers.ngetDirect).not.toHaveBeenCalled();
   });

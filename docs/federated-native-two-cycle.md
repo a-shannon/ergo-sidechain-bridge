@@ -186,6 +186,10 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `failure-root-phase.json` | Optional parent sidecar after `failure.json`. It binds the terminal failure and both validated worker diagnostics to the same invocation identities. It is not an outcome or admission receipt. |
 | `worker-root-phase-v2.json` | Optional V2 root sidecar. It preserves the V1 root phase and adds an allowlisted Ergo node startup phase only when the primary phase is `node-start`; config, commit and path identities remain bound. |
 | `failure-root-phase-v2.json` | Optional parent V2 sidecar. It binds the terminal failure, V1 worker failure and V2 worker root receipts to the same invocation. |
+| `worker-cycle-step.json` | Optional invocation-local operation within a failed cycle, bound to the worker failure and V2 root phase. |
+| `failure-cycle-step.json` | Optional parent sidecar linking that operation to the exact terminal failure and worker ancestry. |
+| `worker-setup-stage.json` | Optional native setup operation label, available only for `cycle-1/setup-check` with valid worker failure, V2 root phase and cycle-step ancestry. |
+| `failure-setup-stage.json` | Optional parent sidecar binding the setup label and every worker ancestor to the same terminal failure, config, commit and path identities. |
 
 The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
 `post-root-identity` and `transport-publication`. A root exception and a cleanup
@@ -202,6 +206,17 @@ assign one; a cleanup exception count, including zero, never proves disposal.
 A primitive value thrown during cleanup is not included in this count; a
 cleanup-only primitive may have no root-phase companion. A missing or invalid
 companion does not change the terminal result or permit another attempt.
+
+The setup-stage companion narrows a future native setup failure to retained
+session or compiler validation, request construction, observation, signing,
+an individual node check or receipt promotion. It tags the original error in
+the active operation. Unknown or conflicting detail, borrowed cycle metadata,
+and stage detail below a cleanup-tagged aggregate are rejected. The label
+identifies the failing section; it does not explain the raw cause or establish
+that an operation completed, cleanup succeeded or custody was destroyed.
+Missing or invalid ancestry prevents the companion from being published.
+Existing terminal, root-phase and cycle-step formats and digest domains are
+unchanged. These optional files grant no signing, submission or retry authority.
 
 The diagnostics use separate schemas and digest domains; the existing terminal
 failure format and digest are unchanged. Missing, invalid or unwritable

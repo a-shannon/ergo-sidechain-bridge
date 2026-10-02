@@ -24,6 +24,8 @@ import {
 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { createNativeTwoCycleParentSetupStageV1 }
+  from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import {
   canonicalPathIdentity,
   readBoundedRegularFile,
@@ -430,6 +432,25 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent cycle step companion');
         } catch {
           // Absent, invalid or occupied step evidence cannot alter the terminal failure.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle setup stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentSetupStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-setup-stage.json'));
+          writeNewFile(join(attemptPath, 'failure-setup-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent setup stage companion');
+        } catch {
+          // Unknown, invalid or unwritable setup detail leaves all existing receipts intact.
         }
       } catch {
         // Preserve the original execution failure. A missing failure artifact

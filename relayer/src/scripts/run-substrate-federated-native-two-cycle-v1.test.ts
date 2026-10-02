@@ -59,6 +59,10 @@ import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 } from '../substr
 import { tagNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { createNativeTwoCycleWorkerCycleStepV1, parseNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { tagNativeGenesisSetupFailureStageV1 }
+  from '../substrate-federated-native-genesis-setup-stage-v1.js';
+import { parseNativeTwoCycleParentSetupStageV1 }
+  from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import {
   runSubstrateFederatedNativeTwoCycleFromArguments,
 } from './run-substrate-federated-native-two-cycle-v1.js';
@@ -902,6 +906,92 @@ describe('native two-cycle parent and worker V1', () => {
       expect(mocked.root).toHaveBeenCalledOnce();
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
       expect(existsSync(join(fixture.attemptPath, 'worker-start.json'))).toBe(true);
+    });
+
+  it('carries a real worker setup operation tag through exact terminal ancestry', async () => {
+    const fixture = commandFixture(); configureParent(fixture, projectedResult());
+    const primary = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(new Error('private cause'), 'cycle-1');
+    tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'setup-check');
+    tagNativeGenesisSetupFailureStageV1(primary, 'tracker-node-check');
+    mocked.root.mockRejectedValueOnce(primary);
+    mocked.process.mockImplementationOnce(async input => {
+      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+      throw new Error('unexpected worker success');
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath])).rejects.toBe(primary);
+    const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+    expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+    const companion = parseNativeTwoCycleParentSetupStageV1(read('failure-setup-stage.json'),
+      failureBindings(fixture), JSON.parse(read('failure.json')).receiptDigestHex,
+      read('worker-failure.json'), read('worker-root-phase-v2.json'), read('worker-cycle-step.json'),
+      read('worker-setup-stage.json'));
+    expect(companion).toMatchObject({ cycle: 'cycle-1', step: 'setup-check', setupStage: 'tracker-node-check',
+      operationCompletionEstablished: false, rootCleanupEstablished: false, rawCausePublished: false });
+    expect(read('worker-setup-stage.json') + read('failure-setup-stage.json')).not.toContain('private');
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'worker-start.json'))).toBe(true);
+  });
+
+  it.each(['missing', 'invalid', 'foreign', 'digest', 'directory', 'occupied', 'changed step ancestor'] as const)(
+    'retains terminal and older companions when setup stage is %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(new Error('private setup'), 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'setup-check');
+      if (fault !== 'missing' && fault !== 'directory') tagNativeGenesisSetupFailureStageV1(primary, 'wasm-signing');
+      mocked.root.mockRejectedValueOnce(primary);
+      let preserved: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (error) {
+          expect(error).toBe(primary);
+          const name = join(fixture.attemptPath, 'worker-setup-stage.json');
+          if (fault === 'directory') mkdirSync(name);
+          else if (fault === 'invalid') writeFileSync(name, '{}\n');
+          else if (fault === 'foreign' || fault === 'digest') {
+            const stage = JSON.parse(readFileSync(name, 'utf8'));
+            writeFileSync(name, `${canonicalJson({ ...stage,
+              [fault === 'foreign' ? 'configSha256Hex' : 'receiptDigestHex']: '9'.repeat(64) })}\n`);
+          } else if (fault === 'changed step ancestor') {
+            const read = (n: string) => readFileSync(join(fixture.attemptPath, n), 'utf8');
+            writeFileSync(join(fixture.attemptPath, 'worker-cycle-step.json'), `${canonicalJson(
+              createNativeTwoCycleWorkerCycleStepV1(failureBindings(fixture), read('worker-failure.json'),
+                read('worker-root-phase-v2.json'), { cycle: 'cycle-1', step: 'tracker-check' }))}\n`);
+          } else if (fault === 'occupied') writeFileSync(join(fixture.attemptPath, 'failure-setup-stage.json'), 'retained setup bytes');
+          preserved = Object.fromEntries(['worker-failure.json', 'worker-root-phase.json', 'worker-root-phase-v2.json',
+            'worker-cycle-step.json'].map(n => [n, readFileSync(join(fixture.attemptPath, n), 'utf8')]));
+          throw error;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath])).rejects.toBe(primary);
+      expect(readFileSync(join(fixture.attemptPath, 'failure.json'), 'utf8')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(preserved)) expect(readFileSync(join(fixture.attemptPath, name), 'utf8')).toBe(bytes);
+      for (const name of ['failure-diagnostic.json', 'failure-root-phase.json', 'failure-root-phase-v2.json', 'failure-cycle-step.json']) {
+        expect(existsSync(join(fixture.attemptPath, name))).toBe(true);
+      }
+      if (fault === 'occupied') expect(readFileSync(join(fixture.attemptPath, 'failure-setup-stage.json'), 'utf8')).toBe('retained setup bytes');
+      else expect(existsSync(join(fixture.attemptPath, 'failure-setup-stage.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['worker-setup-stage.json', 'worker-cycle-step.json', 'worker-root-phase-v2.json', 'worker-failure.json'] as const)(
+    'keeps original worker error and consumed claim when setup ancestry %s is occupied', async artifact => {
+      const fixture = workerFixture(); mocked.load.mockReturnValue(fixture.loaded);
+      mocked.environment.mockResolvedValue(environment());
+      const primary = tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(new Error('private'), 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'setup-check');
+      tagNativeGenesisSetupFailureStageV1(primary, 'request-construction'); mocked.root.mockRejectedValueOnce(primary);
+      writeFileSync(join(fixture.attemptPath, artifact), 'retained bytes');
+      const args = ['--config', fixture.configPath, '--expected-config-sha256', fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex, '--attempt', fixture.attemptPath];
+      await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments(args)).rejects.toBe(primary);
+      expect(readFileSync(join(fixture.attemptPath, artifact), 'utf8')).toBe('retained bytes');
+      if (artifact !== 'worker-setup-stage.json') expect(existsSync(join(fixture.attemptPath, 'worker-setup-stage.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'worker-start.json'))).toBe(true);
+      expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+      await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments(args)).rejects.toThrow();
+      expect(mocked.root).toHaveBeenCalledOnce();
     });
 
   it.each(['missing', 'invalid', 'foreign', 'digest', 'directory', 'occupied'] as const)(

@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { tagNativeGenesisSetupFailureStageV1, type NativeGenesisSetupFailureStageV1 }
+  from './substrate-federated-native-genesis-setup-stage-v1.js';
 
 import { Mnemonic } from 'ethers';
 
@@ -2474,30 +2476,43 @@ export async function createSubstrateFederatedIsolatedDevnetSetupCheckExecutionS
         compiled: Readonly<ObservedSubstrateFederatedGenesisV1>,
         target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
       ) => consume('open', async activeMnemonic => {
-        nativeRouteSelected = true;
-        assertNativeSessionActive();
-        assertObservedSubstrateFederatedGenesisV1(compiled, target);
-        const profile = compiled.familyCompilerInput.trackerRequest.profile;
-        if (profile.ergoAdmissionThreshold !== 1 || profile.ergoAdmissionPublicKeysHex.length !== 1
-          || profile.ergoAdmissionPublicKeysHex[0] !== signer.publicKeyHex
-          || compiled.discovery.signer.publicKeyHex !== signer.publicKeyHex
-          || compiled.discovery.signer.p2pkErgoTreeHex !== signer.p2pkErgoTreeHex) {
-          throw new Error('native FED setup requires its exact retained synthetic signer');
+        let stage: NativeGenesisSetupFailureStageV1 | null = 'session-entry';
+        try {
+          nativeRouteSelected = true;
+          assertNativeSessionActive();
+          stage = 'compiled-target-validation';
+          assertObservedSubstrateFederatedGenesisV1(compiled, target);
+          stage = 'retained-signer-validation';
+          const profile = compiled.familyCompilerInput.trackerRequest.profile;
+          if (profile.ergoAdmissionThreshold !== 1 || profile.ergoAdmissionPublicKeysHex.length !== 1
+            || profile.ergoAdmissionPublicKeysHex[0] !== signer.publicKeyHex
+            || compiled.discovery.signer.publicKeyHex !== signer.publicKeyHex
+            || compiled.discovery.signer.p2pkErgoTreeHex !== signer.p2pkErgoTreeHex) {
+            throw new Error('native FED setup requires its exact retained synthetic signer');
+          }
+          stage = 'node-origin-validation';
+          const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, {
+            primaryNodeOrigin: compiled.discovery.sources.primaryNodeOrigin,
+            witnessNodeOrigin: compiled.discovery.sources.witnessNodeOrigin,
+          }) });
+          stage = 'request-construction';
+          const request = await buildSubstrateFederatedNativeGenesisSetupCheckRequestV1({ compiled, target });
+          assertNativeSessionActive();
+          // The consumer owns its finer stage; an untagged delegated failure stays unknown.
+          stage = null;
+          const receipt = await runSubstrateFederatedNativeGenesisSetupCheckV1(request, activeMnemonic, nativeCancellation.signal);
+          stage = 'retained-batch-promotion';
+          assertNativeSessionActive();
+          nativeBatch = promoteNativeSetupExecutionBatch({ compiled, target, binding, request, receipt,
+            assertSessionActive: assertNativeSessionActive });
+          trackerFeeContinuation = Object.freeze({ route: 'native', batch: nativeBatch, target,
+            feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
+            trackerCompilerRequest: compiled.familyCompilerInput.trackerRequest });
+          return nativeBatch;
+        } catch (error) {
+          // Tag the operation before existing rollback; a replacement cleanup failure stays unknown.
+          throw stage === null ? error : tagNativeGenesisSetupFailureStageV1(error, stage);
         }
-        const binding = Object.freeze({ ...assertExecutionTargetMatchesOrigins(target, {
-          primaryNodeOrigin: compiled.discovery.sources.primaryNodeOrigin,
-          witnessNodeOrigin: compiled.discovery.sources.witnessNodeOrigin,
-        }) });
-        const request = await buildSubstrateFederatedNativeGenesisSetupCheckRequestV1({ compiled, target });
-        assertNativeSessionActive();
-        const receipt = await runSubstrateFederatedNativeGenesisSetupCheckV1(request, activeMnemonic, nativeCancellation.signal);
-        assertNativeSessionActive();
-        nativeBatch = promoteNativeSetupExecutionBatch({ compiled, target, binding, request, receipt,
-          assertSessionActive: assertNativeSessionActive });
-        trackerFeeContinuation = Object.freeze({ route: 'native', batch: nativeBatch, target,
-          feePayerPublicKeyHex: signer.publicKeyHex, retainTrackerSigner: true,
-          trackerCompilerRequest: compiled.familyCompilerInput.trackerRequest });
-        return nativeBatch;
       }, 'native-setup-complete'),
       checkNativePegInSourceLockRetainingSignerV1: async (
         packet: Readonly<SubstrateFederatedPooledReserveDepositV2Packet>,

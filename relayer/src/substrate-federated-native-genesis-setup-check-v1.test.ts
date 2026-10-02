@@ -56,6 +56,8 @@ import * as helpers from './ergo-helpers.js';
 import * as owned from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import * as fleet from './fleet-signer.js';
 import * as unsigned from './ergo-unsigned-transaction.js';
+import { projectOwnNativeGenesisSetupFailureStageV1 as ownStage }
+  from './substrate-federated-native-genesis-setup-stage-v1.js';
 import { materializeUnsignedTransaction } from './unsigned-ergo-transaction.js';
 import { materializeSubstrateFederatedSingletonIssuanceV1 } from './substrate-federated-genesis-issuance-materialization-v1.js';
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
@@ -350,7 +352,9 @@ describe('native FED request through the retained checking engine', () => {
       if (count++ === ordinal) { boundary.active = false; throw new Error('native custody expired'); }
       return structuredClone(observation);
     });
-    await expect(run(request, mnemonic)).rejects.toThrow(/custody expired/);
+    const failure: unknown = await run(request, mnemonic).then(() => undefined, error => error);
+    expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(/custody expired/);
+    expect(ownStage(failure)).toBe(`${stage}-observation`);
     expect(helpers.ncheck).toHaveBeenCalledTimes(ordinal === 2 ? 3 : 0);
   });
 
@@ -2930,13 +2934,25 @@ describe('native FED managed setup session', () => {
     let other: typeof session | undefined;
     try {
       if (fault === 'foreign signer') other = await createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2();
-      await expect((other ?? session).runNativeGenesisRetainingSigner(
+      const failure: unknown = await (other ?? session).runNativeGenesisRetainingSigner(
         fault === 'compiler clone' ? { ...compiled } : compiled,
         fault === 'target clone' ? { ...target } : target,
-      )).rejects.toThrow(fault === 'foreign signer' ? /exact retained synthetic signer/ : /compiled provenance absent/);
+      ).then(() => undefined, error => error);
+      expect(failure).toBeInstanceOf(Error); expect((failure as Error).message).toMatch(
+        fault === 'foreign signer' ? /exact retained synthetic signer/ : /compiled provenance absent/);
+      expect(ownStage(failure)).toBe(fault === 'foreign signer' ? 'retained-signer-validation' : 'compiled-target-validation');
       expect(boundary.build).not.toHaveBeenCalled(); expect(signatures).not.toHaveBeenCalled();
       expect(helpers.ncheck).not.toHaveBeenCalled();
     } finally { other?.dispose(); }
+  });
+
+  it('preserves a request-construction failure through existing signer rollback', async () => {
+    const primary = new Error('private constructor failure'); boundary.build.mockRejectedValueOnce(primary);
+    const signatures = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
+    await expect(session.runNativeGenesisRetainingSigner(compiled, target)).rejects.toBe(primary);
+    expect(ownStage(primary)).toBe('request-construction');
+    expect(signatures).not.toHaveBeenCalled(); expect(helpers.ncheck).not.toHaveBeenCalled();
+    expect(() => assertSigner(session.signer)).toThrow(/active process provenance/);
   });
 
   it.each(['repeat', 'legacy', 'dispose', 'private dispose'])('cancels %s before any signature at the preparation await', async fault => {

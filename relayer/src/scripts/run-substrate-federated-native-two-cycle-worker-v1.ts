@@ -12,6 +12,8 @@ import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-na
 import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
+import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import {
   validateWasmAvlBuildToolHashV2,
   type WasmAvlBuildToolNameV2,
@@ -166,6 +168,7 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
   } catch (primaryFailure) {
     let workerFailureText: string | undefined;
     let workerRootPhaseV2Text: string | undefined;
+    let workerCycleStepText: string | undefined;
     try {
       const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
         configSha256Hex: invocation.configSha256Hex,
@@ -232,9 +235,26 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
           writeNewFile(join(invocation.attemptPath, 'worker-cycle-step.json'),
             Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
             'native two-cycle worker cycle step companion');
+          workerCycleStepText = `${canonicalJson(companion)}\n`;
         }
       } catch {
         // Optional step capture cannot replace failure or release the consumed claim.
+      }
+      try {
+        const setupStage = projectNativeTwoCycleSetupFailureStageV1(primaryFailure);
+        if (setupStage !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const companion = createNativeTwoCycleWorkerSetupStageV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText, setupStage);
+          writeNewFile(join(invocation.attemptPath, 'worker-setup-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker setup stage companion');
+        }
+      } catch {
+        // Optional setup detail cannot replace the original failure or release its claim.
       }
     }
     throw primaryFailure;

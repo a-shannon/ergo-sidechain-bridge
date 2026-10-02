@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { ngetDirect } from './ergo-helpers.js';
 import { deriveUnsignedTransactionId } from './ergo-unsigned-transaction.js';
+import { tagNativeGenesisSetupFailureStageV1, type NativeGenesisSetupFailureStageV1 }
+  from './substrate-federated-native-genesis-setup-stage-v1.js';
 import {
   checkSignedTransaction,
   prepareLocalWasmRootCheckCandidates,
@@ -353,7 +355,13 @@ export async function runSubstrateFederatedNativeGenesisSetupCheckV1(
   syntheticMnemonic: string,
   cancellation?: AbortSignal,
 ): Promise<Readonly<SubstrateFederatedNativeGenesisSetupCheckReceiptV1>> {
-  return runSetupCheck(request, syntheticMnemonic, nativeGenesisBinding, cancellation);
+  let stage: NativeGenesisSetupFailureStageV1 = 'check-entry';
+  try {
+    return await runSetupCheck(request, syntheticMnemonic, nativeGenesisBinding, cancellation,
+      next => { stage = next; });
+  } catch (error) {
+    throw tagNativeGenesisSetupFailureStageV1(error, stage);
+  }
 }
 
 export function takeSubstrateFederatedNativeGenesisSetupCheckExecutionMaterialV1(
@@ -377,6 +385,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   syntheticMnemonic: string,
   binding: Readonly<SetupCheckBinding<R, C>>,
   cancellation?: AbortSignal,
+  markNativeStage?: (stage: NativeGenesisSetupFailureStageV1) => void,
 ): Promise<Readonly<C>> {
   const mnemonic = syntheticMnemonic.trim();
   if (!mnemonic) {
@@ -394,7 +403,9 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   } else {
     assertActive();
   }
+  markNativeStage?.('request-validation');
   await assertRuntimeRequest(request, binding);
+  markNativeStage?.('pre-sign-observation');
   const preSignObservation = await reobserveAndBind(
     request,
     'pre-sign',
@@ -402,6 +413,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   );
   assertRuntimeFresh(request);
 
+  markNativeStage?.('signing-context');
   const headers = await ngetDirect(
     request.checkPolicy.stateContext.path,
     request.checkPolicy.stateContext.nodeOrigin,
@@ -410,6 +422,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   assertObservationTipInHeaders(preSignObservation, headers);
   assertRuntimeFresh(request);
 
+  markNativeStage?.('unsigned-id-validation');
   const independentIds = await Promise.all(
     request.orderedIssuances.map(async issuance => ({
       role: issuance.role,
@@ -433,6 +446,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
     }
   }
 
+  markNativeStage?.('wasm-signing');
   assertActive();
   const batch = await prepareLocalWasmRootCheckCandidates({
     mnemonic,
@@ -446,6 +460,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
       expectedTxId: issuance.unsignedTransactionIdHex,
     })),
   });
+  markNativeStage?.('signed-candidate-validation');
   assertActive();
   assertSignerContext(batch, request, headerTip);
   const rewardDelay = assertSignerControlsExactInputTrees(
@@ -455,6 +470,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   assertPreparedCandidates(batch.candidates, request);
   assertRuntimeFresh(request);
 
+  markNativeStage?.('pre-check-observation');
   const preCheckObservation = await reobserveAndBind(
     request,
     'pre-check',
@@ -473,6 +489,8 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
   for (let index = 0; index < request.orderedIssuances.length; index += 1) {
     const issuance = request.orderedIssuances[index]!;
     const prepared = batch.candidates[index]!;
+    markNativeStage?.(issuance.role === 'tracker' ? 'tracker-node-check'
+      : issuance.role === 'duplicate-prevention' ? 'duplicate-prevention-node-check' : 'pooled-reserve-node-check');
     assertActive();
     const checked = await checkSignedTransaction(
       prepared.signedCandidate,
@@ -548,6 +566,7 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
     assertRuntimeFresh(request);
   }
 
+  markNativeStage?.('post-check-observation');
   const postCheckObservation = await reobserveAndBind(
     request,
     'post-check',
@@ -558,9 +577,11 @@ async function runSetupCheck<R extends SetupRequestCommonData, C extends SetupRe
     postCheckObservation,
     'post-check',
   );
+  markNativeStage?.('final-request-validation');
   await assertRuntimeRequest(request, binding);
 
   assertActive();
+  markNativeStage?.('check-receipt');
   const controlledInputErgoTreeHex =
     request.orderedIssuances[0]!.requiredInputErgoTreeHex;
   const body = deepFreeze({
