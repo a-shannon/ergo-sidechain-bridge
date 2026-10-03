@@ -22,7 +22,7 @@ on:
     branches:
       - main
       - master
-      - "fix/**"
+      - "a-shannon/research-alpha"
     paths:
       - ".github/workflows/relayer-checks.yml"
       - ".gitattributes"
@@ -47,7 +47,8 @@ jobs:
   audit-alpha:
     name: Public-audit candidate gate
     runs-on: windows-latest
-    timeout-minutes: 120
+    # The full serial suite includes fresh process-custody provisioning matrices.
+    timeout-minutes: 240
     defaults:
       run:
         shell: pwsh
@@ -155,9 +156,64 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Provision wasm-bindgen 0.2.120
+        working-directory: .
+        run: |
+          $toolRoot = Join-Path $env:RUNNER_TEMP "wasm-bindgen-0.2.120-$([guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Path $toolRoot | Out-Null
+          $archive = Join-Path $toolRoot 'wasm-bindgen-0.2.120-x86_64-pc-windows-msvc.tar.gz'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/wasm-bindgen/wasm-bindgen/releases/download/0.2.120/wasm-bindgen-0.2.120-x86_64-pc-windows-msvc.tar.gz' `
+            -OutFile $archive `
+            -TimeoutSec 300
+          $archiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($archiveSha256 -ne 'd8ebacbfdbee70ffdcda0bbfefd99a645aee35ba31ba77dfa3b083f031674977') {
+            throw 'wasm-bindgen 0.2.120 release archive does not match its reviewed SHA-256'
+          }
+          $member = 'wasm-bindgen-0.2.120-x86_64-pc-windows-msvc/wasm-bindgen.exe'
+          tar -xzf $archive -C $toolRoot $member
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = Join-Path $toolRoot $member
+          $executableSha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($executableSha256 -ne '9d669c8c13bb70a37c8518c9476f9b716c7fdf463daaa73742dffb486e7f802a') {
+            throw 'wasm-bindgen 0.2.120 executable does not match its reviewed SHA-256'
+          }
+          "WASM_BINDGEN_EXECUTABLE=$executable" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Fetch locked WASM AVL dependencies
+        working-directory: wasm-avl
+        run: cargo fetch --locked
+
       - name: Install wasm-pack 0.14.0
         working-directory: .
-        run: cargo install wasm-pack --version 0.14.0 --locked
+        run: |
+          $toolRoot = Join-Path $env:RUNNER_TEMP "wasm-pack-0.14.0-$([guid]::NewGuid().ToString('N'))"
+          New-Item -ItemType Directory -Path $toolRoot | Out-Null
+          $archive = Join-Path $toolRoot 'wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz'
+          Invoke-WebRequest `
+            -Uri 'https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz' `
+            -OutFile $archive `
+            -TimeoutSec 300
+          $archiveSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($archiveSha256 -ne 'd484c8e8bcd9e8c30097fbac78b52dd159598f99d11e43a50f5d143b67c721f1') {
+            throw 'wasm-pack 0.14.0 release archive does not match its reviewed SHA-256'
+          }
+          $member = 'wasm-pack-v0.14.0-x86_64-pc-windows-msvc/wasm-pack.exe'
+          tar -xzf $archive -C $toolRoot $member
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $executable = Join-Path $toolRoot $member
+          $executableSha256 = (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($executableSha256 -ne '6e569a9bea962dbdc3e30e9aef076b1d559f7819b1cbb7ffce85ece8a7e47da8') {
+            throw 'wasm-pack 0.14.0 executable does not match its reviewed SHA-256'
+          }
+          $version = (& $executable --version).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($version -ne 'wasm-pack 0.14.0') {
+            throw 'wasm-pack version does not match its reviewed version'
+          }
+          (Split-Path -Parent $executable) |
+            Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Install relayer dependencies
         run: |
@@ -184,10 +240,52 @@ jobs:
           & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run audit:alpha
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  solidity-audit:
+    name: Audit Solidity dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout dependency lock
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: solidity/package-lock.json
+
+      - name: Install Solidity dependencies
+        working-directory: solidity
+        run: npm ci --ignore-scripts --include=dev
+
+      - name: Audit Solidity dependencies
+        working-directory: solidity
+        run: |
+          status=1
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high --registry=https://registry.npmjs.org/ --include=dev --include=optional --include=peer --fetch-retries=5 --fetch-retry-factor=2 --fetch-retry-mintimeout=1000 --fetch-retry-maxtimeout=10000 --fetch-timeout=30000; then
+              exit 0
+            else
+              status=$?
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              delay=$((attempt * 10))
+              echo "npm audit attempt ${attempt} failed; retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          exit "$status"
+
   consensus-sources:
     name: Rebuild pinned Frontier and Ergo sources
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
     steps:
       - name: Checkout recursive source graph
@@ -228,7 +326,6 @@ jobs:
         run: |
           npm ci --ignore-scripts --include=dev
           npm run check
-          npm audit --audit-level=high
 
       - name: Verify standalone consensus workflow
         working-directory: relayer
@@ -264,11 +361,15 @@ jobs:
           git -C "$source_dir" remote add origin https://github.com/ergoplatform/ergo.git
           git -C "$source_dir" fetch --depth=1 origin refs/tags/v6.0.2
           git -C "$source_dir" checkout --detach 2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1
-          git -C "$source_dir" apply --unidiff-zero "$GITHUB_WORKSPACE/sources/ergo-node/0001-sidechain-extension-fields.patch"
+          git -C "$source_dir" apply --unidiff-zero "$GITHUB_WORKSPACE/sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch"
 
       - name: Verify complete source checkouts
         working-directory: relayer
         run: npm run sources:verify -- --ergo-source ../.source-cache/ergo-node
+
+      - name: Test federated LAB no-value reservation admission
+        working-directory: relayer
+        run: npm run federated:lab:reservation:acceptance -- --frontier-source ../substrate-node
 
       - name: Test Frontier bridge commitment producer
         working-directory: substrate-node

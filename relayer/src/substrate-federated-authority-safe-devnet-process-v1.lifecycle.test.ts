@@ -27,6 +27,10 @@ vi.mock('./native-executable-pin.js', () => ({
 
 import {
   assertOwnedAuthoritySafeDevnetProcessV1Receipt,
+  assertOwnedFederatedGenesisDevnetProcessV1Receipt,
+  assertOwnedFederatedGenesisDevnetTargetV1,
+  createOwnedFederatedGenesisDevnetProcessSessionV1,
+  withOwnedFederatedGenesisDevnetProcessesV1,
   assertOwnedAuthoritySafeDevnetRecoveryLifecycleV1Receipt,
   assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt,
   assertOwnedAuthoritySafeDevnetRecoveryTimelineV1Material,
@@ -34,6 +38,7 @@ import {
   exerciseOwnedAuthoritySafeDevnetRecoveryLifecycleV1,
   withOwnedAuthoritySafeDevnetProcessesV1,
   type OwnedAuthoritySafeDevnetProcessV1Input,
+  type OwnedFederatedGenesisDevnetTargetV1,
 } from './substrate-federated-authority-safe-devnet-process-v1.js';
 import {
   assertFrontierBackingReadAgreementSourcesSealed,
@@ -159,6 +164,9 @@ interface FakeBlock {
 let children: FakeChild[];
 let wrongListenerOwner: boolean;
 let wrongListenerAddress: boolean;
+let listenerDrift: { port: number; fault: 'owner' | 'address' | 'missing' } | undefined;
+let portProbeFailureAt: number | undefined;
+let portProbeCommands: string[];
 let wrongPeerIdentity: boolean;
 let retainListenersAfterStop: boolean;
 let witnessStartupFailure: boolean;
@@ -186,6 +194,9 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     children = [];
     wrongListenerOwner = false;
     wrongListenerAddress = false;
+    listenerDrift = undefined;
+    portProbeFailureAt = undefined;
+    portProbeCommands = [];
     wrongPeerIdentity = false;
     retainListenersAfterStop = false;
     witnessStartupFailure = false;
@@ -226,6 +237,12 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
       const command = String(args.at(-1) ?? '');
       if (command.includes('Get-Process -Id')) {
         return syncResult(runningImagePath);
+      }
+      if (command.includes('[System.Net.Sockets.TcpListener]')) {
+        portProbeCommands.push(command);
+        return portProbeCommands.length === portProbeFailureAt
+          ? syncFailure('synthetic loopback bind rejection')
+          : syncResult('');
       }
       const requestedPorts = command.match(/\$ports=@\(([^)]*)\)/)?.[1]
         ?.split(',')
@@ -551,7 +568,324 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
       const index = args.indexOf('--sealing');
       return index >= 0 && args[index + 1] === 'manual';
     })).toBe(true);
-    expect(children.filter(child => child.role === 'witness')).toHaveLength(3);
+    const witnessChildren = children.filter(child => child.role === 'witness');
+    expect(witnessChildren).toHaveLength(3);
+    expect(portProbeCommands.slice(1)).toHaveLength(witnessChildren.length);
+    expect(portProbeCommands.slice(1).every(command => command.includes(
+      `@(${PORTS.witnessRpc},${PORTS.witnessP2p},${PORTS.witnessPrometheus})`,
+    ))).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each([
+    ['legacy chain spec', { genesis: { runtimeGenesis: { patch: {} } } }, /requires direct typed genesis/],
+    ['raw chain spec', { genesis: { raw: { top: {} } } }, /requires direct typed genesis/],
+    ['bootnodes', { ...typedGenesis(), bootNodes: [] }, /requires direct typed genesis/],
+    ['runtime override', { ...typedGenesis(), code: '0x00' }, /requires direct typed genesis/],
+    ['sealing mode', { ...typedGenesis(), manualSeal: { enable: false } }, /requires manual sealing and no Sudo/],
+    ['Sudo', { ...typedGenesis(), sudo: { key: '0x' + '11'.repeat(20) } }, /requires manual sealing and no Sudo/],
+    ['absent V4', { ...typedGenesis(), bridgeCommitment: {} }, /requires its V4 initialization/],
+  ])('rejects incompatible FED %s before launch', async (_label, config, error) => {
+    const genesisJsonBytes = Buffer.from(JSON.stringify(config));
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1({
+      ...federatedInput(), genesisJsonBytes, expectedGenesisJsonSha256Hex: sha256(genesisJsonBytes),
+    }, async () => 'unreachable')).rejects.toThrow(error as RegExp);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pin', /chain-spec bytes differ/], ['size', /must contain bounded bytes/],
+    ['utf8', /encoded data.*encoding/], ['duplicate', /strict valid JSON without duplicate keys/],
+    ['accessor', /exact data fields/], ['extra', /exact data fields/],
+  ])('rejects FED input %s before launch', async (fault, error) => {
+    let genesisJsonBytes = Buffer.from(JSON.stringify(typedGenesis()));
+    if (fault === 'size') genesisJsonBytes = Buffer.alloc(4 * 1024 * 1024 + 1, 32);
+    if (fault === 'utf8') genesisJsonBytes = Buffer.from([0xff]);
+    if (fault === 'duplicate') genesisJsonBytes = Buffer.from(
+      JSON.stringify(typedGenesis()).replace('"sudo":', '"sudo":{"key":null},"sudo":'));
+    const value = { ...federatedInput(), genesisJsonBytes, expectedGenesisJsonSha256Hex: sha256(genesisJsonBytes) };
+    if (fault === 'pin') value.expectedGenesisJsonSha256Hex = '11'.repeat(32);
+    if (fault === 'accessor') Object.defineProperty(value, 'primaryRpcUrl', {
+      enumerable: true, get: () => { throw new Error('getter was invoked'); },
+    });
+    if (fault === 'extra') Object.defineProperty(value, 'unexpected', { value: true });
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(value, async () => 'unreachable'))
+      .rejects.toThrow(error as RegExp);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('runs the typed FED selector with fixed manual sealing and a distinct receipt', async () => {
+    const value = federatedInput();
+    const result = await withOwnedFederatedGenesisDevnetProcessesV1(value, async endpoints => {
+      expect(children).toHaveLength(2);
+      expect(children.every(child => child.alive)).toBe(true);
+      assertExactKeyShape(endpoints, {
+        primaryRpcUrl: true, witnessRpcUrl: true, genesisJsonSha256Hex: true,
+      });
+      expect(Object.isFrozen(endpoints)).toBe(true);
+      expect(endpoints.genesisJsonSha256Hex).toBe(value.expectedGenesisJsonSha256Hex);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(endpoints)).not.toThrow();
+      expect(readFileSync(join(runtimeDirectory, 'authority-safe.json'))).toEqual(value.genesisJsonBytes);
+      return { observed: true };
+    });
+    for (const call of mocks.spawn.mock.calls) {
+      const args = call[1] as string[];
+      expect(args[args.indexOf('--chain') + 1]).toBe(`fed-genesis:${join(runtimeDirectory, 'authority-safe.json')}`);
+      expect(args[args.indexOf('--sealing') + 1]).toBe('manual');
+      expect(args).toContain('--no-grandpa');
+    }
+    expect(result.value).toEqual({ observed: true });
+    expect(result.receipt.schema).toBe('e2s.substrate-federated-genesis-devnet-process.v1');
+    expect(result.receipt.chainSpecSha256Hex).toBe(value.expectedGenesisJsonSha256Hex);
+    expect(result.receipt.checks.bothProcessesStoppedAndListenersReleased).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt(result.receipt)).not.toThrow();
+    expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt({ ...result.receipt })).toThrow(/provenance/);
+    expect(() => assertOwnedAuthoritySafeDevnetProcessV1Receipt(result.receipt)).toThrow(/provenance/);
+    expect(() => assertOwnedAuthoritySafeDevnetRecoveryProcessV1Receipt(result.receipt)).toThrow(/provenance/);
+  });
+
+  it('retains the original captured FED genesis pin across asynchronous startup and action', async () => {
+    const value = federatedInput();
+    const expectedPin = value.expectedGenesisJsonSha256Hex;
+    const pending = withOwnedFederatedGenesisDevnetProcessesV1(value, async target => {
+      expect(target.genesisJsonSha256Hex).toBe(expectedPin);
+      expect(target.primaryRpcUrl).toBe(`http://127.0.0.1:${PORTS.primaryRpc}`);
+      expect(target.witnessRpcUrl).toBe(`http://127.0.0.1:${PORTS.witnessRpc}`);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      await Promise.resolve();
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return target;
+    });
+    value.expectedGenesisJsonSha256Hex = '11'.repeat(32);
+    value.genesisJsonBytes.fill(0);
+    value.primaryRpcUrl = 'http://127.0.0.1:1';
+    value.witnessRpcUrl = 'http://127.0.0.1:2';
+    const result = await pending;
+    expect(result.receipt.chainSpecSha256Hex).toBe(expectedPin);
+    expect(result.value.genesisJsonSha256Hex).toBe(expectedPin);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(result.value)).toThrow(/provenance/);
+  });
+
+  it('keeps one genuine FED target live across actions and revokes it once before close cleanup', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    expect(Object.isFrozen(session)).toBe(true);
+    expect(Object.keys(session).sort()).toEqual(['close', 'withTarget']);
+    let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
+    let checkedDuringTeardown = false;
+
+    expect(await session.withTarget(async target => {
+      retained = target;
+      expect(Object.isFrozen(target)).toBe(true);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'first';
+    })).toBe('first');
+    expect(retained).toBeDefined();
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).not.toThrow();
+    expect(await session.withTarget(async target => {
+      expect(target).toBe(retained);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'second';
+    })).toBe('second');
+
+    const witness = children[1]!;
+    vi.mocked(witness.kill).mockImplementation(() => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+      checkedDuringTeardown = true;
+      exitChild(witness, 'SIGKILL');
+      return true;
+    });
+    const firstClose = session.close();
+    const secondClose = session.close();
+    expect(secondClose).toBe(firstClose);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    const receipt = await firstClose;
+    expect(checkedDuringTeardown).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(() => assertOwnedFederatedGenesisDevnetProcessV1Receipt(receipt)).not.toThrow();
+    expect(await secondClose).toBe(receipt);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    await expect(session.withTarget(async () => 'unreachable'))
+      .rejects.toThrow(/closing or closed/);
+  });
+
+  it('rejects overlapping actions and close without tearing down the active action', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    let releaseAction!: () => void;
+    let reportEntered!: () => void;
+    const actionEntered = new Promise<void>(resolvePromise => {
+      reportEntered = resolvePromise;
+    });
+    const actionReleased = new Promise<void>(resolvePromise => {
+      releaseAction = resolvePromise;
+    });
+    const first = session.withTarget(async target => {
+      reportEntered();
+      await actionReleased;
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'observed';
+    });
+    await actionEntered;
+    await expect(session.withTarget(async () => 'overlap'))
+      .rejects.toThrow(/action is already active/);
+    await expect(session.close()).rejects.toThrow(/while an action is active/);
+    expect(children.every(child => child.alive)).toBe(true);
+    releaseAction();
+    await expect(first).resolves.toBe('observed');
+    await expect(session.close()).resolves.toMatchObject({
+      schema: 'e2s.substrate-federated-genesis-devnet-process.v1',
+    });
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('supports immediate awaited close without starting a target action', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const receipt = await session.close();
+    expect(receipt.schema).toBe('e2s.substrate-federated-genesis-devnet-process.v1');
+    expect(receipt.checks.bothProcessesStoppedAndListenersReleased).toBe(true);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('rejects process death between actions and joins the terminal cleanup outcome', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const target = await session.withTarget(async current => current);
+    exitChild(children[1]!);
+    const next = vi.fn(async () => 'unreachable');
+    const failure = await session.withTarget(next).catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toMatch(/witness process exited unexpectedly/);
+    expect(next).not.toHaveBeenCalled();
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).toThrow(/provenance/);
+    expect(children.every(child => !child.alive)).toBe(true);
+    const firstClose = session.close();
+    expect(session.close()).toBe(firstClose);
+    await expect(firstClose).rejects.toBe(failure);
+  });
+
+  it('retires the FED session and joins cleanup before propagating an action failure', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const failure = new Error('synthetic session action failure');
+    let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
+    await expect(session.withTarget(async target => {
+      retained = target;
+      throw failure;
+    })).rejects.toBe(failure);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    await expect(session.withTarget(async () => 'unreachable'))
+      .rejects.toThrow(/closing or closed/);
+  });
+
+  it('preserves both FED session action and cleanup failures', async () => {
+    retainListenersAfterStop = true;
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    let captured: unknown;
+    try {
+      await session.withTarget(async () => {
+        throw new Error('synthetic session action failure');
+      });
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toBeInstanceOf(AggregateError);
+    expect((captured as AggregateError).errors.map(error => error.message)).toEqual([
+      'synthetic session action failure',
+      expect.stringMatching(/process cleanup failed/),
+    ]);
+  });
+
+  it('joins partial startup cleanup before rejecting FED session creation', async () => {
+    witnessStartupFailure = true;
+    await expect(createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput()))
+      .rejects.toThrow(/witness process exited unexpectedly/);
+    expect(children[0]?.role).toBe('primary');
+    expect(children[0]?.alive).toBe(false);
+  });
+
+  it('rejects copied FED targets without querying process state', async () => {
+    await withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      const probes = mocks.spawnSync.mock.calls.length;
+      for (const copy of [Object.freeze({ ...target }), JSON.parse(JSON.stringify(target))]) {
+        expect(() => assertOwnedFederatedGenesisDevnetTargetV1(copy)).toThrow(/provenance/);
+      }
+      expect(mocks.spawnSync.mock.calls.length).toBe(probes);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'observed';
+    });
+  });
+
+  it.each(['return', 'throw'] as const)('revokes the FED target before teardown after callback %s', async outcome => {
+    let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
+    let checkedDuringTeardown = false;
+    const failure = new Error('synthetic FED callback failure');
+    const pending = withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      retained = target;
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      const witness = children[1]!;
+      vi.mocked(witness.kill).mockImplementation(() => {
+        expect(children.every(child => child.alive)).toBe(true);
+        expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).toThrow(/provenance/);
+        checkedDuringTeardown = true;
+        exitChild(witness, 'SIGKILL');
+        return true;
+      });
+      if (outcome === 'throw') throw failure;
+      return target;
+    });
+    if (outcome === 'throw') await expect(pending).rejects.toBe(failure);
+    else expect((await pending).value).toBe(retained);
+    expect(checkedDuringTeardown).toBe(true);
+    expect(retained).toBeDefined();
+    expect(() => assertOwnedFederatedGenesisDevnetTargetV1(retained!)).toThrow(/provenance/);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each(['primary', 'witness'] as const)('rejects the active FED target after %s process death', async role => {
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      exitChild(children.find(child => child.role === role)!);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
+        .toThrow(`${role} process exited unexpectedly`);
+      return 'observed';
+    })).rejects.toThrow(`${role} process exited unexpectedly`);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('rejects the active FED target after exact genesis bytes drift without a semantic change', async () => {
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      writeFileSync(join(runtimeDirectory, 'authority-safe.json'), JSON.stringify(typedGenesis(), null, 2));
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
+        .toThrow(/chain-spec file changed during target observation/);
+      return 'observed';
+    })).rejects.toThrow(/chain-spec file changed during target observation/);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each(Object.entries(PORTS).flatMap(([label, port]) =>
+    (['owner', 'address', 'missing'] as const).map(fault => ({ label, port, fault })),
+  ))('rejects the active FED target after $label listener $fault drift', async ({ port, fault }) => {
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      listenerDrift = { port, fault };
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
+        .toThrow(/listener is not exclusively loopback-owned/);
+      return 'observed';
+    })).rejects.toThrow(/listener is not exclusively loopback-owned/);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each(['image', 'listener', 'peer', 'action', 'spec', 'cleanup'])('retains FED %s failure containment', async fault => {
+    const value = federatedInput();
+    if (fault === 'listener') wrongListenerAddress = true;
+    if (fault === 'peer') wrongPeerIdentity = true;
+    if (fault === 'cleanup') retainListenersAfterStop = true;
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(value, async () => {
+      if (fault === 'image') runningImagePath = join(runtimeDirectory, 'different.exe');
+      if (fault === 'spec') writeFileSync(join(runtimeDirectory, 'authority-safe.json'), '{}');
+      if (fault === 'action') throw new Error('synthetic observation failure');
+      return 'observed';
+    })).rejects.toThrow();
     expect(children.every(child => !child.alive)).toBe(true);
   });
 
@@ -738,6 +1072,35 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     expect(children.every(child => !child.alive)).toBe(true);
   });
 
+  it('rejects unowned ports that Windows refuses to bind', async () => {
+    portProbeFailureAt = 1;
+    await expect(
+      withOwnedAuthoritySafeDevnetProcessesV1(input(), async () => 'unreachable'),
+    ).rejects.toThrow(/port is not bindable on IPv4 loopback/);
+    expect(portProbeCommands).toHaveLength(1);
+    expect(portProbeCommands[0]).toContain(
+      `@(${PORTS.primaryRpc},${PORTS.witnessRpc},${PORTS.primaryP2p},${PORTS.witnessP2p},${PORTS.primaryPrometheus},${PORTS.witnessPrometheus})`,
+    );
+    expect(portProbeCommands[0]).toMatch(/finally.*\.Stop\(\)/);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(children).toHaveLength(0);
+  });
+
+  it('reprobes witness ports before launch and cleans up the primary on rejection', async () => {
+    portProbeFailureAt = 2;
+    await expect(
+      withOwnedAuthoritySafeDevnetProcessesV1(input(), async () => 'unreachable'),
+    ).rejects.toThrow(/port is not bindable on IPv4 loopback/);
+    expect(portProbeCommands).toHaveLength(2);
+    expect(portProbeCommands[1]).toContain(
+      `@(${PORTS.witnessRpc},${PORTS.witnessP2p},${PORTS.witnessPrometheus})`,
+    );
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    expect(children).toHaveLength(1);
+    expect(children[0]?.role).toBe('primary');
+    expect(children[0]?.alive).toBe(false);
+  });
+
   it('rejects a running process image from a different regular-file path', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'e2s-fed6g1c-wrong-image-'));
     temporaryDirectories.push(directory);
@@ -860,6 +1223,19 @@ function input(): OwnedAuthoritySafeDevnetProcessV1Input {
   };
 }
 
+function federatedInput() {
+  const { chainSpecBytes: _bytes, expectedChainSpecSha256Hex: _hash, ...processInput } = input();
+  const genesisJsonBytes = Buffer.from(JSON.stringify(typedGenesis()));
+  return { ...processInput, genesisJsonBytes, expectedGenesisJsonSha256Hex: sha256(genesisJsonBytes) };
+}
+
+function typedGenesis() {
+  return {
+    manualSeal: { enable: true }, sudo: { key: null },
+    bridgeCommitment: { pooledReserveMintGenesisV4: ['0x' + '31'.repeat(20), [4]] },
+  };
+}
+
 function fakeChild(role: FakeChild['role'], pid: number): FakeChild {
   const child = new EventEmitter() as FakeChild;
   Object.assign(child, {
@@ -918,6 +1294,15 @@ function listenerRows(): Array<{
   }
   if (wrongListenerOwner && rows.length > 0) rows[0]!.OwningProcess = 49_999;
   if (wrongListenerAddress && rows.length > 0) rows[0]!.LocalAddress = '0.0.0.0';
+  if (listenerDrift) {
+    for (const row of rows.filter(row => row.LocalPort === listenerDrift!.port)) {
+      if (listenerDrift.fault === 'owner') row.OwningProcess = 49_999;
+      if (listenerDrift.fault === 'address') row.LocalAddress = '0.0.0.0';
+    }
+    if (listenerDrift.fault === 'missing') {
+      return rows.filter(row => row.LocalPort !== listenerDrift!.port);
+    }
+  }
   return rows;
 }
 
@@ -970,6 +1355,17 @@ function syncResult(stdout: string) {
     stdout,
     stderr: '',
     status: 0,
+    signal: null,
+  };
+}
+
+function syncFailure(stderr: string) {
+  return {
+    pid: 99,
+    output: [null, '', stderr],
+    stdout: '',
+    stderr,
+    status: 1,
     signal: null,
   };
 }

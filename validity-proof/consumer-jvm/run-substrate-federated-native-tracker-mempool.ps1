@@ -1,0 +1,309 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)][string] $ErgoNodeRoot,
+    [Parameter(Mandatory = $true)][string] $GitPath,
+    [Parameter(Mandatory = $true)][string] $NodePath,
+    [Parameter(Mandatory = $true)][string] $JavaPath,
+    [Parameter(Mandatory = $true)][string] $SbtLauncherPath,
+    [Parameter(Mandatory = $true)][string] $FixturePath,
+    [Parameter(Mandatory = $true)][string] $FixtureSha256,
+    [Parameter(Mandatory = $true)][string] $ScratchRoot
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
+$ExpectedSpecHash = 'b2170ad15314a46ccfe3c597fa64d08d9c941142c315dd48def051323159365e'
+$ExpectedRecoverySpecHash = '41b1ef9a15eeab3d3d12ac974c6a77c4d26da36e06ef5512cdd28c961bf4d8ad'
+$ExpectedNodeHash = '63c259c81e5d472b5f11c8d506070130cb04a1ecf84b80377a34ed6ec9048088'
+$ExpectedJobRunnerHash = '47a08af66ef3134fefeee392e5578be9295e5171dca83c8861822d7e464ff627'
+$ExpectedBoundedProcessLibraryHash = '09cc5b729365b8e41b276117b54888dd58d0f2dc89b08a21db1f64853cfa82af'
+$ExpectedProcessOwnerHash = '21ba11605b4bb06b5d94eb8d8d013a675c7c6f7d2d15bed89ac626d7e7cdbc1e'
+$ExpectedTsxCliHash = '0ef1d6f8dee95174853c479fb4d9ffdcebf755125a0b477a1236bac331ccf9d5'
+$ExpectedTsxPackageHash = '4321447dcfb5bc39e683e6a49555bfb6dadc4543fc64baf5cc43020e9c1775a1'
+$ExpectedPackageLockHash = 'a7563e82e39489befde85608276a5739f1b5d4d924e13b33c50829d28f9178b8'
+$ExpectedTests = 20
+$SbtTimeoutMilliseconds = 300000
+$TerminationGraceMilliseconds = 15000
+$MaxOutputBytes = 4MB
+$MaxOwnerOutputBytes = $MaxOutputBytes + 64KB
+$PatchFiles = [ordered]@{
+    'src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala' =
+        'e19af43eed37fa4ed70a7ab7bd7656e5a263be0e69992ec0f5bfbd8cf25db319'
+    'src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala' =
+        'd7bbc0a3c8da6ed3cbf25f517ccb0d6638dd77205ccf0e8433cf35b1fdcc0869'
+}
+
+function Resolve-RealPath([string] $Path, [bool] $Directory) {
+    if (-not [IO.Path]::IsPathRooted($Path) -or $Path -match '["\r\n]') {
+        throw 'Expected an absolute path without SBT command delimiters'
+    }
+    $item = Get-Item -LiteralPath (Resolve-Path -LiteralPath $Path).Path
+    if ($item.PSIsContainer -ne $Directory) { throw 'Unexpected path kind' }
+    $current = $item
+    while ($null -ne $current) {
+        if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Reparse points are not permitted in fixture paths'
+        }
+        $current = if ($current -is [IO.DirectoryInfo]) { $current.Parent } else { $current.Directory }
+    }
+    return $item.FullName
+}
+
+function Assert-Hash([string] $Path, [string] $Expected) {
+    if ($Expected -cnotmatch '^[0-9a-f]{64}$' -or
+        (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Expected) {
+        throw "Input digest mismatch: $Path"
+    }
+}
+
+function Assert-NodeSource {
+    $head = (& $GitPath -C $ErgoNodeRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $head -cne $ExpectedNodeCommit) { throw 'Ergo source commit mismatch' }
+    $status = @(& $GitPath -C $ErgoNodeRoot status --short --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect Ergo source status' }
+    $expected = @($PatchFiles.Keys | ForEach-Object { " M $_" })
+    if (@(Compare-Object $status $expected -CaseSensitive).Count -ne 0) {
+        throw 'Ergo source must contain only the two pinned candidate changes'
+    }
+    foreach ($entry in $PatchFiles.GetEnumerator()) {
+        Assert-Hash (Join-Path $ErgoNodeRoot $entry.Key) $entry.Value
+    }
+}
+
+function ConvertTo-BridgeBase64([string] $Value) {
+    return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Value))
+}
+
+function Remove-OwnedScratchChildren([string] $Parent) {
+    $prefix = $Parent.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    foreach ($child in @(Get-ChildItem -LiteralPath $Parent -Force)) {
+        $childPath = [IO.Path]::GetFullPath($child.FullName)
+        if (-not $child.PSIsContainer -or
+            $child.Name -cnotmatch '^native-tracker-mempool-[A-Za-z0-9-]+$' -or
+            -not $childPath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $child.Parent.FullName.Equals($Parent, [StringComparison]::OrdinalIgnoreCase) -or
+            ($child.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw 'Scratch cleanup found an unowned or unsafe direct child'
+        }
+        $pending = New-Object 'Collections.Generic.Stack[IO.DirectoryInfo]'
+        $pending.Push($child)
+        while ($pending.Count -gt 0) {
+            $directory = $pending.Pop()
+            foreach ($entry in @(Get-ChildItem -LiteralPath $directory.FullName -Force)) {
+                $entryPath = [IO.Path]::GetFullPath($entry.FullName)
+                if (-not $entryPath.StartsWith(
+                    $childPath + [IO.Path]::DirectorySeparatorChar,
+                    [StringComparison]::OrdinalIgnoreCase) -or
+                    ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                    throw 'Scratch cleanup found an unsafe descendant'
+                }
+                if ($entry.PSIsContainer) { $pending.Push($entry) }
+            }
+        }
+        $confirmed = Get-Item -LiteralPath $childPath -Force
+        if ($confirmed.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Scratch cleanup child changed after verification'
+        }
+        Remove-Item -LiteralPath $childPath -Recurse -Force
+    }
+    if (@(Get-ChildItem -LiteralPath $Parent -Force).Count -ne 0) {
+        throw 'Synthetic state cleanup left scratch contents'
+    }
+}
+
+function Invoke-BoundedJob(
+    [string] $NodeExecutable,
+    [string] $TsxCli,
+    [string] $ProcessOwner,
+    [string] $Application,
+    [string[]] $Arguments,
+    [string] $WorkingDirectory,
+    [ref] $OwnerReturned
+) {
+    $request = [ordered]@{
+        executablePath = $Application
+        args = @($Arguments)
+        cwd = $WorkingDirectory
+        timeoutMs = $SbtTimeoutMilliseconds
+        maxOutputBytes = $MaxOutputBytes
+        terminationGraceMs = $TerminationGraceMilliseconds
+    }
+    $requestEnvironmentKey = 'E2S_NATIVE_TRACKER_MEMPOOL_PROCESS_REQUEST_B64'
+    $priorValue = [Environment]::GetEnvironmentVariable($requestEnvironmentKey, 'Process')
+    try {
+        $requestJson = ConvertTo-Json -Compress -Depth 4 -InputObject $request
+        [Environment]::SetEnvironmentVariable(
+            $requestEnvironmentKey,
+            (ConvertTo-BridgeBase64 $requestJson),
+            'Process')
+        try {
+            $priorErrorActionPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $records = @(& $NodeExecutable $TsxCli $ProcessOwner 2>&1)
+                $exitCode = $LASTEXITCODE
+                $OwnerReturned.Value = $true
+            } finally {
+                $ErrorActionPreference = $priorErrorActionPreference
+            }
+        } finally {
+            [Environment]::SetEnvironmentVariable($requestEnvironmentKey, $priorValue, 'Process')
+        }
+        $output = @($records | ForEach-Object { [string]$_ }) -join [Environment]::NewLine
+        if ([Text.Encoding]::UTF8.GetByteCount($output) -gt $MaxOwnerOutputBytes) {
+            throw 'Bounded process owner output exceeded its envelope'
+        }
+        if ($output.Length -gt 0) { Write-Host $output.TrimEnd() }
+        if ($exitCode -ne 0) {
+            throw "Pinned native tracker mempool validation failed with exit code $exitCode"
+        }
+        return $output
+    } finally {
+        [Environment]::SetEnvironmentVariable($requestEnvironmentKey, $priorValue, 'Process')
+    }
+}
+
+$BridgeRoot = Resolve-RealPath ([IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))) $true
+$RelayerRoot = Resolve-RealPath (Join-Path $BridgeRoot 'relayer') $true
+$JobRunnerPath = Resolve-RealPath (Join-Path $BridgeRoot 'relayer/src/scripts/windows-job-process.ps1') $false
+$BoundedProcessLibraryPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/pinned-local-native-verifier-build.ts') $false
+$ProcessOwnerPath = Resolve-RealPath (Join-Path $RelayerRoot 'src/scripts/run-substrate-federated-native-tracker-mempool-process.ts') $false
+$TsxCliPath = Resolve-RealPath (Join-Path $RelayerRoot 'node_modules/tsx/dist/cli.mjs') $false
+$TsxPackagePath = Resolve-RealPath (Join-Path $RelayerRoot 'node_modules/tsx/package.json') $false
+$PackageLockPath = Resolve-RealPath (Join-Path $RelayerRoot 'package-lock.json') $false
+$ErgoNodeRoot = Resolve-RealPath $ErgoNodeRoot $true
+$GitPath = Resolve-RealPath $GitPath $false
+$NodePath = Resolve-RealPath $NodePath $false
+$JavaPath = Resolve-RealPath $JavaPath $false
+$SbtLauncherPath = Resolve-RealPath $SbtLauncherPath $false
+$FixturePath = Resolve-RealPath $FixturePath $false
+$ScratchRoot = Resolve-RealPath $ScratchRoot $true
+foreach ($sourceRoot in @($BridgeRoot, $ErgoNodeRoot)) {
+    foreach ($output in @($FixturePath, $ScratchRoot)) {
+        if ($output.Equals($sourceRoot, [StringComparison]::OrdinalIgnoreCase) -or
+            $output.StartsWith($sourceRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Synthetic fixture and state must be outside both source checkouts'
+        }
+    }
+}
+if (@(Get-ChildItem -LiteralPath $ScratchRoot -Force).Count -ne 0) { throw 'Scratch parent must be empty' }
+if ((Get-Item -LiteralPath $FixturePath).Length -gt 1MB) { throw 'Fixture exceeds its size bound' }
+foreach ($name in @('JAVA_TOOL_OPTIONS', '_JAVA_OPTIONS', 'JDK_JAVA_OPTIONS', 'SBT_OPTS')) {
+    if ([Environment]::GetEnvironmentVariable($name)) { throw "Unreviewed JVM option variable: $name" }
+}
+foreach ($name in @('NODE_OPTIONS', 'NODE_PATH', 'TSX_TSCONFIG_PATH')) {
+    if ([Environment]::GetEnvironmentVariable($name)) { throw "Unreviewed Node or tsx option variable: $name" }
+}
+if ($env:SIGMASTATE_VERSION -and $env:SIGMASTATE_VERSION -cne '6.0.2') {
+    throw 'Pinned node requires SigmaState 6.0.2'
+}
+Assert-Hash $GitPath '81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5'
+Assert-Hash $NodePath $ExpectedNodeHash
+Assert-Hash $JavaPath '69ae5108b20bb132442ebe756a41e67f9b33b65b7ae6dc2a87b3b04947bab19e'
+Assert-Hash $SbtLauncherPath 'b4c0c55d68f11b1510d884641cb1b1456191dac40ddc958bf86c825adc344e16'
+Assert-Hash $JobRunnerPath $ExpectedJobRunnerHash
+Assert-Hash $BoundedProcessLibraryPath $ExpectedBoundedProcessLibraryHash
+Assert-Hash $ProcessOwnerPath $ExpectedProcessOwnerHash
+Assert-Hash $TsxCliPath $ExpectedTsxCliHash
+Assert-Hash $TsxPackagePath $ExpectedTsxPackageHash
+Assert-Hash $PackageLockPath $ExpectedPackageLockHash
+$spec = Resolve-RealPath (Join-Path $PSScriptRoot 'BridgeSubstrateFederatedNativeTrackerMempoolSpec.scala') $false
+Assert-NodeSource
+Assert-Hash $spec $ExpectedSpecHash
+$recoverySpec = Resolve-RealPath (Join-Path $PSScriptRoot 'BridgeCandidateApplicationRecoverySpec.scala') $false
+Assert-Hash $recoverySpec $ExpectedRecoverySpecHash
+Assert-Hash $FixturePath $FixtureSha256
+$cache = Resolve-RealPath (Join-Path $env:LOCALAPPDATA 'Coursier/cache/v1/https/repo1.maven.org/maven2') $true
+$boot = Resolve-RealPath (Join-Path $env:USERPROFILE '.sbt/boot') $true
+# Offline launcher and environment match the isolated node build configuration boundary.
+$offlineRoot = Join-Path $ScratchRoot ('native-tracker-mempool-offline-' + [Guid]::NewGuid().ToString('N'))
+if (Test-Path -LiteralPath $offlineRoot) { throw 'Offline configuration must be fresh' }
+[IO.Directory]::CreateDirectory($offlineRoot) | Out-Null
+$offlineRoot = Resolve-RealPath $offlineRoot $true
+foreach ($directory in @('home', 'appdata', 'localappdata', 'coursier-config', 'global', 'global-cache', 'ivy', 'temp', 'powershell-cache', 'empty')) {
+    [IO.Directory]::CreateDirectory((Join-Path $offlineRoot $directory)) | Out-Null
+}
+$empty = Resolve-RealPath (Join-Path $offlineRoot 'empty') $true
+$cacheUri = ([Uri]($cache.TrimEnd('\') + '\')).AbsoluteUri
+$emptyUri = ([Uri]($empty.TrimEnd('\') + '\')).AbsoluteUri
+$repoBytes = [Text.Encoding]::UTF8.GetBytes("[repositories]`n  bridge-maven-central-cache: $cacheUri`n  bridge-empty-offline: $emptyUri, bootOnly`n")
+$repositories = Join-Path $offlineRoot 'repositories'
+$stream = [IO.File]::Open($repositories, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+try { $stream.Write($repoBytes, 0, $repoBytes.Length) } finally { $stream.Dispose() }
+$repositories = Resolve-RealPath $repositories $false
+if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($repositories)) -cne [Convert]::ToBase64String($repoBytes)) {
+    throw 'File-only launcher repositories differ from the reviewed template'
+}
+$prefix = 'bridge.substrate.federated.native.tracker.mempool.'
+$arguments = @(
+    '-Xmx4G', '-Dsbt.supershell=false', '-Dsbt.log.noformat=true', '-Dsbt.offline=true',
+    '-Dsbt.server.autostart=false', '-Dsbt.override.build.repos=false', '-Djava.net.useSystemProxies=false',
+    "-Dsbt.repository.config=$repositories", "-Dsbt.boot.directory=$boot",
+    "-Dsbt.global.base=$offlineRoot/global", "-Dsbt.ivy.home=$offlineRoot/ivy",
+    "-Dsbt.global.localcache=$offlineRoot/global-cache", "-Duser.home=$offlineRoot/home",
+    "-Djava.io.tmpdir=$offlineRoot/temp",
+    "-D${prefix}root=$ErgoNodeRoot", "-D${prefix}fixture=$FixturePath",
+    "-D${prefix}fixture.sha256=$FixtureSha256", "-D${prefix}scratch=$ScratchRoot",
+    "-Dbridge.candidate.solved.application.root=$ErgoNodeRoot",
+    "-Dbridge.candidate.solved.application.scratch=$ScratchRoot",
+    '-jar', $SbtLauncherPath,
+    'set offline := true', 'set logLevel := Level.Info',
+    'set Test / fork := false', 'set Test / parallelExecution := false',
+    ('set Test / unmanagedSources := Seq(file("' + $spec.Replace('\', '/') + '"), file("' + $recoverySpec.Replace('\', '/') + '"))'),
+    'Test / testOnly org.ergoplatform.bridge.BridgeSubstrateFederatedNativeTrackerMempoolSpec org.ergoplatform.mining.BridgeCandidateApplicationRecoverySpec'
+)
+$result = $null
+$primaryError = $null
+$ownerReturned = $false
+$systemRoot = Resolve-RealPath $env:SystemRoot $true
+$childEnvironment = @{
+    APPDATA = "$offlineRoot/appdata"; CI = 'true'
+    COURSIER_CACHE = (Resolve-RealPath (Join-Path $env:LOCALAPPDATA 'Coursier/cache/v1') $true)
+    COURSIER_CONFIG_DIR = "$offlineRoot/coursier-config"; COURSIER_MODE = 'offline'
+    HOME = "$offlineRoot/home"; USERPROFILE = "$offlineRoot/home"
+    JAVA_HOME = (Split-Path -Parent (Split-Path -Parent $JavaPath))
+    LOCALAPPDATA = "$offlineRoot/localappdata"; NO_COLOR = '1'
+    PATH = (Split-Path -Parent $JavaPath)
+    PSModuleAnalysisCachePath = "$offlineRoot/powershell-cache/ModuleAnalysisCache"
+    SCALA_CLI_CONFIG = "$offlineRoot/scala-cli-config.json"
+    SystemRoot = $systemRoot; WINDIR = $systemRoot
+    TEMP = "$offlineRoot/temp"; TMP = "$offlineRoot/temp"
+}
+$savedEnvironment = [Environment]::GetEnvironmentVariables('Process')
+try {
+    foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable([string]$name, $null, 'Process') }
+    foreach ($name in $childEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $childEnvironment[$name], 'Process') }
+    $result = Invoke-BoundedJob $NodePath $TsxCliPath $ProcessOwnerPath $JavaPath $arguments $ErgoNodeRoot ([ref]$ownerReturned)
+    $counts = [regex]::Matches($result, '(?m)^\[info\] Total number of tests run: ([0-9]+)\r?$')
+    if ($ExpectedTests -lt 1 -or $counts.Count -ne 1 -or
+        $counts[0].Groups[1].Value -cne [string]$ExpectedTests -or $result -notmatch 'All tests passed') {
+        throw 'Pinned node did not report the complete expected test set'
+    }
+} catch {
+    $primaryError = $_.Exception
+} finally {
+    foreach ($name in [Environment]::GetEnvironmentVariables('Process').Keys) { [Environment]::SetEnvironmentVariable([string]$name, $null, 'Process') }
+    foreach ($name in $savedEnvironment.Keys) { [Environment]::SetEnvironmentVariable([string]$name, [string]$savedEnvironment[$name], 'Process') }
+    $closeoutErrors = New-Object 'Collections.Generic.List[Exception]'
+    try { Assert-NodeSource } catch { $closeoutErrors.Add($_.Exception) }
+    try { Assert-Hash $spec $ExpectedSpecHash } catch { $closeoutErrors.Add($_.Exception) }
+    try { Assert-Hash $recoverySpec $ExpectedRecoverySpecHash } catch { $closeoutErrors.Add($_.Exception) }
+    try { Assert-Hash $FixturePath $FixtureSha256 } catch { $closeoutErrors.Add($_.Exception) }
+    if ($ownerReturned) {
+        try { Remove-OwnedScratchChildren $ScratchRoot } catch { $closeoutErrors.Add($_.Exception) }
+    } elseif (@(Get-ChildItem -LiteralPath $ScratchRoot -Force).Count -ne 0) {
+        $closeoutErrors.Add([InvalidOperationException]::new(
+            'Scratch cleanup withheld because process containment was not confirmed'))
+    }
+    if ($null -ne $primaryError) { $closeoutErrors.Insert(0, $primaryError) }
+    if ($closeoutErrors.Count -eq 1) { throw $closeoutErrors[0] }
+    if ($closeoutErrors.Count -gt 1) {
+        throw [AggregateException]::new('Native tracker mempool validation and closeout failed', $closeoutErrors.ToArray())
+    }
+}
+Write-Output 'native_tracker_synthetic_mempool=PASS'
+Write-Output "tests=$ExpectedTests"
+Write-Output 'chain_resident_acceptance=false'
+Write-Output 'node_services_started=false'
+Write-Output 'campaign_failure_cause_established=false'

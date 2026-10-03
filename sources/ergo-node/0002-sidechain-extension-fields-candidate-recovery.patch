@@ -1,0 +1,651 @@
+diff --git a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+index bfa0fe6..1d82715 100644
+--- a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
++++ b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
+@@ -8,7 +8,7 @@ import org.ergoplatform.mining.AutolykosPowScheme.derivedHeaderFields
+ import org.ergoplatform.mining.difficulty.DifficultySerializer
+ import org.ergoplatform.modifiers.ErgoFullBlock
+ import org.ergoplatform.modifiers.history._
+-import org.ergoplatform.modifiers.history.extension.Extension
++import org.ergoplatform.modifiers.history.extension.{Extension, ExtensionCandidate}
+ import org.ergoplatform.modifiers.history.header.{Header, HeaderWithoutPow}
+ import org.ergoplatform.modifiers.history.popow.NipopowAlgos
+ import org.ergoplatform.modifiers.mempool.{ErgoTransaction, UnconfirmedTransaction}
+@@ -19,8 +19,8 @@ import org.ergoplatform.nodeView.LocallyGeneratedModifier
+ import org.ergoplatform.nodeView.history.ErgoHistoryUtils.Height
+ import org.ergoplatform.nodeView.history.{ErgoHistoryReader, ErgoHistoryUtils}
+ import org.ergoplatform.nodeView.mempool.ErgoMemPoolReader
+-import org.ergoplatform.nodeView.state.{ErgoState, ErgoStateContext, StateType, UtxoStateReader}
+-import org.ergoplatform.settings.{ErgoSettings, ErgoValidationSettingsUpdate, Parameters}
++import org.ergoplatform.nodeView.state.{ErgoState, ErgoStateContext, StateType, UpcomingStateContext, UtxoStateReader}
++import org.ergoplatform.settings.{Constants, ErgoSettings, ErgoValidationSettingsUpdate, Parameters}
+ import org.ergoplatform.sdk.wallet.Constants.MaxAssetsPerBox
+ import org.ergoplatform.wallet.interpreter.ErgoInterpreter
+ import org.ergoplatform.{ErgoBox, ErgoBoxCandidate, ErgoTreePredef, Input}
+@@ -29,7 +29,7 @@ import scorex.util.encode.Base16
+ import scorex.util.{ModifierId, ScorexLogging}
+ import sigma.ast.syntax.ErgoBoxRType
+ import sigma.Extensions.ArrayOps
+-import sigma.crypto.CryptoFacade
++import sigma.crypto.{CryptoFacade, EcPointType}
+ import sigma.data.{Digest32Coll, ProveDlog}
+ import sigma.interpreter.ProverResult
+ import sigma.validation.ReplacedRule
+@@ -54,6 +54,8 @@ class CandidateGenerator(
+ 
+   private val candidateGenInterval =
+     ergoSettings.nodeSettings.blockCandidateGenerationInterval
++  private val requiredMiningTransactionIdHex =
++    CandidateGenerator.parseRequiredMiningTransactionId(sys.env)
+ 
+   /** retrieve Readers once on start and then get updated by events */
+   override def preStart(): Unit = {
+@@ -93,6 +95,7 @@ class CandidateGenerator(
+             cachedCandidate = None,
+             cachedPreviousCandidate = None,
+             solvedBlock = None,
++            requiredMiningTransactionConfirmed = requiredMiningTransactionIdHex.isEmpty,
+             h,
+             s,
+             m,
+@@ -103,6 +106,8 @@ class CandidateGenerator(
+       self ! GenerateCandidate(txsToInclude = Seq.empty, reply = false, forced = false)
+       context.system.eventStream
+         .subscribe(self, classOf[FullBlockApplied])
++      context.system.eventStream
++        .subscribe(self, classOf[SemanticallyFailedModification])
+       context.system.eventStream.subscribe(self, classOf[NodeViewChange])
+     case Readers(_, _, _, _) =>
+       log.error("Invalid readers state, mining is possible in UTXO mode only")
+@@ -118,7 +123,17 @@ class CandidateGenerator(
+     case ChangedState(s: UtxoStateReader) =>
+       context.become(initialized(state.copy(sr = s)))
+     case ChangedMempool(mp: ErgoMemPoolReader) =>
+-      if (hasCandidateExpired(
++      val activeRequiredMiningTransactionIdHex =
++        requiredMiningTransactionForCandidate(
++          requiredMiningTransactionIdHex,
++          state.requiredMiningTransactionConfirmed
++        )
++      val requiredMiningTransactionArrived =
++        activeRequiredMiningTransactionIdHex.nonEmpty && containsRequiredMiningTransaction(
++          activeRequiredMiningTransactionIdHex,
++          mp.getAllPrioritized.map(_.id)
++        )
++      if (requiredMiningTransactionArrived || hasCandidateExpired(
+         state.cachedCandidate,
+         state.solvedBlock,
+         candidateGenInterval
+@@ -131,6 +146,14 @@ class CandidateGenerator(
+       } else {
+         context.become(initialized(state.copy(mpr = mp)))
+       }
++    case SemanticallyFailedModification(typeId, modifierId, error)
++        if typeId == ErgoFullBlock.modifierTypeId && state.solvedBlock.exists(_.id == modifierId) =>
++      log.warn(s"Clearing solved candidate after semantic rejection of block $modifierId: ${error.getMessage}")
++      context.become(initialized(state.copy(
++        cachedCandidate = None,
++        cachedPreviousCandidate = None,
++        solvedBlock = None
++      )))
+     case _: NodeViewChange =>
+     // Just ignore all other NodeView Changes
+ 
+@@ -142,19 +165,43 @@ class CandidateGenerator(
+       log.info(
+         s"Preparing new candidate on getting new block at ${header.height}"
+       )
++      val requiredMiningTransactionConfirmed =
++        state.requiredMiningTransactionConfirmed ||
++          state.solvedBlock.exists(block =>
++            requiredMiningTransactionConfirmedByAppliedBlock(
++              requiredMiningTransactionIdHex,
++              header.id,
++              block.id,
++              block.transactions.map(_.id)
++            )
++          )
++      val stateAfterAppliedBlock = state.copy(
++        requiredMiningTransactionConfirmed = requiredMiningTransactionConfirmed
++      )
+       if (needNewCandidate(state.cachedCandidate, header)) {
+         if (needNewSolution(state.solvedBlock, header.id))
+-          context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None, solvedBlock = None)))
++          context.become(initialized(stateAfterAppliedBlock.copy(cachedCandidate = None, cachedPreviousCandidate = None, solvedBlock = None)))
+         else
+-          context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
++          context.become(initialized(stateAfterAppliedBlock.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
+         self ! GenerateCandidate(txsToInclude = Seq.empty, reply = false, forced = false)
+       } else {
+-        context.become(initialized(state))
++        context.become(initialized(stateAfterAppliedBlock))
+       }
+ 
+     case gen @ GenerateCandidate(txsToInclude, reply, forced) =>
+       val senderOpt = if (reply) Some(sender()) else None
+-      if (!forced && cachedFor(state.cachedCandidate, txsToInclude)) {
++      val activeRequiredMiningTransactionIdHex =
++        requiredMiningTransactionForCandidate(
++          requiredMiningTransactionIdHex,
++          state.requiredMiningTransactionConfirmed
++        )
++      val cachedCandidateSatisfiesMiningRequirement =
++        state.cachedCandidate.exists(candidate => containsRequiredMiningTransaction(
++          activeRequiredMiningTransactionIdHex,
++          candidate.candidateBlock.transactions.map(_.id)
++        ))
++      if (!forced && cachedFor(state.cachedCandidate, txsToInclude) &&
++        cachedCandidateSatisfiesMiningRequirement) {
+         senderOpt.foreach(_ ! StatusReply.success(state.cachedCandidate.get))
+       } else {
+         val start = System.currentTimeMillis()
+@@ -164,7 +211,8 @@ class CandidateGenerator(
+           state.mpr,
+           minerPk,
+           txsToInclude,
+-          ergoSettings
++          ergoSettings,
++          activeRequiredMiningTransactionIdHex
+         ) match {
+           case Some(Failure(ex)) =>
+             log.error(s"Candidate generation failed", ex)
+@@ -211,16 +259,32 @@ class CandidateGenerator(
+           .filter(block => ergoSettings.chainSettings.powScheme.validate(block.header).isSuccess)
+           .getOrElse {
+             log.info(s"Using previous candidate as a solution: " + state.cachedPreviousCandidate)
+-            completeBlock(state.cachedPreviousCandidate.get.candidateBlock, solution)
++            completeBlock(
++              state.cachedPreviousCandidate.getOrElse(state.cachedCandidate.get).candidateBlock,
++              solution
++            )
+           }
+         log.info(s"New block mined, header: ${newBlock.header}")
+         ergoSettings.chainSettings.powScheme
+           .validate(newBlock.header)
+           .map(_ => newBlock) match {
+-          case Success(newBlock) =>
++          case Success(newBlock) if solvedBlockSatisfiesMiningRequirement(
++            requiredMiningTransactionIdHex,
++            state.requiredMiningTransactionConfirmed,
++            newBlock.transactions.map(_.id)
++          ) =>
+             sendToNodeView(newBlock)
+             context.become(initialized(state.copy(solvedBlock = Some(newBlock))))
+             StatusReply.success(())
++          case Success(_) =>
++            log.warn("Removing candidates because the solved block omitted the required mining transaction")
++            context.become(initialized(state.copy(
++              cachedCandidate = None,
++              cachedPreviousCandidate = None
++            )))
++            StatusReply.error(
++              new Exception("Solved block omitted the required mining transaction")
++            )
+           case Failure(exception) =>
+             log.warn(s"Removing candidates due to invalid block", exception)
+             context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
+@@ -243,6 +307,54 @@ class CandidateGenerator(
+ 
+ object CandidateGenerator extends ScorexLogging {
+ 
++  val SidechainExtensionFieldsEnv = "ERGO_SIDECHAIN_EXTENSION_FIELDS"
++  val RequiredMiningTransactionIdEnv = "ERGO_SIDECHAIN_REQUIRED_MINING_TRANSACTION_ID"
++
++  private[ergoplatform] def parseRequiredMiningTransactionId(
++    environment: collection.Map[String, String]
++  ): Option[String] =
++    environment.get(RequiredMiningTransactionIdEnv).map { value =>
++      require(
++        value.length == 64 && value.forall(character =>
++          character >= '0' && character <= '9' || character >= 'a' && character <= 'f'
++        ),
++        s"$RequiredMiningTransactionIdEnv must be 32-byte lowercase hexadecimal"
++      )
++      value
++    }
++
++  private[ergoplatform] def containsRequiredMiningTransaction(
++    requiredTransactionIdHex: Option[String],
++    transactionIds: Seq[String]
++  ): Boolean =
++    requiredTransactionIdHex.forall(transactionIds.contains)
++
++  private[ergoplatform] def requiredMiningTransactionForCandidate(
++    requiredTransactionIdHex: Option[String],
++    confirmed: Boolean
++  ): Option[String] =
++    if (confirmed) None else requiredTransactionIdHex
++
++  private[ergoplatform] def solvedBlockSatisfiesMiningRequirement(
++    requiredTransactionIdHex: Option[String],
++    confirmed: Boolean,
++    solvedTransactionIds: Seq[String]
++  ): Boolean =
++    containsRequiredMiningTransaction(
++      requiredMiningTransactionForCandidate(requiredTransactionIdHex, confirmed),
++      solvedTransactionIds
++    )
++
++  private[ergoplatform] def requiredMiningTransactionConfirmedByAppliedBlock(
++    requiredTransactionIdHex: Option[String],
++    appliedBlockId: String,
++    locallySolvedBlockId: String,
++    locallySolvedTransactionIds: Seq[String]
++  ): Boolean =
++    appliedBlockId == locallySolvedBlockId && requiredTransactionIdHex.exists(
++      locallySolvedTransactionIds.contains
++    )
++
+   /**
+     * Holder for both candidate block and data for external miners derived from it
+     * (to avoid possibly costly recalculation)
+@@ -268,6 +380,7 @@ object CandidateGenerator extends ScorexLogging {
+     cachedCandidate: Option[Candidate],
+     cachedPreviousCandidate: Option[Candidate],
+     solvedBlock: Option[ErgoFullBlock],
++    requiredMiningTransactionConfirmed: Boolean,
+     hr: ErgoHistoryReader,
+     sr: UtxoStateReader,
+     mpr: ErgoMemPoolReader,
+@@ -368,6 +481,72 @@ object CandidateGenerator extends ScorexLogging {
+   private def inputsNotSpent(tx: ErgoTransaction, s: UtxoStateReader): Boolean =
+     tx.inputs.forall(inp => s.boxById(inp.boxId).isDefined)
+ 
++  private[mining] def parseSidechainExtensionFields(raw: String): ExtensionCandidate = {
++    val fields = raw
++      .split("[,;]")
++      .toSeq
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map { entry =>
++        val parts = entry.split(":", 2).map(_.trim)
++        require(
++          parts.length == 2,
++          s"$SidechainExtensionFieldsEnv entries must use keyHex:valueHex format"
++        )
++
++        val key = Base16.decode(parts(0)).get
++        val value = Base16.decode(parts(1)).get
++
++        require(
++          key.lengthCompare(Extension.FieldKeySize) == 0,
++          s"Sidechain extension key ${parts(0)} must be ${Extension.FieldKeySize} bytes"
++        )
++        require(
++          key.headOption.contains(0x04.toByte),
++          s"Sidechain extension key ${parts(0)} must use the 0x04 key space"
++        )
++        require(
++          value.lengthCompare(Extension.FieldValueMaxSize) <= 0,
++          s"Sidechain extension value for ${parts(0)} exceeds ${Extension.FieldValueMaxSize} bytes"
++        )
++
++        key -> value
++      }
++
++    val encodedKeys = fields.map { case (key, _) => Base16.encode(key) }
++    require(
++      encodedKeys.distinct.length == encodedKeys.length,
++      s"$SidechainExtensionFieldsEnv contains duplicate keys"
++    )
++
++    ExtensionCandidate(fields)
++  }
++
++  private[mining] def sidechainExtensionFieldsFromEnv(): ExtensionCandidate =
++    sys.env
++      .get(SidechainExtensionFieldsEnv)
++      .map(_.trim)
++      .filter(_.nonEmpty)
++      .map(parseSidechainExtensionFields)
++      .getOrElse(ExtensionCandidate(Seq.empty))
++
++  private[mining] def appendConfiguredSidechainExtensionFields(base: ExtensionCandidate): ExtensionCandidate = {
++    val extra = sidechainExtensionFieldsFromEnv()
++    if (extra.fields.isEmpty) {
++      base
++    } else {
++      val duplicate = base.fields.exists { case (existingKey, _) =>
++        extra.fields.exists { case (extraKey, _) => existingKey sameElements extraKey }
++      }
++      require(
++        !duplicate,
++        s"$SidechainExtensionFieldsEnv duplicates an existing extension key"
++      )
++      log.info(s"Appending ${extra.fields.size} configured sidechain extension fields")
++      base ++ extra
++    }
++  }
++
+   /**
+     * @return None if chain is not synced or Some of attempt to create candidate
+     */
+@@ -377,7 +556,8 @@ object CandidateGenerator extends ScorexLogging {
+     m: ErgoMemPoolReader,
+     pk: ProveDlog,
+     txsToInclude: Seq[ErgoTransaction],
+-    ergoSettings: ErgoSettings
++    ergoSettings: ErgoSettings,
++    requiredMiningTransactionIdHex: Option[String] = None
+   ): Option[Try[(Candidate, EliminateTransactions)]] = {
+     // mandatory transactions to include into next block taken from the previous candidate
+     val stateWithMandatoryTxs = s.withTransactions(txsToInclude)
+@@ -399,7 +579,13 @@ object CandidateGenerator extends ScorexLogging {
+     def hasAnyMemPoolOrMinerTx =
+       poolTransactions.nonEmpty || unspentTxsToInclude.nonEmpty || emissionTxOpt.nonEmpty
+ 
+-    if (!hasAnyMemPoolOrMinerTx) {
++    if (!containsRequiredMiningTransaction(
++      requiredMiningTransactionIdHex,
++      poolTransactions.map(_.id)
++    )) {
++      log.info("Avoiding candidate generation until the required mining transaction is in the mempool")
++      None
++    } else if (!hasAnyMemPoolOrMinerTx) {
+       log.info(s"Avoiding generation of a block without any transactions")
+       None
+     } else if (!chainSynced) {
+@@ -427,7 +613,15 @@ object CandidateGenerator extends ScorexLogging {
+           emissionTxOpt,
+           unspentTxsToInclude,
+           ergoSettings
+-        )
++        ).flatMap { result =>
++          if (containsRequiredMiningTransaction(
++            requiredMiningTransactionIdHex,
++            result._1.candidateBlock.transactions.map(_.id)
++          )) Success(result)
++          else Failure(new IllegalStateException(
++            "Required mining transaction was not retained in the candidate"
++          ))
++        }
+       )
+     }
+   }
+@@ -482,6 +676,32 @@ object CandidateGenerator extends ScorexLogging {
+       nextHeightCondition
+   }
+ 
++  /**
++    * Build the transaction execution context for a block candidate. The predicted
++    * header consumes one of the consensus context's fixed header slots, so only
++    * its nine predecessors are exposed to scripts once the state has a full window.
++    */
++  private[ergoplatform] def candidateExecutionContext(
++    stateContext: ErgoStateContext,
++    minerPk: EcPointType,
++    timestamp: Long,
++    nBits: Long,
++    votes: Array[Byte],
++    proposedUpdate: ErgoValidationSettingsUpdate,
++    version: Byte
++  ): UpcomingStateContext = {
++    val upcoming = stateContext.upcoming(minerPk, timestamp, nBits, votes, proposedUpdate, version)
++    UpcomingStateContext(
++      upcoming.lastHeaders.take(Constants.LastHeadersInContext - 1),
++      upcoming.lastExtensionOpt,
++      upcoming.predictedHeader,
++      upcoming.genesisStateDigest,
++      upcoming.currentParameters,
++      upcoming.validationSettings,
++      upcoming.votingData
++    )(upcoming.chainSettings)
++  }
++
+   /**
+     * Assemble correct block candidate based on
+     *
+@@ -567,7 +787,11 @@ object CandidateGenerator extends ScorexLogging {
+           (interlinksExtension, Array(0: Byte, 0: Byte, 0: Byte), Header.InitialVersion)
+         )
+ 
+-      val upcomingContext = state.stateContext.upcoming(
++      val extensionCandidateWithSidechainFields =
++        appendConfiguredSidechainExtensionFields(extensionCandidate)
++
++      val upcomingContext = candidateExecutionContext(
++        state.stateContext,
+         minerPk.value,
+         timestamp,
+         nBits,
+@@ -624,7 +848,7 @@ object CandidateGenerator extends ScorexLogging {
+             adProof,
+             txs,
+             timestamp,
+-            extensionCandidate,
++            extensionCandidateWithSidechainFields,
+             votes
+           )
+           val ext = deriveWorkMessage(candidate)
+@@ -656,7 +880,7 @@ object CandidateGenerator extends ScorexLogging {
+                     adProof,
+                     fallbackTxs,
+                     timestamp,
+-                    extensionCandidate,
++                    extensionCandidateWithSidechainFields,
+                     votes
+                   )
+                   Candidate(
+diff --git a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+index 1c394b2..fdfbf97 100644
+--- a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
++++ b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
+@@ -13,11 +13,12 @@ import org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.FullBlockApplie
+ import org.ergoplatform.nodeView.ErgoNodeViewHolder.ReceivableMessages.LocallyGeneratedTransaction
+ import org.ergoplatform.nodeView.ErgoReadersHolder.{GetReaders, Readers}
+ import org.ergoplatform.nodeView.history.ErgoHistoryReader
+-import org.ergoplatform.nodeView.state.StateType
++import org.ergoplatform.nodeView.state.{ErgoStateContext, StateType}
+ import org.ergoplatform.nodeView.{ErgoNodeViewRef, ErgoReadersHolderRef}
+ import org.ergoplatform.settings.NetworkType.DevNet60
+-import org.ergoplatform.settings.{ErgoSettings, ErgoSettingsReader}
++import org.ergoplatform.settings.{Constants, ErgoSettings, ErgoSettingsReader}
+ import org.ergoplatform.utils.ErgoTestHelpers
++import org.ergoplatform.utils.generators.ChainGenerator
+ import org.ergoplatform.{ErgoBox, ErgoBoxCandidate, ErgoTreePredef, Input}
+ import org.scalatest.concurrent.Eventually
+ import org.scalatest.flatspec.AnyFlatSpec
+@@ -56,6 +57,203 @@ class CandidateGeneratorSpec extends AnyFlatSpec with Matchers with ErgoTestHelp
+ 
+   private val defaultSettings60 = defaultSettings.copy(networkType = DevNet60, directory = defaultSettings.directory + "60")
+ 
++  it should "parse configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++    val candidate = CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex")
++
++    candidate.fields.length shouldBe 1
++    Base16.encode(candidate.fields.head._1) shouldBe "0401"
++    Base16.encode(candidate.fields.head._2) shouldBe valueHex
++  }
++
++  it should "reject extension fields outside the sidechain key space" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0301:$valueHex")
++    }.getMessage should include("0x04 key space")
++  }
++
++  it should "reject duplicate configured sidechain extension fields" in {
++    val valueHex = "ab" * 32
++
++    intercept[IllegalArgumentException] {
++      CandidateGenerator.parseSidechainExtensionFields(s"0401:$valueHex,0401:$valueHex")
++    }.getMessage should include("duplicate keys")
++  }
++
++  it should "parse an exact required mining transaction ID" in {
++    val transactionId = "ab" * 32
++
++    CandidateGenerator.parseRequiredMiningTransactionId(Map(
++      CandidateGenerator.RequiredMiningTransactionIdEnv -> transactionId
++    )) shouldBe Some(transactionId)
++    CandidateGenerator.parseRequiredMiningTransactionId(Map.empty) shouldBe None
++  }
++
++  it should "reject a malformed required mining transaction ID" in {
++    Seq("ab" * 31, "AB" * 32, "gg" * 32).foreach { transactionId =>
++      intercept[IllegalArgumentException] {
++        CandidateGenerator.parseRequiredMiningTransactionId(Map(
++          CandidateGenerator.RequiredMiningTransactionIdEnv -> transactionId
++        ))
++      }.getMessage should include("32-byte lowercase hexadecimal")
++    }
++  }
++
++  it should "require the exact bound transaction in both the mempool and candidate" in {
++    val required = "ab" * 32
++    val foreign = "cd" * 32
++
++    CandidateGenerator.containsRequiredMiningTransaction(None, Seq.empty) shouldBe true
++    CandidateGenerator.containsRequiredMiningTransaction(Some(required), Seq.empty) shouldBe false
++    CandidateGenerator.containsRequiredMiningTransaction(Some(required), Seq(foreign)) shouldBe false
++    CandidateGenerator.containsRequiredMiningTransaction(Some(required), Seq(foreign, required)) shouldBe true
++  }
++
++  it should "release the mining requirement only after the exact local block is applied" in {
++    val required = "ab" * 32
++    val foreign = "cd" * 32
++    val localBlockId = "ef" * 32
++    val foreignBlockId = "12" * 32
++
++    CandidateGenerator.requiredMiningTransactionForCandidate(Some(required), confirmed = false) shouldBe Some(required)
++    CandidateGenerator.requiredMiningTransactionForCandidate(Some(required), confirmed = true) shouldBe None
++    CandidateGenerator.solvedBlockSatisfiesMiningRequirement(
++      Some(required), confirmed = false, Seq(foreign)
++    ) shouldBe false
++    CandidateGenerator.solvedBlockSatisfiesMiningRequirement(
++      Some(required), confirmed = false, Seq(required)
++    ) shouldBe true
++    CandidateGenerator.solvedBlockSatisfiesMiningRequirement(
++      Some(required), confirmed = true, Seq(foreign)
++    ) shouldBe true
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      Some(required), localBlockId, localBlockId, Seq(foreign)
++    ) shouldBe false
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      Some(required), foreignBlockId, localBlockId, Seq(required)
++    ) shouldBe false
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      None, localBlockId, localBlockId, Seq(required)
++    ) shouldBe false
++    CandidateGenerator.requiredMiningTransactionConfirmedByAppliedBlock(
++      Some(required), localBlockId, localBlockId, Seq(foreign, required)
++    ) shouldBe true
++  }
++
++  it should "preserve an empty predecessor window in the candidate execution context" in {
++    val stateContext = ErgoStateContext.empty(chainSettings, parameters)
++    val expected = stateContext.upcoming(
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++    val actual = CandidateGenerator.candidateExecutionContext(
++      stateContext,
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++
++    actual.lastHeaders shouldBe empty
++    actual.lastExtensionOpt shouldBe expected.lastExtensionOpt
++    actual.predictedHeader shouldBe expected.predictedHeader
++    actual.genesisStateDigest shouldBe expected.genesisStateDigest
++    actual.currentParameters shouldBe expected.currentParameters
++    actual.validationSettings shouldBe expected.validationSettings
++    actual.votingData shouldBe expected.votingData
++  }
++
++  it should "preserve non-empty short predecessor windows in the candidate execution context" in {
++    Seq(1, 8).foreach { windowSize =>
++      val headers = ChainGenerator
++        .genHeaderChain(windowSize, diffBitsOpt = None, useRealTs = false)
++        .headers
++        .reverse
++      headers.size shouldBe windowSize
++      val emptyContext = ErgoStateContext.empty(chainSettings, parameters)
++      val stateContext = new ErgoStateContext(
++        headers,
++        None,
++        emptyContext.genesisStateDigest,
++        emptyContext.currentParameters,
++        emptyContext.validationSettings,
++        emptyContext.votingData
++      )(chainSettings)
++      val expected = stateContext.upcoming(
++        defaultMinerPkPoint,
++        defaultTimestamp,
++        defaultNBits,
++        defaultVotes,
++        emptyVSUpdate,
++        Header.InitialVersion
++      )
++      val actual = CandidateGenerator.candidateExecutionContext(
++        stateContext,
++        defaultMinerPkPoint,
++        defaultTimestamp,
++        defaultNBits,
++        defaultVotes,
++        emptyVSUpdate,
++        Header.InitialVersion
++      )
++
++      actual.lastHeaders.map(_.id) shouldBe expected.lastHeaders.map(_.id)
++      actual.sigmaLastHeaders.length shouldBe windowSize
++    }
++  }
++
++  it should "reserve the predicted-header slot in a full candidate execution context" in {
++    val headers = ChainGenerator
++      .genHeaderChain(Constants.LastHeadersInContext, diffBitsOpt = None, useRealTs = false)
++      .headers
++      .reverse
++    headers.size shouldBe Constants.LastHeadersInContext
++    val emptyContext = ErgoStateContext.empty(chainSettings, parameters)
++    val stateContext = new ErgoStateContext(
++      headers,
++      None,
++      emptyContext.genesisStateDigest,
++      emptyContext.currentParameters,
++      emptyContext.validationSettings,
++      emptyContext.votingData
++    )(chainSettings)
++    val expected = stateContext.upcoming(
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++    val actual = CandidateGenerator.candidateExecutionContext(
++      stateContext,
++      defaultMinerPkPoint,
++      defaultTimestamp,
++      defaultNBits,
++      defaultVotes,
++      emptyVSUpdate,
++      Header.InitialVersion
++    )
++
++    expected.lastHeaders.size shouldBe Constants.LastHeadersInContext
++    actual.lastHeaders.map(_.id) shouldBe headers.take(Constants.LastHeadersInContext - 1).map(_.id)
++    actual.sigmaLastHeaders.length shouldBe Constants.LastHeadersInContext - 1
++    actual.lastExtensionOpt shouldBe expected.lastExtensionOpt
++    actual.predictedHeader shouldBe expected.predictedHeader
++    actual.genesisStateDigest shouldBe expected.genesisStateDigest
++    actual.currentParameters shouldBe expected.currentParameters
++    actual.validationSettings shouldBe expected.validationSettings
++    actual.votingData shouldBe expected.votingData
++  }
++
+   it should "provider candidate to internal miner and verify and apply his solution" in new TestKit(
+     ActorSystem()
+   ) {

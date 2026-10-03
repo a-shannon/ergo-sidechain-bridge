@@ -9,6 +9,10 @@ import {
   type SubstrateFederatedCheckpointProfileV1Input,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
+  assertSubstrateFederatedSettlementFamilyCompilerBindingV1,
+  bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
+} from './substrate-federated-settlement-family-compiler-binding-v1.js';
+import {
   bindSubstrateFederatedSettlementFamilyJvmCompilerObservationV1,
   SUBSTRATE_FEDERATED_SETTLEMENT_FAMILY_JVM_COMPILER_RECEIPT_V1_SCHEMA,
   assertSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1,
@@ -220,6 +224,56 @@ describe('substrate federated settlement-family process-owned JVM compiler V1', 
       expect(targetReceipt.contracts[role].contractIdHex)
         .not.toBe(fixtureReceipt.contracts[role].contractIdHex);
     }
+  });
+
+  it('binds the exact same-process JVM family receipt for downstream producers', () => {
+    const expectedInput = familyCompilerInput(
+      fixtureTrackerRequest,
+      fixtureTrackerReceipt,
+    );
+    const binding =
+      bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1({
+        receipt: fixtureReceipt,
+        expectedInput,
+      });
+
+    assertSubstrateFederatedSettlementFamilyCompilerBindingV1(binding);
+    expect(binding.provenance).toEqual({
+      kind: 'same-process-pinned-jvm',
+      digestHex: fixtureReceipt.receiptDigestHex,
+    });
+    expect(binding.profile).toEqual(fixtureReceipt.profile);
+    for (const role of [
+      'duplicatePrevention',
+      'sourceLock',
+      'pooledReserve',
+    ] as const) {
+      expect(binding.contracts[role]).toEqual({
+        resolvedSourceSha256Hex:
+          fixtureReceipt.contracts[role].resolvedSourceSha256Hex,
+        propositionHex: fixtureReceipt.contracts[role].propositionHex,
+        contractIdHex: fixtureReceipt.contracts[role].contractIdHex,
+      });
+    }
+    expect(binding.boundaries).toMatchObject({
+      targetNodeAcceptanceEstablished: false,
+      signingAuthorityEstablished: false,
+      broadcastAuthorityEstablished: false,
+      fundsAuthorityEstablished: false,
+      gate5Closed: false,
+      trustlessStatusEstablished: false,
+      productionReadinessEstablished: false,
+    });
+    expect(() => assertSubstrateFederatedSettlementFamilyCompilerBindingV1(
+      structuredClone(binding),
+    )).toThrow(/same-process provenance/i);
+  });
+
+  it('rejects a JVM family receipt under a different exact compiler input', () => {
+    expect(() => bindSubstrateFederatedSettlementFamilyJvmCompilerReceiptV1({
+      receipt: fixtureReceipt,
+      expectedInput: siblingInput,
+    })).toThrow(/family binding drifted/i);
   });
 
   it('rejects copied tracker provenance and caller identity fields', async () => {

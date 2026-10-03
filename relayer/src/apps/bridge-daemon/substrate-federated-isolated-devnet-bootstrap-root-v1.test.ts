@@ -341,7 +341,7 @@ function validBuild() {
       processRunnerSha256Hex: digest('9'),
       timeoutMs: 900_000,
       terminationGraceMs: 10_000,
-      maxOutputBytes: 16_777_216,
+      maxOutputBytes: 33_554_432,
       artifactName: 'ergo-reviewed-SNAPSHOT.jar',
       artifactBytes: 78_000_000,
       artifactSha256Hex: digest('8'),

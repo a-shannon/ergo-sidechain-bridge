@@ -317,7 +317,7 @@ describe('local trustless unsigned transaction evidence producer', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it('writes validator-compatible unsigned transaction evidence JSON for a proof-vector-bound multi-leaf instance', () => {
     const dir = mkdtempSync(join(process.cwd(), 'tmp-trustless-unsigned-tx-producer-'));

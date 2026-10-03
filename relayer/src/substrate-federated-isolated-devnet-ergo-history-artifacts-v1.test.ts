@@ -18,12 +18,15 @@ import {
 } from './relayer-core/devnet-reward-consolidation.js';
 import {
   assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1Provenance,
+  assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance,
   collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1,
+  collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_HEADERS_V1_SCHEMA,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_TRANSACTIONS_V1_SCHEMA,
 } from './substrate-federated-isolated-devnet-ergo-history-artifacts-v1.js';
 import {
   discoverSubstrateFederatedRewardInputsV1,
+  discoverSubstrateFederatedRewardInputsV2,
   SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
   SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN,
   type SubstrateFederatedRewardSignerBindingV1,
@@ -61,7 +64,7 @@ interface NodeHeader extends Record<string, unknown> {
 
 interface NodeState {
   readonly headers: Map<string, NodeHeader>;
-  readonly bestHeaderId: string;
+  bestHeaderId: string;
   readonly blocks: Map<string, Record<string, unknown>>;
   readonly transactions: Map<string, Record<string, unknown>>;
   readonly rewardBoxes: readonly Eip12Box[];
@@ -185,6 +188,67 @@ describe('Substrate federated isolated-devnet Ergo history artifacts V1', () => 
     ) as any;
     expect(transactions.transactions[0].signedTransaction.inputs[0])
       .not.toHaveProperty('value');
+  });
+
+  it('keeps V1 strict when the target extends during history collection', async () => {
+    const states = nodeStates();
+    installNodeMocks(states);
+    const discovery = await discoverSubstrateFederatedRewardInputsV1(signer());
+    for (const state of states.values()) {
+      appendHeader(state, state.bestHeaderId, 'canonical-extension');
+    }
+
+    await expect(
+      collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV1(discovery),
+    ).rejects.toThrow(/differs from reward-input discovery/i);
+  });
+
+  it('V2 keeps the discovery tip as the anchor across canonical extensions', async () => {
+    const states = nodeStates();
+    installNodeMocks(states);
+    const discovery = await discoverSubstrateFederatedRewardInputsV2(signer());
+    for (const state of states.values()) {
+      appendHeader(state, state.bestHeaderId, 'canonical-extension');
+    }
+
+    const history =
+      await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(
+        discovery,
+      );
+
+    expect(history.receipt.target).toMatchObject({
+      setupAnchorHeaderIdHex: discovery.target.tipHeaderIdHex,
+      setupAnchorHeight: discovery.target.tipHeight,
+      headerCount: discovery.target.tipHeight,
+    });
+    const headers = parseManifest(
+      history.artifacts.greatestWorkHeadersManifest,
+    ) as any;
+    expect(headers.headers.map((value: any) => value.headerIdHex))
+      .toEqual(fixture.headers.map(value => value.id));
+    expect(() =>
+      assertSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2Provenance(
+        structuredClone(history),
+      )
+    ).toThrow(/lack process provenance/u);
+  });
+
+  it('V2 rejects a discovery tip that left the canonical best chain', async () => {
+    const states = nodeStates();
+    installNodeMocks(states);
+    const discovery = await discoverSubstrateFederatedRewardInputsV2(signer());
+    for (const state of states.values()) {
+      const forkTip = appendHeader(
+        state,
+        fixture.headers[1]!.id,
+        'replacement-height-3',
+      );
+      appendHeader(state, forkTip, 'replacement-height-4');
+    }
+
+    await expect(
+      collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(discovery),
+    ).rejects.toThrow(/reward-discovery anchor is not canonical/i);
   });
 
   it('rejects a copied G1dH report before opening history sources', async () => {
@@ -377,6 +441,53 @@ function nodeStates(): Map<string, NodeState> {
   ]);
 }
 
+function appendHeader(
+  state: NodeState,
+  parentId: string,
+  label: string,
+): string {
+  const parent = state.headers.get(parentId);
+  if (parent === undefined) throw new Error('test header parent is unavailable');
+  const height = parent.height + 1;
+  const identity: ErgoHeaderIdentityFields = {
+    version: 2,
+    parentId: Buffer.from(parentId, 'hex'),
+    adProofsRoot: fixedBytes(`${label}-ad-${height}`, 32),
+    stateRoot: fixedBytes(`${label}-state-${height}`, 33),
+    transactionsRoot: fixedBytes(`${label}-transactions-${height}`, 32),
+    timestamp: 1_730_000_000_000n + BigInt(height),
+    nBits: 117_440_511,
+    height,
+    extensionHash: fixedBytes(`${label}-extension-${height}`, 32),
+    votes: Buffer.alloc(3),
+    unparsedBytes: Buffer.alloc(0),
+    powSolution: {
+      publicKey: Buffer.from(PUBLIC_KEY_HEX, 'hex'),
+      nonce: Buffer.from(height.toString(16).padStart(16, '0'), 'hex'),
+    },
+  };
+  const id = computeErgoHeaderId(identity).toString('hex');
+  state.headers.set(id, {
+    id,
+    parentId,
+    height,
+    version: identity.version,
+    adProofsRoot: Buffer.from(identity.adProofsRoot).toString('hex'),
+    stateRoot: Buffer.from(identity.stateRoot).toString('hex'),
+    transactionsRoot: Buffer.from(identity.transactionsRoot).toString('hex'),
+    timestamp: Number(identity.timestamp),
+    nBits: identity.nBits,
+    extensionHash: Buffer.from(identity.extensionHash).toString('hex'),
+    powSolutions: {
+      pk: PUBLIC_KEY_HEX,
+      n: Buffer.from(identity.powSolution.nonce).toString('hex'),
+    },
+    votes: '000000',
+  });
+  state.bestHeaderId = id;
+  return id;
+}
+
 function installNodeMocks(states: Map<string, NodeState>): void {
   const state = (client: AuthenticatedSpvTrackerReadOnlyNodeClient) => {
     const found = states.get(client.observationSourceId);
@@ -384,7 +495,15 @@ function installNodeMocks(states: Map<string, NodeState>): void {
     return found;
   };
   vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getInfo')
-    .mockImplementation(async () => ({ network: 'devnet', fullHeight: 3 }));
+    .mockImplementation(async function (
+      this: AuthenticatedSpvTrackerReadOnlyNodeClient,
+    ) {
+      const current = state(this);
+      return {
+        network: 'devnet',
+        fullHeight: current.headers.get(current.bestHeaderId)!.height,
+      };
+    });
   vi.spyOn(AuthenticatedSpvTrackerReadOnlyNodeClient.prototype, 'getBestHeader')
     .mockImplementation(async function (
       this: AuthenticatedSpvTrackerReadOnlyNodeClient,

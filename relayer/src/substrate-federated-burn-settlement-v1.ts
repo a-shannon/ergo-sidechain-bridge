@@ -192,8 +192,65 @@ export interface SubstrateFederatedBurnSettlementV1Packet {
 export async function buildSubstrateFederatedBurnSettlementV1(
   input: BuildSubstrateFederatedBurnSettlementV1Input,
 ): Promise<Readonly<SubstrateFederatedBurnSettlementV1Packet>> {
+  assertSubstrateFederatedBurnSettlementInputShape(input, ['familyIdentity']);
+  const family = input.familyIdentity;
+  assertSubstrateFederatedSettlementFamilyV1Identity(family);
+  assertFamilyReceipts(family, decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile));
+  const candidate = await buildSubstrateFederatedBurnSettlementCandidate({
+    trackerState: input.trackerState,
+    reserveState: input.reserveState,
+    duplicatePreventionState: input.duplicatePreventionState,
+    feeFundingInput: input.feeFundingInput,
+    claim: input.claim,
+    currentErgoHeight: input.currentErgoHeight,
+    creationHeight: input.creationHeight,
+    feeNanoErg: input.feeNanoErg,
+  }, {
+    profile: family.profile,
+    pooledReserveTreeHex: family.contracts.pooledReserve.receipt.propositionHex,
+    duplicatePreventionTreeHex: family.contracts.duplicatePrevention.receipt.propositionHex,
+  });
+  const result = deepFreeze({
+    schema: SUBSTRATE_FEDERATED_BURN_SETTLEMENT_V1_SCHEMA,
+    version: 1 as const,
+    ...candidate,
+    invariants: { ...candidate.invariants, federatedAuthorityProfileBound: true as const },
+  });
+  packets.add(result);
+  return result;
+}
+
+export interface SubstrateFederatedBurnSettlementMaterial {
+  readonly profile: SubstrateFederatedSettlementFamilyV1Identity['profile'];
+  readonly pooledReserveTreeHex: string;
+  readonly duplicatePreventionTreeHex: string;
+}
+
+export interface SubstrateFederatedBurnSettlementCandidate
+  extends Omit<SubstrateFederatedBurnSettlementV1Packet, 'schema' | 'version' | 'invariants'> {
+  readonly invariants: Omit<SubstrateFederatedBurnSettlementV1Packet['invariants'],
+    'federatedAuthorityProfileBound'> & { readonly federatedAuthorityProfileBound: false };
+}
+
+// Unbranded construction only. Versioned callers authenticate compiler provenance
+// before entry; this function cannot issue either version's process-owned packet.
+export async function buildSubstrateFederatedBurnSettlementCandidate(
+  input: Omit<BuildSubstrateFederatedBurnSettlementV1Input, 'familyIdentity'>,
+  material: Readonly<SubstrateFederatedBurnSettlementMaterial>,
+): Promise<Readonly<SubstrateFederatedBurnSettlementCandidate>> {
+  assertSubstrateFederatedBurnSettlementInputShape(input);
+  const family = deepFreeze(structuredClone(material));
+  const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(family.profile);
+
+  return constructSettlement(input, family, profile);
+}
+
+export function assertSubstrateFederatedBurnSettlementInputShape(
+  input: Omit<BuildSubstrateFederatedBurnSettlementV1Input, 'familyIdentity'>,
+  authorityKeys: readonly string[] = [],
+): void {
   assertExactKeys(input, [
-    'familyIdentity',
+    ...authorityKeys,
     'trackerState',
     'reserveState',
     'duplicatePreventionState',
@@ -214,13 +271,13 @@ export async function buildSubstrateFederatedBurnSettlementV1(
     'historyKeys',
   ], 'substrate federated duplicate-prevention state');
   assertClaimShape(input.claim);
-  assertSubstrateFederatedSettlementFamilyV1Identity(input.familyIdentity);
-  const family = input.familyIdentity;
-  const profile = decodeSubstrateFederatedSettlementFamilyV1Profile(
-    family.profile,
-  );
-  assertFamilyReceipts(family, profile);
+}
 
+async function constructSettlement(
+  input: Omit<BuildSubstrateFederatedBurnSettlementV1Input, 'familyIdentity'>,
+  family: Readonly<SubstrateFederatedBurnSettlementMaterial>,
+  profile: Readonly<SubstrateFederatedSettlementFamilyV1DecodedProfile>,
+): Promise<Readonly<SubstrateFederatedBurnSettlementCandidate>> {
   const snapshot = structuredClone({
     trackerState: input.trackerState,
     reserveState: input.reserveState,
@@ -476,8 +533,6 @@ export async function buildSubstrateFederatedBurnSettlementV1(
   });
 
   const result = deepFreeze({
-    schema: SUBSTRATE_FEDERATED_BURN_SETTLEMENT_V1_SCHEMA,
-    version: 1 as const,
     trustModel: 'federated_non_trustless' as const,
     familyIdHex: family.profile.familyIdHex,
     tracker: {
@@ -527,7 +582,7 @@ export async function buildSubstrateFederatedBurnSettlementV1(
     },
     invariants: {
       exactFederatedTrackerEntryProved: true as const,
-      federatedAuthorityProfileBound: true as const,
+      federatedAuthorityProfileBound: false as const,
       canonicalBurnInclusionProved: true as const,
       payoutBoundToBurnLeaf: true as const,
       duplicatePreventionIsSoleProofConsumer: true as const,
@@ -555,7 +610,6 @@ export async function buildSubstrateFederatedBurnSettlementV1(
       productionReadinessEstablished: false as const,
     },
   });
-  packets.add(result);
   return result;
 }
 
@@ -884,14 +938,14 @@ function validateTrackerValueBindings(input: {
 
 function assertReservePredecessor(input: {
   readonly reserve: Eip12Box;
-  readonly family: Readonly<SubstrateFederatedSettlementFamilyV1Identity>;
+  readonly family: Readonly<SubstrateFederatedBurnSettlementMaterial>;
   readonly profile: Readonly<SubstrateFederatedSettlementFamilyV1DecodedProfile>;
   readonly burnAmount: bigint;
 }) {
   const reserve = input.reserve;
   if (
     reserve.ergoTree
-      !== input.family.contracts.pooledReserve.receipt.propositionHex
+      !== input.family.pooledReserveTreeHex
     || reserve.assets.length !== 1
     || reserve.assets[0].tokenId !== input.profile.pooledReserveNftIdHex
     || reserve.assets[0].amount !== '1'
@@ -951,13 +1005,13 @@ function assertReservePredecessor(input: {
 
 function assertDuplicatePreventionPredecessor(input: {
   readonly duplicatePrevention: Eip12Box;
-  readonly family: Readonly<SubstrateFederatedSettlementFamilyV1Identity>;
+  readonly family: Readonly<SubstrateFederatedBurnSettlementMaterial>;
   readonly expectedDigestHex: string;
 }): void {
   const dup = input.duplicatePrevention;
   if (
     dup.ergoTree
-      !== input.family.contracts.duplicatePrevention.receipt.propositionHex
+      !== input.family.duplicatePreventionTreeHex
     || dup.assets.length !== 1
     || dup.assets[0].tokenId
       !== input.family.profile.duplicatePreventionNftIdHex

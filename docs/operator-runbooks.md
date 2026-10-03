@@ -14,6 +14,11 @@ publication blockers.
 
 ## Global Rules
 
+The fixed synthetic native FED campaign has a separate
+[two-cycle runbook](federated-native-two-cycle.md). Its disposable local custody
+and contained node processes do not use the ordinary daemon's broadcast flag or
+node-wallet signing.
+
 - The current observation-only bridge daemon does not load an Ergo signer or
   mnemonic and refuses startup when `BRIDGE_BROADCAST_ENABLED=true`. Commands
   that require signing or broadcast are separate, explicitly invoked utilities
