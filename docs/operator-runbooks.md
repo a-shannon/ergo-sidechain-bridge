@@ -43,10 +43,18 @@ Purpose: exercise the current relayer recovery boundaries without chain RPC,
 operator keys, persistent runtime state, submission, broadcast, or funds
 authority.
 
+In a fresh checkout, install the locked relayer dependencies with `npm ci` from
+`relayer/`. Prepare the pinned WASM build tools and offline Cargo dependencies
+in the [two-cycle prerequisites](federated-native-two-cycle.md#prerequisites).
+The generated `wasm-avl/pkg/` bindings are ignored by Git; `npm ci` does not
+create them. Build them from this checkout before running the drill. A failed
+build is a preparation failure, before any recovery case runs.
+
 Command:
 
 ```bash
 cd relayer
+npm run wasm:build
 npm run operator:drill:recovery
 ```
 
