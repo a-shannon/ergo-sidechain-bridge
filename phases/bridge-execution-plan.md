@@ -28,13 +28,21 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–36 remain permanently consumed or held. The last completed
-exact-head CI baseline is `1ca23ee1ed9ded0c79b6feafb5e360a799acb4c7`, matching open PR 7
-when verified on October 2. Its exact-head
-[run 37005622742](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37005622742)
-passed all three required jobs. The observer batch below changes that baseline
-and requires its own review, guarded promotion and exact-head CI. Prior green
-CI does not cover these changes or establish native two-cycle acceptance.
+**Now:** Campaigns 24–37 remain permanently consumed or held. Published runtime
+candidate `681ca21d14489f2035d7c8775489fb177d813a02`, matching open PR 7 when
+verified on October 3, passed all three required jobs in its own
+[run 37085325522](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37085325522).
+The observer batch below is closed for that exact candidate. Separately admitted
+C37 failed once at `frontier-build`; its cause and cleanup remain unknown.
+The first fresh compiler discriminator passed: full offline locked metadata
+resolved 1,060 packages and a bounded native Rust/MSVC link-and-run passed
+against the production projected environment. Select one compiler-only FED
+build with a genuine new process-owned source session and verified disposal;
+stop before build-spec, node startup or any campaign. The build export now
+disables Git automatic GC and maintenance explicitly for each subprocess.
+No consumed state or fabricated profile is an input. Green checkpoint CI and
+compiler diagnostics do not establish native two-cycle acceptance. No C38 is
+admitted.
 
 The cycle-step producer, worker and parent join is closed and published.
 Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
@@ -131,7 +139,7 @@ now covers the final-validation freshness boundary (0 ms, exactly 60,000 ms,
 passes. A local observer cost probe measured four fresh process-pair reads at
 870.8–919.9 ms each; this is a performance observation, not C36's cause.
 
-No C37 is admitted. The observer comparison matched exact process images and
+The completed observer comparison matched exact process images and
 all owned IPv4/IPv6 listeners in three controlled runs: the existing CIM route
 took 800–876 ms and a bounded PowerShell-image plus
 `System32/netstat.exe -a -n -o` route took 285–301 ms. The production join now
@@ -148,7 +156,7 @@ loopback/wildcard listeners in 341 and 329 ms on the final reviewed source;
 the owned processes closed.
 These local observations establish neither C36's cause nor campaign success.
 The affected canonical closure and independent source review pass locally.
-Guarded promotion and a fresh exact-head CI precede any new admission.
+Guarded promotion and all three exact-head CI jobs passed for `681ca21d`.
 The first canonical replay stopped at the native-mint shard despite 50 passed
 assertions: a separate lifecycle diagnostic exposed Vitest's global worker
 `onTaskUpdate` timeout, which its JSON success flag omits. The runner now uses
@@ -1253,7 +1261,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C36 final-request-validation observer boundary (promotion and CI selected) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and the segmented 608-file canonical closure pass. Independent source review is GO after the isolated TCP wildcard correction. Recheck exact final bytes/claims, guard promotion and require all three jobs on its own head before separate fresh campaign admission. C24–36 remain consumed or held; no retry, timeout increase or predicate relaxation |
+| C37 Frontier compiler boundary (compiler-only FED build selected) | Isolate the named compiler boundary using public locked sources, the production build environment and a genuine fresh disposable source-profile session, without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. Invoke the unchanged FED build flow once with new process-owned custody, process-scoped Git maintenance guards, fresh output and finally-disposal plus post-disposal denial checks. No build-spec, node startup, signing or campaign follows. C37 public receipts establish execution_failure/frontier-build only; raw cause and cleanup remain unknown. No retry, fabricated profile, standalone materialization or C38 admission |
+| C36 final-request-validation observer boundary (closed 2026-10-03) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Published at `681ca21d`; all three jobs passed in exact run 37085325522. Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and segmented 608-file closure pass. Independent source review GO after the TCP wildcard correction. Reuse unchanged gates. C24–37 remain consumed or held; no retry, timeout increase or predicate relaxation |
 | C34 cycle-step diagnostic join (closed 2026-10-02) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Published at aeb8883f2; targeted 1,047 cases, TypeScript/import checks, independent review, guards and all three exact-head CI jobs pass. Fresh C35 validates terminal cycle-1/setup-check lineage, not C34 cause, operation completion or execution authority |
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
 | C29 `node-start` diagnostic lineage (closed 2026-09-30) | Preserve the coarse root phase and terminal formats while exposing an allowlisted Ergo startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Promoted at `29785fbc015e0a07d8a6799048bb7a5f7524252c`; all three jobs passed in run 36629279161. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). TypeScript, the layered import check and 788 targeted producer/consumer tests passed. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. C30 subsequently completed separate fresh-input admission and failed once as recorded in Current Focus. Neither these diagnostics nor green CI authorize another attempt. |

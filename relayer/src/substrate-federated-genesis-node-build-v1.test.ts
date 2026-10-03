@@ -75,10 +75,10 @@ beforeEach(() => {
     generation: fault === 'tool drift' && mocks.toolchain.mock.calls.length > 1 ? 2 : 1 }));
   mocks.run.mockImplementation(async request => {
     const args = request.args as string[];
-    if (args[2] === 'write-tree') return { stdout: fault === 'tree' ? 'ab'.repeat(20) : tree, stderr: '' };
-    if (args[2] === 'ls-files') return { stdout: `100644 ${blob} 0\tCargo.toml\0` +
+    if (args[6] === 'write-tree') return { stdout: fault === 'tree' ? 'ab'.repeat(20) : tree, stderr: '' };
+    if (args[6] === 'ls-files') return { stdout: `100644 ${blob} 0\tCargo.toml\0` +
       `100644 ${blob} 0\truntime/Cargo.toml\0`, stderr: '' };
-    if (args[2] === 'checkout-index') {
+    if (args[6] === 'checkout-index') {
       buildSource = args.find(value => value.startsWith('--prefix='))!.slice('--prefix='.length);
       writeFileSync(join(buildSource, 'Cargo.toml'), fault === 'export drift' ? 'changed' : sourceBytes);
       mkdirSync(join(buildSource, 'runtime'));
@@ -122,8 +122,9 @@ describe('FED genesis build owner', () => {
       readSubstrateFederatedGenesisProfilesFromSessionV2(session).mintProofProfile);
     const result = await buildSubstrateFederatedGenesisNodeV1(input);
     expect(result.sourceTreeId).toBe(tree);
-    expect(mocks.run.mock.calls.map(([call]) => call.args).filter(args => args[2] === 'apply'))
-      .toEqual(patchNames.map(name => ['-c', 'core.autocrlf=false', 'apply', '--cached', '--whitespace=nowarn',
+    expect(mocks.run.mock.calls.map(([call]) => call.args).filter(args => args[6] === 'apply'))
+      .toEqual(patchNames.map(name => ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false',
+        '-c', 'core.autocrlf=false', 'apply', '--cached', '--whitespace=nowarn',
         join(bridgeRoot, 'sources/frontier', name)]));
     const buildCalls = mocks.run.mock.calls.map(([call]) => call).filter(call => call.args[0] === 'build');
     expect(buildCalls).toHaveLength(1);
@@ -146,6 +147,9 @@ describe('FED genesis build owner', () => {
     expect(() => readSubstrateFederatedGenesisProfilesFromSessionV2(session)).not.toThrow();
     expect(mocks.run.mock.calls.filter(([call]) => call.args[0] !== 'build')
       .every(([call]) => call.env.GIT_INDEX_FILE.startsWith(input.buildParentDirectory))).toBe(true);
+    expect(mocks.run.mock.calls.filter(([call]) => call.args[0] !== 'build')
+      .every(([call]) => call.args.slice(0, 6).join(' ') ===
+        '-c gc.auto=0 -c maintenance.auto=false -c core.autocrlf=false')).toBe(true);
   });
 
   it.each(['missing', 'hash', 'export', 'build'])('rejects native burn patch %s drift', async selected => {

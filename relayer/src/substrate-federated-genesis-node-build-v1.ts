@@ -95,7 +95,8 @@ export async function buildSubstrateFederatedGenesisNodeV1(input: BuildSubstrate
   const gitEnvironment = { ...buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1(),
     GIT_INDEX_FILE: join(root, 'source.index') };
   const git = (args: string[]) => runBoundedProcess({ executablePath: gitExecutablePath,
-    args: ['-c', 'core.autocrlf=false', ...args], cwd: repository, env: gitEnvironment,
+    args: ['-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.autocrlf=false', ...args],
+    cwd: repository, env: gitEnvironment,
     timeoutMs: 30_000, maxOutputBytes: 8 * 1024 * 1024, label: 'FED source export' });
   await git(['read-tree', BASE]);
   for (const [file] of PATCHES) {
