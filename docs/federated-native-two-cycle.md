@@ -220,6 +220,12 @@ the active operation. Unknown or conflicting detail, borrowed cycle metadata,
 and stage detail below a cleanup-tagged aggregate are rejected. The label
 identifies the failing section; it does not explain the raw cause or establish
 that an operation completed, cleanup succeeded or custody was destroyed.
+For a newly produced cycle-step companion, `tracker-context` means the V2
+context constructor did not complete. `tracker-context-custody` means that
+constructor returned and the immediately following retained-custody check
+failed. Older receipts with `tracker-context`, including C39, cover both
+operations and cannot be retroactively narrowed. Neither label establishes
+tracker transaction construction, root cleanup or custody disposal.
 Missing or invalid ancestry prevents the companion from being published.
 Existing terminal, root-phase and cycle-step formats and digest domains are
 unchanged. These optional files grant no signing, submission or retry authority.

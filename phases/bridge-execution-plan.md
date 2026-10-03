@@ -28,15 +28,19 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–38 remain permanently consumed or held. Published runtime
-candidate `168e61ba53d858e4c3be80921eb042a4191f69bc`, matching open PR 7 when
-verified on October 3, passed all three required jobs in its own
-[run 37110008057](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37110008057).
-The observer batch below is closed for that exact candidate. Separately admitted
-C37 failed once at `frontier-build`. C38 was admitted and invoked once on the
-current candidate; it terminated with the public `execution_failure` receipt at
-`cycle-1/cycle-summary`. Its raw cause and cleanup/disposal remain unknown; no
-two-cycle acceptance exists. Both attempts remain consumed or held.
+**Now:** Campaigns 24–39 remain permanently consumed or held. Published runtime
+candidate `35eeb675644afdd78f392d05e5a9fed6c06155b0`, matching open PR 7
+when verified on October 3, passed all three required jobs in its own
+[run 37134305984](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37134305984).
+The observer and Git-control checkpoints remain closed for their exact inputs.
+C39 passed separate source, cache, host and path admission, then issued the
+canonical two-cycle command once. Its parent terminal reports
+`execution_failure`; the public diagnostic narrows the failure to
+`cycle-1/tracker-context`, before operation completion. Post-failure identity
+passed. The raw cause and root cleanup/custody disposal are unestablished;
+there is no two-cycle acceptance. Do not retry or resume C39 or inspect its
+private runtime. C38's earlier `cycle-1/cycle-summary` failure also remains
+consumed and does not supply C39 evidence.
 The first fresh compiler discriminator passed: full offline locked metadata
 resolved 1,060 packages and a bounded native Rust/MSVC link-and-run passed
 against the production projected environment. A separate compiler-only FED
@@ -58,13 +62,21 @@ two-cycle acceptance. The Git-control and Windows-layout changes
 are locally reviewed; any future changed public candidate requires all three
 exact-head jobs to pass.
 
-**Next:** With the exact-head checkpoint closed, keep its evidence and the
-compiler results as reusable prerequisites. Do not retry or resume C38. Prepare
-separately fresh source, tool, cache, shallow-build-parent and output inputs plus
-fresh custody and fee inputs for the next two-cycle admission. Revalidate every
-required path, admission, custody, fee and anchor gate before one new invocation;
-preserve every current domain, quorum and no-retry guard. The successful
-compiler diagnostic artifacts are disposed and cannot supply the new campaign.
+**Next:** The local diagnostic candidate separates a newly observed V2 context
+failure from the following custody check in both cycles. The genuine issuer-box
+and JVM receipt fit the real first-cycle constructor under coherent synthetic
+anchors, including a reserve-derived dynamic window. The lower anchor boundary
+and expiry each reject in isolation. This does not identify C39's private
+dynamic values or raw cause. Existing root tests substitute the constructor;
+their custody checks establish attribution and disposal, not the real join.
+Close the final candidate review and affected validation, then promote this
+named observability correction through the guards and all three exact-head CI
+jobs. Only a separately admitted fresh campaign can decide the remaining
+runtime branch; its outcome may still be failure and must not be presumed.
+Prepare the clean-root operator recovery drill in parallel on the exact
+candidate. Fresh source, tool, cache, shallow-build, output, custody and fee
+inputs remain mandatory; no retained campaign or disposed compiler session is
+an input or authority.
 
 The cycle-step producer, worker and parent join is closed and published.
 Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
@@ -1247,16 +1259,18 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Compiler join -> existing native two-cycle root | Use the existing root only after separate fresh-input admission and all required candidate promotion and exact-head CI gates. Keep the pinned Frontier build-spec/raw-storage and owned native start inside that consumer; do not insert a standalone materialization probe | The fresh compiler probe passed once on runtime candidate `29785fbc015e0a07d8a6799048bb7a5f7524252c`: genuine Ergo build, V2 mining custody, owned discovery and matching history reached the actual pinned JVM-observed genesis/compiler pair; all three unsigned issuance checks passed in 194,617 ms with all 34 ordered markers. Probe test SHA-256: `a448a19503a243269deb07b192046307037ce9bd7b9af301b87af2bd870556fc`. Post-input identities, managed freeze, expired-target and cloned-owner negatives, node/source/setup disposal and whole completion passed. This closes the compiler join only; it establishes no native Frontier materialization, target acceptance, native issuance or two-cycle result, and does not explain C30. The eight-byte fixture WASM and expired/cloned-owner custody cannot be reused; real generated WASM and fresh custody are mandatory. Campaigns 24–38 remain consumed or held; C38 failed at `cycle-1/cycle-summary` with raw cause and cleanup/disposal unknown. The next deciding run must use separately admitted fresh runtime, source, output, custody and fee inputs; do not retry or resume C38. |
+| **Now** | Public C39 `tracker-context` bracket -> producer/custody discrimination | Promote the reviewed diagnostic split and reserve-window fixture through exact-head CI; retain C39 as unknown | The one C39 invocation failed after the historical `tracker-context` marker and before `tracker-transaction`; operation completion and root cleanup are unestablished. New code separates constructor and custody labels for future attempts. Synthetic issuer/JVM-to-real-context and dynamic-window checks pass, but do not assign C39's cause. C39 is consumed/held. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 38 are terminal; Campaigns 24–38 remain consumed or held.
-The next full local campaign is conditional on separate fresh-input admission.
-Candidate review, closeout, guarded promotion and exact-head CI are complete
-for the frozen diagnostic candidate; reopen only an invalidated gate.
+Campaigns through 39 are terminal; Campaigns 24–39 remain consumed or held.
+The next full local campaign is conditional on promoting the named
+`tracker-context` diagnostic correction and separate fresh-input admission.
+Candidate review, closeout, guarded promotion and exact-head CI for the prior
+checkpoint candidate do not transfer to changed bytes; reopen only those
+invalidated gates.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
 for this deciding run; private historical campaign scripts or custody are not

@@ -771,6 +771,7 @@ async function completeFirstNativeReturn(input: Readonly<{
       compilerReceipt: prepared.compiled.familyCompilerInput.trackerReceipt,
       trackerInputBox, encodedStatementHex: statement.encodedStatementHex, observedHeaderContext: headers,
       extensionMembershipProofHex: observation.extensionMembershipProofHex });
+    markStep('tracker-context-custody');
     readCustody();
     markStep('tracker-transaction');
     const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({ trackerContext: context, trackerInputBox,
@@ -1137,6 +1138,7 @@ async function completeSecondNativeReturn(input: Readonly<{
       trackerInputBox, encodedStatementHex: statement.encodedStatementHex, observedHeaderContext: headers,
       extensionMembershipProofHex: observation.extensionMembershipProofHex,
     });
+    markStep('tracker-context-custody');
     readCustody();
     markStep('tracker-transaction');
     const transaction = await buildSubstrateFederatedTrackerV2ExternalFeeTransaction({

@@ -2528,6 +2528,11 @@ describe('fresh FED target composition', () => {
       inject: (failure: Error) => mocked.checkpoint.mockRejectedValueOnce(failure),
       assertCalls: () => expect(mocked.checkpoint).toHaveBeenCalledOnce(),
     },
+    {
+      name: 'tracker context', step: 'tracker-context',
+      inject: (failure: Error) => mocked.context.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.context).toHaveBeenCalledOnce(),
+    },
   ] as const;
 
   it.each(cycleOneStepFailures)('projects the isolated cycle-1 $name failure', async ({ step, inject, assertCalls }) => {
@@ -2543,7 +2548,36 @@ describe('fresh FED target composition', () => {
     assertDisposed();
   });
 
+  it('separates the cycle-1 custody check following a completed tracker context', async () => {
+    const trigger = new Error('post-context custody failed');
+    const originalContext = mocked.context.getMockImplementation()!;
+    const originalRead = mocked.nativeRead.getMockImplementation()!;
+    let contextBuilt = false;
+    mocked.context.mockImplementationOnce(async (...args) => {
+      const context = await originalContext(...args);
+      contextBuilt = true;
+      return context;
+    });
+    mocked.nativeRead.mockImplementation((...args) => {
+      if (contextBuilt) { contextBuilt = false; throw trigger; }
+      return originalRead(...args);
+    });
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBe(trigger);
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure))
+      .toEqual({ cycle: 'cycle-1', step: 'tracker-context-custody' });
+    expect(mocked.context).toHaveBeenCalledOnce();
+    expect(mocked.trackerTx).not.toHaveBeenCalled();
+    expect(stop).toHaveBeenCalledOnce();
+    assertDisposed();
+  });
+
   const cycleTwoStepFailures = [
+    {
+      name: 'tracker context', step: 'tracker-context',
+      inject: (failure: Error) => mocked.continuationContext.mockRejectedValueOnce(failure),
+      assertCalls: () => expect(mocked.continuationContext).toHaveBeenCalledOnce(),
+    },
     {
       name: 'tracker transport', step: 'tracker-transport',
       inject: (failure: Error) => {
@@ -2592,6 +2626,29 @@ describe('fresh FED target composition', () => {
     expect(stop).toHaveBeenCalledOnce();
     expect(closeNative).toHaveBeenCalledTimes(2);
     expect(order.at(-1)).toBe('stop');
+    assertDisposed();
+  });
+
+  it('separates the cycle-2 custody check following a completed tracker context', async () => {
+    const trigger = new Error('continuation post-context custody failed');
+    const originalContext = mocked.continuationContext.getMockImplementation()!;
+    const originalRead = mocked.nativeRead.getMockImplementation()!;
+    let contextBuilt = false;
+    mocked.continuationContext.mockImplementation(async (...args) => {
+      const context = await originalContext(...args);
+      contextBuilt = true;
+      return context;
+    });
+    mocked.nativeRead.mockImplementation((...args) => {
+      if (contextBuilt) { contextBuilt = false; throw trigger; }
+      return originalRead(...args);
+    });
+    const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+    expect(failure).toBe(trigger);
+    expect(projectNativeTwoCycleCycleStepFailureV1(failure))
+      .toEqual({ cycle: 'cycle-2', step: 'tracker-context-custody' });
+    expect(mocked.continuationContext).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
     assertDisposed();
   });
 

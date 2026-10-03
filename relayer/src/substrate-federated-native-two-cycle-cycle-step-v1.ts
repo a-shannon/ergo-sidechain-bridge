@@ -33,6 +33,7 @@ export const NATIVE_TWO_CYCLE_CYCLE_STEPS_V1 = Object.freeze([
   'checkpoint-anchor',
   'tracker-observation',
   'tracker-context',
+  'tracker-context-custody',
   'tracker-transaction',
   'tracker-check',
   'tracker-authorization',

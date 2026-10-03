@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,12 +37,17 @@ import * as issuanceMaterializer from './substrate-federated-genesis-issuance-ma
 import { getDupTreeDigest, getPooledReserveEmptyDigest } from './avl-bridge.js';
 import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
 import { encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encodeLongRegister, MINER_FEE_TREE } from './ergo-encoding.js';
+import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
+import { buildSubstrateFederatedCheckpointStatementV1,
+  encodeSubstrateFederatedCheckpointExtensionValueV1 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import { buildSubstrateFederatedNativeGenesisSetupCheckRequestV1 } from './substrate-federated-native-genesis-setup-check-request-v1.js';
+import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context } from './substrate-federated-tracker-v2.js';
 import * as genesisObservation from './substrate-federated-genesis-observation-v1.js';
 import * as ownedTarget from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import * as readOnlySource from './authenticated-spv-tracker-read-only-node-client.js';
 import * as helpers from './ergo-helpers.js';
-import { buildBridgeValidityTrackerCanonicalHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
+import { buildBridgeValidityTrackerCanonicalHeaderContextV1,
+  buildBridgeValidityTrackerObservedHeaderContextV1 } from './bridge-validity-tracker-header-context-v1.js';
 import { assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1, getSubstrateFederatedNativeGenesisSetupCompilerInputV1 }
   from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 
@@ -178,6 +184,82 @@ describe('observed FED genesis compilation', () => {
         expect(Object.isFrozen(transaction.eip12Tx.inputs[0])).toBe(true);
         expect(Object.isFrozen(state!.additionalRegisters)).toBe(true);
       }
+      // The runtime root consumes this issuer's output, not the separate V2 genesis builder's box.
+      const vector = JSON.parse(readFileSync(new URL(
+        '../test-vectors/substrate-federated-v1-tracker-admission.json', import.meta.url,
+      ), 'utf8'));
+      const statement = buildSubstrateFederatedCheckpointStatementV1({
+        ...vector.input.statement, ...result.preparation.application,
+        profile: result.preparation.checkpointProfile,
+      });
+      const key = Buffer.from('0401', 'hex');
+      const membership = buildErgoExtensionMembershipProof([{
+        key, value: Buffer.from(encodeSubstrateFederatedCheckpointExtensionValueV1(
+          statement.encodedStatementHex,
+        ), 'hex'),
+      }], key);
+      const trackerInputBox = result.issuance.orderedTransactions[0]!.transaction.outputs[0]!;
+      for (const currentHeight of [1012, 1030, 1059]) {
+        for (const anchorContextIndex of [0, 1]) {
+          const syntheticHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+            currentHeight, anchorContextIndex,
+            anchorExtensionRootHex: membership.root.toString('hex'),
+          });
+          const observedHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+            rawHeaders: syntheticHeaders.headers.map(header => header.raw), anchorContextIndex,
+            expectedAnchorHeaderIdHex: syntheticHeaders.anchorHeader.id,
+            expectedAnchorExtensionRootHex: syntheticHeaders.anchorHeader.extensionRootHex,
+          });
+          const trackerContext = await buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
+            compilerRequest: result.familyCompilerInput.trackerRequest,
+            compilerReceipt: result.familyCompilerInput.trackerReceipt,
+            trackerInputBox, encodedStatementHex: statement.encodedStatementHex,
+            observedHeaderContext: observedHeaders,
+            extensionMembershipProofHex: membership.proof.toString('hex'),
+          });
+          expect(trackerContext.trackerTransition.inputRegisters).toEqual(trackerInputBox.additionalRegisters);
+          expect(trackerContext.trackerTransition.currentErgoHeight).toBe(currentHeight);
+        }
+      }
+      const confirmedReserveObservedAtHeight = 1080;
+      const dynamicExpiry = Number(BigInt(confirmedReserveObservedAtHeight)
+        + BigInt(result.preparation.checkpointProfile.maxAdmissionValidityBlocks));
+      const dynamicStatement = buildSubstrateFederatedCheckpointStatementV1({
+        ...vector.input.statement, ...result.preparation.application,
+        admissionValidFromErgoHeight: String(confirmedReserveObservedAtHeight),
+        admissionExpiresAtErgoHeight: String(dynamicExpiry),
+        profile: result.preparation.checkpointProfile,
+      });
+      const dynamicMembership = buildErgoExtensionMembershipProof([{
+        key, value: Buffer.from(encodeSubstrateFederatedCheckpointExtensionValueV1(
+          dynamicStatement.encodedStatementHex,
+        ), 'hex'),
+      }], key);
+      const dynamicContextAt = async (currentHeight: number) => {
+        const syntheticHeaders = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+          currentHeight, anchorContextIndex: 0,
+          anchorExtensionRootHex: dynamicMembership.root.toString('hex'),
+        });
+        const observedHeaders = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+          rawHeaders: syntheticHeaders.headers.map(header => header.raw), anchorContextIndex: 0,
+          expectedAnchorHeaderIdHex: syntheticHeaders.anchorHeader.id,
+          expectedAnchorExtensionRootHex: syntheticHeaders.anchorHeader.extensionRootHex,
+        });
+        return buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context({
+          compilerRequest: result.familyCompilerInput.trackerRequest,
+          compilerReceipt: result.familyCompilerInput.trackerReceipt,
+          trackerInputBox, encodedStatementHex: dynamicStatement.encodedStatementHex,
+          observedHeaderContext: observedHeaders,
+          extensionMembershipProofHex: dynamicMembership.proof.toString('hex'),
+        });
+      };
+      await expect(dynamicContextAt(confirmedReserveObservedAtHeight))
+        .rejects.toThrow(/anchor is outside the statement admission horizon/);
+      const admittedHeight = confirmedReserveObservedAtHeight + 1;
+      expect((await dynamicContextAt(admittedHeight))
+        .trackerTransition.currentErgoHeight).toBe(admittedHeight);
+      await expect(dynamicContextAt(dynamicExpiry))
+        .rejects.toThrow(/outside its Ergo admission horizon/);
       expect(result.preparation.launchDomainHex).toBe('61'.repeat(32));
       expect(result.preparation.operatorAddressHex).toBe('31'.repeat(20));
       expect(JSON.parse(result.candidate.genesisJson).balances.balances).toEqual([
