@@ -145,6 +145,12 @@ checkout at execution time. Keep outputs, builds, source checkouts and caches
 separate. The same pinned Git executable may serve both builders. The Ergo
 builder's worktree root is derived from the bridge checkout layout.
 
+On Windows, use a shallow existing absolute directory for
+`frontierBuildParentDirectory`; the Frontier builder creates nested source,
+target, temporary and WASM paths beneath it. Keep `outputParentDirectory`
+separate for attempt files, with both roots canonical, alias-free and disjoint
+from the checkout, source, cache and tool roots and from each other.
+
 There are no caller-supplied keys, node endpoints, quorum settings, amounts,
 runtime hashes, retry or resume options. Do not add wallet material or secrets
 to the configuration.

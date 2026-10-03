@@ -36,13 +36,32 @@ The observer batch below is closed for that exact candidate. Separately admitted
 C37 failed once at `frontier-build`; its cause and cleanup remain unknown.
 The first fresh compiler discriminator passed: full offline locked metadata
 resolved 1,060 packages and a bounded native Rust/MSVC link-and-run passed
-against the production projected environment. Select one compiler-only FED
-build with a genuine new process-owned source session and verified disposal;
-stop before build-spec, node startup or any campaign. The build export now
-disables Git automatic GC and maintenance explicitly for each subprocess.
-No consumed state or fabricated profile is an input. Green checkpoint CI and
-compiler diagnostics do not establish native two-cycle acceptance. No C38 is
-admitted.
+against the production projected environment. A separate compiler-only FED
+build on local `dd7e054b6fbf05c1d36a297cd46d0c95fb5569e2` failed once during
+the runtime custom build: nested `winapi` build-script linking reported LNK1104.
+Both new sessions were disposed and their actual post-disposal access checks
+rejected them; no build-spec, node, signing or campaign ran. The missing file
+name is redacted. Public source inspection and a tiny no-key Cargo differential
+then demonstrated path sensitivity within that experiment. A separate fresh FED
+compiler diagnostic with a shallow Windows build parent passed on the same local
+candidate, producing the real Frontier node and runtime WASM in about five
+minutes. Both fresh sessions were disposed and their post-disposal access checks
+rejected them; no build-spec, node, signing or campaign ran. These diagnostic
+outputs are consumed and bound to disposed sessions, never reusable as campaign
+authority. The exact historical C37 cause and cleanup remain unknown.
+The build export disables Git automatic GC and maintenance explicitly for each
+subprocess. Green checkpoint CI and compiler diagnostics do not establish native
+two-cycle acceptance or C38 admission. The Git-control and Windows-layout changes
+are locally reviewed; their next public checkpoint requires all three exact-head
+jobs to pass.
+
+**Next:** Publish the verified Git-control change with the clarified Windows
+build-directory guidance and this compiler result, then verify all three jobs
+for that exact public candidate. Prepare separately fresh source, tool, cache,
+output and custody inputs for a new two-cycle admission only after that checkpoint
+passes. Use a shallow build parent through the existing configuration field;
+preserve every current path, custody, fee, anchor and no-retry guard. No C38 is
+selected or admitted, and the successful diagnostic artifacts cannot supply it.
 
 The cycle-step producer, worker and parent join is closed and published.
 Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
@@ -1261,7 +1280,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C37 Frontier compiler boundary (compiler-only FED build selected) | Isolate the named compiler boundary using public locked sources, the production build environment and a genuine fresh disposable source-profile session, without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. Invoke the unchanged FED build flow once with new process-owned custody, process-scoped Git maintenance guards, fresh output and finally-disposal plus post-disposal denial checks. No build-spec, node startup, signing or campaign follows. C37 public receipts establish execution_failure/frontier-build only; raw cause and cleanup remain unknown. No retry, fabricated profile, standalone materialization or C38 admission |
+| Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. After exact CI passes, prepare separately fresh sources, tools, caches, shallow build and output parents; revalidate every required admission, custody and fee input before selecting a campaign. No C38 admission exists |
+| C37 Frontier compiler boundary (local compiler discriminator closed 2026-10-03) | Isolate the named compiler boundary using public locked sources and the production build environment without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. One deep FED diagnostic failed with nested winapi LNK1104; a no-key differential demonstrated scoped path sensitivity. A separate fresh FED compiler diagnostic using a shallow build parent passed on local dd7e054, with actual node/WASM hashes and both disposals/exact post-disposal denials verified. Independent review passed. All three diagnostic outputs are consumed, never retryable or campaign authority. No build-spec, node or signing ran. C37 historical cause and cleanup remain unknown; no two-cycle acceptance or C38 admission |
 | C36 final-request-validation observer boundary (closed 2026-10-03) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Published at `681ca21d`; all three jobs passed in exact run 37085325522. Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and segmented 608-file closure pass. Independent source review GO after the TCP wildcard correction. Reuse unchanged gates. C24–37 remain consumed or held; no retry, timeout increase or predicate relaxation |
 | C34 cycle-step diagnostic join (closed 2026-10-02) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Published at aeb8883f2; targeted 1,047 cases, TypeScript/import checks, independent review, guards and all three exact-head CI jobs pass. Fresh C35 validates terminal cycle-1/setup-check lineage, not C34 cause, operation completion or execution authority |
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
