@@ -28,12 +28,15 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–37 remain permanently consumed or held. Published runtime
-candidate `681ca21d14489f2035d7c8775489fb177d813a02`, matching open PR 7 when
+**Now:** Campaigns 24–38 remain permanently consumed or held. Published runtime
+candidate `168e61ba53d858e4c3be80921eb042a4191f69bc`, matching open PR 7 when
 verified on October 3, passed all three required jobs in its own
-[run 37085325522](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37085325522).
+[run 37110008057](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37110008057).
 The observer batch below is closed for that exact candidate. Separately admitted
-C37 failed once at `frontier-build`; its cause and cleanup remain unknown.
+C37 failed once at `frontier-build`. C38 was admitted and invoked once on the
+current candidate; it terminated with the public `execution_failure` receipt at
+`cycle-1/cycle-summary`. Its raw cause and cleanup/disposal remain unknown; no
+two-cycle acceptance exists. Both attempts remain consumed or held.
 The first fresh compiler discriminator passed: full offline locked metadata
 resolved 1,060 packages and a bounded native Rust/MSVC link-and-run passed
 against the production projected environment. A separate compiler-only FED
@@ -48,20 +51,20 @@ candidate, producing the real Frontier node and runtime WASM in about five
 minutes. Both fresh sessions were disposed and their post-disposal access checks
 rejected them; no build-spec, node, signing or campaign ran. These diagnostic
 outputs are consumed and bound to disposed sessions, never reusable as campaign
-authority. The exact historical C37 cause and cleanup remain unknown.
+authority. The exact C37 and C38 causes and cleanup remain unknown.
 The build export disables Git automatic GC and maintenance explicitly for each
 subprocess. Green checkpoint CI and compiler diagnostics do not establish native
-two-cycle acceptance or C38 admission. The Git-control and Windows-layout changes
-are locally reviewed; their next public checkpoint requires all three exact-head
-jobs to pass.
+two-cycle acceptance. The Git-control and Windows-layout changes
+are locally reviewed; any future changed public candidate requires all three
+exact-head jobs to pass.
 
-**Next:** Publish the verified Git-control change with the clarified Windows
-build-directory guidance and this compiler result, then verify all three jobs
-for that exact public candidate. Prepare separately fresh source, tool, cache,
-output and custody inputs for a new two-cycle admission only after that checkpoint
-passes. Use a shallow build parent through the existing configuration field;
-preserve every current path, custody, fee, anchor and no-retry guard. No C38 is
-selected or admitted, and the successful diagnostic artifacts cannot supply it.
+**Next:** With the exact-head checkpoint closed, keep its evidence and the
+compiler results as reusable prerequisites. Do not retry or resume C38. Prepare
+separately fresh source, tool, cache, shallow-build-parent and output inputs plus
+fresh custody and fee inputs for the next two-cycle admission. Revalidate every
+required path, admission, custody, fee and anchor gate before one new invocation;
+preserve every current domain, quorum and no-retry guard. The successful
+compiler diagnostic artifacts are disposed and cannot supply the new campaign.
 
 The cycle-step producer, worker and parent join is closed and published.
 Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
@@ -1244,13 +1247,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Compiler join -> existing native two-cycle root | Use the existing root only after separate fresh-input admission and all required candidate promotion and exact-head CI gates. Keep the pinned Frontier build-spec/raw-storage and owned native start inside that consumer; do not insert a standalone materialization probe | The fresh compiler probe passed once on runtime candidate `29785fbc015e0a07d8a6799048bb7a5f7524252c`: genuine Ergo build, V2 mining custody, owned discovery and matching history reached the actual pinned JVM-observed genesis/compiler pair; all three unsigned issuance checks passed in 194,617 ms with all 34 ordered markers. Probe test SHA-256: `a448a19503a243269deb07b192046307037ce9bd7b9af301b87af2bd870556fc`. Post-input identities, managed freeze, expired-target and cloned-owner negatives, node/source/setup disposal and whole completion passed. This closes the compiler join only; it establishes no native Frontier materialization, target acceptance, native issuance or two-cycle result, and does not explain C30. The eight-byte fixture WASM and expired/cloned-owner custody cannot be reused; real generated WASM and fresh custody are mandatory. Campaigns 24–30 remain consumed; C30 raw cause, cleanup and custody disposal remain unknown. Run required CI on the exact promoted test head; run 36629279161 covers the unchanged runtime candidate only. |
+| **Now** | Compiler join -> existing native two-cycle root | Use the existing root only after separate fresh-input admission and all required candidate promotion and exact-head CI gates. Keep the pinned Frontier build-spec/raw-storage and owned native start inside that consumer; do not insert a standalone materialization probe | The fresh compiler probe passed once on runtime candidate `29785fbc015e0a07d8a6799048bb7a5f7524252c`: genuine Ergo build, V2 mining custody, owned discovery and matching history reached the actual pinned JVM-observed genesis/compiler pair; all three unsigned issuance checks passed in 194,617 ms with all 34 ordered markers. Probe test SHA-256: `a448a19503a243269deb07b192046307037ce9bd7b9af301b87af2bd870556fc`. Post-input identities, managed freeze, expired-target and cloned-owner negatives, node/source/setup disposal and whole completion passed. This closes the compiler join only; it establishes no native Frontier materialization, target acceptance, native issuance or two-cycle result, and does not explain C30. The eight-byte fixture WASM and expired/cloned-owner custody cannot be reused; real generated WASM and fresh custody are mandatory. Campaigns 24–38 remain consumed or held; C38 failed at `cycle-1/cycle-summary` with raw cause and cleanup/disposal unknown. The next deciding run must use separately admitted fresh runtime, source, output, custody and fee inputs; do not retry or resume C38. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 30 are terminal; Campaigns 24–30 failed and remain consumed.
+Campaigns through 38 are terminal; Campaigns 24–38 remain consumed or held.
 The next full local campaign is conditional on separate fresh-input admission.
 Candidate review, closeout, guarded promotion and exact-head CI are complete
 for the frozen diagnostic candidate; reopen only an invalidated gate.
@@ -1280,8 +1283,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. After exact CI passes, prepare separately fresh sources, tools, caches, shallow build and output parents; revalidate every required admission, custody and fee input before selecting a campaign. No C38 admission exists |
-| C37 Frontier compiler boundary (local compiler discriminator closed 2026-10-03) | Isolate the named compiler boundary using public locked sources and the production build environment without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. One deep FED diagnostic failed with nested winapi LNK1104; a no-key differential demonstrated scoped path sensitivity. A separate fresh FED compiler diagnostic using a shallow build parent passed on local dd7e054, with actual node/WASM hashes and both disposals/exact post-disposal denials verified. Independent review passed. All three diagnostic outputs are consumed, never retryable or campaign authority. No build-spec, node or signing ran. C37 historical cause and cleanup remain unknown; no two-cycle acceptance or C38 admission |
+| Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. The exact-head checkpoint is already closed; prepare separately fresh sources, tools, caches, shallow build and output parents plus custody and fee inputs; revalidate every required admission, custody and fee input before selecting one campaign. C38 is consumed/held after one failed invocation; do not retry or resume it, and its diagnostics cannot supply the next admission |
+| C37 Frontier compiler boundary (local compiler discriminator closed 2026-10-03) | Isolate the named compiler boundary using public locked sources and the production build environment without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. One deep FED diagnostic failed with nested winapi LNK1104; a no-key differential demonstrated scoped path sensitivity. A separate fresh FED compiler diagnostic using a shallow build parent passed on local dd7e054, with actual node/WASM hashes and both disposals/exact post-disposal denials verified. Independent review passed. All three diagnostic outputs are consumed, never retryable or campaign authority. No build-spec, node or signing ran. C37 historical cause and cleanup remain unknown; no two-cycle acceptance. C38 was admitted separately and is recorded in Current Focus as consumed/held after its failed invocation |
 | C36 final-request-validation observer boundary (closed 2026-10-03) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Published at `681ca21d`; all three jobs passed in exact run 37085325522. Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and segmented 608-file closure pass. Independent source review GO after the TCP wildcard correction. Reuse unchanged gates. C24–37 remain consumed or held; no retry, timeout increase or predicate relaxation |
 | C34 cycle-step diagnostic join (closed 2026-10-02) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Published at aeb8883f2; targeted 1,047 cases, TypeScript/import checks, independent review, guards and all three exact-head CI jobs pass. Fresh C35 validates terminal cycle-1/setup-check lineage, not C34 cause, operation completion or execution authority |
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
