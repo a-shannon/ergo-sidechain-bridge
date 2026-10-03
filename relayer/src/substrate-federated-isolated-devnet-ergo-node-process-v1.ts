@@ -21,6 +21,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
+import { isIP } from 'node:net';
 import { performance } from 'node:perf_hooks';
 
 import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
@@ -219,6 +220,16 @@ interface ListenerBinding {
   readonly localAddress: string;
   readonly localPort: number;
 }
+
+export interface SubstrateFederatedIsolatedDevnetWindowsNetstatListenerV1
+  extends ListenerBinding {}
+
+const NETSTAT_TCP_STATES = new Set([
+  'CLOSED', 'CLOSE_WAIT', 'CLOSING', 'DELETE_TCB', 'ESTABLISHED',
+  'FIN_WAIT_1', 'FIN_WAIT_2', 'LAST_ACK', 'LISTENING', 'SYN_RECEIVED',
+  'SYN_SENT', 'TIME_WAIT',
+]);
+const MAX_NETSTAT_OUTPUT_BYTES = 256 * 1024;
 
 interface TargetSnapshot {
   readonly network: 'devnet';
@@ -4036,6 +4047,148 @@ function assertPortsUnowned(ports: readonly number[]): void {
   }
 }
 
+/** Parse one bounded `netstat -a -n -o` capture; UDP rows are validated then ignored. */
+export function parseSubstrateFederatedIsolatedDevnetWindowsNetstatV1(
+  stdout: string,
+  pids: readonly number[],
+): readonly Readonly<SubstrateFederatedIsolatedDevnetWindowsNetstatListenerV1>[] {
+  if (
+    typeof stdout !== 'string'
+    || Buffer.byteLength(stdout, 'utf8') === 0
+    || Buffer.byteLength(stdout, 'utf8') > MAX_NETSTAT_OUTPUT_BYTES
+    || pids.length === 0
+    || pids.some(pid => !Number.isSafeInteger(pid) || pid <= 0 || pid > 0xffff_ffff)
+  ) {
+    throw new Error('Windows netstat output or process IDs are invalid');
+  }
+  const listeners: SubstrateFederatedIsolatedDevnetWindowsNetstatListenerV1[] = [];
+  let dataStarted = false;
+  let preambleSeen = false;
+  let headerSeen = false;
+  for (const rawLine of stdout.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    const fields = line.split(/\s+/u);
+    const protocol = fields[0]?.toUpperCase();
+    if (protocol !== 'TCP' && protocol !== 'UDP') {
+      // Support the verified English/French Windows captions and Proto header;
+      // reject other locales or malformed preambles rather than guessing.
+      if (dataStarted) {
+        throw new Error('Windows netstat row is unknown or malformed');
+      }
+      if (!preambleSeen) {
+        if (!/^(?:Active Connections|Connexions actives)$/iu.test(line)) {
+          throw new Error('Windows netstat caption is unknown');
+        }
+        preambleSeen = true;
+      } else if (!headerSeen) {
+        // The verified French Windows capture omits the PID label with -o and
+        // decodes its OEM-accented state label as U+FFFD under UTF-8. Data rows
+        // still require their exact PID field; never infer it from the header.
+        if (
+          !/^Proto\s+Local Address\s+Foreign Address\s+State(?:\s+PID)?$/iu.test(line)
+          && !/^Proto\s+Adresse locale\s+Adresse distante\s+(?:É|\uFFFD)tat(?:\s+PID)?$/iu.test(line)
+        ) {
+          throw new Error('Windows netstat header is malformed');
+        }
+        headerSeen = true;
+      } else {
+        throw new Error('Windows netstat header is duplicated');
+      }
+      continue;
+    }
+    if (!headerSeen) throw new Error('Windows netstat header is missing');
+    dataStarted = true;
+    const expectedLength = protocol === 'TCP' ? 5 : 4;
+    if (fields.length !== expectedLength) throw new Error('Windows netstat row is truncated');
+    const local = parseNetstatEndpoint(fields[1]!, false);
+    const foreign = parseNetstatEndpoint(fields[2]!, true);
+    if (protocol === 'TCP' && foreign.address === '*') {
+      throw new Error('Windows netstat TCP foreign endpoint is malformed');
+    }
+    const pidText = protocol === 'TCP' ? fields[4]! : fields[3]!;
+    const pid = parseNetstatProcessId(pidText);
+    if (protocol === 'TCP') {
+      const state = fields[3]!.toUpperCase();
+      if (!NETSTAT_TCP_STATES.has(state)) throw new Error('Windows netstat TCP state is unknown');
+      if (state === 'LISTENING' && pids.includes(pid)) {
+        listeners.push(Object.freeze({ pid, localAddress: local.address, localPort: local.port }));
+      }
+    } else {
+      // UDP has no state; parsing above is deliberately strict before ignoring it.
+      void foreign;
+    }
+  }
+  if (!preambleSeen || !headerSeen) throw new Error('Windows netstat header is missing');
+  return Object.freeze(listeners);
+}
+
+function parseNetstatEndpoint(
+  value: string,
+  foreign: boolean,
+): Readonly<{ address: string; port: number }> {
+  let address: string;
+  let portText: string;
+  if (value.startsWith('[')) {
+    const match = /^\[([^\]]+)\]:(\*|\d+)$/u.exec(value);
+    if (!match) throw new Error('Windows netstat endpoint is malformed');
+    address = match[1]!;
+    portText = match[2]!;
+    if (isIP(address) !== 6) throw new Error('Windows netstat IPv6 endpoint is malformed');
+  } else {
+    const separator = value.lastIndexOf(':');
+    if (separator <= 0) throw new Error('Windows netstat endpoint is malformed');
+    address = value.slice(0, separator);
+    portText = value.slice(separator + 1);
+    if (address !== '*' && isIP(address) !== 4) throw new Error('Windows netstat address is malformed');
+  }
+  if (address === '*' || portText === '*') {
+    if (!foreign || address !== '*' || portText !== '*') {
+      throw new Error('Windows netstat wildcard endpoint is malformed');
+    }
+    return Object.freeze({ address, port: -1 });
+  }
+  const port = parseNetstatInteger(portText, 'Windows netstat port', foreign);
+  if (port === 0 && !foreign) throw new Error('Windows netstat local port is malformed');
+  return Object.freeze({ address, port });
+}
+
+function parseNetstatInteger(value: string, label: string, allowZero = false): number {
+  if (!/^\d+$/u.test(value)) throw new Error(`${label} is malformed`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < (allowZero ? 0 : 1) || parsed > 65_535) {
+    throw new Error(`${label} is malformed`);
+  }
+  return parsed;
+}
+
+function parseNetstatProcessId(value: string): number {
+  if (!/^\d+$/u.test(value)) throw new Error('Windows netstat owning PID is malformed');
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 0xffff_ffff) {
+    throw new Error('Windows netstat owning PID is malformed');
+  }
+  return parsed;
+}
+
+function windowsNetstatPath(): string {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot || !isAbsolute(systemRoot)) throw new Error('Windows SystemRoot is unavailable');
+  return canonicalRegularFile(resolve(systemRoot, 'System32', 'netstat.exe'), 'Windows netstat executable');
+}
+
+function windowsNetstatListeners(pids: readonly number[]): readonly Readonly<ListenerBinding>[] {
+  const result = spawnSync(windowsNetstatPath(), ['-a', '-n', '-o'], {
+    cwd: resolve(process.env.SystemRoot ?? process.env.WINDIR!),
+    env: minimalEnvironment(), encoding: 'utf8', timeout: 10_000,
+    maxBuffer: MAX_NETSTAT_OUTPUT_BYTES, windowsHide: true,
+  });
+  if (result.error || result.signal !== null || result.status !== 0 || result.stderr.trim() !== '') {
+    throw new Error('Windows netstat inspection failed');
+  }
+  return parseSubstrateFederatedIsolatedDevnetWindowsNetstatV1(result.stdout, pids);
+}
+
 function windowsListenerBindings(
   ports: readonly number[],
 ): Map<number, ListenerBinding[]> {
@@ -4190,11 +4343,7 @@ export function observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1(
     '$ErrorActionPreference="Stop"',
     `$pids=@(${pids.join(',')})`,
     '$images=@(Get-Process -Id $pids -ErrorAction Stop | Select-Object Id,Path)',
-    // Same provider as Get-NetTCPConnection; its Listen state is 2. Keep every owned listener.
-    '$rows=@(Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection '
-      + `-Filter "State = 2 AND (OwningProcess = ${primaryPid} OR OwningProcess = ${witnessPid})" `
-      + '-ErrorAction Stop | Select-Object LocalAddress,LocalPort,OwningProcess)',
-    'ConvertTo-Json -Compress -Depth 3 -InputObject @{images=$images; listeners=$rows}',
+    'ConvertTo-Json -Compress -Depth 3 -InputObject @{images=$images}',
   ].join('; ');
   const result = spawnSync(windowsPowerShellPath(),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
@@ -4210,7 +4359,7 @@ export function observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1(
     throw new Error('Windows process pair output is malformed');
   }
   const body = parsed as Record<string, unknown>;
-  if (!Array.isArray(body.images) || body.images.length !== 2 || !Array.isArray(body.listeners)) {
+  if (!Array.isArray(body.images) || body.images.length !== 2) {
     throw new Error('Windows process pair output is malformed');
   }
   const images = new Map<number, string>();
@@ -4222,19 +4371,7 @@ export function observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1(
     }
     images.set(row.Id, canonicalRegularFile(row.Path.trim(), 'running Java process image'));
   }
-  const listeners = body.listeners.map((row: unknown) => {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      throw new Error('Windows process pair listener row is malformed');
-    }
-    const record = row as Record<string, unknown>;
-    const { LocalAddress: localAddress, LocalPort: localPort, OwningProcess: pid } = record;
-    if (typeof localAddress !== 'string' || typeof localPort !== 'number'
-      || !Number.isSafeInteger(localPort) || localPort <= 0 || localPort > 65_535
-      || typeof pid !== 'number' || !pids.includes(pid)) {
-      throw new Error('Windows process pair listener row is malformed');
-    }
-    return Object.freeze({ pid, localAddress, localPort });
-  });
+  const listeners = windowsNetstatListeners(pids);
   return Object.freeze({ primaryExecutablePath: images.get(primaryPid)!,
     witnessExecutablePath: images.get(witnessPid)!, listeners: Object.freeze(listeners) });
 }

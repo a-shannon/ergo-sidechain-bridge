@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { appendFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +14,7 @@ vi.mock('node:child_process', async importOriginal => ({
 
 import {
   observeSubstrateFederatedIsolatedDevnetWindowsProcessPairV1 as observe,
+  parseSubstrateFederatedIsolatedDevnetWindowsNetstatV1 as parseNetstat,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1 as assertTarget,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
@@ -35,12 +36,131 @@ const listeners = () => [
 const result = (value: unknown) => ({
   status: 0, signal: null, error: undefined, stderr: '', stdout: JSON.stringify(value),
 });
+const rawResult = (stdout: string) => ({
+  status: 0, signal: null, error: undefined, stderr: '', stdout,
+});
 
-beforeEach(() => boundary.spawnSync.mockReset().mockReturnValue(result({ images: images(), listeners: listeners() })));
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+const netstat = (rows: string[]) => [
+  'Active Connections',
+  '  Proto  Local Address          Foreign Address        State           PID',
+  ...rows,
+].join('\r\n');
+
+describe('bounded netstat listener parser', () => {
+  it('accepts localized headings, IPv4/IPv6 listeners and ignores strict UDP rows', () => {
+    expect(parseNetstat([
+      'Connexions actives',
+      '  Proto  Adresse locale     Adresse distante       \uFFFDtat',
+      '  TCP    0.0.0.0:9051       0.0.0.0:0       LISTENING       41001',
+      '  TCP    [::]:9021           [::]:0           LISTENING       41001',
+      '  TCP    [::1]:9052          [::1]:51200      ESTABLISHED     41002',
+      '  UDP    0.0.0.0:5353        *:*                              41001',
+      '  UDP    [::]:5353           *:*                              41002',
+    ].join('\r\n'), [PRIMARY, WITNESS])).toEqual([
+      { pid: PRIMARY, localAddress: '0.0.0.0', localPort: 9051 },
+      { pid: PRIMARY, localAddress: '::', localPort: 9021 },
+    ]);
+  });
+
+  it.each([
+    'TCP 0.0.0.0:9051 0.0.0.0:0 LISTENING',
+    'TCP 0.0.0.0:9051 0.0.0.0:0 UNKNOWN 41001',
+    'TCP 0.0.0.0:9051 0.0.0.0:0 LISTENING 41001 extra',
+    'TCP [broken:9051 0.0.0.0:0 LISTENING 41001',
+    'TCP [not-an-ip]:9051 [::]:0 LISTENING 41001',
+    'TCP ::1:9051 0.0.0.0:0 LISTENING 41001',
+    'TCP 127.0.0.1:* 0.0.0.0:0 LISTENING 41001',
+    'TCP [::1]:* 0.0.0.0:0 LISTENING 41001',
+    'TCP 127.0.0.1:9051 *:443 LISTENING 41001',
+    'TCP 127.0.0.1:9051 *:* LISTENING 41001',
+    'TCP 192.0.2.1:443 *:* LISTENING 42000',
+    'TCP 127.0.0.1:9051 0.0.0.0:* LISTENING 41001',
+    'TCP 127.0.0.1:65536 0.0.0.0:0 LISTENING 41001',
+    'TCP 127.0.0.1:9051 0.0.0.0:65536 LISTENING 41001',
+    'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 4294967296',
+    'TCP 0.0.0.0:9051 0.0.0.0:0 LISTENING 41001\nMALFORMED ROW',
+    'UDP 0.0.0.0:5353 *:*',
+  ])('rejects malformed, unknown or truncated netstat rows', row => {
+    expect(() => parseNetstat(netstat([row]), [PRIMARY, WITNESS])).toThrow();
+  });
+
+  it.each([
+    ['Active Connections', 'Proto Local Address Foreign Address State PID'],
+    ['Active Connections', 'Proto Local Address Foreign Address State'],
+    ['Connexions actives', 'Proto Adresse locale Adresse distante État PID'],
+    ['Connexions actives', 'Proto Adresse locale Adresse distante État'],
+    ['Connexions actives', 'Proto Adresse locale Adresse distante \uFFFDtat PID'],
+    ['Connexions actives', 'Proto Adresse locale Adresse distante \uFFFDtat'],
+  ])('accepts the verified caption/header shape %# with exact PID data rows', (caption, header) => {
+    expect(parseNetstat([
+      caption, header, 'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 41001',
+    ].join('\r\n'), [PRIMARY])).toEqual([
+      { pid: PRIMARY, localAddress: '127.0.0.1', localPort: 9051 },
+    ]);
+  });
+
+  it.each([
+    'Connexions actives',
+    'Connexions actives\nProto Adresse locale Adresse distante',
+    'Active Connections\nProto UNKNOWN PID',
+    'Active Connections\nProto Local Address Foreign Address State PID EXTRA',
+    'Active Connections\nProto Local Address Foreign Address State PID\nProto Local Address Foreign Address State PID',
+    'Proto Local Address Foreign Address State PID',
+    'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 41001',
+    netstat([]) + '\n' + ' '.repeat(256 * 1024),
+  ])('rejects incomplete, unknown, duplicated or oversized captures %#', stdout => {
+    expect(() => parseNetstat(stdout, [PRIMARY, WITNESS])).toThrow();
+  });
+
+  it('accepts a complete empty table but requires an actual header', () => {
+    expect(parseNetstat(netstat([]), [PRIMARY, WITNESS])).toEqual([]);
+  });
+
+  it('ignores unrelated owners after strict row validation and preserves target rows', () => {
+    expect(parseNetstat(netstat([
+      'TCP 192.0.2.1:443 0.0.0.0:0 LISTENING 42000',
+      'TCP 192.0.2.2:444 192.0.2.3:0 TIME_WAIT 0',
+      'UDP 0.0.0.0:5353 203.0.113.1:443 42000',
+      'TCP 0.0.0.0:9051 0.0.0.0:0 LISTENING 41001',
+    ]), [PRIMARY, WITNESS])).toEqual([
+      { pid: PRIMARY, localAddress: '0.0.0.0', localPort: 9051 },
+    ]);
+  });
+
+  it('rejects invalid local ports, empty output and duplicate target rows by consumer policy', () => {
+    expect(() => parseNetstat(netstat(['TCP 0.0.0.0:0 0.0.0.0:0 LISTENING 41001']), [PRIMARY, WITNESS])).toThrow();
+    expect(() => parseNetstat('', [PRIMARY, WITNESS])).toThrow();
+    expect(parseNetstat(netstat([
+      'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 41001',
+      'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 41001',
+    ]), [PRIMARY, WITNESS])).toHaveLength(2);
+  });
+
+  it('accepts a Windows process ID above the TCP port range', () => {
+    expect(parseNetstat(netstat([
+      'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 70000',
+    ]), [70_000])).toEqual([
+      { pid: 70_000, localAddress: '127.0.0.1', localPort: 9051 },
+    ]);
+  });
+
+  it('rejects an unknown preamble even when a valid row follows', () => {
+    expect(() => parseNetstat([
+      'unexpected preamble 123',
+      'Proto Local Address Foreign Address State PID',
+      'TCP 127.0.0.1:9051 0.0.0.0:0 LISTENING 41001',
+    ].join('\r\n'), [PRIMARY, WITNESS])).toThrow();
+  });
+});
+
+beforeEach(() => boundary.spawnSync.mockReset().mockImplementation((_executable: string, args: string[]) =>
+  args[0] === '-a' ? rawResult(netstat(listeners().map(row =>
+    `TCP ${row.LocalAddress}:${row.LocalPort} 0.0.0.0:0 LISTENING ${row.OwningProcess}`)))
+    : result({ images: images() })));
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe.skipIf(process.platform !== 'win32')('fresh Windows process-pair observation', () => {
-  it('maps both exact PIDs and all listener rows with one bounded invocation', () => {
+  it('maps both exact PIDs and all listener rows with two bounded reads', () => {
     const observed = observe(PRIMARY, WITNESS);
     expect(observed.primaryExecutablePath).toBe(realpathSync(process.execPath));
     expect(observed.witnessExecutablePath).toBe(realpathSync(process.execPath));
@@ -50,30 +170,34 @@ describe.skipIf(process.platform !== 'win32')('fresh Windows process-pair observ
     expect(Object.isFrozen(observed)).toBe(true);
     expect(Object.isFrozen(observed.listeners)).toBe(true);
     expect(observed.listeners.every(Object.isFrozen)).toBe(true);
-    expect(boundary.spawnSync).toHaveBeenCalledTimes(1);
+    expect(boundary.spawnSync).toHaveBeenCalledTimes(2);
     const [executable, args, options] = boundary.spawnSync.mock.calls[0]!;
     expect(executable).toBe(join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
     expect(args.slice(0, -1)).toEqual(['-NoLogo', '-NoProfile', '-NonInteractive', '-Command']);
     expect(args.at(-1)).toContain('$pids=@(41001,41002)');
     expect(args.at(-1)).toContain('Get-Process -Id $pids -ErrorAction Stop');
-    expect(args.at(-1)).toContain('Get-CimInstance -Namespace root/StandardCimv2 -ClassName MSFT_NetTCPConnection');
-    expect(args.at(-1)).toContain('-Filter "State = 2 AND (OwningProcess = 41001 OR OwningProcess = 41002)" -ErrorAction Stop');
-    expect(args.at(-1)).toContain('Select-Object LocalAddress,LocalPort,OwningProcess');
-    expect(args.at(-1)).not.toContain('-LocalPort');
-    expect(args.at(-1)).not.toContain('catch');
     expect(options).toMatchObject({ encoding: 'utf8', timeout: 10_000, maxBuffer: 256 * 1024, windowsHide: true });
+    const [netstatExecutable, netstatArgs, netstatOptions] = boundary.spawnSync.mock.calls[1]!;
+    expect(netstatExecutable).toBe(join(process.env.SystemRoot!, 'System32', 'netstat.exe'));
+    expect(netstatArgs).toEqual(['-a', '-n', '-o']);
+    expect(netstatOptions).toMatchObject({ encoding: 'utf8', timeout: 10_000, maxBuffer: 256 * 1024, windowsHide: true });
   });
 
   it('does not cache an observation across successive assertions', () => {
     observe(PRIMARY, WITNESS);
-    boundary.spawnSync.mockReturnValueOnce(result({ images: images(), listeners: [] }));
+    boundary.spawnSync.mockReturnValueOnce(result({ images: images() }));
+    boundary.spawnSync.mockReturnValueOnce(rawResult(netstat([])));
     expect(observe(PRIMARY, WITNESS).listeners).toEqual([]);
-    expect(boundary.spawnSync).toHaveBeenCalledTimes(2);
+    expect(boundary.spawnSync).toHaveBeenCalledTimes(4);
   });
 
   it('retains unexpected listener rows for the owner to reject instead of filtering them', () => {
     const extra = { LocalAddress: '0.0.0.0', LocalPort: 1234, OwningProcess: PRIMARY };
-    boundary.spawnSync.mockReturnValueOnce(result({ images: images(), listeners: [...listeners(), extra] }));
+    boundary.spawnSync.mockReturnValueOnce(result({ images: images() }));
+    boundary.spawnSync.mockReturnValueOnce(rawResult(netstat([
+      ...listeners().map(row => `TCP ${row.LocalAddress}:${row.LocalPort} 0.0.0.0:0 LISTENING ${row.OwningProcess}`),
+      `TCP ${extra.LocalAddress}:${extra.LocalPort} 0.0.0.0:0 LISTENING ${extra.OwningProcess}`,
+    ])));
     expect(observe(PRIMARY, WITNESS).listeners.at(-1)).toEqual({ pid: PRIMARY, localAddress: '0.0.0.0', localPort: 1234 });
   });
 
@@ -87,10 +211,8 @@ describe.skipIf(process.platform !== 'win32')('fresh Windows process-pair observ
   });
 
   it.each([
-    null, [], {}, { images: images() }, { images: [], listeners: [] },
-    { images: images()[0], listeners: [] }, { images: images(), listeners: {} },
-    { images: [images()[0]], listeners: [] },
-    { images: [...images(), images()[0]], listeners: [] },
+    null, [], {}, { images: [] }, { images: images()[0] },
+    { images: [images()[0]] }, { images: [...images(), images()[0]] },
   ])('rejects a malformed complete observation %#', value => {
     boundary.spawnSync.mockReturnValueOnce(result(value));
     expect(() => observe(PRIMARY, WITNESS)).toThrow('output is malformed');
@@ -111,26 +233,42 @@ describe.skipIf(process.platform !== 'win32')('fresh Windows process-pair observ
   });
 
   it.each([
-    null, [], {},
-    { LocalAddress: 1, LocalPort: 9051, OwningProcess: PRIMARY },
-    { LocalAddress: '127.0.0.1', LocalPort: '9051', OwningProcess: PRIMARY },
-    { LocalAddress: '127.0.0.1', LocalPort: 0, OwningProcess: PRIMARY },
-    { LocalAddress: '127.0.0.1', LocalPort: 65_536, OwningProcess: PRIMARY },
-    { LocalAddress: '127.0.0.1', LocalPort: 1.5, OwningProcess: PRIMARY },
-    { LocalAddress: '127.0.0.1', LocalPort: 9051, OwningProcess: 42_000 },
-    { LocalAddress: '127.0.0.1', LocalPort: 9051, OwningProcess: String(PRIMARY) },
-  ])('rejects a malformed or foreign listener row %#', row => {
-    boundary.spawnSync.mockReturnValueOnce(result({ images: images(), listeners: [row] }));
-    expect(() => observe(PRIMARY, WITNESS)).toThrow('listener row is malformed');
-  });
-
-  it.each([
     { error: new Error('timeout') }, { status: 1 }, { status: null },
     { signal: 'SIGTERM' }, { stderr: 'inspection error' },
   ])('fails closed on subprocess failure %#', overrides => {
     boundary.spawnSync.mockReturnValueOnce({ ...result({ images: images(), listeners: listeners() }), ...overrides });
     expect(() => observe(PRIMARY, WITNESS)).toThrow('inspection failed');
   });
+
+  it.each([
+    { error: new Error('timeout') }, { error: new Error('ENOBUFS') },
+    { status: 1 }, { status: null }, { signal: 'SIGTERM' }, { stderr: 'inspection error' },
+  ])('fails closed on the second subprocess failure %#', overrides => {
+    boundary.spawnSync.mockReturnValueOnce(result({ images: images() }));
+    boundary.spawnSync.mockReturnValueOnce({ ...rawResult(netstat([])), ...overrides });
+    expect(() => observe(PRIMARY, WITNESS)).toThrow('Windows netstat inspection failed');
+    expect(boundary.spawnSync).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['unavailable', 'relative', 'missing', 'directory'] as const)(
+    'rejects a %s netstat path before the second subprocess', fault => {
+      const root = mkdtempSync(join(tmpdir(), 'fed-netstat-path-test-'));
+      try {
+        if (fault === 'directory') mkdirSync(join(root, 'System32', 'netstat.exe'), { recursive: true });
+        boundary.spawnSync.mockImplementationOnce(() => {
+          vi.stubEnv('SystemRoot', fault === 'unavailable' ? undefined : fault === 'relative' ? '.' : root);
+          vi.stubEnv('WINDIR', undefined);
+          return result({ images: images() });
+        });
+        expect(() => observe(PRIMARY, WITNESS)).toThrow(
+          fault === 'unavailable' || fault === 'relative' ? 'SystemRoot is unavailable' : /file|regular|ENOENT/i,
+        );
+        expect(boundary.spawnSync).toHaveBeenCalledTimes(1);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.each(['', '{', 'undefined'])('rejects invalid JSON %s', stdout => {
     boundary.spawnSync.mockReturnValueOnce({ ...result({}), stdout });
@@ -200,6 +338,12 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
       const command = args.at(-1)!;
       if (command.includes('-LocalPort')) return { ...result([]) };
       if (command.includes('$images=')) {
+        return result({ images: [
+          { Id: PRIMARY, Path: injected && fault === 'primary-image' ? otherJava : java },
+          { Id: WITNESS, Path: injected && fault === 'witness-image' ? otherJava : java },
+        ] });
+      }
+      if (args[0] === '-a') {
         const rows = listeners();
         if (injected) {
           const missing = ['missing-primary-rest', 'missing-primary-p2p', 'missing-witness-rest', 'missing-witness-p2p'].indexOf(fault);
@@ -208,10 +352,8 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
           if (fault === 'extra-port') rows.push({ LocalAddress: '127.0.0.1', LocalPort: 1234, OwningProcess: PRIMARY });
           if (fault === 'foreign-owner') rows[0]!.OwningProcess = 42_000;
         }
-        return result({ images: [
-          { Id: PRIMARY, Path: injected && fault === 'primary-image' ? otherJava : java },
-          { Id: WITNESS, Path: injected && fault === 'witness-image' ? otherJava : java },
-        ], listeners: rows });
+        return rawResult(netstat(rows.map(row =>
+          `TCP ${row.LocalAddress}:${row.LocalPort} 0.0.0.0:0 LISTENING ${row.OwningProcess}`)));
       }
       if (command.includes('Get-Process -Id')) return { ...result(null), stdout: java };
       if (command.includes('-OwningProcess')) return result(listeners());
@@ -243,7 +385,7 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
       await expect(session.withMiningActiveExecutionTarget(async target => {
         const before = boundary.spawnSync.mock.calls.length;
         expect(() => assertTarget(target)).not.toThrow();
-        expect(boundary.spawnSync.mock.calls.length - before).toBe(1);
+        expect(boundary.spawnSync.mock.calls.length - before).toBe(2);
         injected = true;
         if (fault === 'primary-exit') children[0]!.exitCode = 1;
         if (fault === 'witness-exit') children[1]!.exitCode = 1;

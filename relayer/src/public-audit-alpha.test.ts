@@ -382,7 +382,7 @@ describe('public audit alpha bootstrap', () => {
       "{ envName: 'STATE_TRACKER_TEST_SHARD', shardCount: 4 }",
     );
     expect(boundedVitestRunner).toContain(
-      "['src/adapters/federated-native-mint-execution-v1.test.ts', 50]",
+      "['src/adapters/federated-native-mint-execution-v1.test.ts', 25]",
     );
     expect(boundedVitestRunner).toContain("'--testNamePattern'");
     expect(boundedVitestRunner).toContain("'--hideSkippedTests'");

@@ -44,7 +44,9 @@ const ISOLATED_TEST_TARGETS = new Set([
   'src/wp06-fixture-backed-lifecycle.test.ts',
 ]);
 const NAME_SHARDED_TEST_TARGETS = new Map<string, number>([
-  ['src/adapters/federated-native-mint-execution-v1.test.ts', 50],
+  // This file's synchronous compiler checks can starve worker RPC updates in
+  // a 50-case shard. Smaller exhaustive shards retain the same test budget.
+  ['src/adapters/federated-native-mint-execution-v1.test.ts', 25],
 ]);
 
 function collectTestFiles(dir: string): string[] {

@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-02
+Updated: 2026-10-03
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,12 +28,13 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–35 remain permanently consumed or held. The preceding
-published candidate is `aeb8883f2bde0b8f71788c5aa1d0193845f5a09c`; it matched
-open PR 7 when its terminal CI was verified on October 2.
-Its exact-head [run 36920536288](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/36920536288)
-passed all three required jobs. Reuse that unchanged candidate evidence;
-it does not establish native two-cycle acceptance.
+**Now:** Campaigns 24–36 remain permanently consumed or held. The last completed
+exact-head CI baseline is `1ca23ee1ed9ded0c79b6feafb5e360a799acb4c7`, matching open PR 7
+when verified on October 2. Its exact-head
+[run 37005622742](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37005622742)
+passed all three required jobs. The observer batch below changes that baseline
+and requires its own review, guarded promotion and exact-head CI. Prior green
+CI does not cover these changes or establish native two-cycle acceptance.
 
 The cycle-step producer, worker and parent join is closed and published.
 Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
@@ -118,12 +119,56 @@ inputs. Promote one combined checkpoint through the exact publication guards
 and require all three CI jobs on its new head before fresh campaign admission.
 These diagnostics do not identify C35's cause or establish a runtime correction.
 
-No C36 is admitted. A fresh campaign requires separately reviewed inputs and
-all applicable exact-candidate gates after this boundary is resolved. Two-cycle
-success, accumulated recovery, operator reproduction, FED release-consumer
-closure and independent assurance remain due. Prepare and simulate the operator
-package as requested; actual external reproduction and custody remain separate
-final obligations.
+C36 was separately admitted with fresh inputs and independent review, then
+terminated once with `execution_failure` at `cycle-1/setup-check/
+final-request-validation`; it is permanently consumed and supplies no success,
+retry, custody-disposal or historical-cause authority. The exact promoted
+candidate `1ca23ee1ed9ded0c79b6feafb5e360a799acb4c7` passed all three required
+jobs in run 37005622742. The independent terminal-result review reconstructed
+the 13 canonical receipts with no inconsistency. A five-case focused fixture
+now covers the final-validation freshness boundary (0 ms, exactly 60,000 ms,
+60,001 ms expiry, custody disposal and compiler-identity drift); TypeScript
+passes. A local observer cost probe measured four fresh process-pair reads at
+870.8–919.9 ms each; this is a performance observation, not C36's cause.
+
+No C37 is admitted. The observer comparison matched exact process images and
+all owned IPv4/IPv6 listeners in three controlled runs: the existing CIM route
+took 800–876 ms and a bounded PowerShell-image plus
+`System32/netstat.exe -a -n -o` route took 285–301 ms. The production join now
+uses those two fresh bounded reads, preserves every owned listener and the
+existing image/file/liveness checks, and retains the 60-second freshness bound.
+It does not cache observations or filter to expected ports.
+
+The first production host check rejected the French header without a PID label;
+the corrected strict parser accepts the verified English/French headings while
+requiring exact PID data rows. It rejects malformed or incomplete captures and
+subprocess failures. All 111 focused cases and TypeScript pass. Two observations
+of the corrected production join matched all images and four IPv4/IPv6
+loopback/wildcard listeners in 341 and 329 ms on the final reviewed source;
+the owned processes closed.
+These local observations establish neither C36's cause nor campaign success.
+The affected canonical closure and independent source review pass locally.
+Guarded promotion and a fresh exact-head CI precede any new admission.
+The first canonical replay stopped at the native-mint shard despite 50 passed
+assertions: a separate lifecycle diagnostic exposed Vitest's global worker
+`onTaskUpdate` timeout, which its JSON success flag omits. The runner now uses
+25-case exact-name shards for that file, preserving exhaustive selection,
+coverage-count enforcement and the existing per-test budget. The canonical
+replay must complete successfully; diagnostic reports alone do not close it.
+The canonical replay completed all 738 mint cases in 30 exhaustive shards and
+311 files before an audit-contract test's obsolete 50-case expectation failed.
+That consumer now pins 25, and all 11 audit-contract cases pass. The remaining
+279-file canonical suffix terminated with exit code zero. The segmented closure
+covers all 608 files: 17 original prefix files, 311 resumed files, the corrected
+audit consumer and 279 suffix files. Interrupted runs remain recorded; their
+green assertions alone did not establish process success. All 111 focused
+cases, 293 architecture cases, TypeScript and import checks pass. Reuse these
+checks and independent source review while their inputs remain unchanged;
+recheck exact candidate bytes and claims at promotion.
+Two-cycle success, accumulated recovery, operator
+reproduction, FED release-consumer closure and independent assurance remain
+due. Prepare and simulate the operator package as requested; actual external
+reproduction and custody remain separate final obligations.
 
 ### Historical Admission And Compiler Checkpoints
 
@@ -1208,7 +1253,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C35 native setup-check operation boundary (selected) | Preserve the actual failing setup operation through a bounded own-stage tag and the existing worker/parent failure lineage; distinguish live compiler/custody, observation, signing-context and JVM-node checks while preserving native provenance | The cheaper pre-sign, real-WASM and offline JVM falsifiers pass with their stated synthetic scope. No runtime fix is yet supported. Close the smallest necessary diagnostic producer/consumer join with isolated negatives and independent review before a separately admitted complete fresh campaign; no retry, fake provenance, raw private errors or relaxed predicates |
+| C36 final-request-validation observer boundary (promotion and CI selected) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and the segmented 608-file canonical closure pass. Independent source review is GO after the isolated TCP wildcard correction. Recheck exact final bytes/claims, guard promotion and require all three jobs on its own head before separate fresh campaign admission. C24–36 remain consumed or held; no retry, timeout increase or predicate relaxation |
 | C34 cycle-step diagnostic join (closed 2026-10-02) | Connect the actual failing cycle operation to a bounded, identity-bound worker and parent companion while retaining existing terminal/V1/V2 bytes and permanent attempt holds | Published at aeb8883f2; targeted 1,047 cases, TypeScript/import checks, independent review, guards and all three exact-head CI jobs pass. Fresh C35 validates terminal cycle-1/setup-check lineage, not C34 cause, operation completion or execution authority |
 | Bounded wasm-pack provenance correction and exact-head CI closeout (closed 2026-09-29) | Provision and hash-pin the official Windows x64 release asset and executable; align runtime pins, fixtures, workflow validation and the current WASM producer/consumer lock; rebuild and inspect the package; close affected exact-Node-24 consumers; independently review, guard and promote; pass all three required jobs on the exact promoted head | Completed on `d6cca077cf2389bcb1e8f21ed3b594004fdb4653`: exact run 36582859790 has all three jobs terminal-success. Reuse its evidence while the promoted tree and hosted result remain unchanged |
 | C29 `node-start` diagnostic lineage (closed 2026-09-30) | Preserve the coarse root phase and terminal formats while exposing an allowlisted Ergo startup subphase in separately versioned, identity-bound worker and parent sidecars. Keep C29 consumed; do not inspect its raw private files, retry, resume or reuse custody. Preserve exact phase correlation, canonical JSON, bounded traversal/bytes, redaction and no-cleanup claim; V1 and terminal receipts stay byte-compatible. | Promoted at `29785fbc015e0a07d8a6799048bb7a5f7524252c`; all three jobs passed in run 36629279161. Final independent review found no remaining actionable defect after two P2 fixes (truncated aggregate traversal; hostile nested Error inspection). TypeScript, the layered import check and 788 targeted producer/consumer tests passed. Reuse C29 facts only: `execution_failure`, `primaryPhase=node-start`, `sourceFailurePhase=null`, cleanup and raw cause unknown. C30 subsequently completed separate fresh-input admission and failed once as recorded in Current Focus. Neither these diagnostics nor green CI authorize another attempt. |
