@@ -149,6 +149,9 @@ import {
 } from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
 import { projectNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { projectNativeTwoCycleErgoNodePostCallbackStageV1,
+  tagIsolatedErgoNodePostCallbackStageV1 }
+  from '../../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
@@ -2691,7 +2694,8 @@ describe('fresh FED target composition', () => {
 
   it('retains the cycle step when cycle failure and owner cleanup both fail', async () => {
     const createProcess = mocked.process.getMockImplementation()!;
-    const primary = new Error('post-cycle callback failed');
+    const primary = tagIsolatedErgoNodePostCallbackStageV1(
+      new Error('post-cycle owner operation failed'), 'read-only-restart');
     const nativeCleanup = new Error('native close failed');
     const ergoCleanup = new Error('Ergo stop failed');
     mocked.process.mockImplementation((...args) => {
@@ -2707,6 +2711,7 @@ describe('fresh FED target composition', () => {
     expect(failure).toBeInstanceOf(AggregateError);
     expect(failure.errors).toEqual([primary, nativeCleanup, ergoCleanup]);
     expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({ cycle: 'cycle-1', step: 'cycle-summary' });
+    expect(projectNativeTwoCycleErgoNodePostCallbackStageV1(failure)).toBe('read-only-restart');
     expect(stop).toHaveBeenCalledOnce();
     expect(closeNative).toHaveBeenCalledOnce();
     assertDisposed();

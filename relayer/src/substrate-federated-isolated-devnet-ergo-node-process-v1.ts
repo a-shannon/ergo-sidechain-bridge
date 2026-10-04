@@ -47,6 +47,9 @@ import {
   type SubstrateFederatedIsolatedDevnetTrackerTargetPreActionPhaseV1,
 } from './relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
+import { tagIsolatedErgoNodePostCallbackStageV1,
+  type IsolatedErgoNodePostCallbackStageV1 }
+  from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
 import type {
   SubstrateFederatedIsolatedDevnetErgoNodeExecutionReceiptV1,
@@ -1249,9 +1252,10 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
 
   const runCycleAction = <Target extends object, T>(
     action: (target: Readonly<Target>) => Promise<T>, target: Readonly<Target>,
+    onFulfilled?: () => void,
   ): Promise<T> => {
     currentCycle.assertCustody?.();
-    return runManagedAction(action, target);
+    return runManagedAction(action, target, onFulfilled);
   };
   const operations: Omit<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2, 'continueNativeTrackerCycleV1'> = Object.freeze({
     startMining: async () => {
@@ -1340,6 +1344,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         throw new Error('isolated Ergo execution action is required');
       }
       activeOperation = 'execution';
+      let postCallbackStage: IsolatedErgoNodePostCallbackStageV1 | null = null;
       try {
         const initialSnapshot = await waitForCommonIndexedSnapshot(
           primary,
@@ -1391,23 +1396,28 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
         let value: T;
         try {
-          value = await runCycleAction(action, target);
+          value = await runCycleAction(action, target,
+            () => { postCallbackStage = 'completion-check'; });
         } finally {
           ACTIVE_OWNED_EXECUTION_TARGETS.delete(target);
         }
         state = 'mining';
 
+        postCallbackStage = 'mining-shutdown';
         await stopOwnedNode(primary, true);
         primary = undefined;
         await stopOwnedNode(witness, true);
         witness = undefined;
+        postCallbackStage = 'ownership-recheck';
         assertPortsUnowned(OWNED_PORTS);
         recheckRuntimeFiles(input, runtime);
 
+        postCallbackStage = 'read-only-restart';
         primary = spawnOwnedNode(input, runtime, 'primary', 'non-mining');
         const finalSnapshot = await waitForMinimumIndexedSnapshot(primary);
         witness = spawnOwnedNode(input, runtime, 'witness', 'non-mining');
         await waitForExactSnapshot(witness, finalSnapshot, STARTUP_TIMEOUT_MS);
+        postCallbackStage = 'read-only-validation';
         assertOwnedNodeIdentity(input, runtime, primary);
         assertOwnedNodeIdentity(input, runtime, witness);
         assertOwnedListenerBindings(primary, witness);
@@ -1415,6 +1425,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         recheckRuntimeFiles(input, runtime);
         state = 'read-only';
 
+        postCallbackStage = 'receipt-finalization';
         const receipt: SubstrateFederatedIsolatedDevnetErgoNodeExecutionV1Receipt =
           Object.freeze({
             schema:
@@ -1434,7 +1445,11 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         completedSetupTarget = target;
         return Object.freeze({ value, receipt });
       } catch (error) {
-        return await failWithCleanup(error);
+        try { return await failWithCleanup(error); }
+        catch (failure) {
+          throw postCallbackStage === null ? failure
+            : tagIsolatedErgoNodePostCallbackStageV1(failure, postCallbackStage);
+        }
       } finally {
         activeOperation = undefined;
       }
@@ -4586,12 +4601,15 @@ function delay(milliseconds: number): Promise<void> {
 async function runManagedAction<TTarget extends object, T>(
   action: (target: Readonly<TTarget>) => Promise<T>,
   target: Readonly<TTarget>,
+  onFulfilled?: () => void,
 ): Promise<T> {
   const startedAtMs = performance.now();
   const value = await action(target);
+  const completedAtMs = performance.now();
+  onFulfilled?.();
   assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
     startedAtMs,
-    performance.now(),
+    completedAtMs,
     SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1,
   );
   return value;

@@ -17,8 +17,11 @@ import {
   parseSubstrateFederatedIsolatedDevnetWindowsNetstatV1 as parseNetstat,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1 as assertTarget,
+  SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1 as completionBudgetMs,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
+import { projectOwnIsolatedErgoNodePostCallbackStageV1 as projectOwnerStage }
+  from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import { issueSubstrateFederatedIsolatedDevnetMiningCredentialV1 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 
 const PRIMARY = 41_001;
@@ -314,7 +317,11 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
     'inactive-primary-config', 'inactive-witness-config',
     'missing-primary-rest', 'missing-primary-p2p', 'missing-witness-rest', 'missing-witness-p2p',
     'non-loopback', 'extra-port', 'foreign-owner',
-  ])('preserves per-assertion checks: %s', async fault => {
+    'callback-return', 'completion-equality', 'completion-plus-one',
+    'invalid-start-time', 'invalid-completion-time', 'backwards-completion-time',
+    'primary-orderly-stop', 'witness-orderly-stop', 'post-stop-port',
+    'primary-restart', 'witness-restart', 'primary-stable-snapshot', 'witness-stable-snapshot',
+  ])('preserves per-assertion and post-callback checks: %s', async fault => {
     const directory = mkdtempSync(join(tmpdir(), 'fed-process-pair-test-'));
     const java = join(directory, 'java.exe');
     const otherJava = join(directory, 'same-image-other-path.exe');
@@ -325,26 +332,56 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
     const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
     const children: FakeChild[] = [];
     const configs: string[] = [];
+    const launches: { role: 'primary' | 'witness'; mode: 'mining' | 'non-mining'; child: FakeChild }[] = [];
+    const shutdownPids: number[] = [];
+    const snapshotReads = new Map<number, number>();
+    const lifecycleFault = [
+      'callback-return', 'completion-equality', 'completion-plus-one',
+      'invalid-start-time', 'invalid-completion-time', 'backwards-completion-time',
+      'primary-orderly-stop', 'witness-orderly-stop', 'post-stop-port',
+      'primary-restart', 'witness-restart', 'primary-stable-snapshot', 'witness-stable-snapshot',
+    ].includes(fault);
+    const liveLaunches = () => launches.filter(({ child }) => child.exitCode === null && child.signalCode === null);
+    const liveListeners = () => liveLaunches().flatMap(({ role, child }) =>
+      (role === 'primary' ? [9051, 9021] : [9052, 9022]).map(LocalPort => ({
+        LocalAddress: '127.0.0.1', LocalPort, OwningProcess: child.pid,
+      })));
     let logback = '';
     let injected = false;
+    let callbackReturned = false;
+    let portFaultInjected = false;
     boundary.spawn.mockReset().mockImplementation((_exe: string, args: string[]) => {
-      const child = new FakeChild(children.length === 0 ? PRIMARY : WITNESS);
-      configs.push(args[args.indexOf('--config') + 1]!);
+      const config = args[args.indexOf('--config') + 1]!;
+      const role = config.endsWith('primary-mining.conf') || config.endsWith('primary-non-mining.conf') ? 'primary' : 'witness';
+      const mode = config.endsWith('-non-mining.conf') ? 'non-mining' : 'mining';
+      if (mode === 'non-mining' && fault === `${role}-restart`) {
+        throw new Error(`fixture ${role} non-mining spawn failure`);
+      }
+      expect(liveLaunches().some(launch => launch.role === role)).toBe(false);
+      const child = new FakeChild((role === 'primary' ? PRIMARY : WITNESS) + (mode === 'non-mining' ? 100 : 0));
+      configs.push(config);
       logback = args.find(value => value.startsWith('-Dlogback.configurationFile='))!.split('=')[1]!;
       children.push(child);
+      launches.push({ role, mode, child });
       return child;
     });
     boundary.spawnSync.mockImplementation((_exe: string, args: string[]) => {
       const command = args.at(-1)!;
-      if (command.includes('-LocalPort')) return { ...result([]) };
+      if (command.includes('-LocalPort')) {
+        const rows = liveListeners();
+        if (fault === 'post-stop-port' && callbackReturned && rows.length === 0 && !portFaultInjected) {
+          portFaultInjected = true;
+          rows.push({ LocalAddress: '127.0.0.1', LocalPort: 9051, OwningProcess: 42_000 });
+        }
+        return result(rows);
+      }
       if (command.includes('$images=')) {
-        return result({ images: [
-          { Id: PRIMARY, Path: injected && fault === 'primary-image' ? otherJava : java },
-          { Id: WITNESS, Path: injected && fault === 'witness-image' ? otherJava : java },
-        ] });
+        return result({ images: liveLaunches().map(({ role, child }) => ({
+          Id: child.pid, Path: injected && fault === `${role}-image` ? otherJava : java,
+        })) });
       }
       if (args[0] === '-a') {
-        const rows = listeners();
+        const rows = liveListeners();
         if (injected) {
           const missing = ['missing-primary-rest', 'missing-primary-p2p', 'missing-witness-rest', 'missing-witness-p2p'].indexOf(fault);
           if (missing >= 0) rows.splice(missing, 1);
@@ -355,18 +392,32 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
         return rawResult(netstat(rows.map(row =>
           `TCP ${row.LocalAddress}:${row.LocalPort} 0.0.0.0:0 LISTENING ${row.OwningProcess}`)));
       }
-      if (command.includes('Get-Process -Id')) return { ...result(null), stdout: java };
-      if (command.includes('-OwningProcess')) return result(listeners());
+      if (command.includes('Get-Process -Id')) {
+        const pid = Number(/Get-Process -Id (\d+)/u.exec(command)![1]);
+        expect(liveLaunches().some(launch => launch.child.pid === pid)).toBe(true);
+        return { ...result(null), stdout: java };
+      }
+      if (command.includes('-OwningProcess')) return result(liveListeners());
       throw new Error('unexpected process inspection');
     });
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
       const url = new URL(String(input));
+      const role = url.port === '9051' ? 'primary' : 'witness';
+      const launch = liveLaunches().find(candidate => candidate.role === role);
+      if (!launch) throw new Error('fixture request has no live process generation');
       if (url.pathname === '/node/shutdown' && init?.method === 'POST') {
-        setTimeout(() => children[url.port === '9051' ? 0 : 1]?.close(), 0);
+        shutdownPids.push(launch.child.pid);
+        if (callbackReturned && fault === `${role}-orderly-stop`) return new Response('', { status: 503 });
+        setTimeout(() => launch.child.close(), 0);
         return new Response('', { status: 200 });
       }
+      if (url.pathname === '/blocks/lastHeaders/1') {
+        snapshotReads.set(launch.child.pid, (snapshotReads.get(launch.child.pid) ?? 0) + 1);
+      }
+      const changedSnapshot = launch.mode === 'non-mining' && fault === `${role}-stable-snapshot`
+        && (snapshotReads.get(launch.child.pid) ?? 0) === 3;
       const data = url.pathname === '/info' ? { network: 'devnet', fullHeight: 10 }
-        : url.pathname === '/blocks/lastHeaders/1' ? [{ id: '11'.repeat(32), height: 10 }]
+        : url.pathname === '/blocks/lastHeaders/1' ? [{ id: (changedSnapshot ? '22' : '11').repeat(32), height: 10 }]
           : url.pathname === '/blockchain/indexedHeight' ? { fullHeight: 10, indexedHeight: 10 } : undefined;
       if (!data) throw new Error('unexpected fixture HTTP request');
       return new Response(JSON.stringify(data), { status: 200 });
@@ -382,11 +433,25 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
     }, issueSubstrateFederatedIsolatedDevnetMiningCredentialV1('test test test test test test test test test test test junk', key));
     try {
       await session.startMining();
-      await expect(session.withMiningActiveExecutionTarget(async target => {
+      expect(completionBudgetMs).toBe(4_680_000);
+      const timing = fault === 'invalid-start-time' ? [NaN, 1_000]
+        : fault === 'invalid-completion-time' ? [1_000, Infinity]
+          : fault === 'backwards-completion-time' ? [1_000, 999]
+            : [1_000, 1_000 + (fault === 'completion-equality' ? 4_680_000
+              : fault === 'completion-plus-one' ? 4_680_001 : 0)];
+      const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(timing[0]!).mockReturnValueOnce(timing[1]!);
+      const value = Object.freeze({ callback: 'completed' });
+      let retainedTarget: Parameters<typeof assertTarget>[0] | undefined;
+      const execution = session.withMiningActiveExecutionTarget(async target => {
+        retainedTarget = target;
         const before = boundary.spawnSync.mock.calls.length;
         expect(() => assertTarget(target)).not.toThrow();
         expect(boundary.spawnSync.mock.calls.length - before).toBe(2);
         injected = true;
+        if (lifecycleFault) {
+          callbackReturned = true;
+          return value;
+        }
         if (fault === 'primary-exit') children[0]!.exitCode = 1;
         if (fault === 'witness-exit') children[1]!.exitCode = 1;
         const changedFile = fault === 'java-bytes' ? java : fault === 'jar-bytes' ? jar
@@ -403,7 +468,51 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
           expect(() => assertTarget(target)).toThrow('exposed an unexpected listener');
         } else expect(() => assertTarget(target)).toThrow();
         throw new Error('fixture stop after deciding assertion');
-      })).rejects.toThrow('fixture stop after deciding assertion');
+      });
+      if (!lifecycleFault) {
+        await expect(execution).rejects.toThrow('fixture stop after deciding assertion');
+      } else if (fault === 'callback-return' || fault === 'completion-equality') {
+        const completed = await execution;
+        expect(completed.value).toBe(value);
+        expect(completed.receipt.initialSnapshot).toEqual({
+          network: 'devnet', fullHeight: 10, indexedHeight: 10, headerIdHex: '11'.repeat(32),
+        });
+        expect(completed.receipt.finalSnapshot).toEqual(completed.receipt.initialSnapshot);
+        expect(launches.map(({ role, mode, child }) => [role, mode, child.pid])).toEqual([
+          ['primary', 'mining', PRIMARY], ['witness', 'mining', WITNESS],
+          ['primary', 'non-mining', PRIMARY + 100], ['witness', 'non-mining', WITNESS + 100],
+        ]);
+        expect(snapshotReads.get(PRIMARY + 100)).toBe(3);
+        expect(snapshotReads.get(WITNESS + 100)).toBe(3);
+        expect(liveLaunches().map(({ child }) => child.pid)).toEqual([PRIMARY + 100, WITNESS + 100]);
+      } else {
+        const expected = fault === 'completion-plus-one' ? 'managed action exceeded its completion budget'
+          : fault.includes('-time') ? 'managed-action timing is invalid'
+            : fault.endsWith('-orderly-stop') ? `${fault.split('-')[0]} process did not stop orderly`
+              : fault === 'post-stop-port' ? 'process port is already owned'
+                : fault.endsWith('-restart') ? `fixture ${fault.split('-')[0]} non-mining spawn failure`
+                  : `${fault.split('-')[0]} snapshot differs from the frozen target`;
+        let rejected: unknown;
+        await expect(execution.catch(error => { rejected = error; throw error; })).rejects.toThrow(expected);
+        const ownerStage = fault.endsWith('-time') || fault === 'completion-plus-one'
+          ? 'completion-check' : fault.endsWith('-orderly-stop') ? 'mining-shutdown'
+            : fault === 'post-stop-port' ? 'ownership-recheck'
+              : fault.endsWith('-restart') ? 'read-only-restart' : 'read-only-validation';
+        expect(projectOwnerStage(rejected)).toBe(ownerStage);
+        expect(liveLaunches()).toEqual([]);
+      }
+      if (lifecycleFault) {
+        expect(callbackReturned).toBe(true);
+        expect(clock).toHaveBeenCalledTimes(2);
+        const rejectedTiming = fault === 'completion-plus-one' || fault.includes('-time');
+        expect(shutdownPids).toEqual(rejectedTiming ? []
+          : fault === 'primary-orderly-stop' ? [PRIMARY] : [PRIMARY, WITNESS]);
+        expect(launches.filter(({ mode }) => mode === 'non-mining')).toHaveLength(
+          rejectedTiming || fault.endsWith('-orderly-stop') || fault === 'post-stop-port' || fault === 'primary-restart' ? 0
+            : fault === 'witness-restart' ? 1 : 2,
+        );
+        expect(() => assertTarget(retainedTarget!)).toThrow();
+      }
     } finally {
       await session.stop();
       expect(children.every(child => child.exitCode !== null || child.signalCode !== null)).toBe(true);

@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-03
+Updated: 2026-10-04
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,55 +28,29 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–39 remain permanently consumed or held. Published runtime
-candidate `35eeb675644afdd78f392d05e5a9fed6c06155b0`, matching open PR 7
-when verified on October 3, passed all three required jobs in its own
-[run 37134305984](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37134305984).
-The observer and Git-control checkpoints remain closed for their exact inputs.
-C39 passed separate source, cache, host and path admission, then issued the
-canonical two-cycle command once. Its parent terminal reports
-`execution_failure`; the public diagnostic narrows the failure to
-`cycle-1/tracker-context`, before operation completion. Post-failure identity
-passed. The raw cause and root cleanup/custody disposal are unestablished;
-there is no two-cycle acceptance. Do not retry or resume C39 or inspect its
-private runtime. C38's earlier `cycle-1/cycle-summary` failure also remains
-consumed and does not supply C39 evidence.
-The first fresh compiler discriminator passed: full offline locked metadata
-resolved 1,060 packages and a bounded native Rust/MSVC link-and-run passed
-against the production projected environment. A separate compiler-only FED
-build on local `dd7e054b6fbf05c1d36a297cd46d0c95fb5569e2` failed once during
-the runtime custom build: nested `winapi` build-script linking reported LNK1104.
-Both new sessions were disposed and their actual post-disposal access checks
-rejected them; no build-spec, node, signing or campaign ran. The missing file
-name is redacted. Public source inspection and a tiny no-key Cargo differential
-then demonstrated path sensitivity within that experiment. A separate fresh FED
-compiler diagnostic with a shallow Windows build parent passed on the same local
-candidate, producing the real Frontier node and runtime WASM in about five
-minutes. Both fresh sessions were disposed and their post-disposal access checks
-rejected them; no build-spec, node, signing or campaign ran. These diagnostic
-outputs are consumed and bound to disposed sessions, never reusable as campaign
-authority. The exact C37 and C38 causes and cleanup remain unknown.
-The build export disables Git automatic GC and maintenance explicitly for each
-subprocess. Green checkpoint CI and compiler diagnostics do not establish native
-two-cycle acceptance. The Git-control and Windows-layout changes
-are locally reviewed; any future changed public candidate requires all three
-exact-head jobs to pass.
+**Now:** Campaigns 24–41 are permanently consumed or held. C40 stopped before
+attempt creation because the selected `wasm-pack` did not match the reviewed
+tool. The separately admitted C41 failed once at `cycle-1/cycle-summary`.
+Operation completion, root cleanup, custody disposal and the raw cause remain
+unestablished; no two-cycle acceptance follows. Do not retry or resume either
+attempt or inspect private runtime state. The preceding published head
+`0efa934a2a38c23fc680918ae562597f1f6e781c` passed all three jobs in its
+exact [run 37161540090](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37161540090).
+That run cannot validate the owner-lifecycle diagnostic; its checkpoint
+requires separate guarded promotion and exact-head CI.
 
-**Next:** The local diagnostic candidate separates a newly observed V2 context
-failure from the following custody check in both cycles. The genuine issuer-box
-and JVM receipt fit the real first-cycle constructor under coherent synthetic
-anchors, including a reserve-derived dynamic window. The lower anchor boundary
-and expiry each reject in isolation. This does not identify C39's private
-dynamic values or raw cause. Existing root tests substitute the constructor;
-their custody checks establish attribution and disposal, not the real join.
-Close the final candidate review and affected validation, then promote this
-named observability correction through the guards and all three exact-head CI
-jobs. Only a separately admitted fresh campaign can decide the remaining
-runtime branch; its outcome may still be failure and must not be presumed.
-Prepare the clean-root operator recovery drill in parallel on the exact
-candidate. Fresh source, tool, cache, shallow-build, output, custody and fee
-inputs remain mandatory; no retained campaign or disposed compiler session is
-an input or authority.
+**Next:** Close the synthetic owner post-callback and bounded worker/parent
+diagnostic checkpoint with strict affected validation, independent final-diff
+review, guarded promotion through the existing fork PR and all three exact-head
+CI jobs. Only after that checkpoint may a separate fresh C42 admission prepare
+source, tool, cache, build/output and custody for one complete two-cycle run.
+The run must fund and canonically confirm two distinct first-cycle external
+fee inputs from retained issuance change before selecting the first checkpoint
+anchor. This diagnostic grants no execution authority and cannot assign
+C41's hidden cause. Continue the clean-root operator and accumulated-state
+recovery preparation alongside independent work; neither is already accepted.
+
+### Prior checkpoint notes (historical)
 
 The cycle-step producer, worker and parent join is closed and published.
 Existing terminal/V1/V2 formats and domains, protocol behavior, original error,
@@ -1259,15 +1233,19 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Public C39 `tracker-context` bracket -> producer/custody discrimination | Promote the reviewed diagnostic split and reserve-window fixture through exact-head CI; retain C39 as unknown | The one C39 invocation failed after the historical `tracker-context` marker and before `tracker-transaction`; operation completion and root cleanup are unestablished. New code separates constructor and custody labels for future attempts. Synthetic issuer/JVM-to-real-context and dynamic-window checks pass, but do not assign C39's cause. C39 is consumed/held. |
+| **Now** | C41 `cycle-1/cycle-summary` bracket -> Ergo owner-lifecycle discrimination | Isolate the post-callback stop/restart/snapshot and completion-budget branches in synthetic fixtures, then add only the bounded diagnostic needed to distinguish a future owner failure from the root summary | The one C41 invocation failed at `cycle-summary`; operation completion, root cleanup and custody disposal are unestablished. The marker covers both the initial summary and the outer Ergo owner lifecycle, so duration alone does not identify the cause. C41 is consumed/held; a later diagnostic cannot retroactively assign its cause. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 39 are terminal; Campaigns 24–39 remain consumed or held.
-The next full local campaign is conditional on promoting the named
-`tracker-context` diagnostic correction and separate fresh-input admission.
+Campaigns through 41 are terminal; Campaigns 24–41 remain consumed or held.
+C40 stopped before attempt-directory creation when the selected `wasm-pack`
+did not match the reviewed tool; C41 passed fresh admission and failed once at
+`cycle-1/cycle-summary`. Neither result authorizes a retry or resume. The next
+full local campaign is conditional on the bounded owner-lifecycle discriminator,
+its focused negative tests and independent review, guarded promotion,
+exact-head CI and separate fresh-input admission.
 Candidate review, closeout, guarded promotion and exact-head CI for the prior
 checkpoint candidate do not transfer to changed bytes; reopen only those
 invalidated gates.
@@ -1297,6 +1275,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
+| C41 cycle-summary owner-lifecycle discrimination | Preserve terminal/V1/V2 receipt bytes, digest domains, time/quorum rules, custody and permanent attempt holds while making a future post-callback owner failure distinguishable from the root summary | First make a synthetic successful callback return exercise the mining-node stop, read-only restart, exact snapshot and 4,680,000 ms completion boundary, with isolated negatives. Then add a bounded, identity-bound operation tag only at the failing owner boundary and carry it through the existing root/worker/parent diagnostic lineage. Focused producer/consumer tests, strict closeout, independent review, publication guards and exact-head CI precede any new campaign. C41's raw cause stays unknown |
 | Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. The exact-head checkpoint is already closed; prepare separately fresh sources, tools, caches, shallow build and output parents plus custody and fee inputs; revalidate every required admission, custody and fee input before selecting one campaign. C38 is consumed/held after one failed invocation; do not retry or resume it, and its diagnostics cannot supply the next admission |
 | C37 Frontier compiler boundary (local compiler discriminator closed 2026-10-03) | Isolate the named compiler boundary using public locked sources and the production build environment without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. One deep FED diagnostic failed with nested winapi LNK1104; a no-key differential demonstrated scoped path sensitivity. A separate fresh FED compiler diagnostic using a shallow build parent passed on local dd7e054, with actual node/WASM hashes and both disposals/exact post-disposal denials verified. Independent review passed. All three diagnostic outputs are consumed, never retryable or campaign authority. No build-spec, node or signing ran. C37 historical cause and cleanup remain unknown; no two-cycle acceptance. C38 was admitted separately and is recorded in Current Focus as consumed/held after its failed invocation |
 | C36 final-request-validation observer boundary (closed 2026-10-03) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Published at `681ca21d`; all three jobs passed in exact run 37085325522. Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and segmented 608-file closure pass. Independent source review GO after the TCP wildcard correction. Reuse unchanged gates. C24–37 remain consumed or held; no retry, timeout increase or predicate relaxation |

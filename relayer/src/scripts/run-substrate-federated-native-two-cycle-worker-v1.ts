@@ -14,6 +14,10 @@ import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-na
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
+import { projectNativeTwoCycleErgoNodePostCallbackStageV1 }
+  from '../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
+import { createNativeTwoCycleWorkerOwnerStageV1 }
+  from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
 import {
   validateWasmAvlBuildToolHashV2,
   type WasmAvlBuildToolNameV2,
@@ -255,6 +259,22 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional setup detail cannot replace the original failure or release its claim.
+      }
+      try {
+        const ownerStage = projectNativeTwoCycleErgoNodePostCallbackStageV1(primaryFailure);
+        if (ownerStage !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const companion = createNativeTwoCycleWorkerOwnerStageV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText, ownerStage);
+          writeNewFile(join(invocation.attemptPath, 'worker-owner-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker owner stage companion');
+        }
+      } catch {
+        // Optional owner detail cannot replace failure or older companions.
       }
     }
     throw primaryFailure;
