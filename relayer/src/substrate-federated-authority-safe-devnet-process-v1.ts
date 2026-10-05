@@ -125,6 +125,10 @@ export interface OwnedFederatedGenesisDevnetProcessSessionV1 {
   ): Promise<T>;
   /** Rejects during an active action; retry after that awaited action settles. */
   close(): Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
+  /** Runs only after both owned processes and listeners stop, before their data is removed. */
+  closeWithStoppedData(
+    action: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
+  ): Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
 }
 
 export interface OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
@@ -355,6 +359,10 @@ export async function createOwnedFederatedGenesisDevnetProcessSessionV1(
     releaseOwner = resolvePromise;
   });
   let processLifetime!: Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
+  let stoppedDataAction:
+    | ((paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>)
+    | undefined;
+  let stoppedDataCompleted = false;
 
   processLifetime = withOwnedFederatedGenesisDevnetProcessesV1(
     input,
@@ -423,12 +431,33 @@ export async function createOwnedFederatedGenesisDevnetProcessSessionV1(
             }
             return beginClose();
           },
+          closeWithStoppedData: async (
+            action: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
+          ) => {
+            if (typeof action !== 'function') {
+              throw new Error('FED stopped-data action is required');
+            }
+            if (state !== 'active') {
+              throw new Error('FED genesis session must be active before stopped-data close');
+            }
+            stoppedDataAction = action;
+            const receipt = await beginClose();
+            if (!stoppedDataCompleted) {
+              throw new Error('FED stopped-data action did not complete');
+            }
+            return receipt;
+          },
         });
 
       resolveSession(session);
       await ownerReleased;
       if (actionFailed) throw actionFailure;
       return true;
+    },
+    async paths => {
+      if (stoppedDataAction === undefined) return;
+      await stoppedDataAction(paths);
+      stoppedDataCompleted = true;
     },
   ).then(result => result.receipt);
   void processLifetime.then(undefined, error => rejectSession(error));
@@ -439,6 +468,7 @@ export async function createOwnedFederatedGenesisDevnetProcessSessionV1(
 export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
   input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
   action: (target: Readonly<OwnedFederatedGenesisDevnetTargetV1>) => Promise<T>,
+  onStoppedData?: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
 ): Promise<Readonly<{ value: T; receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt> }>> {
   if (typeof action !== 'function') throw new Error('FED genesis owned-process action is required');
   const keys = ['nodeBinaryPath', 'expectedNodeBinarySha256Hex', 'genesisJsonBytes',
@@ -475,7 +505,7 @@ export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
     } finally {
       revoke();
     }
-  }, 'federated_genesis_observation');
+  }, 'federated_genesis_observation', onStoppedData);
 }
 
 export function assertOwnedFederatedGenesisDevnetTargetV1(
@@ -922,6 +952,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   input: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
   action: (owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>) => Promise<T>,
   mode: 'federated_genesis_observation',
+  onStoppedData?: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
 ): Promise<Readonly<{
   value: T;
   receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>;
@@ -930,6 +961,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   input: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
   action: (owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>) => Promise<T>,
   mode: OwnedAuthoritySafeDevnetProcessModeV1,
+  onStoppedData?: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
 ): Promise<Readonly<{
   value: T;
   receipt: Readonly<
@@ -1202,6 +1234,14 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
       cleanupErrors.push(error instanceof Error
         ? error
         : new Error('authority-safe listener cleanup failed'));
+    }
+    if (mode === 'federated_genesis_observation' && actionCompleted
+      && actionError === undefined && cleanupErrors.length === 0 && onStoppedData !== undefined) {
+      try {
+        await onStoppedData(Object.freeze({ primaryBasePath, witnessBasePath }));
+      } catch (error) {
+        cleanupErrors.push(asError(error, 'authority-safe stopped-data action failed'));
+      }
     }
     try {
       rmSync(runtimeDirectory, { recursive: true, force: true, maxRetries: 3 });

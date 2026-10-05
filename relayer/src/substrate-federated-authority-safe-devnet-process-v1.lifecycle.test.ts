@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -670,7 +670,7 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
   it('keeps one genuine FED target live across actions and revokes it once before close cleanup', async () => {
     const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
     expect(Object.isFrozen(session)).toBe(true);
-    expect(Object.keys(session).sort()).toEqual(['close', 'withTarget']);
+    expect(Object.keys(session).sort()).toEqual(['close', 'closeWithStoppedData', 'withTarget']);
     let retained: Readonly<OwnedFederatedGenesisDevnetTargetV1> | undefined;
     let checkedDuringTeardown = false;
 
@@ -744,6 +744,41 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     expect(receipt.schema).toBe('e2s.substrate-federated-genesis-devnet-process.v1');
     expect(receipt.checks.bothProcessesStoppedAndListenersReleased).toBe(true);
     expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it('offers stopped FED data only after both processes and listeners retire, before cleanup', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const target = await session.withTarget(async current => current);
+    const observed = vi.fn(async (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => {
+      expect(children.every(child => !child.alive)).toBe(true);
+      expect(listenerRows()).toEqual([]);
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).toThrow(/provenance/);
+      expect(paths.primaryBasePath).toBe(join(runtimeDirectory, 'primary'));
+      expect(paths.witnessBasePath).toBe(join(runtimeDirectory, 'witness'));
+      expect(existsSync(runtimeDirectory)).toBe(true);
+    });
+    const receipt = await session.closeWithStoppedData(observed);
+    expect(observed).toHaveBeenCalledTimes(1);
+    expect(receipt.checks.bothProcessesStoppedAndListenersReleased).toBe(true);
+    expect(existsSync(runtimeDirectory)).toBe(false);
+    await expect(session.closeWithStoppedData(observed)).rejects.toThrow(/must be active/);
+  });
+
+  it('does not expose FED stopped data when listener release fails', async () => {
+    retainListenersAfterStop = true;
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const observed = vi.fn(async () => undefined);
+    await expect(session.closeWithStoppedData(observed)).rejects.toThrow(/process cleanup failed/);
+    expect(observed).not.toHaveBeenCalled();
+  });
+
+  it('fails the FED close and still cleans up if stopped-data handling fails', async () => {
+    const session = await createOwnedFederatedGenesisDevnetProcessSessionV1(federatedInput());
+    const failure = new Error('synthetic stopped-data copy failure');
+    await expect(session.closeWithStoppedData(async () => { throw failure; }))
+      .rejects.toThrow(/synthetic stopped-data copy failure/);
+    expect(children.every(child => !child.alive)).toBe(true);
+    expect(existsSync(runtimeDirectory)).toBe(false);
   });
 
   it('rejects process death between actions and joins the terminal cleanup outcome', async () => {

@@ -567,6 +567,33 @@ describe('layer import rules', () => {
     );
   });
 
+  it('bounds the native root recovery capture to exact runtime and erased type bindings', () => {
+    const captureSpecifier = '../../substrate-federated-two-cycle-recovery-capture-v1.js';
+    const exportSpecifier = '../../substrate-federated-two-cycle-recovery-export-v1.js';
+    const source = `
+      import { captureSubstrateFederatedTwoCycleRecoveryV1 } from '${captureSpecifier}';
+      import type { RecoveryTrackerAttemptIdentityV1 } from '${exportSpecifier}';
+      type Attempt = RecoveryTrackerAttemptIdentityV1;
+      async function capture() { await captureSubstrateFederatedTwoCycleRecoveryV1({} as never); }
+    `;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      source.replace('captureSubstrateFederatedTwoCycleRecoveryV1', 'unreviewedRecoveryAuthority')))
+      .map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${captureSpecifier}#unreviewedRecoveryAuthority`,
+    );
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      source.replace('import type { RecoveryTrackerAttemptIdentityV1 }',
+        'import { RecoveryTrackerAttemptIdentityV1 }')))
+      .map(item => item.message)).toContain(
+      `restricted capability binding must not escape its reviewed call: ${exportSpecifier}#RecoveryTrackerAttemptIdentityV1`,
+    );
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign-recovery-root.ts', source))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-two-cycle-recovery-capture-v1.ts',
+    );
+  });
+
   it('keeps confirmation progress imports bounded to the reviewed native root and exact binding', () => {
     const specifier = '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
     const binding = 'projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1';

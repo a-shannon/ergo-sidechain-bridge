@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { canonicalJson } from './ergo-settlement-core/strict-json.js';
+import { canonicalJson, sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
 import {
   loadSubstrateFederatedNativeTwoCycleInvocationV1,
   projectSubstrateFederatedNativeTwoCycleResultV1,
@@ -139,6 +139,141 @@ describe('native two-cycle invocation V1', () => {
     expect(projected.firstCycle.mintIdentityHex)
       .not.toBe(projected.secondCycle.mintIdentityHex);
     expect(projected.boundaries.releaseReadinessEstablished).toBe(false);
+    expect(projected.rootResultDigestHex).toBe(sha256CanonicalJson(
+      result, 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_RESULT_V1',
+    ));
+  });
+
+  it('normalizes exactly the recovery pointer and two tracker digests to frozen V1', () => {
+    const legacy = rootResult();
+    const extended = extendedRootResult();
+    const before = structuredClone(extended);
+    const projected = projectSubstrateFederatedNativeTwoCycleResultV1(extended);
+    expect(projected).toEqual(projectSubstrateFederatedNativeTwoCycleResultV1(legacy));
+    expect(extended).toEqual(before);
+    expect(projected).not.toHaveProperty('recoveryEvidence');
+    expect(projected.firstCycle).not.toHaveProperty('durableAttemptDigestHex');
+    expect(projected.secondCycle).not.toHaveProperty('durableAttemptDigestHex');
+
+    extended.recoveryEvidence.directoryName = 'two-cycle-recovery-X9y8Z7';
+    extended.recoveryEvidence.buildDirectoryName = 'bridge-fed-genesis-X9y8Z7';
+    extended.recoveryEvidence.manifestSha256Hex = hex(204);
+    extended.withdrawal.tracker.durableAttemptDigestHex = hex(205);
+    extended.secondCycle.tracker.durableAttemptDigestHex = hex(206);
+    expect(projectSubstrateFederatedNativeTwoCycleResultV1(extended)).toEqual(projected);
+  });
+
+  it.each([
+    { buildDirectoryName: '../bridge-fed-genesis-Ab3D4e' },
+    { buildDirectoryName: '/bridge-fed-genesis-Ab3D4e' },
+    { buildDirectoryName: 'C:\\bridge-fed-genesis-Ab3D4e' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4e/target' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4e\\target' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4e7' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4-' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4é' },
+    { buildDirectoryName: 'bridge-fed-genesis-Ab3D4e\n' },
+    { directoryName: '../two-cycle-recovery-Ab3D4e' },
+    { directoryName: '/two-cycle-recovery-Ab3D4e' },
+    { directoryName: 'C:\\two-cycle-recovery-Ab3D4e' },
+    { directoryName: 'two-cycle-recovery-Ab3D4e/child' },
+    { directoryName: 'two-cycle-recovery-Ab3D4e\\child' },
+    { directoryName: 'two-cycle-recovery-Ab3D4' },
+    { directoryName: 'two-cycle-recovery-Ab3D4e7' },
+    { directoryName: 'two-cycle-recovery-Ab3D4-' },
+    { directoryName: 'two-cycle-recovery-Ab3D4é' },
+    { directoryName: 'two-cycle-recovery-Ab3D4e\n' },
+    { manifestSha256Hex: 'A'.repeat(64) },
+    { manifestSha256Hex: '0x' + hex(203) },
+    { manifestSha256Hex: 'a'.repeat(63) },
+    { manifestSha256Hex: hex(203) + '\n' },
+    { manifestSha256Hex: 1 },
+    { extra: true },
+    { manifest: {} },
+  ])('rejects an invalid recovery pointer %j', mutation => {
+    const result = extendedRootResult();
+    Object.assign(result.recoveryEvidence, mutation);
+    expect(() => projectSubstrateFederatedNativeTwoCycleResultV1(result))
+      .toThrow(/relative (?:capture|build) name|lowercase hexadecimal|fields differ/iu);
+  });
+
+  it.each(['first', 'second'] as const)(
+    'requires the %s tracker digest only in the exact extended root', cycleName => {
+      const select = <T extends ReturnType<typeof rootResult>>(result: T) =>
+        cycleName === 'first' ? result.withdrawal.tracker : result.secondCycle.tracker;
+      const legacy = rootResult();
+      Object.assign(select(legacy), { durableAttemptDigestHex: hex(203) });
+      expect(() => projectSubstrateFederatedNativeTwoCycleResultV1(legacy))
+        .toThrow(/tracker fields differ/iu);
+
+      for (const mutation of ['missing', 'extra', 'uppercase', 'short', 'non-string', 'newline']) {
+        const result = extendedRootResult();
+        const tracker = select(result);
+        if (mutation === 'missing') Reflect.deleteProperty(tracker, 'durableAttemptDigestHex');
+        if (mutation === 'extra') Object.assign(tracker, { extra: true });
+        if (mutation === 'uppercase') Object.assign(tracker, { durableAttemptDigestHex: 'A'.repeat(64) });
+        if (mutation === 'short') Object.assign(tracker, { durableAttemptDigestHex: 'a'.repeat(63) });
+        if (mutation === 'non-string') Object.assign(tracker, { durableAttemptDigestHex: 1 });
+        if (mutation === 'newline') Object.assign(tracker, { durableAttemptDigestHex: hex(203) + '\n' });
+        expect(() => projectSubstrateFederatedNativeTwoCycleResultV1(result))
+          .toThrow(/tracker fields differ|lowercase hexadecimal/iu);
+      }
+    },
+  );
+
+  it.each(['buildDirectoryName', 'directoryName', 'manifestSha256Hex'] as const)(
+    'requires recovery pointer field %s', key => {
+      const result = extendedRootResult();
+      Reflect.deleteProperty(result.recoveryEvidence, key);
+      expect(() => projectSubstrateFederatedNativeTwoCycleResultV1(result))
+        .toThrow(/recovery evidence fields differ/iu);
+    },
+  );
+
+  it.each(['root', 'pointer', 'withdrawal', 'second', 'first-tracker', 'second-tracker'] as const)(
+    'rejects extra %s fields before traversing their values', location => {
+      const result = extendedRootResult();
+      const targets = {
+        root: result,
+        pointer: result.recoveryEvidence,
+        withdrawal: result.withdrawal,
+        second: result.secondCycle,
+        'first-tracker': result.withdrawal.tracker,
+        'second-tracker': result.secondCycle.tracker,
+      };
+      const extra: Record<string, unknown> = {};
+      extra.self = extra;
+      Object.assign(targets[location], { extra });
+      expect(() => projectSubstrateFederatedNativeTwoCycleResultV1(result))
+        .toThrow(/fields differ/iu);
+    },
+  );
+
+  it.each([
+    'recoveryEvidence', 'buildDirectoryName', 'directoryName', 'manifestSha256Hex', 'withdrawal',
+    'first-tracker', 'first-digest', 'secondCycle', 'second-tracker', 'second-digest',
+  ] as const)('rejects %s accessors without executing them', location => {
+    const result = extendedRootResult();
+    let target: object = result;
+    let key: string = location;
+    if (location === 'buildDirectoryName' || location === 'directoryName' || location === 'manifestSha256Hex') {
+      target = result.recoveryEvidence;
+    } else if (location === 'first-tracker') {
+      target = result.withdrawal; key = 'tracker';
+    } else if (location === 'second-tracker') {
+      target = result.secondCycle; key = 'tracker';
+    } else if (location === 'first-digest' || location === 'second-digest') {
+      target = location === 'first-digest' ? result.withdrawal.tracker : result.secondCycle.tracker;
+      key = 'durableAttemptDigestHex';
+    }
+    let calls = 0;
+    Object.defineProperty(target, key, {
+      enumerable: true, get: () => { calls++; throw new Error('getter executed'); },
+    });
+    expect(() => projectSubstrateFederatedNativeTwoCycleResultV1(result))
+      .toThrow(/fields differ/iu);
+    expect(calls).toBe(0);
   });
 
   it.each(['frontierBuildParentDirectory', 'frontierCargoHomeDirectory'] as const)(
@@ -277,6 +412,25 @@ function file(root: string, name: string): string {
 
 function writeConfig(path: string, value: unknown): void {
   writeFileSync(path, `${canonicalJson(value)}\n`, 'utf8');
+}
+
+function extendedRootResult() {
+  const legacy = rootResult();
+  return {
+    ...legacy,
+    recoveryEvidence: {
+      buildDirectoryName: 'bridge-fed-genesis-Ab3D4e',
+      directoryName: 'two-cycle-recovery-Ab3D4e', manifestSha256Hex: hex(203),
+    },
+    withdrawal: {
+      ...legacy.withdrawal,
+      tracker: { ...legacy.withdrawal.tracker, durableAttemptDigestHex: hex(201) },
+    },
+    secondCycle: {
+      ...legacy.secondCycle,
+      tracker: { ...legacy.secondCycle.tracker, durableAttemptDigestHex: hex(202) },
+    },
+  };
 }
 
 function rootResult() {

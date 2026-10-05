@@ -281,6 +281,12 @@ const REVIEWED_NATIVE_RESERVATION_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlyS
 const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ['authenticated-spv-tracker-read-only-node-client.ts', new Set(['createBoundedAuthenticatedSpvTrackerReadOnlySource'])],
   ['state-tracker.ts', new Set(['StateTracker'])],
+  ['substrate-federated-two-cycle-recovery-capture-v1.ts', new Set([
+    'captureSubstrateFederatedTwoCycleRecoveryV1',
+  ])],
+  ['substrate-federated-two-cycle-recovery-export-v1.ts', new Set([
+    'RecoveryTrackerAttemptIdentityV1',
+  ])],
   ['unsigned-ergo-transaction.ts', new Set(['normalizeEip12Box', 'Eip12Box'])],
   ['substrate-federated-isolated-devnet-setup-check-execution-v2.ts', new Set([
     'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1', 'assertSubstrateFederatedNativeGenesisSetupReadCustodyV1',
@@ -412,7 +418,7 @@ const REVIEWED_FEDERATED_GENESIS_IMPORT_BINDINGS: ReadonlyMap<string, ReadonlySe
   ['../../ergo-settlement-core/strict-json.js', new Set(['assertNoDuplicateJsonKeys', 'canonicalJson'])],
   ['node:crypto', new Set(['createHash'])],
   ['node:fs', new Set(['mkdirSync', 'mkdtempSync', 'readFileSync', 'realpathSync', 'writeFileSync'])],
-  ['node:path', new Set(['join'])],
+  ['node:path', new Set(['basename', 'dirname', 'join'])],
 ]);
 
 // Gate 5 may compose these reviewed legacy producers before WP-08A extracts

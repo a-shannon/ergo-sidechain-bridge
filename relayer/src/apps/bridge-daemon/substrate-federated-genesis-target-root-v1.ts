@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import {
   createFederatedGenesisOperatorV1, assertFederatedGenesisOperatorV1, disposeFederatedGenesisOperatorV1,
@@ -11,6 +11,10 @@ import { assertNoDuplicateJsonKeys, canonicalJson } from '../../ergo-settlement-
 import { createBoundedAuthenticatedSpvTrackerReadOnlySource } from '../../authenticated-spv-tracker-read-only-node-client.js';
 import { StateTracker } from '../../state-tracker.js';
 import type { StateTracker as NativeJournalState } from '../../state-tracker.js';
+import { captureSubstrateFederatedTwoCycleRecoveryV1 }
+  from '../../substrate-federated-two-cycle-recovery-capture-v1.js';
+import type { RecoveryTrackerAttemptIdentityV1 }
+  from '../../substrate-federated-two-cycle-recovery-export-v1.js';
 import { verifyExecutableSha256 } from '../../native-executable-pin.js';
 import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
@@ -155,6 +159,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     // Compile before starting the bounded Ergo mining lifetime.
     rootPhase = 'frontier-build';
     const frontier = await buildSubstrateFederatedGenesisNodeV1({ ...frontierInput, sourceSession: retainedSource });
+    const buildDirectory = dirname(frontier.targetDirectory);
+    const buildDirectoryName = basename(buildDirectory);
+    if (basename(frontier.targetDirectory) !== 'target'
+      || !/^bridge-fed-genesis-[A-Za-z0-9]{6}$/.test(buildDirectoryName)
+      || realpathSync(dirname(buildDirectory)) !== realpathSync(frontierInput.buildParentDirectory)) {
+      throw new Error('FED recovery capture target differs from its fresh builder parent');
+    }
     assertCustody();
     rootPhase = 'ergo-build';
     const builtErgo = await buildSubstrateFederatedIsolatedDevnetErgoNodeV1(ergoInput);
@@ -539,10 +550,24 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     });
     rootPhase = 'cleanup';
     cycleStep = null;
-    const frontierProcess = await native.close();
+    const recovery = await captureSubstrateFederatedTwoCycleRecoveryV1({
+      targetDirectory: frontier.targetDirectory,
+      journalDirectory: executed.value.continuation.journalDirectory,
+      tracker: retainedState,
+      expectedAttempts: [
+        recoveryTrackerIdentity(first.summary.tracker),
+        recoveryTrackerIdentity(secondCycle.tracker),
+      ],
+      ergoSession: ergo,
+      frontierSession: native,
+    });
+    retainedState = undefined;
+    const frontierProcess = recovery.frontierProcess;
     return Object.freeze({ status: 'fresh-federated-round-trip-confirmed' as const,
       ...executed.value.summary, frontierProcess, ergoExecution: executed.receipt, withdrawal: first.summary,
       completedCycles: 2 as const, secondCycle,
+      recoveryEvidence: Object.freeze({ buildDirectoryName, directoryName: recovery.recoveryDirectory,
+        manifestSha256Hex: recovery.manifestSha256Hex }),
       singletonIssuanceEstablished: true as const, operationalMintEstablished: true as const,
       canonicalPayoutEstablished: true as const,
       sourceFinalityEstablished: false as const, trustless: false as const });
@@ -594,6 +619,26 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     if (setupAcquired) throw error;
     throw tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(error, rootPhase);
   }
+}
+
+function recoveryTrackerIdentity(tracker: Readonly<{
+  expectedTxId: string;
+  durableAttemptDigestHex: string;
+  authorizationDigestHex: string;
+  transportStatus: 'accepted' | 'ambiguous';
+  confirmationHeight: number | null;
+  confirmationHeaderIdHex: string | null;
+}>): RecoveryTrackerAttemptIdentityV1 {
+  if (tracker.confirmationHeight === null || tracker.confirmationHeaderIdHex === null
+    || (tracker.transportStatus !== 'accepted' && tracker.transportStatus !== 'ambiguous')) {
+    throw new Error('FED recovery capture requires two exact confirmed tracker admissions');
+  }
+  return Object.freeze({ expectedTxId: tracker.expectedTxId,
+    durableAttemptDigestHex: tracker.durableAttemptDigestHex,
+    authorizationDigestHex: tracker.authorizationDigestHex,
+    transportDisposition: tracker.transportStatus,
+    confirmationHeight: tracker.confirmationHeight,
+    confirmationHeaderIdHex: tracker.confirmationHeaderIdHex });
 }
 
 function nativeTrackerConfirmationFailure(input: Readonly<{
@@ -987,7 +1032,9 @@ async function completeFirstNativeReturn(input: Readonly<{
       summary: Object.freeze({ checkpoint: prepared.checkpoint.attestation, feeFunding: Object.freeze({
         withdrawal: prepared.withdrawalFee, tracker: prepared.trackerFee }),
         anchor: Object.freeze({ observation: anchored.value, execution: anchored.receipt }),
-        tracker: Object.freeze({ ...confirmed.value.tracker, authorizationDigestHex: admitted.value.authorizationDigestHex,
+        tracker: Object.freeze({ ...confirmed.value.tracker,
+          durableAttemptDigestHex: attempt.durableAttemptDigestHex,
+          authorizationDigestHex: admitted.value.authorizationDigestHex,
           checkDigestHex: admitted.value.checkDigestHex, frozenExecution: admitted.receipt, freshnessExecution: refreshed.receipt,
           transportExecution: transported.receipt, transportStatus: transported.value.submission.status,
           journalDigestHex: transported.value.journalDigestHex }),
@@ -1258,6 +1305,7 @@ async function completeSecondNativeReturn(input: Readonly<{
       tracker: feeSummary(continuation.trackerFee) }),
     anchor: Object.freeze({ observation: anchored.value, execution: anchored.receipt }),
     tracker: Object.freeze({ ...confirmed.value.tracker,
+      durableAttemptDigestHex: attempt.durableAttemptDigestHex,
       authorizationDigestHex: admitted.value.authorizationDigestHex,
       checkDigestHex: admitted.value.checkDigestHex, frozenExecution: admitted.receipt,
       freshnessExecution: refreshed.receipt, transportExecution: transported.receipt,

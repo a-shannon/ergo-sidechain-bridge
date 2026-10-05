@@ -42,24 +42,30 @@ disposal proof. No two-cycle acceptance follows. The owner-stage diagnostic
 checkpoint at `96a4d4615de06c15afb240bb961cd4ac77ce391e` passed all three
 jobs in exact [run 37184578524](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37184578524).
 
-**Next:** The bounded discriminator is implemented locally for future failures:
-the unchanged completion predicate tags `invalid-timing` or `budget-exceeded`;
-the retained owner projects the reason only from the exact primary failure,
-including a cleanup aggregate; optional worker and parent V2 companions bind
-the existing V1 lineage. A first independent review found and prompted repair
-of a cleanup-aggregate attribution defect. The five affected suites pass 426
-tests with 11 pre-existing skips under pinned Node 24.14.0; TypeScript and the
-layered import check pass. Independent correction review found no remaining
-P0-P2 issue. Complete exact publication guards and fork PR promotion, then
-verify all three CI jobs on the
-new head. The discriminator cannot assign C43's historical branch. A distinct
-fresh two-cycle campaign requires new source, build/output and custody
-admission after that checkpoint; neither C42 nor C43 is execution authority.
-Do not increase the time budget or narrow its scope without deciding evidence.
-In parallel, prepare the non-authorizing accumulated-state recovery export and
-clean-root operator package; neither is accepted yet. The recovery export must
-prove a key-free, consistent stop-and-copy boundary before another runtime
-acceptance run.
+**Next:** The bounded owner timing-reason discriminator is published at
+`86b37133258b2e9399798a6a53ca60b7b6f4e8f6`. At the 2026-10-05 11:00 UTC
+check, two jobs passed and the public-audit candidate gate remained in progress
+in exact [run 37287762654](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37287762654).
+The discriminator cannot assign C43's historical branch. Do not increase the
+time budget or narrow its scope without deciding evidence.
+
+The current local source checkpoint joins the retained owners' stopped-data
+windows, bounded allowlisted node database copies and two exact tracker
+admissions in a SQLite backup. The frozen V1 terminal projector accepts only
+the new private recovery locator and two tracker digests, then strips them
+before its unchanged V1 validation and digest. Focused root, projector,
+architecture and TypeScript checks pass; independent correction review found
+no remaining P0-P2 issue in this source scope. The worker still needs a
+separately versioned companion to carry the locator to its parent before a
+fresh campaign can yield an operator-findable recovery artifact. Close that
+consumer, then the due guarded publication and exact-head CI, before separate
+fresh source, build/output, custody and fee admission. Neither C42 nor C43 is
+execution authority.
+
+The capture manifests leave node consistency and fresh restart unvalidated.
+Only a separately admitted successful fresh two-cycle run can establish the
+actual stopped-tree inventory and fresh-process reopen. The clean-root operator
+package, accumulated-state recovery and FED-7 acceptance remain open.
 
 ### Prior checkpoint notes (historical)
 
@@ -975,7 +981,7 @@ publication guards and its own applicable CI closure.
 
 | Track | Deliverable | Deciding trust model | State |
 |---|---|---|---|
-| **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. One fresh local campaign completed the composed native deposit, mint, burn, checkpoint, tracker and Ergo payout lifecycle. Reproducible operator packaging and recovery evidence remain open |
+| **WP-06-FED** | A complete, reproducible two-way federated reference | A versioned source-attestation Ed25519 quorum and a separately bound Ergo-admission SigmaProp quorum; roles, thresholds and federation epoch are explicit | Active. Campaign 23 completed one local deposit, mint, burn, checkpoint, tracker and Ergo payout lifecycle before the current capture code. The later two-cycle campaigns did not pass. Actual accumulated-state recovery, reproducible operator packaging and external acceptance remain open |
 | **WP-06-STARK / Gate 5** | An Ergo-verifiable trustless upgrade | An activated verifier checks the separately versioned statement and finality semantics before value release | Frozen pending a compatible activated target. Not a prerequisite for the federated reference |
 
 Both tracks remain research work; neither supports production use or
@@ -1244,9 +1250,9 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | C43 owner `completion-check` -> exact future timing-reason lineage | Guard and promote the locally tested and independently reviewed V2 worker/parent companions, then verify exact-head CI | C43 failed at this stage without publishing its cause. The new discriminator does not retrospectively identify it or establish operation completion, root cleanup or custody disposal. |
+| **Now** | Source-derived capture -> worker/parent recovery locator | Carry the bounded locator in a separate versioned companion without changing V1 terminal fields or domains; then close due validation, guard, promote and verify exact-head CI | Owner/copy/SQLite/root and V1 projection source checks pass, but the current worker discards the locator. The source checkpoint does not establish node consistency, restart or C43's historical cause. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
-| Next candidate | Accumulated state -> recovery | Establish a key-free, consistent, bounded export of the two-cycle node state before ordinary cleanup; then exercise fresh-process restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on disposable copies | The current success path deletes both node data trees and retains only a closed tracker journal. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
+| Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 

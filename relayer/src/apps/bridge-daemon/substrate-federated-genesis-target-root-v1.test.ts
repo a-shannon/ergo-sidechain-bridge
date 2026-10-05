@@ -25,6 +25,7 @@ const mocked = vi.hoisted(() => ({
   projectStartupPhase: vi.fn(),
   payoutCheck: vi.fn(), continuationPayoutCheck: vi.fn(), payoutAuthorize: vi.fn(), payoutReserve: vi.fn(),
   payoutSubmit: vi.fn(), payoutFinalize: vi.fn(), payoutConfirm: vi.fn(), wait: vi.fn(),
+  recovery: vi.fn(),
 }));
 vi.mock('../../substrate-federated-genesis-node-build-v1.js', () => ({ buildSubstrateFederatedGenesisNodeV1: mocked.frontier }));
 vi.mock('../../substrate-federated-isolated-devnet-ergo-node-build-v1.js', () => ({ buildSubstrateFederatedIsolatedDevnetErgoNodeV1: mocked.ergoBuild }));
@@ -64,6 +65,9 @@ vi.mock('./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.j
   executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1: mocked.trackerFee,
   waitForCanonicalConfirmation: mocked.wait,
   projectTrackerCanonicalConfirmationFailureDiagnosticV1: mocked.projectConfirmation,
+}));
+vi.mock('../../substrate-federated-two-cycle-recovery-capture-v1.js', () => ({
+  captureSubstrateFederatedTwoCycleRecoveryV1: mocked.recovery,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-candidate-v2.js', () => ({
   buildSubstrateFederatedNativeGenesisPegInPacketV1: mocked.packet,
@@ -181,6 +185,7 @@ let operator: ReturnType<typeof makeOperator> | undefined;
 let miningCredential: ReturnType<typeof claimMining> | undefined;
 let compiledGenesisBytes: Buffer | undefined;
 let directory: string;
+let builtTargetDirectory: string;
 let input: RunSubstrateFederatedGenesisTargetRootV1Input;
 let top: Record<string, string>;
 let order: string[];
@@ -279,7 +284,7 @@ function assertDownstreamCleanup() {
   expect(setups.createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2).toHaveBeenCalledOnce();
   expect(sources.createSubstrateFederatedIsolatedDevnetSourceAttestationSessionV2).toHaveBeenCalledOnce();
   expect(operators.createFederatedGenesisOperatorV1).toHaveBeenCalledOnce();
-  expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toHaveLength(1);
+  expect(readdirSync(builtTargetDirectory).filter(name => name.startsWith('issuance-journal-'))).toHaveLength(1);
   for (const file of attemptFiles) expect(readFileSync(file, 'utf8')).toBe('synthetic retained attempt');
 }
 function retainAttempt(name: string, parent = journalDirectory) {
@@ -415,7 +420,9 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'fed-root-component-'));
   const bridgeRoot = join(directory, 'bridge');
   mkdirSync(bridgeRoot);
-  mkdirSync(join(directory, 'target'));
+  builtTargetDirectory = join(directory, 'bridge-fed-genesis-Ab3D4e', 'target');
+  mkdirSync(dirname(builtTargetDirectory), { recursive: true });
+  mkdirSync(builtTargetDirectory);
   writeFileSync(join(directory, 'runtime.wasm'), wasm);
   input = {
     frontierBuild: { bridgeRoot, frontierSourcePath: directory, buildParentDirectory: directory,
@@ -452,7 +459,7 @@ beforeEach(() => {
   });
   mocked.frontier.mockImplementation(async value => {
     order.push('frontier-build'); expect(value.sourceSession).toBe(source); assertCustodyActive();
-    return { sourceDirectory: directory, targetDirectory: join(directory, 'target'),
+    return { sourceDirectory: directory, targetDirectory: builtTargetDirectory,
       node: { path: join(directory, 'node.exe'), sha256Hex: '51'.repeat(32) },
       wasm: { path: join(directory, 'runtime.wasm'), sha256Hex: sha256(wasm) },
       sourceProofProfileScaleHex: source!.binding.federatedMintProfileScaleHex,
@@ -610,7 +617,7 @@ beforeEach(() => {
     expect(value.batch).toBe(batch); expect(value.target).toBe(target);
     expect(value.state).toBeInstanceOf(StateTracker); journalState = value.state;
     expect(existsSync(value.markerDirectory)).toBe(true);
-    expect(value.markerDirectory.startsWith(join(directory, 'target', 'issuance-journal-'))).toBe(true);
+    expect(value.markerDirectory.startsWith(join(builtTargetDirectory, 'issuance-journal-'))).toBe(true);
     journalDirectory = dirname(value.markerDirectory);
     retainAttempt('issuance-attempt', value.markerDirectory);
     receipts = compiled.issuance.orderedTransactions.map(({ role, transaction }: any, ordinal: number) => ({
@@ -661,8 +668,8 @@ beforeEach(() => {
   mocked.pin.mockResolvedValue(undefined);
   mocked.materialize.mockImplementation(async value => {
     order.push('materialize'); assertCustodyActive(); expect(active).toBe(true);
-    expect(value.args).toEqual(['build-spec', '--chain', `fed-genesis:${join(directory, 'target', 'fed-genesis.json')}`, '--disable-default-bootnode', '--raw']);
-    expect(JSON.parse(readFileSync(join(directory, 'target', 'fed-genesis.json'), 'utf8')).operatorAddressHex).toBe(operator!.addressHex);
+    expect(value.args).toEqual(['build-spec', '--chain', `fed-genesis:${join(builtTargetDirectory, 'fed-genesis.json')}`, '--disable-default-bootnode', '--raw']);
+    expect(JSON.parse(readFileSync(join(builtTargetDirectory, 'fed-genesis.json'), 'utf8')).operatorAddressHex).toBe(operator!.addressHex);
     return { stdout: JSON.stringify(rawSpec()), stderr: '' };
   });
   mocked.nodes.mockImplementation(async value => {
@@ -695,6 +702,36 @@ beforeEach(() => {
       }
     });
     return Object.freeze({ withTarget: nativeAction, close: closeNative });
+  });
+  mocked.recovery.mockImplementation(async value => {
+    order.push('recovery-capture');
+    expect(value.targetDirectory).toBe(builtTargetDirectory);
+    expect(value.journalDirectory).toBe(journalDirectory);
+    expect(value.tracker).toBe(journalState);
+    expect(value.expectedAttempts).toHaveLength(2);
+    expect(value.expectedAttempts[0]).toMatchObject({
+      expectedTxId: returnValues.trackerAttempt.expectedTxId,
+      durableAttemptDigestHex: returnValues.trackerAttempt.durableAttemptDigestHex,
+      authorizationDigestHex: returnValues.trackerAuthorization.authorizationDigestHex,
+      transportDisposition: 'accepted',
+    });
+    expect(value.expectedAttempts[1]).toMatchObject({
+      expectedTxId: returnValues.secondTrackerAttempt.expectedTxId,
+      durableAttemptDigestHex: returnValues.secondTrackerAttempt.durableAttemptDigestHex,
+      authorizationDigestHex: returnValues.secondTrackerAuthorization.authorizationDigestHex,
+      transportDisposition: 'accepted',
+    });
+    expect(value.ergoSession).toBeDefined();
+    expect(value.frontierSession).toBeDefined();
+    const frontierProcess = await value.frontierSession.close();
+    value.tracker.close();
+    return Object.freeze({ frontierProcess,
+      recoveryDirectory: 'two-cycle-recovery-Ab3D4e',
+      manifestSha256Hex: 'ab'.repeat(32),
+      manifest: Object.freeze({ schema: 'e2s.substrate-federated-two-cycle-recovery-capture.v1',
+        nodeConsistencyEstablished: false, freshRestartValidated: false,
+        executionAuthorityRestored: false }),
+    });
   });
   mocked.frontierOwned.mockImplementation(value => {
     if (!frontierActive || value !== frontierEndpoints) throw new Error('FED target inactive');
@@ -1609,6 +1646,10 @@ describe('fresh FED target composition', () => {
     expect(result.secondCycle.feeFunding.withdrawal.feeInputBoxIdHex).toBe(returnValues.secondWithdrawalFee.feeInputBox.boxId);
     expect(result.secondCycle.feeFunding.tracker.feeInputBoxIdHex).toBe(returnValues.secondTrackerFee.feeInputBox.boxId);
     expect(result.sourceFinalityEstablished).toBe(false); expect(result.trustless).toBe(false);
+    expect(result.recoveryEvidence).toEqual({
+      buildDirectoryName: 'bridge-fed-genesis-Ab3D4e',
+      directoryName: 'two-cycle-recovery-Ab3D4e', manifestSha256Hex: 'ab'.repeat(32),
+    });
     expect(mocked.projectConfirmation).not.toHaveBeenCalled(); expect(mocked.projectSubmission).not.toHaveBeenCalled();
     expect(mocked.projectProgress).not.toHaveBeenCalled();
     expect(projectSubstrateFederatedNativeTrackerConfirmationProgressV1(result)).toBeNull();
@@ -1619,7 +1660,7 @@ describe('fresh FED target composition', () => {
     expect(Object.isFrozen(result.pegIn)).toBe(true); expect(result.mint).toBe(mint);
     expect(result.issuedTransactions).toBe(receipts); expect(observeConfirmation).toHaveBeenCalledTimes(6);
     expect(StateTracker.prototype.close).toHaveBeenCalledOnce();
-    expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toHaveLength(1);
+    expect(readdirSync(builtTargetDirectory).filter(name => name.startsWith('issuance-journal-'))).toHaveLength(1);
     expect(result.storageKeysChecked).toBe(6); expect(Object.isFrozen(result)).toBe(true);
     expect(order).toEqual(['setup', 'source', 'operator', 'frontier-build', 'ergo-build', 'process', 'mine',
       'discover', 'history', 'compile', 'materialize', 'nodes', 'check', 'execute',
@@ -1636,7 +1677,7 @@ describe('fresh FED target composition', () => {
       'secondFreshness-phase', 'secondTrackerFreshness', 'secondTransport-phase', 'secondTrackerSubmit',
       'secondTrackerFinalize', 'secondConfirmation-phase', 'secondTrackerConfirm', 'continuationPayoutCheck',
       'secondPayoutAuthorize', 'secondPayoutReserve', 'secondPayoutSubmit', 'secondPayoutFinalize', 'secondPayoutConfirm',
-      'nodes-stop', 'stop']);
+      'recovery-capture', 'nodes-stop', 'stop']);
     expect(nativeAction).toHaveBeenCalledTimes(3);
     expect(closeNative).toHaveBeenCalledTimes(2);
     expect(result.frontierProcess).toEqual({ component: 'FED process stub' });
@@ -1656,7 +1697,7 @@ describe('fresh FED target composition', () => {
       'nodeSha256Hex', 'wasmSha256Hex', 'operatorAddressHex', 'storageKeysChecked', 'issuanceInputBoxIds',
       'issuedTransactions', 'pegIn', 'mint', 'unsignedIssuance', 'ergoExecution', 'singletonIssuanceEstablished',
       'operationalMintEstablished', 'sourceFinalityEstablished', 'trustless', 'burn', 'withdrawal', 'canonicalPayoutEstablished',
-      'completedCycles', 'secondCycle'].sort());
+      'completedCycles', 'secondCycle', 'recoveryEvidence'].sort());
     const privateHandles = new Set([setup, retainedSetup, source, operator, miningCredential, target,
       ...Object.values(phaseTargets),
       frontierEndpoints, batch, compiled, funding, packet, sourceLock, sourceLock.outputObservation,
@@ -1677,6 +1718,33 @@ describe('fresh FED target composition', () => {
     };
     visit(result); expect(JSON.parse(JSON.stringify(result))).toEqual(result);
   });
+
+  it('withholds a successful round trip when the stopped-state capture fails', async () => {
+    const failure = new Error('stopped-state capture failed');
+    mocked.recovery.mockRejectedValueOnce(failure);
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toBe(failure);
+    expect(mocked.recovery).toHaveBeenCalledOnce();
+    expect(mocked.payoutConfirm).toHaveBeenCalledTimes(2);
+    assertDownstreamCleanup();
+  });
+
+  it.each(['first', 'second'] as const)(
+    'refuses a %s tracker admission without a confirmed header before recovery capture',
+    async cycle => {
+      const original = mocked.trackerConfirm.getMockImplementation()!;
+      let calls = 0;
+      mocked.trackerConfirm.mockImplementation(async (...args) => {
+        const value = await original(...args);
+        calls += 1;
+        return calls === (cycle === 'first' ? 1 : 2)
+          ? { ...value, confirmationHeaderId: null } : value;
+      });
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input))
+        .rejects.toThrow('FED recovery capture requires two exact confirmed tracker admissions');
+      expect(mocked.recovery).not.toHaveBeenCalled();
+      assertDownstreamCleanup();
+    },
+  );
 
   it('keeps native ownership through the payout and awaits its final cleanup receipt', async () => {
     let releaseCleanup!: () => void;
@@ -1938,7 +2006,7 @@ describe('fresh FED target composition', () => {
     expect(fetch).not.toHaveBeenCalled(); expect(mocked.check).not.toHaveBeenCalled();
     expect(mocked.execute).not.toHaveBeenCalled(); expect(mocked.packet).not.toHaveBeenCalled();
     expect(StateTracker.prototype.close).not.toHaveBeenCalled();
-    expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toEqual([]);
+    expect(readdirSync(builtTargetDirectory).filter(name => name.startsWith('issuance-journal-'))).toEqual([]);
     expect(order.slice(-2)).toEqual(['nodes-stop', 'stop']); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
   });
 
@@ -1988,7 +2056,7 @@ describe('fresh FED target composition', () => {
     mocked.check.mockRejectedValueOnce(new Error('native check rejected'));
     await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('native check rejected');
     expect(mocked.execute).not.toHaveBeenCalled();
-    expect(readdirSync(join(directory, 'target')).filter(name => name.startsWith('issuance-journal-'))).toEqual([]);
+    expect(readdirSync(builtTargetDirectory).filter(name => name.startsWith('issuance-journal-'))).toEqual([]);
     expect(order).toContain('nodes-stop'); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
   });
 
@@ -2625,6 +2693,7 @@ describe('fresh FED target composition', () => {
     const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
     expect(failure).toBe(trigger);
     expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({ cycle: 'cycle-2', step });
+    expect(mocked.recovery).not.toHaveBeenCalled();
     assertCalls();
     expect(stop).toHaveBeenCalledOnce();
     expect(closeNative).toHaveBeenCalledTimes(2);
@@ -2670,7 +2739,9 @@ describe('fresh FED target composition', () => {
     order.length = 0;
     calls.length = 0;
     const originalBuild = mocked.frontier.getMockImplementation()!;
-    const freshTargetDirectory = mkdtempSync(join(directory, 'second-target-'));
+    const freshBuildDirectory = mkdtempSync(join(directory, 'bridge-fed-genesis-'));
+    const freshTargetDirectory = join(freshBuildDirectory, 'target');
+    mkdirSync(freshTargetDirectory);
     mocked.frontier.mockImplementationOnce(async value => ({
       ...await originalBuild(value), targetDirectory: freshTargetDirectory,
     }));
@@ -2800,6 +2871,28 @@ describe('fresh FED target composition', () => {
     expect(mocked.ergoBuild).not.toHaveBeenCalled(); expect(mocked.nodes).not.toHaveBeenCalled(); assertDisposed();
   });
 
+  it.each(['wrong parent', 'wrong build name', 'wrong target leaf'] as const)(
+    'rejects a Frontier %s before starting Ergo build or nodes', async fault => {
+      const build = mocked.frontier.getMockImplementation()!;
+      mocked.frontier.mockImplementationOnce(async value => {
+        const result = await build(value);
+        const targetDirectory = fault === 'wrong parent'
+          ? join(directory, 'nested', 'bridge-fed-genesis-Ab3D4e', 'target')
+          : fault === 'wrong build name'
+            ? join(directory, 'other-build-Ab3D4e', 'target')
+            : join(directory, 'bridge-fed-genesis-Ab3D4e', 'other');
+        mkdirSync(targetDirectory, { recursive: true });
+        return { ...result, targetDirectory };
+      });
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input))
+        .rejects.toThrow('FED recovery capture target differs from its fresh builder parent');
+      expect(mocked.ergoBuild).not.toHaveBeenCalled();
+      expect(mocked.nodes).not.toHaveBeenCalled();
+      expect(mocked.recovery).not.toHaveBeenCalled();
+      assertDisposed();
+    },
+  );
+
   it.each(['scale', 'id'])('rejects compiled federation %s drift before materialization', async field => {
     const compile = mocked.compile.getMockImplementation()!;
     mocked.compile.mockImplementationOnce(async value => {
@@ -2833,7 +2926,7 @@ describe('fresh FED target composition', () => {
 
   it('rejects modified materialization input before starting FED nodes', async () => {
     mocked.materialize.mockImplementationOnce(async () => {
-      writeFileSync(join(directory, 'target', 'fed-genesis.json'), '{}'); return { stdout: JSON.stringify(rawSpec()) };
+      writeFileSync(join(builtTargetDirectory, 'fed-genesis.json'), '{}'); return { stdout: JSON.stringify(rawSpec()) };
     });
     await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/typed genesis bytes changed/);
     expect(mocked.nodes).not.toHaveBeenCalled(); assertDisposed();

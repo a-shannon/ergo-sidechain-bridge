@@ -63,6 +63,24 @@ const PATH_IDENTITY_DIGEST_DOMAIN =
 const TOOL_IDENTITY_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_TOOL_IDENTITY_V1';
 
+const ROOT_RESULT_KEYS = Object.freeze([
+  'status', 'nativeGenesisHashHex', 'typedGenesisSha256Hex',
+  'rawSpecSha256Hex', 'runtimeProfileIdHex', 'familyIdHex',
+  'sourceProofProfileIdHex', 'nodeSha256Hex', 'wasmSha256Hex',
+  'operatorAddressHex', 'storageKeysChecked', 'issuanceInputBoxIds',
+  'issuedTransactions', 'pegIn', 'mint', 'burn', 'unsignedIssuance',
+  'frontierProcess', 'ergoExecution', 'withdrawal', 'completedCycles',
+  'secondCycle', 'singletonIssuanceEstablished',
+  'operationalMintEstablished', 'canonicalPayoutEstablished',
+  'sourceFinalityEstablished', 'trustless',
+] as const);
+const TRACKER_RESULT_KEYS = Object.freeze([
+  'expectedTxId', 'confirmationHeight', 'confirmationHeaderIdHex',
+  'authorizationDigestHex', 'checkDigestHex', 'frozenExecution',
+  'freshnessExecution', 'transportExecution', 'transportStatus',
+  'journalDigestHex',
+] as const);
+
 const CONFIG_KEYS = Object.freeze([
   'schema',
   'version',
@@ -464,18 +482,9 @@ export async function validateSubstrateFederatedNativeTwoCycleInvocationEnvironm
 export function projectSubstrateFederatedNativeTwoCycleResultV1(
   value: unknown,
 ): Readonly<SubstrateFederatedNativeTwoCycleResultV1> {
-  assertPlainSerializablePathFree(value, 'native two-cycle root result');
-  const root = exactRecord(value, [
-    'status', 'nativeGenesisHashHex', 'typedGenesisSha256Hex',
-    'rawSpecSha256Hex', 'runtimeProfileIdHex', 'familyIdHex',
-    'sourceProofProfileIdHex', 'nodeSha256Hex', 'wasmSha256Hex',
-    'operatorAddressHex', 'storageKeysChecked', 'issuanceInputBoxIds',
-    'issuedTransactions', 'pegIn', 'mint', 'burn', 'unsignedIssuance',
-    'frontierProcess', 'ergoExecution', 'withdrawal', 'completedCycles',
-    'secondCycle', 'singletonIssuanceEstablished',
-    'operationalMintEstablished', 'canonicalPayoutEstablished',
-    'sourceFinalityEstablished', 'trustless',
-  ], 'native two-cycle root result');
+  const normalized = normalizeRootResultForV1(value);
+  assertPlainSerializablePathFree(normalized, 'native two-cycle root result');
+  const root = exactRecord(normalized, ROOT_RESULT_KEYS, 'native two-cycle root result');
   if (
     root.status !== 'fresh-federated-round-trip-confirmed'
     || root.completedCycles !== 2
@@ -590,6 +599,63 @@ export function projectSubstrateFederatedNativeTwoCycleResultV1(
     ...body,
     receiptDigestHex: sha256CanonicalJson(body, RESULT_DIGEST_DOMAIN),
   });
+}
+
+function normalizeRootResultForV1(value: unknown): Record<string, unknown> {
+  const extended = value !== null && typeof value === 'object'
+    && Object.hasOwn(value, 'recoveryEvidence');
+  const root = exactRecord(value, extended
+    ? [...ROOT_RESULT_KEYS, 'recoveryEvidence'] : ROOT_RESULT_KEYS,
+  'native two-cycle root result');
+  if (!extended) return root;
+
+  const pointer = exactRecord(root.recoveryEvidence, [
+    'buildDirectoryName', 'directoryName', 'manifestSha256Hex',
+  ], 'native two-cycle recovery evidence');
+  if (typeof pointer.buildDirectoryName !== 'string'
+    || pointer.buildDirectoryName.length !== 'bridge-fed-genesis-'.length + 6
+    || !/^bridge-fed-genesis-[A-Za-z0-9]{6}$/u.test(pointer.buildDirectoryName)) {
+    throw new Error('native two-cycle recovery build directory must be one relative build name');
+  }
+  if (typeof pointer.directoryName !== 'string'
+    || pointer.directoryName.length !== 'two-cycle-recovery-'.length + 6
+    || !/^two-cycle-recovery-[A-Za-z0-9]{6}$/u.test(pointer.directoryName)) {
+    throw new Error('native two-cycle recovery directory must be one relative capture name');
+  }
+  const compatibilityDigest = (digest: unknown, label: string) => {
+    if (typeof digest !== 'string' || digest.length !== 64) {
+      throw new Error(`${label} must be 32 lowercase hexadecimal bytes`);
+    }
+    fixedLowerHex(digest, 32, label);
+  };
+  compatibilityDigest(pointer.manifestSha256Hex, 'native two-cycle recovery manifest SHA-256');
+
+  const withdrawal = exactRecord(root.withdrawal, [
+    'checkpoint', 'feeFunding', 'anchor', 'tracker', 'payout',
+    'confirmationExecution',
+  ], 'first cycle return');
+  const second = exactRecord(root.secondCycle, [
+    'pegIn', 'mint', 'burn', 'checkpoint', 'feeFunding', 'anchor',
+    'tracker', 'payout', 'confirmationExecution',
+  ], 'second cycle');
+  const legacyTracker = (trackerValue: unknown, label: string) => {
+    const tracker = exactRecord(trackerValue, [
+      ...TRACKER_RESULT_KEYS, 'durableAttemptDigestHex',
+    ], label);
+    compatibilityDigest(tracker.durableAttemptDigestHex, `${label} durable attempt digest`);
+    const { durableAttemptDigestHex: _durableAttemptDigestHex, ...legacy } = tracker;
+    return legacy;
+  };
+  // Validate only the fixed-depth additions before removing them. V1 continues
+  // to digest the legacy root; this pointer does not establish recovery acceptance.
+  const firstTracker = legacyTracker(withdrawal.tracker, 'first cycle return tracker');
+  const secondTracker = legacyTracker(second.tracker, 'second cycle return tracker');
+  const { recoveryEvidence: _recoveryEvidence, ...legacyRoot } = root;
+  return {
+    ...legacyRoot,
+    withdrawal: { ...withdrawal, tracker: firstTracker },
+    secondCycle: { ...second, tracker: secondTracker },
+  };
 }
 
 function revalidateLoadedInvocation(
@@ -926,12 +992,7 @@ function cycleReturn(value: unknown, label: string, includesFeeBoxes = false): R
   const validateFee = includesFeeBoxes ? firstCycleFee : feeSummary;
   validateFee(fees.withdrawal, `${label} withdrawal fee`);
   validateFee(fees.tracker, `${label} tracker fee`);
-  const tracker = exactRecord(cycle.tracker, [
-    'expectedTxId', 'confirmationHeight', 'confirmationHeaderIdHex',
-    'authorizationDigestHex', 'checkDigestHex', 'frozenExecution',
-    'freshnessExecution', 'transportExecution', 'transportStatus',
-    'journalDigestHex',
-  ], `${label} tracker`);
+  const tracker = exactRecord(cycle.tracker, TRACKER_RESULT_KEYS, `${label} tracker`);
   if (
     !positiveSafeInteger(tracker.confirmationHeight, `${label} tracker confirmation height`)
     || !['accepted', 'ambiguous', 'reconciled'].includes(String(tracker.transportStatus))

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import {
   appendFileSync,
   copyFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -211,6 +212,10 @@ describe.skipIf(process.platform !== 'win32')(
       await expect(session.withCheckpointBoundMiningActiveExecutionTarget(
         async () => 'never',
       )).rejects.toThrow(/requires one completed checkpoint observation/);
+      const stoppedData = vi.fn(async () => undefined);
+      await expect(session.stopWithStoppedData(stoppedData))
+        .rejects.toThrow(/requires completed second cycle/);
+      expect(stoppedData).not.toHaveBeenCalled();
       await expect(session.stop()).resolves.toBeUndefined();
       expect(() => assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1({
         primaryNodeOrigin: SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN,
@@ -1334,6 +1339,15 @@ describe.skipIf(process.platform !== 'win32')(
             expect(next.receipt.finalSnapshot.fullHeight).toBeGreaterThan(first.receipt.finalSnapshot.fullHeight);
             expect(callbacks).toEqual(['checkpoint', 'admission', 'transport', 'confirmation']);
             expect(injected).toBe(0);
+            const stoppedData = vi.fn(async (paths: Readonly<{
+              primaryDataDirectory: string; witnessDataDirectory: string;
+            }>) => {
+              expect(existsSync(paths.primaryDataDirectory)).toBe(true);
+              expect(existsSync(paths.witnessDataDirectory)).toBe(true);
+              expect(paths.primaryDataDirectory).not.toBe(paths.witnessDataDirectory);
+            });
+            await session.stopWithStoppedData(stoppedData);
+            expect(stoppedData).toHaveBeenCalledTimes(1);
           } else {
             await expect(pending).rejects.toThrow(/custody lost during await/);
             expect(injected).toBe(1);

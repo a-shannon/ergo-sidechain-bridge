@@ -455,6 +455,10 @@ export interface SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2 {
     >;
   }>>;
   readonly stop: () => Promise<void>;
+  /** Stops both nodes orderly before exposing their data, then removes the owned root. */
+  readonly stopWithStoppedData: (
+    action: (paths: Readonly<{ primaryDataDirectory: string; witnessDataDirectory: string }>) => Promise<void>,
+  ) => Promise<void>;
   readonly continueNativeTrackerCycleV1: (
     authority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1>,
   ) => Readonly<SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1>;
@@ -1110,6 +1114,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
   let currentCycle = originalCycle;
   let continuationAuthority: Readonly<SubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1> | undefined;
   let completedConfirmationTarget: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1> | undefined;
+  let secondCycleConfirmationCompleted = false;
   let checkpointExecutionContinuation:
     Readonly<CheckpointExecutionContinuation> | undefined;
   let trackerReservationFreshnessContinuation:
@@ -1136,7 +1141,9 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
     | 'stop'
     | undefined;
 
-  const cleanup = async (): Promise<void> => {
+  const cleanup = async (
+    onStoppedData?: (paths: Readonly<{ primaryDataDirectory: string; witnessDataDirectory: string }>) => Promise<void>,
+  ): Promise<void> => {
     if (state === 'stopped') return;
     if (continuationAuthority !== undefined) {
       revokeSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1(continuationAuthority);
@@ -1178,7 +1185,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       [primary, () => { primary = undefined; }],
     ] as const) {
       try {
-        await stopOwnedNode(node, false);
+        await stopOwnedNode(node, onStoppedData !== undefined);
         clear();
       } catch (error) {
         terminationErrors.push(
@@ -1205,6 +1212,21 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       return await holdOwnedNodeCleanupAuthority();
     }
     const cleanupErrors: Error[] = [];
+    if (onStoppedData !== undefined) {
+      try {
+        if (runtime === undefined || ownedRuntimeRoot === undefined
+          || runtime.root !== ownedRuntimeRoot) {
+          throw new Error('isolated Ergo stopped-data runtime is absent');
+        }
+        assertOwnedRuntimePath(ownedRuntimeRoot);
+        await onStoppedData(Object.freeze({
+          primaryDataDirectory: runtime.primaryDataDirectory,
+          witnessDataDirectory: runtime.witnessDataDirectory,
+        }));
+      } catch (error) {
+        cleanupErrors.push(asError(error, 'isolated Ergo stopped-data action failed'));
+      }
+    }
     if (ownedRuntimeRoot !== undefined) {
       try {
         removeOwnedRuntime(ownedRuntimeRoot);
@@ -1232,6 +1254,22 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
     activeOperation = 'stop';
     try {
       await cleanup();
+    } finally {
+      activeOperation = undefined;
+    }
+  };
+
+  const stopWithStoppedData = async (
+    action: (paths: Readonly<{ primaryDataDirectory: string; witnessDataDirectory: string }>) => Promise<void>,
+  ): Promise<void> => {
+    if (typeof action !== 'function') throw new Error('isolated Ergo stopped-data action is required');
+    if (activeOperation !== undefined || state !== 'mining'
+      || currentCycle === originalCycle || !secondCycleConfirmationCompleted) {
+      throw new Error('isolated Ergo stopped-data export requires completed second cycle');
+    }
+    activeOperation = 'stop';
+    try {
+      await cleanup(action);
     } finally {
       activeOperation = undefined;
     }
@@ -2947,6 +2985,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
             transportSnapshot: continuation.transportSnapshot,
           });
         completedConfirmationTarget = target;
+        if (currentCycle !== originalCycle) secondCycleConfirmationCompleted = true;
         return Object.freeze({ value, receipt });
       } catch (error) {
         return await failWithCleanup(error);
@@ -2955,6 +2994,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       }
     },
     stop,
+    stopWithStoppedData,
   });
 
   const guardCycle = <Args extends unknown[], Result>(cycle: MiningCycle,

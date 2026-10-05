@@ -251,6 +251,15 @@ The campaign does not implement restart, database-loss or reorg recovery. Those
 cases must be exercised separately against accumulated state before the wider
 FED delivery can be considered complete.
 
+After a successful two-cycle root, the source-derived capture path can copy
+fixed Frontier and Ergo database subtrees in the owners' stopped-data windows
+and back up the two exact tracker admissions from SQLite. It writes bounded
+hash manifests without keys or restored execution authority. The capture has
+not been demonstrated against actual stopped node data, and its manifests do
+not establish cross-node consistency or fresh-process restart. Recovery
+acceptance requires a separately admitted run and validation on disposable
+copies.
+
 ## Observed campaign status
 
 Campaign 24 invoked this command at
