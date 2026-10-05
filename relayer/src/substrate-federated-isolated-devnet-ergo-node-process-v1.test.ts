@@ -22,6 +22,9 @@ import { encodeAvlTreeRegister, encodeCollByteRegister, encodeIntRegister, encod
 import { getSubstrateFederatedTrackerDigestV1Hex } from './substrate-federated-burn-settlement-v1.js';
 import { MINER_FEE as NANOERG_MINER_FEE, MINER_FEE_TREE } from './profiles/substrate-grandpa-v1/ergo-settlement-policy.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
+import {
+  projectOwnIsolatedErgoNodeCompletionFailureReasonV1 as projectCompletionReason,
+} from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import { executePinnedFederatedJvmCompilerV1 } from './substrate-federated-tracker-jvm-compiler-v1.js';
 import { SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_SINGLETON_VALUE_NANOERG } from './substrate-federated-isolated-devnet-generation-v1.js';
 import { buildFederatedPooledReserveSourceProofProfileV1 } from './substrate-federated-pooled-reserve-source-proof-v1.js';
@@ -476,6 +479,59 @@ describe.skipIf(process.platform !== 'win32')(
       expect(source).toContain('managedActionOverrunRejectedAfterJoin');
       expect(source).toContain('performance.now()');
       expect(source).not.toContain('Promise.race([');
+    });
+
+    it('tags only strict overruns and invalid timing in the pure completion predicate', () => {
+      const completionBudget =
+        SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1;
+      const captureFailure = (attempt: () => void): unknown => {
+        try {
+          attempt();
+        } catch (error) {
+          return error;
+        }
+        return null;
+      };
+
+      expect(captureFailure(() =>
+        assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
+          1_000,
+          1_000 + completionBudget,
+          completionBudget,
+        ),
+      )).toBeNull();
+
+      const exceeded = captureFailure(() =>
+        assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
+          1_000,
+          1_001 + completionBudget,
+          completionBudget,
+        ),
+      );
+      expect(exceeded).toBeInstanceOf(Error);
+      expect((exceeded as Error).message).toBe(
+        'isolated Ergo managed action exceeded its completion budget',
+      );
+      expect(projectCompletionReason(exceeded)).toBe('budget-exceeded');
+
+      const invalidTimings = [
+        [Number.NaN, 1_000, completionBudget],
+        [1_000, Number.POSITIVE_INFINITY, completionBudget],
+        [1_000, 999, completionBudget],
+        [1_000, 1_000, 0],
+      ] as const;
+      for (const [startedAtMs, completedAtMs, budgetMs] of invalidTimings) {
+        const invalid = captureFailure(() =>
+          assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBudgetV1(
+            startedAtMs,
+            completedAtMs,
+            budgetMs,
+          ),
+        );
+        expect(invalid).toBeInstanceOf(Error);
+        expect((invalid as Error).message).toBe('isolated Ergo managed-action timing is invalid');
+        expect(projectCompletionReason(invalid)).toBe('invalid-timing');
+      }
     });
 
     it('applies an explicit checkpoint tip floor without changing the generic path', () => {

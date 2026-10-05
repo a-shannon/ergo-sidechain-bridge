@@ -14,9 +14,11 @@ import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-na
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
-import { projectNativeTwoCycleErgoNodePostCallbackStageV1 }
+import { projectNativeTwoCycleErgoNodeCompletionFailureReasonV1,
+  projectNativeTwoCycleErgoNodePostCallbackStageV1 }
   from '../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
-import { createNativeTwoCycleWorkerOwnerStageV1 }
+import { createNativeTwoCycleWorkerOwnerStageV1,
+  createNativeTwoCycleWorkerOwnerStageV2 }
   from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
 import {
   validateWasmAvlBuildToolHashV2,
@@ -173,6 +175,7 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
     let workerFailureText: string | undefined;
     let workerRootPhaseV2Text: string | undefined;
     let workerCycleStepText: string | undefined;
+    let workerOwnerStageText: string | undefined;
     try {
       const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
         configSha256Hex: invocation.configSha256Hex,
@@ -272,9 +275,28 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
           writeNewFile(join(invocation.attemptPath, 'worker-owner-stage.json'),
             Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
             'native two-cycle worker owner stage companion');
+          workerOwnerStageText = `${canonicalJson(companion)}\n`;
         }
       } catch {
         // Optional owner detail cannot replace failure or older companions.
+      }
+      try {
+        const reason = projectNativeTwoCycleErgoNodeCompletionFailureReasonV1(primaryFailure);
+        if (reason !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined
+          && workerOwnerStageText !== undefined) {
+          const companion = createNativeTwoCycleWorkerOwnerStageV2({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+          workerOwnerStageText, reason);
+          writeNewFile(join(invocation.attemptPath, 'worker-owner-stage-v2.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker owner completion reason companion');
+        }
+      } catch {
+        // Optional reason cannot replace failure or any earlier companion.
       }
     }
     throw primaryFailure;

@@ -26,7 +26,8 @@ import { createNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { createNativeTwoCycleParentSetupStageV1 }
   from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
-import { createNativeTwoCycleParentOwnerStageV1 }
+import { createNativeTwoCycleParentOwnerStageV1,
+  createNativeTwoCycleParentOwnerStageV2 }
   from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
 import {
   canonicalPathIdentity,
@@ -217,7 +218,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))
       || existsSync(join(attemptPath, 'worker-cycle-step.json'))
       || existsSync(join(attemptPath, 'worker-setup-stage.json'))
-      || existsSync(join(attemptPath, 'worker-owner-stage.json'))) {
+      || existsSync(join(attemptPath, 'worker-owner-stage.json'))
+      || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))) {
       throw new Error('native two-cycle worker returned contradictory failure evidence');
     }
     const retainedWasmEvidence = readBoundedRegularFile(
@@ -474,6 +476,27 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent owner stage companion');
         } catch {
           // Unknown, invalid or unwritable owner detail leaves all older receipts intact.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle owner completion reason lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentOwnerStageV2(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-owner-stage.json'),
+            readCompanion('worker-owner-stage-v2.json'),
+            readCompanion('failure-owner-stage.json'));
+          writeNewFile(join(attemptPath, 'failure-owner-stage-v2.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent owner completion reason companion');
+        } catch {
+          // Optional reason cannot alter terminal failure or earlier companions.
         }
       } catch {
         // Preserve the original execution failure. A missing failure artifact

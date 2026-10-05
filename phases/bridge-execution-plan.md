@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-04
+Updated: 2026-10-05
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,27 +28,38 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–41 are permanently consumed or held. C40 stopped before
-attempt creation because the selected `wasm-pack` did not match the reviewed
-tool. The separately admitted C41 failed once at `cycle-1/cycle-summary`.
-Operation completion, root cleanup, custody disposal and the raw cause remain
-unestablished; no two-cycle acceptance follows. Do not retry or resume either
-attempt or inspect private runtime state. The preceding published head
-`0efa934a2a38c23fc680918ae562597f1f6e781c` passed all three jobs in its
-exact [run 37161540090](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37161540090).
-That run cannot validate the owner-lifecycle diagnostic; its checkpoint
-requires separate guarded promotion and exact-head CI.
+**Now:** Campaigns 24–43 are permanently consumed or held. C42 issued the
+canonical command once but lost its tool session after `worker-start.json` and
+has no parent terminal artifact; it is incomplete/ambiguous. A no-key detached
+process-lifetime falsifier preceded separate fresh C43 admission. C43 issued
+the command once and produced a terminal `execution_failure` at
+`cycle-1/cycle-summary`, owner `withMiningActiveExecutionTarget`, stage
+`completion-check`. The bounded receipt reports a passing post-failure identity
+check but establishes neither operation completion, root cleanup nor custody
+disposal; its raw cause is unpublished. Do not retry/resume either attempt,
+inspect private historical runtime state or treat `cleanupErrorCount=0` as
+disposal proof. No two-cycle acceptance follows. The owner-stage diagnostic
+checkpoint at `96a4d4615de06c15afb240bb961cd4ac77ce391e` passed all three
+jobs in exact [run 37184578524](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37184578524).
 
-**Next:** Close the synthetic owner post-callback and bounded worker/parent
-diagnostic checkpoint with strict affected validation, independent final-diff
-review, guarded promotion through the existing fork PR and all three exact-head
-CI jobs. Only after that checkpoint may a separate fresh C42 admission prepare
-source, tool, cache, build/output and custody for one complete two-cycle run.
-The run must fund and canonically confirm two distinct first-cycle external
-fee inputs from retained issuance change before selecting the first checkpoint
-anchor. This diagnostic grants no execution authority and cannot assign
-C41's hidden cause. Continue the clean-root operator and accumulated-state
-recovery preparation alongside independent work; neither is already accepted.
+**Next:** The bounded discriminator is implemented locally for future failures:
+the unchanged completion predicate tags `invalid-timing` or `budget-exceeded`;
+the retained owner projects the reason only from the exact primary failure,
+including a cleanup aggregate; optional worker and parent V2 companions bind
+the existing V1 lineage. A first independent review found and prompted repair
+of a cleanup-aggregate attribution defect. The five affected suites pass 426
+tests with 11 pre-existing skips under pinned Node 24.14.0; TypeScript and the
+layered import check pass. Independent correction review found no remaining
+P0-P2 issue. Complete exact publication guards and fork PR promotion, then
+verify all three CI jobs on the
+new head. The discriminator cannot assign C43's historical branch. A distinct
+fresh two-cycle campaign requires new source, build/output and custody
+admission after that checkpoint; neither C42 nor C43 is execution authority.
+Do not increase the time budget or narrow its scope without deciding evidence.
+In parallel, prepare the non-authorizing accumulated-state recovery export and
+clean-root operator package; neither is accepted yet. The recovery export must
+prove a key-free, consistent stop-and-copy boundary before another runtime
+acceptance run.
 
 ### Prior checkpoint notes (historical)
 
@@ -1233,22 +1244,20 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | C41 `cycle-1/cycle-summary` bracket -> Ergo owner-lifecycle discrimination | Isolate the post-callback stop/restart/snapshot and completion-budget branches in synthetic fixtures, then add only the bounded diagnostic needed to distinguish a future owner failure from the root summary | The one C41 invocation failed at `cycle-summary`; operation completion, root cleanup and custody disposal are unestablished. The marker covers both the initial summary and the outer Ergo owner lifecycle, so duration alone does not identify the cause. C41 is consumed/held; a later diagnostic cannot retroactively assign its cause. |
-| First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after the named failure boundary is addressed, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
-| Next candidate | Accumulated state -> recovery | Exercise restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on the selected FED consumer | Recover observations and safe progress only from the required authority. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority |
+| **Now** | C43 owner `completion-check` -> exact future timing-reason lineage | Guard and promote the locally tested and independently reviewed V2 worker/parent companions, then verify exact-head CI | C43 failed at this stage without publishing its cause. The new discriminator does not retrospectively identify it or establish operation completion, root cleanup or custody disposal. |
+| First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
+| Next candidate | Accumulated state -> recovery | Establish a key-free, consistent, bounded export of the two-cycle node state before ordinary cleanup; then exercise fresh-process restart, DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions on disposable copies | The current success path deletes both node data trees and retains only a closed tracker journal. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns through 41 are terminal; Campaigns 24–41 remain consumed or held.
-C40 stopped before attempt-directory creation when the selected `wasm-pack`
-did not match the reviewed tool; C41 passed fresh admission and failed once at
-`cycle-1/cycle-summary`. Neither result authorizes a retry or resume. The next
-full local campaign is conditional on the bounded owner-lifecycle discriminator,
-its focused negative tests and independent review, guarded promotion,
-exact-head CI and separate fresh-input admission.
-Candidate review, closeout, guarded promotion and exact-head CI for the prior
-checkpoint candidate do not transfer to changed bytes; reopen only those
-invalidated gates.
+Campaigns 24–43 remain consumed or held. C42 is incomplete/ambiguous without a
+parent terminal artifact. C43 failed once with a terminal owner
+`completion-check` receipt. Neither result authorizes retry, resume or custody
+reuse. The owner-stage diagnostic and its exact-head CI are closed; the next
+runtime campaign is conditional on a separately closed bounded timing-branch
+discriminator or other source-backed correction, independent review, guarded
+promotion, exact-head CI and fresh-input admission. Reopen only gates
+invalidated by changed inputs; unchanged candidate evidence remains reusable.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
 for this deciding run; private historical campaign scripts or custody are not
@@ -1275,7 +1284,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C41 cycle-summary owner-lifecycle discrimination | Preserve terminal/V1/V2 receipt bytes, digest domains, time/quorum rules, custody and permanent attempt holds while making a future post-callback owner failure distinguishable from the root summary | First make a synthetic successful callback return exercise the mining-node stop, read-only restart, exact snapshot and 4,680,000 ms completion boundary, with isolated negatives. Then add a bounded, identity-bound operation tag only at the failing owner boundary and carry it through the existing root/worker/parent diagnostic lineage. Focused producer/consumer tests, strict closeout, independent review, publication guards and exact-head CI precede any new campaign. C41's raw cause stays unknown |
+| C43 owner completion timing branch | Preserve existing terminal/V1/V2/owner-stage bytes and digest domains, the 4,680,000 ms budget, time/quorum rules, custody and permanent attempt holds while distinguishing future invalid-timing from budget-exceeded owner failures | The local predicate-to-parent join and cleanup-aggregate correction pass 426 affected tests, TypeScript and import checks under pinned Node 24.14.0. Independent correction review found no remaining P0-P2 issue; publication guards and exact-head CI remain due before fresh admission. C43's raw cause remains unknown |
 | Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. The exact-head checkpoint is already closed; prepare separately fresh sources, tools, caches, shallow build and output parents plus custody and fee inputs; revalidate every required admission, custody and fee input before selecting one campaign. C38 is consumed/held after one failed invocation; do not retry or resume it, and its diagnostics cannot supply the next admission |
 | C37 Frontier compiler boundary (local compiler discriminator closed 2026-10-03) | Isolate the named compiler boundary using public locked sources and the production build environment without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. One deep FED diagnostic failed with nested winapi LNK1104; a no-key differential demonstrated scoped path sensitivity. A separate fresh FED compiler diagnostic using a shallow build parent passed on local dd7e054, with actual node/WASM hashes and both disposals/exact post-disposal denials verified. Independent review passed. All three diagnostic outputs are consumed, never retryable or campaign authority. No build-spec, node or signing ran. C37 historical cause and cleanup remain unknown; no two-cycle acceptance. C38 was admitted separately and is recorded in Current Focus as consumed/held after its failed invocation |
 | C36 final-request-validation observer boundary (closed 2026-10-03) | Connect the materially cheaper fresh owned-process/listener observer without weakening image, listener, freshness, custody or native-provenance checks | Published at `681ca21d`; all three jobs passed in exact run 37085325522. Three bounded comparisons match CIM; the final production source has two exact image/listener matches. All 111 focused cases, 293 architecture cases, TypeScript/import checks and segmented 608-file closure pass. Independent source review GO after the TCP wildcard correction. Reuse unchanged gates. C24–37 remain consumed or held; no retry, timeout increase or predicate relaxation |

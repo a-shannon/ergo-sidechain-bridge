@@ -20,8 +20,10 @@ import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_MANAGED_ACTION_COMPLETION_BUDGET_MS_V1 as completionBudgetMs,
 } from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
-import { projectOwnIsolatedErgoNodePostCallbackStageV1 as projectOwnerStage }
-  from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
+import {
+  projectOwnIsolatedErgoNodeCompletionFailureReasonV1 as projectOwnerCompletionReason,
+  projectOwnIsolatedErgoNodePostCallbackStageV1 as projectOwnerStage,
+} from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import { issueSubstrateFederatedIsolatedDevnetMiningCredentialV1 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
 
 const PRIMARY = 41_001;
@@ -318,11 +320,14 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
     'missing-primary-rest', 'missing-primary-p2p', 'missing-witness-rest', 'missing-witness-p2p',
     'non-loopback', 'extra-port', 'foreign-owner',
     'callback-return', 'completion-equality', 'completion-plus-one',
+    'completion-plus-one-cleanup-failure',
     'invalid-start-time', 'invalid-completion-time', 'backwards-completion-time',
     'primary-orderly-stop', 'witness-orderly-stop', 'post-stop-port',
     'primary-restart', 'witness-restart', 'primary-stable-snapshot', 'witness-stable-snapshot',
   ])('preserves per-assertion and post-callback checks: %s', async fault => {
     const directory = mkdtempSync(join(tmpdir(), 'fed-process-pair-test-'));
+    const originalTemp = process.env.TEMP;
+    const originalTmp = process.env.TMP;
     const java = join(directory, 'java.exe');
     const otherJava = join(directory, 'same-image-other-path.exe');
     const jar = join(directory, 'node.jar');
@@ -337,6 +342,7 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
     const snapshotReads = new Map<number, number>();
     const lifecycleFault = [
       'callback-return', 'completion-equality', 'completion-plus-one',
+      'completion-plus-one-cleanup-failure',
       'invalid-start-time', 'invalid-completion-time', 'backwards-completion-time',
       'primary-orderly-stop', 'witness-orderly-stop', 'post-stop-port',
       'primary-restart', 'witness-restart', 'primary-stable-snapshot', 'witness-stable-snapshot',
@@ -438,7 +444,7 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
         : fault === 'invalid-completion-time' ? [1_000, Infinity]
           : fault === 'backwards-completion-time' ? [1_000, 999]
             : [1_000, 1_000 + (fault === 'completion-equality' ? 4_680_000
-              : fault === 'completion-plus-one' ? 4_680_001 : 0)];
+            : fault.includes('completion-plus-one') ? 4_680_001 : 0)];
       const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(timing[0]!).mockReturnValueOnce(timing[1]!);
       const value = Object.freeze({ callback: 'completed' });
       let retainedTarget: Parameters<typeof assertTarget>[0] | undefined;
@@ -450,6 +456,13 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
         injected = true;
         if (lifecycleFault) {
           callbackReturned = true;
+          if (fault === 'completion-plus-one-cleanup-failure') {
+            const alternateTempRoot = join(directory, 'alternate-temp-root');
+            mkdirSync(alternateTempRoot);
+            vi.stubEnv('TEMP', alternateTempRoot);
+            vi.stubEnv('TMP', alternateTempRoot);
+            expect(realpathSync(tmpdir())).toBe(realpathSync(alternateTempRoot));
+          }
           return value;
         }
         if (fault === 'primary-exit') children[0]!.exitCode = 1;
@@ -486,25 +499,55 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
         expect(snapshotReads.get(WITNESS + 100)).toBe(3);
         expect(liveLaunches().map(({ child }) => child.pid)).toEqual([PRIMARY + 100, WITNESS + 100]);
       } else {
-        const expected = fault === 'completion-plus-one' ? 'managed action exceeded its completion budget'
+        const composedCleanupFailure = fault === 'completion-plus-one-cleanup-failure';
+        const expected = composedCleanupFailure
+          ? 'isolated Ergo lifecycle failed and cleanup was incomplete'
+          : fault.includes('completion-plus-one') ? 'managed action exceeded its completion budget'
           : fault.includes('-time') ? 'managed-action timing is invalid'
             : fault.endsWith('-orderly-stop') ? `${fault.split('-')[0]} process did not stop orderly`
               : fault === 'post-stop-port' ? 'process port is already owned'
                 : fault.endsWith('-restart') ? `fixture ${fault.split('-')[0]} non-mining spawn failure`
                   : `${fault.split('-')[0]} snapshot differs from the frozen target`;
         let rejected: unknown;
-        await expect(execution.catch(error => { rejected = error; throw error; })).rejects.toThrow(expected);
-        const ownerStage = fault.endsWith('-time') || fault === 'completion-plus-one'
+        const rejectedExecution = execution.catch(error => { rejected = error; throw error; });
+        if (composedCleanupFailure) {
+          await expect(rejectedExecution).rejects.toBeInstanceOf(AggregateError);
+          const aggregate = rejected as AggregateError;
+          expect(aggregate.message).toBe(expected);
+          const children = aggregate.errors as unknown[];
+          expect(children).toHaveLength(2);
+          expect(aggregate.errors).toBe(children);
+          const predicateFailure = children[0];
+          const cleanupFailure = children[1];
+          expect(predicateFailure).toBeInstanceOf(Error);
+          expect((predicateFailure as Error).message)
+            .toBe('isolated Ergo managed action exceeded its completion budget');
+          expect(projectOwnerCompletionReason(predicateFailure)).toBeNull();
+          expect(cleanupFailure).toBeInstanceOf(AggregateError);
+          const cleanupAggregate = cleanupFailure as AggregateError;
+          expect(cleanupAggregate.message)
+            .toBe('isolated Ergo owned-process cleanup was incomplete');
+          expect(cleanupAggregate.errors).toHaveLength(1);
+          expect((cleanupAggregate.errors[0] as Error).message)
+            .toBe('isolated Ergo runtime root is outside the dedicated temp namespace');
+          expect(projectOwnerCompletionReason(cleanupFailure)).toBeNull();
+        } else {
+          await expect(rejectedExecution).rejects.toThrow(expected);
+        }
+        const ownerStage = fault.endsWith('-time') || fault.includes('completion-plus-one')
           ? 'completion-check' : fault.endsWith('-orderly-stop') ? 'mining-shutdown'
             : fault === 'post-stop-port' ? 'ownership-recheck'
               : fault.endsWith('-restart') ? 'read-only-restart' : 'read-only-validation';
         expect(projectOwnerStage(rejected)).toBe(ownerStage);
+        const completionReason = fault.includes('completion-plus-one') ? 'budget-exceeded'
+          : fault.endsWith('-time') ? 'invalid-timing' : null;
+        expect(projectOwnerCompletionReason(rejected)).toBe(completionReason);
         expect(liveLaunches()).toEqual([]);
       }
       if (lifecycleFault) {
         expect(callbackReturned).toBe(true);
         expect(clock).toHaveBeenCalledTimes(2);
-        const rejectedTiming = fault === 'completion-plus-one' || fault.includes('-time');
+        const rejectedTiming = fault.includes('completion-plus-one') || fault.includes('-time');
         expect(shutdownPids).toEqual(rejectedTiming ? []
           : fault === 'primary-orderly-stop' ? [PRIMARY] : [PRIMARY, WITNESS]);
         expect(launches.filter(({ mode }) => mode === 'non-mining')).toHaveLength(
@@ -514,6 +557,10 @@ describe.skipIf(process.platform !== 'win32')('combined observation in the retai
         expect(() => assertTarget(retainedTarget!)).toThrow();
       }
     } finally {
+      if (fault === 'completion-plus-one-cleanup-failure') {
+        vi.stubEnv('TEMP', originalTemp);
+        vi.stubEnv('TMP', originalTmp);
+      }
       await session.stop();
       expect(children.every(child => child.exitCode !== null || child.signalCode !== null)).toBe(true);
       rmSync(directory, { recursive: true, force: true });

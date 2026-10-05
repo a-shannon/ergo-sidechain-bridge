@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ISOLATED_ERGO_NODE_COMPLETION_FAILURE_REASONS_V1,
   ISOLATED_ERGO_NODE_POST_CALLBACK_STAGES_V1,
+  projectNativeTwoCycleErgoNodeCompletionFailureReasonV1 as projectCompletionReason,
   projectNativeTwoCycleErgoNodePostCallbackStageV1 as project,
+  projectOwnIsolatedErgoNodeCompletionFailureReasonV1 as ownCompletionReason,
   projectOwnIsolatedErgoNodePostCallbackStageV1 as own,
+  tagIsolatedErgoNodeCompletionFailureReasonV1 as tagCompletionReason,
   tagIsolatedErgoNodePostCallbackStageV1 as tag,
+  transferIsolatedErgoNodeCompletionFailureReasonV1 as transferCompletionReason,
 } from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 as root }
   from './substrate-federated-native-two-cycle-root-phase-v2.js';
@@ -15,6 +20,15 @@ function cycleSummary(error: Error): Error {
   root(error, 'cycle-1');
   step(error, 'cycle-1', 'cycle-summary');
   return error;
+}
+
+function completionFailure(
+  error: Error,
+  reason: typeof ISOLATED_ERGO_NODE_COMPLETION_FAILURE_REASONS_V1[number],
+): Error {
+  tag(error, 'completion-check');
+  tagCompletionReason(error, reason);
+  return cycleSummary(error);
 }
 
 describe('Ergo owner post-callback failure provenance', () => {
@@ -80,5 +94,102 @@ describe('Ergo owner post-callback failure provenance', () => {
     const iterator = new AggregateError([primary]);
     Object.defineProperty(iterator.errors, Symbol.iterator, { value: () => [primary] });
     expect(project(iterator)).toBeNull();
+  });
+
+  it('projects a completion reason only when it shares the owner error with its stage', () => {
+    const owner = new Error('private completion cause');
+    tag(owner, 'completion-check');
+    tagCompletionReason(owner, 'invalid-timing');
+    const summary = cycleSummary(owner);
+
+    expect(own(owner)).toBe('completion-check');
+    expect(ownCompletionReason(owner)).toBe('invalid-timing');
+    expect(project(summary)).toBe('completion-check');
+    expect(projectCompletionReason(summary)).toBe('invalid-timing');
+
+    const missing = cycleSummary(tag(new Error('missing reason'), 'completion-check'));
+    expect(project(missing)).toBe('completion-check');
+    expect(projectCompletionReason(missing)).toBeNull();
+
+    const unknown = tag(new Error('unknown reason'), 'completion-check');
+    tagCompletionReason(
+      unknown,
+      'unknown' as typeof ISOLATED_ERGO_NODE_COMPLETION_FAILURE_REASONS_V1[number],
+    );
+    const unknownSummary = cycleSummary(unknown);
+    expect(ownCompletionReason(unknown)).toBeNull();
+    expect(projectCompletionReason(unknownSummary)).toBeNull();
+
+    const conflicting = tag(new Error('conflicting reason'), 'completion-check');
+    tagCompletionReason(conflicting, 'invalid-timing');
+    tagCompletionReason(conflicting, 'budget-exceeded');
+    const conflictingSummary = cycleSummary(conflicting);
+    expect(ownCompletionReason(conflicting)).toBeNull();
+    expect(project(conflictingSummary)).toBe('completion-check');
+    expect(projectCompletionReason(conflictingSummary)).toBeNull();
+  });
+
+  it('rejects completion reasons borrowed across primary, secondary, cleanup and bounded graph paths', () => {
+    const primaryOwner = tag(new Error('primary owner'), 'completion-check');
+    const borrowedByPrimary = tagCompletionReason(
+      new AggregateError([primaryOwner]),
+      'invalid-timing',
+    );
+    expect(projectCompletionReason(cycleSummary(borrowedByPrimary))).toBeNull();
+
+    const secondary = completionFailure(new Error('secondary owner'), 'budget-exceeded');
+    expect(projectCompletionReason(
+      cycleSummary(new AggregateError([new Error('unrelated primary'), secondary])),
+    )).toBeNull();
+
+    const cleanup = new Error('cleanup owner');
+    tag(cleanup, 'completion-check');
+    tagCompletionReason(cleanup, 'invalid-timing');
+    root(cleanup, 'cleanup');
+    expect(projectCompletionReason(cycleSummary(new AggregateError([cleanup])))).toBeNull();
+
+    const duplicate = completionFailure(new Error('duplicate owner'), 'budget-exceeded');
+    expect(projectCompletionReason(new AggregateError([duplicate, duplicate]))).toBeNull();
+
+    const oversized = completionFailure(new Error('oversized owner'), 'invalid-timing');
+    expect(projectCompletionReason(new AggregateError([
+      oversized,
+      ...Array.from({ length: 65 }, () => new Error('unrelated')),
+    ]))).toBeNull();
+  });
+
+  it.each(ISOLATED_ERGO_NODE_COMPLETION_FAILURE_REASONS_V1)(
+    'preserves %s on the exact cleanup aggregate without borrowing from its primary child', reason => {
+      const predicate = tagCompletionReason(new Error('private predicate'), reason);
+      const cleanup = new Error('private cleanup');
+      const final = cycleSummary(tag(new AggregateError([predicate, cleanup]),
+        'completion-check'));
+      expect(project(final)).toBe('completion-check');
+      expect(projectCompletionReason(final)).toBeNull();
+      expect(transferCompletionReason(predicate, final)).toBe(final);
+      expect(ownCompletionReason(predicate)).toBeNull();
+      expect(ownCompletionReason(final)).toBe(reason);
+      expect(projectCompletionReason(final)).toBe(reason);
+      expect((final as AggregateError).errors).toEqual([predicate, cleanup]);
+    });
+
+  it('refuses reason transfer to a secondary, absent, or malformed cleanup ancestry', () => {
+    const predicate = tagCompletionReason(new Error('private predicate'), 'budget-exceeded');
+    const cleanup = new Error('private cleanup');
+    const wrongOrder = cycleSummary(tag(new AggregateError([cleanup, predicate]),
+      'completion-check'));
+    expect(transferCompletionReason(predicate, wrongOrder)).toBe(wrongOrder);
+    expect(ownCompletionReason(predicate)).toBe('budget-exceeded');
+    expect(projectCompletionReason(wrongOrder)).toBeNull();
+
+    const missing = cycleSummary(tag(new AggregateError([predicate]), 'completion-check'));
+    expect(transferCompletionReason(predicate, missing)).toBe(missing);
+    expect(ownCompletionReason(predicate)).toBe('budget-exceeded');
+    expect(projectCompletionReason(missing)).toBeNull();
+
+    const unrelated = cycleSummary(tag(new Error('unrelated'), 'completion-check'));
+    expect(transferCompletionReason(predicate, unrelated)).toBe(unrelated);
+    expect(ownCompletionReason(predicate)).toBe('budget-exceeded');
+    expect(projectCompletionReason(unrelated)).toBeNull();
   });
 });

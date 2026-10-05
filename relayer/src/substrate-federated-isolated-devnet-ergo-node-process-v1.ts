@@ -48,6 +48,9 @@ import {
 } from './relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
 import { tagIsolatedErgoNodePostCallbackStageV1,
+  tagIsolatedErgoNodeCompletionFailureReasonV1,
+  projectOwnIsolatedErgoNodeCompletionFailureReasonV1,
+  transferIsolatedErgoNodeCompletionFailureReasonV1,
   type IsolatedErgoNodePostCallbackStageV1 }
   from './substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
 import { deriveDevnetRewardErgoTreeHexForDelay } from './relayer-core/devnet-reward-consolidation.js';
@@ -1345,6 +1348,9 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       }
       activeOperation = 'execution';
       let postCallbackStage: IsolatedErgoNodePostCallbackStageV1 | null = null;
+      // The action callback can set the stage after this frame has begun.
+      const currentPostCallbackStage = (): IsolatedErgoNodePostCallbackStageV1 | null =>
+        postCallbackStage;
       try {
         const initialSnapshot = await waitForCommonIndexedSnapshot(
           primary,
@@ -1445,10 +1451,14 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         completedSetupTarget = target;
         return Object.freeze({ value, receipt });
       } catch (error) {
+        const completionReason = currentPostCallbackStage() === 'completion-check'
+          ? projectOwnIsolatedErgoNodeCompletionFailureReasonV1(error) : null;
         try { return await failWithCleanup(error); }
         catch (failure) {
-          throw postCallbackStage === null ? failure
-            : tagIsolatedErgoNodePostCallbackStageV1(failure, postCallbackStage);
+          if (postCallbackStage === null) throw failure;
+          const stagedFailure = tagIsolatedErgoNodePostCallbackStageV1(failure, postCallbackStage);
+          throw completionReason === null ? stagedFailure
+            : transferIsolatedErgoNodeCompletionFailureReasonV1(error, stagedFailure);
         }
       } finally {
         activeOperation = undefined;
@@ -4627,12 +4637,13 @@ export function assertSubstrateFederatedIsolatedDevnetManagedActionCompletionBud
     || completionBudgetMs <= 0
     || completedAtMs < startedAtMs
   ) {
-    throw new Error('isolated Ergo managed-action timing is invalid');
+    throw tagIsolatedErgoNodeCompletionFailureReasonV1(
+      new Error('isolated Ergo managed-action timing is invalid'), 'invalid-timing');
   }
   if (completedAtMs - startedAtMs > completionBudgetMs) {
-    throw new Error(
-      'isolated Ergo managed action exceeded its completion budget',
-    );
+    throw tagIsolatedErgoNodeCompletionFailureReasonV1(
+      new Error('isolated Ergo managed action exceeded its completion budget'),
+      'budget-exceeded');
   }
 }
 

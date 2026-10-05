@@ -12,7 +12,9 @@ import { createNativeTwoCycleWorkerCycleStepV1 }
 import { type NativeTwoCycleCycleStepV1 }
   from './substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { createNativeTwoCycleWorkerOwnerStageV1, parseNativeTwoCycleWorkerOwnerStageV1,
-  createNativeTwoCycleParentOwnerStageV1, parseNativeTwoCycleParentOwnerStageV1 }
+  createNativeTwoCycleParentOwnerStageV1, parseNativeTwoCycleParentOwnerStageV1,
+  createNativeTwoCycleWorkerOwnerStageV2, parseNativeTwoCycleWorkerOwnerStageV2,
+  createNativeTwoCycleParentOwnerStageV2, parseNativeTwoCycleParentOwnerStageV2 }
   from './substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
 
 const bindings = { configSha256Hex: 'a'.repeat(64), expectedBridgeCommit: 'b'.repeat(40),
@@ -20,6 +22,8 @@ const bindings = { configSha256Hex: 'a'.repeat(64), expectedBridgeCommit: 'b'.re
 const terminalDigest = 'd'.repeat(64);
 const workerDomain = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_OWNER_STAGE_V1';
 const parentDomain = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PARENT_OWNER_STAGE_V1';
+const workerDomainV2 = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_OWNER_STAGE_V2';
+const parentDomainV2 = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PARENT_OWNER_STAGE_V2';
 const text = (value: unknown) => `${canonicalJson(value)}\n`;
 function fixture(stage: IsolatedErgoNodePostCallbackStageV1 = 'completion-check') {
   const failure = createNativeTwoCycleWorkerFailureDiagnosticV1(bindings,
@@ -219,5 +223,135 @@ describe('bounded native owner-stage diagnostic lineage', () => {
     expect(parseNativeTwoCycleParentOwnerStageV1(text(parent), bindings, terminalDigest,
       text(f.failure), text(f.root), text(f.cycleStep), text(changedWorker))).toEqual(parent);
     expect(() => parseParent(text(parent), f)).toThrow();
+  });
+});
+
+describe('bounded native owner completion reason V2 lineage', () => {
+  function completionFixture(reason: 'invalid-timing' | 'budget-exceeded' = 'budget-exceeded') {
+    const f = fixture();
+    const workerV2 = createNativeTwoCycleWorkerOwnerStageV2(bindings,
+      text(f.failure), text(f.root), text(f.cycleStep), text(f.worker), reason);
+    const parentV2 = createNativeTwoCycleParentOwnerStageV2(bindings, terminalDigest,
+      text(f.failure), text(f.root), text(f.cycleStep), text(f.worker),
+      text(workerV2), text(f.parent));
+    return { ...f, workerV2, parentV2 };
+  }
+  type CompletionFixture = ReturnType<typeof completionFixture>;
+  function parseWorkerV2(candidate: string, f: CompletionFixture) {
+    return parseNativeTwoCycleWorkerOwnerStageV2(candidate, bindings,
+      text(f.failure), text(f.root), text(f.cycleStep), text(f.worker));
+  }
+  function parseParentV2(candidate: string, f: CompletionFixture) {
+    return parseNativeTwoCycleParentOwnerStageV2(candidate, bindings, terminalDigest,
+      text(f.failure), text(f.root), text(f.cycleStep), text(f.worker),
+      text(f.workerV2), text(f.parent));
+  }
+
+  it.each(['invalid-timing', 'budget-exceeded'] as const)(
+    'roundtrips %s without changing V1 receipts or claiming completion', reason => {
+      const f = completionFixture(reason);
+      const v1 = fixture();
+      expect(text(f.worker)).toBe(text(v1.worker));
+      expect(text(f.parent)).toBe(text(v1.parent));
+      expect(parseWorkerV2(text(f.workerV2), f)).toEqual(f.workerV2);
+      expect(parseParentV2(text(f.parentV2), f)).toEqual(f.parentV2);
+      expect(f.workerV2).toMatchObject({ ownerStage: 'completion-check',
+        completionFailureReason: reason, workerOwnerStageReceiptDigestHex: f.worker.receiptDigestHex,
+        operationCompletionEstablished: false, rootCleanupEstablished: false,
+        rawCausePublished: false });
+      expect(f.parentV2).toMatchObject({
+        failureReceiptDigestHex: terminalDigest,
+        workerOwnerStageV2ReceiptDigestHex: f.workerV2.receiptDigestHex,
+        parentOwnerStageV1ReceiptDigestHex: f.parent.receiptDigestHex,
+        operationCompletionEstablished: false, rootCleanupEstablished: false,
+        rawCausePublished: false });
+      expect(text(f.workerV2) + text(f.parentV2)).not.toMatch(/private|cause|[A-Za-z]:[\\/]/u);
+    });
+
+  it.each(['unknown', null, { reason: 'budget-exceeded' }] as const)(
+    'rejects unsupported reason %j', reason => {
+      const f = completionFixture();
+      expect(() => createNativeTwoCycleWorkerOwnerStageV2(bindings,
+        text(f.failure), text(f.root), text(f.cycleStep), text(f.worker),
+        reason as never)).toThrow(/unsupported/u);
+      expect(() => parseWorkerV2(text(resign({ ...f.workerV2,
+        completionFailureReason: reason }, workerDomainV2)), f)).toThrow(/unsupported/u);
+    });
+
+  it.each(['mining-shutdown', 'ownership-recheck'] as const)(
+    'rejects V2 reason after a different valid owner stage %s', stage => {
+      const f = fixture(stage);
+      expect(() => createNativeTwoCycleWorkerOwnerStageV2(bindings,
+        text(f.failure), text(f.root), text(f.cycleStep), text(f.worker),
+        'budget-exceeded')).toThrow(/completion-check/u);
+    });
+
+  it.each(['workerFailureReceiptDigestHex', 'workerRootPhaseV2ReceiptDigestHex',
+    'workerCycleStepReceiptDigestHex', 'workerOwnerStageReceiptDigestHex',
+    'operationCompletionEstablished', 'rootCleanupEstablished', 'rawCausePublished',
+    'ownerStage', 'cycle', 'step', 'status', 'schema'] as const)(
+    'rejects independently changed worker V2 %s after rehash', field => {
+      const f = completionFixture();
+      expect(() => parseWorkerV2(text(resign({ ...f.workerV2,
+        [field]: replacement(field) }, workerDomainV2)), f)).toThrow();
+    });
+
+  it.each(['failureReceiptDigestHex', 'workerOwnerStageV2ReceiptDigestHex',
+    'parentOwnerStageV1ReceiptDigestHex', 'workerOwnerStageReceiptDigestHex',
+    'operationCompletionEstablished', 'rootCleanupEstablished', 'rawCausePublished',
+    'ownerStage', 'cycle', 'step', 'status', 'schema'] as const)(
+    'rejects independently changed parent V2 %s after rehash', field => {
+      const f = completionFixture();
+      expect(() => parseParentV2(text(resign({ ...f.parentV2,
+        [field]: replacement(field) }, parentDomainV2)), f)).toThrow();
+    });
+
+  it.each(['failure', 'root', 'cycleStep', 'worker'] as const)(
+    'rejects a changed %s ancestor', ancestor => {
+      const f = completionFixture();
+      const changed = text({ ...f[ancestor], receiptDigestHex: 'e'.repeat(64) });
+      expect(() => parseNativeTwoCycleWorkerOwnerStageV2(text(f.workerV2), bindings,
+        ancestor === 'failure' ? changed : text(f.failure),
+        ancestor === 'root' ? changed : text(f.root),
+        ancestor === 'cycleStep' ? changed : text(f.cycleStep),
+        ancestor === 'worker' ? changed : text(f.worker))).toThrow();
+    });
+
+  it('rejects foreign worker V2 and parent V1 ancestors, including a different terminal', () => {
+    const f = completionFixture();
+    const other = completionFixture('invalid-timing');
+    expect(() => parseNativeTwoCycleParentOwnerStageV2(text(f.parentV2), bindings,
+      terminalDigest, text(f.failure), text(f.root), text(f.cycleStep),
+      text(f.worker), text(other.workerV2), text(f.parent))).toThrow();
+    expect(() => parseNativeTwoCycleParentOwnerStageV2(text(f.parentV2), bindings,
+      'e'.repeat(64), text(f.failure), text(f.root), text(f.cycleStep),
+      text(f.worker), text(f.workerV2), text(f.parent))).toThrow();
+    expect(() => parseNativeTwoCycleParentOwnerStageV2(text(f.parentV2), bindings,
+      terminalDigest, text(f.failure), text(f.root), text(f.cycleStep),
+      text(f.worker), text(f.workerV2),
+      text({ ...f.parent, receiptDigestHex: 'e'.repeat(64) }))).toThrow();
+  });
+
+  it.each(['worker', 'parent'] as const)('rejects noncanonical or extra %s V2 fields', surface => {
+    const f = completionFixture();
+    const candidate = surface === 'worker' ? f.workerV2 : f.parentV2;
+    const parse = surface === 'worker' ? parseWorkerV2 : parseParentV2;
+    const domain = surface === 'worker' ? workerDomainV2 : parentDomainV2;
+    expect(() => parse(` ${text(candidate)}`, f)).toThrow();
+    expect(() => parse(text(resign({ ...candidate, privateCause: 'redacted' }, domain)), f)).toThrow();
+    expect(() => parse(text(candidate).replace('"version":2', '"version":2,"version":2'), f))
+      .toThrow();
+    expect(() => parse(text({ ...candidate, receiptDigestHex: 'e'.repeat(64) }), f)).toThrow();
+  });
+
+  it('labels coordinated reason rehashes as self-consistency, not authentication', () => {
+    const f = completionFixture();
+    const changed = resign({ ...f.workerV2,
+      completionFailureReason: 'invalid-timing' }, workerDomainV2);
+    const parsed = parseWorkerV2(text(changed), f);
+    expect(parsed.completionFailureReason).toBe('invalid-timing');
+    expect(() => parseNativeTwoCycleParentOwnerStageV2(text(f.parentV2), bindings,
+      terminalDigest, text(f.failure), text(f.root), text(f.cycleStep),
+      text(f.worker), text(changed), text(f.parent))).toThrow();
   });
 });

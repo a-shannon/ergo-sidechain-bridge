@@ -64,9 +64,11 @@ import { tagNativeGenesisSetupFailureStageV1 }
 import { parseNativeTwoCycleParentSetupStageV1 }
   from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { ISOLATED_ERGO_NODE_POST_CALLBACK_STAGES_V1,
+  tagIsolatedErgoNodeCompletionFailureReasonV1,
   tagIsolatedErgoNodePostCallbackStageV1 }
   from '../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
-import { parseNativeTwoCycleParentOwnerStageV1 }
+import { parseNativeTwoCycleParentOwnerStageV1,
+  parseNativeTwoCycleParentOwnerStageV2 }
   from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
 import {
   runSubstrateFederatedNativeTwoCycleFromArguments,
@@ -737,7 +739,7 @@ describe('native two-cycle parent and worker V1', () => {
   });
 
   it.each(['worker-root-phase.json', 'worker-root-phase-v2.json', 'worker-cycle-step.json',
-    'worker-setup-stage.json', 'worker-owner-stage.json'] as const)(
+    'worker-setup-stage.json', 'worker-owner-stage.json', 'worker-owner-stage-v2.json'] as const)(
     'rejects a worker root phase companion %s alongside a success transport', async artifact => {
     const fixture = commandFixture();
     const result = projectedResult();
@@ -963,6 +965,96 @@ describe('native two-cycle parent and worker V1', () => {
         ownerOperation: 'withMiningActiveExecutionTarget', operationCompletionEstablished: false,
         rootCleanupEstablished: false, rawCausePublished: false });
       expect(read('worker-owner-stage.json') + read('failure-owner-stage.json')).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'worker-owner-stage-v2.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'failure-owner-stage-v2.json'))).toBe(false);
+    });
+
+  it.each(['invalid-timing', 'budget-exceeded'] as const)(
+    'attests %s only through the exact owner completion failure lineage', async reason => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = tagIsolatedErgoNodeCompletionFailureReasonV1(
+        tagIsolatedErgoNodePostCallbackStageV1(new Error('private owner cause'),
+          'completion-check'), reason);
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'cycle-summary');
+      mocked.root.mockRejectedValueOnce(primary);
+      mocked.process.mockImplementationOnce(async input => {
+        await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+          input.args.slice(input.args.indexOf('--config')));
+        throw new Error('unexpected worker success');
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      const parent = parseNativeTwoCycleParentOwnerStageV2(
+        read('failure-owner-stage-v2.json'), failureBindings(fixture),
+        JSON.parse(read('failure.json')).receiptDigestHex,
+        read('worker-failure.json'), read('worker-root-phase-v2.json'),
+        read('worker-cycle-step.json'), read('worker-owner-stage.json'),
+        read('worker-owner-stage-v2.json'), read('failure-owner-stage.json'));
+      expect(parent).toMatchObject({ completionFailureReason: reason,
+        ownerStage: 'completion-check', operationCompletionEstablished: false,
+        rootCleanupEstablished: false, rawCausePublished: false });
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      expect(read('worker-owner-stage-v2.json') + read('failure-owner-stage-v2.json'))
+        .not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['occupied worker V2', 'tampered worker V2', 'occupied parent V2',
+    'tampered parent V1'] as const)(
+    'retains older failure receipts when completion reason has %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = tagIsolatedErgoNodeCompletionFailureReasonV1(
+        tagIsolatedErgoNodePostCallbackStageV1(new Error('private owner cause'),
+          'completion-check'), 'budget-exceeded');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'cycle-summary');
+      mocked.root.mockRejectedValueOnce(primary);
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker V2') {
+          writeFileSync(join(fixture.attemptPath, 'worker-owner-stage-v2.json'),
+            'retained worker V2 bytes');
+        }
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+            input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (error) {
+          expect(error).toBe(primary);
+          if (fault === 'tampered worker V2') {
+            const path = join(fixture.attemptPath, 'worker-owner-stage-v2.json');
+            const worker = JSON.parse(readFileSync(path, 'utf8'));
+            writeFileSync(path, `${canonicalJson({ ...worker,
+              receiptDigestHex: '9'.repeat(64) })}\n`);
+          }
+          if (fault === 'occupied parent V2') {
+            writeFileSync(join(fixture.attemptPath, 'failure-owner-stage-v2.json'),
+              'retained parent V2 bytes');
+          }
+          if (fault === 'tampered parent V1') {
+            const path = join(fixture.attemptPath, 'failure-owner-stage.json');
+            // The parent V1 file is emitted later, so occupy its create-only path.
+            writeFileSync(path, 'retained parent V1 bytes');
+          }
+          throw error;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      expect(existsSync(join(fixture.attemptPath, 'worker-owner-stage.json'))).toBe(true);
+      expect(existsSync(join(fixture.attemptPath, 'failure-cycle-step.json'))).toBe(true);
+      if (fault === 'occupied worker V2') {
+        expect(read('worker-owner-stage-v2.json')).toBe('retained worker V2 bytes');
+      }
+      if (fault === 'occupied parent V2') {
+        expect(read('failure-owner-stage-v2.json')).toBe('retained parent V2 bytes');
+      } else expect(existsSync(join(fixture.attemptPath, 'failure-owner-stage-v2.json'))).toBe(false);
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
     });
 
