@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
-  existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
+  existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
   rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 import { StateTracker } from './state-tracker.js';
@@ -48,8 +48,8 @@ function confirmedTrackerAttempt(
     confirmationHeight, confirmationHeaderIdHex });
 }
 
-function fixture(secondTransportDisposition: 'accepted' | 'ambiguous' = 'accepted') {
-  const root = mkdtempSync(join(tmpdir(), 'fed-sqlite-export-'));
+function fixture(secondTransportDisposition: 'accepted' | 'ambiguous' = 'accepted', tempParent = tmpdir()) {
+  const root = realpathSync.native(mkdtempSync(join(realpathSync.native(tempParent), 'fed-sqlite-export-')));
   const sourceRoot = join(root, 'source');
   mkdirSync(sourceRoot);
   const sourceDatabasePath = join(sourceRoot, 'state.sqlite');
@@ -70,14 +70,36 @@ function fixture(secondTransportDisposition: 'accepted' | 'ambiguous' = 'accepte
 async function withFixture(
   action: (f: ReturnType<typeof fixture>) => void | Promise<void>,
   secondTransportDisposition: 'accepted' | 'ambiguous' = 'accepted',
+  tempParent = tmpdir(),
 ) {
-  const f = fixture(secondTransportDisposition);
+  const f = fixture(secondTransportDisposition, tempParent);
   try { await action(f); } finally {
     rmSync(f.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 }
 
 describe('two-cycle SQLite evidence export', () => {
+  it('uses a canonical synthetic temp parent without accepting an aliased source', async () => {
+    const parent = mkdtempSync(join(realpathSync.native(tmpdir()), 'fed-sqlite-export-parent-'));
+    try {
+      const target = join(parent, 'target');
+      mkdirSync(target);
+      const alias = join(parent, 'alias');
+      symlinkSync(target, alias, 'junction');
+      await withFixture(async f => {
+        expect(realpathSync.native(f.root)).toBe(f.root);
+        const aliasedSource = join(alias, basename(f.root), 'source');
+        await expect(exportSubstrateFederatedTwoCycleSqliteEvidenceV1({ ...f.input,
+          sourceRoot: aliasedSource, sourceDatabasePath: join(aliasedSource, 'state.sqlite'),
+        })).rejects.toThrow(/alias/);
+        await expect(exportSubstrateFederatedTwoCycleSqliteEvidenceV1(f.input))
+          .resolves.toMatchObject({ fundsExecutionAuthorityRows: 0 });
+      }, 'accepted', alias);
+    } finally {
+      rmSync(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
   it('awaits a real backup and publishes only the validated database and manifest', async () => {
     await withFixture(async ({ input }) => {
       const manifest = await exportSubstrateFederatedTwoCycleSqliteEvidenceV1(input);

@@ -424,24 +424,46 @@ describe('standalone consensus-source build workflow', () => {
 
     const skippedEarlyCopyTest = validateStandaloneConsensusBuildWorkflow(
       workflowText.replace(
-        'src/substrate-federated-two-cycle-node-state-copy-v1.test.ts --reporter=dot',
-        'src/public-audit-alpha.test.ts --reporter=dot',
+        'src/substrate-federated-two-cycle-node-state-copy-v1.test.ts `',
+        'src/public-audit-alpha.test.ts `',
       ),
       sourceLock,
     );
     expect(skippedEarlyCopyTest.errors).toContain(
-      'Check stopped-node copy paths before long audit gate: run command must match the reviewed command graph',
+      'Check stopped-node recovery fixtures before long audit gate: run command must match the reviewed command graph',
+    );
+
+    const skippedEarlyCaptureTest = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        'src/substrate-federated-two-cycle-recovery-capture-v1.test.ts `',
+        'src/public-audit-alpha.test.ts `',
+      ),
+      sourceLock,
+    );
+    expect(skippedEarlyCaptureTest.errors).toContain(
+      'Check stopped-node recovery fixtures before long audit gate: run command must match the reviewed command graph',
+    );
+
+    const skippedEarlyExportTest = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        'src/substrate-federated-two-cycle-recovery-export-v1.test.ts --reporter=dot',
+        'src/public-audit-alpha.test.ts --reporter=dot',
+      ),
+      sourceLock,
+    );
+    expect(skippedEarlyExportTest.errors).toContain(
+      'Check stopped-node recovery fixtures before long audit gate: run command must match the reviewed command graph',
     );
 
     const ignoredEarlyCopyFailure = validateStandaloneConsensusBuildWorkflow(
       workflowText.replace(
-        '      - name: Check stopped-node copy paths before long audit gate\n        run: |',
-        '      - name: Check stopped-node copy paths before long audit gate\n        continue-on-error: true\n        run: |',
+        '      - name: Check stopped-node recovery fixtures before long audit gate\n        run: |',
+        '      - name: Check stopped-node recovery fixtures before long audit gate\n        continue-on-error: true\n        run: |',
       ),
       sourceLock,
     );
     expect(ignoredEarlyCopyFailure.errors).toContain(
-      'Check stopped-node copy paths before long audit gate: run step may contain only the reviewed keys',
+      'Check stopped-node recovery fixtures before long audit gate: run step may contain only the reviewed keys',
     );
 
     const driftedIsolation = validateStandaloneConsensusBuildWorkflow(

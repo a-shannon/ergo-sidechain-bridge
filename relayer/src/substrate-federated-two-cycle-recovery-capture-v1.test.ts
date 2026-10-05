@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
@@ -46,9 +46,10 @@ function confirmed(tracker: StateTracker, offset: number, disposition: 'accepted
     confirmationHeight, confirmationHeaderIdHex };
 }
 
-function fixture() {
+function fixture(tempParent = tmpdir()) {
   // Test-owned synthetic files only; no node or historical runtime is read.
-  const root = mkdtempSync(join(tmpdir(), 'bridge-recovery-capture-synthetic-'));
+  const root = realpathSync.native(mkdtempSync(join(realpathSync.native(tempParent),
+    'bridge-recovery-capture-synthetic-')));
   const targetDirectory = join(root, 'builder');
   const journalDirectory = join(targetDirectory, 'issuance-journal');
   mkdirSync(targetDirectory);
@@ -119,8 +120,8 @@ function fixture() {
   return { root, roots, input, events, receipt, partial };
 }
 
-async function withFixture(action: (f: ReturnType<typeof fixture>) => Promise<void>) {
-  const f = fixture();
+async function withFixture(action: (f: ReturnType<typeof fixture>) => Promise<void>, tempParent = tmpdir()) {
+  const f = fixture(tempParent);
   try { await action(f); } finally {
     try { f.input.tracker.close(); } finally {
       rmSync(f.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
@@ -136,6 +137,27 @@ function unpublished(f: ReturnType<typeof fixture>) {
 }
 
 describe('stopped two-cycle recovery capture composer', () => {
+  it('uses a canonical synthetic temp parent without accepting an aliased target', async () => {
+    const parent = mkdtempSync(join(realpathSync.native(tmpdir()), 'bridge-recovery-capture-parent-'));
+    try {
+      const target = join(parent, 'target');
+      mkdirSync(target);
+      const alias = join(parent, 'alias');
+      symlinkSync(target, alias, 'junction');
+      await withFixture(async f => {
+        expect(realpathSync.native(f.root)).toBe(f.root);
+        await expect(capture({ ...f.input,
+          targetDirectory: join(alias, basename(f.root), 'builder'),
+        })).rejects.toThrow(/alias/);
+        await expect(capture(f.input)).resolves.toMatchObject({
+          manifest: { nodeConsistencyEstablished: false, freshRestartValidated: false },
+        });
+      }, alias);
+    } finally {
+      rmSync(parent, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
   it('captures the root layout with a journal inside the builder and publishes aggregate manifest last', async () => {
     await withFixture(async f => {
       vi.mocked(writeFileSync).mockClear();

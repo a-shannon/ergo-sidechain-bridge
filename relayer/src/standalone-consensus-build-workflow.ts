@@ -85,7 +85,7 @@ const EXPECTED_AUDIT_STEP_NAMES = [
   'Fetch locked WASM AVL dependencies',
   'Install wasm-pack 0.14.0',
   'Install relayer dependencies',
-  'Check stopped-node copy paths before long audit gate',
+  'Check stopped-node recovery fixtures before long audit gate',
   'Setup compiler Node.js',
   'Capture compiler Node.js',
   'Run public-audit candidate gate',
@@ -383,11 +383,13 @@ export function validateStandaloneConsensusBuildWorkflow(
   requireRunStep(
     errors,
     concreteAuditSteps,
-    'Check stopped-node copy paths before long audit gate',
+    'Check stopped-node recovery fixtures before long audit gate',
     [
       '$env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"',
       '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
-      '  src/substrate-federated-two-cycle-node-state-copy-v1.test.ts --reporter=dot',
+      '  src/substrate-federated-two-cycle-node-state-copy-v1.test.ts `',
+      '  src/substrate-federated-two-cycle-recovery-capture-v1.test.ts `',
+      '  src/substrate-federated-two-cycle-recovery-export-v1.test.ts --reporter=dot',
       'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
     ].join('\n'),
   );
