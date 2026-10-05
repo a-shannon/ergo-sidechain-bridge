@@ -31,6 +31,8 @@ import {
   projectSubstrateFederatedNativeTwoCycleResultV1,
   validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
+import { createNativeTwoCycleWorkerRecoveryLocatorV1 }
+  from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
 import {
   assertSubstrateFederatedNativeWasmAvlPackageMatchesV1,
   type SubstrateFederatedNativeWasmAvlPackageIdentityV1,
@@ -166,6 +168,22 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       result,
     });
     stage = 'transport-publication';
+    const recoveryLocator = createNativeTwoCycleWorkerRecoveryLocatorV1(
+      rootResult.recoveryEvidence,
+      {
+        configSha256Hex: invocation.configSha256Hex,
+        bridgeCommit: after.repository.commit,
+        bridgeTree: after.repository.tree,
+        pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+        toolIdentityDigestHex: after.toolIdentityDigestHex,
+        rootResultDigestHex: result.rootResultDigestHex,
+      },
+    );
+    writeNewFile(
+      join(invocation.attemptPath, 'worker-recovery-locator-v1.json'),
+      Buffer.from(`${canonicalJson(recoveryLocator)}\n`, 'utf8'),
+      'native two-cycle worker recovery locator',
+    );
     writeNewFile(
       join(invocation.attemptPath, 'worker-result.json'),
       Buffer.from(`${canonicalJson(transport)}\n`, 'utf8'),

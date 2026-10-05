@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -70,6 +71,9 @@ import { ISOLATED_ERGO_NODE_POST_CALLBACK_STAGES_V1,
 import { parseNativeTwoCycleParentOwnerStageV1,
   parseNativeTwoCycleParentOwnerStageV2 }
   from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
+import { createNativeTwoCycleWorkerRecoveryLocatorV1,
+  parseNativeTwoCycleParentRecoveryLocatorV1 }
+  from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
 import {
   runSubstrateFederatedNativeTwoCycleFromArguments,
 } from './run-substrate-federated-native-two-cycle-v1.js';
@@ -183,6 +187,28 @@ describe('native two-cycle parent and worker V1', () => {
 
     expect(published.status).toBe('two_cycle_terminal_receipt_published');
     expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(true);
+    const terminal = JSON.parse(readFileSync(join(fixture.attemptPath, 'result.json'), 'utf8'));
+    const workerRecoveryText = readFileSync(
+      join(fixture.attemptPath, 'worker-recovery-locator-v1.json'), 'utf8');
+    const parentRecovery = parseNativeTwoCycleParentRecoveryLocatorV1(
+      readFileSync(join(fixture.attemptPath, 'recovery-locator-v1.json'), 'utf8'),
+      { configSha256Hex: fixture.loaded.configSha256Hex,
+        bridgeCommit: environment().repository.commit,
+        bridgeTree: environment().repository.tree,
+        pathIdentityDigestHex: fixture.loaded.pathIdentityDigestHex,
+        toolIdentityDigestHex: environment().toolIdentityDigestHex,
+        rootResultDigestHex: result.rootResultDigestHex },
+      terminal.receiptDigestHex, workerRecoveryText,
+    );
+    expect(parentRecovery.locator).toMatchObject({
+      buildDirectoryName: 'bridge-fed-genesis-ABC123',
+      directoryName: 'two-cycle-recovery-ABC123',
+    });
+    expect(Object.keys(terminal).sort()).toEqual([
+      'schema', 'version', 'status', 'configSha256Hex', 'bridgeCommit',
+      'bridgeTree', 'pathIdentityDigestHex', 'toolIdentityDigestHex', 'result',
+      'checks', 'boundaries', 'receiptDigestHex',
+    ].sort());
     expect(existsSync(join(fixture.attemptPath, 'wasm-avl-package.json'))).toBe(true);
     expect(existsSync(join(fixture.attemptPath, 'worker-wasm-avl-package.json'))).toBe(true);
     expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(false);
@@ -226,6 +252,44 @@ describe('native two-cycle parent and worker V1', () => {
     ])).rejects.toThrow();
     expect(mocked.process).not.toHaveBeenCalled();
   });
+
+  it.each(['missing worker locator', 'tampered worker locator',
+    'missing capture manifest', 'changed capture manifest', 'occupied parent locator'] as const)(
+    'withholds terminal success for %s', async fault => {
+      const fixture = commandFixture();
+      const result = projectedResult();
+      configureParent(fixture, result);
+      mocked.process.mockImplementationOnce(async input => {
+        writeWorkerTransport(fixture, result);
+        const workerPath = join(fixture.attemptPath, 'worker-recovery-locator-v1.json');
+        if (fault === 'missing worker locator') rmSync(workerPath);
+        if (fault === 'tampered worker locator') {
+          writeFileSync(workerPath, readFileSync(workerPath, 'utf8').replace(
+            'bridge-fed-genesis-ABC123', 'bridge-fed-genesis-ABC124'));
+        }
+        if (fault === 'missing capture manifest' || fault === 'changed capture manifest') {
+          const manifestPath = join(fixture.loaded.config.frontierBuildParentDirectory,
+            'bridge-fed-genesis-ABC123', 'target', 'two-cycle-recovery-ABC123',
+            'manifest.json');
+          if (fault === 'missing capture manifest') rmSync(manifestPath);
+          else writeFileSync(manifestPath, 'changed manifest bytes\n');
+        }
+        if (fault === 'occupied parent locator') {
+          writeFileSync(join(fixture.attemptPath, 'recovery-locator-v1.json'),
+            'retained parent locator bytes');
+        }
+        return cleanProcessResult(input);
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toThrow();
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(true);
+      if (fault === 'occupied parent locator') {
+        expect(readFileSync(join(fixture.attemptPath, 'recovery-locator-v1.json'), 'utf8'))
+          .toBe('retained parent locator bytes');
+      }
+    });
 
   it.each([
     'missing compiler dependency root',
@@ -772,6 +836,7 @@ describe('native two-cycle parent and worker V1', () => {
 
   it('worker rechecks before and after one root call, then writes one transport', async () => {
     const fixture = workerFixture();
+    const recoveryEvidence = writeRecoveryManifestFixture(fixture);
     const order: string[] = [];
     mocked.load.mockReturnValue(fixture.loaded);
     mocked.environment.mockImplementation(async () => {
@@ -781,11 +846,11 @@ describe('native two-cycle parent and worker V1', () => {
     mocked.root.mockImplementation(async () => {
       order.push('root');
       order.push('cleanup-complete');
-      return { root: 'result' };
+      return { root: 'result', recoveryEvidence };
     });
     mocked.project.mockImplementation(value => {
       order.push('project');
-      expect(value).toEqual({ root: 'result' });
+      expect(value).toEqual({ root: 'result', recoveryEvidence });
       return projectedResult();
     });
 
@@ -802,6 +867,7 @@ describe('native two-cycle parent and worker V1', () => {
       'validate', 'root', 'cleanup-complete', 'project', 'validate',
     ]);
     expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(true);
+    expect(existsSync(join(fixture.attemptPath, 'worker-recovery-locator-v1.json'))).toBe(true);
     expect(existsSync(join(fixture.attemptPath, 'worker-failure.json'))).toBe(false);
   });
 
@@ -1226,9 +1292,10 @@ describe('native two-cycle parent and worker V1', () => {
 
   it('worker records transport publication failure without claiming cleanup', async () => {
     const fixture = workerFixture();
+    const recoveryEvidence = writeRecoveryManifestFixture(fixture);
     mocked.load.mockReturnValue(fixture.loaded);
     mocked.environment.mockResolvedValue(environment());
-    mocked.root.mockResolvedValue({ root: 'result' });
+    mocked.root.mockResolvedValue({ root: 'result', recoveryEvidence });
     mocked.project.mockReturnValue(projectedResult());
     mkdirSync(join(fixture.attemptPath, 'worker-result.json'));
     await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
@@ -1241,6 +1308,32 @@ describe('native two-cycle parent and worker V1', () => {
     expect(diagnostic.stage).toBe('transport-publication');
     expect(diagnostic.rootCleanupEstablished).toBe(false);
   });
+
+  it.each(['missing root recovery pointer', 'occupied worker recovery locator'] as const)(
+    'worker withholds success for %s', async fault => {
+      const fixture = workerFixture();
+      const recoveryEvidence = writeRecoveryManifestFixture(fixture);
+      mocked.load.mockReturnValue(fixture.loaded);
+      mocked.environment.mockResolvedValue(environment());
+      mocked.root.mockResolvedValue(fault === 'missing root recovery pointer'
+        ? { root: 'result' } : { root: 'result', recoveryEvidence });
+      mocked.project.mockReturnValue(projectedResult());
+      const workerPath = join(fixture.attemptPath, 'worker-recovery-locator-v1.json');
+      if (fault === 'occupied worker recovery locator') {
+        writeFileSync(workerPath, 'retained worker locator bytes');
+      }
+      await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+        '--config', fixture.configPath,
+        '--expected-config-sha256', fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+        '--attempt', fixture.attemptPath,
+      ])).rejects.toThrow();
+      expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'worker-failure.json'))).toBe(true);
+      if (fault === 'occupied worker recovery locator') {
+        expect(readFileSync(workerPath, 'utf8')).toBe('retained worker locator bytes');
+      }
+    });
 
   it('worker preserves the primary failure and existing diagnostic bytes on a write collision', async () => {
     const fixture = workerFixture();
@@ -1457,6 +1550,7 @@ function loadedInvocation(
       profile: 'synthetic-loopback-two-cycle',
       expectedBridgeCommit: '1'.repeat(40),
       bridgeRoot,
+      frontierBuildParentDirectory: join(outputParentDirectory, 'frontier-builds'),
       ergoSourcePath,
       ergoJavaExecutablePath: join(outputParentDirectory, 'jdk', 'bin', 'java.exe'),
       frontierCargoHomeDirectory: join(outputParentDirectory, 'cargo-home'),
@@ -1622,6 +1716,17 @@ function writeWorkerTransport(
     toolIdentityDigestHex: environment().toolIdentityDigestHex,
     result,
   };
+  const locator = writeRecoveryManifestFixture(fixture);
+  const workerRecovery = createNativeTwoCycleWorkerRecoveryLocatorV1(locator, {
+    configSha256Hex: fixture.loaded.configSha256Hex,
+    bridgeCommit: environment().repository.commit,
+    bridgeTree: environment().repository.tree,
+    pathIdentityDigestHex: fixture.loaded.pathIdentityDigestHex,
+    toolIdentityDigestHex: environment().toolIdentityDigestHex,
+    rootResultDigestHex: result.rootResultDigestHex,
+  });
+  writeFileSync(join(fixture.attemptPath, 'worker-recovery-locator-v1.json'),
+    `${canonicalJson(workerRecovery)}\n`, 'utf8');
   writeFileSync(
     join(fixture.attemptPath, 'worker-result.json'),
     `${canonicalJson(transport)}\n`,
@@ -1645,6 +1750,19 @@ function writeWorkerTransport(
     })}\n`,
     'utf8',
   );
+}
+
+function writeRecoveryManifestFixture(fixture: ReturnType<typeof commandFixture>
+  | ReturnType<typeof workerFixture>) {
+  const buildDirectoryName = 'bridge-fed-genesis-ABC123';
+  const directoryName = 'two-cycle-recovery-ABC123';
+  const directory = join(fixture.loaded.config.frontierBuildParentDirectory,
+    buildDirectoryName, 'target', directoryName);
+  mkdirSync(directory, { recursive: true });
+  const bytes = Buffer.from('{"schema":"synthetic-recovery-manifest"}\n', 'utf8');
+  writeFileSync(join(directory, 'manifest.json'), bytes);
+  return Object.freeze({ buildDirectoryName, directoryName,
+    manifestSha256Hex: createHash('sha256').update(bytes).digest('hex') });
 }
 
 function wasmPackageIdentity() {

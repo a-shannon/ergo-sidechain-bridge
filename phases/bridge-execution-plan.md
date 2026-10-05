@@ -43,24 +43,26 @@ checkpoint at `96a4d4615de06c15afb240bb961cd4ac77ce391e` passed all three
 jobs in exact [run 37184578524](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37184578524).
 
 **Next:** The bounded owner timing-reason discriminator is published at
-`86b37133258b2e9399798a6a53ca60b7b6f4e8f6`. At the 2026-10-05 11:00 UTC
-check, two jobs passed and the public-audit candidate gate remained in progress
-in exact [run 37287762654](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37287762654).
+`86b37133258b2e9399798a6a53ca60b7b6f4e8f6`. All three jobs passed in
+exact [run 37287762654](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37287762654).
 The discriminator cannot assign C43's historical branch. Do not increase the
 time budget or narrow its scope without deciding evidence.
 
-The current local source checkpoint joins the retained owners' stopped-data
-windows, bounded allowlisted node database copies and two exact tracker
-admissions in a SQLite backup. The frozen V1 terminal projector accepts only
-the new private recovery locator and two tracker digests, then strips them
-before its unchanged V1 validation and digest. Focused root, projector,
-architecture and TypeScript checks pass; independent correction review found
-no remaining P0-P2 issue in this source scope. The worker still needs a
-separately versioned companion to carry the locator to its parent before a
-fresh campaign can yield an operator-findable recovery artifact. Close that
-consumer, then the due guarded publication and exact-head CI, before separate
-fresh source, build/output, custody and fee admission. Neither C42 nor C43 is
-execution authority.
+Local commit `1290bba258024003bfbf9a7605ca31214dad2e18` joins the retained
+owners' stopped-data windows, bounded allowlisted node database copies and two
+exact tracker admissions in a SQLite backup. Its frozen V1 projector strips
+the private recovery pointer and two tracker digests before unchanged V1
+validation and digest. Focused source checks and independent correction review
+passed. The worker/parent companion in the current candidate carries the bounded pointer
+through separate versioned receipts, checks the located manifest's file
+identity and SHA-256, and writes its parent locator before the unchanged
+`result.json` success marker. The focused schema, composed worker/parent,
+architecture and TypeScript checks pass. The layered import check, the full
+614-file bounded relayer suite and independent exact-byte review pass; no
+actionable P0–P2 finding remains in this source scope. Apply guarded
+publication and require
+CI on the exact new head before separate fresh source, build/output, custody
+and fee admission. Neither C42 nor C43 is execution authority.
 
 The capture manifests leave node consistency and fresh restart unvalidated.
 Only a separately admitted successful fresh two-cycle run can establish the
@@ -1250,7 +1252,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Source-derived capture -> worker/parent recovery locator | Carry the bounded locator in a separate versioned companion without changing V1 terminal fields or domains; then close due validation, guard, promote and verify exact-head CI | Owner/copy/SQLite/root and V1 projection source checks pass, but the current worker discards the locator. The source checkpoint does not establish node consistency, restart or C43's historical cause. |
+| **Now** | Worker/parent recovery locator -> publishable source checkpoint | Guard and promote the exact reviewed candidate, then verify its exact-head CI | Focused schema, worker/parent, architecture and TypeScript checks, layered imports, the 614-file bounded relayer suite and independent review pass locally. The capture still needs actual stopped-node inventory, fresh restart and a successful separately admitted two-cycle run; C43's historical cause remains unknown. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |

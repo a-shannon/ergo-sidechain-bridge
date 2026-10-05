@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   lstatSync,
@@ -49,6 +50,10 @@ import {
   type SubstrateFederatedNativeTwoCycleEnvironmentV1,
   type SubstrateFederatedNativeTwoCycleResultV1,
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
+import { createNativeTwoCycleParentRecoveryLocatorV1,
+  parseNativeTwoCycleWorkerRecoveryLocatorV1,
+  type RecoveryLocatorPointerV1 }
+  from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
 import {
   buildWasmAvlPackageV2,
   type WasmAvlBuildIdentityV2,
@@ -252,6 +257,25 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
     ) {
       throw new Error('native two-cycle worker transport identities differ');
     }
+    const recoveryBindings = Object.freeze({
+      configSha256Hex: captured.configSha256Hex,
+      bridgeCommit: environmentAfter.repository.commit,
+      bridgeTree: environmentAfter.repository.tree,
+      pathIdentityDigestHex: captured.pathIdentityDigestHex,
+      toolIdentityDigestHex: environmentAfter.toolIdentityDigestHex,
+      rootResultDigestHex: transport.result.rootResultDigestHex,
+    });
+    const workerRecoveryBytes = readBoundedRegularFile(
+      join(attemptPath, 'worker-recovery-locator-v1.json'),
+      'native two-cycle worker recovery locator', 16 * 1024,
+    ).bytes;
+    const workerRecoveryText = new TextDecoder('utf-8', { fatal: true }).decode(workerRecoveryBytes);
+    const workerRecovery = parseNativeTwoCycleWorkerRecoveryLocatorV1(
+      workerRecoveryText, recoveryBindings,
+    );
+    assertNativeTwoCycleRecoveryManifestV1(
+      captured.config.frontierBuildParentDirectory, workerRecovery.locator,
+    );
     const terminalBody = Object.freeze({
       schema: TERMINAL_SCHEMA,
       version: 1 as const,
@@ -285,6 +309,14 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
         TERMINAL_DIGEST_DOMAIN,
       ),
     });
+    const parentRecovery = createNativeTwoCycleParentRecoveryLocatorV1(
+      workerRecoveryText, recoveryBindings, terminal.receiptDigestHex,
+    );
+    writeNewFile(
+      join(attemptPath, 'recovery-locator-v1.json'),
+      Buffer.from(`${canonicalJson(parentRecovery)}\n`, 'utf8'),
+      'native two-cycle parent recovery locator',
+    );
     terminalPublicationStarted = true;
     writeNewFile(
       resultPath,
@@ -505,6 +537,46 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
     }
     throw primaryFailure;
   }
+}
+
+function assertNativeTwoCycleRecoveryManifestV1(
+  buildParentDirectory: string,
+  locator: Readonly<RecoveryLocatorPointerV1>,
+): void {
+  const directoryParts = [
+    [] as string[],
+    [locator.buildDirectoryName],
+    [locator.buildDirectoryName, 'target'],
+    [locator.buildDirectoryName, 'target', locator.directoryName],
+  ];
+  const canonicalParent = realpathSync(buildParentDirectory);
+  const directories = directoryParts.map(parts => join(canonicalParent, ...parts));
+  const before = directories.map((path, index) => {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || canonicalPathIdentity(realpathSync(path))
+        !== canonicalPathIdentity(join(canonicalParent, ...directoryParts[index]!))) {
+      throw new Error('native two-cycle recovery directory identity is invalid');
+    }
+    return stat;
+  });
+  const manifest = readBoundedRegularFile(
+    join(directories[3]!, 'manifest.json'),
+    'native two-cycle recovery manifest', 64 * 1024,
+  );
+  if (createHash('sha256').update(manifest.bytes).digest('hex')
+    !== locator.manifestSha256Hex) {
+    throw new Error('native two-cycle recovery manifest digest differs');
+  }
+  directories.forEach((path, index) => {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || stat.dev !== before[index]!.dev || stat.ino !== before[index]!.ino
+      || canonicalPathIdentity(realpathSync(path))
+        !== canonicalPathIdentity(join(canonicalParent, ...directoryParts[index]!))) {
+      throw new Error('native two-cycle recovery directory changed during verification');
+    }
+  });
 }
 
 function readWorkerTransport(

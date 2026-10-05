@@ -180,12 +180,14 @@ Only the parent's terminal artifact determines the invocation outcome:
 
 | Artifact | Meaning |
 |---|---|
-| `result.json` | Both cycles completed, the worker exited successfully, cleanup finished and the final identity checks passed. |
+| `result.json` | Both cycles completed, the worker exited successfully, cleanup finished, the recovery manifest was located and hash-checked, and the final identity checks passed. It remains the final success marker. |
 | `failure.json` | The invocation failed. Read its bounded failure classification and preserve the attempt. A containment timeout does not establish clean root cleanup. |
 | `start.json` without a terminal artifact | The attempt is incomplete or ambiguous. It is not safe to resume or retry it. |
 | Attempt directory without a valid `start.json` | Preparation failed before worker launch. The occupied attempt remains consumed and must not be reused. |
 | `worker-start.json` | The worker entry is consumed, including when its environment check fails. It cannot be called again for this attempt. |
 | `worker-result.json` | Internal transport from the worker; it is not the parent's completion result. |
+| `worker-recovery-locator-v1.json` | Create-only worker success companion binding the relative builder/capture names and manifest hash to the invocation and unchanged V1 root-result digest. It is not a terminal result. |
+| `recovery-locator-v1.json` | Parent success companion binding the validated worker locator to the terminal digest. Combine its generated names with the captured invocation's Frontier build parent to find the private manifest; the parent checks its file identity and SHA-256 before writing `result.json`. The locator does not prove database consistency or restart. |
 | `worker-failure.json` | Optional bounded diagnostic written after the worker claim. It identifies the last execution stage and, when available, an existing allowlisted source failure phase. It is not a terminal result or cleanup evidence. |
 | `failure-diagnostic.json` | Optional parent sidecar published only after `failure.json`, binding that receipt to a validated worker diagnostic with matching config, commit and path identities. It grants no execution or retry authority. |
 | `worker-root-phase.json` | Optional root-only phase signal from a failed worker. It names a primary phase when known and counts bounded cleanup `Error` values. It carries no cause, path or cleanup claim. |
@@ -196,6 +198,8 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `failure-cycle-step.json` | Optional parent sidecar linking that operation to the exact terminal failure and worker ancestry. |
 | `worker-setup-stage.json` | Optional native setup operation label, available only for `cycle-1/setup-check` with valid worker failure, V2 root phase and cycle-step ancestry. |
 | `failure-setup-stage.json` | Optional parent sidecar binding the setup label and every worker ancestor to the same terminal failure, config, commit and path identities. |
+| `worker-owner-stage.json` / `failure-owner-stage.json` | Optional worker/parent failure pair identifying an allowlisted post-callback owner stage with exact terminal ancestry. |
+| `worker-owner-stage-v2.json` / `failure-owner-stage-v2.json` | Optional worker/parent failure pair adding `invalid-timing` or `budget-exceeded` only at the exact owner completion check. It cannot classify a historical attempt. |
 
 The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
 `post-root-identity` and `transport-publication`. A root exception and a cleanup
@@ -232,9 +236,9 @@ unchanged. These optional files grant no signing, submission or retry authority.
 
 The diagnostics use separate schemas and digest domains; the existing terminal
 failure format and digest are unchanged. Missing, invalid or unwritable
-diagnostics leave the original failure and consumed attempt intact. A worker
-failure or root-phase file, including either V2 root sidecar, accompanying an
-otherwise successful worker result blocks terminal success. A digest detects
+diagnostics leave the original failure and consumed attempt intact. Any worker
+failure companion accompanying an otherwise successful worker result blocks
+terminal success. A digest detects
 changed bytes under the declared same-user host assumption; it is not
 authentication or independent attestation.
 
