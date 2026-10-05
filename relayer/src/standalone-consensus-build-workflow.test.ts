@@ -422,6 +422,61 @@ describe('standalone consensus-source build workflow', () => {
       'Run public-audit candidate gate: run command must match the reviewed command graph',
     );
 
+    const skippedEarlyWasmBuild = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+        '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run build',
+      ),
+      sourceLock,
+    );
+    expect(skippedEarlyWasmBuild.errors).toContain(
+      'Check stopped-node recovery fixtures before long audit gate: run command must match the reviewed command graph',
+    );
+
+    const ignoredEarlyWasmFailure = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        [
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+          '          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
+        ].join('\n'),
+        [
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
+        ].join('\n'),
+      ),
+      sourceLock,
+    );
+    expect(ignoredEarlyWasmFailure.errors).toContain(
+      'Check stopped-node recovery fixtures before long audit gate: run command must match the reviewed command graph',
+    );
+
+    const movedEarlyWasmBuild = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        [
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+          '          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
+        ].join('\n'),
+        '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
+      ).replace(
+        [
+          '          src/substrate-federated-two-cycle-recovery-export-v1.test.ts --reporter=dot',
+          '          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+        ].join('\n'),
+        [
+          '          src/substrate-federated-two-cycle-recovery-export-v1.test.ts --reporter=dot',
+          '          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+          '          & $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+          '          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+        ].join('\n'),
+      ),
+      sourceLock,
+    );
+    expect(movedEarlyWasmBuild.errors).toContain(
+      'Check stopped-node recovery fixtures before long audit gate: run command must match the reviewed command graph',
+    );
+
     const skippedEarlyCopyTest = validateStandaloneConsensusBuildWorkflow(
       workflowText.replace(
         'src/substrate-federated-two-cycle-node-state-copy-v1.test.ts `',

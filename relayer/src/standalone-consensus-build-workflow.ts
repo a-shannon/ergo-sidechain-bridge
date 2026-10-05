@@ -386,6 +386,8 @@ export function validateStandaloneConsensusBuildWorkflow(
     'Check stopped-node recovery fixtures before long audit gate',
     [
       '$env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"',
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
       '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
       '  src/substrate-federated-two-cycle-node-state-copy-v1.test.ts `',
       '  src/substrate-federated-two-cycle-recovery-capture-v1.test.ts `',
