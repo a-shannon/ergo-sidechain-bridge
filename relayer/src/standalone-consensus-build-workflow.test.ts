@@ -422,6 +422,28 @@ describe('standalone consensus-source build workflow', () => {
       'Run public-audit candidate gate: run command must match the reviewed command graph',
     );
 
+    const skippedEarlyCopyTest = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        'src/substrate-federated-two-cycle-node-state-copy-v1.test.ts --reporter=dot',
+        'src/public-audit-alpha.test.ts --reporter=dot',
+      ),
+      sourceLock,
+    );
+    expect(skippedEarlyCopyTest.errors).toContain(
+      'Check stopped-node copy paths before long audit gate: run command must match the reviewed command graph',
+    );
+
+    const ignoredEarlyCopyFailure = validateStandaloneConsensusBuildWorkflow(
+      workflowText.replace(
+        '      - name: Check stopped-node copy paths before long audit gate\n        run: |',
+        '      - name: Check stopped-node copy paths before long audit gate\n        continue-on-error: true\n        run: |',
+      ),
+      sourceLock,
+    );
+    expect(ignoredEarlyCopyFailure.errors).toContain(
+      'Check stopped-node copy paths before long audit gate: run step may contain only the reviewed keys',
+    );
+
     const driftedIsolation = validateStandaloneConsensusBuildWorkflow(
       workflowText.replace(
         "throw 'hosted audit npm package is empty'",

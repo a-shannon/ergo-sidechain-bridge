@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
-  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
+  existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync,
   renameSync, rmSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   copySubstrateFederatedTwoCycleNodeStateV1 as copy,
@@ -25,8 +25,9 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) rmSync(fixture, { recursive: true, force: true });
 });
 
-function fixture(kind: 'frontier' | 'ergo' = 'frontier') {
-  const root = mkdtempSync(join(tmpdir(), 'bridge-node-copy-synthetic-'));
+function fixture(kind: 'frontier' | 'ergo' = 'frontier', tempParent = tmpdir()) {
+  const root = realpathSync.native(mkdtempSync(join(realpathSync.native(tempParent),
+    'bridge-node-copy-synthetic-')));
   fixtures.push(root);
   const paths = kind === 'frontier' ? frontier : ergo;
   const primaryRoot = join(root, 'primary');
@@ -52,6 +53,26 @@ function fixture(kind: 'frontier' | 'ergo' = 'frontier') {
 }
 
 describe('bounded key-free stopped-node database copy', () => {
+  it('uses a canonical synthetic temp parent without accepting aliased node roots', async () => {
+    const parent = mkdtempSync(join(realpathSync.native(tmpdir()), 'bridge-node-copy-parent-'));
+    fixtures.push(parent);
+    const target = join(parent, 'target');
+    mkdirSync(target);
+    const alias = join(parent, 'alias');
+    symlinkSync(target, alias, 'junction');
+
+    const f = fixture('ergo', alias);
+    expect(realpathSync.native(f.root)).toBe(f.root);
+    await expect(copy(f.input)).resolves.toMatchObject({ kind: 'ergo' });
+    expect(f.guardCalls()).toBe(2);
+
+    const aliasedPrimary = join(alias, basename(f.root), 'primary');
+    await expect(copy({ ...f.input, primaryRoot: aliasedPrimary,
+      destinationDirectory: join(parent, 'second-copy') })).rejects.toThrow(/alias/);
+    expect(f.guardCalls()).toBe(2);
+    expect(existsSync(join(parent, 'second-copy'))).toBe(false);
+  });
+
   it.each(['frontier', 'ergo'] as const)('copies only %s database allowlists with relative hashes', async kind => {
     const f = fixture(kind);
     const manifest = await copy(f.input);
