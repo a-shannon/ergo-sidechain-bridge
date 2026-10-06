@@ -92,6 +92,30 @@ const it = Object.assign(isolatedDevnetLaunchIt, vitestIt, {
   each: isolatedDevnetLaunchItEach,
 }) as typeof vitestIt;
 
+const SOURCE_LOCK_METADATA_MODULE = './substrate-federated-native-source-lock-failure-v1.js';
+
+function assertSourceLockMetadataImport(source: string): void {
+  const parsed = ts.createSourceFile('setup-check-execution.ts', source,
+    ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const imports = parsed.statements.filter(ts.isImportDeclaration).filter(statement =>
+    ts.isStringLiteral(statement.moduleSpecifier)
+      && statement.moduleSpecifier.text === SOURCE_LOCK_METADATA_MODULE);
+  expect(imports).toHaveLength(1);
+  const clause = imports[0]!.importClause;
+  expect(clause?.name).toBeUndefined();
+  expect(clause?.isTypeOnly).toBe(false);
+  const bindings = clause?.namedBindings;
+  expect(bindings !== undefined && ts.isNamedImports(bindings)).toBe(true);
+  if (bindings === undefined || !ts.isNamedImports(bindings)) return;
+  expect(bindings.elements.map(binding => ({
+    name: binding.name.text, aliased: binding.propertyName !== undefined,
+    typeOnly: binding.isTypeOnly,
+  }))).toEqual([
+    { name: 'tagSubstrateFederatedNativeSourceLockFailureStageV1', aliased: false, typeOnly: false },
+    { name: 'SubstrateFederatedNativeSourceLockFailureStageV1', aliased: false, typeOnly: true },
+  ]);
+}
+
 import {
   getDupTreeDigest,
   getPooledReserveEmptyDigest,
@@ -2480,6 +2504,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect(executionImports).toEqual([
       'node:crypto',
       './substrate-federated-native-genesis-setup-stage-v1.js',
+      './substrate-federated-native-source-lock-failure-v1.js',
       'ethers',
       './fleet-signer.js',
       './bridge-validity-tracker-header-context-v1.js',
@@ -2513,6 +2538,7 @@ describe('Substrate federated isolated-devnet launch V1', () => {
       './substrate-federated-tracker-v2-external-fee.js',
       './unsigned-ergo-transaction.js',
     ]);
+    assertSourceLockMetadataImport(execution);
     expect(execution.match(/import\s*\{([^}]+)\}\s*from\s*'\.\/ergo-helpers\.js'/u)?.[1]?.trim())
       .toBe('ngetDirect');
     expect([...execution.matchAll(/import\s*\{([^}]+)\}\s*from\s*'\.\/substrate-federated-tracker-v2-external-fee\.js'/gu)]
@@ -2533,6 +2559,32 @@ describe('Substrate federated isolated-devnet launch V1', () => {
     expect(execution).toContain("'http://127.0.0.1:9051'");
     expect(execution).toContain("'http://127.0.0.1:9052'");
     expect(execution).toContain('Process termination');
+  });
+
+  it.each([
+    ['projector', `import { tagSubstrateFederatedNativeSourceLockFailureStageV1, type SubstrateFederatedNativeSourceLockFailureStageV1, projectSubstrateFederatedNativeSourceLockFailureStageV1 } from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['receipt constructor', `import { tagSubstrateFederatedNativeSourceLockFailureStageV1, type SubstrateFederatedNativeSourceLockFailureStageV1, createNativeTwoCycleWorkerSourceLockStageV1 } from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['namespace', `import * as diagnostics from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['default', `import diagnostics, { tagSubstrateFederatedNativeSourceLockFailureStageV1, type SubstrateFederatedNativeSourceLockFailureStageV1 } from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['side effect', `import '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['alias', `import { tagSubstrateFederatedNativeSourceLockFailureStageV1 as tag, type SubstrateFederatedNativeSourceLockFailureStageV1 } from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['runtime stage type', `import { tagSubstrateFederatedNativeSourceLockFailureStageV1, SubstrateFederatedNativeSourceLockFailureStageV1 } from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['type-only clause', `import type { tagSubstrateFederatedNativeSourceLockFailureStageV1, SubstrateFederatedNativeSourceLockFailureStageV1 } from '${SOURCE_LOCK_METADATA_MODULE}';`],
+    ['duplicate', undefined],
+  ] as const)('rejects source-lock diagnostic %s import drift in the check-only session', (_label, replacement) => {
+    const source = readFileSync(new URL(
+      './substrate-federated-isolated-devnet-setup-check-execution-v2.ts', import.meta.url,
+    ), 'utf8');
+    assertSourceLockMetadataImport(source);
+    const parsed = ts.createSourceFile('setup-check-execution.ts', source,
+      ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const declaration = parsed.statements.filter(ts.isImportDeclaration).find(statement =>
+      ts.isStringLiteral(statement.moduleSpecifier)
+        && statement.moduleSpecifier.text === SOURCE_LOCK_METADATA_MODULE)!;
+    const changed = replacement === undefined
+      ? `${source}\n${declaration.getText(parsed)}`
+      : source.slice(0, declaration.getStart(parsed)) + replacement + source.slice(declaration.end);
+    expect(() => assertSourceLockMetadataImport(changed)).toThrow();
   });
 
   it.each([

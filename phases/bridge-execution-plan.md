@@ -145,8 +145,27 @@ and independent exact-byte source/claim review pass. Unchanged protocol/WASM/JVM
 terminal and tracker closures remain reusable. This establishes the prospective
 diagnostic join, not C45's cause or native two-cycle acceptance.
 
-**Next:** Guard and promote this exact source checkpoint, then require all three
-jobs on its new head. After green exact-head CI, admit one distinct fresh complete
+The diagnostic checkpoint is published at
+`761353c4f7783152b51bbc30d3a58b654c37b142`. Exact
+[run 37447613295](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37447613295)
+passed the pinned-source rebuild and Solidity dependency audit, but its public
+gate failed in the signer-first session's source-text capability test: the exact
+expected imports omitted the new metadata module. The failed case reproduces
+locally. This missed static consumer was outside the earlier selected 1,315
+cases; those passes do not erase the hosted failure.
+
+The correction changes only that test consumer: retain the exact dependency
+list, admit the runtime tag and type-only stage binding, and reject broader
+bindings and import-shape drift. Nine isolated mutations operate on in-memory
+source text with a genuine-source positive control. Existing capability
+assertions, shard selection and budgets remain unchanged. All 208 cases pass
+across the sixteen canonical shards; TypeScript, the layered import check and
+independent exact-byte correction review pass. Close the final source-only claims
+and guarded publication, then require new-head CI. Reuse the
+unchanged runtime diagnostic, protocol, WASM/JVM and architecture evidence.
+
+**Next:** Guard and publish this bounded capability-test correction, then require
+all three jobs on its exact new head. After green CI, admit one distinct fresh complete
 campaign, normally C46: new config/head/tree/source-index, four pinned public
 callers, verified sources/tools, empty outputs, exclusive processes, fees before
 each frozen anchor, disposable custody, independent admission review and at least
@@ -1338,7 +1357,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Source-lock operation kind/stage -> public failure companion | Guard and promote the exact reviewed source checkpoint, then verify its exact-head CI | The 1,315 affected executed cases, TypeScript, layered imports and independent review pass locally. Genesis and continuation both occur under cycle-1; synthetic cycle-2 codec cases do not prove that actual route. C45's cause and disposal remain unknown. |
+| **Now** | Check-only session -> exact source-text capability guard | Guard and promote the reviewed narrow-binding correction, then verify its exact-head CI | All 208 launch cases across sixteen canonical shards, TypeScript, layered imports and independent correction review pass. The existing runtime diagnostic evidence remains reusable; these source cases do not erase run 37447613295's failure. C45's cause and disposal remain unknown. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
