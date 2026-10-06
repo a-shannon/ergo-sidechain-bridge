@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { tagNativeGenesisSetupFailureStageV1, type NativeGenesisSetupFailureStageV1 }
   from './substrate-federated-native-genesis-setup-stage-v1.js';
+import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
+  type SubstrateFederatedNativeSourceLockFailureStageV1 }
+  from './substrate-federated-native-source-lock-failure-v1.js';
 
 import { Mnemonic } from 'ethers';
 
@@ -3297,6 +3300,8 @@ async function runPegInSourceLockCheck(
   mnemonic: string,
   assertActive?: () => void,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt>> {
+  let failureStage: SubstrateFederatedNativeSourceLockFailureStageV1 = 'check-input';
+  try {
   assertActive?.();
   const input = capturePegInSourceLockCheckInput(inputValue);
   const before = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
@@ -3332,6 +3337,7 @@ async function runPegInSourceLockCheck(
     transaction,
     PEG_IN_SOURCE_LOCK_TRANSACTION_DIGEST_DOMAIN,
   );
+  failureStage = 'check-signing';
   const batch = await prepareLocalWasmRootCheckCandidatesFromNode({
     mnemonic,
     ...(assertActive === undefined ? {} : { assertActive }),
@@ -3357,6 +3363,7 @@ async function runPegInSourceLockCheck(
   ) {
     throw new Error('isolated peg-in source-lock signer binding changed');
   }
+  failureStage = 'check-node';
   const checked = await checkSignedTransaction(
     prepared.signedCandidate,
     'isolated local peg-in source-lock check',
@@ -3367,6 +3374,7 @@ async function runPegInSourceLockCheck(
   if (checked === null) {
     throw new Error('isolated local peg-in source-lock JVM node check failed');
   }
+  failureStage = 'check-receipt';
   const signedBytesDigestHex = fixedHex(
     checked.signedTransactionBytesSha256Hex,
     32,
@@ -3473,6 +3481,9 @@ async function runPegInSourceLockCheck(
     assertActive,
   }));
   return receipt;
+  } catch (error) {
+    throw tagSubstrateFederatedNativeSourceLockFailureStageV1(error, failureStage);
+  }
 }
 
 async function runPegInCommittedVaultCheck(

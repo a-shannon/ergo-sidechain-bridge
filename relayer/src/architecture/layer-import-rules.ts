@@ -457,6 +457,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Set([
       'bridge-repository-layout.ts',
+      'substrate-federated-native-source-lock-failure-v1.ts',
       'bridge-validity-tracker-header-context-v1.ts',
       'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
@@ -692,6 +693,12 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Map([
+      [
+        'substrate-federated-native-source-lock-failure-v1.ts',
+        new Set(['tagSubstrateFederatedNativeSourceLockFailureStageV1',
+          'projectOwnSubstrateFederatedNativeSourceLockFailureStageV1',
+          'SubstrateFederatedNativeSourceLockFailureStageV1', 'SubstrateFederatedNativeSourceLockKindV1']),
+      ],
       [
         'bridge-repository-layout.ts',
         new Set(['resolveBridgeRepositoryRootsFromCheckoutLayout']),

@@ -360,6 +360,29 @@ describe('layer import rules', () => {
       .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
   });
 
+  it('allows only source-lock metadata at its execution root seam', () => {
+    const specifier = '../../substrate-federated-native-source-lock-failure-v1.js';
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+      `import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
+        projectOwnSubstrateFederatedNativeSourceLockFailureStageV1,
+        type SubstrateFederatedNativeSourceLockFailureStageV1,
+        type SubstrateFederatedNativeSourceLockKindV1 } from '${specifier}';
+       tagSubstrateFederatedNativeSourceLockFailureStageV1(new Error(), 'ingress');
+       projectOwnSubstrateFederatedNativeSourceLockFailureStageV1(new Error());`))).toEqual([]);
+    for (const binding of ['projectSubstrateFederatedNativeSourceLockFailureStageV1',
+      'createNativeTwoCycleWorkerSourceLockStageV1', 'createNativeTwoCycleParentSourceLockStageV1',
+      'parseNativeTwoCycleWorkerSourceLockStageV1', 'parseNativeTwoCycleParentSourceLockStageV1',
+      'SUBSTRATE_FEDERATED_NATIVE_SOURCE_LOCK_FAILURE_STAGES_V1']) {
+      expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+        `import { ${binding} } from '${specifier}';`)).map(item => item.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    }
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts',
+      `import { tagSubstrateFederatedNativeSourceLockFailureStageV1 } from '${specifier}';`))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-native-source-lock-failure-v1.ts');
+  });
+
   it('allows only the diagnostic cycle tag and type at the target root seam', () => {
     const specifier = '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,

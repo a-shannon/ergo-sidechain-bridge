@@ -15,6 +15,9 @@ import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-
 import { createNativeTwoCycleWorkerTrackerContextV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
+import { createNativeTwoCycleWorkerSourceLockStageV1,
+  projectSubstrateFederatedNativeSourceLockFailureStageV1 }
+  from '../substrate-federated-native-source-lock-failure-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { projectNativeTwoCycleErgoNodeCompletionFailureReasonV1,
@@ -267,6 +270,23 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional step capture cannot replace failure or release the consumed claim.
+      }
+      try {
+        const stage = projectSubstrateFederatedNativeSourceLockFailureStageV1(primaryFailure);
+        if (stage !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const companion = createNativeTwoCycleWorkerSourceLockStageV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+          stage.sourceLockStage, stage.sourceLockKind);
+          writeNewFile(join(invocation.attemptPath, 'worker-source-lock-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker source-lock stage companion');
+        }
+      } catch {
+        // Optional operation detail never replaces failure or releases the claim.
       }
       try {
         const phase = projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(primaryFailure);

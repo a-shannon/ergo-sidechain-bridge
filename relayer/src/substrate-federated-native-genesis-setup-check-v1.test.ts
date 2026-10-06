@@ -58,6 +58,9 @@ import * as fleet from './fleet-signer.js';
 import * as unsigned from './ergo-unsigned-transaction.js';
 import { projectOwnNativeGenesisSetupFailureStageV1 as ownStage }
   from './substrate-federated-native-genesis-setup-stage-v1.js';
+import { projectOwnSubstrateFederatedNativeSourceLockFailureStageV1 as ownSourceLockStage,
+  projectOwnSubstrateFederatedNativeSourceLockKindV1 as ownSourceLockKind }
+  from './substrate-federated-native-source-lock-failure-v1.js';
 import { materializeUnsignedTransaction } from './unsigned-ergo-transaction.js';
 import { materializeSubstrateFederatedSingletonIssuanceV1 } from './substrate-federated-genesis-issuance-materialization-v1.js';
 import { deriveLocalWasmRootSignerPublicIdentity } from './local-wasm-root-signer-public-identity.js';
@@ -87,10 +90,12 @@ import { buildSubstrateFederatedNativeGenesisPegInPacketV1 as buildNativePegIn,
   from './substrate-federated-isolated-devnet-peg-in-candidate-v2.js';
 import { MINER_FEE_TREE } from './ergo-encoding.js';
 import { executeSubstrateFederatedNativeGenesisBatchV1, executeSubstrateFederatedNativeGenesisPegInSourceLockV1 as executeNativeSourceLock,
+  executeSubstrateFederatedNativeContinuationPegInSourceLockV1 as executeContinuationSourceLock,
   executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1 as executeNativeVault }
   from './apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js';
 import * as rewardDiscovery from './substrate-federated-isolated-devnet-reward-input-discovery-v1.js';
 import * as sourceLockAuthority from './substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js';
+import * as nativeSourceObserver from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
 import * as vaultAuthority from './substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer-v1.js';
 import { assertSubstrateFederatedNativeGenesisPegInSourceLockOutputObservationV1 as assertNativeSourceOutputs }
   from './substrate-federated-isolated-devnet-peg-in-source-lock-output-observer-v1.js';
@@ -598,6 +603,27 @@ describe('native FED managed setup session', () => {
       creationHeights: { sourceLockCreation: 1000, reserveTransition: 1000 } as never } };
   }
 
+  it.each(['check-input', 'check-signing', 'check-node', 'check-receipt'] as const)(
+    'retains the actual source-lock checker %s stage without changing its error', async stage => {
+      const { packet, input } = await nativePegInFixture();
+      await buildNativePegIn(input);
+      const sentinel = new Error('unpublished source-lock checker fault');
+      if (stage === 'check-input') vi.spyOn(unsigned, 'deriveUnsignedTransactionId').mockRejectedValueOnce(sentinel);
+      if (stage === 'check-signing') vi.spyOn(fleet, 'prepareLocalWasmRootCheckCandidatesFromNode').mockRejectedValueOnce(sentinel);
+      if (stage === 'check-node') vi.spyOn(fleet, 'checkSignedTransaction').mockRejectedValueOnce(sentinel);
+      if (stage === 'check-receipt') {
+        const check = fleet.checkSignedTransaction;
+        vi.spyOn(fleet, 'checkSignedTransaction').mockImplementationOnce(async (...args) => {
+          const checked = await check(...args);
+          if (checked === null) throw new Error('fixture checker unexpectedly rejected');
+          return Object.defineProperty({ ...checked }, 'signedTransactionBytesLength', { get() { throw sentinel; } });
+        });
+      }
+      const failure = await session.checkNativePegInSourceLockRetainingSignerV1(packet, target).catch(error => error);
+      expect(failure).toBe(sentinel);
+      expect(ownSourceLockStage(failure)).toBe(stage);
+    });
+
   it('binds native setup to the unchanged deposit packet and checks both transactions in order', async () => {
     const { batch, packet, builder, input } = await nativePegInFixture();
     expect(await buildNativePegIn(input)).toBe(packet);
@@ -911,6 +937,61 @@ describe('native FED managed setup session', () => {
     });
   });
 
+  it.each(['native-check', 'post-check-funding', 'pre-transport-funding', 'authorization',
+    'journal-reconciliation', 'operational-execution', 'output-observation'] as const)(
+    'retains the actual source-lock operation %s stage and original error', async stage => {
+      await withNativeSourceLock(async ({ input, post, onFunding }) => {
+        const sentinel = new Error('unpublished source-lock operation fault');
+        if (stage === 'native-check') input = { ...input, setupSession: {
+          ...input.setupSession, checkNativePegInSourceLockRetainingSignerV1: async () => { throw sentinel; },
+        } };
+        if (stage === 'post-check-funding' || stage === 'pre-transport-funding') onFunding(count => {
+          if (count === (stage === 'post-check-funding' ? 1 : 2)) throw sentinel;
+        });
+        if (stage === 'authorization') vi.spyOn(sourceLockAuthority,
+          'createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1').mockImplementationOnce(() => { throw sentinel; });
+        if (stage === 'journal-reconciliation') vi.spyOn(input.state,
+          'getActiveErgoOperationalTransactionAttempts').mockImplementationOnce(() => { throw sentinel; });
+        if (stage === 'operational-execution') vi.spyOn(input.state,
+          'reserveErgoOperationalTransactionAttempt').mockImplementationOnce(() => { throw sentinel; });
+        if (stage === 'output-observation') vi.spyOn(nativeSourceObserver,
+          'observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1').mockRejectedValueOnce(sentinel);
+        const failure = await executeNativeSourceLock(input).catch(error => error);
+        expect(failure).toBe(sentinel);
+        expect(ownSourceLockStage(failure)).toBe(stage);
+        expect(ownSourceLockKind(failure)).toBe('genesis');
+        expect(post).toHaveBeenCalledTimes(stage === 'output-observation' ? 1 : 0);
+      });
+    });
+
+  it('preserves the inner native checker stage through the source-lock operation', async () => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      const sentinel = new Error('unpublished actual checker failure');
+      vi.spyOn(fleet, 'checkSignedTransaction').mockRejectedValueOnce(sentinel);
+      const failure = await executeNativeSourceLock(input).catch(error => error);
+      expect(failure).toBe(sentinel);
+      expect(ownSourceLockStage(failure)).toBe('check-node');
+      expect(ownSourceLockKind(failure)).toBe('genesis');
+      expect(post).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each(['genesis', 'continuation'] as const)('binds %s kind at its actual source-lock entrypoint', async kind => {
+    await withNativeSourceLock(async ({ input, post }) => {
+      const sentinel = new Error('unpublished native checker callback fault');
+      const check = async () => { throw sentinel; };
+      const changed = { ...input, setupSession: { ...input.setupSession,
+        checkNativePegInSourceLockRetainingSignerV1: check,
+        checkNativeContinuationPegInSourceLockRetainingSignerV1: check } };
+      const execute = kind === 'genesis' ? executeNativeSourceLock : executeContinuationSourceLock;
+      const failure = await execute(changed).catch(error => error);
+      expect(failure).toBe(sentinel);
+      expect(ownSourceLockStage(failure)).toBe('native-check');
+      expect(ownSourceLockKind(failure)).toBe(kind);
+      expect(post).not.toHaveBeenCalled();
+    });
+  });
+
   it.each(['packet clone', 'batch clone', 'target clone', 'disposed'])('rejects %s before native source-lock checking', async fault => {
     await withNativeSourceLock(async ({ input, post }) => {
       const changed = { ...input };
@@ -918,7 +999,10 @@ describe('native FED managed setup session', () => {
       if (fault === 'batch clone') changed.batch = { ...input.batch };
       if (fault === 'target clone') changed.target = { ...target };
       if (fault === 'disposed') session.dispose();
-      await expect(executeNativeSourceLock(changed)).rejects.toThrow(/provenance|inactive/);
+      const failure = await executeNativeSourceLock(changed).catch(error => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toMatch(/provenance|inactive/);
+      expect(ownSourceLockStage(failure)).toBe('ingress');
       expect(helpers.ncheck).toHaveBeenCalledTimes(3); expect(post).not.toHaveBeenCalled();
     });
   });
@@ -997,7 +1081,10 @@ describe('native FED managed setup session', () => {
         if (count === stopAfter) session.dispose();
         return stage === 'pending confirmation' ? 1 : 20;
       });
-      await expect(executeNativeSourceLock(input)).rejects.toThrow(/inactive/);
+      const failure = await executeNativeSourceLock(input).catch(error => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure.message).toMatch(/inactive/);
+      expect(ownSourceLockStage(failure)).toBe(stage === 'pending confirmation' ? 'confirmation' : 'confirmed-journal');
       expect(reads).toBe(stopAfter);
       expect(post).toHaveBeenCalledTimes(1);
       expect(input.state.getErgoOperationalTransactionAttempt(input.packet.transactions.sourceLockCreation.txId)?.status)

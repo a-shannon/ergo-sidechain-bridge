@@ -27,6 +27,8 @@ import { createNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { createNativeTwoCycleParentTrackerContextV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
+import { createNativeTwoCycleParentSourceLockStageV1 }
+  from '../substrate-federated-native-source-lock-failure-v1.js';
 import { createNativeTwoCycleParentSetupStageV1 }
   from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { createNativeTwoCycleParentOwnerStageV1,
@@ -225,6 +227,7 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))
       || existsSync(join(attemptPath, 'worker-cycle-step.json'))
       || existsSync(join(attemptPath, 'worker-tracker-context.json'))
+      || existsSync(join(attemptPath, 'worker-source-lock-stage.json'))
       || existsSync(join(attemptPath, 'worker-setup-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))) {
@@ -473,6 +476,25 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent cycle step companion');
         } catch {
           // Absent, invalid or occupied step evidence cannot alter the terminal failure.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle source-lock stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentSourceLockStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-source-lock-stage.json'), readCompanion('failure-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-source-lock-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent source-lock stage companion');
+        } catch {
+          // Missing, invalid or occupied detail leaves terminal and older receipts intact.
         }
         try {
           const bindings = {

@@ -18,6 +18,11 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isNativeError, isProxy } from 'node:util/types';
+import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
+  projectOwnSubstrateFederatedNativeSourceLockFailureStageV1,
+  type SubstrateFederatedNativeSourceLockFailureStageV1,
+  type SubstrateFederatedNativeSourceLockKindV1 }
+  from '../../substrate-federated-native-source-lock-failure-v1.js';
 
 import {
   sha256CanonicalJson,
@@ -2606,6 +2611,7 @@ export async function executeSubstrateFederatedNativeGenesisPegInSourceLockV1(
   return executeSubstrateFederatedNativePegInSourceLockV1(
     input,
     (packet, target) => check.call(session, packet, target),
+    'genesis',
   );
 }
 
@@ -2618,13 +2624,17 @@ export async function executeSubstrateFederatedNativeContinuationPegInSourceLock
   return executeSubstrateFederatedNativePegInSourceLockV1(
     input,
     (packet, target) => check.call(session, packet, target),
+    'continuation',
   );
 }
 
 async function executeSubstrateFederatedNativePegInSourceLockV1(
   input: NativePegInSourceLockExecutionInputV1,
   check: NativePegInSourceLockCheckV1,
+  sourceLockKind: SubstrateFederatedNativeSourceLockKindV1,
 ): Promise<NativePegInSourceLockExecutionResultV1> {
+  let failureStage: SubstrateFederatedNativeSourceLockFailureStageV1 = 'ingress';
+  try {
   const { target, batch, packet, setupSession, state } = input;
   const targetBinding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   const assertActive = () => assertSubstrateFederatedNativeGenesisPegInPacketV1(packet, batch, target);
@@ -2633,6 +2643,7 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
   const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
     target, batch.request.target.genesisHeaderIdHex,
   );
+  failureStage = 'native-check';
   const receipt = await check(packet, target);
   assertActive();
   const discoverFunding = async (minimumHeight: number) => {
@@ -2647,8 +2658,11 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
     }
     return ownedFunding;
   };
+  failureStage = 'post-check-funding';
   const postCheck = await discoverFunding(receipt.signer.stateContextTipHeight);
+  failureStage = 'pre-transport-funding';
   const preTransport = await discoverFunding(postCheck.observation.target.tipHeight);
+  failureStage = 'authorization';
   const executionCheck = promoteSubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1(receipt, target);
   const authorizer = createSubstrateFederatedNativeGenesisPegInSourceLockBroadcastAuthorizerV1({
     target, batch, packet, executionCheck, postCheck, preTransport,
@@ -2657,11 +2671,13 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
     state, authorizer, reconciliationIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
     targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
   });
+  failureStage = 'journal-reconciliation';
   const prior = await journal.reconcileActive(observer);
   assertActive();
   if (prior !== 'none') {
     throw new Error('unexpected prior native source-lock attempt was reconciled');
   }
+  failureStage = 'operational-execution';
   const transport = createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(target, authorizer);
   const transaction = packet.transactions.sourceLockCreation;
   const sourceBoxId = packet.boxes.sourceFundingInput.boxId;
@@ -2706,8 +2722,10 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
   });
   assertSourceLockTransportExecution(result, transaction.txId);
   assertActive();
+  failureStage = 'confirmation';
   const confirmation = await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline, 'native source-lock', assertActive);
   assertActive();
+  failureStage = 'confirmed-journal';
   const reconciled = await journal.reconcileActive(observer);
   assertActive();
   if (reconciled !== 'confirmed') {
@@ -2719,6 +2737,7 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
     throw new Error('native source-lock journal did not retain exact confirmation');
   }
   assertActive();
+  failureStage = 'output-observation';
   const outputObservation = await observeSubstrateFederatedNativeGenesisPegInSourceLockOutputsV1({
     target, batch, packet, confirmation,
   });
@@ -2726,6 +2745,14 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
   return Object.freeze({ expectedTxId: transaction.txId,
     transportStatus: result.status === 'accepted' ? 'accepted' : 'reconciled',
     durableAttemptDigestHex: result.durableAttemptDigestHex, journalDigestHex: result.journalDigestHex, outputObservation });
+  } catch (error) {
+    const checkerStage = projectOwnSubstrateFederatedNativeSourceLockFailureStageV1(error);
+    if (failureStage === 'native-check' && (checkerStage === 'check-input'
+      || checkerStage === 'check-signing' || checkerStage === 'check-node' || checkerStage === 'check-receipt')) {
+      throw tagSubstrateFederatedNativeSourceLockFailureStageV1(error, checkerStage, sourceLockKind);
+    }
+    throw tagSubstrateFederatedNativeSourceLockFailureStageV1(error, failureStage, sourceLockKind);
+  }
 }
 
 type NativePegInCommittedVaultExecutionInputV1 = Readonly<{

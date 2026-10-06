@@ -156,6 +156,9 @@ import { projectNativeTwoCycleCycleStepFailureV1 }
 import { tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1 }
   from '../../substrate-federated-tracker-context-failure-v1.js';
+import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
+  projectSubstrateFederatedNativeSourceLockFailureStageV1 }
+  from '../../substrate-federated-native-source-lock-failure-v1.js';
 import { projectNativeTwoCycleErgoNodePostCallbackStageV1,
   tagIsolatedErgoNodePostCallbackStageV1 }
   from '../../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
@@ -2722,6 +2725,31 @@ describe('fresh FED target composition', () => {
       expect(projectNativeTwoCycleCycleStepFailureV1(failure))
         .toEqual({ cycle, step: 'tracker-context' });
       expect(projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(failure)).toBe('statement');
+      expect(mocked.recovery).not.toHaveBeenCalled();
+      expect(stop).toHaveBeenCalledOnce();
+      expect(closeNative).toHaveBeenCalledTimes(2);
+      assertDisposed();
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(sourceLockKind =>
+    [false, true].map(cleanupFailure => ({ sourceLockKind, cleanupFailure }))))(
+    'retains the source-lock stage and $sourceLockKind kind through actual cycle-1 root tags, cleanup failure $cleanupFailure',
+    async ({ sourceLockKind, cleanupFailure }) => {
+      const cycle = 'cycle-1';
+      const primary = tagSubstrateFederatedNativeSourceLockFailureStageV1(
+        new Error('unpublished source-lock operation failure'), 'check-node', sourceLockKind);
+      (sourceLockKind === 'genesis' ? mocked.sourceLock : mocked.continuationSourceLock)
+        .mockRejectedValueOnce(primary);
+      const cleanup = new Error('unpublished stop failure');
+      if (cleanupFailure) stop.mockRejectedValueOnce(cleanup);
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+      if (cleanupFailure) {
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect(failure.errors).toEqual([primary, cleanup]);
+      } else expect(failure).toBe(primary);
+      expect(projectNativeTwoCycleCycleStepFailureV1(failure)).toEqual({ cycle, step: 'source-lock' });
+      expect(projectSubstrateFederatedNativeSourceLockFailureStageV1(failure))
+        .toEqual({ sourceLockStage: 'check-node', sourceLockKind });
       expect(mocked.recovery).not.toHaveBeenCalled();
       expect(stop).toHaveBeenCalledOnce();
       expect(closeNative).toHaveBeenCalledTimes(2);

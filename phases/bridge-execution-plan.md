@@ -28,7 +28,7 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–44 are permanently consumed or held. C42 issued the
+**Now:** Campaigns 24–45 are permanently consumed or held. C42 issued the
 canonical command once but lost its tool session after `worker-start.json` and
 has no parent terminal artifact; it is incomplete/ambiguous. A no-key detached
 process-lifetime falsifier preceded separate fresh C43 admission. C43 issued
@@ -108,12 +108,52 @@ This is a bounded CI fixture correction, not new Gate 6 work or a C44 fix.
 The correction's four cases and TypeScript pass locally; independent source and
 claim review passed. These results do not close the failed hosted gate.
 
-**Next:** Guarded promotion and all three CI jobs on the exact new head. Reuse
-the unchanged local correction checks and review. After CI passes, separately
-admit one complete fresh
-campaign with new custody, inputs, outputs and at least 100 GiB free in the final
-shell. No speculative predicate fix, timeout increase or provenance substitution
-is supported by C44's coarse step.
+The CLI correction is published at
+`56eaff9c9dab7a0163c95c83549d972eaf5a06d8`. All three required jobs passed in
+exact [run 37414606887](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37414606887).
+C45 then completed separate fresh admission and issued its canonical command
+once. It terminated with integer exit 1, null launcher exception, parent failure
+and no result. Independent public receipt reconstruction identifies
+`execution_failure`, `root-or-cleanup`, `cycle-1/source-lock`. Source-lock is the
+refundable Ergo deposit creation operation. Both genesis and continuation deposit
+creation run under cycle-1; the coarse receipt cannot distinguish those
+occurrences or establish which earlier operations completed. Raw cause,
+operation completion and custody disposal remain unknown. Preserve the permanent
+hold; do not inspect private runtime or retry/resume it.
+
+The source-lock operation-to-worker-to-parent diagnostic join is closed locally.
+No reproducible predicate defect is supported by the coarse failure. Existing
+WASM/JVM differentials cover the funding input scripts; another exact deposit
+signature fixture would add shape coverage without distinguishing the node
+check, funding rechecks, journal, transport, confirmation or output observation.
+Fourteen closed operation/checker stages and literal genesis/continuation kinds
+preserve the original thrown value, existing predicates, successful bytes,
+older receipt formats/domains and custody rules. Optional worker and parent
+companions bind the exact failure/root/cycle-step and parent ancestry, reject
+ambiguous or cleanup-derived detail, and retain false completion, cleanup and
+raw-cause claims. Missing, invalid or occupied detail leaves primary and older
+receipts intact; success rejects the new worker failure companion.
+
+The affected closure passes 1,315 executed cases: 345 codec/metadata, 442 native
+setup/operation, 224 worker/parent composition, 295 architecture, five continuation
+consumer and four added actual root-control-flow cases. Those four cover genesis
+and continuation under cycle-1, each with/without cleanup aggregation; 411 other
+root cases were not replayed. Codec and CLI cases using both cycle labels are
+synthetic model coverage, not evidence of an actual cycle-2 source-lock. The
+existing canonical 15-second Windows test budget, TypeScript, layered imports
+and independent exact-byte source/claim review pass. Unchanged protocol/WASM/JVM,
+terminal and tracker closures remain reusable. This establishes the prospective
+diagnostic join, not C45's cause or native two-cycle acceptance.
+
+**Next:** Guard and promote this exact source checkpoint, then require all three
+jobs on its new head. After green exact-head CI, admit one distinct fresh complete
+campaign, normally C46: new config/head/tree/source-index, four pinned public
+callers, verified sources/tools, empty outputs, exclusive processes, fees before
+each frozen anchor, disposable custody, independent admission review and at least
+100 GiB free in the final launch shell. No C45 config, caller, claim, receipt or
+session supplies authority. Stopped-state recovery, operator preparation and
+FED-7 retain their separate obligations. No timeout increase or provenance
+substitution.
 
 ### Prior checkpoint notes (historical)
 
@@ -1298,19 +1338,18 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Worker/parent recovery locator -> publishable source checkpoint | Guard and promote the exact reviewed candidate, then verify its exact-head CI | Focused schema, worker/parent, architecture and TypeScript checks, layered imports, the 614-file bounded relayer suite and independent review pass locally. The capture still needs actual stopped-node inventory, fresh restart and a successful separately admitted two-cycle run; C43's historical cause remains unknown. |
+| **Now** | Source-lock operation kind/stage -> public failure companion | Guard and promote the exact reviewed source checkpoint, then verify its exact-head CI | The 1,315 affected executed cases, TypeScript, layered imports and independent review pass locally. Genesis and continuation both occur under cycle-1; synthetic cycle-2 codec cases do not prove that actual route. C45's cause and disposal remain unknown. |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–43 remain consumed or held. C42 is incomplete/ambiguous without a
-parent terminal artifact. C43 failed once with a terminal owner
-`completion-check` receipt. Neither result authorizes retry, resume or custody
-reuse. The owner-stage diagnostic and its exact-head CI are closed; the next
-runtime campaign is conditional on a separately closed bounded timing-branch
-discriminator or other source-backed correction, independent review, guarded
-promotion, exact-head CI and fresh-input admission. Reopen only gates
+Campaigns 24–45 remain consumed or held. C42 is incomplete/ambiguous without a
+parent terminal artifact; C43, C44 and C45 failed once as recorded in Current
+Focus. None authorizes retry, resume or custody reuse. The earlier timing and
+tracker checkpoints are closed; the current source-lock diagnostic requires
+guarded promotion and its exact-head CI before entirely fresh admission of the
+next distinct campaign. Preserve independent admission review. Reopen only gates
 invalidated by changed inputs; unchanged candidate evidence remains reusable.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
