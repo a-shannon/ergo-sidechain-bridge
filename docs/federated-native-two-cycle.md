@@ -196,6 +196,8 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `failure-root-phase-v2.json` | Optional parent V2 sidecar. It binds the terminal failure, V1 worker failure and V2 worker root receipts to the same invocation. |
 | `worker-cycle-step.json` | Optional invocation-local operation within a failed cycle, bound to the worker failure and V2 root phase. |
 | `failure-cycle-step.json` | Optional parent sidecar linking that operation to the exact terminal failure and worker ancestry. |
+| `worker-tracker-context.json` | Optional V2 context-construction phase for either cycle, bound to the worker failure, V2 root phase and cycle-step ancestry. |
+| `failure-tracker-context.json` | Optional parent sidecar binding the constructor phase, exact worker ancestry and validated parent cycle-step receipt to the terminal failure. |
 | `worker-setup-stage.json` | Optional native setup operation label, available only for `cycle-1/setup-check` with valid worker failure, V2 root phase and cycle-step ancestry. |
 | `failure-setup-stage.json` | Optional parent sidecar binding the setup label and every worker ancestor to the same terminal failure, config, commit and path identities. |
 | `worker-owner-stage.json` / `failure-owner-stage.json` | Optional worker/parent failure pair identifying an allowlisted post-callback owner stage with exact terminal ancestry. |
@@ -233,6 +235,20 @@ tracker transaction construction, root cleanup or custody disposal.
 Missing or invalid ancestry prevents the companion from being published.
 Existing terminal, root-phase and cycle-step formats and digest domains are
 unchanged. These optional files grant no signing, submission or retry authority.
+
+The tracker-context companion narrows a future constructor failure to `ingress`,
+`provenance`, `statement`, `membership`, `tracker-input`, `avl-transition` or
+`serialization`. The constructor records the active section on the original
+native error; it preserves the thrown value and successful context bytes.
+Publication requires the same error's own matching cycle and `tracker-context`
+step. Unknown or conflicting phases, multiple phase-bearing producers and
+detail under a cleanup ancestor are rejected. The parent validates both worker
+ancestry and its own cycle-step receipt before writing the optional detail.
+Missing, changed or occupied companions leave the primary failure and older
+receipts intact. This phase is a section label, not a predicate or raw cause;
+it does not classify previous attempts or establish cleanup, custody disposal
+or operation completion. Its digest establishes diagnostic consistency under
+the same-user host assumption, not authentication.
 
 The diagnostics use separate schemas and digest domains; the existing terminal
 failure format and digest are unchanged. Missing, invalid or unwritable

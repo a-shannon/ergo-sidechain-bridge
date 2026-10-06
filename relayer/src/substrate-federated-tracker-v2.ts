@@ -27,6 +27,10 @@ import {
   SUBSTRATE_FEDERATED_TRACKER_VALUE_V1_BYTES,
 } from './profiles/substrate-federated-v1/tracker-admission.js';
 import { canonicalJson } from './strict-json.js';
+import {
+  tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
+  type SubstrateFederatedTrackerV2BuildFailurePhaseV1,
+} from './substrate-federated-tracker-context-failure-v1.js';
 import type { SubstrateFederatedTrackerCompilerRequestV2 } from './substrate-federated-tracker-compiler-v2.js';
 import {
   assertSubstrateFederatedTrackerJvmCompilerReceiptV2,
@@ -188,9 +192,13 @@ export function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Conte
 export function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext(
   input: BuildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationInput,
 ): Promise<Readonly<SubstrateFederatedTrackerV2Context>> {
-  const previousContext = input.previousContext;
+  let previousContext: Readonly<SubstrateFederatedTrackerV2Context>;
+  try { previousContext = input.previousContext; }
+  catch (error) { throw tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(error, 'ingress'); }
   if (previousContext === undefined) {
-    return Promise.reject(new Error('federated tracker V2 continuation previous context is required'));
+    return Promise.reject(tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(
+      new Error('federated tracker V2 continuation previous context is required'), 'provenance',
+    ));
   }
   return buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContextInternal(
     input, previousContext,
@@ -201,6 +209,8 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   input: BuildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Input,
   previousContext: Readonly<SubstrateFederatedTrackerV2Context> | undefined,
 ): Promise<Readonly<SubstrateFederatedTrackerV2Context>> {
+  let phase: SubstrateFederatedTrackerV2BuildFailurePhaseV1 = 'ingress';
+  try {
   // Provenance-bearing objects are already deeply frozen. Copy mutable ingress
   // and capture every caller property before the first asynchronous boundary.
   const compilerRequest = input.compilerRequest;
@@ -209,6 +219,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   const encodedStatementHex = input.encodedStatementHex;
   const extensionProofHex = boundedHex(input.extensionMembershipProofHex, 'extension membership proof');
   const boxSnapshot = structuredClone(input.trackerInputBox);
+  phase = 'provenance';
   let previousMetadata: Readonly<TrackerContextMetadata> | undefined;
   if (previousContext !== undefined) {
     assertSubstrateFederatedTrackerV2Context(previousContext);
@@ -234,6 +245,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   const currentErgoHeight = positiveInt(headers.currentHeight, 'current Ergo height');
   const anchor = headers.anchorHeader;
   const anchorHeight = positiveInt(anchor.height, 'anchor height');
+  phase = 'statement';
   const statement = decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
     encodedStatementHex, profile, currentErgoHeight,
   );
@@ -248,6 +260,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
       throw new Error(`federated tracker V2 statement differs from compiled application: ${key}`);
     }
   }
+  phase = 'membership';
   const extensionValueHex = encodeSubstrateFederatedCheckpointExtensionValueV1(
     statement.encodedStatementHex,
   );
@@ -260,6 +273,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   })) {
     throw new Error('observed 0x0401 membership proof does not match the anchor');
   }
+  phase = 'tracker-input';
   const trackerInputBox = await normalizeExactBox(boxSnapshot);
   const genesisDigestHex = exactHex(
     tracker_application_v2_empty_digest(), 33, 'empty tracker digest',
@@ -292,6 +306,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
       ? 'compiler-bound federated tracker V2 input box differs from genesis state'
       : 'compiler-bound federated tracker V2 input box differs from retained predecessor state');
   }
+  phase = 'avl-transition';
   const admission = buildSubstrateFederatedTrackerAdmissionV1({
     profile,
     encodedStatementHex: statement.encodedStatementHex,
@@ -325,6 +340,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
     R7: encodeLongRegister(BigInt(statement.sourceNativeBlockHeight)),
     R8: encodeIntRegister(currentErgoHeight),
   });
+  phase = 'serialization';
   const serialized = await serializeContext({
     contract, trackerInputBox, successorRegisters, currentErgoHeight, anchorHeight,
     statementHex: statement.encodedStatementHex, transitionProofBundleHex,
@@ -391,6 +407,9 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
     ...(previousContext === undefined ? {} : { parent: previousContext }),
   }));
   return context;
+  } catch (error) {
+    throw tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(error, phase);
+  }
 }
 
 export async function assertExactSubstrateFederatedTrackerV2InputBox(

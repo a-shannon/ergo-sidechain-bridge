@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-05
+Updated: 2026-10-06
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,7 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–43 are permanently consumed or held. C42 issued the
+**Now:** Campaigns 24–44 are permanently consumed or held. C42 issued the
 canonical command once but lost its tool session after `worker-start.json` and
 has no parent terminal artifact; it is incomplete/ambiguous. A no-key detached
 process-lifetime falsifier preceded separate fresh C43 admission. C43 issued
@@ -42,7 +42,7 @@ disposal proof. No two-cycle acceptance follows. The owner-stage diagnostic
 checkpoint at `96a4d4615de06c15afb240bb961cd4ac77ce391e` passed all three
 jobs in exact [run 37184578524](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37184578524).
 
-**Next:** The bounded owner timing-reason discriminator is published at
+The bounded owner timing-reason discriminator is published at
 `86b37133258b2e9399798a6a53ca60b7b6f4e8f6`. All three jobs passed in
 exact [run 37287762654](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37287762654).
 The discriminator cannot assign C43's historical branch. Do not increase the
@@ -68,6 +68,37 @@ The capture manifests leave node consistency and fresh restart unvalidated.
 Only a separately admitted successful fresh two-cycle run can establish the
 actual stopped-tree inventory and fresh-process reopen. The clean-root operator
 package, accumulated-state recovery and FED-7 acceptance remain open.
+
+C44 issued the canonical command once at
+`e9c689caff31c60d8b25a0ce0e96c62f66ee3504`, after all three jobs passed in
+exact [run 37375810578](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37375810578).
+It terminated with command exit 1 and `execution_failure` at
+`cycle-1/tracker-context`; no parent success result exists. Independent review
+reconstructed the public parent receipt identities and digests. Worker ancestry
+was checked as linked digests only. The failed constructor's inner phase, raw
+cause and custody disposal remain unknown. Preserve C44 as consumed; no retry
+or private historical-state inspection follows from its result.
+
+The tracker constructor-to-worker-to-parent diagnostic join is closed locally.
+Seven closed constructor phases preserve the original thrown value, existing
+predicates, successful context bytes and older receipt formats. Optional worker
+and parent companions bind the exact failure, root, cycle-step and parent
+ancestry, publish no raw cause and grant no completion, cleanup or retry
+authority. Missing, changed or occupied detail must leave the primary and older
+receipts intact. The selected closure passes 667 tests: 134 codec/metadata,
+83 genuine tracker construction, 152 worker/parent composition, 294 architecture
+and four real root-control-flow cases with mocked tracker builders. The latter
+cover both cycles with and without cleanup aggregation; 407 unrelated root cases
+were not replayed in that focused selection. TypeScript, the layer import guard
+and independent exact-byte source/claim review pass. The parent also rejects
+the new failure companion alongside worker success. Existing protocol/WASM/JVM
+matrices outside this changed builder remain reusable. These tests establish
+the diagnostic source join, not a fix for C44 or native two-cycle acceptance.
+
+**Next:** Guarded promotion and all three CI jobs on the exact new head, then
+separately admit one complete fresh campaign with new custody, inputs, outputs
+and at least 100 GiB free in the final shell. No speculative predicate fix,
+timeout increase or provenance substitution is supported by C44's coarse step.
 
 ### Prior checkpoint notes (historical)
 

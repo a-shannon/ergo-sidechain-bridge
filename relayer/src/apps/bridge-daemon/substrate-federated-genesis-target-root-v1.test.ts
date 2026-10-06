@@ -153,6 +153,9 @@ import {
 } from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
 import { projectNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
+  projectSubstrateFederatedTrackerV2BuildFailurePhaseV1 }
+  from '../../substrate-federated-tracker-context-failure-v1.js';
 import { projectNativeTwoCycleErgoNodePostCallbackStageV1,
   tagIsolatedErgoNodePostCallbackStageV1 }
   from '../../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
@@ -2700,6 +2703,30 @@ describe('fresh FED target composition', () => {
     expect(order.at(-1)).toBe('stop');
     assertDisposed();
   });
+
+  it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle =>
+    [false, true].map(cleanupFailure => ({ cycle, cleanupFailure }))))(
+    'retains the constructor phase through actual $cycle root tags, cleanup failure $cleanupFailure',
+    async ({ cycle, cleanupFailure }) => {
+      const primary = tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(
+        new Error('unpublished tracker constructor failure'), 'statement');
+      (cycle === 'cycle-1' ? mocked.context : mocked.continuationContext)
+        .mockRejectedValueOnce(primary);
+      const cleanup = new Error('unpublished stop failure');
+      if (cleanupFailure) stop.mockRejectedValueOnce(cleanup);
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+      if (cleanupFailure) {
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect(failure.errors).toEqual([primary, cleanup]);
+      } else expect(failure).toBe(primary);
+      expect(projectNativeTwoCycleCycleStepFailureV1(failure))
+        .toEqual({ cycle, step: 'tracker-context' });
+      expect(projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(failure)).toBe('statement');
+      expect(mocked.recovery).not.toHaveBeenCalled();
+      expect(stop).toHaveBeenCalledOnce();
+      expect(closeNative).toHaveBeenCalledTimes(2);
+      assertDisposed();
+    });
 
   it('separates the cycle-2 custody check following a completed tracker context', async () => {
     const trigger = new Error('continuation post-context custody failed');

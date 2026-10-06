@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import blakejs from 'blakejs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   tracker_application_v2_empty_digest,
@@ -48,6 +48,10 @@ import {
 } from './substrate-federated-tracker-v2.js';
 import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substrate-federated-tracker-v2-external-fee.js';
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
+import {
+  projectOwnSubstrateFederatedTrackerV2BuildFailurePhaseV1 as ownFailurePhase,
+  type SubstrateFederatedTrackerV2BuildFailurePhaseV1 as FailurePhase,
+} from './substrate-federated-tracker-context-failure-v1.js';
 import type { Eip12Box } from './unsigned-ergo-transaction.js';
 
 const vector = JSON.parse(readFileSync(new URL(
@@ -187,6 +191,54 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
     expect(bundle.subarray(8 + extensionBytes.length).toString('hex'))
       .toBe(context.trackerTransition.avlInsertProofHex);
     expect(await build(input)).toEqual(context);
+  });
+
+  it.each(['ingress', 'provenance', 'statement', 'membership', 'tracker-input',
+    'avl-transition'] as const)('records the real constructor failure boundary: %s', async phase => {
+    let candidate = { ...input };
+    if (phase === 'ingress') candidate.extensionMembershipProofHex = '';
+    if (phase === 'provenance') candidate.compilerRequest = structuredClone(compilerRequest);
+    if (phase === 'statement') candidate.encodedStatementHex = '00';
+    if (phase === 'membership') candidate.extensionMembershipProofHex = 'ff';
+    if (phase === 'tracker-input') candidate.trackerInputBox = boxFromCandidate({
+      ...candidateFromBox(trackerInputBox), value: '10000001',
+    });
+    if (phase === 'avl-transition') candidate = { ...input,
+      ...anchorInput(statement.encodedStatementHex, '0401', 1_011) };
+    const error = await build(candidate).then(() => { throw new Error('negative fixture accepted'); },
+      (failure: unknown) => failure);
+    expect(ownFailurePhase(error)).toBe(phase);
+  });
+
+  it('retains the original serialization error and unchanged happy context bytes', async () => {
+    const original = new Error('opaque serialization fixture');
+    const serialize = vi.spyOn(wasm.ContextExtension.prototype, 'sigma_serialize_bytes')
+      .mockImplementation(() => { throw original; });
+    let failure: unknown;
+    try { failure = await build(input).then(() => undefined, error => error); }
+    finally { serialize.mockRestore(); }
+    expect(failure).toBe(original);
+    expect(ownFailurePhase(failure)).toBe('serialization');
+    expect(await build(input)).toEqual(context);
+  });
+
+  it.each(['compilerRequest', 'compilerReceipt', 'observedHeaderContext', 'encodedStatementHex',
+    'extensionMembershipProofHex', 'trackerInputBox'] as const)(
+    'preserves ingress getter Error identity for %s', async field => {
+      const original = new Error('opaque ingress fixture');
+      const candidate = { ...input };
+      Object.defineProperty(candidate, field, { get() { throw original; } });
+      const failure = await build(candidate).then(() => undefined, error => error);
+      expect(failure).toBe(original);
+      expect(ownFailurePhase(failure)).toBe('ingress');
+    });
+
+  it.each([{}, 'opaque', null, undefined])('preserves non-Error ingress identity %#', async original => {
+    const candidate = { ...input };
+    Object.defineProperty(candidate, 'compilerRequest', { get() { throw original; } });
+    const failure = await build(candidate).then(() => Symbol('accepted'), error => error);
+    expect(failure).toBe(original);
+    expect(ownFailurePhase(failure)).toBeNull();
   });
 
   it('round-trips exact WASM bytes and hash without fee or authority claims', async () => {
@@ -409,10 +461,34 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
   });
 
   it('requires a previous context even when every genesis input is valid', async () => {
-    const outcome = await buildContinuation({ ...input, previousContext: undefined as never })
-      .then(() => 'accepted without a parent', (error: Error) => error.message);
-    expect(outcome).toMatch(/continuation previous context is required/);
+    const failure = await buildContinuation({ ...input, previousContext: undefined as never })
+      .then(() => undefined, (error: Error) => error);
+    expect(failure?.message).toMatch(/continuation previous context is required/);
+    expect(ownFailurePhase(failure)).toBe('provenance');
   });
+
+  it('preserves a synchronous continuation getter throw and captures only ingress', () => {
+    const original = new Error('opaque continuation getter fixture');
+    const candidate = { ...continuationInput };
+    Object.defineProperty(candidate, 'previousContext', { get() { throw original; } });
+    let failure: unknown;
+    try { buildContinuation(candidate); }
+    catch (error) { failure = error; }
+    expect(failure).toBe(original);
+    expect(ownFailurePhase(failure)).toBe('ingress');
+  });
+
+  it.each(['provenance', 'statement', 'tracker-input'] as const)(
+    'records the real continuation boundary: %s', async phase => {
+      let candidate = { ...continuationInput };
+      if (phase === 'provenance') candidate.previousContext = structuredClone(context);
+      if (phase === 'statement') candidate.encodedStatementHex = '00';
+      if (phase === 'tracker-input') candidate.trackerInputBox = boxFromCandidate({
+        ...candidateFromBox(firstSuccessor), value: '10000001',
+      });
+      const failure = await buildContinuation(candidate).then(() => undefined, error => error);
+      expect(ownFailurePhase(failure)).toBe(phase satisfies FailurePhase);
+    });
 
   it('binds continuation provenance to the exact parent object', async () => {
     const equalButForeignParent = await build(input);

@@ -12,6 +12,9 @@ import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-na
 import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { createNativeTwoCycleWorkerTrackerContextV1,
+  projectSubstrateFederatedTrackerV2BuildFailurePhaseV1 }
+  from '../substrate-federated-tracker-context-failure-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { projectNativeTwoCycleErgoNodeCompletionFailureReasonV1,
@@ -264,6 +267,22 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional step capture cannot replace failure or release the consumed claim.
+      }
+      try {
+        const phase = projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(primaryFailure);
+        if (phase !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const companion = createNativeTwoCycleWorkerTrackerContextV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText, phase);
+          writeNewFile(join(invocation.attemptPath, 'worker-tracker-context.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker tracker context companion');
+        }
+      } catch {
+        // Optional constructor detail cannot replace failure or release the claim.
       }
       try {
         const setupStage = projectNativeTwoCycleSetupFailureStageV1(primaryFailure);
