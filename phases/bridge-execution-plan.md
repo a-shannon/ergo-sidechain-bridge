@@ -95,10 +95,25 @@ the new failure companion alongside worker success. Existing protocol/WASM/JVM
 matrices outside this changed builder remain reusable. These tests establish
 the diagnostic source join, not a fix for C44 or native two-cycle acceptance.
 
-**Next:** Guarded promotion and all three CI jobs on the exact new head, then
-separately admit one complete fresh campaign with new custody, inputs, outputs
-and at least 100 GiB free in the final shell. No speculative predicate fix,
-timeout increase or provenance substitution is supported by C44's coarse step.
+The tracker diagnostic checkpoint is published at
+`40831025161d017d582163a3e5fe60f8e1cf247f`. Exact
+[run 37408482585](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37408482585)
+passed the pinned-source rebuild and Solidity dependency audit, but its public
+gate failed at the existing local governance CLI roundtrip's 15-second timeout.
+The unchanged four-case file passes locally; this does not erase the hosted
+failure or identify its cause. Its three real command launches can use Node's
+locked TSX preflight and loader directly, avoiding TSX's intermediate process
+while preserving the entrypoints, arguments, environment, assertions and timeout.
+This is a bounded CI fixture correction, not new Gate 6 work or a C44 fix.
+The correction's four cases and TypeScript pass locally; independent source and
+claim review passed. These results do not close the failed hosted gate.
+
+**Next:** Guarded promotion and all three CI jobs on the exact new head. Reuse
+the unchanged local correction checks and review. After CI passes, separately
+admit one complete fresh
+campaign with new custody, inputs, outputs and at least 100 GiB free in the final
+shell. No speculative predicate fix, timeout increase or provenance substitution
+is supported by C44's coarse step.
 
 ### Prior checkpoint notes (historical)
 
