@@ -20,10 +20,15 @@ import { runBoundedProcess } from '../../pinned-local-native-verifier-build.js';
 import { buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1 } from '../../substrate-federated-authority-safe-devnet-build-environment-v1.js';
 import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 }
   from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
-import type { SubstrateFederatedNativeTwoCycleRootPhaseV1 }
+import { projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1,
+  type SubstrateFederatedNativeTwoCycleRootPhaseV1 }
   from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
-import { tagNativeTwoCycleCycleStepFailureV1, type NativeTwoCycleCycleStepV1 }
+import { tagNativeTwoCycleCycleStepFailureV1, projectOwnNativeTwoCycleCycleStepFailureV1,
+  type NativeTwoCycleCycleStepV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { beginNativeTwoCycleCallbackTimingV1, tagNativeTwoCycleCallbackTimingFailureV1,
+  type NativeTwoCycleCallbackTimingTraceV1 }
+  from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { createOwnedFederatedGenesisDevnetProcessSessionV1, assertOwnedFederatedGenesisDevnetTargetV1,
   type OwnedFederatedGenesisDevnetProcessSessionV1 } from '../../substrate-federated-authority-safe-devnet-process-v1.js';
 import { buildSubstrateFederatedGenesisNodeV1, type BuildSubstrateFederatedGenesisNodeV1Input } from '../../substrate-federated-genesis-node-build-v1.js';
@@ -118,7 +123,11 @@ export interface RunSubstrateFederatedGenesisTargetRootV1Input {
 export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstrateFederatedGenesisTargetRootV1Input) {
   let rootPhase: SubstrateFederatedNativeTwoCycleRootPhaseV1 = 'setup-and-custody';
   let cycleStep: NativeTwoCycleCycleStepV1 | null = null;
-  const markStep = (step: NativeTwoCycleCycleStepV1) => { cycleStep = step; };
+  let callbackTiming: ReturnType<typeof beginNativeTwoCycleCallbackTimingV1> | undefined;
+  let callbackTimingTrace: Readonly<NativeTwoCycleCallbackTimingTraceV1> | null = null;
+  const markStep = (step: NativeTwoCycleCycleStepV1) => {
+    cycleStep = step; callbackTiming?.record(step);
+  };
   let setupAcquired = false;
   try {
     const captured = exact(input, ['frontierBuild', 'ergoBuild']);
@@ -187,9 +196,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       mining.trackerAdmissionMiningCredential, mining.trackerConfirmationMiningCredential);
     await ergo.startMining();
     const executed = await ergo.withMiningActiveExecutionTarget(async target => {
+      callbackTiming = beginNativeTwoCycleCallbackTimingV1();
+      callbackTiming.record('reward-input-discovery');
       const ownedDiscovery = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
+      callbackTiming.record('history-collection');
       const history = await collectSubstrateFederatedIsolatedDevnetErgoHistoryArtifactsV2(ownedDiscovery.observation);
       assertCustody();
+      callbackTiming.record('genesis-compilation');
       const compiled = await compileObservedSubstrateFederatedGenesisV1({
         setupSigner: setup.signer, sourceSession: retainedSource, target, ownedDiscovery, history,
         genesis: {
@@ -209,6 +222,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       const candidatePath = join(frontier.targetDirectory, 'fed-genesis.json');
       writeFileSync(candidatePath, candidateBytes, { flag: 'wx' });
       await verifyExecutableSha256(frontier.node.path, `0x${frontier.node.sha256Hex}`, 'FED node');
+      callbackTiming.record('genesis-materialization');
       const raw = await runBoundedProcess({ executablePath: frontier.node.path,
         args: ['build-spec', '--chain', `fed-genesis:${candidatePath}`, '--disable-default-bootnode', '--raw'],
         cwd: frontier.sourceDirectory, env: buildSubstrateFederatedAuthoritySafeMinimalToolEnvironmentV1(),
@@ -222,6 +236,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       }
       assertCustody();
       assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+      callbackTiming.record('native-process-start');
       native = await createOwnedFederatedGenesisDevnetProcessSessionV1({
         nodeBinaryPath: frontier.node.path, expectedNodeBinarySha256Hex: frontier.node.sha256Hex,
         genesisJsonBytes: candidateBytes, expectedGenesisJsonSha256Hex: candidate.genesisJsonSha256Hex,
@@ -485,7 +500,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
               mintIdentityHex: mint.mintIdentityHex, sourceProofReceiptDigestHex: proof.receiptDigestHex }) });
       });
       markStep('cycle-summary');
-      return Object.freeze({ continuation: running.continuation,
+      const callbackResult = Object.freeze({ continuation: running.continuation,
         summary: Object.freeze({ nativeGenesisHashHex: running.genesis,
         typedGenesisSha256Hex: candidate.genesisJsonSha256Hex, rawSpecSha256Hex: sha256(Buffer.from(raw.stdout)),
         runtimeProfileIdHex: candidate.runtimeProfileIdHex, familyIdHex: candidate.familyIdHex,
@@ -497,6 +512,9 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
         pegIn: running.pegIn, mint: running.mint, burn: running.burn,
         unsignedIssuance: Object.freeze(compiled.issuance.orderedTransactions.map(({ role, transaction }) =>
           Object.freeze({ role, transactionIdHex: transaction.txId, predictedSingletonBoxIdHex: transaction.outputs[0]!.boxId }))) }) });
+      callbackTimingTrace = callbackTiming.finish();
+      callbackTiming = undefined;
+      return callbackResult;
     });
     markStep('return-preparation');
     if (retainedState === undefined) throw new Error('FED native continuation journal is absent');
@@ -573,6 +591,8 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
       sourceFinalityEstablished: false as const, trustless: false as const });
   } catch (error) {
     rootFailed = true;
+    const previouslyRootTagged = projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(error) !== null
+      || projectOwnNativeTwoCycleCycleStepFailureV1(error) !== null;
     let ergoNodeStartupPhase = null;
     if (rootPhase === 'node-start') {
       try {
@@ -589,6 +609,10 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     const failurePhase = rootPhase as SubstrateFederatedNativeTwoCycleRootPhaseV1;
     if ((failurePhase === 'cycle-1' || failurePhase === 'cycle-2') && cycleStep !== null) {
       tagNativeTwoCycleCycleStepFailureV1(rootFailure, failurePhase, cycleStep);
+    }
+    if (failurePhase === 'cycle-1' && cycleStep === 'cycle-summary') {
+      tagNativeTwoCycleCallbackTimingFailureV1(rootFailure,
+        previouslyRootTagged ? null : callbackTimingTrace);
     }
     throw rootFailure;
   } finally {

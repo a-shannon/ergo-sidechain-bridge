@@ -11,6 +11,8 @@ import {
 import { createNativeTwoCycleWorkerRootPhaseV1 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
 import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { createNativeTwoCycleWorkerCallbackTimingV1, projectNativeTwoCycleCallbackTimingFailureV1 }
+  from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { createNativeTwoCycleWorkerTrackerContextV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
@@ -202,6 +204,7 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
     let workerRootPhaseV2Text: string | undefined;
     let workerCycleStepText: string | undefined;
     let workerOwnerStageText: string | undefined;
+    let workerOwnerStageV2Text: string | undefined;
     try {
       const diagnostic = createNativeTwoCycleWorkerFailureDiagnosticV1({
         configSha256Hex: invocation.configSha256Hex,
@@ -366,9 +369,28 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
           writeNewFile(join(invocation.attemptPath, 'worker-owner-stage-v2.json'),
             Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
             'native two-cycle worker owner completion reason companion');
+          workerOwnerStageV2Text = `${canonicalJson(companion)}\n`;
         }
       } catch {
         // Optional reason cannot replace failure or any earlier companion.
+      }
+      try {
+        const trace = projectNativeTwoCycleCallbackTimingFailureV1(primaryFailure);
+        if (trace !== null && workerFailureText !== undefined && workerRootPhaseV2Text !== undefined
+          && workerCycleStepText !== undefined && workerOwnerStageText !== undefined
+          && workerOwnerStageV2Text !== undefined) {
+          const companion = createNativeTwoCycleWorkerCallbackTimingV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+            workerOwnerStageText, workerOwnerStageV2Text }, trace);
+          writeNewFile(join(invocation.attemptPath, 'worker-callback-timing-v1.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker callback timing companion');
+        }
+      } catch {
+        // Optional timing cannot replace the original failure or any previous receipt.
       }
     }
     throw primaryFailure;

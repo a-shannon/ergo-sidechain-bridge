@@ -139,6 +139,72 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['substrate-federated-native-two-cycle-root-phase-v1',
+      'projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1', false],
+    ['substrate-federated-native-two-cycle-cycle-step-v1',
+      'projectOwnNativeTwoCycleCycleStepFailureV1', false],
+    ['substrate-federated-native-two-cycle-callback-timing-v1',
+      'beginNativeTwoCycleCallbackTimingV1', false],
+    ['substrate-federated-native-two-cycle-callback-timing-v1',
+      'tagNativeTwoCycleCallbackTimingFailureV1', false],
+    ['substrate-federated-native-two-cycle-callback-timing-v1',
+      'NativeTwoCycleCallbackTimingTraceV1', true],
+  ] as const)('admits the reviewed callback metadata binding %s#%s',
+    (module, binding, typeOnly) => {
+      const source = `import ${typeOnly ? 'type ' : ''}{ ${binding} } from '../../${module}.js';`;
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+    });
+
+  it.each([
+    ['namespace', "import * as timing from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['default', "import timing from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['alias', "import { beginNativeTwoCycleCallbackTimingV1 as timing } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['dynamic', "const timing = await import('../../substrate-federated-native-two-cycle-callback-timing-v1.js');"],
+    ['re-export', "export { beginNativeTwoCycleCallbackTimingV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['timing projector', "import { projectNativeTwoCycleCallbackTimingFailureV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['timing constructor', "import { createNativeTwoCycleWorkerCallbackTimingV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['extra binding', "import { beginNativeTwoCycleCallbackTimingV1, projectNativeTwoCycleCallbackTimingFailureV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';"],
+    ['aggregate step reader', "import { projectNativeTwoCycleCycleStepFailureV1 } from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';"],
+    ['aggregate root reader', "import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 } from '../../substrate-federated-native-two-cycle-root-phase-v1.js';"],
+    ['runtime escape', "import { beginNativeTwoCycleCallbackTimingV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js'; const escaped = beginNativeTwoCycleCallbackTimingV1;"],
+    ['other binding type query', "import { tagNativeTwoCycleCallbackTimingFailureV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js'; type Tag = typeof tagNativeTwoCycleCallbackTimingFailureV1;"],
+  ])('rejects widening the root callback metadata import through %s', (fault, source) => {
+    const files = staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source);
+    // Dynamic imports and re-exports also need a resolved dependency to isolate the form guard.
+    files['substrate-federated-native-two-cycle-callback-timing-v1.ts'] = 'export {};';
+    const messages = inspect(files).map(violation => violation.message);
+    if (['namespace', 'default', 'dynamic', 're-export'].includes(fault)) {
+      expect(messages).toContain('restricted capability import must use reviewed named bindings: ../../substrate-federated-native-two-cycle-callback-timing-v1.js');
+    } else if (fault === 'alias') {
+      expect(messages).toContain('restricted capability import binding must not be aliased: ../../substrate-federated-native-two-cycle-callback-timing-v1.js#beginNativeTwoCycleCallbackTimingV1');
+    } else if (fault === 'runtime escape' || fault === 'other binding type query') {
+      expect(messages.some(message => message.includes('restricted capability binding must not escape its reviewed call'))).toBe(true);
+    } else {
+      expect(messages.some(message => message.includes('restricted capability import binding is not allowlisted'))).toBe(true);
+    }
+  });
+
+  it('keeps the callback recorder type query erased at its reviewed root', () => {
+    const source = "import { beginNativeTwoCycleCallbackTimingV1 } from '../../substrate-federated-native-two-cycle-callback-timing-v1.js'; type Recorder = ReturnType<typeof beginNativeTwoCycleCallbackTimingV1>;";
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/forged-callback-timing-root.ts', source))
+      .some(violation => violation.message.includes('unclassified legacy module'))).toBe(true);
+  });
+
+  it.each([
+    ['substrate-federated-native-two-cycle-root-phase-v1',
+      'projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1'],
+    ['substrate-federated-native-two-cycle-cycle-step-v1',
+      'projectOwnNativeTwoCycleCycleStepFailureV1'],
+    ['substrate-federated-native-two-cycle-callback-timing-v1',
+      'beginNativeTwoCycleCallbackTimingV1'],
+  ])('rejects callback metadata root allowance at a different owner for %s', (module, binding) => {
+    const source = `import { ${binding} } from '../../${module}.js';`;
+    expect(inspect(staticAppFixture('apps/bridge-daemon/forged-callback-timing-root.ts', source))
+      .some(violation => violation.message.includes('unclassified legacy module'))).toBe(true);
+  });
+
+  it.each([
     ['./substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.js', 'executeSubstrateFederatedNativeGenesisBatchV1'],
     ['../../substrate-federated-isolated-devnet-setup-check-execution-v2.js', 'assertSubstrateFederatedNativeGenesisSetupExecutionBatchV1'],
     ['../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', 'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1'],

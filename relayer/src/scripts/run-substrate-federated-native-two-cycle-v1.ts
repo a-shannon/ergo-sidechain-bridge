@@ -25,6 +25,8 @@ import {
 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { createNativeTwoCycleParentCallbackTimingV1 }
+  from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { createNativeTwoCycleParentTrackerContextV1, createNativeTwoCycleParentTrackerStatementV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { createNativeTwoCycleParentSourceLockStageV1 }
@@ -232,7 +234,9 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'worker-source-lock-stage.json'))
       || existsSync(join(attemptPath, 'worker-setup-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage.json'))
-      || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))) {
+      || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))
+      || existsSync(join(attemptPath, 'worker-callback-timing-v1.json'))
+      || existsSync(join(attemptPath, 'failure-callback-timing-v1.json'))) {
       throw new Error('native two-cycle worker returned contradictory failure evidence');
     }
     const retainedWasmEvidence = readBoundedRegularFile(
@@ -583,6 +587,30 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent owner completion reason companion');
         } catch {
           // Optional reason cannot alter terminal failure or earlier companions.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle callback timing lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCallbackTimingV1(bindings,
+            failure.receiptDigestHex, {
+              workerFailureText: readCompanion('worker-failure.json'),
+              workerRootPhaseV2Text: readCompanion('worker-root-phase-v2.json'),
+              workerCycleStepText: readCompanion('worker-cycle-step.json'),
+              workerOwnerStageText: readCompanion('worker-owner-stage.json'),
+              workerOwnerStageV2Text: readCompanion('worker-owner-stage-v2.json'),
+            }, readCompanion('worker-callback-timing-v1.json'),
+            readCompanion('failure-owner-stage.json'), readCompanion('failure-owner-stage-v2.json'));
+          writeNewFile(join(attemptPath, 'failure-callback-timing-v1.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent callback timing companion');
+        } catch {
+          // Missing, invalid or occupied timing cannot change the failure or older receipts.
         }
       } catch {
         // Preserve the original execution failure. A missing failure artifact

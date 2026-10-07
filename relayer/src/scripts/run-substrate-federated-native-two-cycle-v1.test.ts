@@ -82,6 +82,9 @@ import { ISOLATED_ERGO_NODE_POST_CALLBACK_STAGES_V1,
 import { parseNativeTwoCycleParentOwnerStageV1,
   parseNativeTwoCycleParentOwnerStageV2 }
   from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
+import { beginNativeTwoCycleCallbackTimingV1, tagNativeTwoCycleCallbackTimingFailureV1,
+  parseNativeTwoCycleParentCallbackTimingV1 }
+  from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import { createNativeTwoCycleWorkerRecoveryLocatorV1,
   parseNativeTwoCycleParentRecoveryLocatorV1 }
   from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
@@ -816,7 +819,8 @@ describe('native two-cycle parent and worker V1', () => {
   it.each(['worker-root-phase.json', 'worker-root-phase-v2.json', 'worker-cycle-step.json',
     'worker-tracker-context.json', 'worker-tracker-statement.json', 'failure-tracker-statement.json',
     'worker-setup-stage.json', 'worker-owner-stage.json',
-    'worker-owner-stage-v2.json', 'worker-source-lock-stage.json'] as const)(
+    'worker-owner-stage-v2.json', 'worker-source-lock-stage.json',
+    'worker-callback-timing-v1.json', 'failure-callback-timing-v1.json'] as const)(
     'rejects a worker root phase companion %s alongside a success transport', async artifact => {
     const fixture = commandFixture();
     const result = projectedResult();
@@ -1047,6 +1051,72 @@ describe('native two-cycle parent and worker V1', () => {
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
       expect(existsSync(join(fixture.attemptPath, 'worker-owner-stage-v2.json'))).toBe(false);
       expect(existsSync(join(fixture.attemptPath, 'failure-owner-stage-v2.json'))).toBe(false);
+    });
+
+  it.each(['valid', 'missing trace', 'occupied worker', 'occupied parent', 'tampered worker',
+    'occupied owner V2', 'tampered parent owner V2', 'cleanup aggregate'] as const)(
+    'callback timing worker parent join preserves failure for %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = tagIsolatedErgoNodeCompletionFailureReasonV1(
+        tagIsolatedErgoNodePostCallbackStageV1(new Error('private timing failure'), 'completion-check'),
+        'budget-exceeded');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'cycle-summary');
+      let now = 123_456;
+      const recorder = beginNativeTwoCycleCallbackTimingV1(() => now);
+      now += 1234; recorder.record('target-entry'); now += 200; recorder.record('cycle-summary');
+      const trace = recorder.finish();
+      if (fault !== 'missing trace') tagNativeTwoCycleCallbackTimingFailureV1(primary, trace);
+      const thrown = fault === 'cleanup aggregate'
+        ? new AggregateError([primary, new Error('cleanup')], 'failed cleanup') : primary;
+      mocked.root.mockRejectedValueOnce(thrown);
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker' || fault === 'occupied owner V2') {
+          writeFileSync(join(fixture.attemptPath, fault === 'occupied worker'
+            ? 'worker-callback-timing-v1.json' : 'worker-owner-stage-v2.json'), 'retained bytes');
+        }
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+            input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (error) {
+          expect(error).toBe(thrown);
+          if (fault === 'tampered worker') {
+            const path = join(fixture.attemptPath, 'worker-callback-timing-v1.json');
+            const worker = JSON.parse(readFileSync(path, 'utf8'));
+            writeFileSync(path, `${canonicalJson({ ...worker, receiptDigestHex: '9'.repeat(64) })}\n`);
+          }
+          if (fault === 'occupied parent' || fault === 'tampered parent owner V2') {
+            writeFileSync(join(fixture.attemptPath, fault === 'occupied parent'
+              ? 'failure-callback-timing-v1.json' : 'failure-owner-stage-v2.json'), 'retained bytes');
+          }
+          throw error;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(thrown);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      if (fault !== 'cleanup aggregate') expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'failure-cycle-step.json'))).toBe(true);
+      if (fault === 'valid') {
+        const parent = parseNativeTwoCycleParentCallbackTimingV1(read('failure-callback-timing-v1.json'),
+          failureBindings(fixture), JSON.parse(read('failure.json')).receiptDigestHex, {
+            workerFailureText: read('worker-failure.json'), workerRootPhaseV2Text: read('worker-root-phase-v2.json'),
+            workerCycleStepText: read('worker-cycle-step.json'), workerOwnerStageText: read('worker-owner-stage.json'),
+            workerOwnerStageV2Text: read('worker-owner-stage-v2.json'),
+          }, read('worker-callback-timing-v1.json'), read('failure-owner-stage.json'), read('failure-owner-stage-v2.json'));
+        expect(parent.trace).toEqual(trace);
+        expect(parent).toMatchObject({ operationCompletionEstablished: false,
+          rootCleanupEstablished: false, rawCausePublished: false, performanceCauseEstablished: false });
+        expect(read('failure-callback-timing-v1.json')).not.toMatch(/private|123456/u);
+      } else if (fault === 'occupied parent') expect(read('failure-callback-timing-v1.json')).toBe('retained bytes');
+      else expect(existsSync(join(fixture.attemptPath, 'failure-callback-timing-v1.json'))).toBe(false);
+      if (fault === 'occupied worker') expect(read('worker-callback-timing-v1.json')).toBe('retained bytes');
+      if (fault === 'missing trace' || fault === 'occupied owner V2' || fault === 'cleanup aggregate') {
+        expect(existsSync(join(fixture.attemptPath, 'worker-callback-timing-v1.json'))).toBe(false);
+      }
     });
 
   it.each(['invalid-timing', 'budget-exceeded'] as const)(

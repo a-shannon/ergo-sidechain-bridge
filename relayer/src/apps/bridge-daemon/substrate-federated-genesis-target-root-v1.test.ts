@@ -150,8 +150,11 @@ import { projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 }
   from '../../substrate-federated-native-two-cycle-root-phase-v1.js';
 import {
   projectSubstrateFederatedNativeTwoCycleRootFailurePhaseV2,
+  tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2,
 } from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
 import { projectNativeTwoCycleCycleStepFailureV1 }
+  from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { tagNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
   projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
@@ -162,8 +165,10 @@ import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
   projectSubstrateFederatedNativeSourceLockFailureStageV1 }
   from '../../substrate-federated-native-source-lock-failure-v1.js';
 import { projectNativeTwoCycleErgoNodePostCallbackStageV1,
-  tagIsolatedErgoNodePostCallbackStageV1 }
+  tagIsolatedErgoNodePostCallbackStageV1, tagIsolatedErgoNodeCompletionFailureReasonV1 }
   from '../../substrate-federated-isolated-devnet-ergo-node-post-callback-stage-v1.js';
+import { projectNativeTwoCycleCallbackTimingFailureV1 }
+  from '../../substrate-federated-native-two-cycle-callback-timing-v1.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_ERGO_NODE_STARTUP_PHASES_V1,
 } from '../../relayer-core/substrate-federated-isolated-devnet-managed-campaign-phase-v1.js';
@@ -2821,6 +2826,65 @@ describe('fresh FED target composition', () => {
     expect(mocked.sourceLock).toHaveBeenCalledOnce();
     assertDisposed();
   });
+
+  it.each(['budget', 'invalid clock', 'shutdown', 'root cleanup', 'owner aggregate',
+    'callback failure', 'recorder clock failure', 'stale error'] as const)(
+    'callback timing root join preserves original behavior for %s', async fault => {
+      const createProcess = mocked.process.getMockImplementation()!;
+      let now = 9_000_000_000;
+      const timing = vi.spyOn(performance, 'now').mockImplementation(() => {
+        now += 100;
+        return fault === 'recorder clock failure' ? NaN : now;
+      });
+      const primary = tagIsolatedErgoNodeCompletionFailureReasonV1(
+        tagIsolatedErgoNodePostCallbackStageV1(new Error('private completion failure'),
+          fault === 'shutdown' ? 'mining-shutdown' : 'completion-check'),
+        fault === 'invalid clock' ? 'invalid-timing' : 'budget-exceeded');
+      if (fault === 'stale error') {
+        tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+        tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'cycle-summary');
+      }
+      const thrown = fault === 'owner aggregate' ? new AggregateError([primary,
+        new Error('owner cleanup')], 'owner failure') : primary;
+      if (fault === 'callback failure') mocked.check.mockRejectedValueOnce(primary);
+      const originalCompile = mocked.compile.getMockImplementation()!;
+      mocked.compile.mockImplementationOnce(async (...args) => {
+        now += 10_000; return originalCompile(...args);
+      });
+      let callbackEnd = 0;
+      mocked.process.mockImplementation((...args) => {
+        const owner = createProcess(...args);
+        return { ...owner, withMiningActiveExecutionTarget: async (...phaseArgs: any[]) => {
+          await owner.withMiningActiveExecutionTarget(...phaseArgs);
+          callbackEnd = now;
+          now += 1_000_000; // Completion/owner cost must not enter the callback trace.
+          if (fault === 'root cleanup') closeNative.mockRejectedValueOnce(new Error('root cleanup'));
+          throw thrown;
+        } };
+      });
+      const failure = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+      timing.mockRestore();
+      if (fault === 'root cleanup') expect(failure.errors[0]).toBe(primary);
+      else expect(failure).toBe(thrown);
+      const trace = projectNativeTwoCycleCallbackTimingFailureV1(failure);
+      if (fault === 'budget') {
+        expect(trace?.segments[0]).toMatchObject({ step: 'pre-native-target' });
+        expect(trace!.segments.slice(0, 6).map(segment => segment.step)).toEqual([
+          'pre-native-target', 'reward-input-discovery', 'history-collection', 'genesis-compilation',
+          'genesis-materialization', 'native-process-start',
+        ]);
+        expect(trace!.segments.find(segment => segment.step === 'genesis-compilation')!.durationMs)
+          .toBeGreaterThanOrEqual(10_000);
+        expect(trace!.segments.at(-1)!.step).toBe('cycle-summary');
+        expect(trace!.segments.some(segment => segment.step === 'return-preparation')).toBe(false);
+        expect(trace!.totalDurationMs).toBeLessThan(100_000);
+        expect(trace!.totalDurationMs).toBe(callbackEnd - 9_000_000_100);
+        expect(trace!.segments.reduce((sum, segment) => sum + segment.durationMs, 0)).toBe(trace!.totalDurationMs);
+      } else expect(trace).toBeNull();
+      expect(mocked.anchor).not.toHaveBeenCalled();
+      expect(mocked.continuationPacket).not.toHaveBeenCalled();
+      expect(stop).toHaveBeenCalledOnce(); assertDisposed();
+    });
 
   it('retains the cycle step when cycle failure and owner cleanup both fail', async () => {
     const createProcess = mocked.process.getMockImplementation()!;

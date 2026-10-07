@@ -332,13 +332,19 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
   ])],
   ['substrate-federated-native-two-cycle-root-phase-v1.ts', new Set([
     'tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1',
+    'projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1',
     'SubstrateFederatedNativeTwoCycleRootPhaseV1',
   ])],
   ['substrate-federated-native-two-cycle-root-phase-v2.ts', new Set([
     'tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2',
   ])],
   ['substrate-federated-native-two-cycle-cycle-step-v1.ts', new Set([
-    'tagNativeTwoCycleCycleStepFailureV1', 'NativeTwoCycleCycleStepV1',
+    'tagNativeTwoCycleCycleStepFailureV1', 'projectOwnNativeTwoCycleCycleStepFailureV1',
+    'NativeTwoCycleCycleStepV1',
+  ])],
+  ['substrate-federated-native-two-cycle-callback-timing-v1.ts', new Set([
+    'beginNativeTwoCycleCallbackTimingV1', 'tagNativeTwoCycleCallbackTimingFailureV1',
+    'NativeTwoCycleCallbackTimingTraceV1',
   ])],
   ['substrate-federated-authority-safe-devnet-process-v1.ts', new Set([
     'createOwnedFederatedGenesisDevnetProcessSessionV1', 'assertOwnedFederatedGenesisDevnetTargetV1',
@@ -3145,7 +3151,9 @@ function collectCapabilityRestrictedLayerViolations(
                 'confirmSubstrateFederatedIsolatedDevnetWithdrawalV2'].includes(restricted.binding))
             || (restricted.moduleSpecifier === '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js'
               && ['submitSubstrateFederatedIsolatedDevnetWithdrawalV2',
-                'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'].includes(restricted.binding)));
+                'finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2'].includes(restricted.binding))
+            || (restricted.moduleSpecifier === '../../substrate-federated-native-two-cycle-callback-timing-v1.js'
+              && restricted.binding === 'beginNativeTwoCycleCallbackTimingV1'));
         if (
           !isReviewedEcdhCall
           && !isReviewedCryptoFactoryCall
