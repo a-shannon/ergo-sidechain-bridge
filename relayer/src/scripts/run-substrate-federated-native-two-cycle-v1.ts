@@ -25,7 +25,7 @@ import {
 } from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
 import { createNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
-import { createNativeTwoCycleParentTrackerContextV1 }
+import { createNativeTwoCycleParentTrackerContextV1, createNativeTwoCycleParentTrackerStatementV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { createNativeTwoCycleParentSourceLockStageV1 }
   from '../substrate-federated-native-source-lock-failure-v1.js';
@@ -227,6 +227,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))
       || existsSync(join(attemptPath, 'worker-cycle-step.json'))
       || existsSync(join(attemptPath, 'worker-tracker-context.json'))
+      || existsSync(join(attemptPath, 'worker-tracker-statement.json'))
+      || existsSync(join(attemptPath, 'failure-tracker-statement.json'))
       || existsSync(join(attemptPath, 'worker-source-lock-stage.json'))
       || existsSync(join(attemptPath, 'worker-setup-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage.json'))
@@ -512,6 +514,14 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
           writeNewFile(join(attemptPath, 'failure-tracker-context.json'),
             Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
             'native two-cycle parent tracker context companion');
+          const statement = createNativeTwoCycleParentTrackerStatementV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-tracker-context.json'), readCompanion('failure-cycle-step.json'),
+            readCompanion('worker-tracker-statement.json'), `${canonicalJson(companion)}\n`);
+          writeNewFile(join(attemptPath, 'failure-tracker-statement.json'),
+            Buffer.from(`${canonicalJson(statement)}\n`, 'utf8'),
+            'native two-cycle parent tracker statement companion');
         } catch {
           // Missing, invalid or occupied detail leaves terminal and older receipts intact.
         }

@@ -50,6 +50,7 @@ import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substr
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import {
   projectOwnSubstrateFederatedTrackerV2BuildFailurePhaseV1 as ownFailurePhase,
+  projectOwnSubstrateFederatedTrackerV2StatementFailureCheckV1 as ownStatementCheck,
   type SubstrateFederatedTrackerV2BuildFailurePhaseV1 as FailurePhase,
 } from './substrate-federated-tracker-context-failure-v1.js';
 import type { Eip12Box } from './unsigned-ergo-transaction.js';
@@ -219,6 +220,7 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
     finally { serialize.mockRestore(); }
     expect(failure).toBe(original);
     expect(ownFailurePhase(failure)).toBe('serialization');
+    expect(ownStatementCheck(failure)).toBeNull();
     expect(await build(input)).toEqual(context);
   });
 
@@ -354,10 +356,14 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
       ...vector.input.statement, profile,
       [key]: typeof original === 'number' ? original + 1 : 'ee'.repeat(original.length / 2),
     });
-    await expect(build({
+    const failure = await build({
       ...input, encodedStatementHex: changed.encodedStatementHex,
       ...anchorInput(changed.encodedStatementHex),
-    })).rejects.toThrow(/compiled application/);
+    }).then(() => undefined, error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toMatch(/compiled application/);
+    expect(ownFailurePhase(failure)).toBe('statement');
+    expect(ownStatementCheck(failure)).toBe('application-binding');
   });
 
   it('rejects profile, membership key/value/proof, anchor and admission horizon drift', async () => {
@@ -385,6 +391,27 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
     await expect(build({ ...input, ...anchorInput(statement.encodedStatementHex, '0401', 1_011) }))
       .rejects.toThrow(/anchor.*horizon/);
   });
+
+  it.each(['decoder', 'profile', 'admission horizon'] as const)(
+    'records the real statement admission check: %s', async fault => {
+      let candidate = { ...input };
+      if (fault === 'decoder') candidate.encodedStatementHex = '00';
+      if (fault === 'profile') {
+        const otherProfile = buildSubstrateFederatedCheckpointProfileV1({
+          ...vector.input.profile, federationEpoch: '8',
+        });
+        const changed = buildSubstrateFederatedCheckpointStatementV1({ ...vector.input.statement, profile: otherProfile });
+        candidate = { ...input, encodedStatementHex: changed.encodedStatementHex,
+          ...anchorInput(changed.encodedStatementHex) };
+      }
+      if (fault === 'admission horizon') candidate = { ...input,
+        ...anchorInput(statement.encodedStatementHex, '0401', 1_060) };
+      const failure = await build(candidate).then(() => undefined, error => error);
+      expect(ownFailurePhase(failure)).toBe('statement');
+      expect(ownStatementCheck(failure)).toBe(fault === 'decoder' ? 'decode'
+        : fault === 'profile' ? 'profile' : 'admission-horizon');
+      expect(await build(input)).toEqual(context);
+    });
 
   it('snapshots mutable caller parameters and exact-consumer input before awaiting', async () => {
     const box = structuredClone(trackerInputBox);
@@ -561,19 +588,25 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
         bridgeEventRootHex: '25'.repeat(32),
         profile,
       });
-      await expect(buildContinuation({
+      const failure = await buildContinuation({
         ...continuationInput,
         encodedStatementHex: changed.encodedStatementHex,
         ...anchorInput(changed.encodedStatementHex, '0401', 1_040),
-      })).rejects.toThrow(/heights must strictly increase/);
+      }).then(() => undefined, error => error);
+      expect(failure.message).toMatch(/heights must strictly increase/);
+      expect(ownFailurePhase(failure)).toBe('statement');
+      expect(ownStatementCheck(failure)).toBe('height-progression');
     },
   );
 
   it('rejects a non-increasing admission stamp and a stale predecessor box', async () => {
-    await expect(buildContinuation({
+    const failure = await buildContinuation({
       ...continuationInput,
       ...anchorInput(secondStatement.encodedStatementHex, '0401', 1_030),
-    })).rejects.toThrow(/heights must strictly increase/);
+    }).then(() => undefined, error => error);
+    expect(failure.message).toMatch(/heights must strictly increase/);
+    expect(ownFailurePhase(failure)).toBe('statement');
+    expect(ownStatementCheck(failure)).toBe('height-progression');
     const later = buildSubstrateFederatedCheckpointStatementV1({
       ...vector.input.statement,
       sourceNativeBlockHeight: '1002',

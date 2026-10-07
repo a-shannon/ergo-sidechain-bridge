@@ -13,7 +13,9 @@ import { createNativeTwoCycleWorkerRootPhaseV2 } from '../substrate-federated-na
 import { createNativeTwoCycleWorkerCycleStepV1 } from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { projectNativeTwoCycleCycleStepFailureV1 } from '../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { createNativeTwoCycleWorkerTrackerContextV1,
-  projectSubstrateFederatedTrackerV2BuildFailurePhaseV1 }
+  projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
+  createNativeTwoCycleWorkerTrackerStatementV1,
+  projectSubstrateFederatedTrackerV2StatementFailureCheckV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { createNativeTwoCycleWorkerSourceLockStageV1,
   projectSubstrateFederatedNativeSourceLockFailureStageV1 }
@@ -300,6 +302,19 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
           writeNewFile(join(invocation.attemptPath, 'worker-tracker-context.json'),
             Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
             'native two-cycle worker tracker context companion');
+          // Only a newly created preceding receipt may supply this optional join.
+          const check = projectSubstrateFederatedTrackerV2StatementFailureCheckV1(primaryFailure);
+          if (check !== null) {
+            const statement = createNativeTwoCycleWorkerTrackerStatementV1({
+              configSha256Hex: invocation.configSha256Hex,
+              expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+              pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+            }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+            `${canonicalJson(companion)}\n`, check);
+            writeNewFile(join(invocation.attemptPath, 'worker-tracker-statement.json'),
+              Buffer.from(`${canonicalJson(statement)}\n`, 'utf8'),
+              'native two-cycle worker tracker statement companion');
+          }
         }
       } catch {
         // Optional constructor detail cannot replace failure or release the claim.

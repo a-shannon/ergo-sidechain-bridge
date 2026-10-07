@@ -62,7 +62,10 @@ import { createNativeTwoCycleWorkerCycleStepV1, parseNativeTwoCycleParentCycleSt
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { SUBSTRATE_FEDERATED_TRACKER_V2_BUILD_FAILURE_PHASES_V1,
   tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
-  parseNativeTwoCycleParentTrackerContextV1 }
+  parseNativeTwoCycleParentTrackerContextV1,
+  SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1,
+  tagSubstrateFederatedTrackerV2StatementFailureCheckV1,
+  parseNativeTwoCycleParentTrackerStatementV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { SUBSTRATE_FEDERATED_NATIVE_SOURCE_LOCK_FAILURE_STAGES_V1,
   tagSubstrateFederatedNativeSourceLockFailureStageV1,
@@ -811,7 +814,8 @@ describe('native two-cycle parent and worker V1', () => {
   });
 
   it.each(['worker-root-phase.json', 'worker-root-phase-v2.json', 'worker-cycle-step.json',
-    'worker-tracker-context.json', 'worker-setup-stage.json', 'worker-owner-stage.json',
+    'worker-tracker-context.json', 'worker-tracker-statement.json', 'failure-tracker-statement.json',
+    'worker-setup-stage.json', 'worker-owner-stage.json',
     'worker-owner-stage-v2.json', 'worker-source-lock-stage.json'] as const)(
     'rejects a worker root phase companion %s alongside a success transport', async artifact => {
     const fixture = commandFixture();
@@ -1163,6 +1167,94 @@ describe('native two-cycle parent and worker V1', () => {
         .toBe(JSON.parse(read('failure-cycle-step.json')).receiptDigestHex);
       expect(text).not.toContain('private');
       expect(mocked.root).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle =>
+    SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1.map(check => ({ cycle, check }))))(
+    'carries the real catch path with synthetic $cycle statement $check', async ({ cycle, check }) => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(new Error('private tracker cause'), 'statement');
+      tagSubstrateFederatedTrackerV2StatementFailureCheckV1(primary, check);
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, cycle);
+      tagNativeTwoCycleCycleStepFailureV1(primary, cycle, 'tracker-context');
+      const failureValue = new AggregateError([primary, tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(new Error(), 'cleanup')]);
+      mocked.root.mockRejectedValueOnce(failureValue);
+      mocked.process.mockImplementationOnce(async input => {
+        await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+        throw new Error('unexpected worker success');
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toBe(failureValue);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      const terminal = JSON.parse(read('failure.json'));
+      const detail = parseNativeTwoCycleParentTrackerStatementV1(read('failure-tracker-statement.json'),
+        failureBindings(fixture), terminal.receiptDigestHex, read('worker-failure.json'), read('worker-root-phase-v2.json'),
+        read('worker-cycle-step.json'), read('worker-tracker-context.json'), read('failure-cycle-step.json'),
+        read('worker-tracker-statement.json'), read('failure-tracker-context.json'));
+      expect(detail).toMatchObject({ cycle, statementCheck: check, trackerContextPhase: 'statement',
+        operationCompletionEstablished: false, rootCleanupEstablished: false, rawCausePublished: false });
+      expect(read('failure-tracker-statement.json')).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['missing check', 'conflicting check', 'occupied worker', 'directory worker', 'occupied worker context',
+    'tampered worker', 'foreign worker', 'changed worker context', 'occupied parent', 'occupied parent context'] as const)(
+    'preserves older receipts and primary when statement detail has %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(new Error('private tracker cause'), 'statement');
+      if (fault !== 'missing check') tagSubstrateFederatedTrackerV2StatementFailureCheckV1(primary, 'decode');
+      if (fault === 'conflicting check') tagSubstrateFederatedTrackerV2StatementFailureCheckV1(primary, 'profile');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'tracker-context');
+      mocked.root.mockRejectedValueOnce(primary);
+      let preserved: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        const path = join(fixture.attemptPath, 'worker-tracker-statement.json');
+        if (fault === 'occupied worker') writeFileSync(path, 'retained worker statement bytes');
+        if (fault === 'directory worker') mkdirSync(path);
+        if (fault === 'occupied worker context') writeFileSync(join(fixture.attemptPath, 'worker-tracker-context.json'), 'retained worker context bytes');
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (error) {
+          expect(error).toBe(primary);
+          const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+          if (fault === 'tampered worker' || fault === 'foreign worker') {
+            const detail = JSON.parse(read('worker-tracker-statement.json'));
+            const { receiptDigestHex: ignored, ...body } = { ...detail,
+              [fault === 'foreign worker' ? 'configSha256Hex' : 'workerTrackerContextReceiptDigestHex']: '9'.repeat(64) };
+            void ignored;
+            writeFileSync(path, `${canonicalJson({ ...body, receiptDigestHex: sha256CanonicalJson(body,
+              'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_TRACKER_STATEMENT_V1') })}\n`);
+          }
+          if (fault === 'changed worker context') {
+            const detail = JSON.parse(read('worker-tracker-context.json'));
+            const { receiptDigestHex: ignored, ...body } = { ...detail, trackerContextPhase: 'membership' }; void ignored;
+            writeFileSync(join(fixture.attemptPath, 'worker-tracker-context.json'), `${canonicalJson({ ...body,
+              receiptDigestHex: sha256CanonicalJson(body, 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_TRACKER_CONTEXT_V1') })}\n`);
+          }
+          if (fault === 'occupied parent') writeFileSync(join(fixture.attemptPath, 'failure-tracker-statement.json'), 'retained parent statement bytes');
+          if (fault === 'occupied parent context') writeFileSync(join(fixture.attemptPath, 'failure-tracker-context.json'), 'retained parent context bytes');
+          preserved = Object.fromEntries(['worker-failure.json', 'worker-root-phase.json', 'worker-root-phase-v2.json',
+            'worker-cycle-step.json', 'worker-tracker-context.json'].map(name => [name, read(name)]));
+          throw error;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath])).rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(preserved)) expect(read(name)).toBe(bytes);
+      for (const name of ['failure-diagnostic.json', 'failure-root-phase.json', 'failure-root-phase-v2.json', 'failure-cycle-step.json']) {
+        expect(existsSync(join(fixture.attemptPath, name))).toBe(true);
+      }
+      if (fault === 'occupied parent') expect(read('failure-tracker-statement.json')).toBe('retained parent statement bytes');
+      else expect(existsSync(join(fixture.attemptPath, 'failure-tracker-statement.json'))).toBe(false);
+      if (fault === 'occupied worker') expect(read('worker-tracker-statement.json')).toBe('retained worker statement bytes');
+      if (fault === 'occupied worker context') expect(existsSync(join(fixture.attemptPath, 'worker-tracker-statement.json'))).toBe(false);
+      if (fault === 'occupied parent context') expect(read('failure-tracker-context.json')).toBe('retained parent context bytes');
+      else if (fault !== 'occupied worker context') expect(existsSync(join(fixture.attemptPath, 'failure-tracker-context.json'))).toBe(true);
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
     });
 

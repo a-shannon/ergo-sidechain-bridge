@@ -20,6 +20,7 @@ import {
 import { verifyErgoExtensionMembership } from './ergo-settlement-core/ergo-extension-membership.js';
 import {
   decodeSubstrateFederatedCheckpointStatementV1ForAdmission,
+  projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1,
   encodeSubstrateFederatedCheckpointExtensionValueV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
@@ -29,7 +30,9 @@ import {
 import { canonicalJson } from './strict-json.js';
 import {
   tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
+  tagSubstrateFederatedTrackerV2StatementFailureCheckV1,
   type SubstrateFederatedTrackerV2BuildFailurePhaseV1,
+  type SubstrateFederatedTrackerV2StatementFailureCheckV1,
 } from './substrate-federated-tracker-context-failure-v1.js';
 import type { SubstrateFederatedTrackerCompilerRequestV2 } from './substrate-federated-tracker-compiler-v2.js';
 import {
@@ -210,6 +213,7 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   previousContext: Readonly<SubstrateFederatedTrackerV2Context> | undefined,
 ): Promise<Readonly<SubstrateFederatedTrackerV2Context>> {
   let phase: SubstrateFederatedTrackerV2BuildFailurePhaseV1 = 'ingress';
+  let statementCheck: SubstrateFederatedTrackerV2StatementFailureCheckV1 | 'admission' | undefined;
   try {
   // Provenance-bearing objects are already deeply frozen. Copy mutable ingress
   // and capture every caller property before the first asynchronous boundary.
@@ -246,15 +250,18 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   const anchor = headers.anchorHeader;
   const anchorHeight = positiveInt(anchor.height, 'anchor height');
   phase = 'statement';
+  statementCheck = 'admission';
   const statement = decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
     encodedStatementHex, profile, currentErgoHeight,
   );
   const sourceNativeBlockHeight = BigInt(statement.sourceNativeBlockHeight);
+  statementCheck = 'height-progression';
   if (previousMetadata !== undefined
     && (sourceNativeBlockHeight <= previousMetadata.latestSourceNativeBlockHeight
       || currentErgoHeight <= previousMetadata.latestAdmissionErgoHeight)) {
     throw new Error('federated tracker V2 continuation heights must strictly increase');
   }
+  statementCheck = 'application-binding';
   for (const key of Object.keys(application) as (keyof typeof application)[]) {
     if (application[key] !== statement[key]) {
       throw new Error(`federated tracker V2 statement differs from compiled application: ${key}`);
@@ -408,6 +415,11 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
   }));
   return context;
   } catch (error) {
+    if (phase === 'statement' && statementCheck !== undefined) {
+      const check = statementCheck === 'admission'
+        ? projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1(error) : statementCheck;
+      if (check !== null) tagSubstrateFederatedTrackerV2StatementFailureCheckV1(error, check);
+    }
     throw tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(error, phase);
   }
 }

@@ -252,6 +252,197 @@ function asError(value: unknown): Error | null {
   catch { return null; }
 }
 
+export const SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1 = Object.freeze([
+  'decode', 'profile', 'admission-horizon', 'height-progression', 'application-binding',
+] as const);
+export type SubstrateFederatedTrackerV2StatementFailureCheckV1 =
+  typeof SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1[number];
+const STATEMENT_CHECKS = new WeakMap<Error, SubstrateFederatedTrackerV2StatementFailureCheckV1 | null>();
+
+/** Own invocation-local check metadata; never inspect or replace the thrown value. */
+export function tagSubstrateFederatedTrackerV2StatementFailureCheckV1<T>(
+  value: T, check: SubstrateFederatedTrackerV2StatementFailureCheckV1,
+): T {
+  const error = asError(value);
+  if (error === null) return value;
+  if (!isStatementCheck(check)) STATEMENT_CHECKS.set(error, null);
+  else {
+    const previous = STATEMENT_CHECKS.get(error);
+    if (previous === undefined) STATEMENT_CHECKS.set(error, check);
+    else if (previous !== check) STATEMENT_CHECKS.set(error, null);
+  }
+  return value;
+}
+
+export function projectOwnSubstrateFederatedTrackerV2StatementFailureCheckV1(
+  value: unknown,
+): SubstrateFederatedTrackerV2StatementFailureCheckV1 | null {
+  const error = asError(value);
+  return error === null ? null : STATEMENT_CHECKS.get(error) ?? null;
+}
+
+/** Bind the check to the same unique own statement producer validated by the V1 phase projector. */
+export function projectSubstrateFederatedTrackerV2StatementFailureCheckV1(
+  value: unknown,
+): SubstrateFederatedTrackerV2StatementFailureCheckV1 | null {
+  try {
+    if (projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(value) !== 'statement') return null;
+    const step = projectNativeTwoCycleCycleStepFailureV1(value);
+    if (step?.step !== 'tracker-context') return null;
+    const pending = [{ value, cleanupAncestor: false }];
+    const seen = new WeakMap<Error, number>();
+    let result: SubstrateFederatedTrackerV2StatementFailureCheckV1 | null = null;
+    let tagged = 0;
+    let inspected = 0;
+    while (pending.length > 0) {
+      if (++inspected > MAX_INSPECTED_VALUES) return null;
+      const next = pending.pop()!;
+      const current = asError(next.value);
+      if (current === null || STATEMENT_CHECKS.get(current) === null) return null;
+      const ownRoot = projectOwnSubstrateFederatedNativeTwoCycleRootFailurePhaseV1(current);
+      const cleanupAncestor = next.cleanupAncestor || ownRoot === 'cleanup';
+      const check = STATEMENT_CHECKS.get(current);
+      if (check !== undefined && cleanupAncestor) return null;
+      const context = cleanupAncestor ? 2 : 1;
+      const previous = seen.get(current) ?? 0;
+      if ((previous & context) !== 0) continue;
+      seen.set(current, previous | context);
+      if (check !== undefined) {
+        if (++tagged > 1 || ownRoot !== step.cycle
+          || projectOwnSubstrateFederatedTrackerV2BuildFailurePhaseV1(current) !== 'statement') return null;
+        const ownStep = projectOwnNativeTwoCycleCycleStepFailureV1(current);
+        if (ownStep?.cycle !== step.cycle || ownStep.step !== 'tracker-context') return null;
+        result = check;
+      }
+      if (current instanceof AggregateError) {
+        const children: unknown = Object.getOwnPropertyDescriptor(current, 'errors')?.value;
+        if (!Array.isArray(children)) return null;
+        const length: unknown = Object.getOwnPropertyDescriptor(children, 'length')?.value;
+        if (!Number.isSafeInteger(length) || (length as number) < 0
+          || (length as number) > MAX_INSPECTED_VALUES - inspected) return null;
+        for (let index = 0; index < (length as number); index++) {
+          const descriptor = Object.getOwnPropertyDescriptor(children, String(index));
+          if (descriptor === undefined || !('value' in descriptor)) return null;
+          pending.push({ value: descriptor.value, cleanupAncestor });
+        }
+      }
+    }
+    return result;
+  } catch { return null; }
+}
+
+const STATEMENT_WORKER_SCHEMA = 'e2s.substrate-federated-native-two-cycle-worker-tracker-statement.v1';
+const STATEMENT_PARENT_SCHEMA = 'e2s.substrate-federated-native-two-cycle-parent-tracker-statement.v1';
+const STATEMENT_WORKER_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_TRACKER_STATEMENT_V1';
+const STATEMENT_PARENT_DOMAIN = 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_PARENT_TRACKER_STATEMENT_V1';
+const STATEMENT_WORKER_KEYS = [...WORKER_KEYS, 'workerTrackerContextReceiptDigestHex', 'statementCheck'];
+const STATEMENT_PARENT_KEYS = [...PARENT_KEYS, 'parentTrackerContextReceiptDigestHex',
+  'workerTrackerStatementReceiptDigestHex', 'statementCheck'];
+
+export interface NativeTwoCycleWorkerTrackerStatementV1
+  extends Omit<NativeTwoCycleWorkerTrackerContextV1, 'schema' | 'status' | 'trackerContextPhase'> {
+  readonly schema: typeof STATEMENT_WORKER_SCHEMA;
+  readonly status: 'tracker_statement_check_failed';
+  readonly trackerContextPhase: 'statement';
+  readonly workerTrackerContextReceiptDigestHex: string;
+  readonly statementCheck: SubstrateFederatedTrackerV2StatementFailureCheckV1;
+}
+
+export interface NativeTwoCycleParentTrackerStatementV1
+  extends Omit<NativeTwoCycleParentTrackerContextV1, 'schema' | 'status' | 'trackerContextPhase'> {
+  readonly schema: typeof STATEMENT_PARENT_SCHEMA;
+  readonly status: 'tracker_statement_diagnostics_validated';
+  readonly trackerContextPhase: 'statement';
+  readonly parentTrackerContextReceiptDigestHex: string;
+  readonly workerTrackerStatementReceiptDigestHex: string;
+  readonly statementCheck: SubstrateFederatedTrackerV2StatementFailureCheckV1;
+}
+
+export function createNativeTwoCycleWorkerTrackerStatementV1(
+  bindings: Readonly<NativeTwoCycleFailureBindingsV1>, workerFailureText: string,
+  workerRootPhaseV2Text: string, workerCycleStepText: string, workerTrackerContextText: string,
+  check: SubstrateFederatedTrackerV2StatementFailureCheckV1,
+): Readonly<NativeTwoCycleWorkerTrackerStatementV1> {
+  const context = parseNativeTwoCycleWorkerTrackerContextV1(workerTrackerContextText, bindings,
+    workerFailureText, workerRootPhaseV2Text, workerCycleStepText);
+  if (context.trackerContextPhase !== 'statement') {
+    throw new Error('native two-cycle tracker statement requires statement phase');
+  }
+  const { receiptDigestHex, ...contextBody } = context;
+  const body = Object.freeze({ ...contextBody, schema: STATEMENT_WORKER_SCHEMA,
+    status: 'tracker_statement_check_failed' as const, trackerContextPhase: 'statement' as const,
+    workerTrackerContextReceiptDigestHex: receiptDigestHex,
+    statementCheck: validateStatementCheck(check) });
+  return Object.freeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, STATEMENT_WORKER_DOMAIN) });
+}
+
+export function parseNativeTwoCycleWorkerTrackerStatementV1(
+  text: string, bindings: Readonly<NativeTwoCycleFailureBindingsV1>, workerFailureText: string,
+  workerRootPhaseV2Text: string, workerCycleStepText: string, workerTrackerContextText: string,
+): Readonly<NativeTwoCycleWorkerTrackerStatementV1> {
+  const fields = exactRecord(parseText(text), STATEMENT_WORKER_KEYS);
+  const expected = createNativeTwoCycleWorkerTrackerStatementV1(bindings, workerFailureText,
+    workerRootPhaseV2Text, workerCycleStepText, workerTrackerContextText,
+    validateStatementCheck(fields.statementCheck));
+  if (canonicalJson(fields) !== canonicalJson(expected)) {
+    throw new Error('native two-cycle tracker statement identity, claims, lineage or digest differ');
+  }
+  return expected;
+}
+
+export function createNativeTwoCycleParentTrackerStatementV1(
+  bindings: Readonly<NativeTwoCycleFailureBindingsV1>, failureReceiptDigestHex: string,
+  workerFailureText: string, workerRootPhaseV2Text: string, workerCycleStepText: string,
+  workerTrackerContextText: string, parentCycleStepText: string,
+  workerTrackerStatementText: string, parentTrackerContextText: string,
+): Readonly<NativeTwoCycleParentTrackerStatementV1> {
+  const worker = parseNativeTwoCycleWorkerTrackerStatementV1(workerTrackerStatementText, bindings,
+    workerFailureText, workerRootPhaseV2Text, workerCycleStepText, workerTrackerContextText);
+  const context = parseNativeTwoCycleParentTrackerContextV1(parentTrackerContextText, bindings,
+    failureReceiptDigestHex, workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+    workerTrackerContextText, parentCycleStepText);
+  if (context.trackerContextPhase !== 'statement'
+    || context.cycle !== worker.cycle || context.step !== worker.step
+    || context.workerTrackerContextReceiptDigestHex !== worker.workerTrackerContextReceiptDigestHex
+    || context.workerFailureReceiptDigestHex !== worker.workerFailureReceiptDigestHex
+    || context.workerRootPhaseV2ReceiptDigestHex !== worker.workerRootPhaseV2ReceiptDigestHex
+    || context.workerCycleStepReceiptDigestHex !== worker.workerCycleStepReceiptDigestHex) {
+    throw new Error('native two-cycle parent tracker statement ancestry differs');
+  }
+  const { receiptDigestHex, ...contextBody } = context;
+  const body = Object.freeze({ ...contextBody, schema: STATEMENT_PARENT_SCHEMA,
+    status: 'tracker_statement_diagnostics_validated' as const, trackerContextPhase: 'statement' as const,
+    parentTrackerContextReceiptDigestHex: receiptDigestHex,
+    workerTrackerStatementReceiptDigestHex: worker.receiptDigestHex,
+    statementCheck: worker.statementCheck });
+  return Object.freeze({ ...body, receiptDigestHex: sha256CanonicalJson(body, STATEMENT_PARENT_DOMAIN) });
+}
+
+export function parseNativeTwoCycleParentTrackerStatementV1(
+  text: string, bindings: Readonly<NativeTwoCycleFailureBindingsV1>, failureReceiptDigestHex: string,
+  workerFailureText: string, workerRootPhaseV2Text: string, workerCycleStepText: string,
+  workerTrackerContextText: string, parentCycleStepText: string,
+  workerTrackerStatementText: string, parentTrackerContextText: string,
+): Readonly<NativeTwoCycleParentTrackerStatementV1> {
+  const fields = exactRecord(parseText(text), STATEMENT_PARENT_KEYS);
+  const expected = createNativeTwoCycleParentTrackerStatementV1(bindings, failureReceiptDigestHex,
+    workerFailureText, workerRootPhaseV2Text, workerCycleStepText, workerTrackerContextText,
+    parentCycleStepText, workerTrackerStatementText, parentTrackerContextText);
+  if (canonicalJson(fields) !== canonicalJson(expected)) {
+    throw new Error('native two-cycle parent tracker statement identity, claims, lineage or digest differ');
+  }
+  return expected;
+}
+
+function isStatementCheck(value: unknown): value is SubstrateFederatedTrackerV2StatementFailureCheckV1 {
+  return typeof value === 'string' && SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1
+    .includes(value as SubstrateFederatedTrackerV2StatementFailureCheckV1);
+}
+function validateStatementCheck(value: unknown): SubstrateFederatedTrackerV2StatementFailureCheckV1 {
+  if (!isStatementCheck(value)) throw new Error('native two-cycle tracker statement check is unsupported');
+  return value;
+}
+
 function isPhase(value: unknown): value is SubstrateFederatedTrackerV2BuildFailurePhaseV1 {
   return typeof value === 'string'
     && SUBSTRATE_FEDERATED_TRACKER_V2_BUILD_FAILURE_PHASES_V1.includes(

@@ -154,7 +154,9 @@ import {
 import { projectNativeTwoCycleCycleStepFailureV1 }
   from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
 import { tagSubstrateFederatedTrackerV2BuildFailurePhaseV1,
-  projectSubstrateFederatedTrackerV2BuildFailurePhaseV1 }
+  projectSubstrateFederatedTrackerV2BuildFailurePhaseV1,
+  tagSubstrateFederatedTrackerV2StatementFailureCheckV1,
+  projectSubstrateFederatedTrackerV2StatementFailureCheckV1 }
   from '../../substrate-federated-tracker-context-failure-v1.js';
 import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
   projectSubstrateFederatedNativeSourceLockFailureStageV1 }
@@ -2713,6 +2715,7 @@ describe('fresh FED target composition', () => {
     async ({ cycle, cleanupFailure }) => {
       const primary = tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(
         new Error('unpublished tracker constructor failure'), 'statement');
+      tagSubstrateFederatedTrackerV2StatementFailureCheckV1(primary, 'application-binding');
       (cycle === 'cycle-1' ? mocked.context : mocked.continuationContext)
         .mockRejectedValueOnce(primary);
       const cleanup = new Error('unpublished stop failure');
@@ -2725,6 +2728,7 @@ describe('fresh FED target composition', () => {
       expect(projectNativeTwoCycleCycleStepFailureV1(failure))
         .toEqual({ cycle, step: 'tracker-context' });
       expect(projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(failure)).toBe('statement');
+      expect(projectSubstrateFederatedTrackerV2StatementFailureCheckV1(failure)).toBe('application-binding');
       expect(mocked.recovery).not.toHaveBeenCalled();
       expect(stop).toHaveBeenCalledOnce();
       expect(closeNative).toHaveBeenCalledTimes(2);

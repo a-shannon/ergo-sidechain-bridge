@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-06
+Updated: 2026-10-07
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,10 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–45 are permanently consumed or held. C42 issued the
+**Now:** Campaigns 24–47 are permanently consumed or held. The bounded tracker
+statement-to-diagnostic join is closed locally; guard its publication and require
+its exact-head CI before any entirely separate fresh campaign admission.
+C42 issued the
 canonical command once but lost its tool session after `worker-start.json` and
 has no parent terminal artifact; it is incomplete/ambiguous. A no-key detached
 process-lifetime falsifier preceded separate fresh C43 admission. C43 issued
@@ -160,19 +163,60 @@ bindings and import-shape drift. Nine isolated mutations operate on in-memory
 source text with a genuine-source positive control. Existing capability
 assertions, shard selection and budgets remain unchanged. All 208 cases pass
 across the sixteen canonical shards; TypeScript, the layered import check and
-independent exact-byte correction review pass. Close the final source-only claims
-and guarded publication, then require new-head CI. Reuse the
+independent exact-byte correction review pass. The correction is published at
+`b2377468023a873923ac65c9fe65202c6e94dae0`; all three required jobs passed in
+exact [run 37496006328](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37496006328). Reuse the
 unchanged runtime diagnostic, protocol, WASM/JVM and architecture evidence.
 
-**Next:** Guard and publish this bounded capability-test correction, then require
-all three jobs on its exact new head. After green CI, admit one distinct fresh complete
-campaign, normally C46: new config/head/tree/source-index, four pinned public
-callers, verified sources/tools, empty outputs, exclusive processes, fees before
-each frozen anchor, disposable custody, independent admission review and at least
-100 GiB free in the final launch shell. No C45 config, caller, claim, receipt or
-session supplies authority. Stopped-state recovery, operator preparation and
-FED-7 retain their separate obligations. No timeout increase or provenance
-substitution.
+C46 was dispatched after an input review that omitted the complete Ergo source
+closure and failed once at `ergo-build`. Its raw cause,
+operation completion and custody disposal remain unknown. A separate public
+no-key diagnostic exposed incorrect staged patch metadata in the preparation
+recipe: canonical Ergo source validation requires the unstaged pinned patch.
+Earlier input-helper checks omitted that complete source predicate. A separately
+fresh unstaged source, full baseline before claim and the unchanged canonical
+builder produced a real assembly successfully. This establishes the corrected
+build preparation, not C46's historical cause or campaign acceptance.
+
+C47 then passed its fresh complete source/input review, including the full Ergo
+baseline and exact boolean report before command claim. It issued the canonical
+command once on the same green source head. The launcher finished at
+`2026-10-06T23:15:34.0937907Z` with integer exit 1, null exception, parent failure
+and no result. Independent public graph reconstruction identifies
+`execution_failure`, `root-or-cleanup`, `cycle-1/tracker-context`, phase
+`statement`. The zero cleanup-error count establishes neither root cleanup nor
+custody destruction. Worker ancestry is linked opaque digests only; raw cause,
+operation completion and a specific failed statement predicate remain unknown.
+The obsolete C47 monitor was deleted. Do not retry, resume or inspect its private
+historical runtime state.
+
+The bounded statement-to-worker-to-parent diagnostic join is closed locally.
+The `statement` label remains active during decoder/profile/admission-horizon
+validation, continuation height progression and compiled-application equality.
+Current source mapping supports no concrete predicate defect. Five closed,
+invocation-local check labels distinguish those branches through separate
+optional worker/parent companions. The implementation retains exact thrown
+values, successful context construction, older receipt formats and domains,
+predicates, quorum, time budgets and custody rules. Unknown, conflicting or
+cleanup-derived detail is omitted. Missing, invalid or occupied detail preserves
+the primary failure and preceding evidence; success rejects both new failure
+companion filenames. Focused helper, genuine tracker, metadata/codec, composed
+worker/parent, legacy admission and actual root-catch cases pass, with
+TypeScript, layered imports and architecture checks. The final conflict-storage
+change was rechecked with 161 selected metadata/composed cases; root coverage
+uses mocked tracker builders and does not establish node acceptance. Independent
+exact-input source/negative-matrix review gives GO, no actionable P1/P2.
+This prospective diagnostic cannot assign C47's historical cause or authorize
+another attempt.
+
+**Next:** Guard and publish this bounded source checkpoint, then verify all three
+required jobs on its exact new head. Only after that may one entirely separate
+fresh campaign be admitted: new config/head/tree/source-index, four new pinned
+callers, complete sources/tools, empty outputs, process/port exclusivity,
+confirmed external fees before each anchor, disposable custody, independent
+admission review and at least 100 GiB free in the final launch shell. Nothing
+from C47 supplies execution authority. Stopped-state recovery, operator
+preparation, FED-7 and real external acceptance retain separate obligations.
 
 ### Prior checkpoint notes (historical)
 
@@ -1357,18 +1401,18 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Check-only session -> exact source-text capability guard | Guard and promote the reviewed narrow-binding correction, then verify its exact-head CI | All 208 launch cases across sixteen canonical shards, TypeScript, layered imports and independent correction review pass. The existing runtime diagnostic evidence remains reusable; these source cases do not erase run 37447613295's failure. C45's cause and disposal remain unknown. |
+| **Now** | Reviewed tracker statement diagnostic -> exact published source | Guard the five-check producer/worker/parent checkpoint and verify its exact-head CI | Focused source/consumer negatives, TypeScript, architecture/import checks and independent exact-input review pass. C47's specific predicate, cause and disposal remain unknown; no new campaign is admitted |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–45 remain consumed or held. C42 is incomplete/ambiguous without a
-parent terminal artifact; C43, C44 and C45 failed once as recorded in Current
-Focus. None authorizes retry, resume or custody reuse. The earlier timing and
-tracker checkpoints are closed; the current source-lock diagnostic requires
-guarded promotion and its exact-head CI before entirely fresh admission of the
-next distinct campaign. Preserve independent admission review. Reopen only gates
+Campaigns 24–47 remain consumed or held. C42 is incomplete/ambiguous without a
+parent terminal artifact; C43–C47 failed once as recorded in Current Focus and
+the active handoff. None authorizes retry, resume or custody reuse. The earlier
+timing, tracker-phase and source-lock checkpoints are closed; the selected
+tracker statement diagnostic requires guarded promotion and its exact-head CI
+before entirely fresh admission of the next distinct campaign. Preserve independent admission review. Reopen only gates
 invalidated by changed inputs; unchanged candidate evidence remains reusable.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
@@ -1396,6 +1440,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
+| C47 tracker statement check discriminator (closed locally) | Preserve existing tracker-phase/terminal formats and predicates while distinguishing future decode/profile/admission-horizon, continuation height progression and compiled-application binding failures through separate optional companions | Genuine constructor, canonical codec/identity/domain/claim negatives, composed failure preservation and success rejection pass. Final changed conflict storage has a 161-case targeted recheck; independent exact-input review GO. Publication and exact-head CI remain due. C47 supplies only the coarse phase, never historical cause or new execution authority |
 | C43 owner completion timing branch | Preserve existing terminal/V1/V2/owner-stage bytes and digest domains, the 4,680,000 ms budget, time/quorum rules, custody and permanent attempt holds while distinguishing future invalid-timing from budget-exceeded owner failures | The local predicate-to-parent join and cleanup-aggregate correction pass 426 affected tests, TypeScript and import checks under pinned Node 24.14.0. Independent correction review found no remaining P0-P2 issue; publication guards and exact-head CI remain due before fresh admission. C43's raw cause remains unknown |
 | Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. The exact-head checkpoint is already closed; prepare separately fresh sources, tools, caches, shallow build and output parents plus custody and fee inputs; revalidate every required admission, custody and fee input before selecting one campaign. C38 is consumed/held after one failed invocation; do not retry or resume it, and its diagnostics cannot supply the next admission |
 | C37 Frontier compiler boundary (local compiler discriminator closed 2026-10-03) | Isolate the named compiler boundary using public locked sources and the production build environment without campaign execution authority | Full offline locked metadata and tiny native Rust/MSVC link-and-run passed. One deep FED diagnostic failed with nested winapi LNK1104; a no-key differential demonstrated scoped path sensitivity. A separate fresh FED compiler diagnostic using a shallow build parent passed on local dd7e054, with actual node/WASM hashes and both disposals/exact post-disposal denials verified. Independent review passed. All three diagnostic outputs are consumed, never retryable or campaign authority. No build-spec, node or signing ran. C37 historical cause and cleanup remain unknown; no two-cycle acceptance. C38 was admitted separately and is recorded in Current Focus as consumed/held after its failed invocation |
