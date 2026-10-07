@@ -30,6 +30,7 @@ import {
 } from './adapters/frontier-backing-read-agreement.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
 import { parseStrictJson } from './strict-json.js';
+import { observeWindowsTcpListenersV1 } from './windows-tcp-listener-observation-v1.js';
 
 export const SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_PROCESS_V1_SCHEMA =
   'e2s.substrate-federated-authority-safe-devnet-process.v1' as const;
@@ -2163,59 +2164,10 @@ function listenerBindings(ports: readonly number[]): Map<number, ListenerBinding
 }
 
 function windowsListenerBindings(ports: readonly number[]): Map<number, ListenerBinding[]> {
-  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
-  if (!systemRoot || !isAbsolute(systemRoot)) {
-    throw new Error('Windows SystemRoot is unavailable for listener ownership');
-  }
-  const script = [
-    `$ports=@(${ports.join(',')})`,
-    'try { $rows=@(Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop '
-      + '| Select-Object LocalAddress,LocalPort,OwningProcess) } '
-      + 'catch { if ($_.FullyQualifiedErrorId '
-      + '-like "CmdletizationQuery_NotFound,Get-NetTCPConnection*") '
-      + '{ $rows=@() } else { throw } }',
-    'ConvertTo-Json -Compress -InputObject $rows',
-  ].join('; ');
-  const result = spawnSync(
-    resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
-    {
-      cwd: systemRoot,
-      env: minimalEnvironment(),
-      encoding: 'utf8',
-      timeout: 30_000,
-      maxBuffer: 256 * 1024,
-      windowsHide: true,
-    },
-  );
-  if (
-    result.error
-    || result.signal !== null
-    || result.status !== 0
-    || result.stderr.trim() !== ''
-  ) {
-    throw new Error('Windows listener ownership inspection failed');
-  }
-  const parsed = JSON.parse(result.stdout || '[]') as unknown;
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  const rows = observeWindowsTcpListenersV1(ports);
   const bindings = emptyBindingMap(ports);
   for (const row of rows) {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      throw new Error('Windows listener ownership output is malformed');
-    }
-    const record = row as Record<string, unknown>;
-    const localAddress = record.LocalAddress;
-    const localPort = Number(record.LocalPort);
-    const owningProcess = Number(record.OwningProcess);
-    if (
-      typeof localAddress !== 'string'
-      || !bindings.has(localPort)
-      || !Number.isSafeInteger(owningProcess)
-      || owningProcess <= 0
-    ) {
-      throw new Error('Windows listener ownership row is malformed');
-    }
-    bindings.get(localPort)!.push({ pid: owningProcess, localAddress });
+    bindings.get(row.localPort)!.push({ pid: row.pid, localAddress: row.localAddress });
   }
   return bindings;
 }

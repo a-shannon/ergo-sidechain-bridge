@@ -28,14 +28,32 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–48 are permanently consumed or held. The tracker statement
-diagnostic is published and its exact-head CI passed. C48's public terminal graph
-identifies a first mining-active callback completion-budget failure. The bounded
-prospective step-timing producer-to-public-diagnostic join is closed locally;
-guard its publication and verify exact-head CI before fresh admission. It will
-identify costly intervals before changing the runtime schedule. Preserve the 78-minute
-budget, existing receipts, protocol predicates and custody; no new campaign is
-admitted and no performance improvement is established.
+**Now:** Campaigns 24–49 are permanently consumed or held. The callback timing
+diagnostic is published at `0c7cf255d1c660afc7eb07eb401c9566ac071f94`; all three
+required jobs passed in exact [run 37587166485](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37587166485).
+Separately admitted C49 failed once at the first callback's completion check.
+Independent review validates its current public parent failure graph and 31
+quantized timing segments: total 5,548,100 ms, including 3,732,400 ms in
+`native-mint-burn` and 679,700 ms in `checkpoint-attestation`. These intervals
+identify where to investigate; they establish neither internal cause nor
+operation completion, cleanup or custody disposal. Worker ancestry remains
+opaque linked digests. Do not retry C49 or inspect its private runtime state.
+
+The bounded no-key listener-query comparison passed on six fresh synthetic
+loopback listeners: all three selected-port tuple sets matched; legacy CIM
+queries took 2,370.7–2,679.0 ms and `netstat` queries 43.0–50.5 ms. This measures
+query cost only, without proving production-observer equivalence or C49's internal
+cause. The candidate connects a fresh bounded, port-complete `netstat`
+producer to the existing Frontier owner. It retains every ownership check and all
+competing-PID, IPv4/IPv6 wildcard, malformed-output and subprocess-failure
+refusals. Preserve the 78-minute budget, receipts, protocol predicates and
+custody. The local checks pass: 78 parser/subprocess cases, 8 existing owner cases,
+119 lifecycle cases, 316 architecture cases, TypeScript and the import guard.
+The lifecycle matrix includes same-owner IPv4 and IPv6 wildcard additions that
+retain valid loopback rows. Complete exact-input independent review and guarded
+publication, then require all three jobs on the new exact head before selecting
+separately fresh campaign admission. No next campaign is
+admitted and no full-campaign speedup is established.
 C42 issued the
 canonical command once but lost its tool session after `worker-start.json` and
 has no parent terminal artifact; it is incomplete/ambiguous. A no-key detached
@@ -1481,7 +1499,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C48 callback cost discriminator (closed locally) | Bound relative step timing within the first mining-active callback and carry optional failure detail through exact owner V2 ancestry without changing its budget, outcomes or existing receipts | Final 140 helper, 8 selected root and 10 selected composed cases pass; the earlier full 256-case parent/worker scope is retained, with 316 architecture cases, actual import checks, TypeScript and independent review GO. Publication and exact-head CI remain due. No measured speedup or historical slow-stage claim |
+| C49 Frontier listener producer-to-owner batch (promotion closure) | Replace the repeated CIM listener query with a fresh bounded port-complete observer, preserving the existing owner and refusal predicates | The no-key query-cost falsifier matched six exact tuples. The 78 parser/subprocess, 8 owner, 119 lifecycle and 316 architecture cases, TypeScript and import checks pass. Close exact-input independent review and guarded publication/CI before separately fresh campaign admission. No cached ownership verdict, C49 internal-cause claim or full-campaign speedup claim |
+| C48 callback cost discriminator (closed and published) | Bound relative step timing within the first mining-active callback and carry optional failure detail through exact owner V2 ancestry without changing its budget, outcomes or existing receipts | Final 140 helper, 8 selected root and 10 selected composed cases pass; the earlier full 256-case parent/worker scope is retained, with 316 architecture cases, actual import checks, TypeScript and independent review GO. Guarded publication and all three exact-head jobs passed at `0c7cf255`. C49 exercised the public failure timing join; it did not pass two-cycle acceptance or establish a speedup |
 | C47 tracker statement check discriminator (closed) | Preserve existing tracker-phase/terminal formats and predicates while distinguishing future decode/profile/admission-horizon, continuation height progression and compiled-application binding failures through separate optional companions | Genuine constructor, canonical codec/identity/domain/claim negatives, composed failure preservation and success rejection pass. Final changed conflict storage has a 161-case targeted recheck; independent exact-input review GO. Guarded publication and exact-head CI passed at the current checkpoint. C47 supplies only the coarse phase, never historical cause or new execution authority |
 | C43 owner completion timing branch | Preserve existing terminal/V1/V2/owner-stage bytes and digest domains, the 4,680,000 ms budget, time/quorum rules, custody and permanent attempt holds while distinguishing future invalid-timing from budget-exceeded owner failures | The local predicate-to-parent join and cleanup-aggregate correction pass 426 affected tests, TypeScript and import checks under pinned Node 24.14.0. Independent correction review found no remaining P0-P2 issue; publication guards and exact-head CI remain due before fresh admission. C43's raw cause remains unknown |
 | Compiler checkpoint publication and fresh two-cycle input preparation | Publish the verified Git export controls, Windows layout guidance and scoped compiler result; verify all three exact-head jobs before selecting fresh admission | Reuse unchanged Git-control source tests and closeout. Review the exact documentation and claim delta, run staged/range publication guards and update the existing branch/PR. Successful shallow compiler artifacts are bound to disposed sessions. The exact-head checkpoint is already closed; prepare separately fresh sources, tools, caches, shallow build and output parents plus custody and fee inputs; revalidate every required admission, custody and fee input before selecting one campaign. C38 is consumed/held after one failed invocation; do not retry or resume it, and its diagnostics cannot supply the next admission |

@@ -99,16 +99,10 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe devnet proce
       './substrate-federated-authority-safe-devnet-process-v1.ts',
       import.meta.url,
     ), 'utf8');
-    expect(source).toContain(
-      'Get-NetTCPConnection -State Listen -LocalPort $ports -ErrorAction Stop',
-    );
-    expect(source).toContain('CmdletizationQuery_NotFound,Get-NetTCPConnection*');
-    expect(source).toContain('{ $rows=@() } else { throw }');
-    expect(source).toContain('timeout: 30_000');
-    expect(source).not.toContain('Where-Object { $ports -contains $_.LocalPort }');
-    expect(source).not.toContain(
-      'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue',
-    );
+    expect(source).toContain('const rows = observeWindowsTcpListenersV1(ports)');
+    expect(source).toContain('binding.pid !== process.pid');
+    expect(source).toContain("binding.localAddress === '127.0.0.1'");
+    expect(source).not.toContain('Get-NetTCPConnection');
   });
 
   it('rejects a copied or fabricated process receipt', () => {

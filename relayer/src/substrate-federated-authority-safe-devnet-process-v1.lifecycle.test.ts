@@ -164,7 +164,12 @@ interface FakeBlock {
 let children: FakeChild[];
 let wrongListenerOwner: boolean;
 let wrongListenerAddress: boolean;
-let listenerDrift: { port: number; fault: 'owner' | 'address' | 'missing' } | undefined;
+let listenerDrift: {
+  port: number;
+  fault: 'owner' | 'address' | 'missing' | 'competing' | 'ipv4-wildcard' | 'ipv6-wildcard' | 'ipv6-only' | 'zero-owner';
+} | undefined;
+let preexistingPort: number | undefined;
+let allPortsDualStack: boolean;
 let portProbeFailureAt: number | undefined;
 let portProbeCommands: string[];
 let wrongPeerIdentity: boolean;
@@ -195,6 +200,8 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
     wrongListenerOwner = false;
     wrongListenerAddress = false;
     listenerDrift = undefined;
+    preexistingPort = undefined;
+    allPortsDualStack = false;
     portProbeFailureAt = undefined;
     portProbeCommands = [];
     wrongPeerIdentity = false;
@@ -244,14 +251,18 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
           ? syncFailure('synthetic loopback bind rejection')
           : syncResult('');
       }
-      const requestedPorts = command.match(/\$ports=@\(([^)]*)\)/)?.[1]
-        ?.split(',')
-        .map(value => Number(value.trim()))
-        .filter(value => Number.isSafeInteger(value));
-      const rows = listenerRows().filter(row =>
-        requestedPorts === undefined || requestedPorts.includes(row.LocalPort),
-      );
-      return syncResult(JSON.stringify(rows));
+      if (args.join(' ') !== '-a -n -o') throw new Error('unexpected inspection command');
+      return syncResult([
+        'Active Connections',
+        'Proto Local Address Foreign Address State PID',
+        ...listenerRows().map(row => {
+          const local = row.LocalAddress.includes(':')
+            ? `[${row.LocalAddress}]:${row.LocalPort}`
+            : `${row.LocalAddress}:${row.LocalPort}`;
+          const foreign = row.LocalAddress.includes(':') ? '[::]:0' : '0.0.0.0:0';
+          return `TCP ${local} ${foreign} LISTENING ${row.OwningProcess}`;
+        }),
+      ].join('\r\n'));
     });
     vi.stubGlobal('fetch', vi.fn(async (_url: string | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -898,15 +909,35 @@ describe.skipIf(process.platform !== 'win32')('owned authority-safe process life
   });
 
   it.each(Object.entries(PORTS).flatMap(([label, port]) =>
-    (['owner', 'address', 'missing'] as const).map(fault => ({ label, port, fault })),
+    (['owner', 'address', 'missing', 'competing', 'ipv4-wildcard', 'ipv6-wildcard', 'ipv6-only', 'zero-owner'] as const)
+      .map(fault => ({ label, port, fault })),
   ))('rejects the active FED target after $label listener $fault drift', async ({ port, fault }) => {
+    const expectedError = fault === 'zero-owner'
+      ? /selected listener owning PID/ : /listener is not exclusively loopback-owned/;
     await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
       expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
       listenerDrift = { port, fault };
       expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target))
-        .toThrow(/listener is not exclusively loopback-owned/);
+        .toThrow(expectedError);
       return 'observed';
-    })).rejects.toThrow(/listener is not exclusively loopback-owned/);
+    })).rejects.toThrow(expectedError);
+    expect(children.every(child => !child.alive)).toBe(true);
+  });
+
+  it.each(Object.entries(PORTS))('rejects preexisting $0 port before launching either node', async (_label, port) => {
+    preexistingPort = port;
+    await expect(withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async () => 'unreachable'))
+      .rejects.toThrow(/port is already owned/);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('accepts same-owner IPv4 and IPv6 loopback listeners on every selected port', async () => {
+    allPortsDualStack = true;
+    const result = await withOwnedFederatedGenesisDevnetProcessesV1(federatedInput(), async target => {
+      expect(() => assertOwnedFederatedGenesisDevnetTargetV1(target)).not.toThrow();
+      return 'observed';
+    });
+    expect(result.value).toBe('observed');
     expect(children.every(child => !child.alive)).toBe(true);
   });
 
@@ -1318,7 +1349,7 @@ function listenerRows(): Array<{
         LocalPort: localPort,
         OwningProcess: child.pid!,
       });
-      if (localPort === PORTS.primaryRpc || localPort === PORTS.witnessRpc) {
+      if (allPortsDualStack || localPort === PORTS.primaryRpc || localPort === PORTS.witnessRpc) {
         rows.push({
           LocalAddress: '::1',
           LocalPort: localPort,
@@ -1329,10 +1360,25 @@ function listenerRows(): Array<{
   }
   if (wrongListenerOwner && rows.length > 0) rows[0]!.OwningProcess = 49_999;
   if (wrongListenerAddress && rows.length > 0) rows[0]!.LocalAddress = '0.0.0.0';
+  if (preexistingPort !== undefined) {
+    rows.push({ LocalAddress: '127.0.0.1', LocalPort: preexistingPort, OwningProcess: 49_999 });
+  }
   if (listenerDrift) {
     for (const row of rows.filter(row => row.LocalPort === listenerDrift!.port)) {
       if (listenerDrift.fault === 'owner') row.OwningProcess = 49_999;
+      if (listenerDrift.fault === 'zero-owner') row.OwningProcess = 0;
       if (listenerDrift.fault === 'address') row.LocalAddress = '0.0.0.0';
+      if (listenerDrift.fault === 'ipv6-only') row.LocalAddress = '::1';
+    }
+    const selected = rows.find(row => row.LocalPort === listenerDrift!.port);
+    if (selected && listenerDrift.fault === 'competing') {
+      rows.push({ ...selected, OwningProcess: 49_999 });
+    }
+    if (selected && listenerDrift.fault === 'ipv4-wildcard') {
+      rows.push({ ...selected, LocalAddress: '0.0.0.0' });
+    }
+    if (selected && listenerDrift.fault === 'ipv6-wildcard') {
+      rows.push({ ...selected, LocalAddress: '::' });
     }
     if (listenerDrift.fault === 'missing') {
       return rows.filter(row => row.LocalPort !== listenerDrift!.port);
