@@ -220,7 +220,7 @@ function verifyRetainedTrackerAtHeaders(input: Readonly<{
   dataBoxes?: readonly Readonly<Eip12Box>[];
   headers: readonly Readonly<Record<string, unknown>>[];
   minedHeader?: Readonly<Record<string, unknown>>;
-}>) {
+}>): { proofs: boolean[]; transactionError: string | null } {
   const { signedBody, signedCandidate, boxes, headers } = input;
   expect(headers).toHaveLength(10);
   for (const [index, header] of headers.entries()) {
@@ -417,6 +417,11 @@ describe('native FED withdrawal continuation', () => {
     const boxes = new Map<string, Eip12Box>();
     const confirmed = new Map<string, number>();
     const checkBodies: Record<string, unknown>[] = [];
+    let secondReserveSignedCandidate: fleet.LocalWasmSignedCheckCandidate | undefined;
+    let secondReserveSignedCandidateLabel: string | undefined;
+    let secondReserveVmEvaluationCount = 0;
+    let secondReserveVmHeight: number | undefined;
+    const secondReserveVmEvaluationLabels: string[] = [];
     const submissionBodies: Record<string, unknown>[] = [];
     const feeSubmissionBodies: Record<string, unknown>[] = [];
     const feeTransactions = new Map<string, Readonly<{
@@ -779,7 +784,66 @@ describe('native FED withdrawal continuation', () => {
     });
     vi.spyOn(helpers, 'ncheck').mockImplementation(async (path, body, origin) => {
       expect(path).toBe('/transactions/check'); expect(origin).toBe(PRIMARY);
-      checkBodies.push(body as Record<string, unknown>); return signedId(body as Record<string, unknown>);
+      const signedBody = body as Record<string, unknown>;
+      checkBodies.push(signedBody);
+      if (fault === 'continuation valid' && secondContinuationPacket !== undefined
+        && secondReserveSignedCandidate?.txId === secondContinuationPacket.transactions.reserveTransition.txId) {
+        expect(signedId(signedBody)).toBe(secondReserveSignedCandidate.txId);
+        expect(secondReserveSignedCandidate.signerContext.stateContextTipHeight).toBe(Number(signingHeaders[0]!.height));
+        expect(secondReserveSignedCandidate.signerContext.stateContextTipIdHex).toBe(signingHeaders[0]!.id);
+        expect((signedBody.dataInputs as unknown[])).toHaveLength(0);
+        const verification = verifyRetainedTrackerAtHeaders({
+          signedBody,
+          signedCandidate: {
+            txId: secondReserveSignedCandidate.txId,
+            signedTransactionBytesSha256Hex: secondReserveSignedCandidate.signedTransactionBytesSha256Hex!,
+            signedTransactionBytesLength: secondReserveSignedCandidate.signedTransactionBytesLength!,
+          },
+          boxes: [secondContinuationPacket.boxes.reservePredecessor,
+            secondContinuationPacket.boxes.sourceLock, secondContinuationPacket.boxes.transitionFeeFunding],
+          headers: signingHeaders,
+        });
+        expect(verification).toEqual({ proofs: [true, true, true], transactionError: null });
+        if (secondReserveVmEvaluationCount === 0) {
+          secondReserveVmHeight = secondReserveSignedCandidate.signerContext.stateContextTipHeight + 1;
+          const successorCreationHeight = Number(secondContinuationPacket.transactions.reserveTransition.outputs[0]!.creationHeight);
+          const heightPlus100Headers = headerContext(successorCreationHeight + 100);
+          const heightPlus101Headers = headerContext(successorCreationHeight + 101);
+          expect(Number(heightPlus100Headers[0]!.height) + 1).toBe(successorCreationHeight + 100);
+          expect(Number(heightPlus101Headers[0]!.height) + 1).toBe(successorCreationHeight + 101);
+          const atHeightPlus100 = verifyRetainedTrackerAtHeaders({
+            signedBody,
+            signedCandidate: {
+              txId: secondReserveSignedCandidate.txId,
+              signedTransactionBytesSha256Hex: secondReserveSignedCandidate.signedTransactionBytesSha256Hex!,
+              signedTransactionBytesLength: secondReserveSignedCandidate.signedTransactionBytesLength!,
+            },
+            boxes: [secondContinuationPacket.boxes.reservePredecessor,
+              secondContinuationPacket.boxes.sourceLock, secondContinuationPacket.boxes.transitionFeeFunding],
+            headers: heightPlus100Headers,
+          });
+          const atHeightPlus101 = verifyRetainedTrackerAtHeaders({
+            signedBody,
+            signedCandidate: {
+              txId: secondReserveSignedCandidate.txId,
+              signedTransactionBytesSha256Hex: secondReserveSignedCandidate.signedTransactionBytesSha256Hex!,
+              signedTransactionBytesLength: secondReserveSignedCandidate.signedTransactionBytesLength!,
+            },
+            boxes: [secondContinuationPacket.boxes.reservePredecessor,
+              secondContinuationPacket.boxes.sourceLock, secondContinuationPacket.boxes.transitionFeeFunding],
+            headers: heightPlus101Headers,
+          });
+          expect(atHeightPlus100).toEqual({ proofs: [true, true, true], transactionError: null });
+          expect(atHeightPlus101.proofs).toEqual([false, true, true]);
+          expect(atHeightPlus101.transactionError)
+            .toMatch(/^TxValidationError: Input 0 reduced to false during verification:/);
+        }
+        secondReserveVmEvaluationCount++;
+        secondReserveVmEvaluationLabels.push(secondReserveSignedCandidateLabel!);
+        secondReserveSignedCandidate = undefined;
+        secondReserveSignedCandidateLabel = undefined;
+      }
+      return signedId(signedBody);
     });
     const signCalls = vi.spyOn(wasm.Wallet.prototype, 'sign_transaction');
     const prepare = fleet.prepareLocalWasmRootCheckCandidates;
@@ -824,6 +888,11 @@ describe('native FED withdrawal continuation', () => {
       return pending;
     });
     vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
+      if (fault === 'continuation valid' && secondContinuationPacket !== undefined
+        && args[0].txId === secondContinuationPacket.transactions.reserveTransition.txId) {
+        secondReserveSignedCandidate = args[0];
+        secondReserveSignedCandidateLabel = args[1];
+      }
       const pending = check(...args);
       // The real checker passed its entry veto and suspended at its import.
       if (internalStage('checker')) disposeInside(args[3]);
@@ -1513,6 +1582,72 @@ describe('native FED withdrawal continuation', () => {
             });
             expect(vaultExecution.expectedTxId).toBe(second.transactions.reserveTransition.txId);
             expect(vaultExecution.transportStatus).toBe('accepted');
+            if (fault === 'continuation valid') {
+              expect(secondReserveVmEvaluationCount).toBe(2);
+              expect(secondReserveVmEvaluationLabels).toEqual([
+                'isolated local peg-in committed-vault check',
+                'isolated local committed-vault pre-transport recheck',
+              ]);
+              if (process.env.BRIDGE_NATIVE_CONTINUATION_PREDICATE_FIXTURE !== undefined) {
+                // Public constructor bytes for an offline protected-predicate
+                // differential. No key, session or execution capability is exported.
+                const output = process.env.BRIDGE_NATIVE_CONTINUATION_PREDICATE_FIXTURE;
+                expect(isAbsolute(output)).toBe(true);
+                const parent = realpathSync(dirname(output));
+                expect(parent.toLowerCase()).toBe(resolve(dirname(output)).toLowerCase());
+                const root = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+                const location = relative(root, parent);
+                expect(isAbsolute(location) || location === '..' || location.startsWith('..\\') || location.startsWith('../')).toBe(true);
+                const space = statfsSync(parent, { bigint: true });
+                expect(space.bavail * space.bsize).toBeGreaterThanOrEqual(10n * 1024n ** 3n);
+                const lockSha = createHash('sha256').update(readFileSync(join(root,
+                  'sources/substrate-federated-tracker-compiler-lock-v1.json'))).digest('hex');
+                expect(lockSha).toBe('441c518aabefd19ddeee102a2cf403152b3c641fa0ea970f35a707d3f4d47583');
+                const sourceLockSha = createHash('sha256').update(templates.sourceLock.source).digest('hex');
+                const reserveSha = createHash('sha256').update(templates.pooledReserve.source).digest('hex');
+                expect(sourceLockSha).toBe('f03c1e2ecbb0433d9b5bcad2489467bee26e2e03543ec2a1cd61c18aba21db6b');
+                expect(reserveSha).toBe('44f8bf015c301b3fe478764cfc2b841a026b9727a71fa0c4d5a60309894d67f5');
+                expect(second.boxes.reservePredecessor.ergoTree)
+                  .toBe(activeFamilyReceipt.contracts.pooledReserve.propositionHex);
+                expect(second.boxes.sourceLock.ergoTree)
+                  .toBe(activeFamilyReceipt.contracts.sourceLock.propositionHex);
+                expect(secondReserveVmHeight).toBeTypeOf('number');
+                let unsigned: any = wasm.UnsignedTransaction.from_json(
+                  JSON.stringify(second.transactions.reserveTransition.eip12Tx));
+                let proofless: any;
+                let txId: any;
+                try {
+                  const consumed = unsigned;
+                  unsigned = undefined;
+                  proofless = wasm.Transaction.from_unsigned_tx(consumed,
+                    [new Uint8Array(), new Uint8Array(), new Uint8Array()]);
+                  txId = proofless.id();
+                  expect(txId.to_str()).toBe(second.transactions.reserveTransition.txId);
+                  const bytes = Buffer.from(proofless.sigma_serialize_bytes());
+                  expect(Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex'))
+                    .toBe(second.transactions.reserveTransition.txId);
+                  const inputBoxSigmaHex = [second.boxes.reservePredecessor,
+                    second.boxes.sourceLock, second.boxes.transitionFeeFunding].map(box => {
+                    const value = wasm.ErgoBox.from_json(JSON.stringify(box));
+                    try { return Buffer.from(value.sigma_serialize_bytes()).toString('hex'); }
+                    finally { value.free(); }
+                  });
+                  const fixture = Buffer.from([
+                    'E2S_NATIVE_CONTINUATION_PREDICATE_FIXTURE_V1', lockSha,
+                    '0dbd3b31ef94affec83f8f0f6c5a9891c45da1e975ff6016a0574fc5aa1418e6',
+                    sourceLockSha, reserveSha, String(secondReserveVmHeight),
+                    second.transactions.reserveTransition.txId, bytes.toString('hex'),
+                    ...inputBoxSigmaHex,
+                    activeFamilyReceipt.contracts.pooledReserve.propositionHex,
+                    activeFamilyReceipt.contracts.sourceLock.propositionHex,
+                    String(second.transactions.reserveTransition.outputs[0]!.creationHeight),
+                  ].join('\n') + '\n', 'ascii');
+                  expect(fixture.length).toBeLessThanOrEqual(1024 * 1024);
+                  writeFileSync(output, fixture, { flag: 'wx', mode: 0o600 });
+                  expect(readFileSync(output).equals(fixture)).toBe(true);
+                } finally { txId?.free(); proofless?.free(); unsigned?.free(); }
+              }
+            }
             expect(state.getErgoOperationalTransactionAttempt(vaultExecution.expectedTxId)?.status).toBe('confirmed');
             expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 2);
             expect(second.transactions.sourceLockCreation.outputs[0]!.creationHeight)

@@ -28,35 +28,50 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–50 are permanently consumed or held. The bounded Frontier
-listener checkpoint is published at `b64a177006ae5f791395169689e75ab4ceb4fd9e`;
-all three required jobs passed in exact [run 37651159264](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37651159264).
-Separately admitted C50 failed once at `cycle-1/committed-reserve`. Independent
-review validates its current public parent identities and five domain digests.
-No inner predicate, operation completion, cleanup or custody disposal is
-established. Owner and callback timing companions are absent; a receipt wall-clock
-envelope is not callback timing or a matched speedup. Do not retry C50 or inspect
-its private runtime state.
+**Now:** Campaigns 24–51 are permanently consumed or held. The committed-reserve
+diagnostic checkpoint is published at `1efe1bd533a9beb37e44e9d49041e0e0980488af`;
+all three required jobs passed in exact [run 37706956085](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37706956085).
+Separately admitted C51 failed once at `cycle-1/committed-reserve/native-check`,
+kind `continuation`. Independent review validates the current public parent
+graph and six domain digests. The stage covers both the check callback and its
+following liveness assertion; it does not identify an inner predicate. Cause,
+operation completion, cleanup and custody disposal remain unknown. Do not retry
+C51 or inspect private historical runtime state.
 
-The committed-reserve executor-to-worker-to-parent diagnostic join is implemented
-locally. Its 17 closed stages carry an explicit genesis or continuation kind,
-including both kinds under cycle 1. Local validation passes: 378 metadata/codec
-cases, 51 actual native-helper cases, the full 341-case worker/parent suite,
-317 architecture cases, TypeScript and the layered import guard. These are
-separate suites; earlier overlapping selections are not additional evidence.
-Independent exact-input review of the diagnostic module, direct tests,
-integrated producer/consumer and public claims gives GO. Guarded publication
-and the new exact-head CI remain due.
+The local differential passes for the actual fresh second reserve-deposit
+packet. The genuine constructor, retained checker, signatures and pre-transport
+recheck run with synthetic node observations. All 73 affected cases and
+TypeScript pass. WASM validates the signed transaction and all three inputs.
+The locked SigmaState 6.0.2 production JVM accepts both protected inputs at
+HEIGHT 1073 and at successor creation height plus 100 (1151); at plus 101
+(1152), exactly reserve input 0 rejects in both interpreters. Nineteen isolated,
+reason-checked malformed-fixture negatives pass. Independent exact-input review
+passed. The JVM evaluates the two proofless protected predicates, not the fee
+signature or a full node transaction. This closes the scoped local script
+comparison; it establishes neither C51's cause nor node acceptance.
 
-Preserve exact thrown values, signing and transaction predicates, all budgets,
-older receipt bytes and domains, and the permanent attempt holds. Distinguish
-closed internal stages through optional create-only companions, with unique
-primary-error ancestry, exact identity and false completion/cleanup/authority
-claims. Isolate actual native-helper failures, preserve primary failure when
-detail is absent, conflicting or unwritable, and reject detail alongside success.
-Complete guarded publication and all three jobs
-on the new exact head before separately fresh campaign admission. No deterministic
-production defect is established and no new campaign is admitted.
+The remaining response and post-await liveness branches already have focused
+checks; no new synthetic HTTP harness or finer-stage-only campaign is selected.
+The repository-owned operator preflight now composes the existing config,
+clean-checkout, runtime/tool and Ergo build-output validators, then stops before
+build, attempt creation, custody or node execution. Ten focused cases, TypeScript,
+the import guard, four real CLI probes and the documented silent npm refusal
+pass; independent source and command review passed. Its report is explicitly
+non-authorizing and does not establish complete admission or operator custody.
+The next deciding check is the real default positive in a clean exact candidate
+with fresh public prerequisites. Then promote this coherent operator-preparation
+milestone once, with its scoped interpreter tool, rather than publishing each
+local diagnostic. Exact-head CI remains due for changed published bytes; actual
+two-cycle acceptance, recovery and real independent reproduction remain open.
+No new campaign is due merely because the interpreter differential passed.
+
+The published 17-stage join retains explicit genesis/continuation kind, optional
+create-only companions and exact primary-error ancestry. Its 378 metadata/codec,
+51 native-helper, 341 worker/parent and 317 architecture cases, TypeScript/import
+checks and independent source/claim review remain reusable within their unchanged
+scope. Preserve throws, signing predicates, budgets, older receipt bytes/domains
+and all attempt holds. No deterministic production defect or new campaign
+admission is established.
 
 The callback timing
 diagnostic is published at `0c7cf255d1c660afc7eb07eb401c9566ac071f94`; all three
@@ -304,7 +319,7 @@ may one entirely separate fresh campaign be admitted, with new
 config/head/tree/source-index, four new pinned callers, complete sources/tools,
 empty outputs, process/port exclusivity, confirmed external fees before each
 anchor, disposable custody, independent admission review and at least 100 GiB
-free in the final launch shell. Nothing from C24–C50 supplies execution authority.
+free in the final launch shell. Nothing from C24–C51 supplies execution authority.
 Recovery, operator preparation, FED-7 and real external acceptance remain open.
 
 ### Prior checkpoint notes (historical)
@@ -1490,21 +1505,22 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Committed-reserve operation -> exact parent failure discriminator | Guard publication and verify exact-head CI of the locally validated and independently reviewed bounded stage join | Local metadata/codec, native-helper, full worker/parent, architecture, type/import checks and independent exact-input review pass. C50's public parent graph validates only `cycle-1/committed-reserve`; inner predicate, completion and disposal remain unknown. No fresh campaign is admitted |
+| **Now** | Operator preflight command -> actual local caller | Check the real default command on a clean exact candidate and fresh public prerequisites, then publish one coherent operator-preparation milestone | Implementation, ten focused checks, four CLI probes, the documented npm refusal, TypeScript/import checks and independent exact-input review pass. The real default positive and guarded promotion remain due. A passing report cannot authorize execution or replace full source, process/port, space, custody or fee admission. The closed local interpreter differential remains scoped evidence; C51's cause and disposal remain unknown |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–50 remain consumed or held. C42 is incomplete/ambiguous without a
-parent terminal artifact; C43–C50 failed once as recorded in Current Focus and
+Campaigns 24–51 remain consumed or held. C42 is incomplete/ambiguous without a
+parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
 tracker statement diagnostic passed guarded promotion and its exact-head CI.
 The callback timing join and listener checkpoint have passed review, guarded
-promotion and exact-head CI. The current committed-reserve join requires its
-own guarded promotion and exact-head CI before entirely
-fresh admission. Preserve independent admission review. Reopen only gates
+promotion and exact-head CI. The committed-reserve join also passed guarded
+promotion and exact-head CI at `1efe1bd`. The current local interpreter
+differential is not a campaign admission. Preserve independent admission review
+and guarded promotion before any separately fresh full campaign. Reopen only gates
 invalidated by changed inputs; unchanged candidate evidence remains reusable.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
@@ -1532,7 +1548,9 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C50 committed-reserve diagnostic join | Locally implemented: connect closed internal stages of the actual native executor to optional worker/parent companions while preserving thrown values, old receipts/domains, budgets and protocol/signing predicates | 378 metadata/codec, 51 actual native-helper, 341 full worker/parent and 317 architecture cases pass, with TypeScript/import checks and independent exact-input integration/claim review GO. C50 remains consumed with inner cause and disposal unknown; publication/CI and fresh admission remain separate |
+| Native two-cycle operator preflight (local source preparation validated) | Compose the existing exact-config, clean-checkout, parent/compiler/tool and Ergo build-output readiness checks in one documented command; return a path-free non-authorizing report before any build or attempt/custody/node execution | Ten focused cases preserve order and exact default-stage thrown values; four real CLI probes and the silent npm refusal pass. TypeScript/import checks and independent exact-input review pass. Real default success on a clean exact candidate, guarded promotion and changed-head CI remain due. Existing validators, runtime domains and campaign semantics are unchanged. Real external reproduction and two-cycle acceptance remain open |
+| C51 native continuation interpreter differential (locally validated) | Pass the actual second reserve-deposit packet and current compiled family from the genuine retained checker to both interpreters; compare the normal and boundary heights, without a node or campaign | The 73-case suite, TypeScript, selected export, 19 isolated preflight negatives and six production JVM protected-predicate evaluations pass. Both protected inputs accept at the normal height and plus 100; only reserve input 0 rejects at plus 101. Exact independent review passed. WASM also validates the fee signature and full signed transaction; the JVM check does not. C51's historical cause and fresh execution authority remain outside this evidence |
+| C50 committed-reserve diagnostic join (closed and published) | Connect closed internal stages of the actual native executor to optional worker/parent companions while preserving thrown values, old receipts/domains, budgets and protocol/signing predicates | 378 metadata/codec, 51 actual native-helper, 341 full worker/parent and 317 architecture cases, TypeScript/import checks, independent exact-input review, guarded publication and all three required jobs passed at `1efe1bd`. C50 and C51 remain consumed with cause and disposal unknown |
 | C49 Frontier listener producer-to-owner batch (closed and published) | Replace the repeated CIM listener query with a fresh bounded port-complete observer, preserving the existing owner and refusal predicates | The no-key query-cost falsifier matched six exact tuples. The 78 parser/subprocess, 8 owner, 119 lifecycle and 316 architecture cases, TypeScript, import checks, independent exact-input review and guarded publication passed; all three required jobs passed on exact `b64a177`. No cached ownership verdict, C49 internal-cause claim or full-campaign speedup claim |
 | C48 callback cost discriminator (closed and published) | Bound relative step timing within the first mining-active callback and carry optional failure detail through exact owner V2 ancestry without changing its budget, outcomes or existing receipts | Final 140 helper, 8 selected root and 10 selected composed cases pass; the earlier full 256-case parent/worker scope is retained, with 316 architecture cases, actual import checks, TypeScript and independent review GO. Guarded publication and all three exact-head jobs passed at `0c7cf255`. C49 exercised the public failure timing join; it did not pass two-cycle acceptance or establish a speedup |
 | C47 tracker statement check discriminator (closed) | Preserve existing tracker-phase/terminal formats and predicates while distinguishing future decode/profile/admission-horizon, continuation height progression and compiled-application binding failures through separate optional companions | Genuine constructor, canonical codec/identity/domain/claim negatives, composed failure preservation and success rejection pass. Final changed conflict storage has a 161-case targeted recheck; independent exact-input review GO. Guarded publication and exact-head CI passed at the current checkpoint. C47 supplies only the coarse phase, never historical cause or new execution authority |

@@ -155,6 +155,30 @@ There are no caller-supplied keys, node endpoints, quorum settings, amounts,
 runtime hashes, retry or resume options. Do not add wallet material or secrets
 to the configuration.
 
+## Check Prerequisites Without Starting A Campaign
+
+From `relayer/`, in the same pinned Node and Visual Studio shell described above:
+
+```powershell
+npm run --silent federated:native:two-cycle:preflight -- --config <absolute-config-path>
+```
+
+This command loads the exact configuration, checks the clean expected checkout,
+parent runtime, compiler/JVM dependencies, native tools and build-host discovery,
+then applies the existing Ergo build-output freshness check. It can run bounded
+tool identity probes. It stops before the WASM build, attempt creation, worker,
+node startup, custody or signing. It neither submits a transaction nor reserves
+the configured attempt name.
+
+A passing report has `executionAuthorized: false` and `campaignStarted: false`.
+It describes only the checks completed by this command. It is not a start,
+terminal or admission receipt, and later execution repeats its own checks.
+Full source-baseline validation, process/port exclusivity, available space,
+fresh custody and confirmed fee inputs still need their respective admission
+checks. Cache content and independent operator custody are not attested here.
+Correct a failed prerequisite before selecting a fresh invocation; preserve any
+already occupied, consumed or ambiguous attempt.
+
 ## Run Once
 
 From `relayer/`, with the pinned Node available to the command:
