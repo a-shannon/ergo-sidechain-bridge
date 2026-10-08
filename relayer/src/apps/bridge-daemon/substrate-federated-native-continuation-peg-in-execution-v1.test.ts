@@ -1,4 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as operational from './ergo-operational-transaction.js';
+import { SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1,
+  projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1,
+  projectOwnSubstrateFederatedNativeCommittedReserveKindV1,
+  projectSubstrateFederatedNativeCommittedReserveFailureStageV1 }
+  from '../../substrate-federated-native-committed-reserve-failure-v1.js';
+import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 }
+  from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
+import { tagNativeTwoCycleCycleStepFailureV1 }
+  from '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
 
 const mocked = vi.hoisted(() => ({
   assertOwnedTarget: vi.fn(),
@@ -109,6 +119,7 @@ describe('native continuation peg-in execution transport', () => {
   let confirmation: Readonly<Record<string, unknown>>;
 
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     sourcePrior = 'none';
     vaultPrior = 'none';
@@ -254,6 +265,104 @@ describe('native continuation peg-in execution transport', () => {
     expect(mocked.createSourceJournal).not.toHaveBeenCalled();
     expect(mocked.createSourceTransport).not.toHaveBeenCalled();
   });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1.map(stage => ({ kind, stage }))))(
+    'preserves the actual native $kind committed-reserve thrown value at $stage', async ({ kind, stage }) => {
+      const fixture = executionFixture();
+      const primary = Object.freeze(new Error('private native reserve cause'));
+      const fail = () => { throw primary; };
+      const authorization = mocked.createVaultAuthorization.getMockImplementation()!();
+      const journal = vaultJournal();
+      if (stage === 'ingress') mocked.assertOwnedTarget.mockImplementationOnce(fail);
+      if (stage === 'native-check') {
+        const check = kind === 'genesis' ? fixture.session.checkNativePegInCommittedVaultRetainingSignerV1
+          : fixture.session.checkNativeContinuationPegInCommittedVaultRetainingSignerV1;
+        check.mockImplementationOnce(fail);
+      }
+      if (stage === 'check-promotion') mocked.promoteVault.mockImplementationOnce(fail);
+      if (stage === 'authorization') mocked.createVaultAuthorization.mockImplementationOnce(fail);
+      if (stage === 'journal-reconciliation') journal.reconcileActive.mockImplementationOnce(fail);
+      if (stage === 'operational-execution') vi.spyOn(operational, 'runErgoOperationalTransaction').mockImplementationOnce(fail);
+      if (stage === 'operational-sign' || stage === 'operational-check' || stage === 'operational-submit') {
+        // Exercise the actual native callback; the generic runner is a control-flow double here.
+        vi.spyOn(operational, 'runErgoOperationalTransaction').mockImplementationOnce(async (_input, ports) => {
+          mocked.assertSourceOutputs.mockImplementationOnce(fail);
+          const callback = stage === 'operational-sign' ? ports.sign
+            : stage === 'operational-check' ? ports.check : ports.submit;
+          await callback({} as never);
+          throw new Error('expected native callback refusal');
+        });
+      }
+      if (stage === 'operational-revalidate') authorization.revalidator.revalidate.mockImplementationOnce(fail);
+      if (stage === 'operational-authorize') authorization.broadcastAuthorizer.authorize.mockImplementationOnce(fail);
+      if (stage === 'operational-reserve') journal.journal.reserve.mockImplementationOnce(fail);
+      if (stage === 'operational-finalize') journal.journal.finalize.mockImplementationOnce(fail);
+      if (stage === 'transport-validation') authorization.takePreTransportObservation.mockImplementationOnce(fail);
+      if (stage === 'confirmation') {
+        mocked.createObserver.mockReturnValueOnce({ reconciliationIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
+          observe: vi.fn(async () => {
+            mocked.assertSourceOutputs.mockImplementationOnce(fail);
+            return confirmation;
+          }) });
+      }
+      if (stage === 'confirmed-journal') journal.reconcileActive.mockResolvedValueOnce('none').mockImplementationOnce(fail);
+      if (stage === 'output-observation') mocked.observeVaultOutputs.mockImplementationOnce(fail);
+      if (stage !== 'authorization') mocked.createVaultAuthorization.mockReturnValueOnce(authorization);
+      mocked.createVaultJournal.mockReturnValueOnce(journal);
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      await expect(execute(fixture.vaultInput as never)).rejects.toBe(primary);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(primary)).toBe(stage);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveKindV1(primary)).toBe(kind);
+      // Both actual operation kinds occur within cycle-1; kind is never inferred from cycle.
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'committed-reserve');
+      expect(projectSubstrateFederatedNativeCommittedReserveFailureStageV1(primary))
+        .toEqual({ committedReserveStage: stage, committedReserveKind: kind });
+      expect(mocked.createVaultTransport.mock.results[0]?.value.submit.mock.calls.length ?? 0).toBeLessThanOrEqual(1);
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    [undefined, 'opaque primitive', Object.freeze({ opaque: true })].map(value => ({ kind, value }))))(
+    'preserves unbranded native $kind check failures without inventing detail', async ({ kind, value }) => {
+      const fixture = executionFixture();
+      const check = kind === 'genesis' ? fixture.session.checkNativePegInCommittedVaultRetainingSignerV1
+        : fixture.session.checkNativeContinuationPegInCommittedVaultRetainingSignerV1;
+      check.mockImplementationOnce(() => { throw value; });
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      await expect(execute(fixture.vaultInput as never)).rejects.toBe(value);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(value)).toBeNull();
+      expect(mocked.promoteVault).not.toHaveBeenCalled();
+      expect(mocked.createVaultTransport).not.toHaveBeenCalled();
+    });
+
+  it.each(['genesis', 'continuation'] as const)(
+    'refuses a prior $kind committed-reserve attempt before any transport', async kind => {
+      const fixture = executionFixture(); vaultPrior = 'confirmed';
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      const thrown = await execute(fixture.vaultInput as never).catch(error => error);
+      expect(thrown.message).toMatch(/prior native committed-vault attempt/);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(thrown)).toBe('journal-reconciliation');
+      expect(mocked.createVaultTransport).not.toHaveBeenCalled();
+      expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind => [0, 2].map(count => ({ kind, count }))))(
+    'refuses $count confirmed $kind committed-reserve attempts without a second submission', async ({ kind, count }) => {
+      const fixture = executionFixture(); const journal = vaultJournal();
+      journal.revalidateConfirmed.mockResolvedValueOnce(Array.from({ length: count }, () => confirmation));
+      mocked.createVaultJournal.mockReturnValueOnce(journal);
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      const thrown = await execute(fixture.vaultInput as never).catch(error => error);
+      expect(thrown.message).toMatch(/confirmed attempt count changed/);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(thrown)).toBe('confirmed-journal');
+      expect(mocked.createVaultTransport.mock.results[0]!.value.submit).toHaveBeenCalledOnce();
+      expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
+    });
 
   function sourceJournal() {
     let reconciliations = 0;

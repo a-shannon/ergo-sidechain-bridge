@@ -22,6 +22,9 @@ import { createNativeTwoCycleWorkerTrackerContextV1,
 import { createNativeTwoCycleWorkerSourceLockStageV1,
   projectSubstrateFederatedNativeSourceLockFailureStageV1 }
   from '../substrate-federated-native-source-lock-failure-v1.js';
+import { createNativeTwoCycleWorkerCommittedReserveStageV1,
+  projectSubstrateFederatedNativeCommittedReserveFailureStageV1 }
+  from '../substrate-federated-native-committed-reserve-failure-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { projectNativeTwoCycleErgoNodeCompletionFailureReasonV1,
@@ -292,6 +295,23 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional operation detail never replaces failure or releases the claim.
+      }
+      try {
+        const stage = projectSubstrateFederatedNativeCommittedReserveFailureStageV1(primaryFailure);
+        if (stage !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const companion = createNativeTwoCycleWorkerCommittedReserveStageV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+          stage.committedReserveStage, stage.committedReserveKind);
+          writeNewFile(join(invocation.attemptPath, 'worker-committed-reserve-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker committed-reserve stage companion');
+        }
+      } catch {
+        // Optional reserve detail cannot replace failure or release the claim.
       }
       try {
         const phase = projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(primaryFailure);

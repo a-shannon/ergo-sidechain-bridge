@@ -71,6 +71,10 @@ import { SUBSTRATE_FEDERATED_NATIVE_SOURCE_LOCK_FAILURE_STAGES_V1,
   tagSubstrateFederatedNativeSourceLockFailureStageV1,
   parseNativeTwoCycleParentSourceLockStageV1 }
   from '../substrate-federated-native-source-lock-failure-v1.js';
+import { SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1,
+  tagSubstrateFederatedNativeCommittedReserveFailureStageV1,
+  parseNativeTwoCycleParentCommittedReserveStageV1 }
+  from '../substrate-federated-native-committed-reserve-failure-v1.js';
 import { tagNativeGenesisSetupFailureStageV1 }
   from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { parseNativeTwoCycleParentSetupStageV1 }
@@ -820,6 +824,7 @@ describe('native two-cycle parent and worker V1', () => {
     'worker-tracker-context.json', 'worker-tracker-statement.json', 'failure-tracker-statement.json',
     'worker-setup-stage.json', 'worker-owner-stage.json',
     'worker-owner-stage-v2.json', 'worker-source-lock-stage.json',
+    'worker-committed-reserve-stage.json', 'failure-committed-reserve-stage.json',
     'worker-callback-timing-v1.json', 'failure-callback-timing-v1.json'] as const)(
     'rejects a worker root phase companion %s alongside a success transport', async artifact => {
     const fixture = commandFixture();
@@ -1388,6 +1393,124 @@ describe('native two-cycle parent and worker V1', () => {
         .toBe('retained worker tracker bytes');
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
     });
+
+  it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle =>
+    SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1.flatMap(committedReserveStage =>
+      (['genesis', 'continuation'] as const).map(committedReserveKind => ({ cycle, committedReserveStage, committedReserveKind }))))) (
+    'carries the worker $cycle committed-reserve $committedReserveKind $committedReserveStage through exact parent ancestry',
+    async ({ cycle, committedReserveStage, committedReserveKind }) => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('private committed-reserve cause');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, cycle);
+      tagNativeTwoCycleCycleStepFailureV1(primary, cycle, 'committed-reserve');
+      tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, committedReserveStage, committedReserveKind);
+      mocked.root.mockRejectedValueOnce(primary);
+      mocked.process.mockImplementationOnce(async input => {
+        await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+          input.args.slice(input.args.indexOf('--config')));
+        throw new Error('unexpected worker success');
+      });
+
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      const failure = JSON.parse(read('failure.json'));
+      const companion = parseNativeTwoCycleParentCommittedReserveStageV1(
+        read('failure-committed-reserve-stage.json'), failureBindings(fixture), failure.receiptDigestHex,
+        read('worker-failure.json'), read('worker-root-phase-v2.json'),
+        read('worker-cycle-step.json'), read('worker-committed-reserve-stage.json'),
+        read('failure-cycle-step.json'));
+      expect(companion).toMatchObject({ cycle, step: 'committed-reserve', committedReserveStage, committedReserveKind,
+        operationCompletionEstablished: false, rootCleanupEstablished: false, rawCausePublished: false });
+      expect(read('worker-committed-reserve-stage.json') + read('failure-committed-reserve-stage.json'))
+        .not.toContain('private');
+      expect(mocked.root).toHaveBeenCalledOnce();
+      expect(mocked.process).toHaveBeenCalledOnce();
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['missing tag', 'missing kind', 'conflicting kind', 'wrong step', 'conflicting tags', 'occupied worker', 'worker directory',
+    'invalid JSON', 'invalid claims', 'invalid kind', 'foreign identity', 'bad digest', 'changed ancestry',
+    'occupied parent', 'parent directory'] as const)(
+    'preserves the primary and older receipts when committed-reserve stage evidence has %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('private committed-reserve cause');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1',
+        fault === 'wrong step' ? 'tracker-check' : 'committed-reserve');
+      if (fault !== 'missing tag' && fault !== 'worker directory') {
+        tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'ingress',
+          fault === 'missing kind' ? undefined : 'genesis');
+      }
+      if (fault === 'conflicting tags') {
+        tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'confirmation');
+      }
+      if (fault === 'conflicting kind') {
+        tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'ingress', 'continuation');
+      }
+      mocked.root.mockRejectedValueOnce(primary);
+      let workerReceipts: Record<string, string> = {};
+      const workerStagePath = join(fixture.attemptPath, 'worker-committed-reserve-stage.json');
+      const parentStagePath = join(fixture.attemptPath, 'failure-committed-reserve-stage.json');
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker') writeFileSync(workerStagePath, 'retained worker committed-reserve bytes');
+        if (fault === 'worker directory') mkdirSync(workerStagePath);
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
+            input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (error) {
+          expect(error).toBe(primary);
+          const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+          if (fault === 'invalid JSON') writeFileSync(workerStagePath, '{}\n');
+          if (fault === 'invalid claims' || fault === 'invalid kind' || fault === 'foreign identity' || fault === 'bad digest') {
+            const detail = JSON.parse(read('worker-committed-reserve-stage.json'));
+            if (fault === 'invalid claims') detail.operationCompletionEstablished = true;
+            if (fault === 'invalid kind') detail.committedReserveKind = 'unknown';
+            if (fault === 'foreign identity') detail.configSha256Hex = '9'.repeat(64);
+            if (fault === 'bad digest') detail.receiptDigestHex = '9'.repeat(64);
+            writeFileSync(workerStagePath, `${canonicalJson(detail)}\n`);
+          }
+          if (fault === 'changed ancestry') {
+            writeFileSync(join(fixture.attemptPath, 'worker-cycle-step.json'), `${canonicalJson(
+              createNativeTwoCycleWorkerCycleStepV1(failureBindings(fixture),
+                read('worker-failure.json'), read('worker-root-phase-v2.json'),
+                { cycle: 'cycle-1', step: 'tracker-check' }))}\n`);
+          }
+          if (fault === 'occupied parent') writeFileSync(parentStagePath, 'retained parent committed-reserve bytes');
+          if (fault === 'parent directory') mkdirSync(parentStagePath);
+          workerReceipts = Object.fromEntries(['worker-failure.json', 'worker-root-phase-v2.json',
+            'worker-cycle-step.json'].map(name => [name, read(name)]));
+          throw error;
+        }
+      });
+
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments([
+        '--config', fixture.configSourcePath,
+      ])).rejects.toBe(primary);
+
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      expect(read('failure-diagnostic.json')).not.toContain('private');
+      for (const [name, bytes] of Object.entries(workerReceipts)) expect(read(name)).toBe(bytes);
+      expect(mocked.root).toHaveBeenCalledOnce();
+      expect(mocked.process).toHaveBeenCalledOnce();
+      expect(JSON.parse(read('failure-cycle-step.json')).step)
+        .toBe(fault === 'wrong step' || fault === 'changed ancestry' ? 'tracker-check' : 'committed-reserve');
+      expect(existsSync(join(fixture.attemptPath, 'failure-root-phase-v2.json'))).toBe(true);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      if (fault === 'occupied worker') expect(read('worker-committed-reserve-stage.json'))
+        .toBe('retained worker committed-reserve bytes');
+      else if (fault === 'worker directory') expect(existsSync(workerStagePath)).toBe(true);
+      if (fault === 'occupied parent') expect(read('failure-committed-reserve-stage.json'))
+        .toBe('retained parent committed-reserve bytes');
+      else if (fault === 'parent directory') expect(existsSync(parentStagePath)).toBe(true);
+      else expect(existsSync(parentStagePath)).toBe(false);
+    });
+
 
   it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle =>
     SUBSTRATE_FEDERATED_NATIVE_SOURCE_LOCK_FAILURE_STAGES_V1.flatMap(sourceLockStage =>

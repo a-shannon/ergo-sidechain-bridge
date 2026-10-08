@@ -31,6 +31,8 @@ import { createNativeTwoCycleParentTrackerContextV1, createNativeTwoCycleParentT
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { createNativeTwoCycleParentSourceLockStageV1 }
   from '../substrate-federated-native-source-lock-failure-v1.js';
+import { createNativeTwoCycleParentCommittedReserveStageV1 }
+  from '../substrate-federated-native-committed-reserve-failure-v1.js';
 import { createNativeTwoCycleParentSetupStageV1 }
   from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { createNativeTwoCycleParentOwnerStageV1,
@@ -232,6 +234,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'worker-tracker-statement.json'))
       || existsSync(join(attemptPath, 'failure-tracker-statement.json'))
       || existsSync(join(attemptPath, 'worker-source-lock-stage.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-stage.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-stage.json'))
       || existsSync(join(attemptPath, 'worker-setup-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))
@@ -501,6 +505,25 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent source-lock stage companion');
         } catch {
           // Missing, invalid or occupied detail leaves terminal and older receipts intact.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle committed-reserve stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCommittedReserveStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-committed-reserve-stage.json'), readCompanion('failure-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-committed-reserve-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent committed-reserve stage companion');
+        } catch {
+          // Missing, invalid or occupied reserve detail preserves terminal and older receipts.
         }
         try {
           const bindings = {

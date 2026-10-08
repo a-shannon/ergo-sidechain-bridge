@@ -464,6 +464,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
     new Set([
       'bridge-repository-layout.ts',
       'substrate-federated-native-source-lock-failure-v1.ts',
+      'substrate-federated-native-committed-reserve-failure-v1.ts',
       'bridge-validity-tracker-header-context-v1.ts',
       'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
@@ -704,6 +705,12 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set(['tagSubstrateFederatedNativeSourceLockFailureStageV1',
           'projectOwnSubstrateFederatedNativeSourceLockFailureStageV1',
           'SubstrateFederatedNativeSourceLockFailureStageV1', 'SubstrateFederatedNativeSourceLockKindV1']),
+      ],
+      [
+        'substrate-federated-native-committed-reserve-failure-v1.ts',
+        new Set(['tagSubstrateFederatedNativeCommittedReserveFailureStageV1',
+          'SubstrateFederatedNativeCommittedReserveFailureStageV1',
+          'SubstrateFederatedNativeCommittedReserveKindV1']),
       ],
       [
         'bridge-repository-layout.ts',

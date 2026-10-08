@@ -449,6 +449,29 @@ describe('layer import rules', () => {
       'apps must not import an unclassified legacy module: substrate-federated-native-source-lock-failure-v1.ts');
   });
 
+  it('allows only committed-reserve tagging at its execution root seam', () => {
+    const specifier = '../../substrate-federated-native-committed-reserve-failure-v1.js';
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+      `import { tagSubstrateFederatedNativeCommittedReserveFailureStageV1,
+        type SubstrateFederatedNativeCommittedReserveFailureStageV1,
+        type SubstrateFederatedNativeCommittedReserveKindV1 } from '${specifier}';
+       tagSubstrateFederatedNativeCommittedReserveFailureStageV1(new Error(), 'ingress', 'genesis');`))).toEqual([]);
+    for (const binding of ['projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1',
+      'projectOwnSubstrateFederatedNativeCommittedReserveKindV1',
+      'projectSubstrateFederatedNativeCommittedReserveFailureStageV1',
+      'createNativeTwoCycleWorkerCommittedReserveStageV1', 'createNativeTwoCycleParentCommittedReserveStageV1',
+      'parseNativeTwoCycleWorkerCommittedReserveStageV1', 'parseNativeTwoCycleParentCommittedReserveStageV1',
+      'SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1']) {
+      expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+        `import { ${binding} } from '${specifier}';`)).map(item => item.message)).toContain(
+        `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    }
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts',
+      `import { tagSubstrateFederatedNativeCommittedReserveFailureStageV1 } from '${specifier}';`))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-native-committed-reserve-failure-v1.ts');
+  });
+
   it('allows only the diagnostic cycle tag and type at the target root seam', () => {
     const specifier = '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,

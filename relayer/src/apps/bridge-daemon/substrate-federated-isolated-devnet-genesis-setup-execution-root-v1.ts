@@ -23,6 +23,10 @@ import { tagSubstrateFederatedNativeSourceLockFailureStageV1,
   type SubstrateFederatedNativeSourceLockFailureStageV1,
   type SubstrateFederatedNativeSourceLockKindV1 }
   from '../../substrate-federated-native-source-lock-failure-v1.js';
+import { tagSubstrateFederatedNativeCommittedReserveFailureStageV1,
+  type SubstrateFederatedNativeCommittedReserveFailureStageV1,
+  type SubstrateFederatedNativeCommittedReserveKindV1 }
+  from '../../substrate-federated-native-committed-reserve-failure-v1.js';
 
 import {
   sha256CanonicalJson,
@@ -2787,6 +2791,7 @@ export async function executeSubstrateFederatedNativeGenesisPegInCommittedVaultV
   return executeSubstrateFederatedNativePegInCommittedVaultV1(
     input,
     (packet, target) => check.call(session, packet, target),
+    'genesis',
   );
 }
 
@@ -2799,13 +2804,17 @@ export async function executeSubstrateFederatedNativeContinuationPegInCommittedV
   return executeSubstrateFederatedNativePegInCommittedVaultV1(
     input,
     (packet, target) => check.call(session, packet, target),
+    'continuation',
   );
 }
 
 async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   input: NativePegInCommittedVaultExecutionInputV1,
   check: NativePegInCommittedVaultCheckV1,
+  committedReserveKind: SubstrateFederatedNativeCommittedReserveKindV1,
 ): Promise<NativePegInCommittedVaultExecutionResultV1> {
+  let failureStage: SubstrateFederatedNativeCommittedReserveFailureStageV1 = 'ingress';
+  try {
   const { target, batch, packet, sourceLockObservation, state } = input;
   const targetBinding = assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   const assertActive = () => {
@@ -2814,9 +2823,12 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   assertActive();
   const completionDeadline = performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS;
   const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, batch.request.target.genesisHeaderIdHex);
+  failureStage = 'native-check';
   const receipt = await check(packet, target);
   assertActive();
+  failureStage = 'check-promotion';
   const executionCheck = promoteSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1(receipt, target);
+  failureStage = 'authorization';
   const authorizationSession = createSubstrateFederatedNativeGenesisPegInCommittedVaultAuthorizationSessionV1({
     target, batch, packet, executionCheck, sourceLockObservation,
   });
@@ -2825,6 +2837,7 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
     executionTargetIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
     targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
   });
+  failureStage = 'journal-reconciliation';
   const prior = await journal.reconcileActive(observer);
   assertActive();
   if (prior !== 'none') throw new Error('unexpected prior native committed-vault attempt was reconciled');
@@ -2833,6 +2846,7 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   );
   const transaction = packet.transactions.reserveTransition;
   const inputBoxIds = [packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId, packet.boxes.transitionFeeFunding.boxId] as const;
+  failureStage = 'operational-execution';
   const result = await runErgoOperationalTransaction({
     operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
     expectedTxId: transaction.txId, sourceBoxId: inputBoxIds[0]!, inputBoxIds,
@@ -2841,6 +2855,7 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
     unsignedTransaction: transaction.eip12Tx,
   }, {
     sign: async admission => {
+      failureStage = 'operational-sign';
       assertActive();
       assertCommittedVaultOperationalAdmission(admission, executionCheck, transaction.eip12Tx,
         receipt.signer.stateContextTipHeight, inputBoxIds);
@@ -2848,6 +2863,7 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
         signedTransactionDigestHex: receipt.signedTransactionCanonicalJsonSha256Hex, signerArtifact: executionCheck.signedCandidate });
     },
     check: async signed => {
+      failureStage = 'operational-check';
       assertActive();
       if (signed.signerArtifact !== executionCheck.signedCandidate
         || signed.signedTransactionDigestHex !== receipt.signedTransactionCanonicalJsonSha256Hex) {
@@ -2856,27 +2872,44 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
       return Object.freeze({ checkResponseDigestHex: executionCheck.checkedAcceptance.submissionHandle.checkResponseDigestHex,
         checkerArtifact: executionCheck.checkedAcceptance.submissionHandle });
     },
-    revalidate: checked => { assertActive(); return authorizationSession.revalidator.revalidate(checked); },
-    authorize: value => authorizationSession.broadcastAuthorizer.authorize(value),
-    reserve: value => journal.journal.reserve(value),
-    finalize: value => journal.journal.finalize(value),
+    revalidate: checked => {
+      failureStage = 'operational-revalidate';
+      assertActive(); return authorizationSession.revalidator.revalidate(checked);
+    },
+    authorize: value => {
+      failureStage = 'operational-authorize';
+      return authorizationSession.broadcastAuthorizer.authorize(value);
+    },
+    reserve: value => {
+      failureStage = 'operational-reserve';
+      return journal.journal.reserve(value);
+    },
+    finalize: value => {
+      failureStage = 'operational-finalize';
+      return journal.journal.finalize(value);
+    },
     submit: attempt => {
+      failureStage = 'operational-submit';
       assertActive();
       assertFullConfirmationWindowAvailable(completionDeadline, 'native committed-vault');
       return transport.submit(attempt);
     },
   });
+  failureStage = 'transport-validation';
   assertCommittedVaultTransportExecution(result, transaction.txId);
   assertActive();
   const preTransportObservation = authorizationSession.takePreTransportObservation();
+  failureStage = 'confirmation';
   await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline, 'native committed-vault', assertActive);
   assertActive();
+  failureStage = 'confirmed-journal';
   const reconciled = await journal.reconcileActive(observer);
   assertActive();
   if (reconciled !== 'confirmed') throw new Error('native committed-vault journal did not retain exact confirmation');
   const confirmations = await journal.revalidateConfirmed(observer, transaction.txId);
   assertActive();
   if (confirmations.length !== 1) throw new Error('native committed-vault confirmed attempt count changed');
+  failureStage = 'output-observation';
   const outputObservation = await observeSubstrateFederatedNativeGenesisPegInCommittedVaultOutputsV1({
     target, batch, packet, confirmation: confirmations[0]!,
   });
@@ -2884,6 +2917,9 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   return Object.freeze({ expectedTxId: transaction.txId, transportStatus: result.status === 'accepted' ? 'accepted' : 'reconciled',
     durableAttemptDigestHex: result.durableAttemptDigestHex, journalDigestHex: result.journalDigestHex,
     preTransportObservation, outputObservation });
+  } catch (error) {
+    throw tagSubstrateFederatedNativeCommittedReserveFailureStageV1(error, failureStage, committedReserveKind);
+  }
 }
 
 export async function runSubstrateFederatedIsolatedDevnetGenesisSetupExecutionRootV1(
