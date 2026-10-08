@@ -47,6 +47,8 @@ const NAME_SHARDED_TEST_TARGETS = new Map<string, number>([
   // This file's synchronous compiler checks can starve worker RPC updates in
   // a 50-case shard. Smaller exhaustive shards retain the same test budget.
   ['src/adapters/federated-native-mint-execution-v1.test.ts', 25],
+  // Bound synchronous receipt fixtures per worker without narrowing inventory.
+  ['src/scripts/run-substrate-federated-native-two-cycle-v1.test.ts', 25],
 ]);
 
 function collectTestFiles(dir: string): string[] {
@@ -248,28 +250,28 @@ for (let index = 0; index < tests.length; index += batchSize) {
   const batchCount = Math.ceil(tests.length / batchSize);
   console.log(`\nVitest batch ${batchNumber}/${batchCount}: ${batch.join(' ')}`);
 
-  const isolatedTests = batch.filter(test => ISOLATED_TEST_TARGETS.has(test));
-  const regularTests = batch.filter(test => !ISOLATED_TEST_TARGETS.has(test));
-  const shardedTests = regularTests.filter(test => SHARDED_TEST_TARGETS.has(test));
-  const nameShardedTests = regularTests.filter(test => NAME_SHARDED_TEST_TARGETS.has(test));
-  const ordinaryTests = regularTests.filter(
-    test => !SHARDED_TEST_TARGETS.has(test) && !NAME_SHARDED_TEST_TARGETS.has(test),
-  );
-
-  if (ordinaryTests.length > 0) {
+  let ordinaryTests: string[] = [];
+  const flushOrdinaryTests = (): void => {
+    if (ordinaryTests.length === 0) return;
     runVitestBatch(ordinaryTests);
+    ordinaryTests = [];
+  };
+  for (const target of batch) {
+    if (ISOLATED_TEST_TARGETS.has(target)) {
+      flushOrdinaryTests();
+      console.log(`\nVitest isolated target: ${target}`);
+      runVitestBatch([target]);
+    } else if (SHARDED_TEST_TARGETS.has(target)) {
+      flushOrdinaryTests();
+      runTestShards(target, SHARDED_TEST_TARGETS.get(target)!);
+    } else if (NAME_SHARDED_TEST_TARGETS.has(target)) {
+      flushOrdinaryTests();
+      runNameShardedTest(target, NAME_SHARDED_TEST_TARGETS.get(target)!);
+    } else {
+      ordinaryTests.push(target);
+    }
   }
-  for (const shardedTest of shardedTests) {
-    runTestShards(shardedTest, SHARDED_TEST_TARGETS.get(shardedTest)!);
-  }
-  for (const nameShardedTest of nameShardedTests) {
-    runNameShardedTest(nameShardedTest, NAME_SHARDED_TEST_TARGETS.get(nameShardedTest)!);
-  }
-
-  for (const isolatedTest of isolatedTests) {
-    console.log(`\nVitest isolated target: ${isolatedTest}`);
-    runVitestBatch([isolatedTest]);
-  }
+  flushOrdinaryTests();
 }
 
 console.log(`Completed ${tests.length} Vitest files across ${Math.ceil(tests.length / batchSize)} batches.`);

@@ -384,6 +384,9 @@ describe('public audit alpha bootstrap', () => {
     expect(boundedVitestRunner).toContain(
       "['src/adapters/federated-native-mint-execution-v1.test.ts', 25]",
     );
+    expect(boundedVitestRunner).toContain(
+      "['src/scripts/run-substrate-federated-native-two-cycle-v1.test.ts', 25]",
+    );
     expect(boundedVitestRunner).toContain("'--testNamePattern'");
     expect(boundedVitestRunner).toContain("'--hideSkippedTests'");
     expect(boundedVitestRunner).toContain('spawnSync(process.execPath');

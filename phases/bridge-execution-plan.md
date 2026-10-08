@@ -84,8 +84,33 @@ the V4 schema and every refusal. The four portable differential tests pass,
 including isolated drift refusal for each source; the historical pinned-JVM
 host case remains inapplicable under its unchanged guard. No fresh JVM execution
 is claimed. The other 12 source digests and both runtime artifact digests match.
-Independent exact-input review, guarded publication and the new head's three
-required CI jobs are the promotion gates. Reuse unchanged operator, interpreter
+The correction was guarded-published at
+`51311263674f0a8e642a1aee6425186841add5c8`. Its exact
+[run 37798783087](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37798783087)
+passes the pinned-source rebuild and Solidity audit. The public gate passes all
+341 parent/worker assertions, then fails with Vitest's unhandled
+`onTaskUpdate` RPC timeout. It stops before the JVM/AVL corpus, so that corpus
+has no hosted execution evidence on this head.
+
+The selected correction uses the existing exhaustive exact-name runner for the
+parent/worker suite, with at most 25 cases per fresh serial worker. A local
+comparison passes both the full 341-case file and all 341 cases across 14
+shards; every executed name matches the listed inventory exactly once. The
+hosted timeout does not reproduce locally, and its internal cause remains
+unproved. The suite, assertions, file schedule, list/count refusals, RPC error
+handling and platform-specific test timeouts remain unchanged. The audit-command
+consumer requires this shard entry; removing it fails the focused check.
+Independent review identified an ordering regression for supported batch sizes
+greater than one. The runner now flushes contiguous ordinary files before each
+special target and at the batch end, retaining serial file order. Seventeen
+composition cases exercise the actual runner with synthetic inventory and
+subprocess-result doubles: batch sizes 1, 2 and 50, both platform timeouts,
+exact 341-name coverage and twelve isolated list/exit/report refusals. These
+composition cases do not execute Vitest or establish hosted acceptance.
+Close the affected runner, helper, audit and clean-checkout consumers, review
+the exact coherent candidate, then publish once and inspect all three jobs of
+that head. No timeout increase, ignored worker error or omitted test is allowed.
+Reuse unchanged operator, interpreter
 and protocol evidence within its recorded scope. Actual two-cycle
 acceptance, recovery and real independent reproduction remain open.
 No new campaign is due merely because the interpreter differential passed.
@@ -1530,7 +1555,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Published package script -> current-source WASM identity -> differential corpus | Close the stale package digest after exact script-change and pin-fan-out review; promote one coherent correction and inspect its three exact-head jobs | Four portable tests pass, including 13 isolated source-drift refusals; all other declared sources and runtime artifacts match. The historical pinned-JVM host case is inapplicable under its unchanged guard. Preserve every source/artifact check, schema and budget; no new JVM or node acceptance follows. Runtime preflight and interpreter evidence remain scoped; C51's cause and disposal remain unknown |
+| **Now** | Exact test inventory -> serial short-lived workers -> public audit gate | Route the 341-case parent/worker suite through the existing exhaustive 25-case exact-name shards; close the affected runner and generic consumers locally before one reviewed publication | Full and sharded local runs pass all 341 cases with exact names; the hosted RPC timeout is not locally reproduced. Preserve all assertions, list/count/error refusals, file order and timeouts. The package-pin correction is published but its hosted corpus remains unexecuted because the gate stopped earlier. Exact-input review, publication guards and all three new-head jobs remain due |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1573,7 +1598,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Current-source JVM/AVL package pin correction (locally validated) | Bind the reviewed additive npm command to the current-source WASM lock without changing runtime pins, source checks, schema, budgets or corpus expectations | The two original failures reproduce before correction; four portable tests then pass, including every isolated source drift. The historical JVM-host case is inapplicable and not new execution evidence. Exact-input independent review, publication guards and the new head's three CI jobs remain required |
+| Parent/worker test scheduling correction (local checkpoint) | Execute the complete listed parent/worker suite in fresh serial exact-name workers of at most 25 cases, without changing assertions, file order, budgets or error refusal | Full 341-case and 14-shard local runs pass with every executed name matched exactly once. The hosted timeout remains an unproved scheduling hypothesis. Close the affected runner/helper/audit/clean-checkout consumers, exact-input independent review and publication guards before one new-head CI |
+| Current-source JVM/AVL package pin correction (published; hosted corpus pending) | Bind the reviewed additive npm command to the current-source WASM lock without changing runtime pins, source checks, schema, budgets or corpus expectations | Four portable tests and all 13 isolated source-drift refusals pass locally; review and guarded publication passed at513112636. Its hosted gate stops at the earlier worker RPC timeout before this corpus. Reuse the unchanged pins and local evidence; no fresh JVM or node acceptance follows |
 | Public documented-command parser correction (published; consumer passes) | Recognize the documented silent npm invocation without concealing absent scripts, unsupported options or incomplete commands; keep extraction on one Markdown line | Published at0af80c24f with TypeScript, independent review and guarded publication. Exact run37787122258 passes all 53 hygiene cases, but its full public gate fails the later stale JVM/AVL package pin. No runtime, protocol, admission or campaign behavior changes |
 | Native two-cycle operator preflight (published; CI correction pending) | Compose the existing exact-config, clean-checkout, parent/compiler/tool and Ergo build-output readiness checks in one documented command; return a path-free non-authorizing report before any build or attempt/custody/node execution | Ten focused cases preserve order and exact default-stage thrown values; four real CLI probes, the silent npm refusal and actual default command on clean182e437f and final4aab5e007 pass. TypeScript/import checks, independent exact-input review and guarded publication pass. The parser correction passes its real hosted consumer at0af80c24f; the current-source package pin correction is selected above. Existing validators, runtime domains and campaign semantics are unchanged. Real external reproduction and two-cycle acceptance remain open |
 | C51 native continuation interpreter differential (locally validated) | Pass the actual second reserve-deposit packet and current compiled family from the genuine retained checker to both interpreters; compare the normal and boundary heights, without a node or campaign | The 73-case suite, TypeScript, selected export, 19 isolated preflight negatives and six production JVM protected-predicate evaluations pass. Both protected inputs accept at the normal height and plus 100; only reserve input 0 rejects at plus 101. Exact independent review passed. WASM also validates the fee signature and full signed transaction; the JVM check does not. C51's historical cause and fresh execution authority remain outside this evidence |
