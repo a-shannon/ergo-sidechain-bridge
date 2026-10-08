@@ -58,16 +58,24 @@ build, attempt creation, custody or node execution. Ten focused cases, TypeScrip
 the import guard, four real CLI probes and the documented silent npm refusal
 pass; independent source and command review passed. Its report is explicitly
 non-authorizing and does not establish complete admission or operator custody.
-The real documented npm command also passes on clean local `182e437f`, using
+The real documented npm command also passes on clean `182e437f` and final
+`4aab5e007739be3c1d4fa89edb44961b32709b53`, using
 fresh plain-patched public source copies, empty build/cache/output parents and
 the pinned tools in the x64 Visual Studio shell. The report binds that commit,
 tree and tool identity; the empty parents, absent Ergo target and clean checkout
 remain unchanged. This is a local prerequisite check, not a source-baseline or
-campaign attestation. Next promote this coherent operator-preparation milestone
-once, with its scoped interpreter tool, rather than publishing each local
-diagnostic. Recheck the clean final candidate before publication. Exact-head CI
-remains due for changed published bytes; actual
-two-cycle acceptance, recovery and real independent reproduction remain open.
+campaign attestation. The coherent operator-preparation milestone is published.
+Its exact [run 37776405111](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37776405111)
+passed the pinned-source rebuild and Solidity dependency audit, but the public
+gate failed because its documented-command parser treated `--silent` as a
+script name. This is a test-consumer defect, not a preflight or campaign failure.
+The bounded correction recognizes the known silent flag before or after `run`,
+preserves missing scripts and unsupported or incomplete options for refusal,
+and never joins separate Markdown lines. All 53 publication-hygiene cases and
+TypeScript pass locally with the unchanged budget. Independent exact-input
+review passed. Guarded correction publication and new-head CI remain due; reuse the
+unchanged operator, interpreter and protocol evidence. Actual two-cycle
+acceptance, recovery and real independent reproduction remain open.
 No new campaign is due merely because the interpreter differential passed.
 
 The published 17-stage join retains explicit genesis/continuation kind, optional
@@ -1510,7 +1518,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Validated local operator caller -> reviewed public checkpoint | Recheck the clean final candidate, publish one coherent operator-preparation milestone and inspect its three exact-head jobs | Implementation, ten focused checks, four CLI probes, documented npm refusal and real default positive, TypeScript/import checks and independent exact-input review pass. Guarded promotion and changed-head CI remain due. A passing report cannot authorize execution or replace full source, process/port, space, custody or fee admission. The closed local interpreter differential remains scoped evidence; C51's cause and disposal remain unknown |
+| **Now** | Documented npm invocation -> public gate's backing-script check | Promote the reviewed parser correction once and inspect its three exact-head jobs | All 53 affected hygiene cases, TypeScript and independent exact-input review pass locally. The command parser recognizes the known silent flag while retaining missing scripts and malformed options for refusal. Runtime preflight and interpreter evidence remain unchanged; the two successful hosted jobs validate only the published operator checkpoint. A passing report cannot authorize execution or replace full source, process/port, space, custody or fee admission. C51's cause and disposal remain unknown |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1553,7 +1561,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Native two-cycle operator preflight (locally validated) | Compose the existing exact-config, clean-checkout, parent/compiler/tool and Ergo build-output readiness checks in one documented command; return a path-free non-authorizing report before any build or attempt/custody/node execution | Ten focused cases preserve order and exact default-stage thrown values; four real CLI probes, the silent npm refusal and the actual default command on clean local182e437f pass. TypeScript/import checks and independent exact-input review pass. Final exact-input recheck, guarded promotion and changed-head CI remain due. Existing validators, runtime domains and campaign semantics are unchanged. Real external reproduction and two-cycle acceptance remain open |
+| Public documented-command parser correction (locally closed) | Recognize the documented silent npm invocation without concealing absent scripts, unsupported options or incomplete commands; keep extraction on one Markdown line | Twelve isolated grammar/refusal cases and the genuine documentation consumer pass; the full affected 53-case suite, TypeScript and independent exact-input review pass with unchanged budgets. Guarded publication and fresh exact-head CI remain due. No runtime, protocol, admission or campaign behavior changes |
+| Native two-cycle operator preflight (published; CI correction pending) | Compose the existing exact-config, clean-checkout, parent/compiler/tool and Ergo build-output readiness checks in one documented command; return a path-free non-authorizing report before any build or attempt/custody/node execution | Ten focused cases preserve order and exact default-stage thrown values; four real CLI probes, the silent npm refusal and actual default command on clean182e437f and final4aab5e007 pass. TypeScript/import checks, independent exact-input review and guarded publication pass. Exact run37776405111 passes the rebuild and dependency audit but fails the documented-command parser; its bounded correction is selected above. Existing validators, runtime domains and campaign semantics are unchanged. Real external reproduction and two-cycle acceptance remain open |
 | C51 native continuation interpreter differential (locally validated) | Pass the actual second reserve-deposit packet and current compiled family from the genuine retained checker to both interpreters; compare the normal and boundary heights, without a node or campaign | The 73-case suite, TypeScript, selected export, 19 isolated preflight negatives and six production JVM protected-predicate evaluations pass. Both protected inputs accept at the normal height and plus 100; only reserve input 0 rejects at plus 101. Exact independent review passed. WASM also validates the fee signature and full signed transaction; the JVM check does not. C51's historical cause and fresh execution authority remain outside this evidence |
 | C50 committed-reserve diagnostic join (closed and published) | Connect closed internal stages of the actual native executor to optional worker/parent companions while preserving thrown values, old receipts/domains, budgets and protocol/signing predicates | 378 metadata/codec, 51 actual native-helper, 341 full worker/parent and 317 architecture cases, TypeScript/import checks, independent exact-input review, guarded publication and all three required jobs passed at `1efe1bd`. C50 and C51 remain consumed with cause and disposal unknown |
 | C49 Frontier listener producer-to-owner batch (closed and published) | Replace the repeated CIM listener query with a fresh bounded port-complete observer, preserving the existing owner and refusal predicates | The no-key query-cost falsifier matched six exact tuples. The 78 parser/subprocess, 8 owner, 119 lifecycle and 316 architecture cases, TypeScript, import checks, independent exact-input review and guarded publication passed; all three required jobs passed on exact `b64a177`. No cached ownership verdict, C49 internal-cause claim or full-campaign speedup claim |

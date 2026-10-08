@@ -135,7 +135,8 @@ function extractRunbookSections(markdown: string): string[] {
 }
 
 function extractNpmRunScripts(markdown: string): string[] {
-  return [...markdown.matchAll(/\bnpm run ([A-Za-z0-9:_-]+)\b/g)].map(match => match[1]);
+  return [...markdown.matchAll(/\bnpm(?:[ \t]+--silent)?[ \t]+run[ \t]+(?:--silent[ \t]+)?([A-Za-z0-9:_-]+)\b/g)]
+    .map(match => match[1]);
 }
 
 function extractTsxTargets(command: string): string[] {
@@ -4156,6 +4157,42 @@ describe('publication hygiene', () => {
     expect(releaseNotes).not.toContain('unless the release level is production deployment candidate and all production gates are linked');
     expect(register).not.toContain('Dependency state blocks production-grade claims.');
     expect(phaseIndex).not.toContain('Publish "Testnet Production-Candidate Bridge Architecture Manual"');
+  });
+
+  it.each([
+    'npm run federated:native:two-cycle:preflight -- --config public-config.json',
+    'npm run --silent federated:native:two-cycle:preflight -- --config public-config.json',
+    'npm --silent run federated:native:two-cycle:preflight -- --config public-config.json',
+    'npm --silent run --silent federated:native:two-cycle:preflight -- --config public-config.json',
+    'npm\trun\t--silent\tfederated:native:two-cycle:preflight',
+  ])('extracts the actual script from a documented npm invocation: %s', command => {
+    expect(extractNpmRunScripts(command)).toEqual(['federated:native:two-cycle:preflight']);
+  });
+
+  it.each([
+    'npm run missing:script',
+    'npm run --silent missing:script',
+    'npm --silent run missing:script',
+  ])('retains an absent script for the backing-script refusal: %s', command => {
+    const availableScripts = new Set(['federated:native:two-cycle:preflight']);
+    expect(extractNpmRunScripts(command).filter(script => !availableScripts.has(script)))
+      .toEqual(['missing:script']);
+  });
+
+  it.each([
+    ['npm run --silent', '--silent'],
+    ['npm run --unknown federated:native:two-cycle:preflight', '--unknown'],
+  ])('keeps unsupported or incomplete options visible to the refusal: %s', (command, option) => {
+    const availableScripts = new Set(['federated:native:two-cycle:preflight']);
+    expect(extractNpmRunScripts(command).filter(script => !availableScripts.has(script)))
+      .toEqual([option]);
+  });
+
+  it.each([
+    'npm run\nfederated:native:two-cycle:preflight',
+    'npm\nrun federated:native:two-cycle:preflight',
+  ])('does not join separate Markdown lines into an npm invocation: %s', command => {
+    expect(extractNpmRunScripts(command)).toEqual([]);
   });
 
   it('keeps documented npm run commands backed by package scripts', () => {
