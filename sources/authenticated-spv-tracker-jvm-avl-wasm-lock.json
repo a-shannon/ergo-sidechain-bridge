@@ -19,7 +19,7 @@
     },
     {
       "path": "relayer/package.json",
-      "sha256": "8b2755d52c80bb4dd97d28bcd67cd759d497494364b632a5dc484e875fcb5ba6"
+      "sha256": "1525093d890932e236bf3bf8df07319cbb2f89ca3c5288dff9cdc15c25cefd89"
     },
     {
       "path": "relayer/package-lock.json",
