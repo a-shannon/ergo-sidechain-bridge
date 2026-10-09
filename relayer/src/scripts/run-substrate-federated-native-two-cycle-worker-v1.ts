@@ -25,6 +25,9 @@ import { createNativeTwoCycleWorkerSourceLockStageV1,
 import { createNativeTwoCycleWorkerCommittedReserveStageV1,
   projectSubstrateFederatedNativeCommittedReserveFailureStageV1 }
   from '../substrate-federated-native-committed-reserve-failure-v1.js';
+import { createNativeTwoCycleWorkerCommittedReserveRevalidationV1,
+  projectNativeCommittedReserveRevalidationOriginV1 }
+  from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { projectNativeTwoCycleErgoNodeCompletionFailureReasonV1,
@@ -312,6 +315,26 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional reserve detail cannot replace failure or release the claim.
+      }
+      try {
+        const origin = projectNativeCommittedReserveRevalidationOriginV1(primaryFailure);
+        if (origin !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const workerCommittedReserveStageText = new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(invocation.attemptPath, 'worker-committed-reserve-stage.json'),
+              'native two-cycle committed reserve revalidation ancestry', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleWorkerCommittedReserveRevalidationV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+            workerCommittedReserveStageText }, origin);
+          writeNewFile(join(invocation.attemptPath, 'worker-committed-reserve-revalidation.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle worker committed reserve revalidation companion');
+        }
+      } catch {
+        // Optional origin cannot alter the terminal failure or its existing lineage.
       }
       try {
         const phase = projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(primaryFailure);

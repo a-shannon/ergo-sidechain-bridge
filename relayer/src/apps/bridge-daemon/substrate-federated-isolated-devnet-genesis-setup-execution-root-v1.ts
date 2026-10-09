@@ -27,6 +27,8 @@ import { tagSubstrateFederatedNativeCommittedReserveFailureStageV1,
   type SubstrateFederatedNativeCommittedReserveFailureStageV1,
   type SubstrateFederatedNativeCommittedReserveKindV1 }
   from '../../substrate-federated-native-committed-reserve-failure-v1.js';
+import { tagNativeCommittedReserveRevalidationOriginV1 }
+  from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
 
 import {
   sha256CanonicalJson,
@@ -2872,9 +2874,16 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
       return Object.freeze({ checkResponseDigestHex: executionCheck.checkedAcceptance.submissionHandle.checkResponseDigestHex,
         checkerArtifact: executionCheck.checkedAcceptance.submissionHandle });
     },
-    revalidate: checked => {
+    revalidate: async checked => {
       failureStage = 'operational-revalidate';
-      assertActive(); return authorizationSession.revalidator.revalidate(checked);
+      try { assertActive(); }
+      catch (cause) {
+        throw tagNativeCommittedReserveRevalidationOriginV1(cause, 'callback-observation-guard');
+      }
+      try { return await authorizationSession.revalidator.revalidate(checked); }
+      catch (cause) {
+        throw tagNativeCommittedReserveRevalidationOriginV1(cause, 'revalidator-call');
+      }
     },
     authorize: value => {
       failureStage = 'operational-authorize';

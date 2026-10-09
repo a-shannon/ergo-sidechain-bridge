@@ -75,6 +75,9 @@ import { SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1,
   tagSubstrateFederatedNativeCommittedReserveFailureStageV1,
   parseNativeTwoCycleParentCommittedReserveStageV1 }
   from '../substrate-federated-native-committed-reserve-failure-v1.js';
+import { tagNativeCommittedReserveRevalidationOriginV1,
+  parseNativeTwoCycleParentCommittedReserveRevalidationV1 }
+  from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { tagNativeGenesisSetupFailureStageV1 }
   from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { parseNativeTwoCycleParentSetupStageV1 }
@@ -825,6 +828,7 @@ describe('native two-cycle parent and worker V1', () => {
     'worker-setup-stage.json', 'worker-owner-stage.json',
     'worker-owner-stage-v2.json', 'worker-source-lock-stage.json',
     'worker-committed-reserve-stage.json', 'failure-committed-reserve-stage.json',
+    'worker-committed-reserve-revalidation.json', 'failure-committed-reserve-revalidation.json',
     'worker-callback-timing-v1.json', 'failure-callback-timing-v1.json'] as const)(
     'rejects a worker root phase companion %s alongside a success transport', async artifact => {
     const fixture = commandFixture();
@@ -1392,6 +1396,90 @@ describe('native two-cycle parent and worker V1', () => {
       if (fault === 'occupied worker') expect(readFileSync(join(fixture.attemptPath, 'worker-tracker-context.json'), 'utf8'))
         .toBe('retained worker tracker bytes');
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    (['callback-observation-guard', 'revalidator-call'] as const).map(origin => ({ kind, origin }))))(
+    'joins the $kind $origin revalidation origin through exact legacy and new parent ancestry', async ({ kind, origin }) => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('synthetic private revalidation cause');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'committed-reserve');
+      tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'operational-revalidate', kind);
+      tagNativeCommittedReserveRevalidationOriginV1(primary, origin);
+      mocked.root.mockRejectedValueOnce(primary);
+      mocked.process.mockImplementationOnce(async input => {
+        await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+        throw new Error('unexpected worker success');
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      const failure = JSON.parse(read('failure.json'));
+      const companion = parseNativeTwoCycleParentCommittedReserveRevalidationV1(
+        read('failure-committed-reserve-revalidation.json'), failureBindings(fixture), failure.receiptDigestHex, {
+          workerFailureText: read('worker-failure.json'),
+          workerRootPhaseV2Text: read('worker-root-phase-v2.json'),
+          workerCycleStepText: read('worker-cycle-step.json'),
+          workerCommittedReserveStageText: read('worker-committed-reserve-stage.json'),
+          parentCycleStepText: read('failure-cycle-step.json'),
+          parentCommittedReserveStageText: read('failure-committed-reserve-stage.json'),
+          workerRevalidationText: read('worker-committed-reserve-revalidation.json'),
+        });
+      expect(companion).toMatchObject({ cycle: 'cycle-1', step: 'committed-reserve',
+        committedReserveStage: 'operational-revalidate', committedReserveKind: kind,
+        revalidationOrigin: origin, operationCompletionEstablished: false,
+        rootCleanupEstablished: false, rawCausePublished: false });
+      expect(read('worker-committed-reserve-revalidation.json') + read('failure-committed-reserve-revalidation.json'))
+        .not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['missing origin', 'conflicting origins', 'missing worker', 'invalid worker',
+    'occupied worker', 'worker directory', 'occupied parent', 'parent directory'] as const)(
+    'preserves terminal and legacy evidence when revalidation origin has %s', async fault => {
+      const fixture = commandFixture(); configureParent(fixture, projectedResult());
+      const primary = new Error('synthetic private revalidation cause');
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'committed-reserve');
+      tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'operational-revalidate', 'continuation');
+      if (fault !== 'missing origin') tagNativeCommittedReserveRevalidationOriginV1(primary, 'revalidator-call');
+      if (fault === 'conflicting origins') tagNativeCommittedReserveRevalidationOriginV1(primary, 'callback-observation-guard');
+      mocked.root.mockRejectedValueOnce(primary);
+      const workerPath = join(fixture.attemptPath, 'worker-committed-reserve-revalidation.json');
+      const parentPath = join(fixture.attemptPath, 'failure-committed-reserve-revalidation.json');
+      let retained: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker') writeFileSync(workerPath, 'retained worker origin');
+        if (fault === 'worker directory') mkdirSync(workerPath);
+        try {
+          await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+          throw new Error('unexpected worker success');
+        } catch (cause) {
+          expect(cause).toBe(primary);
+          const names = ['worker-failure.json', 'worker-root-phase-v2.json',
+            'worker-cycle-step.json', 'worker-committed-reserve-stage.json'];
+          retained = Object.fromEntries(names.map(name => [name,
+            readFileSync(join(fixture.attemptPath, name), 'utf8')]));
+          if (fault === 'missing worker') rmSync(workerPath);
+          if (fault === 'invalid worker') writeFileSync(workerPath, '{}\n');
+          if (fault === 'occupied parent') writeFileSync(parentPath, 'retained parent origin');
+          if (fault === 'parent directory') mkdirSync(parentPath);
+          throw cause;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(retained)) expect(read(name)).toBe(bytes);
+      expect(existsSync(join(fixture.attemptPath, 'failure-committed-reserve-stage.json'))).toBe(true);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      if (fault === 'occupied worker') expect(read('worker-committed-reserve-revalidation.json')).toBe('retained worker origin');
+      if (fault === 'occupied parent') expect(read('failure-committed-reserve-revalidation.json')).toBe('retained parent origin');
+      else if (fault === 'parent directory') expect(existsSync(parentPath)).toBe(true);
+      else expect(existsSync(parentPath)).toBe(false);
     });
 
   it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle =>

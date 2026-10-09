@@ -226,6 +226,8 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `failure-setup-stage.json` | Optional parent sidecar binding the setup label and every worker ancestor to the same terminal failure, config, commit and path identities. |
 | `worker-owner-stage.json` / `failure-owner-stage.json` | Optional worker/parent failure pair identifying an allowlisted post-callback owner stage with exact terminal ancestry. |
 | `worker-owner-stage-v2.json` / `failure-owner-stage-v2.json` | Optional worker/parent failure pair adding `invalid-timing` or `budget-exceeded` only at the exact owner completion check. It cannot classify a historical attempt. |
+| `worker-committed-reserve-stage.json` / `failure-committed-reserve-stage.json` | Optional worker/parent pair binding a closed native committed-reserve stage and `genesis` or `continuation` kind to the existing cycle-step and terminal failure ancestry. |
+| `worker-committed-reserve-revalidation.json` / `failure-committed-reserve-revalidation.json` | Optional worker/parent pair narrowing `operational-revalidate` to `callback-observation-guard` or `revalidator-call`, with exact committed-reserve-stage ancestry. |
 
 The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
 `post-root-identity` and `transport-publication`. A root exception and a cleanup
@@ -242,6 +244,19 @@ assign one; a cleanup exception count, including zero, never proves disposal.
 A primitive value thrown during cleanup is not included in this count; a
 cleanup-only primitive may have no root-phase companion. A missing or invalid
 companion does not change the terminal result or permit another attempt.
+
+The revalidation companion distinguishes the callback's retained observation
+and custody guard from the following concrete revalidator call. It tags only
+the original native error and requires its own matching cycle, step, stage and
+kind. Unknown or conflicting origins, ambiguous primary errors and detail
+under a cleanup ancestor are refused. The parent validates the complete legacy
+worker and parent committed-reserve lineage before publishing the new detail.
+Missing, malformed or occupied optional files preserve the terminal failure
+and older receipts. Either new file contradicts a successful invocation.
+The origin identifies a call boundary, not an inner predicate or raw cause;
+completion, cleanup and raw-cause flags remain false. Existing receipt formats,
+digest domains, budgets and thrown values are unchanged. These files cannot
+classify earlier attempts or supply execution, signing or retry authority.
 
 The setup-stage companion narrows a future native setup failure to retained
 session or compiler validation, request construction, observation, signing,

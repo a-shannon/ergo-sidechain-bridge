@@ -465,6 +465,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'bridge-repository-layout.ts',
       'substrate-federated-native-source-lock-failure-v1.ts',
       'substrate-federated-native-committed-reserve-failure-v1.ts',
+      'substrate-federated-native-committed-reserve-revalidation-v1.ts',
       'bridge-validity-tracker-header-context-v1.ts',
       'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
@@ -711,6 +712,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
         new Set(['tagSubstrateFederatedNativeCommittedReserveFailureStageV1',
           'SubstrateFederatedNativeCommittedReserveFailureStageV1',
           'SubstrateFederatedNativeCommittedReserveKindV1']),
+      ],
+      [
+        'substrate-federated-native-committed-reserve-revalidation-v1.ts',
+        new Set(['tagNativeCommittedReserveRevalidationOriginV1']),
       ],
       [
         'bridge-repository-layout.ts',
@@ -1255,6 +1260,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
   [
     'apps/bridge-daemon/substrate-federated-isolated-devnet-genesis-setup-execution-root-v1.ts',
     new Map([
+      [
+        '../../substrate-federated-native-committed-reserve-revalidation-v1.js',
+        new Set(['tagNativeCommittedReserveRevalidationOriginV1']),
+      ],
       [
         '../../state-tracker.js',
         new Set([

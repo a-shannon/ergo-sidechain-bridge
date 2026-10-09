@@ -5,6 +5,8 @@ import { SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1,
   projectOwnSubstrateFederatedNativeCommittedReserveKindV1,
   projectSubstrateFederatedNativeCommittedReserveFailureStageV1 }
   from '../../substrate-federated-native-committed-reserve-failure-v1.js';
+import { projectNativeCommittedReserveRevalidationOriginV1 }
+  from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 }
   from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
 import { tagNativeTwoCycleCycleStepFailureV1 }
@@ -362,6 +364,65 @@ describe('native continuation peg-in execution transport', () => {
       expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(thrown)).toBe('confirmed-journal');
       expect(mocked.createVaultTransport.mock.results[0]!.value.submit).toHaveBeenCalledOnce();
       expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    (['callback-observation-guard', 'revalidator-sync', 'revalidator-async'] as const)
+      .map(branch => ({ kind, branch }))))(
+    'binds genuine $kind revalidation $branch refusal before downstream authority', async ({ kind, branch }) => {
+      const fixture = executionFixture();
+      const primary = new Error('synthetic native revalidation refusal');
+      const authorization = mocked.createVaultAuthorization.getMockImplementation()!();
+      if (branch === 'revalidator-sync') {
+        authorization.revalidator.revalidate.mockImplementationOnce(() => { throw primary; });
+      } else if (branch === 'revalidator-async') {
+        authorization.revalidator.revalidate.mockRejectedValueOnce(primary);
+      }
+      mocked.createVaultAuthorization.mockReturnValueOnce(authorization);
+      vi.spyOn(operational, 'runErgoOperationalTransaction').mockImplementationOnce(async (_input, ports) => {
+        if (branch === 'callback-observation-guard') {
+          mocked.assertSourceOutputs.mockImplementationOnce(() => { throw primary; });
+        }
+        await ports.revalidate({} as never);
+        throw new Error('expected native revalidation refusal');
+      });
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      await expect(execute(fixture.vaultInput as never)).rejects.toBe(primary);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(primary)).toBe('operational-revalidate');
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveKindV1(primary)).toBe(kind);
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(primary, 'cycle-1', 'committed-reserve');
+      expect(projectNativeCommittedReserveRevalidationOriginV1(primary))
+        .toBe(branch === 'callback-observation-guard' ? branch : 'revalidator-call');
+      expect(authorization.revalidator.revalidate).toHaveBeenCalledTimes(branch === 'callback-observation-guard' ? 0 : 1);
+      expect(authorization.broadcastAuthorizer.authorize).not.toHaveBeenCalled();
+      const journal = mocked.createVaultJournal.mock.results[0]!.value;
+      expect(journal.journal.reserve).not.toHaveBeenCalled();
+      expect(journal.journal.finalize).not.toHaveBeenCalled();
+      expect(mocked.createVaultTransport.mock.results[0]!.value.submit).not.toHaveBeenCalled();
+    });
+
+  it.each((['callback-observation-guard', 'revalidator-call'] as const).flatMap(origin =>
+    [undefined, 'opaque primitive', Object.freeze({ opaque: true })].map(value => ({ origin, value }))))(
+    'preserves unbranded genuine continuation $origin failures without diagnostic origin', async ({ origin, value }) => {
+      const fixture = executionFixture();
+      const authorization = mocked.createVaultAuthorization.getMockImplementation()!();
+      if (origin === 'revalidator-call') authorization.revalidator.revalidate.mockRejectedValueOnce(value);
+      mocked.createVaultAuthorization.mockReturnValueOnce(authorization);
+      vi.spyOn(operational, 'runErgoOperationalTransaction').mockImplementationOnce(async (_input, ports) => {
+        if (origin === 'callback-observation-guard') mocked.assertSourceOutputs.mockImplementationOnce(() => { throw value; });
+        await ports.revalidate({} as never);
+        throw new Error('expected unbranded revalidation refusal');
+      });
+      await expect(executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1(fixture.vaultInput as never))
+        .rejects.toBe(value);
+      expect(projectNativeCommittedReserveRevalidationOriginV1(value)).toBeNull();
+      expect(authorization.broadcastAuthorizer.authorize).not.toHaveBeenCalled();
+      const journal = mocked.createVaultJournal.mock.results[0]!.value;
+      expect(journal.journal.reserve).not.toHaveBeenCalled();
+      expect(journal.journal.finalize).not.toHaveBeenCalled();
+      expect(mocked.createVaultTransport.mock.results[0]!.value.submit).not.toHaveBeenCalled();
     });
 
   function sourceJournal() {

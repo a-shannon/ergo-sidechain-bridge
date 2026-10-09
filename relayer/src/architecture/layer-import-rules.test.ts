@@ -472,6 +472,46 @@ describe('layer import rules', () => {
       'apps must not import an unclassified legacy module: substrate-federated-native-committed-reserve-failure-v1.ts');
   });
 
+  it('allows only revalidation origin tagging at its execution root seam', () => {
+    const specifier = '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+      `import { tagNativeCommittedReserveRevalidationOriginV1 } from '${specifier}';
+       tagNativeCommittedReserveRevalidationOriginV1(new Error(), 'revalidator-call');`))).toEqual([]);
+  });
+
+  it.each([
+    'projectNativeCommittedReserveRevalidationOriginV1',
+    'createNativeTwoCycleWorkerCommittedReserveRevalidationV1',
+    'createNativeTwoCycleParentCommittedReserveRevalidationV1',
+    'parseNativeTwoCycleWorkerCommittedReserveRevalidationV1',
+    'parseNativeTwoCycleParentCommittedReserveRevalidationV1',
+    'NATIVE_COMMITTED_RESERVE_REVALIDATION_ORIGINS_V1',
+  ])('rejects non-tag revalidation binding %s at the callback seam', binding => {
+    const specifier = '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+      `import { ${binding} } from '${specifier}';`)).map(item => item.message)).toContain(
+      `restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+  });
+
+  it.each([
+    ['namespace', "import * as origin from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';"],
+    ['alias', "import { tagNativeCommittedReserveRevalidationOriginV1 as tag } from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';"],
+    ['escape', "import { tagNativeCommittedReserveRevalidationOriginV1 } from '../../substrate-federated-native-committed-reserve-revalidation-v1.js'; const tag = tagNativeCommittedReserveRevalidationOriginV1;"],
+  ])('rejects widening revalidation origin tagging through %s', (fault, source) => {
+    const messages = inspect(staticAppFixture(GENESIS_SETUP_ROOT, source)).map(item => item.message);
+    const message = fault === 'namespace' ? 'restricted capability import must use reviewed named bindings'
+      : fault === 'alias' ? 'restricted capability import binding must not be aliased'
+        : 'restricted capability binding must not escape its reviewed call';
+    expect(messages.some(item => item.includes(message))).toBe(true);
+  });
+
+  it('rejects revalidation origin tagging from a different app owner', () => {
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts',
+      "import { tagNativeCommittedReserveRevalidationOriginV1 } from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';"))
+      .map(item => item.message)).toContain(
+      'apps must not import an unclassified legacy module: substrate-federated-native-committed-reserve-revalidation-v1.ts');
+  });
+
   it('allows only the diagnostic cycle tag and type at the target root seam', () => {
     const specifier = '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
