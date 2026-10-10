@@ -71,8 +71,37 @@ observation; the prior aggregate 15-second ceiling is not preserved. No cache,
 mock, concurrency, skipped case or timeout override is added. The complete
 affected file passes 32 cases, with all three observations named separately;
 TypeScript and 95 generic publication/claim/bundle cases pass in their scopes.
-Publication requires exact inventory and statement equivalence, independent
-exact-input review, staged/range guards and one new-head CI.
+Exact inventory and statement equivalence, independent review and guarded
+publication closed that correction at `288405c1c0a4c525872f4f46b90597d1c71ca5fb`.
+
+Its exact [run 38033535178](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/38033535178)
+is terminal: the gate fails; pinned-source rebuild and Solidity audit pass.
+The new public failure is confined to `windows-job-output.test.ts`: output
+origin and invalid-handle matrix targets exceed their 10-second process limits,
+while the binary-output case passes. The unchanged file passes locally, so
+the hosted cause is not established. Each affected PowerShell target compiles
+an immutable C# fixture inside its measured interval.
+
+The selected local correction prepares only the current case's exact C# source
+in a fresh directory with the installed Framework compiler, then loads the
+fresh bound DLL in the genuine target. Preparation stays inside the existing
+30-second case; compiler and target each have a 10-second process limit. DLL
+loading, pipe-origin and borrowed/duplicate/invalid-handle probes remain inside
+the target interval. The target interval no longer includes fixture compilation.
+The outer runner still compiles its own source on each invocation. No global
+preparation, restored output, mocked live probe, case limit or runtime change is
+introduced. Source, compiler, default response-file presence/content and DLL
+bytes are rechecked before loading; occupied,
+missing, malformed or changed artifacts refuse the operation. Installed compiler
+servicing hardlinks are allowed with exact byte binding; fresh source and DLL
+files require a single link.
+
+The two affected files pass 29 cases: 26 preparation-boundary cases, including
+real malformed-source and invalid-DLL failures, plus the three original live
+output cases. TypeScript, current-source/probe equivalence and affected consumers
+are required, followed by independent exact-input review, publication guards and
+one new-head CI. This is a test-preparation correction, not evidence of hosted
+cause or speedup, campaign completion, custody disposal or node acceptance.
 
 The preceding revalidation-origin milestone passed independent review, guarded
 publication and all three required jobs in exact
@@ -1614,7 +1643,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Exact public CI timeout -> independent configuration observation cases | Preserve all three current source validations and route/authority assertions in separately named serial cases, with unchanged configured runner/job/runtime limits | The complete affected file passes 32 cases; TypeScript and 95 generic cases pass in scope. Exact inventory/statement equivalence, independent review and guarded promotion close the correction before one new-head CI. Watchdog scope changes from grouped to per observation; no aggregate-bound preservation claim. C56 remains consumed; no automatic C57 |
+| **Now** | Exact public target timeout -> fresh static Windows output fixtures | Compile only the selected immutable C# source inside the existing case, then load its fresh bound DLL and retain every live output probe inside the unchanged target interval | The preparation boundaries and three real output cases pass 29 cases locally. Compilation leaves the target interval; no hosted cause or speedup is proved. Close exact source/probe equivalence, affected consumers, independent review and guarded promotion before one new-head CI. C56 remains consumed; no automatic C57 |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1657,7 +1686,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Compatibility-inventory configuration cases (local correction) | Keep every observation and source freshness check while isolating the three independent case watchdogs; preserve assertions and configured limits | The exact hosted grouped case exceeded 15000ms. Its isolated local canonical-limit probe passes, so hosted cause is not established. The full corrected file passes 32 cases; TypeScript and 95 generic cases pass in scope. Exact inventory/statement equivalence and independent review are required before one guarded publication/CI; no runtime predicate or authority change |
+| Windows output fixture preparation (local correction) | Prepare exact selected C# source freshly before the target interval, bind compiler/configuration/source/DLL bytes, and retain all genuine process/pipe/handle probes and limits | Exact run38033535178 fails two target10s limits and passes the binary case. Its unchanged local file passes, so cause is not proved. The corrected boundary/output files pass 29 cases; close source equivalence, affected consumers and independent review before one guarded publication/CI. Compiler preparation remains inside each original30s case; target loading and live probes remain inside target10s |
+| Compatibility-inventory configuration cases (published) | Keep every observation and source freshness check while isolating the three independent case watchdogs; preserve assertions and configured limits | Independent review and guarded publication close the correction at288405c1c. Reuse 32 local cases, TypeScript and scoped generic evidence while unchanged. The watchdog applies per observation; the prior aggregate15s ceiling is not preserved. No runtime predicate or authority change |
 | C56 prospective confirmation join (published; public timeout correction due) | Bind an active guard or genuine bounded confirmation category to the unique native primary error and exact old committed-reserve worker/parent ancestry in separate optional companions, preserving old receipts, throws, predicates, order and budgets | Local closure, independent review and guarded publication pass at96a8e8973. Exact CI has two jobs PASS and a compatibility-inventory case timeout in the gate. These results do not close hosted acceptance or reclassify C56; no automatic C57 |
 | C55 prospective revalidation-origin join (closed and published) | Bind `callback-observation-guard` or `revalidator-call` to the unique native primary error and exact legacy committed-reserve worker/parent lineage, in separate optional companions; preserve old stages, receipts, thrown values, predicates and budgets | The genuine callback discriminator, 197 metadata/codec, 63 native-helper, 355 exhaustive parent/worker, 328 architecture and 95 generic consumer cases passed in their scopes, with TypeScript/imports and independent review. Guarded publication and exact-head CI passed at `9a6d23b00`. No C55 cause, completion or disposal follows |
 | Parent/worker test scheduling correction (local checkpoint) | Execute the complete listed parent/worker suite in fresh serial exact-name workers of at most 25 cases, without changing assertions, file order, budgets or error refusal | Full 341-case and 14-shard local runs pass with every executed name matched exactly once. The hosted timeout remains an unproved scheduling hypothesis. Close the affected runner/helper/audit/clean-checkout consumers, exact-input independent review and publication guards before one new-head CI |

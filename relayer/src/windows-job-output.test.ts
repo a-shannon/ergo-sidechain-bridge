@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runBoundedProcess } from './pinned-local-native-verifier-build.js';
+import { prepareWindowsCSharpFixture } from './windows-csharp-fixture.test-helper.js';
 
 const bridgeRoot = resolve(import.meta.dirname, '..', '..');
 const environment = { SystemRoot: process.env.SystemRoot, WINDIR: process.env.WINDIR };
@@ -32,24 +33,32 @@ public static class OutputPipeOrigin
     }
 }
 `;
-    const command = [
-      "$ErrorActionPreference = 'Stop';",
-      "$ProgressPreference = 'SilentlyContinue';",
-      `Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(source).toString('base64')}')));`,
-      '[OutputPipeOrigin]::Inspect()',
-    ].join(' ');
-    const result = await runBoundedProcess({
-      executablePath: resolve(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
-      args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')],
-      cwd: bridgeRoot,
-      env: environment,
-      timeoutMs: 10_000,
-      maxOutputBytes: 8_192,
-      label: 'target output pipe origin',
-    });
-    expect(result.stderr).toBe('');
-    expect(result.stdout.trim().split(',').map(Number)).toEqual([process.pid, process.pid]);
-    expect(result.pid).not.toBe(process.pid);
+    const temporary = mkdtempSync(join(tmpdir(), 'e2s-output-origin-'));
+    try {
+      const fixture = await prepareWindowsCSharpFixture({
+        source, directory: temporary, cwd: bridgeRoot, env: environment,
+      });
+      const command = [
+        "$ErrorActionPreference = 'Stop';",
+        "$ProgressPreference = 'SilentlyContinue';",
+        fixture.loadCommand(),
+        '[OutputPipeOrigin]::Inspect()',
+      ].join(' ');
+      const result = await runBoundedProcess({
+        executablePath: resolve(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+        args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(command, 'utf16le').toString('base64')],
+        cwd: bridgeRoot,
+        env: environment,
+        timeoutMs: 10_000,
+        maxOutputBytes: 8_192,
+        label: 'target output pipe origin',
+      });
+      expect(result.stderr).toBe('');
+      expect(result.stdout.trim().split(',').map(Number)).toEqual([process.pid, process.pid]);
+      expect(result.pid).not.toBe(process.pid);
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
   }, 30_000);
 
   it('preserves both large binary channels without consuming cancellation input', async () => {
@@ -147,13 +156,15 @@ public static class OutputHandleMatrix
 `;
     const temporary = mkdtempSync(join(tmpdir(), 'e2s-output-handle-'));
     const scriptPath = join(temporary, 'matrix.ps1');
-    const bytes = Buffer.from(`${source}\n${harness}`).toString('base64');
-    writeFileSync(scriptPath, [
-      "$ErrorActionPreference = 'Stop';",
-      `Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${bytes}')));`,
-      '[OutputHandleMatrix]::Run()',
-    ].join('\n'), { flag: 'wx' });
     try {
+      const fixture = await prepareWindowsCSharpFixture({
+        source: `${source}\n${harness}`, directory: temporary, cwd: bridgeRoot, env: environment,
+      });
+      writeFileSync(scriptPath, [
+        "$ErrorActionPreference = 'Stop';",
+        fixture.loadCommand(),
+        '[OutputHandleMatrix]::Run()',
+      ].join('\n'), { flag: 'wx' });
       const result = await runBoundedProcess({
         executablePath: resolve(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe'),
         args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', scriptPath],
