@@ -37,6 +37,8 @@ import { createNativeTwoCycleParentCommittedReserveRevalidationV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { createNativeTwoCycleParentCommittedReserveConfirmationV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
+import { createNativeTwoCycleParentCommittedReserveConfirmationProgressV1 }
+  from '../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
 import { createNativeTwoCycleParentSetupStageV1 }
   from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { createNativeTwoCycleParentOwnerStageV1,
@@ -244,6 +246,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'failure-committed-reserve-revalidation.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation.json'))
       || existsSync(join(attemptPath, 'failure-committed-reserve-confirmation.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation-progress.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-confirmation-progress.json'))
       || existsSync(join(attemptPath, 'worker-setup-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage.json'))
       || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))
@@ -582,6 +586,33 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent committed reserve confirmation companion');
         } catch {
           // Optional confirmation detail preserves the failure and older receipts.
+        }
+        try {
+          if (initial.config.captureCommittedReserveConfirmationProgress === true) {
+            const bindings = { configSha256Hex: initial.configSha256Hex,
+              expectedBridgeCommit: initial.config.expectedBridgeCommit,
+              pathIdentityDigestHex: initial.pathIdentityDigestHex };
+            const readProgressAncestor = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+              readBoundedRegularFile(join(attemptPath, name),
+                'native committed reserve confirmation progress lineage', 16 * 1024).bytes);
+            const companion = createNativeTwoCycleParentCommittedReserveConfirmationProgressV1(
+              bindings, failure.receiptDigestHex, {
+                workerFailureText: readProgressAncestor('worker-failure.json'),
+                workerRootPhaseV2Text: readProgressAncestor('worker-root-phase-v2.json'),
+                workerCycleStepText: readProgressAncestor('worker-cycle-step.json'),
+                workerCommittedReserveStageText: readProgressAncestor('worker-committed-reserve-stage.json'),
+                parentCycleStepText: readProgressAncestor('failure-cycle-step.json'),
+                parentCommittedReserveStageText: readProgressAncestor('failure-committed-reserve-stage.json'),
+                workerConfirmationText: readProgressAncestor('worker-committed-reserve-confirmation.json'),
+                parentConfirmationText: readProgressAncestor('failure-committed-reserve-confirmation.json'),
+                workerProgressText: readProgressAncestor('worker-committed-reserve-confirmation-progress.json'),
+              });
+            writeNewFile(join(attemptPath, 'failure-committed-reserve-confirmation-progress.json'),
+              Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+              'native committed reserve confirmation progress parent companion');
+          }
+        } catch {
+          // Missing or invalid metrics cannot replace failure or permit a retry.
         }
         try {
           const bindings = {

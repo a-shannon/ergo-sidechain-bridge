@@ -467,6 +467,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-native-committed-reserve-failure-v1.ts',
       'substrate-federated-native-committed-reserve-revalidation-v1.ts',
       'substrate-federated-native-committed-reserve-confirmation-v1.ts',
+      'substrate-federated-native-committed-reserve-confirmation-progress-v1.ts',
       'bridge-validity-tracker-header-context-v1.ts',
       'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
@@ -721,6 +722,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-native-committed-reserve-confirmation-v1.ts',
         new Set(['tagNativeCommittedReserveConfirmationOriginV1']),
+      ],
+      [
+        'substrate-federated-native-committed-reserve-confirmation-progress-v1.ts',
+        new Set(['tagNativeCommittedReserveConfirmationProgressV1']),
       ],
       [
         'bridge-repository-layout.ts',
@@ -1011,6 +1016,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
           'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1',
           'SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
+          'projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1',
         ]),
       ],
       [
@@ -1274,6 +1280,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         new Set(['tagNativeCommittedReserveConfirmationOriginV1']),
       ],
       [
+        '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js',
+        new Set(['tagNativeCommittedReserveConfirmationProgressV1']),
+      ],
+      [
         '../../state-tracker.js',
         new Set([
           'assertReloadSubstrateFederatedIsolatedDevnetTrackerAdmissionV1ResultProvenance',
@@ -1461,6 +1471,7 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
         new Set([
           'createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1',
           'SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1',
+          'projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1',
         ]),
       ],
       [

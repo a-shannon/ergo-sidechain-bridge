@@ -788,7 +788,8 @@ beforeEach(() => {
   mocked.committedVault.mockImplementation(async value => {
     order.push('committedVault');
     expect(value).toEqual({ target, batch, packet, sourceLockObservation: sourceLock.outputObservation,
-      setupSession: retainedSetup, state: journalState });
+      setupSession: retainedSetup, state: journalState,
+      ...(input.captureCommittedReserveConfirmationProgress === true ? { captureConfirmationProgress: true } : {}) });
     expect(value.target).toBe(target); expect(value.batch).toBe(batch);
     expect(value.packet).toBe(packet); expect(value.sourceLockObservation).toBe(sourceLock.outputObservation);
     expect(value.setupSession).toBe(retainedSetup); expect(value.state).toBe(journalState);
@@ -802,7 +803,8 @@ beforeEach(() => {
   mocked.continuationVault.mockImplementation(async value => {
     order.push('continuationVault'); expect(value).toEqual({ target: phaseTargets.confirmation, batch,
       packet: continuationPacket, sourceLockObservation: continuationSourceLock.outputObservation,
-      setupSession: retainedSetup, state: journalState });
+      setupSession: retainedSetup, state: journalState,
+      ...(input.captureCommittedReserveConfirmationProgress === true ? { captureConfirmationProgress: true } : {}) });
     retainAttempt('continuation-reserve-transition-attempt'); return continuationVault;
   });
   mocked.draft.mockImplementation(value => {
@@ -1137,6 +1139,15 @@ function configureNativeReturnMocks() {
 }
 
 describe('fresh FED target composition', () => {
+  it.each([false, undefined, null, 0, 1, 'true', [], {}])(
+    'rejects an invalid root confirmation progress opt-in %j before custody', async value => {
+      const candidate = { ...input, captureCommittedReserveConfirmationProgress: value } as unknown as RunSubstrateFederatedGenesisTargetRootV1Input;
+      await expect(runSubstrateFederatedGenesisTargetRootV1(candidate))
+        .rejects.toThrow('confirmation progress option must be true or omitted');
+      expect(mocked.frontier).not.toHaveBeenCalled();
+      expect(mocked.ergoBuild).not.toHaveBeenCalled();
+      expect(mocked.process).not.toHaveBeenCalled();
+    });
   function assertNativeReturnHeldBeforeAnchor() {
     expect(mocked.withdrawalFee).toHaveBeenCalledOnce(); expect(mocked.trackerFee).toHaveBeenCalledOnce();
     expect(mocked.checkpoint).toHaveBeenCalledOnce(); expect(mocked.checkpointAssert).toHaveBeenCalledOnce();
@@ -1643,8 +1654,14 @@ describe('fresh FED target composition', () => {
     expect(mocked.payoutSubmit).toHaveBeenCalledOnce(); expect(mocked.payoutConfirm).toHaveBeenCalledOnce(); assertDownstreamCleanup();
   });
 
-  it('binds retained custody, actual component handles and both target views, then disposes them', async () => {
+  it.each([false, true])('binds retained custody, actual component handles and both target views, then disposes them with progress %s', async capture => {
+    if (capture) input = { ...input, captureCommittedReserveConfirmationProgress: true };
     const result = await runSubstrateFederatedGenesisTargetRootV1(input);
+    for (const call of [mocked.committedVault, mocked.continuationVault]) {
+      expect(call).toHaveBeenCalledOnce();
+      expect(Object.hasOwn(call.mock.calls[0]![0], 'captureConfirmationProgress')).toBe(capture);
+      if (capture) expect(call.mock.calls[0]![0].captureConfirmationProgress).toBe(true);
+    }
     expect(result.status).toBe('fresh-federated-round-trip-confirmed');
     expect(result.nativeGenesisHashHex).toBe(genesis);
     expect(result.operatorAddressHex).toBe(operator!.addressHex);

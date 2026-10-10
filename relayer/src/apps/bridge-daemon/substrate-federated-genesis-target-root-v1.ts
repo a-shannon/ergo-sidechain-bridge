@@ -115,6 +115,7 @@ const KEYS = {
 } as const;
 
 export interface RunSubstrateFederatedGenesisTargetRootV1Input {
+  readonly captureCommittedReserveConfirmationProgress?: true;
   readonly frontierBuild: Omit<BuildSubstrateFederatedGenesisNodeV1Input, 'sourceSession'>;
   readonly ergoBuild: BuildSubstrateFederatedIsolatedDevnetErgoNodeV1Input;
 }
@@ -130,7 +131,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
   };
   let setupAcquired = false;
   try {
-    const captured = exact(input, ['frontierBuild', 'ergoBuild']);
+    const progressKey = 'captureCommittedReserveConfirmationProgress';
+    const hasProgressOption = input !== null && typeof input === 'object' && Object.hasOwn(input, progressKey);
+    const captured = exact(input, hasProgressOption ? ['frontierBuild', 'ergoBuild', progressKey]
+      : ['frontierBuild', 'ergoBuild']);
+    if (hasProgressOption && captured[progressKey] !== true) {
+      throw new Error('FED target confirmation progress option must be true or omitted');
+    }
     const frontierInput = exact(captured.frontierBuild, ['bridgeRoot', 'frontierSourcePath',
       'buildParentDirectory', 'cargoHomeDirectory', 'cargoExecutablePath', 'rustcExecutablePath',
       'gitExecutablePath', 'protocExecutablePath']);
@@ -426,6 +433,8 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           const reserve = await executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1({
             target, batch, packet, sourceLockObservation: sourceLock.outputObservation,
             setupSession: setup, state,
+            ...(captured.captureCommittedReserveConfirmationProgress === true
+              ? { captureConfirmationProgress: true as const } : {}),
           });
           assertActive();
           const draftInputs = Object.freeze({ target, batch, packet, committedVaultObservation: reserve.outputObservation });
@@ -523,6 +532,8 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
     const returnInput = {
       node: ergo, setup, source: retainedSource, operator: retainedOperator,
       sourceOperation, state: retainedState, prepared: executed.value.continuation,
+      ...(captured.captureCommittedReserveConfirmationProgress === true
+        ? { captureConfirmationProgress: true as const } : {}),
       priorSnapshot: executed.receipt.finalSnapshot };
     const first = await native.withTarget(async () => {
       const result = await completeFirstNativeReturn(returnInput, markStep);
@@ -766,6 +777,7 @@ interface NativeReturnContinuation {
 
 /** Retained data crosses process phases; each consumer owns its current target authority. */
 async function completeFirstNativeReturn(input: Readonly<{
+  captureConfirmationProgress?: true;
   node: Readonly<SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2>;
   setup: NativeSetup;
   source: Readonly<SubstrateFederatedIsolatedDevnetSourceAttestationSessionV2>;
@@ -965,6 +977,7 @@ async function completeFirstNativeReturn(input: Readonly<{
       const reserve = await executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1({
         target, batch: prepared.batch, packet: secondPacket,
         sourceLockObservation: sourceLock.outputObservation, setupSession: setup, state,
+        ...(input.captureConfirmationProgress === true ? { captureConfirmationProgress: true as const } : {}),
       });
       readCustody();
       const draftInputs = Object.freeze({ target, batch: prepared.batch, packet: secondPacket,

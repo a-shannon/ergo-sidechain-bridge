@@ -31,6 +31,8 @@ import { tagNativeCommittedReserveRevalidationOriginV1 }
   from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { tagNativeCommittedReserveConfirmationOriginV1 }
   from '../../substrate-federated-native-committed-reserve-confirmation-v1.js';
+import { tagNativeCommittedReserveConfirmationProgressV1 }
+  from '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
 
 import {
   sha256CanonicalJson,
@@ -343,6 +345,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-genesis-broadcast-authorizer-v1.js';
 import {
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
+  projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_GENESIS_CONFIRMATION_OBSERVATION_MAX_MS_V1,
   type SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1,
 } from '../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js';
@@ -2764,6 +2767,7 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
 }
 
 type NativePegInCommittedVaultExecutionInputV1 = Readonly<{
+  captureConfirmationProgress?: true;
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   batch: Readonly<SubstrateFederatedNativeGenesisSetupExecutionBatchV1>;
   packet: ReturnType<typeof assertSubstrateFederatedNativeGenesisPegInPacketV1>;
@@ -2826,7 +2830,11 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   };
   assertActive();
   const completionDeadline = performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS;
-  const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, batch.request.target.genesisHeaderIdHex);
+  const observer = input.captureConfirmationProgress === true
+    ? createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        target, batch.request.target.genesisHeaderIdHex, packet.transactions.reserveTransition.txId)
+    : createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(
+        target, batch.request.target.genesisHeaderIdHex);
   failureStage = 'native-check';
   const receipt = await check(packet, target);
   assertActive();
@@ -2926,6 +2934,27 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
     if (diagnostic !== null && diagnostic.category !== 'confirmation_phase_failure') {
       tagNativeCommittedReserveConfirmationOriginV1(cause,
         'confirmation-observation', diagnostic.category);
+      // Export only the last completed read of this exact observer. Failed or
+      // mismatched optional capture cannot replace the original thrown value.
+      if (input.captureConfirmationProgress === true && diagnostic.lastObservation !== null) {
+        try {
+          const progress = projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1(
+            observer, transaction.txId, targetBinding.executionTargetIdentityDigestHex);
+          if (progress !== null && diagnostic.expectedTransactionIdHex === transaction.txId
+            && diagnostic.executionTargetIdentityDigestHex === targetBinding.executionTargetIdentityDigestHex) {
+            tagNativeCommittedReserveConfirmationProgressV1(cause, {
+              confirmationCategory: diagnostic.category,
+              progress,
+              expectedTransactionIdHex: transaction.txId,
+              executionTargetIdentityDigestHex: targetBinding.executionTargetIdentityDigestHex,
+              targetGenesisHeaderIdHex: batch.request.target.genesisHeaderIdHex,
+              observationCount: diagnostic.observationCount,
+              lastObservationDigestHex: diagnostic.lastObservation.observationDigestHex,
+              lastObservationHeight: diagnostic.lastObservation.observedAtHeight,
+            });
+          }
+        } catch { /* Optional metrics confer no completion or retry authority. */ }
+      }
     }
     throw cause;
   }

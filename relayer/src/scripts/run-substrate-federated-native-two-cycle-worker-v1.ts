@@ -31,6 +31,9 @@ import { createNativeTwoCycleWorkerCommittedReserveRevalidationV1,
 import { createNativeTwoCycleWorkerCommittedReserveConfirmationV1,
   projectNativeCommittedReserveConfirmationOriginV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
+import { createNativeTwoCycleWorkerCommittedReserveConfirmationProgressV1,
+  projectNativeCommittedReserveConfirmationProgressV1 }
+  from '../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
 import { projectNativeTwoCycleSetupFailureStageV1 } from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { createNativeTwoCycleWorkerSetupStageV1 } from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
 import { projectNativeTwoCycleErgoNodeCompletionFailureReasonV1,
@@ -358,6 +361,29 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional confirmation detail cannot alter failure or older receipts.
+      }
+      try {
+        const detail = invocation.config.captureCommittedReserveConfirmationProgress === true
+          ? projectNativeCommittedReserveConfirmationProgressV1(primaryFailure) : null;
+        if (detail !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const readProgressAncestor = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(invocation.attemptPath, name),
+              'native committed reserve confirmation progress ancestry', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleWorkerCommittedReserveConfirmationProgressV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+            workerCommittedReserveStageText: readProgressAncestor('worker-committed-reserve-stage.json'),
+            workerConfirmationText: readProgressAncestor('worker-committed-reserve-confirmation.json'),
+          }, detail);
+          writeNewFile(join(invocation.attemptPath, 'worker-committed-reserve-confirmation-progress.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native committed reserve confirmation progress companion');
+        }
+      } catch {
+        // Optional metrics preserve the original failure and every older receipt.
       }
       try {
         const phase = projectSubstrateFederatedTrackerV2BuildFailurePhaseV1(primaryFailure);

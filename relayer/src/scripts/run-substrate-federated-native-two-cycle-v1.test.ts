@@ -81,6 +81,9 @@ import { tagNativeCommittedReserveRevalidationOriginV1,
 import { tagNativeCommittedReserveConfirmationOriginV1,
   parseNativeTwoCycleParentCommittedReserveConfirmationV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
+import { tagNativeCommittedReserveConfirmationProgressV1,
+  parseNativeTwoCycleParentCommittedReserveConfirmationProgressV1 }
+  from '../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
 import { tagNativeGenesisSetupFailureStageV1 }
   from '../substrate-federated-native-genesis-setup-stage-v1.js';
 import { parseNativeTwoCycleParentSetupStageV1 }
@@ -833,6 +836,7 @@ describe('native two-cycle parent and worker V1', () => {
     'worker-committed-reserve-stage.json', 'failure-committed-reserve-stage.json',
     'worker-committed-reserve-revalidation.json', 'failure-committed-reserve-revalidation.json',
     'worker-committed-reserve-confirmation.json', 'failure-committed-reserve-confirmation.json',
+    'worker-committed-reserve-confirmation-progress.json', 'failure-committed-reserve-confirmation-progress.json',
     'worker-callback-timing-v1.json', 'failure-callback-timing-v1.json'] as const)(
     'rejects a worker root phase companion %s alongside a success transport', async artifact => {
     const fixture = commandFixture();
@@ -1217,6 +1221,86 @@ describe('native two-cycle parent and worker V1', () => {
       if (fault === 'occupied parent V2') {
         expect(read('failure-owner-stage-v2.json')).toBe('retained parent V2 bytes');
       } else expect(existsSync(join(fixture.attemptPath, 'failure-owner-stage-v2.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    (['cycle-1', 'cycle-2'] as const).map(cycle => ({ kind, cycle }))))(
+    'joins opt-in $kind $cycle progress through the actual worker and public parent', async ({ kind, cycle }) => {
+      const fixture = commandFixture();
+      enableConfirmationProgress(fixture);
+      configureParent(fixture, projectedResult());
+      const primary = progressFailure(kind, cycle);
+      mocked.root.mockRejectedValueOnce(primary);
+      mocked.process.mockImplementationOnce(async input => {
+        await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config')));
+        throw new Error('unexpected worker success');
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      const failure = JSON.parse(read('failure.json'));
+      const companion = parseNativeTwoCycleParentCommittedReserveConfirmationProgressV1(
+        read('failure-committed-reserve-confirmation-progress.json'), failureBindings(fixture), failure.receiptDigestHex, {
+          workerFailureText: read('worker-failure.json'),
+          workerRootPhaseV2Text: read('worker-root-phase-v2.json'),
+          workerCycleStepText: read('worker-cycle-step.json'),
+          workerCommittedReserveStageText: read('worker-committed-reserve-stage.json'),
+          parentCycleStepText: read('failure-cycle-step.json'),
+          parentCommittedReserveStageText: read('failure-committed-reserve-stage.json'),
+          workerConfirmationText: read('worker-committed-reserve-confirmation.json'),
+          parentConfirmationText: read('failure-committed-reserve-confirmation.json'),
+          workerProgressText: read('worker-committed-reserve-confirmation-progress.json'),
+        });
+      expect(companion).toMatchObject({ cycle, committedReserveKind: kind,
+        confirmationOrigin: 'confirmation-observation', confirmationCategory: 'not_found_at_deadline',
+        confirmationProgress: syntheticConfirmationProgressDetail(),
+        operationCompletionEstablished: false, rootCleanupEstablished: false, rawCausePublished: false });
+      expect(mocked.root).toHaveBeenCalledWith(fixture.loaded.rootInput);
+      expect(mocked.root.mock.calls[0]![0].captureCommittedReserveConfirmationProgress).toBe(true);
+      expect(read('worker-committed-reserve-confirmation-progress.json')
+        + read('failure-committed-reserve-confirmation-progress.json')).not.toContain('private');
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+    });
+
+  it.each(['no opt-in', 'missing detail', 'invalid detail', 'missing worker', 'invalid worker',
+    'occupied worker', 'worker directory', 'occupied parent', 'parent directory'] as const)(
+    'preserves the original terminal and legacy receipts for %s progress', async fault => {
+      const fixture = commandFixture();
+      if (fault !== 'no opt-in') enableConfirmationProgress(fixture);
+      configureParent(fixture, projectedResult());
+      const primary = progressFailure('continuation', 'cycle-1', fault !== 'missing detail' && fault !== 'invalid detail');
+      if (fault === 'invalid detail') tagNativeCommittedReserveConfirmationProgressV1(primary,
+        { ...syntheticConfirmationProgressDetail(), observationCount: 0 });
+      mocked.root.mockRejectedValueOnce(primary);
+      const workerPath = join(fixture.attemptPath, 'worker-committed-reserve-confirmation-progress.json');
+      const parentPath = join(fixture.attemptPath, 'failure-committed-reserve-confirmation-progress.json');
+      let retained: Record<string, string> = {};
+      mocked.process.mockImplementationOnce(async input => {
+        if (fault === 'occupied worker') writeFileSync(workerPath, 'retained worker metrics');
+        if (fault === 'worker directory') mkdirSync(workerPath);
+        try { await runSubstrateFederatedNativeTwoCycleWorkerFromArguments(input.args.slice(input.args.indexOf('--config'))); }
+        catch (cause) {
+          retained = Object.fromEntries(['worker-failure.json', 'worker-root-phase-v2.json', 'worker-cycle-step.json',
+            'worker-committed-reserve-stage.json', 'worker-committed-reserve-confirmation.json']
+            .map(name => [name, readFileSync(join(fixture.attemptPath, name), 'utf8')]));
+          if (fault === 'missing worker') rmSync(workerPath);
+          if (fault === 'invalid worker') writeFileSync(workerPath, '{}\n');
+          if (fault === 'occupied parent') writeFileSync(parentPath, 'retained parent metrics');
+          if (fault === 'parent directory') mkdirSync(parentPath);
+          throw cause;
+        }
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toBe(primary);
+      const read = (name: string) => readFileSync(join(fixture.attemptPath, name), 'utf8');
+      expect(read('failure.json')).toBe(expectedTerminalFailure(fixture));
+      for (const [name, bytes] of Object.entries(retained)) expect(read(name)).toBe(bytes);
+      expect(existsSync(join(fixture.attemptPath, 'failure-committed-reserve-confirmation.json'))).toBe(true);
+      if (fault === 'occupied worker') expect(read('worker-committed-reserve-confirmation-progress.json')).toBe('retained worker metrics');
+      if (fault === 'occupied parent') expect(read('failure-committed-reserve-confirmation-progress.json')).toBe('retained parent metrics');
+      else expect(existsSync(parentPath)).toBe(fault === 'parent directory');
       expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
     });
 
@@ -2247,6 +2331,40 @@ function loadedInvocation(
       ergoBuild: Object.freeze({ source: 'ergo', ergoSourcePath }),
     }),
   });
+}
+
+function enableConfirmationProgress(fixture: ReturnType<typeof commandFixture>): void {
+  fixture.loaded = { ...fixture.loaded,
+    config: Object.assign({}, fixture.loaded.config, { captureCommittedReserveConfirmationProgress: true }),
+    rootInput: Object.assign({}, fixture.loaded.rootInput, { captureCommittedReserveConfirmationProgress: true }),
+  };
+}
+
+function syntheticConfirmationProgressDetail() {
+  const node = { fullHeightBefore: 19, fullHeightAfter: 20,
+    index: { status: 'observed' as const, indexedHeight: 19, fullHeight: 20 },
+    pool: { status: 'present' as const } };
+  const body = { schema: 'e2s.substrate-federated-isolated-devnet-confirmation-progress.v1' as const,
+    version: 1 as const, expectedErgoTransactionIdHex: 'a'.repeat(64),
+    executionTargetIdentityDigestHex: 'b'.repeat(64), targetGenesisHeaderIdHex: 'c'.repeat(64),
+    observationSequence: 1, observedAtUnixMs: 1800000000000, primary: node, witness: node };
+  return { confirmationCategory: 'not_found_at_deadline' as const,
+    expectedTransactionIdHex: body.expectedErgoTransactionIdHex,
+    executionTargetIdentityDigestHex: body.executionTargetIdentityDigestHex,
+    targetGenesisHeaderIdHex: body.targetGenesisHeaderIdHex,
+    observationCount: 1, lastObservationDigestHex: 'd'.repeat(64), lastObservationHeight: 20,
+    progress: { ...body, diagnosticDigestHex: sha256CanonicalJson(body,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONFIRMATION_PROGRESS_V1') } };
+}
+
+function progressFailure(kind: 'genesis' | 'continuation', cycle: 'cycle-1' | 'cycle-2', withDetail = true) {
+  const primary = new Error('synthetic private confirmation cause');
+  tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(primary, cycle);
+  tagNativeTwoCycleCycleStepFailureV1(primary, cycle, 'committed-reserve');
+  tagSubstrateFederatedNativeCommittedReserveFailureStageV1(primary, 'confirmation', kind);
+  tagNativeCommittedReserveConfirmationOriginV1(primary, 'confirmation-observation', 'not_found_at_deadline');
+  if (withDetail) tagNativeCommittedReserveConfirmationProgressV1(primary, syntheticConfirmationProgressDetail());
+  return primary;
 }
 
 function configureParent(

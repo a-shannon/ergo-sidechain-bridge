@@ -9,6 +9,9 @@ import { projectNativeCommittedReserveRevalidationOriginV1 }
   from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
 import { projectNativeCommittedReserveConfirmationOriginV1 }
   from '../../substrate-federated-native-committed-reserve-confirmation-v1.js';
+import { projectNativeCommittedReserveConfirmationProgressV1 }
+  from '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
+import { sha256CanonicalJson } from '../../ergo-settlement-core/strict-json.js';
 import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 }
   from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
 import { tagNativeTwoCycleCycleStepFailureV1 }
@@ -21,6 +24,7 @@ const mocked = vi.hoisted(() => ({
   promoteSource: vi.fn(),
   promoteVault: vi.fn(),
   createObserver: vi.fn(),
+  projectProgress: vi.fn(),
   createSourceAuthorizer: vi.fn(),
   createVaultAuthorization: vi.fn(),
   createSourceJournal: vi.fn(),
@@ -56,6 +60,7 @@ vi.mock('../../substrate-federated-isolated-devnet-setup-check-execution-v2.js',
 vi.mock('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js', async importOriginal => ({
   ...(await importOriginal<typeof import('../../substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.js')>()),
   createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1: mocked.createObserver,
+  projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1: mocked.projectProgress,
 }));
 
 vi.mock('../../substrate-federated-isolated-devnet-peg-in-source-lock-broadcast-authorizer-v1.js', async importOriginal => ({
@@ -125,6 +130,7 @@ describe('native continuation peg-in execution transport', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    mocked.projectProgress.mockReset().mockReturnValue(null);
     sourcePrior = 'none';
     vaultPrior = 'none';
     sourceSubmitFailure = undefined;
@@ -479,6 +485,100 @@ describe('native continuation peg-in execution transport', () => {
       expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
       expect(mocked.createVaultTransport.mock.results[0]!.value.submit).toHaveBeenCalledOnce();
     });
+
+  it.each(['genesis', 'continuation'] as const)(
+    'retains opt-in %s metrics from its exact original confirmation observer', async kind => {
+      const fixture = executionFixture();
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      mocked.createObserver.mockReturnValueOnce({
+        reconciliationIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
+        observe: vi.fn(async () => {
+          now = 120_001;
+          return { ...confirmation, status: 'not_found', confirmations: 0,
+            confirmationHeight: null, confirmationHeaderIdHex: null };
+        }),
+      });
+      const progress = confirmationProgress();
+      mocked.projectProgress.mockReturnValueOnce(progress);
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      const error = await execute({ ...fixture.vaultInput, captureConfirmationProgress: true } as never)
+        .catch(value => value);
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(error, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(error, 'cycle-1', 'committed-reserve');
+      expect(mocked.createObserver).toHaveBeenCalledWith(fixture.target,
+        fixture.batch.request.target.genesisHeaderIdHex, fixture.packet.transactions.reserveTransition.txId);
+      expect(mocked.projectProgress).toHaveBeenCalledWith(mocked.createObserver.mock.results[0]!.value,
+        fixture.packet.transactions.reserveTransition.txId, CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex);
+      expect(projectNativeCommittedReserveConfirmationProgressV1(error)).toEqual({
+        confirmationCategory: 'not_found_at_deadline', progress,
+        expectedTransactionIdHex: fixture.packet.transactions.reserveTransition.txId,
+        executionTargetIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
+        targetGenesisHeaderIdHex: fixture.batch.request.target.genesisHeaderIdHex,
+        observationCount: 1, lastObservationDigestHex: confirmation.observationDigestHex,
+        lastObservationHeight: 20,
+      });
+      expect(projectNativeCommittedReserveConfirmationOriginV1(error)?.confirmationCategory)
+        .toBe('not_found_at_deadline');
+      expect(mocked.createVaultTransport.mock.results[0]!.value.submit).toHaveBeenCalledOnce();
+      expect(mocked.createVaultJournal.mock.results[0]!.value.reconcileActive).toHaveBeenCalledOnce();
+      expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
+    });
+
+  it.each(['no opt-in', 'missing', 'foreign transaction', 'foreign target', 'foreign genesis',
+    'stale sequence', 'invalid height interval', 'invalid digest', 'projector throws'] as const)(
+    'preserves original confirmation failure for %s metrics', async fault => {
+      const fixture = executionFixture();
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      mocked.createObserver.mockReturnValueOnce({
+        reconciliationIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
+        observe: vi.fn(async () => {
+          now = 120_001;
+          return { ...confirmation, status: 'not_found', confirmations: 0,
+            confirmationHeight: null, confirmationHeaderIdHex: null };
+        }),
+      });
+      const original = confirmationProgress();
+      const { diagnosticDigestHex: ignored, ...body } = original; void ignored;
+      if (fault === 'foreign transaction') body.expectedErgoTransactionIdHex = hex('1');
+      if (fault === 'foreign target') body.executionTargetIdentityDigestHex = hex('2');
+      if (fault === 'foreign genesis') body.targetGenesisHeaderIdHex = hex('3');
+      if (fault === 'stale sequence') body.observationSequence = 2;
+      if (fault === 'invalid height interval') body.primary = { ...body.primary, fullHeightBefore: 21 };
+      const progress = { ...body, diagnosticDigestHex: fault === 'invalid digest' ? hex('0')
+        : sha256CanonicalJson(body, 'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONFIRMATION_PROGRESS_V1') };
+      if (fault === 'projector throws') mocked.projectProgress.mockImplementationOnce(() => { throw new Error('optional'); });
+      else mocked.projectProgress.mockReturnValueOnce(fault === 'missing' ? null : progress);
+      const error = await executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1({ ...fixture.vaultInput,
+        ...(fault === 'no opt-in' ? {} : { captureConfirmationProgress: true }),
+      } as never).catch(value => value);
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(error, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(error, 'cycle-1', 'committed-reserve');
+      expect(projectNativeCommittedReserveConfirmationProgressV1(error)).toBeNull();
+      expect(projectNativeCommittedReserveConfirmationOriginV1(error)).toEqual({
+        confirmationOrigin: 'confirmation-observation', confirmationCategory: 'not_found_at_deadline' });
+      if (fault === 'no opt-in') {
+        expect(mocked.createObserver).toHaveBeenCalledWith(fixture.target, fixture.batch.request.target.genesisHeaderIdHex);
+        expect(mocked.projectProgress).not.toHaveBeenCalled();
+      }
+      expect(mocked.createVaultTransport.mock.results[0]!.value.submit).toHaveBeenCalledOnce();
+      expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
+    });
+
+  function confirmationProgress() {
+    const node = { fullHeightBefore: 19, fullHeightAfter: 20,
+      index: { status: 'observed' as const, indexedHeight: 19, fullHeight: 20 },
+      pool: { status: 'present' as const } };
+    const body = { schema: 'e2s.substrate-federated-isolated-devnet-confirmation-progress.v1' as const,
+      version: 1 as const, expectedErgoTransactionIdHex: packet().transactions.reserveTransition.txId,
+      executionTargetIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
+      targetGenesisHeaderIdHex: hex('e'), observationSequence: 1, observedAtUnixMs: 1800000000000,
+      primary: node, witness: { ...node, pool: { status: 'not_found' as const } } };
+    return { ...body, diagnosticDigestHex: sha256CanonicalJson(body,
+      'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CONFIRMATION_PROGRESS_V1') };
+  }
 
   function sourceJournal() {
     let reconciliations = 0;

@@ -145,6 +145,20 @@ checkout at execution time. Keep outputs, builds, source checkouts and caches
 separate. The same pinned Git executable may serve both builders. The Ergo
 builder's worktree root is derived from the bridge checkout layout.
 
+The optional Boolean `captureCommittedReserveConfirmationProgress` defaults to
+disabled. Set it to `true` in a separately admitted fresh configuration to
+capture both nodes' index heights and transaction-specific pool observations
+during genesis and continuation reserve confirmation. The helper derives the
+transaction ID from its own reserve packet. The option is bound to the exact
+configuration hash; omission and explicit `false` preserve the default root
+input. Other values are rejected.
+
+Capture adds four HTTP reads per matching observation, each with a two-second
+timeout, alongside the required transaction reads. All optional reads drain before the
+observer returns. The existing 50-second observation envelope and confirmation
+deadlines remain unchanged, but fast observations can become slower, reducing
+the number of polls and potentially changing the deadline category.
+
 On Windows, use a shallow existing absolute directory for
 `frontierBuildParentDirectory`; the Frontier builder creates nested source,
 target, temporary and WASM paths beneath it. Keep `outputParentDirectory`
@@ -228,6 +242,19 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `worker-owner-stage-v2.json` / `failure-owner-stage-v2.json` | Optional worker/parent failure pair adding `invalid-timing` or `budget-exceeded` only at the exact owner completion check. It cannot classify a historical attempt. |
 | `worker-committed-reserve-stage.json` / `failure-committed-reserve-stage.json` | Optional worker/parent pair binding a closed native committed-reserve stage and `genesis` or `continuation` kind to the existing cycle-step and terminal failure ancestry. |
 | `worker-committed-reserve-revalidation.json` / `failure-committed-reserve-revalidation.json` | Optional worker/parent pair narrowing `operational-revalidate` to `callback-observation-guard` or `revalidator-call`, with exact committed-reserve-stage ancestry. |
+| `worker-committed-reserve-confirmation-progress.json` / `failure-committed-reserve-confirmation-progress.json` | Optional opt-in worker/parent pair binding the latest completed paired-node index and exact-ID pool observations to the original confirmation failure, reserve kind and complete legacy ancestry. |
+
+Confirmation progress retains each node's full height before and after the
+transaction read, index heights and pool status. A pool `not_found` means only
+that the endpoint did not return that transaction. Index lag, node disagreement
+and unavailable metrics can guide a subsequent investigation; they do not
+establish a failure cause or transaction acceptance. Export performs no new
+HTTP reads. The observation sequence and minimum final height must match the
+original failure's last observation; stale, foreign or malformed detail is
+refused. Missing, invalid or occupied optional files preserve the terminal
+failure and older receipts. Either progress file contradicts success, even
+when capture is disabled. Completion, cleanup and raw-cause claims remain
+false. These diagnostics cannot reclassify earlier attempts or permit a retry.
 
 The diagnostic stages are `pre-root`, `root-or-cleanup`, `projection`,
 `post-root-identity` and `transport-publication`. A root exception and a cleanup

@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-08
+Updated: 2026-10-10
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,52 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–56 are permanently consumed or held. The separately
+**Now:** Campaigns 24–57 are permanently consumed or held. Packaged C57 on
+`b269ccc61b1a5a10334a481d35f63d8fc9bd79a4` terminated once at
+`2026-10-10T16:59:16.5994018Z`, with integer command exit 1 and no launcher
+exception. Independent review validated the current public parent graph:
+`execution_failure/root-or-cleanup/cycle-1/committed-reserve/confirmation`,
+kind `continuation`, origin `confirmation-observation`, category
+`not_found_at_deadline`. Worker ancestry remained opaque digest links. These
+facts establish neither the inner cause nor operation completion, cleanup or
+custody disposal. C57 cannot be retried, resumed or reclassified.
+
+All three required jobs passed on that exact source in
+[run 38045567224](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/38045567224).
+The source-supported gap is that the actual committed-reserve helper does not
+request the existing observer's transaction-specific progress capture. The
+selected local batch connects an explicit configuration opt-in through both
+genesis and continuation helpers to separately versioned optional worker and
+parent confirmation-progress companions. Its executable consumer is the
+operator interpreting a future failure through the documented two-cycle entry
+point. No new campaign is selected.
+
+The helper derives the capture ID from its own reserve packet and retains only
+the latest completed observation of that exact observer. Export requires the
+original confirmation diagnostic, matching sequence and height, unique own
+native primary error and complete legacy ancestry. Sanitized paired index and
+pool metrics use a separate domain; missing, invalid or occupied detail
+preserves the failure and every old receipt. Either new file contradicts
+success. The opt-in adds four bounded concurrent HTTP reads per matching
+observation. Existing deadlines and the 50-second observation envelope remain
+unchanged, but fast observations can become slower and the number of polls or
+deadline category can change. No timing neutrality or speedup is claimed.
+The local producer-to-consumer closure, operator documentation and exact-input
+independent review precede one guarded publication and one new-head CI. No C58
+follows automatically; a later campaign requires its own plan decision and
+entirely fresh admission. Recovery and external FED acceptance remain separate.
+
+The five affected config, actual-helper, progress-codec, architecture and root
+test files pass 1,078 cases locally. The parent/worker file passes all 384 cases
+in 16 serial exact-name shards, with each listed name executed exactly once.
+TypeScript and the import guard pass for 137 layered modules across 919 sources.
+The unchanged observer passes its 42 cases in the new consumer closure, and
+the three affected documentation/publication/claim/bundle suites pass 95 cases.
+These selections overlap earlier focused evidence and are not added together.
+Builds, node acceptance, historical cause, operation completion and custody
+disposal remain outside this local evidence.
+
+**Earlier confirmation milestone:** The separately
 admitted packaged C56 invocation on `9a6d23b00cc44263e9adfee38bd54c133dc08e04`
 terminated once at `2026-10-10T04:53:21.7380348Z`, with integer command exit
 code 1 and no launcher exception. Independent review validated the current
@@ -1643,13 +1688,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Exact public target timeout -> fresh static Windows output fixtures | Compile only the selected immutable C# source inside the existing case, then load its fresh bound DLL and retain every live output probe inside the unchanged target interval | The preparation boundaries and three real output cases pass 29 cases locally. Compilation leaves the target interval; no hosted cause or speedup is proved. Close exact source/probe equivalence, affected consumers, independent review and guarded promotion before one new-head CI. C56 remains consumed; no automatic C57 |
+| **Now** | Genuine reserve confirmation observer -> bounded operator failure detail | Connect opt-in paired index/pool capture through both actual helpers and worker/parent ancestry; document the cost and interpretation, then validate and review one coherent source candidate | Required-read failure, stale or foreign detail, conflicting primary errors, malformed/occupied companions and successful-result contradictions must fail closed while preserving the original failure and old receipts. C57 remains consumed; no campaign is selected by this diagnostic join |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–56 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–57 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -1686,7 +1731,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Windows output fixture preparation (local correction) | Prepare exact selected C# source freshly before the target interval, bind compiler/configuration/source/DLL bytes, and retain all genuine process/pipe/handle probes and limits | Exact run38033535178 fails two target10s limits and passes the binary case. Its unchanged local file passes, so cause is not proved. The corrected boundary/output files pass 29 cases; close source equivalence, affected consumers and independent review before one guarded publication/CI. Compiler preparation remains inside each original30s case; target loading and live probes remain inside target10s |
+| Committed-reserve confirmation progress (selected local batch) | Connect the genuine opt-in observer capture to bounded separate worker/parent companions, with exact original diagnostic and legacy ancestry; close the documented operator consumer without changing signing, transactions, confirmation predicates or budgets | Config omission/false preserve the default root input; true reaches both helper kinds. Actual helper tests and worker-parent tests must preserve old throws/receipts under isolated invalid/absent/occupied detail. Pure codec/projection negatives, narrow import guards, affected generic consumers and exact independent review precede one guarded publication/CI. No C57 cause or C58 authority follows |
+| Windows output fixture preparation (closed and published) | Prepare exact selected C# source freshly before the target interval, bind compiler/configuration/source/DLL bytes, and retain all genuine process/pipe/handle probes and limits | Independent review, guarded publication and all three exact-head jobs passed at b269ccc61 in run38045567224. Reuse the 29 affected local cases and exact source/probe equivalence. Compilation remains inside each original30s case; target loading and live probes remain inside target10s. Hosted cause and speedup are not established |
 | Compatibility-inventory configuration cases (published) | Keep every observation and source freshness check while isolating the three independent case watchdogs; preserve assertions and configured limits | Independent review and guarded publication close the correction at288405c1c. Reuse 32 local cases, TypeScript and scoped generic evidence while unchanged. The watchdog applies per observation; the prior aggregate15s ceiling is not preserved. No runtime predicate or authority change |
 | C56 prospective confirmation join (published; public timeout correction due) | Bind an active guard or genuine bounded confirmation category to the unique native primary error and exact old committed-reserve worker/parent ancestry in separate optional companions, preserving old receipts, throws, predicates, order and budgets | Local closure, independent review and guarded publication pass at96a8e8973. Exact CI has two jobs PASS and a compatibility-inventory case timeout in the gate. These results do not close hosted acceptance or reclassify C56; no automatic C57 |
 | C55 prospective revalidation-origin join (closed and published) | Bind `callback-observation-guard` or `revalidator-call` to the unique native primary error and exact legacy committed-reserve worker/parent lineage, in separate optional companions; preserve old stages, receipts, thrown values, predicates and budgets | The genuine callback discriminator, 197 metadata/codec, 63 native-helper, 355 exhaustive parent/worker, 328 architecture and 95 generic consumer cases passed in their scopes, with TypeScript/imports and independent review. Guarded publication and exact-head CI passed at `9a6d23b00`. No C55 cause, completion or disposal follows |

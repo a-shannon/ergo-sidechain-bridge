@@ -552,6 +552,41 @@ describe('layer import rules', () => {
       'apps must not import an unclassified legacy module: substrate-federated-native-committed-reserve-confirmation-v1.ts');
   });
 
+  it('allows confirmation progress tagging only at its reviewed execution seam', () => {
+    const specifier = '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+      `import { tagNativeCommittedReserveConfirmationProgressV1 } from '${specifier}';
+       tagNativeCommittedReserveConfirmationProgressV1(new Error(), {});`))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts',
+      `import { tagNativeCommittedReserveConfirmationProgressV1 } from '${specifier}';`))
+      .map(item => item.message)).toContain(
+        'apps must not import an unclassified legacy module: substrate-federated-native-committed-reserve-confirmation-progress-v1.ts');
+  });
+
+  it.each(['projectNativeCommittedReserveConfirmationProgressV1',
+    'createNativeTwoCycleWorkerCommittedReserveConfirmationProgressV1',
+    'createNativeTwoCycleParentCommittedReserveConfirmationProgressV1',
+    'parseNativeTwoCycleWorkerCommittedReserveConfirmationProgressV1',
+    'parseNativeTwoCycleParentCommittedReserveConfirmationProgressV1'])(
+    'rejects confirmation progress capability %s from the callback seam', binding => {
+      const specifier = '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
+      expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT,
+        `import { ${binding} } from '${specifier}';`)).map(item => item.message))
+        .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    });
+
+  it.each([
+    ['namespace', "import * as progress from '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';"],
+    ['alias', "import { tagNativeCommittedReserveConfirmationProgressV1 as tag } from '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';"],
+    ['escape', "import { tagNativeCommittedReserveConfirmationProgressV1 } from '../../substrate-federated-native-committed-reserve-confirmation-progress-v1.js'; const tag = tagNativeCommittedReserveConfirmationProgressV1;"],
+  ])('rejects confirmation progress widening through %s', (fault, source) => {
+    const message = fault === 'namespace' ? 'restricted capability import must use reviewed named bindings'
+      : fault === 'alias' ? 'restricted capability import binding must not be aliased'
+        : 'restricted capability binding must not escape its reviewed call';
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT, source)).map(item => item.message)
+      .some(item => item.includes(message))).toBe(true);
+  });
+
   it('allows only the diagnostic cycle tag and type at the target root seam', () => {
     const specifier = '../../substrate-federated-native-two-cycle-cycle-step-v1.js';
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
@@ -791,8 +826,9 @@ describe('layer import rules', () => {
     const binding = 'projectSubstrateFederatedIsolatedDevnetConfirmationProgressV1';
     const source = `import { ${binding} } from '${specifier}'; ${binding}(null, '', '');`;
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, source))).toEqual([]);
-    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT, source)).map(item => item.message))
-      .toContain(`restricted capability import binding is not allowlisted: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture(GENESIS_SETUP_ROOT, source))).toEqual([]);
+    expect(inspect(staticAppFixture('apps/bridge-daemon/foreign.ts', source)).map(item => item.message))
+      .toContain('apps must not import an unclassified legacy module: substrate-federated-isolated-devnet-genesis-confirmation-observer-v1.ts');
     const otherBinding = 'reobserveSubstrateFederatedIsolatedDevnetGenesisConfirmationArtifactV1';
     expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
       source.replaceAll(binding, otherBinding))).map(item => item.message))

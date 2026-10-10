@@ -26,6 +26,26 @@ afterEach(() => {
 });
 
 describe('native two-cycle invocation V1', () => {
+  it.each([false, true])('binds explicit confirmation progress %s to config bytes', enabled => {
+    const fixture = invocationFixture();
+    const original = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);
+    const config = { ...fixture.config, captureCommittedReserveConfirmationProgress: enabled };
+    writeConfig(fixture.configPath, config);
+    const loaded = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);
+    expect(loaded.config).toEqual(config);
+    expect(loaded.configSha256Hex).not.toBe(original.configSha256Hex);
+    if (enabled) expect(loaded.rootInput.captureCommittedReserveConfirmationProgress).toBe(true);
+    else expect(loaded.rootInput).toEqual(original.rootInput);
+  });
+
+  it.each([null, 0, 1, 'true', 'false', [], {}])(
+    'refuses a non-Boolean confirmation progress option %j before effects', value => {
+      const fixture = invocationFixture();
+      writeConfig(fixture.configPath, { ...fixture.config, captureCommittedReserveConfirmationProgress: value });
+      expect(() => loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath))
+        .toThrow(/option must be Boolean/);
+    });
+
   it('loads only the exact canonical fixed-profile config', () => {
     const fixture = invocationFixture();
     const loaded = loadSubstrateFederatedNativeTwoCycleInvocationV1(
