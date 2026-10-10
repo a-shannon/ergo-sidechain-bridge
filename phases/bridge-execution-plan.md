@@ -39,7 +39,7 @@ The inner predicate, cause, operation completion, cleanup and custody disposal
 remain unknown. A zero cleanup exception count does not establish cleanup.
 C56 cannot be retried or resumed, and new diagnostics cannot reclassify it.
 
-The selected local result connects the genuine confirmation helper's existing
+The published confirmation join connects the genuine helper's existing
 bounded categories to separate optional worker and parent companions. It
 distinguishes an `active-guard` failure from `confirmation-observation`, whose
 closed category identifies a managed deadline, confirmation budget, clock,
@@ -53,12 +53,26 @@ genesis and continuation: post-observation and return guards retain the exact
 error; bounded pending, not-found, observer, invalid-observation and late
 confirmation failures stop before journal confirmation or output observation.
 This is synthetic call-boundary evidence, not C56's cause or node acceptance.
-Close exact old ancestry, hostile primary-error graphs, optional-write failure
-preservation, successful-result contradiction refusal, narrow imports and
-affected generic consumers as one source milestone. Local closure and independent
-exact-source review pass; staged/range guards and new exact-head CI remain due
-at promotion. No C57 follows automatically;
+Exact old ancestry, hostile primary-error graphs, optional-write failure
+preservation, successful-result contradiction refusal, narrow imports and generic
+consumers pass locally with independent review. Guarded publication is complete
+at `96a8e897389eb96b8e1967727903571e383d4baf`. No C57 follows automatically;
 any full campaign requires a separate plan decision and entirely fresh admission.
+
+Its exact [run 38028885339](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/38028885339)
+is terminal: Public-audit candidate gate fails; pinned-source rebuild and Solidity
+dependency audit pass. The public failure is one compatibility-inventory test
+that groups three configuration observations and exceeds the 15-second case
+watchdog. It reports no failed assertion. The selected correction gives each
+independent observation its own named case while retaining all three genuine
+builder calls, fresh tracked-artifact/source validation and every assertion.
+Runner, job and runtime limits remain unchanged. The watchdog now applies per
+observation; the prior aggregate 15-second ceiling is not preserved. No cache,
+mock, concurrency, skipped case or timeout override is added. The complete
+affected file passes 32 cases, with all three observations named separately;
+TypeScript and 95 generic publication/claim/bundle cases pass in their scopes.
+Publication requires exact inventory and statement equivalence, independent
+exact-input review, staged/range guards and one new-head CI.
 
 The preceding revalidation-origin milestone passed independent review, guarded
 publication and all three required jobs in exact
@@ -1600,7 +1614,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Native committed-reserve confirmation -> worker -> public parent diagnostic | Promote the locally closed genuine active-guard/observation join with exact legacy ancestry, failure preservation, success contradiction refusal and narrow imports as one reviewed milestone | Codec, actual helper, exhaustive composed consumers, architecture, TypeScript/imports, generic consumers and independent exact review pass locally. Exact staged/commit/range bytes, guarded publication and new-head CI remain due. C56 remains consumed; no C57 follows automatically |
+| **Now** | Exact public CI timeout -> independent configuration observation cases | Preserve all three current source validations and route/authority assertions in separately named serial cases, with unchanged configured runner/job/runtime limits | The complete affected file passes 32 cases; TypeScript and 95 generic cases pass in scope. Exact inventory/statement equivalence, independent review and guarded promotion close the correction before one new-head CI. Watchdog scope changes from grouped to per observation; no aggregate-bound preservation claim. C56 remains consumed; no automatic C57 |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1643,7 +1657,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C56 prospective confirmation join (local closure complete; promotion due) | Bind an active guard or genuine bounded confirmation category to the unique native primary error and exact old committed-reserve worker/parent ancestry in separate optional companions, preserving old receipts, throws, predicates, order and budgets | The genuine no-node helper, isolated codec/hostile-graph refusals, optional-write failure preservation, success contradictions, exhaustive composed consumers, imports, generic consumers and independent exact-source review pass. Verify exact promoted bytes and publish once before new-head CI. C56 remains consumed with cause, completion and disposal unknown; no automatic C57 |
+| Compatibility-inventory configuration cases (local correction) | Keep every observation and source freshness check while isolating the three independent case watchdogs; preserve assertions and configured limits | The exact hosted grouped case exceeded 15000ms. Its isolated local canonical-limit probe passes, so hosted cause is not established. The full corrected file passes 32 cases; TypeScript and 95 generic cases pass in scope. Exact inventory/statement equivalence and independent review are required before one guarded publication/CI; no runtime predicate or authority change |
+| C56 prospective confirmation join (published; public timeout correction due) | Bind an active guard or genuine bounded confirmation category to the unique native primary error and exact old committed-reserve worker/parent ancestry in separate optional companions, preserving old receipts, throws, predicates, order and budgets | Local closure, independent review and guarded publication pass at96a8e8973. Exact CI has two jobs PASS and a compatibility-inventory case timeout in the gate. These results do not close hosted acceptance or reclassify C56; no automatic C57 |
 | C55 prospective revalidation-origin join (closed and published) | Bind `callback-observation-guard` or `revalidator-call` to the unique native primary error and exact legacy committed-reserve worker/parent lineage, in separate optional companions; preserve old stages, receipts, thrown values, predicates and budgets | The genuine callback discriminator, 197 metadata/codec, 63 native-helper, 355 exhaustive parent/worker, 328 architecture and 95 generic consumer cases passed in their scopes, with TypeScript/imports and independent review. Guarded publication and exact-head CI passed at `9a6d23b00`. No C55 cause, completion or disposal follows |
 | Parent/worker test scheduling correction (local checkpoint) | Execute the complete listed parent/worker suite in fresh serial exact-name workers of at most 25 cases, without changing assertions, file order, budgets or error refusal | Full 341-case and 14-shard local runs pass with every executed name matched exactly once. The hosted timeout remains an unproved scheduling hypothesis. Close the affected runner/helper/audit/clean-checkout consumers, exact-input independent review and publication guards before one new-head CI |
 | Current-source JVM/AVL package pin correction (published; hosted corpus pending) | Bind the reviewed additive npm command to the current-source WASM lock without changing runtime pins, source checks, schema, budgets or corpus expectations | Four portable tests and all 13 isolated source-drift refusals pass locally; review and guarded publication passed at513112636. Its hosted gate stops at the earlier worker RPC timeout before this corpus. Reuse the unchanged pins and local evidence; no fresh JVM or node acceptance follows |
