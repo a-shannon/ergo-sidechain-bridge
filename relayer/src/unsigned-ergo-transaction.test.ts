@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   materializeUnsignedTransaction,
@@ -33,6 +33,30 @@ function transaction(): Eip12UnsignedTransaction {
 }
 
 describe('unsigned Ergo transaction materialization', () => {
+  it('releases the normalized WASM box after success and conversion or identity rejection', async () => {
+    const module = await import('ergo-lib-wasm-nodejs');
+    const wasm = module.default ?? module;
+    const free = vi.spyOn(wasm.ErgoBox.prototype, 'free');
+    const convert = vi.spyOn(wasm.ErgoBox.prototype, 'to_js_eip12');
+    try {
+      await expect(normalizeEip12Box(INPUT_BOX, 'owned box')).resolves.toEqual(INPUT_BOX);
+      expect(free).toHaveBeenCalledTimes(1);
+      free.mockClear();
+
+      convert.mockImplementationOnce(() => { throw new Error('conversion rejected'); });
+      await expect(normalizeEip12Box(INPUT_BOX, 'owned box')).rejects.toThrow('conversion rejected');
+      expect(free).toHaveBeenCalledTimes(1);
+      free.mockClear();
+
+      convert.mockImplementationOnce(() => ({ ...INPUT_BOX, boxId: 'ff'.repeat(32) }));
+      await expect(normalizeEip12Box(INPUT_BOX, 'owned box')).rejects.toThrow(/boxId does not match/);
+      expect(free).toHaveBeenCalledTimes(1);
+    } finally {
+      convert.mockRestore();
+      free.mockRestore();
+    }
+  });
+
   it('accepts only canonical ErgoTree serialization', async () => {
     const tree = `0008cd02${'22'.repeat(32)}`;
     await expect(normalizeErgoTreeHex(tree, 'refund proposition'))

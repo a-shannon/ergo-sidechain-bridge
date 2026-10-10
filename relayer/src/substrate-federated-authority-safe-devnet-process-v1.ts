@@ -30,9 +30,12 @@ import {
 } from './adapters/frontier-backing-read-agreement.js';
 import { verifyExecutableSha256 } from './native-executable-pin.js';
 import { parseStrictJson } from './strict-json.js';
+import { observeWindowsTcpListenersV1 } from './windows-tcp-listener-observation-v1.js';
 
 export const SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_PROCESS_V1_SCHEMA =
   'e2s.substrate-federated-authority-safe-devnet-process.v1' as const;
+export const SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA =
+  'e2s.substrate-federated-genesis-devnet-process.v1' as const;
 export const SUBSTRATE_FEDERATED_OWNED_RECOVERY_PROCESS_V1_SCHEMA =
   'e2s.substrate-federated-owned-recovery-process.v1' as const;
 export const SUBSTRATE_FEDERATED_OWNED_RECOVERY_LIFECYCLE_V1_SCHEMA =
@@ -47,6 +50,14 @@ const MAX_RPC_RESPONSE_BYTES = 64 * 1024;
 const MAX_CHAIN_SPEC_BYTES = 16 * 1024 * 1024;
 const RECOVERY_LAG_BLOCKS = 2;
 const ACCEPTANCE_PROCESS_RECEIPTS = new WeakSet<object>();
+const FEDERATED_GENESIS_PROCESS_RECEIPTS = new WeakSet<object>();
+const FEDERATED_GENESIS_TARGETS = new WeakMap<
+  Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+  Readonly<{
+    owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>;
+    revoke(): void;
+  }>
+>();
 const RECOVERY_PROCESS_RECEIPTS = new WeakSet<object>();
 const RECOVERY_RECEIPTS = new WeakSet<object>();
 const RECOVERY_TIMELINE_RECEIPTS = new WeakSet<object>();
@@ -90,6 +101,35 @@ export interface OwnedAuthoritySafeDevnetProcessV1Receipt {
     readonly exactBinaryRecheckedAfterAction: true;
     readonly bothProcessesStoppedAndListenersReleased: true;
   }>;
+}
+
+export interface OwnedFederatedGenesisDevnetProcessV1Input
+  extends Omit<OwnedAuthoritySafeDevnetProcessV1Input, 'chainSpecBytes' | 'expectedChainSpecSha256Hex'> {
+  readonly genesisJsonBytes: Uint8Array;
+  readonly expectedGenesisJsonSha256Hex: string;
+}
+
+export interface OwnedFederatedGenesisDevnetProcessV1Receipt
+  extends Omit<OwnedAuthoritySafeDevnetProcessV1Receipt, 'schema'> {
+  readonly schema: typeof SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA;
+}
+
+export interface OwnedFederatedGenesisDevnetTargetV1 {
+  readonly primaryRpcUrl: string;
+  readonly witnessRpcUrl: string;
+  readonly genesisJsonSha256Hex: string;
+}
+
+export interface OwnedFederatedGenesisDevnetProcessSessionV1 {
+  withTarget<T>(
+    action: (target: Readonly<OwnedFederatedGenesisDevnetTargetV1>) => Promise<T>,
+  ): Promise<T>;
+  /** Rejects during an active action; retry after that awaited action settles. */
+  close(): Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
+  /** Runs only after both owned processes and listeners stop, before their data is removed. */
+  closeWithStoppedData(
+    action: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
+  ): Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
 }
 
 export interface OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
@@ -237,6 +277,7 @@ interface OwnedAuthoritySafeDevnetRecoveryOperationsV1 {
 }
 
 interface OwnedAuthoritySafeDevnetInternalOwnerV1 {
+  assertActive(): void;
   readonly endpoints: Readonly<{
     primaryRpcUrl: string;
     witnessRpcUrl: string;
@@ -251,6 +292,7 @@ interface OwnedAuthoritySafeDevnetInternalOwnerV1 {
 
 type OwnedAuthoritySafeDevnetProcessModeV1 =
   | 'acceptance_observation'
+  | 'federated_genesis_observation'
   | 'recovery_lifecycle';
 
 interface OwnedAuthoritySafeDevnetRecoveryTimelineV1 {
@@ -297,6 +339,207 @@ export async function withOwnedAuthoritySafeDevnetProcessesV1<T>(
     owner => action(owner.endpoints),
     'acceptance_observation',
   );
+}
+
+/** Own one FED target until explicitly closed; no process handle escapes. */
+export async function createOwnedFederatedGenesisDevnetProcessSessionV1(
+  input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
+): Promise<Readonly<OwnedFederatedGenesisDevnetProcessSessionV1>> {
+  let resolveSession!: (
+    session: Readonly<OwnedFederatedGenesisDevnetProcessSessionV1>,
+  ) => void;
+  let rejectSession!: (error: unknown) => void;
+  const sessionReady = new Promise<
+    Readonly<OwnedFederatedGenesisDevnetProcessSessionV1>
+  >((resolvePromise, rejectPromise) => {
+    resolveSession = resolvePromise;
+    rejectSession = rejectPromise;
+  });
+  let releaseOwner!: () => void;
+  const ownerReleased = new Promise<void>(resolvePromise => {
+    releaseOwner = resolvePromise;
+  });
+  let processLifetime!: Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>;
+  let stoppedDataAction:
+    | ((paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>)
+    | undefined;
+  let stoppedDataCompleted = false;
+
+  processLifetime = withOwnedFederatedGenesisDevnetProcessesV1(
+    input,
+    async target => {
+      let state: 'active' | 'acting' | 'closing' | 'closed' = 'active';
+      let actionFailed = false;
+      let actionFailure: unknown;
+      let closePromise:
+        Promise<Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>>
+        | undefined;
+
+      const beginClose = () => {
+        if (closePromise !== undefined) return closePromise;
+        state = 'closing';
+        revokeOwnedFederatedGenesisDevnetTargetV1(target);
+        releaseOwner();
+        closePromise = processLifetime.then(
+          receipt => {
+            state = 'closed';
+            return receipt;
+          },
+          error => {
+            state = 'closed';
+            throw error;
+          },
+        );
+        return closePromise;
+      };
+
+      const session: Readonly<OwnedFederatedGenesisDevnetProcessSessionV1> =
+        Object.freeze({
+          withTarget: async <T>(
+            action: (
+              current: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+            ) => Promise<T>,
+          ): Promise<T> => {
+            if (typeof action !== 'function') {
+              throw new Error('FED genesis session action is required');
+            }
+            if (state === 'acting') {
+              throw new Error('FED genesis session action is already active');
+            }
+            if (state !== 'active') {
+              throw new Error('FED genesis session is closing or closed');
+            }
+            state = 'acting';
+            try {
+              assertOwnedFederatedGenesisDevnetTargetV1(target);
+              const value = await action(target);
+              assertOwnedFederatedGenesisDevnetTargetV1(target);
+              state = 'active';
+              return value;
+            } catch (error) {
+              actionFailed = true;
+              actionFailure = error;
+              const cleanup = beginClose();
+              await cleanup;
+              throw error;
+            }
+          },
+          close: () => {
+            if (state === 'acting') {
+              return Promise.reject(
+                new Error('FED genesis session cannot close while an action is active'),
+              );
+            }
+            return beginClose();
+          },
+          closeWithStoppedData: async (
+            action: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
+          ) => {
+            if (typeof action !== 'function') {
+              throw new Error('FED stopped-data action is required');
+            }
+            if (state !== 'active') {
+              throw new Error('FED genesis session must be active before stopped-data close');
+            }
+            stoppedDataAction = action;
+            const receipt = await beginClose();
+            if (!stoppedDataCompleted) {
+              throw new Error('FED stopped-data action did not complete');
+            }
+            return receipt;
+          },
+        });
+
+      resolveSession(session);
+      await ownerReleased;
+      if (actionFailed) throw actionFailure;
+      return true;
+    },
+    async paths => {
+      if (stoppedDataAction === undefined) return;
+      await stoppedDataAction(paths);
+      stoppedDataCompleted = true;
+    },
+  ).then(result => result.receipt);
+  void processLifetime.then(undefined, error => rejectSession(error));
+  return await sessionReady;
+}
+
+/** Own two isolated FED nodes; typed-loader execution is not mint authority. */
+export async function withOwnedFederatedGenesisDevnetProcessesV1<T>(
+  input: Readonly<OwnedFederatedGenesisDevnetProcessV1Input>,
+  action: (target: Readonly<OwnedFederatedGenesisDevnetTargetV1>) => Promise<T>,
+  onStoppedData?: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
+): Promise<Readonly<{ value: T; receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt> }>> {
+  if (typeof action !== 'function') throw new Error('FED genesis owned-process action is required');
+  const keys = ['nodeBinaryPath', 'expectedNodeBinarySha256Hex', 'genesisJsonBytes',
+    'expectedGenesisJsonSha256Hex', 'primaryRpcUrl', 'witnessRpcUrl', 'primaryP2pPort',
+    'witnessP2pPort', 'primaryPrometheusPort', 'witnessPrometheusPort'];
+  if (input === null || typeof input !== 'object'
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) {
+    throw new Error('FED genesis process input requires exact data fields');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(input);
+  if (Reflect.ownKeys(descriptors).length !== keys.length
+    || keys.some(key => !descriptors[key]?.enumerable || !('value' in descriptors[key]!))) {
+    throw new Error('FED genesis process input requires exact data fields');
+  }
+  const captured = Object.fromEntries(keys.map(key => [key, descriptors[key]!.value]));
+  return withOwnedAuthoritySafeDevnetProcessOwnerV1(Object.freeze({
+    nodeBinaryPath: captured.nodeBinaryPath,
+    expectedNodeBinarySha256Hex: captured.expectedNodeBinarySha256Hex,
+    chainSpecBytes: captured.genesisJsonBytes,
+    expectedChainSpecSha256Hex: captured.expectedGenesisJsonSha256Hex,
+    primaryRpcUrl: captured.primaryRpcUrl, witnessRpcUrl: captured.witnessRpcUrl,
+    primaryP2pPort: captured.primaryP2pPort, witnessP2pPort: captured.witnessP2pPort,
+    primaryPrometheusPort: captured.primaryPrometheusPort,
+    witnessPrometheusPort: captured.witnessPrometheusPort,
+  }), async owner => {
+    const target: Readonly<OwnedFederatedGenesisDevnetTargetV1> = Object.freeze({
+      primaryRpcUrl: owner.endpoints.primaryRpcUrl,
+      witnessRpcUrl: owner.endpoints.witnessRpcUrl,
+      genesisJsonSha256Hex: captured.expectedGenesisJsonSha256Hex,
+    });
+    const revoke = registerOwnedFederatedGenesisDevnetTargetV1(target, owner);
+    try {
+      return await action(target);
+    } finally {
+      revoke();
+    }
+  }, 'federated_genesis_observation', onStoppedData);
+}
+
+export function assertOwnedFederatedGenesisDevnetTargetV1(
+  target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+): void {
+  const registration = FEDERATED_GENESIS_TARGETS.get(target);
+  if (!registration) {
+    throw new Error('FED genesis target requires original active owned-process provenance');
+  }
+  registration.owner.assertActive();
+}
+
+function registerOwnedFederatedGenesisDevnetTargetV1(
+  target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+  owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>,
+): () => void {
+  let active = true;
+  const registration = Object.freeze({
+    owner,
+    revoke: () => {
+      if (!active) return;
+      active = false;
+      FEDERATED_GENESIS_TARGETS.delete(target);
+    },
+  });
+  FEDERATED_GENESIS_TARGETS.set(target, registration);
+  return registration.revoke;
+}
+
+function revokeOwnedFederatedGenesisDevnetTargetV1(
+  target: Readonly<OwnedFederatedGenesisDevnetTargetV1>,
+): void {
+  FEDERATED_GENESIS_TARGETS.get(target)?.revoke();
 }
 
 export async function exerciseOwnedAuthoritySafeDevnetRecoveryLifecycleV1(
@@ -709,12 +952,23 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
 async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   input: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
   action: (owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>) => Promise<T>,
+  mode: 'federated_genesis_observation',
+  onStoppedData?: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
+): Promise<Readonly<{
+  value: T;
+  receipt: Readonly<OwnedFederatedGenesisDevnetProcessV1Receipt>;
+}>>;
+async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
+  input: Readonly<OwnedAuthoritySafeDevnetProcessV1Input>,
+  action: (owner: Readonly<OwnedAuthoritySafeDevnetInternalOwnerV1>) => Promise<T>,
   mode: OwnedAuthoritySafeDevnetProcessModeV1,
+  onStoppedData?: (paths: Readonly<{ primaryBasePath: string; witnessBasePath: string }>) => Promise<void>,
 ): Promise<Readonly<{
   value: T;
   receipt: Readonly<
     OwnedAuthoritySafeDevnetProcessV1Receipt
     | OwnedAuthoritySafeDevnetRecoveryProcessV1Receipt
+    | OwnedFederatedGenesisDevnetProcessV1Receipt
   >;
 }>> {
   if (process.platform !== 'win32') {
@@ -730,7 +984,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   );
   const chainSpecBytes = boundedBytes(
     input.chainSpecBytes,
-    MAX_CHAIN_SPEC_BYTES,
+    mode === 'federated_genesis_observation' ? 4 * 1024 * 1024 : MAX_CHAIN_SPEC_BYTES,
     'authority-safe chain spec',
   );
   const chainSpecSha256Hex = digest(
@@ -742,6 +996,8 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   }
   if (mode === 'recovery_lifecycle') {
     assertRecoveryManualSealGenesis(chainSpecBytes);
+  } else if (mode === 'federated_genesis_observation') {
+    assertFederatedTypedGenesis(chainSpecBytes);
   }
   const primaryRpc = loopbackRpc(input.primaryRpcUrl, 'primary RPC');
   const witnessRpc = loopbackRpc(input.witnessRpcUrl, 'witness RPC');
@@ -762,9 +1018,12 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     'authority-safe owned-process node binary',
   );
   assertPortsUnowned(ports);
+  assertPortsBindable(ports);
+  assertPortsUnowned(ports);
 
   const runtimeDirectory = mkdtempSync(join(tmpdir(), 'e2s-fed6g1c-runtime-'));
   const specPath = join(runtimeDirectory, 'authority-safe.json');
+  const chainSelector = mode === 'federated_genesis_observation' ? `fed-genesis:${specPath}` : specPath;
   const primaryBasePath = join(runtimeDirectory, 'primary');
   const witnessBasePath = join(runtimeDirectory, 'witness');
   writeFileSync(specPath, chainSpecBytes, { flag: 'wx', mode: 0o600 });
@@ -787,9 +1046,12 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     if (witness !== undefined) {
       throw new Error('authority-safe witness process is already running');
     }
+    assertPortsUnowned(witnessPorts);
+    assertPortsBindable(witnessPorts);
+    assertPortsUnowned(witnessPorts);
     const retainedPeerId = witnessPeerId;
     witness = spawnNode(nodeBinaryPath, [
-      '--chain', specPath,
+      '--chain', chainSelector,
       '--base-path', witnessBasePath,
       '--listen-addr', `/ip4/127.0.0.1/tcp/${input.witnessP2pPort}`,
       '--rpc-port', String(witnessRpc.port),
@@ -800,7 +1062,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
       '--state-pruning', 'archive',
       '--blocks-pruning', 'archive',
       '--unsafe-force-node-key-generation',
-      ...(mode === 'recovery_lifecycle'
+      ...(mode !== 'acceptance_observation'
         ? ['--sealing', 'manual', '--no-grandpa']
         : []),
       '--name', 'fed6g1c-witness',
@@ -865,7 +1127,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   };
   try {
     primary = spawnNode(nodeBinaryPath, [
-      '--chain', specPath,
+      '--chain', chainSelector,
       '--base-path', primaryBasePath,
       '--listen-addr', `/ip4/127.0.0.1/tcp/${input.primaryP2pPort}`,
       '--rpc-port', String(primaryRpc.port),
@@ -876,7 +1138,7 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
       '--state-pruning', 'archive',
       '--blocks-pruning', 'archive',
       '--unsafe-force-node-key-generation',
-      ...(mode === 'recovery_lifecycle'
+      ...(mode !== 'acceptance_observation'
         ? ['--sealing', 'manual', '--no-grandpa']
         : []),
       '--name', 'fed6g1c-primary',
@@ -899,6 +1161,21 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     await assertConnectedRuntime();
 
     actionValue = await action(Object.freeze({
+      assertActive: () => {
+        const currentPrimary = requiredProcess(primary, 'primary');
+        const currentWitness = requiredProcess(witness, 'witness');
+        assertLive(currentPrimary, 'primary');
+        assertLive(currentWitness, 'witness');
+        assertChainSpecUnchanged(specPath, chainSpecSha256Hex);
+        assertListenerOwnership([
+          { pid: processId(currentPrimary, 'primary'), ports: [
+            primaryRpc.port,
+            input.primaryP2pPort,
+            input.primaryPrometheusPort,
+          ] },
+          { pid: processId(currentWitness, 'witness'), ports: witnessPorts },
+        ]);
+      },
       endpoints: Object.freeze({
         primaryRpcUrl: primaryRpc.url,
         witnessRpcUrl: witnessRpc.url,
@@ -959,6 +1236,14 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
         ? error
         : new Error('authority-safe listener cleanup failed'));
     }
+    if (mode === 'federated_genesis_observation' && actionCompleted
+      && actionError === undefined && cleanupErrors.length === 0 && onStoppedData !== undefined) {
+      try {
+        await onStoppedData(Object.freeze({ primaryBasePath, witnessBasePath }));
+      } catch (error) {
+        cleanupErrors.push(asError(error, 'authority-safe stopped-data action failed'));
+      }
+    }
     try {
       rmSync(runtimeDirectory, { recursive: true, force: true, maxRetries: 3 });
     } catch (error) {
@@ -999,6 +1284,9 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
     witnessP2pListenAddress: `/ip4/127.0.0.1/tcp/${input.witnessP2pPort}`,
     primaryPeerIdSha256Hex: sha256(Buffer.from(primaryPeerId, 'utf8')),
     witnessPeerIdSha256Hex: sha256(Buffer.from(witnessPeerId, 'utf8')),
+    ...(mode === 'federated_genesis_observation'
+      ? { typedFederatedGenesis: true, manualSeal: true, grandpaVoter: false }
+      : {}),
     ...(mode === 'recovery_lifecycle'
       ? {
           manualSealPinnedForRecoveryLifecycle: true as const,
@@ -1009,7 +1297,9 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   const receipt = Object.freeze({
     schema: mode === 'acceptance_observation'
       ? SUBSTRATE_FEDERATED_AUTHORITY_SAFE_DEVNET_PROCESS_V1_SCHEMA
-      : SUBSTRATE_FEDERATED_OWNED_RECOVERY_PROCESS_V1_SCHEMA,
+      : mode === 'federated_genesis_observation'
+        ? SUBSTRATE_FEDERATED_GENESIS_DEVNET_PROCESS_V1_SCHEMA
+        : SUBSTRATE_FEDERATED_OWNED_RECOVERY_PROCESS_V1_SCHEMA,
     version: 1 as const,
     nodeBinarySha256Hex,
     chainSpecSha256Hex,
@@ -1029,6 +1319,8 @@ async function withOwnedAuthoritySafeDevnetProcessOwnerV1<T>(
   });
   if (mode === 'acceptance_observation') {
     ACCEPTANCE_PROCESS_RECEIPTS.add(receipt);
+  } else if (mode === 'federated_genesis_observation') {
+    FEDERATED_GENESIS_PROCESS_RECEIPTS.add(receipt);
   } else {
     RECOVERY_PROCESS_RECEIPTS.add(receipt);
   }
@@ -1044,6 +1336,14 @@ export function assertOwnedAuthoritySafeDevnetProcessV1Receipt(
     || !ACCEPTANCE_PROCESS_RECEIPTS.has(value)
   ) {
     throw new Error('authority-safe owned-process receipt provenance is missing');
+  }
+}
+
+export function assertOwnedFederatedGenesisDevnetProcessV1Receipt(
+  value: unknown,
+): asserts value is OwnedFederatedGenesisDevnetProcessV1Receipt {
+  if (typeof value !== 'object' || value === null || !FEDERATED_GENESIS_PROCESS_RECEIPTS.has(value)) {
+    throw new Error('FED genesis owned-process receipt provenance is missing');
   }
 }
 
@@ -1763,6 +2063,43 @@ function assertPortsUnowned(ports: readonly number[]): void {
   }
 }
 
+function assertPortsBindable(ports: readonly number[]): void {
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+  if (!systemRoot || !isAbsolute(systemRoot)) {
+    throw new Error('Windows SystemRoot is unavailable for port bindability');
+  }
+  const script = [
+    "$ErrorActionPreference='Stop'",
+    '$listeners=@()',
+    'try { foreach ($port in @(' + ports.join(',') + ')) { '
+      + '$listener=[System.Net.Sockets.TcpListener]::new('
+      + '[System.Net.IPAddress]::Loopback,$port); '
+      + '$listener.Start(); $listeners+=,$listener } } '
+      + 'finally { foreach ($listener in $listeners) { $listener.Stop() } }',
+  ].join('; ');
+  const result = spawnSync(
+    resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+    {
+      cwd: systemRoot,
+      env: minimalEnvironment(),
+      encoding: 'utf8',
+      timeout: 30_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+    },
+  );
+  if (
+    result.error
+    || result.signal !== null
+    || result.status !== 0
+    || result.stdout.trim() !== ''
+    || result.stderr.trim() !== ''
+  ) {
+    throw new Error('authority-safe process port is not bindable on IPv4 loopback');
+  }
+}
+
 async function assertRunningExecutableIdentity(
   child: ChildProcess,
   expectedPath: string,
@@ -1827,57 +2164,10 @@ function listenerBindings(ports: readonly number[]): Map<number, ListenerBinding
 }
 
 function windowsListenerBindings(ports: readonly number[]): Map<number, ListenerBinding[]> {
-  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
-  if (!systemRoot || !isAbsolute(systemRoot)) {
-    throw new Error('Windows SystemRoot is unavailable for listener ownership');
-  }
-  const script = [
-    `$ports=@(${ports.join(',')})`,
-    '$rows=@(Get-NetTCPConnection -State Listen -ErrorAction Stop '
-      + '| Where-Object { $ports -contains $_.LocalPort } '
-      + '| Select-Object LocalAddress,LocalPort,OwningProcess)',
-    'ConvertTo-Json -Compress -InputObject $rows',
-  ].join('; ');
-  const result = spawnSync(
-    resolve(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
-    {
-      cwd: systemRoot,
-      env: minimalEnvironment(),
-      encoding: 'utf8',
-      timeout: 30_000,
-      maxBuffer: 256 * 1024,
-      windowsHide: true,
-    },
-  );
-  if (
-    result.error
-    || result.signal !== null
-    || result.status !== 0
-    || result.stderr.trim() !== ''
-  ) {
-    throw new Error('Windows listener ownership inspection failed');
-  }
-  const parsed = JSON.parse(result.stdout || '[]') as unknown;
-  const rows = Array.isArray(parsed) ? parsed : [parsed];
+  const rows = observeWindowsTcpListenersV1(ports);
   const bindings = emptyBindingMap(ports);
   for (const row of rows) {
-    if (row === null || typeof row !== 'object' || Array.isArray(row)) {
-      throw new Error('Windows listener ownership output is malformed');
-    }
-    const record = row as Record<string, unknown>;
-    const localAddress = record.LocalAddress;
-    const localPort = Number(record.LocalPort);
-    const owningProcess = Number(record.OwningProcess);
-    if (
-      typeof localAddress !== 'string'
-      || !bindings.has(localPort)
-      || !Number.isSafeInteger(owningProcess)
-      || owningProcess <= 0
-    ) {
-      throw new Error('Windows listener ownership row is malformed');
-    }
-    bindings.get(localPort)!.push({ pid: owningProcess, localAddress });
+    bindings.get(row.localPort)!.push({ pid: row.pid, localAddress: row.localAddress });
   }
   return bindings;
 }
@@ -1997,6 +2287,25 @@ function assertRecoveryManualSealGenesis(chainSpecBytes: Uint8Array): void {
     throw new Error(
       'authority-safe recovery chain spec must enable manual sealing at genesis',
     );
+  }
+}
+
+function assertFederatedTypedGenesis(bytes: Uint8Array): void {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  // Inspect shape only. Pass the original pinned bytes to FRAME without numeric reserialization.
+  const parsed = parseStrictJson(text, 'FED typed genesis');
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)
+    || Object.hasOwn(parsed, 'genesis') || Object.hasOwn(parsed, 'bootNodes')
+    || Object.hasOwn(parsed, 'code')) {
+    throw new Error('FED process requires direct typed genesis, not a chain spec');
+  }
+  if (objectField(parsed, 'manualSeal').enable !== true
+    || objectField(parsed, 'sudo').key !== null) {
+    throw new Error('FED typed genesis requires manual sealing and no Sudo');
+  }
+  const profile = objectField(parsed, 'bridgeCommitment').pooledReserveMintGenesisV4;
+  if (!Array.isArray(profile) || profile.length !== 2) {
+    throw new Error('FED typed genesis requires its V4 initialization');
   }
 }
 

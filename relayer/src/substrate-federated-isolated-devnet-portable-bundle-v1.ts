@@ -25,6 +25,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveBridgeRepositoryRootsFromCheckoutLayout } from './bridge-repository-layout.js';
 import { canonicalJson } from './strict-json.js';
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PORTABLE_ARTIFACT_PATHS_V1,
@@ -90,7 +91,10 @@ const ARTIFACT_ROLES = Object.freeze(Object.keys(
 ) as SubstrateFederatedIsolatedDevnetPortableArtifactRoleV1[]);
 
 const MAX_ARTIFACT_BYTES = 16 * 1024 * 1024;
-const WORKTREE_ROOT = realpathSync(fileURLToPath(new URL('../../../', import.meta.url)));
+const MODULE_DIRECTORY = dirname(fileURLToPath(import.meta.url));
+const BRIDGE_ROOT = resolve(MODULE_DIRECTORY, '..', '..');
+const { worktreeRoot: WORKTREE_ROOT } =
+  resolveBridgeRepositoryRootsFromCheckoutLayout(BRIDGE_ROOT);
 
 export function assembleSubstrateFederatedIsolatedDevnetPortableBundleV1(
   input: Readonly<AssembleSubstrateFederatedIsolatedDevnetPortableBundleV1Input>,

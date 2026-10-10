@@ -17,7 +17,9 @@ import {
 } from './substrate-federated-isolated-devnet-provisioning-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetSettlementTargetV2Provenance,
+  assertSubstrateFederatedIsolatedDevnetSettlementTargetV3Provenance,
   type SubstrateFederatedIsolatedDevnetSettlementTargetV2,
+  type SubstrateFederatedIsolatedDevnetSettlementTargetV3,
 } from './substrate-federated-isolated-devnet-settlement-target-v2.js';
 import { canonicalNodeOrigin } from './ergo-node-endpoint-alignment.js';
 import { sha256CanonicalJson } from './strict-json.js';
@@ -26,11 +28,18 @@ export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-local-provisioning.v2' as const;
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_SCHEMA =
+  'e2s.substrate-federated-isolated-devnet-local-provisioning.v3' as const;
+export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3' as const;
 
 const LOCAL_LAUNCH_INTENT_V2_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_LAUNCH_INTENT_V2';
+const LOCAL_LAUNCH_INTENT_V3_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_LAUNCH_INTENT_V3';
 const MAX_FRESH_OBSERVATION_AGE_MS = 60_000;
 const localProvisionings = new WeakSet<object>();
+const localProvisioningsV3 = new WeakSet<object>();
 const localProvisioningCheckTargets = new WeakMap<
   object,
   SubstrateFederatedIsolatedDevnetLocalCheckTargetV2
@@ -164,28 +173,131 @@ interface ObservedInputIdentityV2 {
   readonly sigmaSerializedSha256Hex: string;
 }
 
-export async function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2(
+type LocalProvisioningCommonData = Omit<
+  SubstrateFederatedIsolatedDevnetLocalProvisioningV2,
+  'schema' | 'version' | 'planDigestHex' | 'target'
+>;
+type LocalSettlementCommonData = Omit<
+  SubstrateFederatedIsolatedDevnetSettlementTargetV2,
+  'schema' | 'version' | 'compatibilityTargetV1AuditDigestHex'
+>;
+type LocalProvisioningObservationInput = Pick<
+  BuildSubstrateFederatedIsolatedDevnetLocalProvisioningV2Input,
+  'settlementTargetProfile' | 'freshSettlementObservation'
+>;
+
+export interface BuildSubstrateFederatedIsolatedDevnetLocalProvisioningV3Input
+  extends LocalProvisioningObservationInput {
+  readonly settlementTarget: Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV3>;
+}
+
+export interface SubstrateFederatedIsolatedDevnetLocalProvisioningV3
+  extends LocalProvisioningCommonData {
+  readonly schema: typeof SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_SCHEMA;
+  readonly version: 3;
+  readonly planDigestHex: string;
+  readonly target: Readonly<Omit<
+    SubstrateFederatedIsolatedDevnetLocalProvisioningV2['target'],
+    'compatibilityTargetV1AuditDigestHex'
+  > & { readonly compilerProfile: 'absolute-height-tracker-v2' }>;
+}
+
+export type SubstrateFederatedIsolatedDevnetLocalCheckTargetV3 =
+  SubstrateFederatedIsolatedDevnetLocalCheckTargetV2;
+
+interface LocalProvisioningBinding<T extends LocalSettlementCommonData, P> {
+  readonly assertTarget: (value: unknown) => asserts value is Readonly<T>;
+  readonly creationHeight: (tipHeight: number) => number;
+  readonly launchIntentDomain: string;
+  readonly plans: WeakSet<object>;
+  readonly finish: (body: LocalProvisioningCommonData, target: Readonly<T>) => Readonly<P>;
+}
+
+const provisioningV2Binding: Readonly<LocalProvisioningBinding<
+  SubstrateFederatedIsolatedDevnetSettlementTargetV2,
+  SubstrateFederatedIsolatedDevnetLocalProvisioningV2
+>> = Object.freeze({
+  assertTarget: assertSubstrateFederatedIsolatedDevnetSettlementTargetV2Provenance,
+  creationHeight: (tipHeight: number) => tipHeight,
+  launchIntentDomain: LOCAL_LAUNCH_INTENT_V2_DIGEST_DOMAIN,
+  plans: localProvisionings,
+  finish: (body: LocalProvisioningCommonData, target: Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV2>) => {
+    const { status, launchIntentIdHex, ...rest } = body;
+    return digestPlan({
+      schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2_SCHEMA,
+      version: 2 as const, status, launchIntentIdHex,
+      target: {
+        settlementTargetDigestHex: target.descriptorDigestHex,
+        sourceAndCompilerClosureDigestHex: target.sourceAndCompilerClosureDigestHex,
+        compatibilityTargetV1AuditDigestHex: target.compatibilityTargetV1AuditDigestHex,
+        ...localTargetScope(target),
+      },
+      ...rest,
+    }, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2_DIGEST_DOMAIN);
+  },
+});
+
+const provisioningV3Binding: Readonly<LocalProvisioningBinding<
+  SubstrateFederatedIsolatedDevnetSettlementTargetV3,
+  SubstrateFederatedIsolatedDevnetLocalProvisioningV3
+>> = Object.freeze({
+  assertTarget: assertSubstrateFederatedIsolatedDevnetSettlementTargetV3Provenance,
+  creationHeight: (tipHeight: number) => {
+    const height = positiveSafeInteger(tipHeight, 'fresh local-settlement tip height') + 1;
+    if (height > 2_147_483_647) {
+      throw new Error('V3 local provisioning creation height exceeds signed Int range');
+    }
+    return height;
+  },
+  launchIntentDomain: LOCAL_LAUNCH_INTENT_V3_DIGEST_DOMAIN,
+  plans: localProvisioningsV3,
+  finish: (body: LocalProvisioningCommonData, target: Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV3>) => {
+    const { status, launchIntentIdHex, ...rest } = body;
+    return digestPlan({
+      schema: SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_SCHEMA,
+      version: 3 as const, status, launchIntentIdHex,
+      target: {
+        settlementTargetDigestHex: target.descriptorDigestHex,
+        sourceAndCompilerClosureDigestHex: target.sourceAndCompilerClosureDigestHex,
+        compilerProfile: target.compilerProfile,
+        ...localTargetScope(target),
+      },
+      ...rest,
+    }, SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_DIGEST_DOMAIN);
+  },
+});
+
+export function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2(
   input: Readonly<
     BuildSubstrateFederatedIsolatedDevnetLocalProvisioningV2Input
   >,
 ): Promise<Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV2>> {
+  return buildLocalProvisioning(input, provisioningV2Binding);
+}
+
+export function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV3(
+  input: Readonly<BuildSubstrateFederatedIsolatedDevnetLocalProvisioningV3Input>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>> {
+  return buildLocalProvisioning(input, provisioningV3Binding);
+}
+
+async function buildLocalProvisioning<T extends LocalSettlementCommonData, P extends object>(
+  input: Readonly<LocalProvisioningObservationInput & { readonly settlementTarget: T }>,
+  binding: Readonly<LocalProvisioningBinding<T, P>>,
+): Promise<Readonly<P>> {
   const captured = exactDataRecord(input, [
     'settlementTarget',
     'settlementTargetProfile',
     'freshSettlementObservation',
   ], 'isolated local provisioning input');
-  const settlementTarget = captured.settlementTarget as Readonly<
-    SubstrateFederatedIsolatedDevnetSettlementTargetV2
-  >;
+  const settlementTarget = captured.settlementTarget;
   const settlementTargetProfile = captured.settlementTargetProfile as Readonly<
     SubstrateFederatedGenesisTargetProfileV1
   >;
   const freshObservation = captured.freshSettlementObservation as Readonly<
     SubstrateFederatedGenesisObservationV1
   >;
-  assertSubstrateFederatedIsolatedDevnetSettlementTargetV2Provenance(
-    settlementTarget,
-  );
+  binding.assertTarget(settlementTarget);
   assertSubstrateFederatedGenesisObservationV1Provenance(
     settlementTargetProfile,
     freshObservation,
@@ -213,6 +325,7 @@ export async function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2(
     );
   }
   assertFreshObservationAge(freshObservedAt);
+  const creationHeight = binding.creationHeight(freshObservation.target.tipHeight);
 
   const [trackerObservation, duplicatePreventionObservation, reserveObservation]
     = await Promise.all([
@@ -260,7 +373,7 @@ export async function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2(
       },
       lineages: generationTarget.lineages,
       genesisPayloads: generationTarget.genesisPayloads,
-      creationHeight: freshObservation.target.tipHeight,
+      creationHeight,
       inputMode: 'fresh-current',
     });
   const preSetupAnchor = {
@@ -282,31 +395,16 @@ export async function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2(
       generationTarget.genesisPayloads.payloadSetDigestHex,
     provisioningIdentitySetDigestHex:
       provisioningCore.provisioning.identitySetDigestHex,
-  }, LOCAL_LAUNCH_INTENT_V2_DIGEST_DOMAIN);
+  }, binding.launchIntentDomain);
   assertFreshObservationAge(freshObservedAt);
   const localCheckTarget = buildExactLocalCheckTarget(
     settlementTarget,
     freshObservation,
   );
   const body = {
-    schema:
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2_SCHEMA,
-    version: 2 as const,
     status:
       'fresh_observation_bound_non_authorizing_local_provisioning' as const,
     launchIntentIdHex,
-    target: {
-      settlementTargetDigestHex: settlementTarget.descriptorDigestHex,
-      sourceAndCompilerClosureDigestHex:
-        settlementTarget.sourceAndCompilerClosureDigestHex,
-      compatibilityTargetV1AuditDigestHex:
-        settlementTarget.compatibilityTargetV1AuditDigestHex,
-      sourceNetworkScope: settlementTarget.sourceNetworkScope,
-      trustModel: settlementTarget.trustModel,
-      settlementNetworkScope: settlementTarget.settlementNetwork.scope,
-      profileIdHex: settlementTarget.settlementNetwork.profileIdHex,
-      profileDigestHex: settlementTarget.settlementNetwork.profileDigestHex,
-    },
     freshObservation: {
       retainedReportDigestHex:
         settlementTarget.settlementNetwork.observation.reportDigestHex,
@@ -349,14 +447,8 @@ export async function buildSubstrateFederatedIsolatedDevnetLocalProvisioningV2(
     execution: falseExecution(),
     boundaries: fixedBoundaries(),
   };
-  const result = deepFreeze({
-    ...body,
-    planDigestHex: sha256CanonicalJson(
-      body,
-      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V2_DIGEST_DOMAIN,
-    ),
-  });
-  localProvisionings.add(result);
+  const result = binding.finish(body, settlementTarget);
+  binding.plans.add(result);
   localProvisioningCheckTargets.set(result, localCheckTarget);
   localProvisioningObservationProfiles.set(result, settlementTargetProfile);
   return result;
@@ -395,6 +487,33 @@ export function getSubstrateFederatedIsolatedDevnetLocalCheckTargetV2(
   plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV2>,
 ): Readonly<SubstrateFederatedIsolatedDevnetLocalCheckTargetV2> {
   assertSubstrateFederatedIsolatedDevnetLocalProvisioningV2Provenance(plan);
+  return getLocalCheckTarget(plan);
+}
+
+export function assertSubstrateFederatedIsolatedDevnetLocalProvisioningV3Provenance(
+  value: unknown,
+): asserts value is Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3> {
+  if (value === null || typeof value !== 'object' || !localProvisioningsV3.has(value)) {
+    throw new Error('V3 isolated local provisioning was not built in this process');
+  }
+  const plan = value as SubstrateFederatedIsolatedDevnetLocalProvisioningV3;
+  const { planDigestHex, ...body } = plan;
+  if (plan.schema !== SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_SCHEMA
+    || plan.version !== 3
+    || sha256CanonicalJson(body,
+      SUBSTRATE_FEDERATED_ISOLATED_DEVNET_LOCAL_PROVISIONING_V3_DIGEST_DOMAIN) !== planDigestHex) {
+    throw new Error('V3 isolated local provisioning content drifted');
+  }
+}
+
+export function getSubstrateFederatedIsolatedDevnetLocalCheckTargetV3(
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): Readonly<SubstrateFederatedIsolatedDevnetLocalCheckTargetV3> {
+  assertSubstrateFederatedIsolatedDevnetLocalProvisioningV3Provenance(plan);
+  return getLocalCheckTarget(plan);
+}
+
+function getLocalCheckTarget(plan: object): Readonly<SubstrateFederatedIsolatedDevnetLocalCheckTargetV2> {
   const target = localProvisioningCheckTargets.get(plan);
   if (target === undefined) {
     throw new Error('isolated local provisioning check target is unavailable');
@@ -406,6 +525,19 @@ export async function reobserveSubstrateFederatedIsolatedDevnetLocalProvisioning
   plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV2>,
 ): Promise<Readonly<SubstrateFederatedGenesisObservationV1>> {
   assertSubstrateFederatedIsolatedDevnetLocalProvisioningV2Provenance(plan);
+  return reobserveLocalProvisioning(plan);
+}
+
+export async function reobserveSubstrateFederatedIsolatedDevnetLocalProvisioningV3(
+  plan: Readonly<SubstrateFederatedIsolatedDevnetLocalProvisioningV3>,
+): Promise<Readonly<SubstrateFederatedGenesisObservationV1>> {
+  assertSubstrateFederatedIsolatedDevnetLocalProvisioningV3Provenance(plan);
+  return reobserveLocalProvisioning(plan);
+}
+
+async function reobserveLocalProvisioning(
+  plan: object,
+): Promise<Readonly<SubstrateFederatedGenesisObservationV1>> {
   const profile = localProvisioningObservationProfiles.get(plan);
   if (profile === undefined) {
     throw new Error(
@@ -421,7 +553,7 @@ export async function reobserveSubstrateFederatedIsolatedDevnetLocalProvisioning
 }
 
 function assertTargetProfileAndObservation(
-  target: Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV2>,
+  target: Readonly<LocalSettlementCommonData>,
   profile: Readonly<SubstrateFederatedGenesisTargetProfileV1>,
   observation: Readonly<SubstrateFederatedGenesisObservationV1>,
 ): void {
@@ -455,7 +587,7 @@ function assertTargetProfileAndObservation(
 }
 
 function buildExactLocalCheckTarget(
-  target: Readonly<SubstrateFederatedIsolatedDevnetSettlementTargetV2>,
+  target: Readonly<LocalSettlementCommonData>,
   observation: Readonly<SubstrateFederatedGenesisObservationV1>,
 ): Readonly<SubstrateFederatedIsolatedDevnetLocalCheckTargetV2> {
   const primaryOrigin = canonicalLoopbackNodeOrigin(
@@ -490,6 +622,20 @@ function buildExactLocalCheckTarget(
       ),
     },
   });
+}
+
+function localTargetScope(target: Readonly<LocalSettlementCommonData>) {
+  return {
+    sourceNetworkScope: target.sourceNetworkScope,
+    trustModel: target.trustModel,
+    settlementNetworkScope: target.settlementNetwork.scope,
+    profileIdHex: target.settlementNetwork.profileIdHex,
+    profileDigestHex: target.settlementNetwork.profileDigestHex,
+  };
+}
+
+function digestPlan<T extends object>(body: T, domain: string): Readonly<T & { planDigestHex: string }> {
+  return deepFreeze({ ...body, planDigestHex: sha256CanonicalJson(body, domain) });
 }
 
 function canonicalLoopbackNodeOrigin(value: string, label: string): string {

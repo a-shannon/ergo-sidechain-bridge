@@ -1,4 +1,6 @@
 import axios, { type AxiosInstance } from 'axios';
+import { Agent as HttpAgent } from 'node:http';
+import { Agent as HttpsAgent } from 'node:https';
 
 import {
   AUTHENTICATED_SPV_TRACKER_MAX_LINEAGE_BOXES,
@@ -106,6 +108,9 @@ implements AuthenticatedSpvTrackerNodeSource {
       timeout: AUTHENTICATED_TRACKER_NODE_REQUEST_TIMEOUT_MS,
       maxRedirects: 0,
       proxy: false,
+      // Keep observations off the shared idle-socket pool; failures are not retried.
+      httpAgent: new HttpAgent({ keepAlive: false }),
+      httpsAgent: new HttpsAgent({ keepAlive: false }),
       maxContentLength: AUTHENTICATED_TRACKER_NODE_MAX_RESPONSE_BYTES,
     });
   }
@@ -438,7 +443,7 @@ implements AuthenticatedSpvTrackerNodeSource {
 
 export function createBoundedAuthenticatedSpvTrackerReadOnlySource(
   nodeUrl: string,
-): AuthenticatedSpvTrackerNodeSource {
+): AuthenticatedSpvTrackerNodeSource & Pick<AuthenticatedSpvTrackerReadOnlyNodeClient, 'getBlockHeaderIdsAtHeight'> {
   return new AuthenticatedSpvTrackerReadOnlyNodeClient(nodeUrl);
 }
 

@@ -146,6 +146,30 @@ export interface LocalWasmExactBytesSignedCheckCandidate
 
 export type LocalWasmOpaqueCheckResult = SignedCheckResult;
 
+export const LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE =
+  'e2s.local-wasm-checked-submission-handle.v1' as const;
+
+export interface LocalWasmCheckedSubmissionHandleV1 {
+  readonly profile: typeof LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE;
+  readonly txId: string;
+  readonly nodeOrigin: string;
+  readonly signedTransactionDigestHex: string;
+  readonly signedTransactionBytesSha256Hex: string;
+  readonly signedTransactionBytesLength: number;
+  readonly checkResponseDigestHex: string;
+  readonly checkerIdentity: SignedCheckNodeIdentity;
+}
+
+export interface LocalWasmCheckedSubmissionAcceptanceV1 {
+  readonly checked: Readonly<LocalWasmOpaqueCheckResult>;
+  readonly submissionHandle: Readonly<LocalWasmCheckedSubmissionHandleV1>;
+}
+
+export interface LocalWasmSubmissionExecutionBindingV1 {
+  readonly processBindingDigestHex: string;
+  readonly executionTargetIdentityDigestHex: string;
+}
+
 interface LocalWasmSignedCheckMaterial {
   readonly signedTx: Readonly<Record<string, unknown>>;
   readonly signedTransactionBytesHex: string;
@@ -154,6 +178,22 @@ interface LocalWasmSignedCheckMaterial {
 const LOCAL_WASM_SIGNED_CHECK_CANDIDATES = new WeakSet<object>();
 const LOCAL_WASM_SIGNED_CHECK_MATERIAL =
   new WeakMap<object, LocalWasmSignedCheckMaterial>();
+const LOCAL_WASM_CHECK_RESULTS = new WeakMap<
+  object,
+  LocalWasmExactBytesSignedCheckCandidate
+>();
+const LOCAL_WASM_PROMOTED_SUBMISSION_CANDIDATES = new WeakSet<object>();
+const LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
+const LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL = new WeakMap<
+  object,
+  Readonly<{
+    signedCandidate: LocalWasmExactBytesSignedCheckCandidate;
+    checkResponseDigestHex: string;
+    executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>;
+    assertActive?: () => void;
+  }>
+>();
+const CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES = new WeakSet<object>();
 
 export interface LocalWasmCheckCandidate {
   role: string;
@@ -376,70 +416,127 @@ async function wasmSignWithStateContext(
   wasm: any,
   stateCtx: any,
 ): Promise<any> {
-
   // 1. Build WASM Wallet from private key
-  const secretKey = wasm.SecretKey.dlog_from_bytes(
-    Buffer.from(keys.privateKeyHex, 'hex')
-  );
-  const secretKeys = new wasm.SecretKeys();
-  secretKeys.add(secretKey);
-  const wallet = wasm.Wallet.from_secrets(secretKeys);
+  const wallet = runWasmSigningStage('secret-key', () => {
+    const secretKey = wasm.SecretKey.dlog_from_bytes(
+      Buffer.from(keys.privateKeyHex, 'hex')
+    );
+    const secretKeys = new wasm.SecretKeys();
+    secretKeys.add(secretKey);
+    return wasm.Wallet.from_secrets(secretKeys);
+  });
 
   // 2. Convert inputs to WASM ErgoBoxes
   // EIP-12 inputs have full box data; WASM needs ErgoBox objects
-  const inputBoxesJson = eip12Tx.inputs.map((input: any) => {
-    // WASM ErgoBox.from_json expects a specific format:
-    // { boxId, value (as string), ergoTree, assets, additionalRegisters,
-    //   transactionId, index, creationHeight }
-    return {
-      boxId: input.boxId,
-      value: typeof input.value === 'bigint' ? input.value.toString() : String(input.value),
-      ergoTree: input.ergoTree,
-      assets: (input.assets || []).map((a: any) => ({
-        tokenId: a.tokenId,
-        amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
-      })),
-      additionalRegisters: input.additionalRegisters || {},
-      transactionId: input.transactionId,
-      index: typeof input.index === 'number' ? input.index : 0,
-      creationHeight: input.creationHeight,
-    };
+  const inputBoxes = runWasmSigningStage('input-boxes', () => {
+    const inputBoxesJson = eip12Tx.inputs.map((input: any) => {
+      // WASM ErgoBox.from_json expects a specific format:
+      // { boxId, value (as string), ergoTree, assets, additionalRegisters,
+      //   transactionId, index, creationHeight }
+      return {
+        boxId: input.boxId,
+        value: typeof input.value === 'bigint' ? input.value.toString() : String(input.value),
+        ergoTree: input.ergoTree,
+        assets: (input.assets || []).map((a: any) => ({
+          tokenId: a.tokenId,
+          amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
+        })),
+        additionalRegisters: input.additionalRegisters || {},
+        transactionId: input.transactionId,
+        index: typeof input.index === 'number' ? input.index : 0,
+        creationHeight: input.creationHeight,
+      };
+    });
+    return wasm.ErgoBoxes.from_boxes_json(inputBoxesJson);
   });
-  // BigInt-safe converter for WASM JSON parsing
-  // WASM from_boxes_json takes a JS array (NOT a JSON string)
-  const numericValue = (v: any) => typeof v === 'bigint' ? v.toString() : String(v);
-  const inputBoxes = wasm.ErgoBoxes.from_boxes_json(inputBoxesJson);
 
   // 4. Convert data inputs
-  const dataInputBoxes = wasm.ErgoBoxes.empty();
-  if (eip12Tx.dataInputs?.length > 0) {
-    const dataJson = eip12Tx.dataInputs.map((di: any) => ({
-      boxId: di.boxId,
-      value: typeof di.value === 'bigint' ? di.value.toString() : String(di.value),
-      ergoTree: di.ergoTree,
-      assets: (di.assets || []).map((a: any) => ({
-        tokenId: a.tokenId,
-        amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
-      })),
-      additionalRegisters: di.additionalRegisters || {},
-      transactionId: di.transactionId,
-      index: typeof di.index === 'number' ? di.index : 0,
-      creationHeight: di.creationHeight,
-    }));
-    const dbis = wasm.ErgoBoxes.from_boxes_json(dataJson);
-    for (let i = 0; i < dbis.len(); i++) dataInputBoxes.add(dbis.get(i));
-  }
+  const dataInputBoxes = runWasmSigningStage('data-input-boxes', () => {
+    const boxes = wasm.ErgoBoxes.empty();
+    if (eip12Tx.dataInputs?.length > 0) {
+      const dataJson = eip12Tx.dataInputs.map((di: any) => ({
+        boxId: di.boxId,
+        value: typeof di.value === 'bigint' ? di.value.toString() : String(di.value),
+        ergoTree: di.ergoTree,
+        assets: (di.assets || []).map((a: any) => ({
+          tokenId: a.tokenId,
+          amount: typeof a.amount === 'bigint' ? a.amount.toString() : String(a.amount),
+        })),
+        additionalRegisters: di.additionalRegisters || {},
+        transactionId: di.transactionId,
+        index: typeof di.index === 'number' ? di.index : 0,
+        creationHeight: di.creationHeight,
+      }));
+      const dbis = wasm.ErgoBoxes.from_boxes_json(dataJson);
+      for (let i = 0; i < dbis.len(); i++) boxes.add(dbis.get(i));
+    }
+    return boxes;
+  });
 
   // 5. Build unsigned TX in WASM format.
-  const unsignedTx = wasm.UnsignedTransaction.from_json(
-    JSON.stringify(toUnsignedTransactionJson(eip12Tx)),
+  const unsignedTx = runWasmSigningStage(
+    'unsigned-transaction',
+    () => wasm.UnsignedTransaction.from_json(
+      JSON.stringify(toUnsignedTransactionJson(eip12Tx)),
+    ),
   );
 
-  // 6. Sign with full sigma-rust interpreter
-  const signedTx = wallet.sign_transaction(stateCtx, unsignedTx, inputBoxes, dataInputBoxes);
+  // 6. Sign with the full sigma-rust interpreter. If that fails, replay only
+  // reduction to distinguish a context/script failure from proof generation.
+  let signedTx: ReturnType<typeof wallet.sign_transaction>;
+  try {
+    signedTx = runWasmSigningStage(
+      'sign-transaction',
+      () => wallet.sign_transaction(stateCtx, unsignedTx, inputBoxes, dataInputBoxes),
+    );
+  } catch (signingError) {
+    runWasmSigningStage('reduce-transaction', () => {
+      const reducedTx = wasm.ReducedTransaction.from_unsigned_tx(
+        unsignedTx,
+        inputBoxes,
+        dataInputBoxes,
+        stateCtx,
+      );
+      reducedTx.free();
+    });
+    throw signingError;
+  }
 
   // 7. Return as JSON for node submission
-  return JSON.parse(signedTx.to_json());
+  return runWasmSigningStage(
+    'signed-transaction-json',
+    () => JSON.parse(signedTx.to_json()),
+  );
+}
+
+type WasmSigningStage =
+  | 'secret-key'
+  | 'input-boxes'
+  | 'data-input-boxes'
+  | 'unsigned-transaction'
+  | 'reduce-transaction'
+  | 'sign-transaction'
+  | 'signed-transaction-json';
+
+class WasmSigningStageError extends Error {
+  readonly stage: WasmSigningStage;
+
+  constructor(stage: WasmSigningStage) {
+    super(`local WASM signing failed at ${stage}`);
+    this.name = 'WasmSigningStageError';
+    this.stage = stage;
+  }
+}
+
+function runWasmSigningStage<T>(
+  stage: WasmSigningStage,
+  operation: () => T,
+): T {
+  try {
+    return operation();
+  } catch {
+    throw new WasmSigningStageError(stage);
+  }
 }
 
 /**
@@ -555,11 +652,16 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
   headers: unknown;
   nodeOrigin: string;
   candidates: readonly LocalWasmCheckCandidate[];
+  /** Optional veto only; the caller's retained session still owns authority. */
+  assertActive?: () => void;
 }): Promise<PreparedLocalWasmRootCheckBatch> {
+  const assertActive = input.assertActive;
+  assertActive?.();
   if (!Array.isArray(input.candidates) || input.candidates.length === 0) {
     throw new Error('local WASM root check requires at least one candidate');
   }
   const wasm = await getWasm();
+  assertActive?.();
   const context = buildStateContextFromHeaders(wasm, input.headers);
   const nodeOrigin = normalizeNodeOrigin(input.nodeOrigin);
   let keys: SignerKeys;
@@ -572,6 +674,7 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
   } catch {
     throw new Error('local WASM root signer preparation failed');
   }
+  assertActive?.();
   const signerContext: SignedCheckSignerContext = Object.freeze({
     profile: LOCAL_WASM_CHECK_SIGNER_PROFILE,
     pubKeyHex: keys.pubKeyHex.toLowerCase(),
@@ -593,6 +696,7 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
     roles.add(candidate.role);
     assertContextExtensionSafe(candidate.eip12Tx?.inputs ?? [], candidate.role);
     assertEip12CreationHeights(candidate.role, candidate.eip12Tx);
+    assertActive?.();
     let signedTx: unknown;
     try {
       signedTx = await wasmSignWithStateContext(
@@ -601,9 +705,15 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
         wasm,
         context.stateContext,
       );
-    } catch {
-      throw new Error(`${candidate.role}: local WASM root signing failed`);
+    } catch (error) {
+      const stage = error instanceof WasmSigningStageError
+        ? ` at ${error.stage}`
+        : '';
+      throw new Error(
+        `${candidate.role}: local WASM root signing failed${stage}`,
+      );
     }
+    assertActive?.();
     assertSignedTransactionIdMatchesExpected(
       candidate.role,
       signedTx,
@@ -634,6 +744,28 @@ export async function prepareLocalWasmRootCheckCandidates(input: {
     stateContextTipHeight: signerContext.stateContextTipHeight,
     stateContextTipIdHex: signerContext.stateContextTipIdHex,
     candidates,
+  });
+}
+
+/**
+ * Read the exact signing context from one fixed node and root-sign a check-only
+ * batch. Network access remains inside the signer/checker boundary.
+ */
+export async function prepareLocalWasmRootCheckCandidatesFromNode(input: {
+  mnemonic: string;
+  networkPrefix: number;
+  nodeOrigin: string;
+  candidates: readonly LocalWasmCheckCandidate[];
+  assertActive?: () => void;
+}): Promise<PreparedLocalWasmRootCheckBatch> {
+  input.assertActive?.();
+  const { ngetDirect } = await import('./ergo-helpers.js');
+  input.assertActive?.();
+  const nodeOrigin = normalizeNodeOrigin(input.nodeOrigin);
+  return prepareLocalWasmRootCheckCandidates({
+    ...input,
+    nodeOrigin,
+    headers: await ngetDirect('/blocks/lastHeaders/10', nodeOrigin),
   });
 }
 
@@ -830,8 +962,10 @@ export async function checkSignedTransaction(
   candidate: LocalWasmSignedCheckCandidate,
   label: string,
   nodeOrigin: string,
+  assertActive?: () => void,
 ): Promise<LocalWasmOpaqueCheckResult | null> {
   try {
+    assertActive?.();
     const { ncheck } = await import('./ergo-helpers.js');
     assertLocalWasmSignedCheckCandidateProvenance(candidate);
     const material = requireLocalWasmSignedCheckMaterial(candidate);
@@ -839,19 +973,21 @@ export async function checkSignedTransaction(
     if (checkerNodeOrigin !== candidate.nodeOrigin) {
       throw new Error('checker node origin does not match the signed candidate context');
     }
+    assertActive?.();
     const result = await ncheck(
       '/transactions/check',
       material.signedTx,
       checkerNodeOrigin,
       { redactResponseBodyOnError: true },
     );
+    assertActive?.();
     const interpreted = interpretCheckResult(
       label,
       material.signedTx,
       result,
     );
     if (!interpreted) return null;
-    return {
+    const checked = Object.freeze({
       txId: interpreted.txId,
       checkResult: interpreted.checkResult,
       signedTransactionDigestHex: candidate.signedTransactionDigestHex,
@@ -867,7 +1003,12 @@ export async function checkSignedTransaction(
         method: 'POST',
         transportPolicy: 'no-redirect-no-proxy',
       }),
-    };
+    });
+    LOCAL_WASM_CHECK_RESULTS.set(
+      checked,
+      candidate as LocalWasmExactBytesSignedCheckCandidate,
+    );
+    return checked;
   } catch (err: any) {
     console.error(`   ${label} check failed: ${sanitizeSignerErrorText(err.message || err)}`);
     if (err.stack) {
@@ -957,6 +1098,209 @@ function serializeSignedCheckTransactionHex(wasm: any, value: unknown): string {
   }
 }
 
+/**
+ * Project only the complete ordered input identity from retained signed bytes.
+ * The signed transaction and its bytes remain inside the private material map.
+ */
+export function projectLocalWasmSignedCheckInputBoxIdsV1(
+  candidate: LocalWasmExactBytesSignedCheckCandidate,
+): readonly string[] {
+  assertLocalWasmSignedCheckCandidateProvenance(candidate);
+  const material = requireLocalWasmSignedCheckMaterial(candidate);
+  const inputs = material.signedTx.inputs;
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new Error('local WASM signed check transaction has no inputs');
+  }
+  const inputBoxIds = inputs.map((input, index) => {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error(
+        `local WASM signed check input ${index} is not an object`,
+      );
+    }
+    const boxId = (input as Readonly<Record<string, unknown>>).boxId;
+    if (typeof boxId !== 'string' || !/^[0-9a-f]{64}$/u.test(boxId)) {
+      throw new Error(
+        `local WASM signed check input ${index} box ID is invalid`,
+      );
+    }
+    return boxId;
+  });
+  if (new Set(inputBoxIds).size !== inputBoxIds.length) {
+    throw new Error('local WASM signed check input box IDs are not unique');
+  }
+  return Object.freeze(inputBoxIds);
+}
+
+/**
+ * Check one exact signed candidate and mint a distinct one-shot submission
+ * handle. The ordinary check-only API never creates this capability.
+ */
+export async function checkSignedTransactionForSubmissionV1(
+  candidate: LocalWasmExactBytesSignedCheckCandidate,
+  label: string,
+  nodeOrigin: string,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): Promise<Readonly<LocalWasmCheckedSubmissionAcceptanceV1> | null> {
+  const checked = await checkSignedTransaction(candidate, label, nodeOrigin);
+  if (checked === null) return null;
+  return promoteLocalWasmCheckedTransactionForSubmissionV1(
+    candidate,
+    checked,
+    executionBinding,
+  );
+}
+
+/**
+ * Mint one submission handle from the exact process-local result of an already
+ * completed node check. A copied or caller-authored check receipt is rejected.
+ */
+export function promoteLocalWasmCheckedTransactionForSubmissionV1(
+  candidate: LocalWasmExactBytesSignedCheckCandidate,
+  checked: Readonly<LocalWasmOpaqueCheckResult>,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+  assertActive?: () => void,
+): Readonly<LocalWasmCheckedSubmissionAcceptanceV1> {
+  assertActive?.();
+  assertLocalWasmSignedCheckCandidateProvenance(candidate);
+  if (LOCAL_WASM_CHECK_RESULTS.get(checked) !== candidate) {
+    throw new Error('checked submission result lacks exact process provenance');
+  }
+  if (LOCAL_WASM_PROMOTED_SUBMISSION_CANDIDATES.has(candidate)) {
+    LOCAL_WASM_CHECK_RESULTS.delete(checked);
+    throw new Error('signed submission candidate is already promoted');
+  }
+  if (
+    checked.signedTransactionBytesSha256Hex
+      !== candidate.signedTransactionBytesSha256Hex
+    || checked.signedTransactionBytesLength
+      !== candidate.signedTransactionBytesLength
+  ) {
+    throw new Error('checked submission bytes differ from the signed candidate');
+  }
+  const frozenChecked = checked;
+  const checkResponseDigestHex = digestCheckedSubmissionResponseV1(
+    frozenChecked,
+  );
+  if (candidate.nodeOrigin !== frozenChecked.checkerIdentity.nodeOrigin) {
+    throw new Error('checked submission origin differs from its signed context');
+  }
+  const frozenExecutionBinding = snapshotSubmissionExecutionBindingV1(
+    executionBinding,
+  );
+  LOCAL_WASM_CHECK_RESULTS.delete(checked);
+  LOCAL_WASM_PROMOTED_SUBMISSION_CANDIDATES.add(candidate);
+  const submissionHandle = Object.freeze({
+    profile: LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE,
+    txId: candidate.txId,
+    nodeOrigin: candidate.nodeOrigin,
+    signedTransactionDigestHex: candidate.signedTransactionDigestHex,
+    signedTransactionBytesSha256Hex:
+      candidate.signedTransactionBytesSha256Hex,
+    signedTransactionBytesLength: candidate.signedTransactionBytesLength,
+    checkResponseDigestHex,
+    checkerIdentity: frozenChecked.checkerIdentity,
+  });
+  LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.add(submissionHandle);
+  LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.set(submissionHandle, Object.freeze({
+    signedCandidate: candidate,
+    checkResponseDigestHex,
+    executionBinding: frozenExecutionBinding,
+    assertActive,
+  }));
+  return Object.freeze({
+    checked: frozenChecked,
+    submissionHandle,
+  });
+}
+
+export function assertLocalWasmCheckedSubmissionHandleV1Provenance(
+  value: unknown,
+): asserts value is Readonly<LocalWasmCheckedSubmissionHandleV1> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || !LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(value)
+  ) {
+    throw new Error('local WASM checked submission handle provenance is missing');
+  }
+  if (CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.has(value)) {
+    throw new Error('local WASM checked submission handle is already consumed');
+  }
+  const handle = value as Readonly<LocalWasmCheckedSubmissionHandleV1>;
+  const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  if (!material) {
+    throw new Error('local WASM checked submission material is unavailable');
+  }
+  material.assertActive?.();
+  assertLocalWasmSignedCheckCandidateProvenance(material.signedCandidate);
+  if (
+    handle.profile !== LOCAL_WASM_CHECKED_SUBMISSION_HANDLE_V1_PROFILE
+    || !Object.isFrozen(handle)
+    || handle.txId !== material.signedCandidate.txId
+    || handle.nodeOrigin !== material.signedCandidate.nodeOrigin
+    || handle.signedTransactionDigestHex
+      !== material.signedCandidate.signedTransactionDigestHex
+    || handle.signedTransactionBytesSha256Hex
+      !== material.signedCandidate.signedTransactionBytesSha256Hex
+    || handle.signedTransactionBytesLength
+      !== material.signedCandidate.signedTransactionBytesLength
+    || handle.checkResponseDigestHex !== material.checkResponseDigestHex
+    || !Object.isFrozen(handle.checkerIdentity)
+    || handle.checkerIdentity.profile !== ERGO_NODE_CHECKER_PROFILE
+    || handle.checkerIdentity.sourceAdapterProfile
+      !== ERGO_NODE_CHECK_SOURCE_ADAPTER_PROFILE
+    || handle.checkerIdentity.nodeOrigin !== handle.nodeOrigin
+    || handle.checkerIdentity.path !== '/transactions/check'
+    || handle.checkerIdentity.method !== 'POST'
+    || handle.checkerIdentity.transportPolicy !== 'no-redirect-no-proxy'
+  ) {
+    throw new Error('local WASM checked submission handle binding is invalid');
+  }
+}
+
+export function assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(
+  handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
+  executionBinding: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): void {
+  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+  const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  const expected = snapshotSubmissionExecutionBindingV1(executionBinding);
+  if (
+    material === undefined
+    || material.executionBinding.processBindingDigestHex
+      !== expected.processBindingDigestHex
+    || material.executionBinding.executionTargetIdentityDigestHex
+      !== expected.executionTargetIdentityDigestHex
+  ) {
+    throw new Error('checked submission handle execution binding changed');
+  }
+}
+
+/**
+ * Give the exact signed object to one reviewed transport callback, once.
+ * Callers cannot recover the object from the handle or invoke the callback a
+ * second time, including after a transport exception or timeout.
+ */
+export async function consumeLocalWasmCheckedSubmissionHandleV1<T>(
+  handle: Readonly<LocalWasmCheckedSubmissionHandleV1>,
+  signedCandidate: LocalWasmExactBytesSignedCheckCandidate,
+  consume: (
+    signedTransaction: Readonly<Record<string, unknown>>,
+  ) => Promise<T>,
+): Promise<T> {
+  assertLocalWasmCheckedSubmissionHandleV1Provenance(handle);
+  const material = LOCAL_WASM_CHECKED_SUBMISSION_MATERIAL.get(handle);
+  if (!material || material.signedCandidate !== signedCandidate) {
+    throw new Error('checked submission handle differs from its signed candidate');
+  }
+  if (typeof consume !== 'function') {
+    throw new Error('checked submission consumer must be a function');
+  }
+  CONSUMED_LOCAL_WASM_CHECKED_SUBMISSION_HANDLES.add(handle);
+  const signedMaterial = requireLocalWasmSignedCheckMaterial(signedCandidate);
+  return await consume(signedMaterial.signedTx);
+}
+
 function requireLocalWasmSignedCheckMaterial(
   candidate: LocalWasmSignedCheckCandidate,
 ): LocalWasmSignedCheckMaterial {
@@ -965,6 +1309,25 @@ function requireLocalWasmSignedCheckMaterial(
     throw new Error('local WASM signed check material is unavailable');
   }
   return material;
+}
+
+function snapshotSubmissionExecutionBindingV1(
+  value: Readonly<LocalWasmSubmissionExecutionBindingV1>,
+): Readonly<LocalWasmSubmissionExecutionBindingV1> {
+  if (
+    value === null
+    || typeof value !== 'object'
+    || Object.keys(value).sort().join(',')
+      !== 'executionTargetIdentityDigestHex,processBindingDigestHex'
+    || !/^[0-9a-f]{64}$/u.test(value.processBindingDigestHex)
+    || !/^[0-9a-f]{64}$/u.test(value.executionTargetIdentityDigestHex)
+  ) {
+    throw new Error('checked submission execution binding is invalid');
+  }
+  return Object.freeze({
+    processBindingDigestHex: value.processBindingDigestHex,
+    executionTargetIdentityDigestHex: value.executionTargetIdentityDigestHex,
+  });
 }
 
 function snapshotSignedCheckTransaction(
@@ -984,6 +1347,23 @@ function snapshotSignedCheckTransaction(
 function digestSignedCheckTransaction(value: unknown): string {
   return createHash('sha256')
     .update(canonicalSignedCheckJson(value), 'utf8')
+    .digest('hex');
+}
+
+function digestCheckedSubmissionResponseV1(
+  checked: Readonly<LocalWasmOpaqueCheckResult>,
+): string {
+  return createHash('sha256')
+    .update('E2S_LOCAL_WASM_CHECKED_SUBMISSION_RESPONSE_V1\0', 'utf8')
+    .update(canonicalSignedCheckJson({
+      txId: checked.txId,
+      checkResult: checked.checkResult,
+      signedTransactionDigestHex: checked.signedTransactionDigestHex,
+      signedTransactionBytesSha256Hex:
+        checked.signedTransactionBytesSha256Hex,
+      signedTransactionBytesLength: checked.signedTransactionBytesLength,
+      checkerIdentity: checked.checkerIdentity,
+    }), 'utf8')
     .digest('hex');
 }
 

@@ -1,8 +1,19 @@
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { readdirSync, readFileSync, realpathSync, statSync } from 'fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'fs';
 import { dirname, isAbsolute, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { tmpdir } from 'os';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -30,6 +41,21 @@ const FORBIDDEN_PARENT_OVERRIDES = [
   'NODE_OPTIONS',
   'NODE_PATH',
   'TSX_TSCONFIG_PATH',
+] as const;
+const CURRENT_WASM_SOURCE_PATHS = [
+  'wasm-avl/rust-toolchain.toml',
+  'wasm-avl/Cargo.toml',
+  'wasm-avl/Cargo.lock',
+  'wasm-avl/src/lib.rs',
+  'relayer/package.json',
+  'relayer/package-lock.json',
+  'relayer/tsconfig.json',
+  'relayer/src/scripts/build-wasm-avl.ts',
+  'relayer/src/scripts/build-wasm-avl-pipeline-v2.ts',
+  'relayer/src/substrate-federated-native-wasm-avl-build-tool-pins-v1.ts',
+  'relayer/src/bounded-process-runner.ts',
+  'relayer/src/scripts/windows-job-process.ps1',
+  'relayer/src/substrate-federated-native-wasm-avl-package-v1.ts',
 ] as const;
 
 function assertPinnedVitestParentEnvironment(
@@ -214,6 +240,9 @@ describe('authenticated SPV tracker JVM AVL differential corpus', () => {
 
   it('derives the reviewed cases from the versioned current-source WASM output', () => {
     const corpus = buildAuthenticatedSpvTrackerJvmAvlDifferentialCorpus({ bridgeRoot: BRIDGE_ROOT });
+    expect(corpus.wasmIdentity.sourceFiles.map(entry => entry.path)).toEqual(
+      CURRENT_WASM_SOURCE_PATHS,
+    );
     expect(corpus.fixture.cases.map(entry => entry.caseId)).toEqual([
       'canonical-empty',
       'canonical-non-empty',
@@ -302,11 +331,68 @@ describe('authenticated SPV tracker JVM AVL differential corpus', () => {
     expect(wrongValue?.wasmSuccessorDigestHex).toMatch(/^[0-9a-f]{66}$/);
     expect(wrongValue?.wasmSuccessorDigestHex).not.toBe(wrongValue?.expectedSuccessorDigestHex);
     expect(corpus.wasmIdentity.wasmArtifactSha256Hex).toBe(
-      'be1134ff4052496eac6903dbc9a40bb6d164786de09e8c98488a81eedc151867',
+      '28a1f941a16134921ac85c9f68d0feb3898534184f83a716c6e5e1f47eeee0b4',
     );
     expect(corpus.wasmIdentity.wasmGlueSha256Hex).toBe(
       '98dbefbf0150b477c7af22d5f9cdfaf925cfb464da08e787b284e17d1a1fd13c',
     );
+  });
+
+  it('rejects isolated drift in every locked WASM producer and execution source', () => {
+    const lockPath = resolve(
+      BRIDGE_ROOT,
+      'sources',
+      'authenticated-spv-tracker-jvm-avl-wasm-lock.json',
+    );
+    const lockBytes = readFileSync(lockPath);
+    const lock = JSON.parse(lockBytes.toString('utf8')) as {
+      sourceFiles: Array<{ path: string; sha256: string }>;
+    };
+    expect(lock.sourceFiles.map(entry => entry.path)).toEqual(CURRENT_WASM_SOURCE_PATHS);
+
+    const fixtureRoot = mkdtempSync(resolve(tmpdir(), 'e2s-jvm-wasm-source-lock-'));
+    try {
+      const fixtureLockPath = resolve(
+        fixtureRoot,
+        'sources',
+        'authenticated-spv-tracker-jvm-avl-wasm-lock.json',
+      );
+      mkdirSync(dirname(fixtureLockPath), { recursive: true });
+      writeFileSync(fixtureLockPath, lockBytes);
+      for (const entry of lock.sourceFiles) {
+        const source = resolve(BRIDGE_ROOT, entry.path);
+        const destination = resolve(fixtureRoot, entry.path);
+        mkdirSync(dirname(destination), { recursive: true });
+        copyFileSync(source, destination);
+      }
+
+      lock.sourceFiles.forEach((entry, index) => {
+        const destination = resolve(fixtureRoot, entry.path);
+        const originalBytes = readFileSync(destination);
+        try {
+          writeFileSync(
+            destination,
+            Buffer.concat([originalBytes, Buffer.from('isolated-source-drift', 'utf8')]),
+          );
+          let failure: unknown;
+          try {
+            buildAuthenticatedSpvTrackerJvmAvlDifferentialCorpus({
+              bridgeRoot: fixtureRoot,
+            });
+          } catch (error) {
+            failure = error;
+          }
+          expect(failure, `source drift was accepted for ${entry.path}`).toBeInstanceOf(Error);
+          expect((failure as Error).message).toContain(
+            `JVM AVL WASM source ${index} does not match the reviewed SHA-256`,
+          );
+        } finally {
+          writeFileSync(destination, originalBytes);
+        }
+      });
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 
   it.runIf(PINNED_JVM_HOST)(

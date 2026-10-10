@@ -454,23 +454,56 @@ export function assertSubstrateFederatedCheckpointStatementV1Matches(
   }
 }
 
+export type SubstrateFederatedCheckpointAdmissionFailureStageV1 =
+  'decode' | 'profile' | 'admission-horizon';
+const ADMISSION_FAILURE_STAGES = new WeakMap<Error, SubstrateFederatedCheckpointAdmissionFailureStageV1 | null>();
+const admissionIsNativeError = (Error as ErrorConstructor & {
+  isError?: (value: unknown) => boolean;
+}).isError;
+
+/** Read only invocation-local metadata; no caller properties or error text. */
+export function projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1(
+  value: unknown,
+): SubstrateFederatedCheckpointAdmissionFailureStageV1 | null {
+  try {
+    return admissionIsNativeError?.(value) === true
+      ? ADMISSION_FAILURE_STAGES.get(value as Error) ?? null : null;
+  } catch { return null; }
+}
+
 export function decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
   encoded: Buffer | string,
   expectedProfile: Readonly<SubstrateFederatedCheckpointProfileV1>,
   currentErgoHeight: string | number | bigint,
 ): Readonly<SubstrateFederatedCheckpointStatementV1> {
-  const statement = decodeSubstrateFederatedCheckpointStatementV1(encoded);
-  assertSubstrateFederatedCheckpointStatementV1MatchesProfile(
-    statement,
-    expectedProfile,
-  );
-  const current = uint64(currentErgoHeight, 'current Ergo height');
-  const validFrom = BigInt(statement.admissionValidFromErgoHeight);
-  const expires = BigInt(statement.admissionExpiresAtErgoHeight);
-  if (current < validFrom || current >= expires) {
-    throw new Error('substrate federated checkpoint statement is outside its Ergo admission horizon');
+  let stage: SubstrateFederatedCheckpointAdmissionFailureStageV1 = 'decode';
+  try {
+    const statement = decodeSubstrateFederatedCheckpointStatementV1(encoded);
+    stage = 'profile';
+    assertSubstrateFederatedCheckpointStatementV1MatchesProfile(
+      statement,
+      expectedProfile,
+    );
+    stage = 'admission-horizon';
+    const current = uint64(currentErgoHeight, 'current Ergo height');
+    const validFrom = BigInt(statement.admissionValidFromErgoHeight);
+    const expires = BigInt(statement.admissionExpiresAtErgoHeight);
+    if (current < validFrom || current >= expires) {
+      throw new Error('substrate federated checkpoint statement is outside its Ergo admission horizon');
+    }
+    return statement;
+  } catch (error) {
+    // Branding and metadata must not change the exact thrown value.
+    try {
+      if (admissionIsNativeError?.(error) === true) {
+        const nativeError = error as Error;
+        const previous = ADMISSION_FAILURE_STAGES.get(nativeError);
+        ADMISSION_FAILURE_STAGES.set(nativeError,
+          previous === undefined || previous === stage ? stage : null);
+      }
+    } catch { /* Omit optional metadata if the intrinsic is unavailable. */ }
+    throw error;
   }
-  return statement;
 }
 
 export function deriveSubstrateFederatedCheckpointAttestationDigestHex(

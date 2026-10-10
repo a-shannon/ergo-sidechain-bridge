@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
+const isNativeError = (Error as ErrorConstructor & { isError: (value: unknown) => boolean }).isError;
+
 import {
   SUBSTRATE_FEDERATED_CHECKPOINT_STATEMENT_V1_BYTES,
   assertSubstrateFederatedCheckpointStatementV1Matches,
@@ -11,6 +13,7 @@ import {
   decodeSubstrateFederatedCheckpointProfileV1,
   decodeSubstrateFederatedCheckpointStatementV1,
   decodeSubstrateFederatedCheckpointStatementV1ForAdmission,
+  projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1 as ownAdmissionStage,
   deriveSubstrateFederatedCheckpointAttestationDigestHex,
   encodeSubstrateFederatedCheckpointExtensionValueV1,
   encodeSubstrateFederatedCheckpointProfileV1,
@@ -243,6 +246,68 @@ describe('substrate-federated-v1 checkpoint profile and statement', () => {
       profile,
       '1010',
     )).toThrow(/exceeds/);
+  });
+
+  it.each(['decode', 'profile', 'profile horizon', 'current height', 'before window', 'exclusive expiry'] as const)(
+    'records the original ForAdmission failure stage: %s', fault => {
+      const { profile, statement } = fixture();
+      let encoded = statement.encodedStatementHex; let current: string = '1010';
+      if (fault === 'decode') encoded = '00';
+      if (fault === 'profile') {
+        const changed = Buffer.from(encoded, 'hex'); changed[388] ^= 1; encoded = changed.toString('hex');
+      }
+      if (fault === 'profile horizon') {
+        const changed = Buffer.from(encoded, 'hex'); changed.writeBigUInt64BE(1075n, 504); encoded = changed.toString('hex');
+      }
+      if (fault === 'current height') current = '-1';
+      if (fault === 'before window') current = '1009';
+      if (fault === 'exclusive expiry') current = '1060';
+      let error: unknown;
+      try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(encoded, profile, current); }
+      catch (failure) { error = failure; }
+      expect(error).toBeInstanceOf(Error);
+      expect(ownAdmissionStage(error)).toBe(fault === 'decode' ? 'decode'
+        : fault.startsWith('profile') ? 'profile' : 'admission-horizon');
+      expect(decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, profile, '1010'))
+        .toEqual(statement);
+    });
+
+  it.each([new Error('opaque'), 'primitive', Object.create(Error.prototype),
+    new Proxy(new Error(), {}), new Proxy({}, { get() { throw new Error('must not inspect'); } })])(
+    'rethrows exact profile getter failure %# without inspecting raw fields', thrown => {
+      const { profile, statement } = fixture();
+      if (isNativeError(thrown)) Object.defineProperties(thrown, {
+        message: { get() { throw new Error('must not inspect message'); } },
+        stack: { get() { throw new Error('must not inspect stack'); } },
+      });
+      const changed = Object.create(null);
+      Object.defineProperty(changed, 'encodedProfileHex', { get() { throw thrown; } });
+      let caught: unknown;
+      try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, changed, '1010'); }
+      catch (failure) { caught = failure; }
+      expect(caught).toBe(thrown);
+      expect(ownAdmissionStage(caught)).toBe(isNativeError(thrown) ? 'profile' : null);
+      expect(ownAdmissionStage(new Error())).toBeNull();
+      expect(ownAdmissionStage(profile)).toBeNull();
+    });
+
+  it('permanently omits a native error reused at conflicting helper stages', () => {
+    const { profile, statement } = fixture();
+    const thrown = new Error('opaque');
+    const encoded = Buffer.from(statement.encodedStatementHex, 'hex');
+    Object.defineProperty(encoded, 'length', { get() { throw thrown; } });
+    let caught: unknown;
+    try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(encoded, profile, '1010'); }
+    catch (failure) { caught = failure; }
+    expect(caught).toBe(thrown); expect(ownAdmissionStage(thrown)).toBe('decode');
+    const changed = Object.create(null);
+    Object.defineProperty(changed, 'encodedProfileHex', { get() { throw thrown; } });
+    try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, changed, '1010'); }
+    catch (failure) { caught = failure; }
+    expect(caught).toBe(thrown); expect(ownAdmissionStage(thrown)).toBeNull();
+    try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(encoded, profile, '1010'); }
+    catch (failure) { caught = failure; }
+    expect(caught).toBe(thrown); expect(ownAdmissionStage(thrown)).toBeNull();
   });
 
   it('rejects every valid but unexpected application binding at the consumer boundary', () => {

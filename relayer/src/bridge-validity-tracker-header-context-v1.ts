@@ -2,8 +2,18 @@ import { createHash } from 'crypto';
 
 import blakejs from 'blakejs';
 
+import {
+  normalizeErgoNodeHeaderBytes,
+} from './adapters/ergo-utxo-state-runtime-witness-capture-port-v1.js';
+import {
+  parseErgoAutolykosV2HeaderIdentity,
+  type ErgoHeaderIdentityFields,
+} from './ergo-settlement-core/ergo-header-id.js';
+
 export const BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE =
   'eip0045-validity-tracker-canonical-synthetic-header-context';
+export const BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE =
+  'eip0045-validity-tracker-observed-header-context';
 
 const HEADER_COUNT = 10;
 const HEADER_VERSION = 2;
@@ -38,7 +48,17 @@ export interface BridgeValidityTrackerCanonicalHeaderContextV1 {
     typeof BRIDGE_VALIDITY_TRACKER_CANONICAL_HEADER_CONTEXT_V1_PROVENANCE;
 }
 
+export interface BridgeValidityTrackerObservedHeaderContextV1 {
+  readonly currentHeight: number;
+  readonly anchorHeader: BridgeValidityTrackerCanonicalHeaderV1;
+  readonly anchorContextIndex: number;
+  readonly headers: readonly BridgeValidityTrackerCanonicalHeaderV1[];
+  readonly provenance:
+    typeof BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE;
+}
+
 const CONTEXTS = new WeakSet<object>();
+const OBSERVED_CONTEXTS = new WeakSet<object>();
 
 export function buildBridgeValidityTrackerCanonicalHeaderContextV1(
   wasm: any,
@@ -88,12 +108,13 @@ export function buildBridgeValidityTrackerCanonicalHeaderContextV1(
       extensionRootHex,
     });
     const serialized = serializeCanonicalErgoHeaderV2(rawWithoutId);
+    const identity = parseErgoAutolykosV2HeaderIdentity(serialized);
     const id = blake2b256Hex(serialized);
     const raw = deepFreeze({
       ...rawWithoutId,
       id,
     });
-    const jvmHeaderJson = canonicalJvmHeaderJson(raw);
+    const jvmHeaderJson = canonicalJvmHeaderJson(identity);
     const record = deepFreeze({
       raw,
       id,
@@ -185,6 +206,170 @@ export function assertBridgeValidityTrackerCanonicalHeaderContextV1(
   });
 }
 
+export function buildBridgeValidityTrackerObservedHeaderContextV1(
+  wasm: any,
+  input: {
+    readonly rawHeaders: readonly Readonly<Record<string, unknown>>[];
+    readonly anchorContextIndex: number;
+    readonly expectedAnchorHeaderIdHex: string;
+    readonly expectedAnchorExtensionRootHex: string;
+  },
+): BridgeValidityTrackerObservedHeaderContextV1 {
+  if (input.rawHeaders.length !== HEADER_COUNT) {
+    throw new Error(
+      `observed header context must contain exactly ${HEADER_COUNT} headers`,
+    );
+  }
+  const anchorContextIndex = safeInteger(
+    input.anchorContextIndex,
+    'observed anchor context index',
+  );
+  if (anchorContextIndex >= HEADER_COUNT) {
+    throw new Error(
+      `observed anchor context index must be between 0 and ${HEADER_COUNT - 1}`,
+    );
+  }
+  const expectedAnchorHeaderIdHex = fixedHex(
+    input.expectedAnchorHeaderIdHex,
+    32,
+    'observed anchor header ID',
+  );
+  const expectedAnchorExtensionRootHex = fixedHex(
+    input.expectedAnchorExtensionRootHex,
+    32,
+    'observed anchor extension root',
+  );
+  const headers = Object.freeze(input.rawHeaders.map((rawInput, index) => {
+    const raw = deepFreeze(structuredClone(rawInput));
+    const { identity, serialized } = canonicalObservedErgoHeader(raw);
+    const id = blake2b256Hex(serialized);
+    const claimedId = fixedHex(
+      raw.id ?? raw.headerId,
+      32,
+      `observed header ${index} claimed ID`,
+    );
+    if (claimedId !== id) {
+      throw new Error(`observed header ${index} ID is not canonical`);
+    }
+    const record: BridgeValidityTrackerCanonicalHeaderV1 = deepFreeze({
+      raw,
+      id,
+      parentId: Buffer.from(identity.parentId).toString('hex'),
+      height: identity.height,
+      extensionRootHex: Buffer.from(identity.extensionHash).toString('hex'),
+      jvmHeaderJson: canonicalJvmHeaderJson(identity),
+      serializedHex: serialized.toString('hex'),
+    });
+    assertSigmaRustHeaderIdentity(wasm, record, index, 'observed');
+    return record;
+  }));
+  const currentHeight = headers[0]!.height + 1;
+  headers.forEach((header, index) => {
+    if (header.height !== currentHeight - index - 1) {
+      throw new Error(`observed header ${index} height is not contiguous`);
+    }
+    if (
+      index + 1 < headers.length
+      && header.parentId !== headers[index + 1]!.id
+    ) {
+      throw new Error(`observed header ${index} parent lineage is broken`);
+    }
+  });
+  const anchorHeader = headers[anchorContextIndex]!;
+  if (
+    anchorHeader.id !== expectedAnchorHeaderIdHex
+    || anchorHeader.extensionRootHex !== expectedAnchorExtensionRootHex
+  ) {
+    throw new Error('observed anchor header binding mismatch');
+  }
+  const context: BridgeValidityTrackerObservedHeaderContextV1 = deepFreeze({
+    currentHeight,
+    anchorHeader,
+    anchorContextIndex,
+    headers,
+    provenance: BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE,
+  });
+  OBSERVED_CONTEXTS.add(context);
+  return context;
+}
+
+export function assertBridgeValidityTrackerObservedHeaderContextV1(
+  value: unknown,
+): asserts value is BridgeValidityTrackerObservedHeaderContextV1 {
+  if (
+    typeof value !== 'object'
+    || value === null
+    || !OBSERVED_CONTEXTS.has(value)
+    || !isDeepFrozen(value)
+  ) {
+    throw new Error(
+      'validity tracker observed header context provenance is missing',
+    );
+  }
+  const context = value as BridgeValidityTrackerObservedHeaderContextV1;
+  if (
+    context.provenance
+      !== BRIDGE_VALIDITY_TRACKER_OBSERVED_HEADER_CONTEXT_V1_PROVENANCE
+    || context.headers.length !== HEADER_COUNT
+    || context.currentHeight !== context.headers[0]!.height + 1
+    || context.anchorContextIndex < 0
+    || context.anchorContextIndex >= context.headers.length
+    || context.anchorHeader !== context.headers[context.anchorContextIndex]
+  ) {
+    throw new Error('validity tracker observed header context shape mismatch');
+  }
+  context.headers.forEach((header, index) => {
+    const { identity, serialized } = canonicalObservedErgoHeader(header.raw);
+    if (
+      header.height !== context.currentHeight - index - 1
+      || serialized.toString('hex') !== header.serializedHex
+      || blake2b256Hex(serialized) !== header.id
+      || Buffer.from(identity.parentId).toString('hex') !== header.parentId
+      || Buffer.from(identity.extensionHash).toString('hex')
+        !== header.extensionRootHex
+      || canonicalJvmHeaderJson(identity) !== header.jvmHeaderJson
+      || (
+        index + 1 < context.headers.length
+        && header.parentId !== context.headers[index + 1]!.id
+      )
+    ) {
+      throw new Error(
+        `validity tracker observed header ${index} identity mismatch`,
+      );
+    }
+  });
+}
+
+function canonicalObservedErgoHeader(
+  rawInput: Readonly<Record<string, unknown>>,
+): Readonly<{
+  readonly identity: ErgoHeaderIdentityFields;
+  readonly serialized: Buffer;
+}> {
+  const serialized = normalizeErgoNodeHeaderBytes(rawInput);
+  const identity = parseErgoAutolykosV2HeaderIdentity(serialized);
+  const raw = requiredRecord(rawInput, 'observed Ergo header');
+  const extensionRootHex = Buffer.from(identity.extensionHash).toString('hex');
+  if (
+    raw.extensionRoot !== undefined
+    && fixedHex(raw.extensionRoot, 32, 'observed header extensionRoot alias')
+      !== extensionRootHex
+  ) {
+    throw new Error('observed header extension root aliases disagree');
+  }
+  const pow = requiredRecord(raw.powSolutions, 'observed header PoW solution');
+  // V2 commits only pk and n. Freshly mined headers may retain the miner's
+  // in-memory w/d aliases, while serialized-and-reloaded headers expose the
+  // protocol placeholders. Validate the aliases but canonicalize JVM input.
+  if (pow.w !== undefined) {
+    fixedHex(pow.w, 33, 'observed Autolykos V2 one-time key');
+  }
+  if (pow.d !== undefined) {
+    decimalInteger(pow.d, 'observed Autolykos V2 distance');
+  }
+  return Object.freeze({ identity, serialized });
+}
+
 export function serializeCanonicalErgoHeaderV2(
   rawInput: Readonly<Record<string, unknown>>,
 ): Buffer {
@@ -274,47 +459,30 @@ function buildRawHeader(input: {
   };
 }
 
-function canonicalJvmHeaderJson(
-  rawInput: Readonly<Record<string, unknown>>,
-): string {
-  const raw = requiredRecord(rawInput, 'canonical JVM header');
-  const pow = requiredRecord(raw.powSolutions, 'canonical JVM PoW solution');
+function canonicalJvmHeaderJson(identity: ErgoHeaderIdentityFields): string {
   return JSON.stringify({
-    version: safeInteger(raw.version, 'JVM header version'),
-    parentId: fixedHex(raw.parentId, 32, 'JVM header parent ID'),
-    adProofsRoot: fixedHex(
-      raw.adProofsRoot,
-      32,
-      'JVM header AD proofs root',
-    ),
+    version: identity.version,
+    parentId: Buffer.from(identity.parentId).toString('hex'),
+    adProofsRoot: Buffer.from(identity.adProofsRoot).toString('hex'),
     stateRoot: {
-      digest: fixedHex(raw.stateRoot, 33, 'JVM header state root'),
+      digest: Buffer.from(identity.stateRoot).toString('hex'),
       treeFlags: 7,
       keyLength: 32,
       valueLength: null,
     },
-    transactionsRoot: fixedHex(
-      raw.transactionsRoot,
-      32,
-      'JVM header transactions root',
+    transactionsRoot: Buffer.from(identity.transactionsRoot).toString('hex'),
+    timestamp: unsignedSafeInteger(
+      Number(identity.timestamp),
+      'JVM header timestamp',
     ),
-    timestamp: unsignedSafeInteger(raw.timestamp, 'JVM header timestamp'),
-    nBits: unsignedSafeInteger(raw.nBits, 'JVM header nBits'),
-    height: unsignedSafeInteger(raw.height, 'JVM header height'),
-    extensionRoot: fixedHex(
-      raw.extensionHash,
-      32,
-      'JVM header extension root',
-    ),
-    minerPk: fixedHex(pow.pk, 33, 'JVM header miner public key'),
-    powOnetimePk: fixedHex(
-      pow.w,
-      33,
-      'JVM header PoW one-time public key',
-    ),
-    powNonce: fixedHex(pow.n, 8, 'JVM header PoW nonce'),
+    nBits: identity.nBits,
+    height: identity.height,
+    extensionRoot: Buffer.from(identity.extensionHash).toString('hex'),
+    minerPk: Buffer.from(identity.powSolution.publicKey).toString('hex'),
+    powOnetimePk: HEADER_W,
+    powNonce: Buffer.from(identity.powSolution.nonce).toString('hex'),
     powDistance: 0,
-    votes: fixedHex(raw.votes, 3, 'JVM header votes'),
+    votes: Buffer.from(identity.votes).toString('hex'),
   });
 }
 
@@ -322,6 +490,7 @@ function assertSigmaRustHeaderIdentity(
   wasm: any,
   record: BridgeValidityTrackerCanonicalHeaderV1,
   index: number,
+  source: 'synthetic' | 'observed' = 'synthetic',
 ): void {
   let header: any;
   let id: any;
@@ -332,7 +501,7 @@ function assertSigmaRustHeaderIdentity(
     expectedId = wasm.BlockId.from_str(record.id);
     if (!id.equals(expectedId)) {
       throw new Error(
-        `sigma-rust changed canonical synthetic header ${index} identity`,
+        `sigma-rust changed canonical ${source} header ${index} identity`,
       );
     }
   } finally {

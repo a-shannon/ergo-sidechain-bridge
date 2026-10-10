@@ -8,10 +8,16 @@ export const STANDALONE_CONSENSUS_WORKFLOW_PATH =
   '.github/workflows/relayer-checks.yml';
 export const STANDALONE_CONSENSUS_JOB_ID = 'consensus-sources';
 export const PUBLIC_AUDIT_JOB_ID = 'audit-alpha';
+export const SOLIDITY_AUDIT_JOB_ID = 'solidity-audit';
 
 const EXPECTED_WORKFLOW_NAME = 'Bridge public-audit candidate checks';
-const EXPECTED_WORKFLOW_JOB_IDS = [PUBLIC_AUDIT_JOB_ID, STANDALONE_CONSENSUS_JOB_ID] as const;
+const EXPECTED_WORKFLOW_JOB_IDS = [
+  PUBLIC_AUDIT_JOB_ID,
+  SOLIDITY_AUDIT_JOB_ID,
+  STANDALONE_CONSENSUS_JOB_ID,
+] as const;
 const EXPECTED_PUBLIC_AUDIT_JOB_NAME = 'Public-audit candidate gate';
+const EXPECTED_SOLIDITY_AUDIT_JOB_NAME = 'Audit Solidity dependencies';
 const EXPECTED_CONSENSUS_JOB_NAME = 'Rebuild pinned Frontier and Ergo sources';
 const EXPECTED_TRIGGER_PATHS = [
   '.github/workflows/relayer-checks.yml',
@@ -30,12 +36,44 @@ const EXPECTED_TRIGGER_PATHS = [
   'wasm-avl/**',
   'substrate-node',
 ] as const;
-const EXPECTED_PUSH_BRANCHES = ['main', 'master', 'fix/**'] as const;
+const EXPECTED_PUSH_BRANCHES = ['main', 'master', 'a-shannon/research-alpha'] as const;
+const SOLIDITY_AUDIT_COMMAND = [
+  'npm audit --audit-level=high',
+  '--registry=https://registry.npmjs.org/',
+  '--include=dev',
+  '--include=optional',
+  '--include=peer',
+  '--fetch-retries=5',
+  '--fetch-retry-factor=2',
+  '--fetch-retry-mintimeout=1000',
+  '--fetch-retry-maxtimeout=10000',
+  '--fetch-timeout=30000',
+].join(' ');
+const SOLIDITY_AUDIT_RUN = [
+  'status=1',
+  'for attempt in 1 2 3; do',
+  `  if ${SOLIDITY_AUDIT_COMMAND}; then`,
+  '    exit 0',
+  '  else',
+  '    status=$?',
+  '  fi',
+  '  if [ "$attempt" -lt 3 ]; then',
+  '    delay=$((attempt * 10))',
+  '    echo "npm audit attempt ${attempt} failed; retrying in ${delay}s"',
+  '    sleep "$delay"',
+  '  fi',
+  'done',
+  'exit "$status"',
+].join('\n');
 const FRONTIER_BUILD_COMMAND = 'cargo build --locked --release -p frontier-template-node';
 const ERGO_TEST_COMMAND = 'sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"';
 const ERGO_BUILD_COMMAND = 'sbt assembly';
 const AUDIT_NODE_ISOLATION_COMMAND_SHA256 =
   '500825e8cb86e4d82215b2d14076eca67ad74f85a8697f2efe12422cf18bef45';
+const WASM_BINDGEN_PROVISION_COMMAND_SHA256 =
+  '6149fbd21aaf2a753ddc9e68a467e688911d2a5963dece14eaa76312bc5f8c1a';
+const WASM_PACK_PROVISION_COMMAND_SHA256 =
+  '8ad3ecfa3f8f29c0134d1933f3da96cca3b9525b7bd6a7fed69d8f3ec5485edd';
 
 const EXPECTED_AUDIT_STEP_NAMES = [
   'Checkout recursive source graph',
@@ -43,11 +81,21 @@ const EXPECTED_AUDIT_STEP_NAMES = [
   'Isolate audit Node.js',
   'Setup Java 17',
   'Setup Rust 1.97.1',
+  'Provision wasm-bindgen 0.2.120',
+  'Fetch locked WASM AVL dependencies',
   'Install wasm-pack 0.14.0',
   'Install relayer dependencies',
+  'Check stopped-node recovery fixtures before long audit gate',
   'Setup compiler Node.js',
   'Capture compiler Node.js',
   'Run public-audit candidate gate',
+] as const;
+
+const EXPECTED_SOLIDITY_AUDIT_STEP_NAMES = [
+  'Checkout dependency lock',
+  'Setup Node.js',
+  'Install Solidity dependencies',
+  'Audit Solidity dependencies',
 ] as const;
 
 const EXPECTED_STEP_NAMES = [
@@ -65,6 +113,7 @@ const EXPECTED_STEP_NAMES = [
   'Apply tracked Frontier runtime commitment patch',
   'Prepare pinned patched Ergo source',
   'Verify complete source checkouts',
+  'Test federated LAB no-value reservation admission',
   'Test Frontier bridge commitment producer',
   'Test native GRANDPA finality proof verifier',
   'Test native finalized bridge state proof verifier',
@@ -233,7 +282,7 @@ export function validateStandaloneConsensusBuildWorkflow(
 
   const jobs = asRecord(workflow?.jobs);
   if (!jobs || !hasExactKeys(jobs, EXPECTED_WORKFLOW_JOB_IDS)) {
-    errors.push('workflow jobs must be exactly audit-alpha and consensus-sources');
+    errors.push('workflow jobs must be exactly audit-alpha, solidity-audit, and consensus-sources');
   }
   const auditJob = asRecord(jobs?.[PUBLIC_AUDIT_JOB_ID]);
   if (!auditJob) errors.push(`workflow job ${PUBLIC_AUDIT_JOB_ID} is missing`);
@@ -243,8 +292,8 @@ export function validateStandaloneConsensusBuildWorkflow(
   if (auditJob?.['runs-on'] !== 'windows-latest') {
     errors.push('public audit job must run on windows-latest');
   }
-  if (auditJob?.['timeout-minutes'] !== 120) {
-    errors.push('public audit job timeout must be 120 minutes');
+  if (auditJob?.['timeout-minutes'] !== 240) {
+    errors.push('public audit job timeout must be 240 minutes');
   }
   if (auditJob && !hasExactKeys(auditJob, [
     'defaults',
@@ -299,11 +348,25 @@ export function validateStandaloneConsensusBuildWorkflow(
   requireUsesStep(errors, concreteAuditSteps, 'Setup Rust 1.97.1', 'dtolnay/rust-toolchain@1.97.1', {
     targets: 'wasm32-unknown-unknown',
   });
+  requireRunStepDigest(
+    errors,
+    concreteAuditSteps,
+    'Provision wasm-bindgen 0.2.120',
+    WASM_BINDGEN_PROVISION_COMMAND_SHA256,
+    '.',
+  );
   requireRunStep(
     errors,
     concreteAuditSteps,
+    'Fetch locked WASM AVL dependencies',
+    'cargo fetch --locked',
+    'wasm-avl',
+  );
+  requireRunStepDigest(
+    errors,
+    concreteAuditSteps,
     'Install wasm-pack 0.14.0',
-    'cargo install wasm-pack --version 0.14.0 --locked',
+    WASM_PACK_PROVISION_COMMAND_SHA256,
     '.',
   );
   requireRunStep(
@@ -314,6 +377,21 @@ export function validateStandaloneConsensusBuildWorkflow(
       "$env:PYTHONDONTWRITEBYTECODE = '1'",
       '$env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"',
       '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI ci',
+      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+    ].join('\n'),
+  );
+  requireRunStep(
+    errors,
+    concreteAuditSteps,
+    'Check stopped-node recovery fixtures before long audit gate',
+    [
+      '$env:Path = "$env:BRIDGE_AUDIT_NODE_DIRECTORY;$env:Path"',
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE $env:BRIDGE_AUDIT_NPM_CLI run wasm:build',
+      'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
+      '& $env:BRIDGE_AUDIT_NODE_EXECUTABLE ./node_modules/vitest/vitest.mjs run `',
+      '  src/substrate-federated-two-cycle-node-state-copy-v1.test.ts `',
+      '  src/substrate-federated-two-cycle-recovery-capture-v1.test.ts `',
+      '  src/substrate-federated-two-cycle-recovery-export-v1.test.ts --reporter=dot',
       'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }',
     ].join('\n'),
   );
@@ -342,6 +420,65 @@ export function validateStandaloneConsensusBuildWorkflow(
     ].join('\n'),
   );
 
+  const solidityAuditJob = asRecord(jobs?.[SOLIDITY_AUDIT_JOB_ID]);
+  if (!solidityAuditJob) errors.push(`workflow job ${SOLIDITY_AUDIT_JOB_ID} is missing`);
+  if (solidityAuditJob?.name !== EXPECTED_SOLIDITY_AUDIT_JOB_NAME) {
+    errors.push(`Solidity audit job name must be ${EXPECTED_SOLIDITY_AUDIT_JOB_NAME}`);
+  }
+  if (solidityAuditJob?.['runs-on'] !== 'ubuntu-latest') {
+    errors.push('Solidity audit job must run on ubuntu-latest');
+  }
+  if (solidityAuditJob?.['timeout-minutes'] !== 15) {
+    errors.push('Solidity audit job timeout must be 15 minutes');
+  }
+  if (solidityAuditJob && !hasExactKeys(solidityAuditJob, [
+    'name',
+    'runs-on',
+    'steps',
+    'timeout-minutes',
+  ])) {
+    errors.push('Solidity audit job may contain only its name, runner, timeout, and exact steps');
+  }
+  const solidityAuditSteps = Array.isArray(solidityAuditJob?.steps)
+    ? solidityAuditJob.steps.map(asRecord)
+    : [];
+  if (solidityAuditSteps.some(step => !step)) {
+    errors.push('every Solidity audit job step must be an object');
+  }
+  const concreteSolidityAuditSteps = solidityAuditSteps.filter(
+    (step): step is Record<string, unknown> => step !== null,
+  );
+  const solidityAuditStepNames = concreteSolidityAuditSteps.map(step => step.name);
+  if (JSON.stringify(solidityAuditStepNames) !== JSON.stringify(EXPECTED_SOLIDITY_AUDIT_STEP_NAMES)) {
+    errors.push('Solidity audit job must preserve the exact ordered command graph');
+  }
+  requireUsesStep(
+    errors,
+    concreteSolidityAuditSteps,
+    'Checkout dependency lock',
+    'actions/checkout@v4',
+    { 'fetch-depth': 1 },
+  );
+  requireUsesStep(errors, concreteSolidityAuditSteps, 'Setup Node.js', 'actions/setup-node@v4', {
+    'node-version': '24',
+    cache: 'npm',
+    'cache-dependency-path': 'solidity/package-lock.json',
+  });
+  requireRunStep(
+    errors,
+    concreteSolidityAuditSteps,
+    'Install Solidity dependencies',
+    'npm ci --ignore-scripts --include=dev',
+    'solidity',
+  );
+  requireRunStep(
+    errors,
+    concreteSolidityAuditSteps,
+    'Audit Solidity dependencies',
+    SOLIDITY_AUDIT_RUN,
+    'solidity',
+  );
+
   const job = asRecord(jobs?.[STANDALONE_CONSENSUS_JOB_ID]);
   if (!job) errors.push(`workflow job ${STANDALONE_CONSENSUS_JOB_ID} is missing`);
   if (job?.name !== EXPECTED_CONSENSUS_JOB_NAME) {
@@ -353,13 +490,19 @@ export function validateStandaloneConsensusBuildWorkflow(
   if (job?.['timeout-minutes'] !== 90) {
     errors.push('standalone consensus job timeout must be 90 minutes');
   }
+  if (JSON.stringify(job?.env) !== JSON.stringify({
+    CARGO_NET_GIT_FETCH_WITH_CLI: 'true',
+  })) {
+    errors.push('standalone consensus job environment must contain only Git CLI fetch enabled');
+  }
   if (job && JSON.stringify(Object.keys(job).sort()) !== JSON.stringify([
+    'env',
     'name',
     'runs-on',
     'steps',
     'timeout-minutes',
   ])) {
-    errors.push('standalone consensus job may contain only its name, runner, timeout, and exact steps');
+    errors.push('standalone consensus job may contain only its reviewed environment, name, runner, timeout, and exact steps');
   }
 
   const steps = Array.isArray(job?.steps) ? job.steps.map(asRecord) : [];
@@ -400,7 +543,7 @@ export function validateStandaloneConsensusBuildWorkflow(
     ['Install relayer dependencies', { workingDirectory: 'relayer', run: 'npm ci' }],
     ['Verify reproducible Solidity build closure', {
       workingDirectory: 'solidity',
-      run: 'npm ci --ignore-scripts --include=dev\nnpm run check\nnpm audit --audit-level=high',
+      run: 'npm ci --ignore-scripts --include=dev\nnpm run check',
     }],
     ['Verify standalone consensus workflow', {
       workingDirectory: 'relayer',
@@ -443,6 +586,10 @@ export function validateStandaloneConsensusBuildWorkflow(
     ['Verify complete source checkouts', {
       workingDirectory: 'relayer',
       run: 'npm run sources:verify -- --ergo-source ../.source-cache/ergo-node',
+    }],
+    ['Test federated LAB no-value reservation admission', {
+      workingDirectory: 'relayer',
+      run: 'npm run federated:lab:reservation:acceptance -- --frontier-source ../substrate-node',
     }],
     ['Test Frontier bridge commitment producer', {
       workingDirectory: 'substrate-node',
@@ -508,7 +655,7 @@ export function validateStandaloneConsensusBuildWorkflow(
     );
   }
 
-  const jobsText = JSON.stringify({ auditJob, job });
+  const jobsText = JSON.stringify({ auditJob, solidityAuditJob, job });
   if (jobsText.includes('ergo-sidechain-bridge/')) {
     errors.push('workflow jobs must not contain superproject-relative paths');
   }
@@ -522,7 +669,14 @@ export function validateStandaloneConsensusBuildWorkflow(
   const auditRunCommands = concreteAuditSteps
     .map(step => typeof step.run === 'string' ? step.run : '')
     .filter(Boolean);
-  const runCommands = [...auditRunCommands, ...consensusRunCommands];
+  const solidityAuditRunCommands = concreteSolidityAuditSteps
+    .map(step => typeof step.run === 'string' ? step.run : '')
+    .filter(Boolean);
+  const runCommands = [
+    ...auditRunCommands,
+    ...solidityAuditRunCommands,
+    ...consensusRunCommands,
+  ];
   const commandText = runCommands.join('\n');
   const forbiddenCapability = /(?:^|[\s:])(deploy|submit|broadcast)(?=$|[\s:])/i;
   const noLiveCapabilityCommands = !forbiddenCapability.test(commandText)
@@ -710,7 +864,7 @@ function emptyValidation(): Pick<StandaloneConsensusBuildWorkflowReport, 'errors
 
 function normalizeRun(value: unknown): string {
   return typeof value === 'string'
-    ? value.replace(/\r\n/g, '\n').split('\n').map(line => line.trimEnd()).join('\n').trim()
+    ? value.replace(/\r\n/g, '\n').trim()
     : '';
 }
 

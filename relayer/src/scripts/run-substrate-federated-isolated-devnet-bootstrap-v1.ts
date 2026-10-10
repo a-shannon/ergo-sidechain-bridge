@@ -17,6 +17,9 @@ import {
   writeNewFile,
 } from '../create-only-out-of-repository-artifact.js';
 import {
+  resolveBridgeRepositoryRootsFromCheckoutLayout,
+} from '../bridge-repository-layout.js';
+import {
   assertNoDuplicateJsonKeys,
   canonicalJson,
   sha256CanonicalJson,
@@ -65,8 +68,9 @@ export async function runSubstrateFederatedIsolatedDevnetBootstrapCommandFromArg
   const args = parseArguments(argv);
   const scriptDirectory = dirname(fileURLToPath(import.meta.url));
   const relayerRoot = resolve(scriptDirectory, '..', '..');
-  const bridgeRoot = resolve(relayerRoot, '..');
-  const worktreeRoot = resolve(bridgeRoot, '..');
+  const inferredBridgeRoot = resolve(relayerRoot, '..');
+  const { bridgeRoot, worktreeRoot } =
+    resolveBridgeRepositoryRootsFromCheckoutLayout(inferredBridgeRoot);
   const request = readBoundedRegularFile(
     explicitExistingLocalNonSensitivePath(
       args.requestPath,
@@ -237,7 +241,7 @@ function parseSanitizedRootReceipt(stdout: string): Record<string, unknown> {
   return receipt;
 }
 
-function assertExactBuildReceipt(value: unknown): string {
+export function assertExactBuildReceipt(value: unknown): string {
   const build = exactRecord(value, [
     'schema',
     'version',
@@ -310,7 +314,7 @@ function assertExactBuildReceipt(value: unknown): string {
     || buildAction.processRunner !== 'reviewed-windows-job-object-v1'
     || buildAction.timeoutMs !== 900_000
     || buildAction.terminationGraceMs !== 10_000
-    || buildAction.maxOutputBytes !== 16_777_216
+    || buildAction.maxOutputBytes !== 33_554_432
     || !safeArtifactName(buildAction.artifactName)
     || !positiveSafeInteger(buildAction.artifactBytes)
   ) {

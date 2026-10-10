@@ -1,0 +1,1182 @@
+import { createHash } from 'node:crypto';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+} from 'node:fs';
+import { delimiter, dirname, join, parse, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import {
+  validatePinnedFederatedCampaignParentRuntime,
+} from '../authenticated-v2-runtime-bundle.js';
+import {
+  createNativeTwoCycleParentFailureDiagnosticV1,
+  parseNativeTwoCycleWorkerFailureDiagnosticV1,
+} from '../substrate-federated-native-two-cycle-failure-diagnostic-v1.js';
+import {
+  createNativeTwoCycleParentRootPhaseV1,
+  parseNativeTwoCycleWorkerRootPhaseV1,
+} from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v1.js';
+import {
+  createNativeTwoCycleParentRootPhaseV2,
+  parseNativeTwoCycleWorkerRootPhaseV2,
+} from '../substrate-federated-native-two-cycle-root-phase-diagnostic-v2.js';
+import { createNativeTwoCycleParentCycleStepV1 }
+  from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
+import { createNativeTwoCycleParentCallbackTimingV1 }
+  from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
+import { createNativeTwoCycleParentTrackerContextV1, createNativeTwoCycleParentTrackerStatementV1 }
+  from '../substrate-federated-tracker-context-failure-v1.js';
+import { createNativeTwoCycleParentSourceLockStageV1 }
+  from '../substrate-federated-native-source-lock-failure-v1.js';
+import { createNativeTwoCycleParentCommittedReserveStageV1 }
+  from '../substrate-federated-native-committed-reserve-failure-v1.js';
+import { createNativeTwoCycleParentCommittedReserveRevalidationV1 }
+  from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
+import { createNativeTwoCycleParentCommittedReserveConfirmationV1 }
+  from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
+import { createNativeTwoCycleParentCommittedReserveConfirmationProgressV1 }
+  from '../substrate-federated-native-committed-reserve-confirmation-progress-v1.js';
+import { createNativeTwoCycleParentSetupStageV1 }
+  from '../substrate-federated-native-two-cycle-setup-stage-diagnostic-v1.js';
+import { createNativeTwoCycleParentOwnerStageV1,
+  createNativeTwoCycleParentOwnerStageV2 }
+  from '../substrate-federated-native-two-cycle-owner-stage-diagnostic-v1.js';
+import {
+  canonicalPathIdentity,
+  readBoundedRegularFile,
+  writeNewFile,
+} from '../create-only-out-of-repository-artifact.js';
+import {
+  assertNoDuplicateJsonKeys,
+  canonicalJson,
+  sha256CanonicalJson,
+} from '../ergo-settlement-core/strict-json.js';
+import { runBoundedProcess } from '../pinned-local-native-verifier-build.js';
+import {
+  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1,
+} from '../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
+import {
+  loadSubstrateFederatedNativeTwoCycleInvocationV1,
+  validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1,
+  type SubstrateFederatedNativeTwoCycleEnvironmentV1,
+  type SubstrateFederatedNativeTwoCycleResultV1,
+} from '../substrate-federated-native-two-cycle-invocation-v1.js';
+import { createNativeTwoCycleParentRecoveryLocatorV1,
+  parseNativeTwoCycleWorkerRecoveryLocatorV1,
+  type RecoveryLocatorPointerV1 }
+  from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
+import {
+  buildWasmAvlPackageV2,
+  type WasmAvlBuildIdentityV2,
+} from './build-wasm-avl.js';
+import {
+  assertSubstrateFederatedNativeWasmAvlPackageMatchesV1,
+} from '../substrate-federated-native-wasm-avl-package-v1.js';
+
+const WORKER_TIMEOUT_MS = 4 * 60 * 60_000;
+const WORKER_TERMINATION_GRACE_MS = 30_000;
+const MAX_WORKER_STDOUT_BYTES = 1024;
+const MAX_WORKER_STDERR_BYTES = 64 * 1024;
+const MAX_WORKER_TRANSPORT_BYTES = 512 * 1024;
+const WORKER_TRANSPORT_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-worker-transport.v1';
+const START_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-start.v1';
+const TERMINAL_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-terminal.v1';
+const FAILURE_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-failure.v1';
+const TERMINAL_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_TERMINAL_V1';
+const FAILURE_DIGEST_DOMAIN =
+  'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_FAILURE_V1';
+const WASM_PACKAGE_EVIDENCE_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-wasm-avl-package.v2';
+const WORKER_WASM_PACKAGE_CHECK_SCHEMA =
+  'e2s.substrate-federated-native-two-cycle-worker-wasm-avl-package.v1';
+
+interface RunSubstrateFederatedNativeTwoCycleResult {
+  readonly status: 'two_cycle_terminal_receipt_published';
+  readonly attemptName: string;
+  readonly receiptDigestHex: string;
+}
+
+export async function runSubstrateFederatedNativeTwoCycleFromArguments(
+  argv: readonly string[],
+): Promise<Readonly<RunSubstrateFederatedNativeTwoCycleResult>> {
+  const configPath = parseArguments(argv);
+  const initial = loadSubstrateFederatedNativeTwoCycleInvocationV1(configPath);
+  const environmentBeforeBuild =
+    await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(initial);
+  assertSubstrateFederatedIsolatedDevnetErgoNodeBuildOutputReadyV1(
+    initial.config.bridgeRoot,
+    initial.config.ergoSourcePath,
+  );
+  const wasmPackage = await buildWasmAvlPackageV2(initial.config.bridgeRoot, { quiet: true });
+  assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+    initial.config.bridgeRoot,
+    wasmPackage,
+  );
+  const environmentBefore =
+    await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(initial);
+  assertSameEnvironment(environmentBeforeBuild, environmentBefore);
+  const attemptPath = createAttemptDirectory(initial.attemptPath);
+  const capturedConfigPath = join(attemptPath, 'config.json');
+  const startPath = join(attemptPath, 'start.json');
+  const wasmPackageEvidencePath = join(attemptPath, 'wasm-avl-package.json');
+  const resultPath = join(attemptPath, 'result.json');
+  const failurePath = join(attemptPath, 'failure.json');
+  const workerResultPath = join(attemptPath, 'worker-result.json');
+  let startPublished = false;
+  let terminalPublicationStarted = false;
+  try {
+    writeNewFile(
+      capturedConfigPath,
+      initial.configBytes,
+      'native two-cycle captured config',
+    );
+    const captured = loadSubstrateFederatedNativeTwoCycleInvocationV1(
+      capturedConfigPath,
+      attemptPath,
+    );
+    assertSameCapture(initial, captured);
+    const wasmPackageEvidence = Object.freeze({
+      schema: WASM_PACKAGE_EVIDENCE_SCHEMA,
+      version: 1 as const,
+      status: 'source-and-tool-bound-package-built' as const,
+      bridgeCommit: environmentBefore.repository.commit,
+      bridgeTree: environmentBefore.repository.tree,
+      build: wasmPackage,
+    });
+    const wasmPackageEvidenceBytes = Buffer.from(
+      `${canonicalJson(wasmPackageEvidence)}\n`,
+      'utf8',
+    );
+    writeNewFile(
+      wasmPackageEvidencePath,
+      wasmPackageEvidenceBytes,
+      'native two-cycle generated WASM AVL package evidence',
+    );
+    const start = Object.freeze({
+      schema: START_SCHEMA,
+      version: 1 as const,
+      status: 'two_cycle_invocation_started' as const,
+      configSha256Hex: initial.configSha256Hex,
+      expectedBridgeCommit: initial.config.expectedBridgeCommit,
+      expectedBridgeTree: environmentBefore.repository.tree,
+      pathIdentityDigestHex: initial.pathIdentityDigestHex,
+      toolIdentityDigestHex: environmentBefore.toolIdentityDigestHex,
+      checks: Object.freeze({
+        exactCleanRepositoryValidated: true as const,
+        pinnedParentRuntimeValidated: true as const,
+        capturedConfigCreatedBeforeWorker: true as const,
+        automaticRetryOrResumeEnabled: false as const,
+      }),
+      boundaries: Object.freeze({
+        parentRuntimeAttestedBeforeInitialTsxLoad: false as const,
+        exclusiveSameUserHostRequired: true as const,
+        startWithoutTerminalIsAmbiguous: true as const,
+      }),
+    });
+    writeNewFile(
+      startPath,
+      Buffer.from(`${canonicalJson(start)}\n`, 'utf8'),
+      'native two-cycle start record',
+    );
+    startPublished = true;
+
+    const runtimeImmediatelyBeforeLaunch =
+      validatePinnedFederatedCampaignParentRuntime(initial.config.bridgeRoot);
+    if (
+      runtimeImmediatelyBeforeLaunch.nodeExecutableSha256
+        !== environmentBefore.runtime.nodeExecutableSha256
+      || runtimeImmediatelyBeforeLaunch.relayerPackageLockSha256
+        !== environmentBefore.runtime.relayerPackageLockSha256
+      || runtimeImmediatelyBeforeLaunch.gitExecutableSha256
+        !== environmentBefore.runtime.gitExecutableSha256
+    ) {
+      throw new Error('parent runtime identity changed before worker launch');
+    }
+    const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+    const relayerRoot = resolve(scriptDirectory, '..', '..');
+    const workerPath = resolve(
+      scriptDirectory,
+      'run-substrate-federated-native-two-cycle-worker-v1.ts',
+    );
+    const worker = await runBoundedProcess({
+      executablePath: process.execPath,
+      args: [
+        ...process.execArgv,
+        workerPath,
+        '--config',
+        capturedConfigPath,
+        '--expected-config-sha256',
+        initial.configSha256Hex,
+        '--expected-wasm-avl-package-sha256',
+        wasmPackage.packageSha256Hex,
+        '--attempt',
+        attemptPath,
+      ],
+      cwd: relayerRoot,
+      env: childEnvironment(initial.config, runtimeImmediatelyBeforeLaunch.gitExecutablePath),
+      timeoutMs: WORKER_TIMEOUT_MS,
+      terminationGraceMs: WORKER_TERMINATION_GRACE_MS,
+      maxOutputBytes: MAX_WORKER_STDOUT_BYTES + MAX_WORKER_STDERR_BYTES,
+      maxStdoutBytes: MAX_WORKER_STDOUT_BYTES,
+      maxStderrBytes: MAX_WORKER_STDERR_BYTES,
+      label: 'native two-cycle worker',
+    });
+    if (worker.stdout !== '' || worker.stderr !== '') {
+      throw new Error('native two-cycle worker emitted output');
+    }
+    if (existsSync(join(attemptPath, 'worker-failure.json'))
+      || existsSync(join(attemptPath, 'worker-root-phase.json'))
+      || existsSync(join(attemptPath, 'worker-root-phase-v2.json'))
+      || existsSync(join(attemptPath, 'worker-cycle-step.json'))
+      || existsSync(join(attemptPath, 'worker-tracker-context.json'))
+      || existsSync(join(attemptPath, 'worker-tracker-statement.json'))
+      || existsSync(join(attemptPath, 'failure-tracker-statement.json'))
+      || existsSync(join(attemptPath, 'worker-source-lock-stage.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-stage.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-stage.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-revalidation.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-revalidation.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-confirmation.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation-progress.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-confirmation-progress.json'))
+      || existsSync(join(attemptPath, 'worker-setup-stage.json'))
+      || existsSync(join(attemptPath, 'worker-owner-stage.json'))
+      || existsSync(join(attemptPath, 'worker-owner-stage-v2.json'))
+      || existsSync(join(attemptPath, 'worker-callback-timing-v1.json'))
+      || existsSync(join(attemptPath, 'failure-callback-timing-v1.json'))) {
+      throw new Error('native two-cycle worker returned contradictory failure evidence');
+    }
+    const retainedWasmEvidence = readBoundedRegularFile(
+      wasmPackageEvidencePath,
+      'native two-cycle generated WASM AVL package evidence',
+      32 * 1024,
+    ).bytes;
+    if (!Buffer.from(retainedWasmEvidence).equals(wasmPackageEvidenceBytes)) {
+      throw new Error('native two-cycle WASM AVL build evidence changed during execution');
+    }
+    readWorkerWasmPackageCheck(
+      join(attemptPath, 'worker-wasm-avl-package.json'),
+      wasmPackage,
+      environmentBefore.repository.commit,
+      environmentBefore.repository.tree,
+    );
+    assertSubstrateFederatedNativeWasmAvlPackageMatchesV1(
+      initial.config.bridgeRoot,
+      wasmPackage,
+    );
+    const transport = readWorkerTransport(workerResultPath, initial.configSha256Hex);
+    const environmentAfter =
+      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(captured);
+    assertSameEnvironment(environmentBefore, environmentAfter);
+    if (
+      transport.bridgeCommit !== environmentAfter.repository.commit
+      || transport.bridgeTree !== environmentAfter.repository.tree
+      || transport.pathIdentityDigestHex !== captured.pathIdentityDigestHex
+      || transport.toolIdentityDigestHex !== environmentAfter.toolIdentityDigestHex
+    ) {
+      throw new Error('native two-cycle worker transport identities differ');
+    }
+    const recoveryBindings = Object.freeze({
+      configSha256Hex: captured.configSha256Hex,
+      bridgeCommit: environmentAfter.repository.commit,
+      bridgeTree: environmentAfter.repository.tree,
+      pathIdentityDigestHex: captured.pathIdentityDigestHex,
+      toolIdentityDigestHex: environmentAfter.toolIdentityDigestHex,
+      rootResultDigestHex: transport.result.rootResultDigestHex,
+    });
+    const workerRecoveryBytes = readBoundedRegularFile(
+      join(attemptPath, 'worker-recovery-locator-v1.json'),
+      'native two-cycle worker recovery locator', 16 * 1024,
+    ).bytes;
+    const workerRecoveryText = new TextDecoder('utf-8', { fatal: true }).decode(workerRecoveryBytes);
+    const workerRecovery = parseNativeTwoCycleWorkerRecoveryLocatorV1(
+      workerRecoveryText, recoveryBindings,
+    );
+    assertNativeTwoCycleRecoveryManifestV1(
+      captured.config.frontierBuildParentDirectory, workerRecovery.locator,
+    );
+    const terminalBody = Object.freeze({
+      schema: TERMINAL_SCHEMA,
+      version: 1 as const,
+      status: 'two_cycle_local_synthetic_execution_completed' as const,
+      configSha256Hex: captured.configSha256Hex,
+      bridgeCommit: environmentAfter.repository.commit,
+      bridgeTree: environmentAfter.repository.tree,
+      pathIdentityDigestHex: captured.pathIdentityDigestHex,
+      toolIdentityDigestHex: environmentAfter.toolIdentityDigestHex,
+      result: transport.result,
+      checks: Object.freeze({
+        startRecordedBeforeWorkerLaunch: true as const,
+        workerExitedCleanlyWithoutOutput: true as const,
+        workerTransportValidated: true as const,
+        repositoryAndToolsRevalidatedAfterRootCleanup: true as const,
+        terminalArtifactCreatedOnce: true as const,
+      }),
+      boundaries: Object.freeze({
+        localSyntheticExecutionOnly: true as const,
+        trustedHostAndCachesRequired: true as const,
+        parentRuntimeAttestedBeforeInitialTsxLoad: false as const,
+        independentOperatorCustodyEstablished: false as const,
+        releaseReadinessEstablished: false as const,
+        productionReadinessEstablished: false as const,
+      }),
+    });
+    const terminal = Object.freeze({
+      ...terminalBody,
+      receiptDigestHex: sha256CanonicalJson(
+        terminalBody,
+        TERMINAL_DIGEST_DOMAIN,
+      ),
+    });
+    const parentRecovery = createNativeTwoCycleParentRecoveryLocatorV1(
+      workerRecoveryText, recoveryBindings, terminal.receiptDigestHex,
+    );
+    writeNewFile(
+      join(attemptPath, 'recovery-locator-v1.json'),
+      Buffer.from(`${canonicalJson(parentRecovery)}\n`, 'utf8'),
+      'native two-cycle parent recovery locator',
+    );
+    terminalPublicationStarted = true;
+    writeNewFile(
+      resultPath,
+      Buffer.from(`${canonicalJson(terminal)}\n`, 'utf8'),
+      'native two-cycle terminal result',
+    );
+    return Object.freeze({
+      status: 'two_cycle_terminal_receipt_published' as const,
+      attemptName: initial.config.attemptName,
+      receiptDigestHex: terminal.receiptDigestHex,
+    });
+  } catch (primaryFailure) {
+    if (startPublished && !terminalPublicationStarted) {
+      try {
+        const postcheckPassed = await boundedPostcheck(initial, environmentBefore);
+        const failureBody = Object.freeze({
+          schema: FAILURE_SCHEMA,
+          version: 1 as const,
+          status: 'two_cycle_invocation_failed' as const,
+          configSha256Hex: initial.configSha256Hex,
+          expectedBridgeCommit: initial.config.expectedBridgeCommit,
+          failureClass: classifyFailure(primaryFailure),
+          checks: Object.freeze({
+            startRecordPresent: true as const,
+            automaticRetryOrResumeEnabled: false as const,
+            postFailureIdentityCheckPassed: postcheckPassed,
+          }),
+          boundaries: Object.freeze({
+            rootCleanupEstablishedByTimeout: false as const,
+            startWithoutThisTerminalWouldBeAmbiguous: true as const,
+            rawCausePublished: false as const,
+          }),
+        });
+        const failure = Object.freeze({
+          ...failureBody,
+          receiptDigestHex: sha256CanonicalJson(
+            failureBody,
+            FAILURE_DIGEST_DOMAIN,
+          ),
+        });
+        writeNewFile(
+          failurePath,
+          Buffer.from(`${canonicalJson(failure)}\n`, 'utf8'),
+          'native two-cycle terminal failure',
+        );
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const workerBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-failure.json'),
+            'native two-cycle worker failure diagnostic',
+            16 * 1024,
+          ).bytes;
+          const workerDiagnostic = parseNativeTwoCycleWorkerFailureDiagnosticV1(
+            new TextDecoder('utf-8', { fatal: true }).decode(workerBytes), bindings,
+          );
+          const diagnostic = createNativeTwoCycleParentFailureDiagnosticV1(
+            bindings, failure.receiptDigestHex, workerDiagnostic,
+          );
+          writeNewFile(
+            join(attemptPath, 'failure-diagnostic.json'),
+            Buffer.from(`${canonicalJson(diagnostic)}\n`, 'utf8'),
+            'native two-cycle parent failure diagnostic',
+          );
+        } catch {
+          // Missing or invalid diagnostics cannot alter the terminal failure.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const workerFailureBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-failure.json'),
+            'native two-cycle worker failure diagnostic',
+            16 * 1024,
+          ).bytes;
+          const workerFailureText = new TextDecoder('utf-8', { fatal: true })
+            .decode(workerFailureBytes);
+          const workerRootBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-root-phase.json'),
+            'native two-cycle worker root phase companion',
+            16 * 1024,
+          ).bytes;
+          const workerRoot = parseNativeTwoCycleWorkerRootPhaseV1(
+            new TextDecoder('utf-8', { fatal: true }).decode(workerRootBytes),
+            bindings,
+          );
+          const companion = createNativeTwoCycleParentRootPhaseV1(
+            bindings, failure.receiptDigestHex, workerFailureText, workerRoot,
+          );
+          writeNewFile(
+            join(attemptPath, 'failure-root-phase.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent root phase companion',
+          );
+        } catch {
+          // Missing or invalid optional root evidence cannot alter existing receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const workerFailureBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-failure.json'),
+            'native two-cycle worker failure diagnostic',
+            16 * 1024,
+          ).bytes;
+          const workerFailureText = new TextDecoder('utf-8', { fatal: true })
+            .decode(workerFailureBytes);
+          const workerRootBytes = readBoundedRegularFile(
+            join(attemptPath, 'worker-root-phase-v2.json'),
+            'native two-cycle worker root phase V2 companion',
+            16 * 1024,
+          ).bytes;
+          const workerRoot = parseNativeTwoCycleWorkerRootPhaseV2(
+            new TextDecoder('utf-8', { fatal: true }).decode(workerRootBytes),
+            bindings,
+          );
+          const companion = createNativeTwoCycleParentRootPhaseV2(
+            bindings, failure.receiptDigestHex, workerFailureText, workerRoot,
+          );
+          writeNewFile(
+            join(attemptPath, 'failure-root-phase-v2.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent root phase V2 companion',
+          );
+        } catch {
+          // Missing or invalid optional V2 phase detail cannot alter terminal/V1 receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle cycle step lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCycleStepV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-cycle-step.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent cycle step companion');
+        } catch {
+          // Absent, invalid or occupied step evidence cannot alter the terminal failure.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle source-lock stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentSourceLockStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-source-lock-stage.json'), readCompanion('failure-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-source-lock-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent source-lock stage companion');
+        } catch {
+          // Missing, invalid or occupied detail leaves terminal and older receipts intact.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle committed-reserve stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCommittedReserveStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-committed-reserve-stage.json'), readCompanion('failure-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-committed-reserve-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent committed-reserve stage companion');
+        } catch {
+          // Missing, invalid or occupied reserve detail preserves terminal and older receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle committed reserve revalidation lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCommittedReserveRevalidationV1(bindings,
+            failure.receiptDigestHex, {
+              workerFailureText: readCompanion('worker-failure.json'),
+              workerRootPhaseV2Text: readCompanion('worker-root-phase-v2.json'),
+              workerCycleStepText: readCompanion('worker-cycle-step.json'),
+              workerCommittedReserveStageText: readCompanion('worker-committed-reserve-stage.json'),
+              parentCycleStepText: readCompanion('failure-cycle-step.json'),
+              parentCommittedReserveStageText: readCompanion('failure-committed-reserve-stage.json'),
+              workerRevalidationText: readCompanion('worker-committed-reserve-revalidation.json'),
+            });
+          writeNewFile(join(attemptPath, 'failure-committed-reserve-revalidation.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent committed reserve revalidation companion');
+        } catch {
+          // Optional origin preserves the failure and all older diagnostic receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle committed reserve confirmation lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCommittedReserveConfirmationV1(bindings,
+            failure.receiptDigestHex, {
+              workerFailureText: readCompanion('worker-failure.json'),
+              workerRootPhaseV2Text: readCompanion('worker-root-phase-v2.json'),
+              workerCycleStepText: readCompanion('worker-cycle-step.json'),
+              workerCommittedReserveStageText: readCompanion('worker-committed-reserve-stage.json'),
+              parentCycleStepText: readCompanion('failure-cycle-step.json'),
+              parentCommittedReserveStageText: readCompanion('failure-committed-reserve-stage.json'),
+              workerConfirmationText: readCompanion('worker-committed-reserve-confirmation.json'),
+            });
+          writeNewFile(join(attemptPath, 'failure-committed-reserve-confirmation.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent committed reserve confirmation companion');
+        } catch {
+          // Optional confirmation detail preserves the failure and older receipts.
+        }
+        try {
+          if (initial.config.captureCommittedReserveConfirmationProgress === true) {
+            const bindings = { configSha256Hex: initial.configSha256Hex,
+              expectedBridgeCommit: initial.config.expectedBridgeCommit,
+              pathIdentityDigestHex: initial.pathIdentityDigestHex };
+            const readProgressAncestor = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+              readBoundedRegularFile(join(attemptPath, name),
+                'native committed reserve confirmation progress lineage', 16 * 1024).bytes);
+            const companion = createNativeTwoCycleParentCommittedReserveConfirmationProgressV1(
+              bindings, failure.receiptDigestHex, {
+                workerFailureText: readProgressAncestor('worker-failure.json'),
+                workerRootPhaseV2Text: readProgressAncestor('worker-root-phase-v2.json'),
+                workerCycleStepText: readProgressAncestor('worker-cycle-step.json'),
+                workerCommittedReserveStageText: readProgressAncestor('worker-committed-reserve-stage.json'),
+                parentCycleStepText: readProgressAncestor('failure-cycle-step.json'),
+                parentCommittedReserveStageText: readProgressAncestor('failure-committed-reserve-stage.json'),
+                workerConfirmationText: readProgressAncestor('worker-committed-reserve-confirmation.json'),
+                parentConfirmationText: readProgressAncestor('failure-committed-reserve-confirmation.json'),
+                workerProgressText: readProgressAncestor('worker-committed-reserve-confirmation-progress.json'),
+              });
+            writeNewFile(join(attemptPath, 'failure-committed-reserve-confirmation-progress.json'),
+              Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+              'native committed reserve confirmation progress parent companion');
+          }
+        } catch {
+          // Missing or invalid metrics cannot replace failure or permit a retry.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle tracker context lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentTrackerContextV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-tracker-context.json'), readCompanion('failure-cycle-step.json'));
+          writeNewFile(join(attemptPath, 'failure-tracker-context.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent tracker context companion');
+          const statement = createNativeTwoCycleParentTrackerStatementV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-tracker-context.json'), readCompanion('failure-cycle-step.json'),
+            readCompanion('worker-tracker-statement.json'), `${canonicalJson(companion)}\n`);
+          writeNewFile(join(attemptPath, 'failure-tracker-statement.json'),
+            Buffer.from(`${canonicalJson(statement)}\n`, 'utf8'),
+            'native two-cycle parent tracker statement companion');
+        } catch {
+          // Missing, invalid or occupied detail leaves terminal and older receipts intact.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle setup stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentSetupStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-setup-stage.json'));
+          writeNewFile(join(attemptPath, 'failure-setup-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent setup stage companion');
+        } catch {
+          // Unknown, invalid or unwritable setup detail leaves all existing receipts intact.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle owner stage lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentOwnerStageV1(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-owner-stage.json'));
+          writeNewFile(join(attemptPath, 'failure-owner-stage.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent owner stage companion');
+        } catch {
+          // Unknown, invalid or unwritable owner detail leaves all older receipts intact.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle owner completion reason lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentOwnerStageV2(bindings,
+            failure.receiptDigestHex, readCompanion('worker-failure.json'),
+            readCompanion('worker-root-phase-v2.json'), readCompanion('worker-cycle-step.json'),
+            readCompanion('worker-owner-stage.json'),
+            readCompanion('worker-owner-stage-v2.json'),
+            readCompanion('failure-owner-stage.json'));
+          writeNewFile(join(attemptPath, 'failure-owner-stage-v2.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent owner completion reason companion');
+        } catch {
+          // Optional reason cannot alter terminal failure or earlier companions.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native two-cycle callback timing lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCallbackTimingV1(bindings,
+            failure.receiptDigestHex, {
+              workerFailureText: readCompanion('worker-failure.json'),
+              workerRootPhaseV2Text: readCompanion('worker-root-phase-v2.json'),
+              workerCycleStepText: readCompanion('worker-cycle-step.json'),
+              workerOwnerStageText: readCompanion('worker-owner-stage.json'),
+              workerOwnerStageV2Text: readCompanion('worker-owner-stage-v2.json'),
+            }, readCompanion('worker-callback-timing-v1.json'),
+            readCompanion('failure-owner-stage.json'), readCompanion('failure-owner-stage-v2.json'));
+          writeNewFile(join(attemptPath, 'failure-callback-timing-v1.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native two-cycle parent callback timing companion');
+        } catch {
+          // Missing, invalid or occupied timing cannot change the failure or older receipts.
+        }
+      } catch {
+        // Preserve the original execution failure. A missing failure artifact
+        // leaves the create-only start as a permanently ambiguous attempt.
+      }
+    }
+    throw primaryFailure;
+  }
+}
+
+function assertNativeTwoCycleRecoveryManifestV1(
+  buildParentDirectory: string,
+  locator: Readonly<RecoveryLocatorPointerV1>,
+): void {
+  const directoryParts = [
+    [] as string[],
+    [locator.buildDirectoryName],
+    [locator.buildDirectoryName, 'target'],
+    [locator.buildDirectoryName, 'target', locator.directoryName],
+  ];
+  const canonicalParent = realpathSync(buildParentDirectory);
+  const directories = directoryParts.map(parts => join(canonicalParent, ...parts));
+  const before = directories.map((path, index) => {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || canonicalPathIdentity(realpathSync(path))
+        !== canonicalPathIdentity(join(canonicalParent, ...directoryParts[index]!))) {
+      throw new Error('native two-cycle recovery directory identity is invalid');
+    }
+    return stat;
+  });
+  const manifest = readBoundedRegularFile(
+    join(directories[3]!, 'manifest.json'),
+    'native two-cycle recovery manifest', 64 * 1024,
+  );
+  if (createHash('sha256').update(manifest.bytes).digest('hex')
+    !== locator.manifestSha256Hex) {
+    throw new Error('native two-cycle recovery manifest digest differs');
+  }
+  directories.forEach((path, index) => {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()
+      || stat.dev !== before[index]!.dev || stat.ino !== before[index]!.ino
+      || canonicalPathIdentity(realpathSync(path))
+        !== canonicalPathIdentity(join(canonicalParent, ...directoryParts[index]!))) {
+      throw new Error('native two-cycle recovery directory changed during verification');
+    }
+  });
+}
+
+function readWorkerTransport(
+  path: string,
+  expectedConfigSha256Hex: string,
+): Readonly<{
+  bridgeCommit: string;
+  bridgeTree: string;
+  pathIdentityDigestHex: string;
+  toolIdentityDigestHex: string;
+  result: Readonly<SubstrateFederatedNativeTwoCycleResultV1>;
+}> {
+  const loaded = readBoundedRegularFile(
+    path,
+    'native two-cycle worker transport',
+    MAX_WORKER_TRANSPORT_BYTES,
+  );
+  const text = Buffer.from(loaded.bytes).toString('utf8');
+  assertNoDuplicateJsonKeys(text);
+  let parsed: unknown;
+  try { parsed = JSON.parse(text) as unknown; }
+  catch { throw new Error('native two-cycle worker transport is invalid JSON'); }
+  if (text !== `${canonicalJson(parsed)}\n`) {
+    throw new Error('native two-cycle worker transport must be canonical JSON plus one LF');
+  }
+  const transport = exactRecord(parsed, [
+    'schema', 'version', 'status', 'configSha256Hex', 'bridgeCommit',
+    'bridgeTree', 'pathIdentityDigestHex', 'toolIdentityDigestHex', 'result',
+  ], 'native two-cycle worker transport');
+  if (
+    transport.schema !== WORKER_TRANSPORT_SCHEMA
+    || transport.version !== 1
+    || transport.status !== 'root_completed_and_cleaned'
+    || transport.configSha256Hex !== expectedConfigSha256Hex
+  ) throw new Error('native two-cycle worker transport identity differs');
+  const result = validateProjectedResult(transport.result);
+  return Object.freeze({
+    bridgeCommit: lowerHex(transport.bridgeCommit, 20, 'worker bridge commit'),
+    bridgeTree: lowerHex(transport.bridgeTree, 20, 'worker bridge tree'),
+    pathIdentityDigestHex: lowerHex(
+      transport.pathIdentityDigestHex,
+      32,
+      'worker path identity digest',
+    ),
+    toolIdentityDigestHex: lowerHex(
+      transport.toolIdentityDigestHex,
+      32,
+      'worker tool identity digest',
+    ),
+    result,
+  });
+}
+
+function readWorkerWasmPackageCheck(
+  path: string,
+  expected: Readonly<WasmAvlBuildIdentityV2>,
+  expectedBridgeCommit: string,
+  expectedBridgeTree: string,
+): void {
+  const loaded = readBoundedRegularFile(
+    path,
+    'native two-cycle worker WASM AVL package check',
+    16 * 1024,
+  );
+  const text = Buffer.from(loaded.bytes).toString('utf8');
+  assertNoDuplicateJsonKeys(text);
+  let parsed: unknown;
+  try { parsed = JSON.parse(text) as unknown; }
+  catch { throw new Error('native two-cycle worker WASM AVL package check is invalid JSON'); }
+  if (text !== `${canonicalJson(parsed)}\n`) {
+    throw new Error('native two-cycle worker WASM AVL package check must be canonical JSON plus one LF');
+  }
+  const check = exactRecord(parsed, [
+    'schema', 'version', 'status', 'bridgeCommit', 'bridgeTree',
+    'sourceSha256Hex', 'packageSha256Hex', 'checks',
+  ], 'native two-cycle worker WASM AVL package check');
+  const checks = exactRecord(check.checks, [
+    'matchedBeforeImport', 'matchedAfterImport', 'matchedAfterRoot',
+  ], 'native two-cycle worker WASM AVL package checks');
+  if (
+    check.schema !== WORKER_WASM_PACKAGE_CHECK_SCHEMA
+    || check.version !== 1
+    || check.status !== 'package_identity_revalidated'
+    || check.bridgeCommit !== expectedBridgeCommit
+    || check.bridgeTree !== expectedBridgeTree
+    || lowerHex(check.sourceSha256Hex, 32, 'worker WASM source digest')
+      !== expected.sourceSha256Hex
+    || lowerHex(check.packageSha256Hex, 32, 'worker WASM package digest')
+      !== expected.packageSha256Hex
+    || checks.matchedBeforeImport !== true
+    || checks.matchedAfterImport !== true
+    || checks.matchedAfterRoot !== true
+  ) throw new Error('native two-cycle worker WASM AVL package identity differs');
+}
+
+function validateProjectedResult(
+  value: unknown,
+): Readonly<SubstrateFederatedNativeTwoCycleResultV1> {
+  const result = exactRecord(value, [
+    'schema', 'version', 'status', 'rootResultDigestHex', 'genesis',
+    'issuance', 'firstCycle', 'secondCycle', 'checks', 'boundaries',
+    'receiptDigestHex',
+  ], 'native two-cycle projected result');
+  if (
+    result.schema !== 'e2s.substrate-federated-native-two-cycle-result.v1'
+    || result.version !== 1
+    || result.status !== 'two_cycle_local_synthetic_execution_completed'
+  ) throw new Error('native two-cycle projected result identity differs');
+  lowerHex(result.rootResultDigestHex, 32, 'root result digest');
+  const genesis = exactRecord(result.genesis, [
+    'nativeGenesisHashHex', 'typedGenesisSha256Hex', 'rawSpecSha256Hex',
+    'runtimeProfileIdHex', 'familyIdHex', 'sourceProofProfileIdHex',
+    'nodeSha256Hex', 'wasmSha256Hex', 'operatorAddressHex',
+    'storageKeysChecked',
+  ], 'projected genesis');
+  for (const key of [
+    'nativeGenesisHashHex', 'typedGenesisSha256Hex', 'rawSpecSha256Hex',
+    'runtimeProfileIdHex', 'familyIdHex', 'sourceProofProfileIdHex',
+    'nodeSha256Hex', 'wasmSha256Hex',
+  ]) flexibleHex(genesis[key], 32, `projected genesis ${key}`);
+  flexibleHex(genesis.operatorAddressHex, 20, 'projected operator address');
+  positiveSafeInteger(genesis.storageKeysChecked, 'projected storage key count');
+  const issuance = exactRecord(result.issuance, [
+    'inputBoxIds', 'transactionIds', 'confirmationHeights',
+  ], 'projected issuance');
+  const inputBoxIds = hexArray(issuance.inputBoxIds, 3, 'projected issuance inputs');
+  const transactionIds = hexArray(
+    issuance.transactionIds,
+    3,
+    'projected issuance transactions',
+  );
+  if (
+    !Array.isArray(issuance.confirmationHeights)
+    || issuance.confirmationHeights.length !== 3
+    || issuance.confirmationHeights.some(value => !Number.isSafeInteger(value) || value <= 0)
+    || inputBoxIds.length !== transactionIds.length
+  ) throw new Error('projected issuance confirmation heights differ');
+  const firstCycle = projectedCycle(result.firstCycle, 'projected first cycle');
+  const secondCycle = projectedCycle(result.secondCycle, 'projected second cycle');
+  if (
+    firstCycle.mintIdentityHex === secondCycle.mintIdentityHex
+    || firstCycle.trackerTransactionIdHex === secondCycle.trackerTransactionIdHex
+    || firstCycle.payoutTransactionIdHex === secondCycle.payoutTransactionIdHex
+    || firstCycle.amountNanoErg !== '20000000'
+    || secondCycle.amountNanoErg !== firstCycle.amountNanoErg
+    || firstCycle.burnGrossAmountNanoErg !== '15000000'
+    || secondCycle.burnGrossAmountNanoErg !== firstCycle.burnGrossAmountNanoErg
+    || firstCycle.burnNetAmountNanoErg !== '10000000'
+    || secondCycle.burnNetAmountNanoErg !== firstCycle.burnNetAmountNanoErg
+    || firstCycle.payoutAmountNanoErg !== firstCycle.burnNetAmountNanoErg
+    || secondCycle.payoutAmountNanoErg !== secondCycle.burnNetAmountNanoErg
+  ) throw new Error('projected two-cycle identities or conservation differ');
+  const checks = exactRecord(result.checks, [
+    'completedCycles', 'nativeAndErgoCleanupCompletedBeforeReturn',
+    'cycleIdentitiesDistinct', 'createOnlyWorkerTransportRequired',
+  ], 'projected result checks');
+  if (
+    checks.completedCycles !== 2
+    || checks.nativeAndErgoCleanupCompletedBeforeReturn !== true
+    || checks.cycleIdentitiesDistinct !== true
+    || checks.createOnlyWorkerTransportRequired !== true
+  ) throw new Error('projected two-cycle checks differ');
+  const boundaries = exactRecord(result.boundaries, [
+    'fixedSyntheticLoopbackProfile', 'trustedHostAndCachesRequired',
+    'independentlyReproducibleBuildEstablished',
+    'independentOperatorCustodyEstablished', 'publicNetworkUsed',
+    'realFundsUsed', 'releaseReadinessEstablished',
+    'productionReadinessEstablished',
+  ], 'projected result boundaries');
+  if (
+    boundaries.fixedSyntheticLoopbackProfile !== true
+    || boundaries.trustedHostAndCachesRequired !== true
+    || boundaries.independentlyReproducibleBuildEstablished !== false
+    || boundaries.independentOperatorCustodyEstablished !== false
+    || boundaries.publicNetworkUsed !== false
+    || boundaries.realFundsUsed !== false
+    || boundaries.releaseReadinessEstablished !== false
+    || boundaries.productionReadinessEstablished !== false
+  ) throw new Error('projected two-cycle boundaries differ');
+  const { receiptDigestHex, ...body } = result;
+  if (
+    lowerHex(receiptDigestHex, 32, 'projected result digest')
+      !== sha256CanonicalJson(body, 'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_RESULT_V1')
+  ) throw new Error('native two-cycle projected result digest differs');
+  assertNoLocalPath(result);
+  return result as unknown as Readonly<SubstrateFederatedNativeTwoCycleResultV1>;
+}
+
+function projectedCycle(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  const cycle = exactRecord(value, [
+    'pegIn', 'mintIdentityHex', 'sourceProofReceiptDigestHex',
+    'amountNanoErg', 'burnGrossAmountNanoErg', 'burnNetAmountNanoErg',
+    'trackerTransactionIdHex', 'payoutTransactionIdHex',
+    'payoutAmountNanoErg',
+  ], label);
+  const pegIn = exactRecord(cycle.pegIn, [
+    'sourceLockTransactionIdHex', 'reserveTransitionTransactionIdHex',
+    'sourceLockBoxIdHex', 'reserveSuccessorBoxIdHex', 'mintIdentityHex',
+    'sourceProofReceiptDigestHex',
+  ], `${label} peg-in`);
+  for (const [key, field] of Object.entries(pegIn)) {
+    flexibleHex(field, 32, `${label} peg-in ${key}`);
+  }
+  for (const key of [
+    'mintIdentityHex', 'sourceProofReceiptDigestHex',
+    'trackerTransactionIdHex', 'payoutTransactionIdHex',
+  ]) flexibleHex(cycle[key], 32, `${label} ${key}`);
+  if (
+    cycle.mintIdentityHex !== pegIn.mintIdentityHex
+    || cycle.sourceProofReceiptDigestHex !== pegIn.sourceProofReceiptDigestHex
+  ) throw new Error(`${label} differs from its peg-in`);
+  for (const key of [
+    'amountNanoErg', 'burnGrossAmountNanoErg', 'burnNetAmountNanoErg',
+    'payoutAmountNanoErg',
+  ]) canonicalDecimal(cycle[key], `${label} ${key}`);
+  return cycle;
+}
+
+function createAttemptDirectory(path: string): string {
+  mkdirSync(path, { recursive: false, mode: 0o700 });
+  const status = lstatSync(path);
+  const canonical = realpathSync.native(path);
+  const canonicalParent = realpathSync.native(dirname(path));
+  const expectedCanonical = join(canonicalParent, parse(path).base);
+  if (
+    !status.isDirectory()
+    || status.isSymbolicLink()
+    || canonicalPathIdentity(canonical) !== canonicalPathIdentity(expectedCanonical)
+  ) throw new Error('native two-cycle attempt directory identity changed');
+  return canonical;
+}
+
+function assertSameCapture(
+  first: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>,
+  second: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>,
+): void {
+  if (
+    first.configSha256Hex !== second.configSha256Hex
+    || first.pathIdentityDigestHex !== second.pathIdentityDigestHex
+    || canonicalJson(first.config) !== canonicalJson(second.config)
+  ) throw new Error('captured native two-cycle invocation differs');
+}
+
+function assertSameEnvironment(
+  first: Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>,
+  second: Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>,
+): void {
+  if (
+    first.repository.commit !== second.repository.commit
+    || first.repository.tree !== second.repository.tree
+    || first.toolIdentityDigestHex !== second.toolIdentityDigestHex
+    || first.runtime.nodeExecutableSha256 !== second.runtime.nodeExecutableSha256
+    || first.runtime.relayerPackageLockSha256 !== second.runtime.relayerPackageLockSha256
+    || first.runtime.gitExecutableSha256 !== second.runtime.gitExecutableSha256
+  ) throw new Error('native two-cycle repository or runtime identity changed');
+}
+
+async function boundedPostcheck(
+  invocation: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>,
+  before: Readonly<SubstrateFederatedNativeTwoCycleEnvironmentV1>,
+): Promise<boolean> {
+  try {
+    const after =
+      await validateSubstrateFederatedNativeTwoCycleInvocationEnvironmentV1(
+        loadSubstrateFederatedNativeTwoCycleInvocationV1(
+          join(invocation.attemptPath, 'config.json'),
+          invocation.attemptPath,
+        ),
+      );
+    assertSameEnvironment(before, after);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseArguments(argv: readonly string[]): string {
+  if (
+    argv.length !== 2
+    || argv[0] !== '--config'
+    || argv[1] === undefined
+    || argv[1].length === 0
+    || argv[1].startsWith('--')
+  ) throw new Error('native two-cycle invocation arguments are invalid');
+  return argv[1];
+}
+
+function childEnvironment(
+  config: Readonly<ReturnType<typeof loadSubstrateFederatedNativeTwoCycleInvocationV1>>['config'],
+  gitExecutablePath: string,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const key of [
+    'PATHEXT',
+    'ComSpec', 'COMSPEC', 'TEMP', 'TMP', 'USERPROFILE', 'HOME',
+    'LOCALAPPDATA', 'APPDATA', 'RUSTUP_HOME', 'LIB',
+    'LIBPATH', 'INCLUDE',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined && value.length > 0) environment[key] = value;
+  }
+  const configuredSystemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? process.env.WINDIR;
+  if (configuredSystemRoot === undefined) throw new Error('worker SystemRoot is required');
+  const systemRoot = realpathSync.native(configuredSystemRoot);
+  environment.SystemRoot = systemRoot;
+  environment.WINDIR = systemRoot;
+  environment.SystemDrive = parse(systemRoot).root.replace(/[\\/]+$/u, '');
+  const inheritedPath = process.env.Path ?? process.env.PATH;
+  environment.PATH = [dirname(gitExecutablePath), ...(inheritedPath ? [inheritedPath] : [])].join(delimiter);
+  environment.JAVA_HOME = dirname(dirname(config.ergoJavaExecutablePath));
+  environment.CARGO_HOME = config.frontierCargoHomeDirectory;
+  return environment;
+}
+
+function classifyFailure(value: unknown): string {
+  if (!(value instanceof Error)) return 'execution_failure';
+  if (/timed out|termination|process tree/iu.test(value.message)) {
+    return 'contained_process_failure';
+  }
+  if (/identity|changed|differs|checkout|runtime|tool|config/iu.test(value.message)) {
+    return 'identity_validation_failure';
+  }
+  return 'execution_failure';
+}
+
+function exactRecord(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be one object`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== keys.length
+    || keys.some(key => !Object.prototype.hasOwnProperty.call(record, key))
+  ) throw new Error(`${label} fields differ from V1`);
+  return record;
+}
+
+function lowerHex(value: unknown, bytes: number, label: string): string {
+  if (
+    typeof value !== 'string'
+    || !new RegExp(`^[0-9a-f]{${bytes * 2}}$`, 'u').test(value)
+  ) throw new Error(`${label} must be ${bytes} lowercase hexadecimal bytes`);
+  return value;
+}
+
+function flexibleHex(value: unknown, bytes: number, label: string): string {
+  if (typeof value !== 'string') throw new Error(`${label} must be hexadecimal`);
+  const normalized = value.startsWith('0x') ? value.slice(2) : value;
+  lowerHex(normalized, bytes, label);
+  return value;
+}
+
+function hexArray(value: unknown, length: number, label: string): string[] {
+  if (!Array.isArray(value) || value.length !== length) {
+    throw new Error(`${label} must contain exactly ${length} values`);
+  }
+  const result = value.map((item, index) => lowerHex(item, 32, `${label} ${index}`));
+  if (new Set(result).size !== result.length) throw new Error(`${label} must be distinct`);
+  return result;
+}
+
+function positiveSafeInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) <= 0) {
+    throw new Error(`${label} must be a positive safe integer`);
+  }
+  return value as number;
+}
+
+function canonicalDecimal(value: unknown, label: string): string {
+  if (typeof value !== 'string' || !/^[1-9][0-9]{0,30}$/u.test(value)) {
+    throw new Error(`${label} must be a positive canonical decimal`);
+  }
+  return value;
+}
+
+function assertNoLocalPath(value: unknown): void {
+  const visit = (current: unknown): void => {
+    if (
+      typeof current === 'string'
+      && (/(?<![A-Za-z0-9])[A-Za-z]:[\\/]/u.test(current)
+        || /^(?:\\\\|\/\/|\\[?.]\\|\\Device\\)/iu.test(current))
+    ) throw new Error('native two-cycle terminal data must not contain local paths');
+    if (Array.isArray(current)) current.forEach(visit);
+    else if (current !== null && typeof current === 'object') {
+      Object.values(current).forEach(visit);
+    }
+  };
+  visit(value);
+}
+
+async function main(): Promise<void> {
+  const result = await runSubstrateFederatedNativeTwoCycleFromArguments(
+    process.argv.slice(2),
+  );
+  process.stdout.write(`${canonicalJson(result)}\n`);
+}
+
+const invokedPath = process.argv[1]
+  ? pathToFileURL(resolve(process.argv[1])).href
+  : undefined;
+if (invokedPath === import.meta.url) {
+  main().catch(() => {
+    process.stderr.write('native two-cycle invocation failed\n');
+    process.exitCode = 1;
+  });
+}

@@ -4,12 +4,52 @@ import type {
 import type {
   SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2,
 } from './substrate-federated-isolated-devnet-setup-check-v2.js';
+import {
+  createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2,
+  SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input,
+  SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt,
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input,
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt,
+  SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2Receipt,
+  SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input,
+  SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt,
+  SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2,
+  SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt,
+} from './substrate-federated-isolated-devnet-setup-check-execution-v2.js';
 import type {
-  SubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1,
+  SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2,
+  SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
+  SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1,
+} from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+import {
+  revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1,
+  type SubstrateFederatedIsolatedDevnetMiningCredentialV1,
 } from './substrate-federated-isolated-devnet-mining-credential-v1.js';
+import {
+  registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+  revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+  type SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+} from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
 
-const ACTIVE_BINDINGS = new WeakSet<object>();
+export type {
+  SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2,
+} from './substrate-federated-isolated-devnet-setup-check-signer-binding-v2.js';
+
 const MINING_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
+>();
+const CHECKPOINT_MINING_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
+>();
+const TRACKER_ADMISSION_MINING_CREDENTIALS = new WeakMap<
+  object,
+  Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
+>();
+const TRACKER_CONFIRMATION_MINING_CREDENTIALS = new WeakMap<
   object,
   Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>
 >();
@@ -21,84 +61,581 @@ export interface RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input {
   readonly witnessNodeOrigin: string;
 }
 
-export interface SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2 {
-  readonly publicKeyHex: string;
-  readonly p2pkErgoTreeHex: string;
-  readonly rewardInputErgoTrees: Readonly<{
-    readonly delay1: string;
-    readonly delay720: string;
-  }>;
-  readonly networkPrefix: 16;
-}
-
 export interface SubstrateFederatedIsolatedDevnetSetupCheckSessionV2 {
   readonly signer:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>;
   readonly dispose: () => void;
+  readonly runNativeGenesisRetainingSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSigner'];
+  readonly checkNativePegInSourceLockRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1'];
+  readonly checkNativePegInCommittedVaultRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInCommittedVaultRetainingSignerV1'];
+  readonly checkNativeWithdrawalFeeFundingV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalFeeFundingV1'];
+  readonly checkNativeTrackerFeeFundingV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeTrackerFeeFundingV1'];
+  readonly checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkNativeWithdrawalV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalV2'];
+  readonly checkNativeWithdrawalRetainingContinuationSignerV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalRetainingContinuationSignerV2'];
+  readonly checkNativeContinuationPegInSourceLockRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInSourceLockRetainingSignerV1'];
+  readonly checkNativeContinuationPegInCommittedVaultRetainingSignerV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInCommittedVaultRetainingSignerV1'];
+  readonly checkNativeContinuationWithdrawalFeeFundingV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalFeeFundingV1'];
+  readonly checkNativeContinuationTrackerFeeFundingV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationTrackerFeeFundingV1'];
+  readonly checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkNativeContinuationWithdrawalV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2'];
+  readonly issueNativeContinuationMiningAuthorityV1:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['issueNativeContinuationMiningAuthorityV1'];
+  readonly runForExecutionV3RetainingPegInAndTrackerSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner'];
+  readonly checkPegInSourceLockV2RetainingSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInSourceLockV2RetainingSigner'];
+  readonly checkPegInCommittedVaultV2RetainingSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInCommittedVaultV2RetainingSigner'];
+  readonly checkTrackerFeeFundingV3:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3'];
+  readonly checkWithdrawalFeeFundingV3:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3'];
+  readonly checkFrozenTrackerV2Candidate:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2Candidate'];
+  readonly checkFrozenTrackerV2CandidateRetainingWithdrawalSigner:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner'];
+  readonly checkWithdrawalV2:
+    SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2'];
   readonly run: (
     input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
   ) => Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckReceiptV2>>;
+  readonly runForExecution: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  >>;
+  readonly runForExecutionRetainingPegInSigner: (
+    input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetSetupFamilyExecutionBatchV2
+  >>;
+  readonly checkPegInSourceLock: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt
+  >>;
+  readonly checkPegInSourceLockRetainingSigner: (
+    input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Receipt
+  >>;
+  readonly checkPegInCommittedVault: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
+  >>;
+  readonly checkPegInCommittedVaultRetainingSigner: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+    >,
+    target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Receipt
+  >>;
+  readonly checkTrackerCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+    >,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Receipt
+  >>;
+  readonly checkFrozenTrackerCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+    >,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV2Receipt
+  >>;
+  readonly recheckTrackerReservationFreshnessCandidate: (
+    input: Readonly<
+      SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+    >,
+    target: Readonly<
+      SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+    >,
+  ) => Promise<Readonly<
+    SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessCheckV1Receipt
+  >>;
 }
 
 /**
- * Creates the signer-first session through a dynamically isolated execution
- * module. Importing the public-binding assertion does not load signer, node,
- * provisioning, checker, submission, or broadcast capabilities.
+ * Creates the signer-first session through the statically composed execution
+ * module so one-shot mining credentials retain one module-local authority.
+ * Capability-free consumers use the separate signer-binding module.
  */
 export async function createSubstrateFederatedIsolatedDevnetSetupCheckSessionV2():
   Promise<Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>> {
-  const { createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2 } =
-    await import(
-      './substrate-federated-isolated-devnet-setup-check-execution-v2.js'
-    );
   const execution =
     await createSubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2();
   let signer:
     Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>;
   try {
-    signer = registerSignerBinding(execution.signer);
+    signer =
+      registerSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(
+        execution.signer,
+        execution.miningCredential,
+      );
   } catch (error) {
     execution.dispose();
     throw error;
   }
-  let state: 'open' | 'running' | 'closed' = 'open';
+  let checkpointMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+  let trackerAdmissionMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+  let trackerConfirmationMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1> | undefined;
+  try {
+    checkpointMiningCredential =
+      execution.claimCheckpointMiningCredential();
+    trackerAdmissionMiningCredential =
+      execution.claimTrackerAdmissionMiningCredential();
+    trackerConfirmationMiningCredential =
+      execution.claimTrackerConfirmationMiningCredential();
+  } catch (error) {
+    if (checkpointMiningCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        checkpointMiningCredential,
+      );
+    }
+    if (trackerAdmissionMiningCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        trackerAdmissionMiningCredential,
+      );
+    }
+    revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+    execution.dispose();
+    throw error;
+  }
+  let state:
+    | 'open'
+    | 'running'
+    | 'setup-complete'
+    | 'source-lock-check-complete'
+    | 'committed-vault-check-complete'
+    | 'check-complete'
+    | 'frozen-tracker-check-complete'
+    | 'v3-setup-complete'
+    | 'native-setup-complete'
+    | 'native-source-lock-checked'
+    | 'native-withdrawal-fee-checked'
+    | 'native-tracker-fee-checked'
+    | 'native-withdrawal-ready'
+    | 'native-continuation-deposit-ready'
+    | 'native-continuation-source-lock-checked'
+    | 'native-continuation-vault-checked'
+    | 'native-continuation-withdrawal-fee-checked'
+    | 'native-continuation-tracker-fee-checked'
+    | 'native-continuation-withdrawal-ready'
+    | 'native-vault-checked'
+    | 'v2-source-lock-check-complete'
+    | 'v2-committed-vault-check-complete'
+    | 'v3-withdrawal-fee-check-complete'
+    | 'v3-tracker-fee-check-complete'
+    | 'v2-withdrawal-ready'
+    | 'closed' = 'open';
+  let terminalInvalidationRequested = false;
+  let withdrawalRouteSelected = false;
+  let nativeRouteSelected = false;
   let session!: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
+  const close = (): void => {
+    if (state === 'closed') return;
+    terminalInvalidationRequested = true;
+    MINING_CREDENTIALS.delete(session);
+    const unclaimedCheckpointCredential =
+      CHECKPOINT_MINING_CREDENTIALS.get(session);
+    if (unclaimedCheckpointCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        unclaimedCheckpointCredential,
+      );
+    }
+    CHECKPOINT_MINING_CREDENTIALS.delete(session);
+    const unclaimedTrackerAdmissionCredential =
+      TRACKER_ADMISSION_MINING_CREDENTIALS.get(session);
+    if (unclaimedTrackerAdmissionCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        unclaimedTrackerAdmissionCredential,
+      );
+    }
+    TRACKER_ADMISSION_MINING_CREDENTIALS.delete(session);
+    const unclaimedTrackerConfirmationCredential =
+      TRACKER_CONFIRMATION_MINING_CREDENTIALS.get(session);
+    if (unclaimedTrackerConfirmationCredential !== undefined) {
+      revokeSubstrateFederatedIsolatedDevnetMiningCredentialV1(
+        unclaimedTrackerConfirmationCredential,
+      );
+    }
+    TRACKER_CONFIRMATION_MINING_CREDENTIALS.delete(session);
+    revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+    try {
+      execution.dispose();
+    } finally {
+      state = 'closed';
+    }
+  };
+  const consume = async <T>(
+    expectedState:
+      | 'open'
+      | 'native-setup-complete'
+      | 'native-source-lock-checked'
+      | 'native-vault-checked'
+      | 'native-withdrawal-fee-checked'
+      | 'native-tracker-fee-checked'
+      | 'native-withdrawal-ready'
+      | 'native-continuation-deposit-ready'
+      | 'native-continuation-source-lock-checked'
+      | 'native-continuation-vault-checked'
+      | 'native-continuation-withdrawal-fee-checked'
+      | 'native-continuation-tracker-fee-checked'
+      | 'native-continuation-withdrawal-ready'
+      | 'setup-complete'
+      | 'source-lock-check-complete'
+      | 'committed-vault-check-complete'
+      | 'frozen-tracker-check-complete'
+      | 'v3-setup-complete'
+      | 'v2-source-lock-check-complete'
+      | 'v2-committed-vault-check-complete'
+      | 'v3-withdrawal-fee-check-complete'
+      | 'v3-tracker-fee-check-complete'
+      | 'v2-withdrawal-ready',
+    operation: () => Promise<T>,
+    successState:
+      | 'setup-complete'
+      | 'source-lock-check-complete'
+      | 'committed-vault-check-complete'
+      | 'check-complete'
+      | 'frozen-tracker-check-complete'
+      | 'v3-setup-complete'
+      | 'native-setup-complete'
+      | 'native-source-lock-checked'
+      | 'native-withdrawal-fee-checked'
+      | 'native-tracker-fee-checked'
+      | 'native-withdrawal-ready'
+      | 'native-continuation-deposit-ready'
+      | 'native-continuation-source-lock-checked'
+      | 'native-continuation-vault-checked'
+      | 'native-continuation-withdrawal-fee-checked'
+      | 'native-continuation-tracker-fee-checked'
+      | 'native-continuation-withdrawal-ready'
+      | 'native-vault-checked'
+      | 'v2-source-lock-check-complete'
+      | 'v2-committed-vault-check-complete'
+      | 'v3-withdrawal-fee-check-complete'
+      | 'v3-tracker-fee-check-complete'
+      | 'v2-withdrawal-ready'
+      | 'closed',
+  ): Promise<T> => {
+    if (state !== expectedState) {
+      const error = new Error(
+        expectedState === 'open'
+          ? 'isolated fixed setup-check session is already consumed or disposed'
+          : 'isolated peg-in signer continuation is absent, consumed, or disposed',
+      );
+      if (state === 'running') {
+        terminalInvalidationRequested = true;
+        if (nativeRouteSelected) {
+          revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+          // Abort the inner operation before it resumes with its retained mnemonic.
+          // Its running-state disposal throws after setting cancellation; preserve
+          // the duplicate transition error for this caller.
+          try { execution.dispose(); } finally { throw error; }
+        }
+      } else if (state !== 'closed') {
+        close();
+      }
+      throw error;
+    }
+    if (expectedState === 'open') MINING_CREDENTIALS.delete(session);
+    state = 'running';
+    try {
+      const result = await operation();
+      if (terminalInvalidationRequested) {
+        close();
+        throw new Error(
+          'isolated fixed setup-check session was invalidated by a concurrent transition',
+        );
+      }
+      if (successState === 'closed') {
+        close();
+      } else {
+        state = successState;
+      }
+      return result;
+    } catch (error) {
+      close();
+      throw error;
+    }
+  };
   session = Object.freeze({
     signer,
     dispose: () => {
       if (state === 'running') {
+        if (withdrawalRouteSelected) terminalInvalidationRequested = true;
+        if (nativeRouteSelected) {
+          terminalInvalidationRequested = true;
+          revokeSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2(signer);
+          execution.dispose();
+        }
         throw new Error('isolated fixed setup-check session is running');
       }
-      if (state === 'open') {
-        MINING_CREDENTIALS.delete(session);
-        revokeSignerBinding(signer);
-        try {
-          execution.dispose();
-        } finally {
-          state = 'closed';
-        }
+      if (
+          state === 'open'
+          || state === 'setup-complete'
+          || state === 'source-lock-check-complete'
+          || state === 'committed-vault-check-complete'
+          || state === 'check-complete'
+          || state === 'frozen-tracker-check-complete'
+          || state === 'v3-setup-complete'
+          || state === 'native-setup-complete'
+          || state === 'native-source-lock-checked'
+          || state === 'native-vault-checked'
+          || state === 'native-withdrawal-fee-checked'
+          || state === 'native-tracker-fee-checked'
+          || state === 'native-withdrawal-ready'
+          || state === 'native-continuation-deposit-ready'
+          || state === 'native-continuation-source-lock-checked'
+          || state === 'native-continuation-vault-checked'
+          || state === 'native-continuation-withdrawal-fee-checked'
+          || state === 'native-continuation-tracker-fee-checked'
+          || state === 'native-continuation-withdrawal-ready'
+          || state === 'v2-source-lock-check-complete'
+          || state === 'v2-committed-vault-check-complete'
+          || state === 'v3-withdrawal-fee-check-complete'
+          || state === 'v3-tracker-fee-check-complete'
+          || state === 'v2-withdrawal-ready'
+      ) {
+        close();
       }
     },
     run: async (
       input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
-    ) => {
-      if (state !== 'open') {
-        throw new Error(
-          'isolated fixed setup-check session is already consumed or disposed',
-        );
-      }
-      MINING_CREDENTIALS.delete(session);
-      revokeSignerBinding(signer);
-      state = 'running';
-      try {
-        return await execution.run(input);
-      } finally {
-        state = 'closed';
-        execution.dispose();
-      }
-    },
+    ) => consume('open', () => execution.run(input), 'closed'),
+    runNativeGenesisRetainingSigner: async (
+      ...[compiled, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runNativeGenesisRetainingSigner']>
+    ) => consume('open', () => {
+      nativeRouteSelected = true;
+      return execution.runNativeGenesisRetainingSigner(compiled, target);
+    }, 'native-setup-complete'),
+    checkNativePegInSourceLockRetainingSignerV1: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInSourceLockRetainingSignerV1']>
+    ) => consume('native-setup-complete', () => execution.checkNativePegInSourceLockRetainingSignerV1(packet, target),
+      'native-source-lock-checked'),
+    checkNativePegInCommittedVaultRetainingSignerV1: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativePegInCommittedVaultRetainingSignerV1']>
+    ) => consume('native-source-lock-checked', () => execution.checkNativePegInCommittedVaultRetainingSignerV1(packet, target),
+      'native-vault-checked'),
+    checkNativeWithdrawalFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalFeeFundingV1']>) => consume('native-vault-checked',
+      () => execution.checkNativeWithdrawalFeeFundingV1(target), 'native-withdrawal-fee-checked'),
+    checkNativeTrackerFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeTrackerFeeFundingV1']>) => consume('native-withdrawal-fee-checked',
+      () => execution.checkNativeTrackerFeeFundingV1(target), 'native-tracker-fee-checked'),
+    checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner']>) =>
+      consume('native-tracker-fee-checked', () => {
+        withdrawalRouteSelected = true;
+        return execution.checkNativeFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target);
+      }, 'native-withdrawal-ready'),
+    checkNativeWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalV2']>) => consume('native-withdrawal-ready',
+      () => execution.checkNativeWithdrawalV2(claim, target), 'closed'),
+    checkNativeWithdrawalRetainingContinuationSignerV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeWithdrawalRetainingContinuationSignerV2']>) => consume('native-withdrawal-ready',
+      () => execution.checkNativeWithdrawalRetainingContinuationSignerV2(claim, target), 'native-continuation-deposit-ready'),
+    checkNativeContinuationPegInSourceLockRetainingSignerV1: async (...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInSourceLockRetainingSignerV1']>) => consume('native-continuation-deposit-ready',
+      () => execution.checkNativeContinuationPegInSourceLockRetainingSignerV1(packet, target), 'native-continuation-source-lock-checked'),
+    checkNativeContinuationPegInCommittedVaultRetainingSignerV1: async (...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationPegInCommittedVaultRetainingSignerV1']>) => consume('native-continuation-source-lock-checked',
+      () => execution.checkNativeContinuationPegInCommittedVaultRetainingSignerV1(packet, target), 'native-continuation-vault-checked'),
+    checkNativeContinuationWithdrawalFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalFeeFundingV1']>) => consume('native-continuation-vault-checked',
+      () => execution.checkNativeContinuationWithdrawalFeeFundingV1(target), 'native-continuation-withdrawal-fee-checked'),
+    checkNativeContinuationTrackerFeeFundingV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationTrackerFeeFundingV1']>) => consume('native-continuation-withdrawal-fee-checked',
+      () => execution.checkNativeContinuationTrackerFeeFundingV1(target), 'native-continuation-tracker-fee-checked'),
+    checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner']>) => consume('native-continuation-tracker-fee-checked',
+      () => execution.checkNativeContinuationFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target), 'native-continuation-withdrawal-ready'),
+    checkNativeContinuationWithdrawalV2: async (...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkNativeContinuationWithdrawalV2']>) => consume('native-continuation-withdrawal-ready',
+      () => execution.checkNativeContinuationWithdrawalV2(claim, target), 'closed'),
+    issueNativeContinuationMiningAuthorityV1: async (...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['issueNativeContinuationMiningAuthorityV1']>) => consume('native-continuation-tracker-fee-checked',
+      () => execution.issueNativeContinuationMiningAuthorityV1(target), 'native-continuation-tracker-fee-checked'),
+    runForExecutionV3RetainingPegInAndTrackerSigner: async (
+      ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['runForExecutionV3RetainingPegInAndTrackerSigner']>
+    ) => consume(
+      'open',
+      () => execution.runForExecutionV3RetainingPegInAndTrackerSigner(input, target),
+      'v3-setup-complete',
+    ),
+    checkPegInSourceLockV2RetainingSigner: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInSourceLockV2RetainingSigner']>
+    ) => consume(
+      'v3-setup-complete',
+      () => execution.checkPegInSourceLockV2RetainingSigner(packet, target),
+      'v2-source-lock-check-complete',
+    ),
+    checkPegInCommittedVaultV2RetainingSigner: async (
+      ...[packet, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkPegInCommittedVaultV2RetainingSigner']>
+    ) => consume(
+      'v2-source-lock-check-complete',
+      () => execution.checkPegInCommittedVaultV2RetainingSigner(packet, target),
+      'v2-committed-vault-check-complete',
+    ),
+    checkWithdrawalFeeFundingV3: async (
+      ...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalFeeFundingV3']>
+    ) => consume(
+      'v2-committed-vault-check-complete',
+      () => execution.checkWithdrawalFeeFundingV3(target),
+      'v3-withdrawal-fee-check-complete',
+    ),
+    checkTrackerFeeFundingV3: async (
+      ...[target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkTrackerFeeFundingV3']>
+    ) => consume(
+      state === 'v3-withdrawal-fee-check-complete' ? 'v3-withdrawal-fee-check-complete' : 'v2-committed-vault-check-complete',
+      () => execution.checkTrackerFeeFundingV3(target),
+      'v3-tracker-fee-check-complete',
+    ),
+    checkFrozenTrackerV2Candidate: async (
+      ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2Candidate']>
+    ) => consume(
+      'v3-tracker-fee-check-complete',
+      () => execution.checkFrozenTrackerV2Candidate(input, target),
+      'closed',
+    ),
+    checkFrozenTrackerV2CandidateRetainingWithdrawalSigner: async (
+      ...[input, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkFrozenTrackerV2CandidateRetainingWithdrawalSigner']>
+    ) => consume(
+      'v3-tracker-fee-check-complete',
+      () => {
+        withdrawalRouteSelected = true;
+        return execution.checkFrozenTrackerV2CandidateRetainingWithdrawalSigner(input, target);
+      },
+      'v2-withdrawal-ready',
+    ),
+    checkWithdrawalV2: async (
+      ...[claim, target]: Parameters<SubstrateFederatedIsolatedDevnetSetupCheckExecutionSessionV2['checkWithdrawalV2']>
+    ) => consume('v2-withdrawal-ready', () => execution.checkWithdrawalV2(claim, target), 'closed'),
+    runForExecution: async (
+      input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'open',
+      () => execution.runForExecution(input, target),
+      'closed',
+    ),
+    runForExecutionRetainingPegInSigner: async (
+      input: Readonly<RunSubstrateFederatedIsolatedDevnetFixedSetupCheckV2Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'open',
+      () => execution.runForExecutionRetainingPegInSigner(input, target),
+      'setup-complete',
+    ),
+    checkPegInSourceLock: async (
+      input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'setup-complete',
+      () => execution.checkPegInSourceLock(input, target),
+      'check-complete',
+    ),
+    checkPegInSourceLockRetainingSigner: async (
+      input: Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockCheckV1Input>,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'setup-complete',
+      () => execution.checkPegInSourceLockRetainingSigner(input, target),
+      'source-lock-check-complete',
+    ),
+    checkPegInCommittedVault: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+      >,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'source-lock-check-complete',
+      () => execution.checkPegInCommittedVault(input, target),
+      'check-complete',
+    ),
+    checkPegInCommittedVaultRetainingSigner: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckV1Input
+      >,
+      target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+    ) => consume(
+      'source-lock-check-complete',
+      () => execution.checkPegInCommittedVaultRetainingSigner(input, target),
+      'committed-vault-check-complete',
+    ),
+    checkTrackerCandidate: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+      >,
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
+      >,
+    ) => consume(
+      'committed-vault-check-complete',
+      () => execution.checkTrackerCandidate(input, target),
+      'check-complete',
+    ),
+    checkFrozenTrackerCandidate: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+      >,
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV2
+      >,
+    ) => consume(
+      'committed-vault-check-complete',
+      () => execution.checkFrozenTrackerCandidate(input, target),
+      'frozen-tracker-check-complete',
+    ),
+    recheckTrackerReservationFreshnessCandidate: async (
+      input: Readonly<
+        SubstrateFederatedIsolatedDevnetObservedAnchorTrackerCheckV1Input
+      >,
+      target: Readonly<
+        SubstrateFederatedIsolatedDevnetTrackerReservationFreshnessTargetV1
+      >,
+    ) => consume(
+      'frozen-tracker-check-complete',
+      () => execution.recheckTrackerReservationFreshnessCandidate(
+        input,
+        target,
+      ),
+      'closed',
+    ),
   });
   MINING_CREDENTIALS.set(session, execution.miningCredential);
+  CHECKPOINT_MINING_CREDENTIALS.set(session, checkpointMiningCredential);
+  TRACKER_ADMISSION_MINING_CREDENTIALS.set(
+    session,
+    trackerAdmissionMiningCredential,
+  );
+  TRACKER_CONFIRMATION_MINING_CREDENTIALS.set(
+    session,
+    trackerConfirmationMiningCredential,
+  );
   return session;
 }
 
@@ -116,133 +653,66 @@ export function claimSubstrateFederatedIsolatedDevnetSetupMiningCredentialV2(
   return credential;
 }
 
-export function assertSubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2Provenance(
-  value: unknown,
-): asserts value is Readonly<
-  SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2
-> {
-  if (
-    value === null
-    || typeof value !== 'object'
-    || !ACTIVE_BINDINGS.has(value)
-  ) {
+/** Atomic composition-root handoff for the two ordered mining phases. */
+export function claimSubstrateFederatedIsolatedDevnetMiningCredentialPairV2(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+): Readonly<{
+  readonly miningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly checkpointMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+}> {
+  const miningCredential = MINING_CREDENTIALS.get(session);
+  const checkpointMiningCredential =
+    CHECKPOINT_MINING_CREDENTIALS.get(session);
+  if (miningCredential === undefined || checkpointMiningCredential === undefined) {
     throw new Error(
-      'isolated setup-check signer binding lacks active process provenance',
+      'isolated mining credential pair is absent, partially claimed, or disposed',
     );
   }
+  MINING_CREDENTIALS.delete(session);
+  CHECKPOINT_MINING_CREDENTIALS.delete(session);
+  return Object.freeze({ miningCredential, checkpointMiningCredential });
 }
 
-function registerSignerBinding(
-  input: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
-): Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2> {
-  const record = exactDataRecord(input, [
-    'publicKeyHex',
-    'p2pkErgoTreeHex',
-    'rewardInputErgoTrees',
-    'networkPrefix',
-  ], 'isolated setup-check signer binding');
-  const rewardTrees = exactDataRecord(record.rewardInputErgoTrees, [
-    'delay1',
-    'delay720',
-  ], 'isolated setup-check reward-input trees');
-  const publicKeyHex = compressedPublicKey(record.publicKeyHex);
-  const p2pkErgoTreeHex = fixedHex(
-    record.p2pkErgoTreeHex,
-    36,
-    'isolated setup-check P2PK ErgoTree',
-  );
-  if (p2pkErgoTreeHex !== `0008cd${publicKeyHex}`) {
-    throw new Error('isolated setup-check P2PK ErgoTree differs from its key');
+/** Atomic handoff for setup, checkpoint, tracker freeze, and confirmation. */
+export function claimSubstrateFederatedIsolatedDevnetMiningCredentialSequenceV2(
+  session: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>,
+): Readonly<{
+  readonly miningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly checkpointMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly trackerAdmissionMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+  readonly trackerConfirmationMiningCredential:
+    Readonly<SubstrateFederatedIsolatedDevnetMiningCredentialV1>;
+}> {
+  const miningCredential = MINING_CREDENTIALS.get(session);
+  const checkpointMiningCredential =
+    CHECKPOINT_MINING_CREDENTIALS.get(session);
+  const trackerAdmissionMiningCredential =
+    TRACKER_ADMISSION_MINING_CREDENTIALS.get(session);
+  const trackerConfirmationMiningCredential =
+    TRACKER_CONFIRMATION_MINING_CREDENTIALS.get(session);
+  if (
+    miningCredential === undefined
+    || checkpointMiningCredential === undefined
+    || trackerAdmissionMiningCredential === undefined
+    || trackerConfirmationMiningCredential === undefined
+  ) {
+    throw new Error(
+      'isolated mining credential sequence is absent, partially claimed, or disposed',
+    );
   }
-  if (record.networkPrefix !== 16) {
-    throw new Error('isolated setup-check signer network prefix must be 16');
-  }
-  const binding = Object.freeze({
-    publicKeyHex,
-    p2pkErgoTreeHex,
-    rewardInputErgoTrees: Object.freeze({
-      delay1: canonicalHex(
-        rewardTrees.delay1,
-        'isolated setup-check delay-1 reward ErgoTree',
-      ),
-      delay720: canonicalHex(
-        rewardTrees.delay720,
-        'isolated setup-check delay-720 reward ErgoTree',
-      ),
-    }),
-    networkPrefix: 16 as const,
+  MINING_CREDENTIALS.delete(session);
+  CHECKPOINT_MINING_CREDENTIALS.delete(session);
+  TRACKER_ADMISSION_MINING_CREDENTIALS.delete(session);
+  TRACKER_CONFIRMATION_MINING_CREDENTIALS.delete(session);
+  return Object.freeze({
+    miningCredential,
+    checkpointMiningCredential,
+    trackerAdmissionMiningCredential,
+    trackerConfirmationMiningCredential,
   });
-  ACTIVE_BINDINGS.add(binding);
-  return binding;
-}
-
-function revokeSignerBinding(
-  value: Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSignerBindingV2>,
-): void {
-  ACTIVE_BINDINGS.delete(value);
-}
-
-function compressedPublicKey(value: unknown): string {
-  const hex = fixedHex(value, 33, 'isolated setup-check public key');
-  if (!hex.startsWith('02') && !hex.startsWith('03')) {
-    throw new Error('isolated setup-check public key is not compressed');
-  }
-  return hex;
-}
-
-function canonicalHex(value: unknown, label: string): string {
-  if (
-    typeof value !== 'string'
-    || value.length === 0
-    || value.length % 2 !== 0
-    || !/^[0-9a-f]+$/u.test(value)
-  ) {
-    throw new Error(`${label} must be canonical lowercase hex`);
-  }
-  return value;
-}
-
-function fixedHex(value: unknown, bytes: number, label: string): string {
-  const hex = canonicalHex(value, label);
-  if (hex.length !== bytes * 2) {
-    throw new Error(`${label} must be ${bytes} bytes`);
-  }
-  return hex;
-}
-
-function exactDataRecord<K extends string>(
-  value: unknown,
-  keys: readonly K[],
-  label: string,
-): Record<K, unknown> {
-  if (
-    value === null
-    || typeof value !== 'object'
-    || Array.isArray(value)
-    || Object.getPrototypeOf(value) !== Object.prototype
-  ) {
-    throw new Error(`${label} must be a plain object`);
-  }
-  const descriptors = Object.getOwnPropertyDescriptors(value);
-  const actual = Object.keys(descriptors).sort();
-  const expected = [...keys].sort();
-  if (
-    actual.length !== expected.length
-    || actual.some((key, index) => key !== expected[index])
-  ) {
-    throw new Error(`${label} must contain exactly: ${expected.join(', ')}`);
-  }
-  const result = Object.create(null) as Record<K, unknown>;
-  for (const key of keys) {
-    const descriptor = descriptors[key];
-    if (
-      descriptor === undefined
-      || !descriptor.enumerable
-      || !('value' in descriptor)
-    ) {
-      throw new Error(`${label} fields must be enumerable data properties`);
-    }
-    result[key] = descriptor.value;
-  }
-  return result;
 }

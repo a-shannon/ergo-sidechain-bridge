@@ -32,11 +32,11 @@ function client(overrides: Readonly<{
       return { data: {
         id: TX_ID,
         numConfirmations: overrides.confirmations ?? 10,
-        inclusionHeight: overrides.inclusionHeight ?? 11,
+        inclusionHeight: overrides.inclusionHeight ?? 10,
         headerId: INCLUSION_HEADER,
       } };
     }
-    if (path === '/blocks/at/11') {
+    if (path === '/blocks/at/10') {
       return { data: [overrides.inclusionHeader ?? INCLUSION_HEADER] };
     }
     throw new Error(`unexpected adapter path: ${path}`);
@@ -68,7 +68,7 @@ describe('devnet reward consolidation node adapter', () => {
     )).resolves.toMatchObject({
       status: 'confirmed',
       confirmations: 10,
-      confirmationHeight: 11,
+      confirmationHeight: 10,
       confirmationHeaderIdHex: INCLUSION_HEADER,
     });
     expect(fixture.get.mock.calls.map(call => call[0])).toEqual([
@@ -77,7 +77,7 @@ describe('devnet reward consolidation node adapter', () => {
       '/info',
       '/blocks/at/1',
       `/blockchain/transaction/byId/${TX_ID}`,
-      '/blocks/at/11',
+      '/blocks/at/10',
     ]);
   });
 
@@ -120,7 +120,7 @@ describe('devnet reward consolidation node adapter', () => {
       confirmationHeight: null,
       confirmationHeaderIdHex: null,
     });
-    expect(fixture.get).not.toHaveBeenCalledWith('/blocks/at/11');
+    expect(fixture.get).not.toHaveBeenCalledWith('/blocks/at/10');
   });
 
   it.each([
@@ -137,14 +137,14 @@ describe('devnet reward consolidation node adapter', () => {
     )).rejects.toThrow(expected);
   });
 
-  it('rejects a claimed final count that exceeds independently derived depth', async () => {
-    const fixture = client({ confirmations: 10, inclusionHeight: 20 });
+  it('rejects an inclusion-inclusive confirmation count', async () => {
+    const fixture = client({ confirmations: 10, inclusionHeight: 11 });
     await expect(observeRewardConsolidationTransaction(
       fixture.client,
       TX_ID,
       NODE_ORIGIN,
       CHAIN_ANCHOR,
     )).rejects.toThrow(/confirmation depth is inconsistent/i);
-    expect(fixture.get).not.toHaveBeenCalledWith('/blocks/at/20');
+    expect(fixture.get).not.toHaveBeenCalledWith('/blocks/at/11');
   });
 });

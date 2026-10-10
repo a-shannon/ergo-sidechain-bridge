@@ -13,6 +13,7 @@ import {
 } from './profiles/substrate-federated-v1/tracker-admission.js';
 import {
   assertSubstrateFederatedBurnSettlementV1Packet,
+  buildSubstrateFederatedBurnSettlementCandidate,
   buildSubstrateFederatedBurnSettlementV1,
   getSubstrateFederatedTrackerDigestV1Hex,
   type BuildSubstrateFederatedBurnSettlementV1Input,
@@ -40,6 +41,69 @@ beforeAll(async () => {
 });
 
 describe('substrate federated burn settlement V1', () => {
+  it.each(['trackerState', 'reserveState', 'duplicatePreventionState', 'feeFundingInput',
+    'claim', 'currentErgoHeight', 'creationHeight'] as const)(
+    'preserves non-enumerable own construction field %s', async key => {
+      const input = buildInput();
+      Object.defineProperty(input, key, { value: input[key], enumerable: false });
+      expect(await buildSubstrateFederatedBurnSettlementV1(input))
+        .toEqual(await buildSubstrateFederatedBurnSettlementV1(buildInput()));
+    },
+  );
+
+  it.each(['non-enumerable', 'inherited'] as const)(
+    'does not silently default a %s explicit fee', async kind => {
+      const input = buildInput();
+      if (kind === 'non-enumerable') {
+        Object.defineProperty(input, 'feeNanoErg', { value: MINER_FEE + 1, enumerable: false });
+      } else {
+        delete (input as { feeNanoErg?: unknown }).feeNanoErg;
+        Object.setPrototypeOf(input, { feeNanoErg: MINER_FEE + 1 });
+      }
+      await expect(buildSubstrateFederatedBurnSettlementV1(input))
+        .rejects.toThrow('substrate federated fee funding must be exact pure ERG');
+    },
+  );
+
+  it.each(['inherited', 'missing', 'extra'] as const)(
+    'rejects %s top-level identity ingress before authentication', async kind => {
+      const { familyIdentity, ...state } = buildInput();
+      const input = kind === 'inherited'
+        ? Object.assign(Object.create({ familyIdentity }), state)
+        : kind === 'missing' ? state : { ...state, familyIdentity, verified: true };
+      await expect(buildSubstrateFederatedBurnSettlementV1(input))
+        .rejects.toThrow('substrate federated burn-settlement input contains unknown or missing fields');
+    },
+  );
+
+  it('preserves nested shape rejection before family authentication', async () => {
+    await expect(buildSubstrateFederatedBurnSettlementV1({
+      ...buildInput(), familyIdentity: { ...baseInput.familyIdentity },
+      trackerState: { ...baseInput.trackerState, verified: true },
+    } as BuildSubstrateFederatedBurnSettlementV1Input))
+      .rejects.toThrow('substrate federated tracker state contains unknown or missing fields');
+  });
+
+  it('keeps raw construction unbranded even with matching V1 packet fields', async () => {
+    const { familyIdentity: family, ...state } = buildInput();
+    const raw = await buildSubstrateFederatedBurnSettlementCandidate(state, {
+      profile: family.profile,
+      pooledReserveTreeHex: family.contracts.pooledReserve.receipt.propositionHex,
+      duplicatePreventionTreeHex: family.contracts.duplicatePrevention.receipt.propositionHex,
+    });
+    const packet = await buildSubstrateFederatedBurnSettlementV1(buildInput());
+    expect(raw.transaction).toEqual(packet.transaction);
+    expect(raw.invariants.federatedAuthorityProfileBound).toBe(false);
+    expect(raw).not.toHaveProperty('schema');
+    expect(raw).not.toHaveProperty('version');
+    const matching = { ...packet, ...raw, invariants: packet.invariants };
+    expect(matching).toEqual(packet);
+    for (const value of [raw, matching, structuredClone(packet)]) {
+      expect(() => assertSubstrateFederatedBurnSettlementV1Packet(value))
+        .toThrow(/not built in this process/);
+    }
+  });
+
   it('builds one deterministic unsigned reserve/DUP/external-fee transaction', async () => {
     const first = await buildSubstrateFederatedBurnSettlementV1(buildInput());
     const second = await buildSubstrateFederatedBurnSettlementV1(buildInput());

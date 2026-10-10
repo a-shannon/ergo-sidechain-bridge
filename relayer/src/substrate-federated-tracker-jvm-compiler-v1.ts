@@ -301,6 +301,19 @@ export async function compileSubstrateFederatedTrackerWithPinnedJvmV1(
   return receipt;
 }
 
+/** Check the actual compiler runtime without compiling or creating a receipt. */
+export function assertPinnedFederatedJvmCompilerRuntimeV1(
+  input: Readonly<{ bridgeRoot: string; javaHome: string }>,
+): void {
+  if (typeof input.bridgeRoot !== 'string' || input.bridgeRoot.length === 0) {
+    throw new Error('federated tracker compiler admission requires a bridge root');
+  }
+  if (typeof input.javaHome !== 'string' || input.javaHome.length === 0) {
+    throw new Error('federated tracker compiler admission requires a Java home');
+  }
+  loadCompilerRuntime(input.javaHome, input.bridgeRoot);
+}
+
 /** Execute a canonical compiler record; the returned text is observation-only. */
 export async function executePinnedFederatedJvmCompilerV1(
   input: Buffer,
@@ -591,8 +604,17 @@ export function validateSubstrateFederatedTrackerJvmCompilerLockV1(
   ));
 }
 
-function loadCompilerRuntime(): LoadedCompilerRuntime {
+function loadCompilerRuntime(
+  javaHomeInput: string | undefined = process.env.JAVA_HOME,
+  expectedBridgeRoot?: string,
+): LoadedCompilerRuntime {
   const bridgeRoot = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+  if (
+    expectedBridgeRoot !== undefined
+    && realpathSync(expectedBridgeRoot) !== bridgeRoot
+  ) {
+    throw new Error('federated tracker compiler admission bridge root differs from loaded source');
+  }
   const lockPath = resolve(bridgeRoot, LOCK_RELATIVE_PATH);
   const lockBytes = readFileSync(lockPath);
   const lock = validateSubstrateFederatedTrackerJvmCompilerLockV1(
@@ -653,7 +675,6 @@ function loadCompilerRuntime(): LoadedCompilerRuntime {
     throw new Error('federated tracker compiler project contains unreviewed files');
   }
 
-  const javaHomeInput = process.env.JAVA_HOME;
   if (!javaHomeInput) {
     throw new Error('JAVA_HOME is required for federated tracker compilation');
   }

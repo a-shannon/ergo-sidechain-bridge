@@ -685,8 +685,9 @@ describe('Frontier/relayer compatibility authority inventory V4', () => {
     ).toThrow(/active sidechain ABI retains.*updateErgoState/i);
   });
 
-  it('keeps configuration observations non-authoritative after source removal', () => {
-    for (const observation of ['not-observed', 'enabled', 'disabled'] as const) {
+  it.each(['not-observed', 'enabled', 'disabled'] as const)(
+    'keeps %s configuration observations non-authoritative after source removal',
+    observation => {
       const fixture = candidateFixture({
         sidechainBroadcast: observation,
         legacyAggregateSettlement: observation,
@@ -723,8 +724,8 @@ describe('Frontier/relayer compatibility authority inventory V4', () => {
       expect(packet.checks.configurationCanRetireCapability).toBe(false);
       expect(Object.values(packet.authority).every(value => value === false))
         .toBe(true);
-    }
-  });
+    },
+  );
 
   it('does not accept claim-bearing statuses or extra retirement fields', () => {
     for (const value of [

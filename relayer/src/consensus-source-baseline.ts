@@ -18,6 +18,8 @@ export interface CheckoutObservation {
   blobs: Record<string, string>;
 }
 
+export type CheckoutBytePolicy = 'controlled-crlf' | 'raw';
+
 export interface SourceValidationResult {
   errors: string[];
 }
@@ -34,6 +36,7 @@ export interface ConsensusSourceBaselineInspection {
   ergoSourcePath?: string;
   requireFrontierCheckout: boolean;
   requireErgoCheckout: boolean;
+  frontierCheckoutBytePolicy?: CheckoutBytePolicy;
   gitExecutablePath?: string;
 }
 
@@ -153,6 +156,11 @@ export function inspectConsensusSourceBaseline(
   input: ConsensusSourceBaselineInspection,
 ): ConsensusSourceBaselineReport {
   const errors: string[] = [];
+  if (input.frontierCheckoutBytePolicy !== undefined
+    && input.frontierCheckoutBytePolicy !== 'controlled-crlf'
+    && input.frontierCheckoutBytePolicy !== 'raw') {
+    errors.push('Frontier checkout byte policy is invalid');
+  }
   const lockPath = resolve(input.bridgeRoot, 'sources', 'consensus-source-lock.json');
   let repositoryLayout: ReturnType<typeof resolveBridgeRepositoryLayout> | null = null;
   try {
@@ -252,6 +260,7 @@ export function inspectConsensusSourceBaseline(
         'Frontier',
         errors,
         input.gitExecutablePath,
+        input.frontierCheckoutBytePolicy,
       );
       if (observation) {
         const checkoutValidation = validateFrontierCheckout(frontier, observation);
@@ -463,8 +472,8 @@ export function validateConsensusSourceLock(
     requireExact(
       errors,
       ergoNode.patchPath,
-      'sources/ergo-node/0001-sidechain-extension-fields.patch',
-      'Ergo patch path must identify the tracked sidechain extension patch',
+      'sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch',
+      'Ergo patch path must identify the tracked sidechain extension and candidate recovery patch',
     );
     requireSafeRelativePath(errors, ergoNode.patchPath, 'Ergo patch path');
     requireSha256(errors, ergoNode.patchSha256, 'Ergo patch SHA-256');
@@ -1581,13 +1590,14 @@ function inspectCheckout(
   label: string,
   errors: string[],
   gitExecutablePath?: string,
+  bytePolicy: CheckoutBytePolicy = 'controlled-crlf',
 ): CheckoutObservation | null {
   if (!existsSync(sourcePath)) {
     errors.push(`${label} source checkout is missing`);
     return null;
   }
   try {
-    return inspectRawCheckout(sourcePath, blobPaths, gitExecutablePath);
+    return inspectRawCheckout(sourcePath, blobPaths, gitExecutablePath, bytePolicy);
   } catch {
     errors.push(`${label} source checkout could not be inspected`);
     return null;
@@ -1598,7 +1608,11 @@ export function inspectRawCheckout(
   sourcePathInput: string,
   blobPaths: string[],
   gitExecutablePath?: string,
+  bytePolicy: CheckoutBytePolicy = 'controlled-crlf',
 ): CheckoutObservation {
+  if (bytePolicy !== 'controlled-crlf' && bytePolicy !== 'raw') {
+    throw new Error('checkout byte policy is invalid');
+  }
   const sourcePath = resolve(sourcePathInput);
   const head = runGit(sourcePath, ['rev-parse', 'HEAD'], false, gitExecutablePath);
   const treeEntries = parseHeadTree(runGit(
@@ -1635,7 +1649,7 @@ export function inspectRawCheckout(
       continue;
     }
     const bytes = readFileSync(workingPath);
-    const identities = rawGitBlobIdentities(entry.path, bytes);
+    const identities = rawGitBlobIdentities(entry.path, bytes, bytePolicy);
     if (!identities.includes(entry.objectId)) statusLines.push(` M ${entry.path}`);
     if (requested.has(entry.path)) blobs[entry.path] = identities[identities.length - 1];
   }
@@ -1657,7 +1671,7 @@ export function inspectRawCheckout(
     if (!isInsideCheckout(workingPath, sourcePath) || !existsSync(workingPath) || !lstatSync(workingPath).isFile()) {
       throw new Error('requested checkout blob is missing or unsupported');
     }
-    const identities = rawGitBlobIdentities(path, readFileSync(workingPath));
+    const identities = rawGitBlobIdentities(path, readFileSync(workingPath), bytePolicy);
     blobs[path] = identities[identities.length - 1];
   }
 
@@ -1709,9 +1723,14 @@ function sameIndexAndHeadTree(index: RawIndexTreeEntry[], head: RawHeadTreeEntry
   );
 }
 
-function rawGitBlobIdentities(path: string, bytes: Buffer): string[] {
+function rawGitBlobIdentities(
+  path: string,
+  bytes: Buffer,
+  bytePolicy: CheckoutBytePolicy,
+): string[] {
   const identities = [gitBlobId(bytes)];
-  if (isControlledCrLfTextPath(path) && bytes.includes(0x0d)) {
+  if (bytePolicy === 'controlled-crlf'
+    && isControlledCrLfTextPath(path) && bytes.includes(0x0d)) {
     const normalized = Buffer.from(bytes.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
     if (!normalized.equals(bytes)) identities.push(gitBlobId(normalized));
   }
@@ -1721,7 +1740,7 @@ function rawGitBlobIdentities(path: string, bytes: Buffer): string[] {
 function isControlledCrLfTextPath(path: string): boolean {
   const name = path.split(/[\\/]/).at(-1)?.toLowerCase() ?? '';
   return (
-    /\.(?:bat|bib|cfg|cmd|conf|css|csv|dat|dockerignore|editorconfig|gitattributes|gitignore|gnu|gradle|hbs|html|ini|java|js|jsx|json|kt|lock|md|mjs|nix|orig|properties|ps1|py|rej|rs|sample|sbt|scala|scss|sh|sol|stderr|svg|tex|toml|ts|tsx|tsv|txt|uxf|xml|ya?ml)$/i.test(name)
+    /\.(?:bat|bib|cfg|cmd|conf|css|csv|dat|dockerignore|editorconfig|gitattributes|gitignore|gnu|gradle|hbs|hex|html|ini|java|js|jsx|json|kt|lock|md|mjs|nix|orig|properties|ps1|py|rej|rs|sample|sbt|scala|scss|sh|sol|stderr|svg|tex|toml|ts|tsx|tsv|txt|uxf|xml|ya?ml)$/i.test(name)
     || ['codeowners', 'dockerfile', 'license', 'makefile', 'notice'].includes(name)
     || /^(?:header|license)-/.test(name)
   );
