@@ -28,38 +28,50 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–55 are permanently consumed or held. The packaged C55
-invocation on `07569805480f3db8c491160ff4d2a3a3d4c4542b` terminated once at
-`2026-10-09T20:25:10.4380348Z` with integer command exit code 1 and no launcher
-exception. Independent review validated the current public parent graph:
-`execution_failure/root-or-cleanup/cycle-1/committed-reserve/operational-revalidate`,
-kind `continuation`. The existing stage covers both the callback's observation
-and custody assertion and the following concrete revalidator. Its inner
-predicate, raw cause, operation completion, cleanup and custody disposal remain
-unknown. C55 cannot be retried or resumed; new diagnostics cannot reclassify it.
+**Now:** Campaigns 24–56 are permanently consumed or held. The separately
+admitted packaged C56 invocation on `9a6d23b00cc44263e9adfee38bd54c133dc08e04`
+terminated once at `2026-10-10T04:53:21.7380348Z`, with integer command exit
+code 1 and no launcher exception. Independent review validated the current
+public parent graph:
+`execution_failure/root-or-cleanup/cycle-1/committed-reserve/confirmation`,
+kind `continuation`. Worker ancestry was checked only as opaque digest links.
+The inner predicate, cause, operation completion, cleanup and custody disposal
+remain unknown. A zero cleanup exception count does not establish cleanup.
+C56 cannot be retried or resumed, and new diagnostics cannot reclassify it.
 
-The selected local result separates those two prospective failure origins in
-new optional worker and parent companions. A fresh no-key discriminator called
-the actual native callback: a failed observation guard stopped before the
-revalidator, while a failed revalidator stopped before authorization or
-submission. Both retained the same old stage and exact thrown value. This is
-synthetic call-boundary evidence, not C55's cause or node acceptance. Close the
-callback-to-worker-to-parent join, its refusal cases, import rules, public
-documentation and exact independent review as one coherent source milestone,
-then publish once and follow that exact-head CI. No C56 is selected by this
-diagnostic; any further full campaign requires a separate plan decision and
-entirely fresh admission.
+The selected local result connects the genuine confirmation helper's existing
+bounded categories to separate optional worker and parent companions. It
+distinguishes an `active-guard` failure from `confirmation-observation`, whose
+closed category identifies a managed deadline, confirmation budget, clock,
+observer, pending, not-found or late-confirmation branch. Guard failures retain
+a null category. No transaction identifier, observation payload or raw error
+is published. The old stage, receipt bytes, thrown values, transaction and
+signing predicates, call order and budgets remain unchanged.
 
-Local validation passes: 197 new metadata/codec cases, 63 actual native-helper
-cases, all 355 parent/worker cases in 15 exhaustive serial shards, and 328
-architecture cases. TypeScript and the real import check pass for 137 layered
-modules across 916 sources. The three affected publication/claim/bundle suites
-pass 95 cases. A reproduced prototype-masked aggregate refusal and the direct
-tag-call import escape are closed with isolated negatives. The older
-committed-reserve codec, runtime predicates and budgets are unchanged; reuse
-their evidence only in that scope. Exact final source/claims review and
-publication guards remain due; no CI or target-node acceptance is claimed for
-this local candidate.
+The no-node/no-key discriminator calls the actual native helper for both
+genesis and continuation: post-observation and return guards retain the exact
+error; bounded pending, not-found, observer, invalid-observation and late
+confirmation failures stop before journal confirmation or output observation.
+This is synthetic call-boundary evidence, not C56's cause or node acceptance.
+Close exact old ancestry, hostile primary-error graphs, optional-write failure
+preservation, successful-result contradiction refusal, narrow imports and
+affected generic consumers as one source milestone. Local closure and independent
+exact-source review pass; staged/range guards and new exact-head CI remain due
+at promotion. No C57 follows automatically;
+any full campaign requires a separate plan decision and entirely fresh admission.
+
+The preceding revalidation-origin milestone passed independent review, guarded
+publication and all three required jobs in exact
+[run 37994218551](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/37994218551).
+Reuse that evidence only for unchanged inputs and scope. The current confirmation
+join passes 275 metadata/codec cases, 81 actual-helper and existing confirmation
+cases, all 369 parent/worker cases in 15 serial shards with every name exactly
+once, and 339 architecture cases. TypeScript and the real import guard pass for
+137 layered modules across 917 sources; the three affected publication/claim/
+bundle suites pass 95 cases. Independent source/claims review passes, including
+85 bounded in-memory assertions and a detected masked-aggregate guard mutant.
+These scopes overlap and are not added together. No new-head hosted CI, target
+node, historical cause, operation completion or custody acceptance follows.
 
 **Earlier scoped evidence:** The committed-reserve
 diagnostic checkpoint is published at `1efe1bd533a9beb37e44e9d49041e0e0980488af`;
@@ -1588,13 +1600,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Native revalidation callback -> worker -> public parent diagnostic | Close the selected two-origin companion with exact legacy ancestry, failure preservation, success contradiction refusal, narrow imports and public command documentation in one reviewed milestone | The actual helper, codec, exhaustive parent/worker shards, architecture and affected generic consumers pass locally. C55 remains consumed with inner cause and disposal unknown. Final exact-input review, guarded publication and new-head CI are due; no C56 follows automatically |
+| **Now** | Native committed-reserve confirmation -> worker -> public parent diagnostic | Promote the locally closed genuine active-guard/observation join with exact legacy ancestry, failure preservation, success contradiction refusal and narrow imports as one reviewed milestone | Codec, actual helper, exhaustive composed consumers, architecture, TypeScript/imports, generic consumers and independent exact review pass locally. Exact staged/commit/range bytes, guarded publication and new-head CI remain due. C56 remains consumed; no C57 follows automatically |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–55 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–56 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -1631,7 +1643,8 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| C55 prospective revalidation-origin join (local checkpoint) | Bind `callback-observation-guard` or `revalidator-call` to the unique native primary error and exact legacy committed-reserve worker/parent lineage, in separate optional companions; preserve old stages, receipts, thrown values, predicates and budgets | The fresh synthetic callback discriminator distinguishes the two origins without keys or nodes. Close exact lineage/hostile-graph refusals, optional-write failure preservation, successful-result contradictions, actual helper and parent/worker consumers, narrow imports and independent exact-input review before one publication/CI. C55 remains consumed with cause, completion and disposal unknown; no automatic C56 |
+| C56 prospective confirmation join (local closure complete; promotion due) | Bind an active guard or genuine bounded confirmation category to the unique native primary error and exact old committed-reserve worker/parent ancestry in separate optional companions, preserving old receipts, throws, predicates, order and budgets | The genuine no-node helper, isolated codec/hostile-graph refusals, optional-write failure preservation, success contradictions, exhaustive composed consumers, imports, generic consumers and independent exact-source review pass. Verify exact promoted bytes and publish once before new-head CI. C56 remains consumed with cause, completion and disposal unknown; no automatic C57 |
+| C55 prospective revalidation-origin join (closed and published) | Bind `callback-observation-guard` or `revalidator-call` to the unique native primary error and exact legacy committed-reserve worker/parent lineage, in separate optional companions; preserve old stages, receipts, thrown values, predicates and budgets | The genuine callback discriminator, 197 metadata/codec, 63 native-helper, 355 exhaustive parent/worker, 328 architecture and 95 generic consumer cases passed in their scopes, with TypeScript/imports and independent review. Guarded publication and exact-head CI passed at `9a6d23b00`. No C55 cause, completion or disposal follows |
 | Parent/worker test scheduling correction (local checkpoint) | Execute the complete listed parent/worker suite in fresh serial exact-name workers of at most 25 cases, without changing assertions, file order, budgets or error refusal | Full 341-case and 14-shard local runs pass with every executed name matched exactly once. The hosted timeout remains an unproved scheduling hypothesis. Close the affected runner/helper/audit/clean-checkout consumers, exact-input independent review and publication guards before one new-head CI |
 | Current-source JVM/AVL package pin correction (published; hosted corpus pending) | Bind the reviewed additive npm command to the current-source WASM lock without changing runtime pins, source checks, schema, budgets or corpus expectations | Four portable tests and all 13 isolated source-drift refusals pass locally; review and guarded publication passed at513112636. Its hosted gate stops at the earlier worker RPC timeout before this corpus. Reuse the unchanged pins and local evidence; no fresh JVM or node acceptance follows |
 | Public documented-command parser correction (published; consumer passes) | Recognize the documented silent npm invocation without concealing absent scripts, unsupported options or incomplete commands; keep extraction on one Markdown line | Published at0af80c24f with TypeScript, independent review and guarded publication. Exact run37787122258 passes all 53 hygiene cases, but its full public gate fails the later stale JVM/AVL package pin. No runtime, protocol, admission or campaign behavior changes |

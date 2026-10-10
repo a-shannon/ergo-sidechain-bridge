@@ -466,6 +466,7 @@ const REVIEWED_APP_LEGACY_COMPOSITION_SEAMS: ReadonlyMap<
       'substrate-federated-native-source-lock-failure-v1.ts',
       'substrate-federated-native-committed-reserve-failure-v1.ts',
       'substrate-federated-native-committed-reserve-revalidation-v1.ts',
+      'substrate-federated-native-committed-reserve-confirmation-v1.ts',
       'bridge-validity-tracker-header-context-v1.ts',
       'peg-in-causal-admission-v2.ts',
       'state-tracker.ts',
@@ -716,6 +717,10 @@ const REVIEWED_APP_LEGACY_COMPOSITION_IMPORT_BINDINGS: ReadonlyMap<
       [
         'substrate-federated-native-committed-reserve-revalidation-v1.ts',
         new Set(['tagNativeCommittedReserveRevalidationOriginV1']),
+      ],
+      [
+        'substrate-federated-native-committed-reserve-confirmation-v1.ts',
+        new Set(['tagNativeCommittedReserveConfirmationOriginV1']),
       ],
       [
         'bridge-repository-layout.ts',
@@ -1263,6 +1268,10 @@ const REVIEWED_APP_CAPABILITY_IMPORT_BINDINGS: ReadonlyMap<
       [
         '../../substrate-federated-native-committed-reserve-revalidation-v1.js',
         new Set(['tagNativeCommittedReserveRevalidationOriginV1']),
+      ],
+      [
+        '../../substrate-federated-native-committed-reserve-confirmation-v1.js',
+        new Set(['tagNativeCommittedReserveConfirmationOriginV1']),
       ],
       [
         '../../state-tracker.js',

@@ -29,6 +29,8 @@ import { tagSubstrateFederatedNativeCommittedReserveFailureStageV1,
   from '../../substrate-federated-native-committed-reserve-failure-v1.js';
 import { tagNativeCommittedReserveRevalidationOriginV1 }
   from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
+import { tagNativeCommittedReserveConfirmationOriginV1 }
+  from '../../substrate-federated-native-committed-reserve-confirmation-v1.js';
 
 import {
   sha256CanonicalJson,
@@ -2909,8 +2911,24 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   assertActive();
   const preTransportObservation = authorizationSession.takePreTransportObservation();
   failureStage = 'confirmation';
-  await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline, 'native committed-vault', assertActive);
-  assertActive();
+  const assertConfirmationActive = () => {
+    try { assertActive(); }
+    catch (cause) {
+      throw tagNativeCommittedReserveConfirmationOriginV1(cause, 'active-guard');
+    }
+  };
+  try {
+    await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline,
+      'native committed-vault', assertConfirmationActive);
+    assertConfirmationActive();
+  } catch (cause) {
+    const diagnostic = projectTrackerCanonicalConfirmationFailureDiagnosticV1(cause);
+    if (diagnostic !== null && diagnostic.category !== 'confirmation_phase_failure') {
+      tagNativeCommittedReserveConfirmationOriginV1(cause,
+        'confirmation-observation', diagnostic.category);
+    }
+    throw cause;
+  }
   failureStage = 'confirmed-journal';
   const reconciled = await journal.reconcileActive(observer);
   assertActive();

@@ -7,6 +7,8 @@ import { SUBSTRATE_FEDERATED_NATIVE_COMMITTED_RESERVE_FAILURE_STAGES_V1,
   from '../../substrate-federated-native-committed-reserve-failure-v1.js';
 import { projectNativeCommittedReserveRevalidationOriginV1 }
   from '../../substrate-federated-native-committed-reserve-revalidation-v1.js';
+import { projectNativeCommittedReserveConfirmationOriginV1 }
+  from '../../substrate-federated-native-committed-reserve-confirmation-v1.js';
 import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2 }
   from '../../substrate-federated-native-two-cycle-root-phase-v2.js';
 import { tagNativeTwoCycleCycleStepFailureV1 }
@@ -423,6 +425,59 @@ describe('native continuation peg-in execution transport', () => {
       expect(journal.journal.reserve).not.toHaveBeenCalled();
       expect(journal.journal.finalize).not.toHaveBeenCalled();
       expect(mocked.createVaultTransport.mock.results[0]!.value.submit).not.toHaveBeenCalled();
+    });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    (['post-observation guard', 'return guard', 'pending', 'not_found',
+      'observer_failure', 'late confirmation', 'invalid observation'] as const)
+      .map(branch => ({ kind, branch }))))(
+    'binds genuine $kind confirmation $branch without completing the journal', async ({ kind, branch }) => {
+      const fixture = executionFixture();
+      const primary = new Error('synthetic private confirmation guard');
+      let now = 0;
+      vi.spyOn(performance, 'now').mockImplementation(() => now);
+      const observe = vi.fn(async () => {
+        if (branch === 'post-observation guard') {
+          mocked.assertSourceOutputs.mockImplementationOnce(() => { throw primary; });
+        } else if (branch === 'return guard') {
+          mocked.assertSourceOutputs.mockImplementationOnce(() => {});
+          mocked.assertSourceOutputs.mockImplementationOnce(() => { throw primary; });
+        } else {
+          now = 120_001;
+          if (branch === 'observer_failure') throw new Error('synthetic private observer cause');
+          if (branch === 'invalid observation') return { ...confirmation, confirmations: -1 };
+          if (branch === 'pending' || branch === 'not_found') return {
+            ...confirmation, status: branch, confirmations: 0,
+            confirmationHeight: null, confirmationHeaderIdHex: null,
+          };
+        }
+        return confirmation;
+      });
+      mocked.createObserver.mockReturnValueOnce({
+        reconciliationIdentityDigestHex: CURRENT_TARGET_BINDING.executionTargetIdentityDigestHex,
+        observe,
+      });
+      const execute = kind === 'genesis' ? executeSubstrateFederatedNativeGenesisPegInCommittedVaultV1
+        : executeSubstrateFederatedNativeContinuationPegInCommittedVaultV1;
+      const thrown = await execute(fixture.vaultInput as never).catch(error => error);
+      const guard = branch === 'post-observation guard' || branch === 'return guard';
+      if (guard) expect(thrown).toBe(primary);
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveFailureStageV1(thrown)).toBe('confirmation');
+      expect(projectOwnSubstrateFederatedNativeCommittedReserveKindV1(thrown)).toBe(kind);
+      tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV2(thrown, 'cycle-1');
+      tagNativeTwoCycleCycleStepFailureV1(thrown, 'cycle-1', 'committed-reserve');
+      expect(projectNativeCommittedReserveConfirmationOriginV1(thrown)).toEqual({
+        confirmationOrigin: guard ? 'active-guard' : 'confirmation-observation',
+        confirmationCategory: guard ? null : branch === 'late confirmation'
+          ? 'observation_completed_after_deadline' : branch === 'invalid observation'
+          ? 'observer_failure' : branch === 'observer_failure' ? branch : `${branch}_at_deadline`,
+      });
+      expect(observe).toHaveBeenCalledOnce();
+      const journal = mocked.createVaultJournal.mock.results[0]!.value;
+      expect(journal.reconcileActive).toHaveBeenCalledOnce();
+      expect(journal.revalidateConfirmed).not.toHaveBeenCalled();
+      expect(mocked.observeVaultOutputs).not.toHaveBeenCalled();
+      expect(mocked.createVaultTransport.mock.results[0]!.value.submit).toHaveBeenCalledOnce();
     });
 
   function sourceJournal() {
