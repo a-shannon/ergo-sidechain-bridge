@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import blakejs from 'blakejs';
+import { readFileSync } from 'node:fs';
+import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-extension-membership.js';
+import {
+  buildSubstrateFederatedCheckpointProfileV1,
+  decodeSubstrateFederatedCheckpointStatementV1ForAdmission,
+  deriveSubstrateFederatedCheckpointAttestationDigestHex,
+  encodeSubstrateFederatedCheckpointExtensionValueV1,
+  projectOwnSubstrateFederatedCheckpointAdmissionWindowFailureV1,
+} from './profiles/substrate-federated-v1/checkpoint-statement.js';
 
 import {
   assertBridgeValidityTrackerCanonicalHeaderContextV1,
@@ -118,6 +127,71 @@ describe('EIP-0045 validity tracker canonical synthetic header context', () => {
         structuredClone(observed),
       ),
     ).toThrow(/provenance is missing/i);
+  });
+
+  it('expires a fixed checkpoint when one observed child advances the admission height while retaining its anchor', async () => {
+    // This models advancing header views, not the process helper or a historical campaign.
+    const vector = JSON.parse(readFileSync(new URL(
+      '../test-vectors/substrate-federated-v1-tracker-admission.json', import.meta.url,
+    ), 'utf8'));
+    const profile = buildSubstrateFederatedCheckpointProfileV1(vector.input.profile);
+    const encoded = vector.expected.encodedStatementHex as string;
+    const extensionValueHex = encodeSubstrateFederatedCheckpointExtensionValueV1(encoded);
+    expect(extensionValueHex).toBe(vector.expected.extensionValueHex);
+    expect(deriveSubstrateFederatedCheckpointAttestationDigestHex(encoded))
+      .toBe(vector.expected.attestationDigestHex);
+    const membership = buildErgoExtensionMembershipProof([
+      { key: Buffer.from('0401', 'hex'), value: Buffer.from(extensionValueHex, 'hex') },
+    ], Buffer.from('0401', 'hex'));
+    const wasm = await wasmModule();
+    const canonical = buildBridgeValidityTrackerCanonicalHeaderContextV1(wasm, {
+      currentHeight: 1_059, anchorContextIndex: 0,
+      anchorExtensionRootHex: membership.root.toString('hex'),
+    });
+    const rawHeaders = canonical.headers.map(header => header.raw);
+    const childFields = {
+      ...rawHeaders[0]!, height: 1_059, parentId: canonical.headers[0]!.id,
+      timestamp: Number(rawHeaders[0]!.timestamp) + 120_000,
+    };
+    const child = {
+      ...childFields,
+      id: Buffer.from(blakejs.blake2b(serializeCanonicalErgoHeaderV2(childFields), undefined, 32))
+        .toString('hex'),
+    };
+    const retainedAnchor = {
+      expectedAnchorHeaderIdHex: canonical.anchorHeader.id,
+      expectedAnchorExtensionRootHex: canonical.anchorHeader.extensionRootHex,
+    };
+    const before = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders, anchorContextIndex: 0, ...retainedAnchor,
+    });
+    const after = buildBridgeValidityTrackerObservedHeaderContextV1(wasm, {
+      rawHeaders: [child, ...rawHeaders.slice(0, 9)], anchorContextIndex: 1, ...retainedAnchor,
+    });
+    for (const context of [before, after]) {
+      expect(() => assertBridgeValidityTrackerObservedHeaderContextV1(context)).not.toThrow();
+      expect(context.currentHeight).toBe(context.headers[0]!.height + 1);
+      expect(context.anchorHeader.id).toBe(retainedAnchor.expectedAnchorHeaderIdHex);
+      expect(context.anchorHeader.extensionRootHex).toBe(membership.root.toString('hex'));
+      expect(context.anchorHeader.serializedHex).toBe(canonical.anchorHeader.serializedHex);
+    }
+    expect(after.headers.slice(1).map(header => header.serializedHex))
+      .toEqual(before.headers.slice(0, 9).map(header => header.serializedHex));
+    expect(after.headers[0]!.parentId).toBe(before.headers[0]!.id);
+    expect([before.currentHeight, after.currentHeight]).toEqual([1_059, 1_060]);
+    const accepted = decodeSubstrateFederatedCheckpointStatementV1ForAdmission(encoded, profile, before.currentHeight);
+    expect(accepted.admissionValidFromErgoHeight).toBe('1010');
+    expect(accepted.admissionExpiresAtErgoHeight).toBe('1060');
+    expect(accepted.encodedStatementHex).toBe(encoded);
+    let failure: unknown;
+    try {
+      decodeSubstrateFederatedCheckpointStatementV1ForAdmission(encoded, profile, after.currentHeight);
+    } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(Error);
+    expect(projectOwnSubstrateFederatedCheckpointAdmissionWindowFailureV1(failure)).toBe('expired');
+    expect(deriveSubstrateFederatedCheckpointAttestationDigestHex(encoded))
+      .toBe(vector.expected.attestationDigestHex);
+    expect(encodeSubstrateFederatedCheckpointExtensionValueV1(encoded)).toBe(extensionValueHex);
   });
 
   it('accepts current Autolykos V2 block-version 4 node headers', async () => {

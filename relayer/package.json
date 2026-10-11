@@ -82,6 +82,7 @@
     "settle:aggregate:recover": "tsx src/scripts/aggregate-settlement-recovery.ts",
     "retry": "tsx src/scripts/retry-failed.ts",
     "release:gate": "tsx src/scripts/release-gate.ts",
+    "federated:release:prepare": "tsx src/scripts/prepare-federated-reference-release-evidence-v1.ts",
     "readiness:triage": "tsx src/scripts/readiness-triage.ts",
     "readiness:node-preflight": "tsx src/scripts/readiness-node-preflight.ts",
     "readiness:runtime-prereqs": "tsx src/scripts/readiness-runtime-prereqs.ts",

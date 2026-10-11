@@ -1,5 +1,8 @@
 import { createHash } from 'crypto';
 import { basename } from 'path';
+import { types as nodeTypes } from 'node:util';
+import { validateFederatedReferenceReleaseEvidenceV1, FED_REFERENCE_PROFILE_V1, FED_REFERENCE_PURPOSE_V1 } from './federated-reference-release-evidence-v1.js';
+import { validateEvidenceJsonTargetPath } from './evidence-json-target-path.js';
 
 import {
   hasAbsoluteSecurityClaim,
@@ -845,6 +848,7 @@ export interface TechnicalAddendumEvidenceValidationInput {
 }
 
 export interface ReleaseGateEvaluationOptions {
+  federatedReferenceEvidenceValidation?: { target: string; status: 'PASS' | 'BLOCKED'; errors: string[]; report?: unknown };
   localLiveRehearsalEvidenceValidation?: LiveRehearsalEvidenceValidationInput;
   liveRehearsalEvidenceValidation?: LiveRehearsalEvidenceValidationInput;
   localSettlementProfileActivationJsonValidation?: SettlementProfileActivationJsonValidationInput;
@@ -1906,6 +1910,7 @@ export function parseReleaseDecision(markdown: string): Partial<ReleaseDecisionF
 }
 
 export function evaluateReleaseGate(markdown: string, options: ReleaseGateEvaluationOptions = {}): ReleaseGateResult {
+  const federatedReference = snapshotFederatedReferenceValidation(options);
   const rows = parsePendingEvidenceRegister(markdown);
   const blockers = rows.filter(row => {
     const unresolved = row.status !== 'Checked';
@@ -1914,7 +1919,9 @@ export function evaluateReleaseGate(markdown: string, options: ReleaseGateEvalua
   });
   const decision = parseReleaseDecision(markdown);
   const issues = [
-    ...validateReleaseGateEvidenceTargetSet(options),
+    ...federatedReference.issues,
+    ...validateFederatedReferencePreparation(markdown, federatedReference.input),
+    ...validateReleaseGateEvidenceTargetSet(options, federatedReference.input),
     ...validateReleaseGateValidationOutputTargetSet(rows, decision),
     ...validateRecoveryObserveJsonValidationSet(options),
     ...validateRequiredPendingEvidenceRows(rows),
@@ -1943,6 +1950,84 @@ export function evaluateReleaseGate(markdown: string, options: ReleaseGateEvalua
     rowCount: rows.length,
     message: `Release gate PASS: ${rows.length} pending evidence rows are resolved; Structural issues = 0.`,
   };
+}
+
+function snapshotFederatedReferenceValidation(options: ReleaseGateEvaluationOptions): {
+  input?: NonNullable<ReleaseGateEvaluationOptions['federatedReferenceEvidenceValidation']>;
+  issues: string[];
+} {
+  try {
+    const option = Object.getOwnPropertyDescriptor(options, 'federatedReferenceEvidenceValidation');
+    if (option === undefined) return { issues: [] };
+    if (!('value' in option)) throw new Error('own data option required');
+    const value: unknown = option.value;
+    if (value === undefined) return { issues: [] };
+    if (value === null || typeof value !== 'object' || nodeTypes.isProxy(value)) throw new Error('plain wrapper required');
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) throw new Error('plain wrapper required');
+    const keys = Reflect.ownKeys(value);
+    const required = ['target', 'status', 'errors'];
+    if (keys.length < 3 || keys.length > 4 || keys.some(key => typeof key !== 'string' || ![...required, 'report'].includes(key))) throw new Error('exact wrapper fields required');
+    const fields = Object.getOwnPropertyDescriptors(value);
+    for (const key of keys) {
+      const field = fields[key as string];
+      if (!('value' in field) || !field.enumerable) throw new Error('own enumerable data fields required');
+    }
+    if (required.some(key => !Object.hasOwn(fields, key))) throw new Error('required wrapper fields missing');
+    const target: unknown = fields.target.value;
+    const status: unknown = fields.status.value;
+    const errors: unknown = fields.errors.value;
+    if (typeof target !== 'string' || (status !== 'PASS' && status !== 'BLOCKED')) throw new Error('wrapper identity required');
+    if (errors === null || typeof errors !== 'object' || nodeTypes.isProxy(errors) || !Array.isArray(errors) || Object.getPrototypeOf(errors) !== Array.prototype) throw new Error('plain errors array required');
+    const errorFields = Object.getOwnPropertyDescriptors(errors as object);
+    const length: unknown = errorFields.length?.value;
+    if (!Number.isSafeInteger(length) || (length as number) < 0 || (length as number) > 64 || Reflect.ownKeys(errors).length !== (length as number) + 1) throw new Error('bounded errors array required');
+    const snapshotErrors: string[] = [];
+    for (let index = 0; index < (length as number); index += 1) {
+      const field = errorFields[String(index)];
+      if (field === undefined || !('value' in field) || !field.enumerable || typeof field.value !== 'string' || field.value.length > 4096) throw new Error('own string errors required');
+      snapshotErrors.push(field.value);
+    }
+    return { input: { target, status, errors: snapshotErrors, ...(Object.hasOwn(fields, 'report') ? { report: fields.report.value } : {}) }, issues: [] };
+  } catch {
+    return { issues: ['FED reference validation wrapper must contain bounded own data fields; preparation cannot authorize release'] };
+  }
+}
+
+function validateFederatedReferencePreparation(
+  markdown: string,
+  input: ReleaseGateEvaluationOptions['federatedReferenceEvidenceValidation'],
+): string[] {
+  if (input === undefined) return [];
+  const issues = ['FED reference preparation cannot authorize release; operational and external obligations remain open'];
+  if (input.status !== 'PASS' || !Array.isArray(input.errors) || input.errors.length !== 0) {
+    issues.push('FED reference evidence JSON validation must pass');
+  }
+  try {
+    const report = validateFederatedReferenceReleaseEvidenceV1(input.report);
+    if (typeof input.target !== 'string') throw new Error('FED evidence target required');
+    issues.push(...validateEvidenceJsonTargetPath(input.target, '--federated-reference-evidence-json'));
+    const headings = [...markdown.matchAll(/^## FED Reference Preparation\r?$/gm)];
+    if (headings.length !== 1) throw new Error('unique FED checklist section required');
+    const section = markdown.slice(headings[0].index! + headings[0][0].length).split(/\r?\n(?=## )/u, 1)[0];
+    const rows = parseMarkdownTableRows(section);
+    const required = ['FED profile', 'FED evidence purpose', 'FED evidence target', 'FED candidate commit', 'FED candidate tree'];
+    if (rows.length !== required.length || rows.some((row, index) => row.length !== 2 || row[0] !== required[index])) throw new Error('exact FED checklist fields required');
+    const fields = new Map(rows.map(row => [row[0], row[1]]));
+    if (fields.get('FED profile') !== FED_REFERENCE_PROFILE_V1 || fields.get('FED evidence purpose') !== FED_REFERENCE_PURPOSE_V1) {
+      issues.push('FED reference checklist profile and purpose must match the dedicated report');
+    }
+    if (typeof input.target !== 'string' || input.target.trim() === '' || fields.get('FED evidence target') !== input.target) {
+      issues.push('FED reference checklist target must match the validated report target exactly');
+    }
+    if (fields.get('FED candidate commit') !== report.candidate.bridgeCommit || fields.get('FED candidate tree') !== report.candidate.bridgeTree) {
+      issues.push('FED reference checklist candidate must match the report commit and tree exactly');
+    }
+    issues.push(...report.openObligations.map(obligation => `FED reference pending: ${obligation}`));
+  } catch {
+    issues.push('FED reference report content failed canonical schema, identity, digest or claim validation');
+  }
+  return issues;
 }
 
 function validatePendingEvidenceRow(row: PendingEvidenceRow, options: ReleaseGateEvaluationOptions): string[] {
@@ -10493,8 +10578,10 @@ function validateRecoveryObserveJsonValidationSet(
 
 function validateReleaseGateEvidenceTargetSet(
   options: ReleaseGateEvaluationOptions,
+  federatedReference: ReleaseGateEvaluationOptions['federatedReferenceEvidenceValidation'],
 ): string[] {
   const entries: Array<[string, { target?: unknown } | undefined]> = [
+    ['federatedReferenceEvidenceValidation', federatedReference],
     ['localLiveRehearsalEvidenceValidation', options.localLiveRehearsalEvidenceValidation],
     ['liveRehearsalEvidenceValidation', options.liveRehearsalEvidenceValidation],
     ['localSettlementProfileActivationJsonValidation', options.localSettlementProfileActivationJsonValidation],

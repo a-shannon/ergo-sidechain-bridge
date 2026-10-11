@@ -28,7 +28,37 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–58 are permanently consumed or held. Separately admitted
+**Now:** Campaigns 24–59 are permanently consumed or held. Separately admitted
+packaged C59 on local `e8edc8eb4d94d56c89a724f577eeb035052d8db8` terminated
+once at `2026-10-11T14:11:59.7249847Z`, with integer command exit 1, null
+launcher exception and no parent result. Independent review validated the
+bounded current public parent graph, own digests and repeated opaque worker
+links: `execution_failure/root-or-cleanup/cycle-1/tracker-context/statement/admission-expired`.
+No heights or raw cause were published. Completion, cleanup and custody disposal
+remain unknown. C59 cannot be retried, resumed or reclassified.
+
+The prospective header-producer/decoder falsifier retains the same signed
+statement, extension bytes and serialized anchor while one contiguous child
+advances current height from 1059 to 1060. The fixed public vector's `[1010,1060)`
+window admits the first view and expires at the second. Ten file cases,
+TypeScript and exact independent review pass. It does not execute the process
+helper, verify signatures or establish C59's actual heights or cause. A simple
+expiry guard would only refuse earlier. Moving attestation outside the original
+callback or omitting mining would violate the current custody/credential joins;
+a successful repair needs a separately specified operation contract and its
+negative matrix. No new campaign or runtime correction is selected here.
+
+The selected independent local lot is the dedicated FED preparation report and
+its actual release consumer: exact candidate commit/tree, canonical public
+parent-result validation when supplied, a documented preparation command and
+strict checklist binding. This version remains blocked for release, with fixed
+open launcher/recovery/operator/custody/assurance/external-acceptance obligations
+and false completion/readiness claims. It preserves the authenticated-external-
+fee Gate 3 branch. Continue locally without push or new CI; no automatic C60.
+The genuine complete packaged lifecycle and separately admitted recovery remain
+missing mandatory delivery results.
+
+**Earlier statement diagnostic:** Separately admitted
 packaged C58 on `6f2564d06d56d3dfbc4c0333fa48f9ca55824182` terminated once at
 `2026-10-11T00:04:43.6627268Z`, with integer command exit 1, null launcher
 exception and no parent result. Independent review validated the bounded
@@ -54,14 +84,12 @@ branch or justify a mining, validity-window or runtime-budget correction.
 The genuine decoder/header/tracker join, isolated projection and codec negatives,
 old-byte regression, composed parent consumers, operator instructions and exact
 independent review are locally closed. Existing unchanged green checks remain
-scoped. Continue locally without a push or new CI. The next selected preparation
-is one separately fresh packaged two-cycle lifecycle on exact locally frozen
-source, under the standing owned synthetic-loopback scope. Preparation does not
-dispatch it: a new config, callers, source/tool/output identities, both canonical
-baselines, independent admission review, process/port exclusivity, fresh disposable
-custody, distinct confirmed external fees before each anchor and final100GiB
-headroom remain mandatory. A diagnostic, local commit or old CI supplies none of
-that operation authority.
+scoped. C59 subsequently consumed its own separate fresh admission and failed as
+recorded above. Any future selected operation still needs its new config,
+callers, source/tool/output identities, both canonical baselines, independent
+admission review, process/port exclusivity, fresh disposable custody, distinct
+confirmed external fees before each anchor and final100GiB headroom. A diagnostic,
+local commit or old CI supplies none of that operation authority.
 The Publication Cadence rule below governs this local lane: public promotion
 requires its guarded update and due exact-head hosted checks; a local synthetic
 run requires its own exact identity, applicable validation and fresh admission.
@@ -1731,13 +1759,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Locally reviewed diagnostic source -> fresh packaged two-cycle preparation | Freeze the coherent local source without pushing; prepare a separate clean-root package, fresh config and callers, canonical baselines and exact independent admission review for the missing lifecycle | No dispatch until every applicable local admission and operation-specific authority is established. C58 remains consumed; its new diagnostic identifies no historical branch and provides no authority |
+| **Now** | Public FED parent receipt -> dedicated release evidence consumer | Prepare the versioned FED report, revalidate the existing projected result codec, bind candidate/checklist identities and close the documented CLI plus its isolated refusals | Preparation remains explicitly blocked for release; no result or external acceptance is inferred. C24-C59 remain consumed or held. Lifecycle repair still needs its own explicit operation contract; no automatic C60 |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–58 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–59 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -1776,7 +1804,9 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Fresh packaged two-cycle preparation (selected local batch) | Prepare a separately fresh invocation of the missing complete successor lifecycle from exact locally frozen source and the documented npm entry point | Full canonical baselines and source/tool/cache/native prerequisites, fresh empty outputs, exact callers/config, independent admission review and final process/port/100GiB gates precede any one-use dispatch. Standing synthetic-loopback scope remains bounded; no existing secrets, funds, public chain or automatic label campaign |
+| FED report-to-release preparation (selected local batch) | Produce a dedicated canonical FED report and connect it to the actual release CLI/checklist without relabelling Gate 3 | Revalidate public parent identity/digest/checks and the unchanged projected-result codec; require exact candidate/target binding, fixed open obligations and false completion/readiness claims. Close command, docs, strict negatives and independent exact review locally; no push or new CI |
+| Admission-window producer/decoder falsifier (locally closed) | Same fixed statement/anchor under two contiguous advancing header views reaches genuine expiry | Ten file cases, TypeScript and independent exact review pass. This is a prospective boundary test, not process/signature acceptance or C59's cause; a guard alone is not a lifecycle correction |
+| Fresh packaged two-cycle preparation (not currently selected) | Prepare a separately fresh invocation only after its success-path contract is justified | Full canonical baselines and source/tool/cache/native prerequisites, fresh empty outputs, exact callers/config, independent admission review and final process/port/100GiB gates precede any one-use dispatch. Standing synthetic-loopback scope remains bounded; no existing secrets, funds, public chain or automatic label campaign |
 | Tracker statement admission comparisons (locally closed) | Own genuine before-window/expiry relation reaches the existing unique-primary tracker statement check and worker/parent codecs | Original errors, predicates, old bytes and broad admission-horizon preserved. Actual producer tests, isolated projection/codecs, composed consumers, operator docs and exact independent review pass; no push/new CI or historical C58 cause |
 | Committed-reserve confirmation progress (closed on 6f2564d06) | Genuine opt-in observer capture reaches bounded separate worker/parent companions with original diagnostic and legacy ancestry | Local closure, independent review and exact-head CI passed. Reuse unchanged evidence in scope; optional reads can affect cost/count/deadline category. Neither C57 cause nor C58 authority follows |
 | Windows output fixture preparation (closed and published) | Prepare exact selected C# source freshly before the target interval, bind compiler/configuration/source/DLL bytes, and retain all genuine process/pipe/handle probes and limits | Independent review, guarded publication and all three exact-head jobs passed at b269ccc61 in run38045567224. Reuse the 29 affected local cases and exact source/probe equivalence. Compilation remains inside each original30s case; target loading and live probes remain inside target10s. Hosted cause and speedup are not established |
