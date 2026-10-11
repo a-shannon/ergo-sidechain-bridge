@@ -70,7 +70,8 @@ import { buildErgoExtensionMembershipProof } from './ergo-settlement-core/ergo-e
 import { buildBridgeValidityTrackerCanonicalHeaderContextV1, buildBridgeValidityTrackerObservedHeaderContextV1,
   serializeCanonicalErgoHeaderV2 }
   from './bridge-validity-tracker-header-context-v1.js';
-import { buildWasmSimplifiedUpcomingPreHeaderCarrier } from './ergo-upcoming-state-context.js';
+import { buildWasmSimplifiedUpcomingPreHeaderCarrier,
+  deriveSimplifiedUpcomingPreHeader } from './ergo-upcoming-state-context.js';
 import { buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Context,
   buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2ContinuationContext } from './substrate-federated-tracker-v2.js';
 import { buildSubstrateFederatedTrackerV2ExternalFeeTransaction } from './substrate-federated-tracker-v2-external-fee.js';
@@ -269,6 +270,104 @@ function verifyRetainedTrackerAtHeaders(input: Readonly<{
     catch (error) { transactionError = String(error); }
     return { proofs, transactionError };
   } finally { dataInputs.free(); inputs.free(); context.free(); txId.free(); tx.free(); }
+}
+
+function exportSignedContinuationTransactionFixture(input: Readonly<{
+  signedBody: Record<string, unknown>;
+  boxes: readonly Readonly<Eip12Box>[];
+  headers: readonly Readonly<Record<string, unknown>>[];
+}>) {
+  const { signedBody, boxes, headers } = input;
+  expect(boxes).toHaveLength(3);
+  expect(headers).toHaveLength(10);
+  const tx = wasm.Transaction.from_json(JSON.stringify(signedBody));
+  const txId = tx.id();
+  const signedBytes = Buffer.from(tx.sigma_serialize_bytes());
+  const id = txId.to_str();
+  try {
+    const changed = structuredClone(signedBody) as Record<string, any>;
+    expect(changed.inputs[2].spendingProof.proofBytes).toMatch(/^(?:[0-9a-f]{2})+$/u);
+    changed.inputs[2].spendingProof.proofBytes = '';
+    const badFee = wasm.Transaction.from_json(JSON.stringify(changed));
+    const badId = badFee.id();
+    try {
+      expect(badId.to_str()).toBe(id);
+      expect(changed.inputs.slice(0, 2)).toEqual((signedBody.inputs as unknown[]).slice(0, 2));
+      const restored = structuredClone(changed);
+      restored.inputs[2].spendingProof.proofBytes = (signedBody.inputs as any[])[2].spendingProof.proofBytes;
+      expect(canonicalJson(restored)).toBe(canonicalJson(signedBody));
+      const negativeBytes = Buffer.from(badFee.sigma_serialize_bytes());
+      const negative = verifyRetainedTrackerAtHeaders({ signedBody: changed, boxes, headers,
+        signedCandidate: { txId: id, signedTransactionBytesLength: negativeBytes.length,
+          signedTransactionBytesSha256Hex: createHash('sha256').update(negativeBytes).digest('hex') } });
+      expect(negative.proofs).toEqual([true, true, false]);
+      expect(negative.transactionError).toMatch(/^TxValidationError: Input 2 /u);
+    } finally { badId.free(); badFee.free(); }
+
+    const output = process.env.BRIDGE_NATIVE_CONTINUATION_TRANSACTION_FIXTURE;
+    if (output === undefined) return;
+    expect(isAbsolute(output)).toBe(true);
+    const parent = realpathSync(dirname(output));
+    expect(parent.toLowerCase()).toBe(resolve(dirname(output)).toLowerCase());
+    const root = realpathSync(fileURLToPath(new URL('../../', import.meta.url)));
+    const location = relative(root, parent);
+    expect(isAbsolute(location) || location === '..' || location.startsWith('..\\') || location.startsWith('../')).toBe(true);
+    const space = statfsSync(parent, { bigint: true });
+    expect(space.bavail * space.bsize).toBeGreaterThanOrEqual(10n * 1024n ** 3n);
+    const params = wasm.Parameters.default_parameters();
+    const carrier = buildWasmSimplifiedUpcomingPreHeaderCarrier(headers[0]!);
+    const upcoming = deriveSimplifiedUpcomingPreHeader(headers[0]!);
+    let parameters: Record<string, number | null>;
+    try {
+      parameters = { blockVersion: params.block_version(), storageFeeFactor: params.storage_fee_factor(),
+        minValuePerByte: params.min_value_per_byte(), maxBlockSize: params.max_block_size(),
+        // ergo-lib 0.28.0 Default omits MaxBlockCost; its getter panics.
+        // Null records that absence rather than inventing a SDK cost ceiling.
+        maxBlockCost: null, tokenAccessCost: params.token_access_cost(),
+        inputCost: params.input_cost(), dataInputCost: params.data_input_cost(), outputCost: params.output_cost() };
+      expect(parameters.blockVersion).toBe(1);
+      for (const [name, value] of Object.entries(parameters)) {
+        if (name !== 'maxBlockCost') expect(Number.isSafeInteger(value) && value !== null && value >= 0).toBe(true);
+      }
+    } finally { params.free(); }
+    const preHeader = (value: Readonly<Record<string, unknown>>, minerPk: unknown) => ({
+      version: value.version, parentId: value.parentId, timestamp: String(value.timestamp),
+      nBits: String(value.nBits), height: value.height, minerPk, votes: value.votes,
+    });
+    const serializedInputs = boxes.map(box => {
+      const parsed = wasm.ErgoBox.from_json(JSON.stringify(box));
+      try { return { id: box.boxId, serializedHex: Buffer.from(parsed.sigma_serialize_bytes()).toString('hex') }; }
+      finally { parsed.free(); }
+    });
+    const serializedHeaders = headers.map(raw => {
+      const parsed = wasm.BlockHeader.from_json(JSON.stringify(raw));
+      const parsedId = parsed.id();
+      const expectedId = wasm.BlockId.from_str(String(raw.id));
+      try {
+        const bytes = serializeCanonicalErgoHeaderV2(raw);
+        expect(parsedId.equals(expectedId)).toBe(true);
+        expect(Buffer.from(parsed.transactions_root()).toString('hex')).toBe(raw.transactionsRoot);
+        expect(Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')).toBe(raw.id);
+        return { id: raw.id, serializedHex: bytes.toString('hex') };
+      } finally { expectedId.free(); parsedId.free(); parsed.free(); }
+    });
+    const fixture = Buffer.from(canonicalJson({
+      schema: 'e2s.substrate-federated-native-continuation-transaction-fixture.v1', version: 1,
+      transaction: { id, signedBytesHex: signedBytes.toString('hex'),
+        signedBytesSha256Hex: createHash('sha256').update(signedBytes).digest('hex'),
+        signedBytesLength: signedBytes.length, json: signedBody },
+      inputs: serializedInputs, headers: serializedHeaders,
+      evaluationContext: { schema: 'e2s.ergo-wasm-default-evaluation-context.v1',
+        wasmPreHeader: preHeader(carrier, (carrier.powSolutions as Record<string, unknown>).pk),
+        nodePreHeader: preHeader(upcoming, upcoming.minerPk), parameters,
+        headers, previousStateDigestHex: headers[0]!.stateRoot },
+    }) + '\n', 'utf8');
+    expect(fixture.length).toBeLessThanOrEqual(1024 * 1024);
+    expect(fixture.every(byte => byte < 128)).toBe(true);
+    writeFileSync(output, fixture, { flag: 'wx', mode: 0o600 });
+    expect(readFileSync(output)).toEqual(fixture);
+    console.info(`native_continuation_transaction_fixture_sha256=${createHash('sha256').update(fixture).digest('hex')}`);
+  } finally { txId.free(); tx.free(); }
 }
 
 beforeAll(async () => {
@@ -869,6 +968,15 @@ describe('native FED withdrawal continuation', () => {
           headers: signingHeaders,
         });
         expect(verification).toEqual({ proofs: [true, true, true], transactionError: null });
+        if (fault === 'continuation valid'
+          && secondReserveSignedCandidateLabel === 'isolated local committed-vault pre-transport recheck') {
+          // Export only this fresh real signed check, never the proofless
+          // protected-predicate fixture or retained runtime/custody state.
+          exportSignedContinuationTransactionFixture({ signedBody,
+            boxes: [secondContinuationPacket.boxes.reservePredecessor,
+              secondContinuationPacket.boxes.sourceLock, secondContinuationPacket.boxes.transitionFeeFunding],
+            headers: signingHeaders });
+        }
         if (secondReserveVmEvaluationCount === 0) {
           secondReserveVmHeight = secondReserveSignedCandidate.signerContext.stateContextTipHeight + 1;
           const successorCreationHeight = Number(secondContinuationPacket.transactions.reserveTransition.outputs[0]!.creationHeight);

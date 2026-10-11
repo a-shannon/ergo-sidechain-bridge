@@ -71,14 +71,24 @@ selections overlap and are not summed. The 95 documentation/claims/bundle
 consumer cases pass. Exact claims review and guarded local promotion apply to
 the stable candidate; no push or new CI is selected.
 
-The next source-first feasibility check is full signed-continuation verification
-in the pinned JVM. The real fleet checker runs in the genuine fixture, but its
-node check response remains synthetic. The existing JVM export removes all
-three proofs and therefore cannot establish the missing signed-transaction join.
-Map a bounded offline consumer of the exact signed bytes, all input boxes and
-evaluation context before selecting implementation. One intact success and an
-isolated invalid fee proof would distinguish this scope. An SDK proof check is
-not node admission; neither outcome identifies C60's cause or authorizes C61.
+The [signed-continuation JVM consumer](../validity-proof/consumer-jvm/native-continuation-transaction.md)
+now reaches the pinned node's complete stateless and stateful transaction
+validator with the genuine fixture's signed bytes, three ordered input boxes
+and ten-header context. All 35 cases pass: intact acceptance in both explicit
+vote contexts, isolated fee-proof refusal at input 2 with inputs 0 and 1 still
+valid, outputless stateless refusal, one-extra-nanoERG conservation refusal and
+exact input/header/context bindings. SDK defaults are recorded separately from
+native DevNet version and cost policy. The command preserves its existing
+process limits, checks source/tool/fixture bytes before and after, and requires
+all cases without skips or an aborted suite. Its 32 executable acceptance
+checks include two detected guard mutants. These selections are not summed.
+This closes an offline join. Supplied boxes do not establish UTXO membership,
+HTTP/mempool admission, custody or the complete packaged lifecycle; no outcome
+identifies C60's cause or authorizes C61. The real fleet checker runs in the
+fixture, but its node check response remains synthetic. Exact independent
+review and guarded local promotion apply to this coherent candidate; no push
+or new CI is selected. The missing genuine packaged lifecycle remains the
+next runtime candidate, with separate selection and entirely fresh admission.
 
 **Previous deciding result:** Separately admitted
 packaged C59 on local `e8edc8eb4d94d56c89a724f577eeb035052d8db8` terminated
@@ -1837,7 +1847,7 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Fully signed continuation accepted by WASM -> pinned offline JVM consumer | Map exact signed-transaction/input-box/context API closure before implementation; distinguish intact acceptance from one invalid fee proof | Fleet runs genuinely, but the fixture's node-check response is synthetic and its existing JVM export is proofless. This check cannot establish node admission, C60's cause or campaign authority. C24-C60 holds remain permanent |
+| **Now** | Fully signed continuation accepted by WASM -> pinned offline JVM consumer (locally validated) | Close the documented command, exact claims review and guarded local promotion on the stable candidate | All 35 JVM cases and 32 command acceptance/refusal cases pass. The full validator distinguishes fee-proof, stateless and conservation failures. The fixture's node response remains synthetic; this evidence does not establish node admission, C60's cause or campaign authority. C24-C60 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
@@ -1882,7 +1892,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Signed-continuation JVM consumer feasibility (selected) | Exact fully signed bytes, three input boxes and evaluation context can reach an existing bounded pinned JVM verifier | Map source APIs and separate script/proof verification from full node transaction/state checks before implementation. Existing proofless export cannot satisfy this result. No broadcast, old custody, historical cause or campaign authority |
+| Signed-continuation JVM consumer (locally validated) | Exact fully signed bytes, three ordered input boxes and both explicit vote contexts reach the pinned native stateless/stateful transaction validator through a documented bounded command | Genuine export, intact full validation, isolated fee-proof/stateless/conservation refusals and context bindings pass. Exact command result acceptance and two guard mutants pass. Preserve the scoped offline result and apply exact independent claims review plus guarded local promotion; the next complete lifecycle requires separate fresh admission |
 | Native revalidation entered-operation join (locally validated) | Original escaping native error reaches optional bounded operation detail with unchanged failure semantics and complete prior revalidation ancestry | All six source-owned phases and isolated stale/conflicting/unsafe/cleanup refusals pass. Missing/invalid/occupied detail preserves old failures; contradictory success refuses. Source review GO and 95 generic consumer cases pass; exact final claims and guarded local promotion apply. Old schemas/bytes remain unchanged; no historical cause or execution authority |
 | Native continuation wire/advancing-header falsifier (locally closed) | Pass the genuine packet and checked handles through actual read decoding, normalization and revalidation; refuse one changed input or invalid header relation before authorization/reservation/submission | All 78 cases pass on the original authorizer; five focused cases also pass on the new diagnostic producer for intact response, reserve-value drift, descendants+2/+64 and ancestry+65. Signed identities, original73 cases and budgets remain unchanged. Component observations and checker responses are synthetic; no historical cause or campaign authority follows |
 | Mining-barrier source-to-attestation join (locally closed at5bfee452) | Establish the success-path contract while retaining original target/custody/credential guards | The cumulative node patch, four Scala suites, exact source reconstruction, one-way owned pause, indexed watermark, three fresh confirmations and immutable E−2 checkpoint mining passed exact independent review and guarded local promotion. C60 exercised this checkpoint once and failed upstream of the second pause; inner cause and lifecycle completion remain unknown. No push or new CI |
