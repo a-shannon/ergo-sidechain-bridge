@@ -532,6 +532,24 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    'createNativeCommittedReserveRevalidationOperationTaggerV1',
+    'projectNativeCommittedReserveRevalidationOperationV1',
+    'createNativeTwoCycleWorkerCommittedReserveRevalidationOperationV1',
+    'createNativeTwoCycleParentCommittedReserveRevalidationOperationV1',
+    'parseNativeTwoCycleWorkerCommittedReserveRevalidationOperationV1',
+    'parseNativeTwoCycleParentCommittedReserveRevalidationOperationV1',
+    'NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1',
+    'NativeCommittedReserveRevalidationOperationV1',
+  ])('keeps source-owned revalidation operation %s out of app composition', binding => {
+    const specifier = '../../substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
+    for (const owner of [GENESIS_SETUP_ROOT, 'apps/bridge-daemon/foreign.ts']) {
+      expect(inspect(staticAppFixture(owner, `import { ${binding} } from '${specifier}';`))
+        .map(item => item.message)).toContain(
+        'apps must not import an unclassified legacy module: substrate-federated-native-committed-reserve-revalidation-operation-v1.ts');
+    }
+  });
+
+  it.each([
     'projectNativeCommittedReserveRevalidationOriginV1',
     'createNativeTwoCycleWorkerCommittedReserveRevalidationV1',
     'createNativeTwoCycleParentCommittedReserveRevalidationV1',

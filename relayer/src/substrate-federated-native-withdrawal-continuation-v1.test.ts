@@ -37,6 +37,7 @@ vi.mock('./substrate-federated-native-genesis-setup-check-request-v1.js', () => 
 import { ORIGINAL_NODE_OPTIONS } from './test-node-env.js';
 import * as helpers from './ergo-helpers.js';
 import * as fleet from './fleet-signer.js';
+import * as operationalRunner from './apps/bridge-daemon/ergo-operational-transaction.js';
 import * as owned from './substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { claimSubstrateFederatedIsolatedDevnetNativeContinuationMiningAuthorityV1 as claimMiningAuthority,
   assertSubstrateFederatedIsolatedDevnetMiningCredentialV1 as assertMiningCredential }
@@ -148,6 +149,21 @@ import { createNativeContinuationRpcFixtureV1 }
 
 const PRIMARY = 'http://127.0.0.1:9051';
 const WITNESS = 'http://127.0.0.1:9052';
+// Ergo 2cdbb8c UtxoApiRoute.byId uses Sigma-state v6.0.2 SDK JsonCodecs:
+// sdk/shared/src/main/scala/org/ergoplatform/sdk/JsonCodecs.scala, ergoBoxEncoder.
+// Long value/asset amounts are JSON numbers; non-mandatory registers are hex
+// strings. Emit decimal tokens directly, without a lossy Number conversion.
+function nodeBoxResponseBytes(box: Eip12Box): Buffer {
+  for (const amount of [box.value, ...box.assets.map(asset => asset.amount)]) {
+    expect(amount).toMatch(/^[1-9][0-9]*$/);
+  }
+  return Buffer.from(JSON.stringify({
+    boxId: box.boxId, value: box.value, ergoTree: box.ergoTree,
+    assets: box.assets.map(asset => ({ tokenId: asset.tokenId, amount: asset.amount })),
+    creationHeight: box.creationHeight, additionalRegisters: box.additionalRegisters,
+    transactionId: box.transactionId, index: box.index,
+  }).replace(/"(value|amount)":"([0-9]+)"/gu, '"$1":$2'));
+}
 const GENESIS = '62'.repeat(32);
 const ROLES = ['tracker', 'duplicate-prevention', 'pooled-reserve'] as const;
 const KEYS = ['tracker', 'duplicatePrevention', 'pooledReserve'] as const;
@@ -342,6 +358,9 @@ const MINING_AUTHORITY_CASES = ['continuation mining authority valid',
   'continuation mining authority foreign confirmation'] as const;
 type MiningAuthorityFault = typeof MINING_AUTHORITY_CASES[number];
 type ContinuationFault = SecondTrackerFault | SecondPayoutFault | MiningAuthorityFault | 'continuation valid' | 'continuation old terminal signer' | 'continuation copied withdrawal check'
+  | 'continuation raw node JSON valid' | 'continuation raw node JSON reserve drift'
+  | 'continuation raw node JSON descendants 2' | 'continuation raw node JSON descendants 64'
+  | 'continuation raw node JSON ancestry 65'
   | 'continuation copied withdrawal attempt' | 'continuation unconfirmed payout' | 'continuation old packet'
   | 'continuation foreign target' | 'continuation duplicate source invocation' | 'continuation disposed during source preparation'
   | 'continuation disposed during source checker' | 'continuation wrong vault packet'
@@ -363,7 +382,10 @@ describe('native FED withdrawal continuation', () => {
     'source disposed before tracker reservation', 'source disposed before tracker transport',
     'source disposed inside tracker preparation', 'source disposed inside tracker checker',
     'source disposed inside payout preparation', 'source disposed inside payout checker',
-    'tracker WASM expiry', 'continuation valid', 'continuation old terminal signer',
+    'tracker WASM expiry', 'continuation valid', 'continuation raw node JSON valid',
+    'continuation raw node JSON reserve drift', 'continuation raw node JSON descendants 2',
+    'continuation raw node JSON descendants 64', 'continuation raw node JSON ancestry 65',
+    'continuation old terminal signer',
     'continuation copied withdrawal check', 'continuation copied withdrawal attempt', 'continuation unconfirmed payout',
     'continuation old packet', 'continuation foreign target', 'continuation duplicate source invocation',
     'continuation disposed during source preparation', 'continuation disposed during source checker',
@@ -387,6 +409,23 @@ describe('native FED withdrawal continuation', () => {
     let payoutStarted = false;
     const continuation = { stage: 'none' as 'none' | 'builder' | 'source' | 'vault' | 'withdrawal-fee' | 'tracker-fee' };
     const continuationFault = fault.startsWith('continuation ');
+    const rawNodeJson = fault.startsWith('continuation raw node JSON ');
+    const rawAncestryAdvance = fault === 'continuation raw node JSON descendants 2' ? 2
+      : fault === 'continuation raw node JSON descendants 64' ? 64
+        : fault === 'continuation raw node JSON ancestry 65' ? 65 : 0;
+    const rawHeadersById = new Map<string, Readonly<Record<string, unknown>>>();
+    const rawAncestryReads = new Map<string, string[]>();
+    let rawAncestryAnchorId: string | undefined;
+    let rawHeaderAdvances = 0;
+    let reserveRevalidationActive = false;
+    let reserveRevalidationCalls = 0;
+    let reserveAuthorizations = 0;
+    let reserveReservations = 0;
+    let reserveSubmissions = 0;
+    let rawReserveDrifts = 0;
+    const rawTransitionReads = new Map<string, number>();
+    const rawRevalidationTips = new Set<string>();
+    const rawReserveCheckCalls: string[] = [];
     const secondTrackerFault = fault.startsWith('continuation second tracker ');
     const miningAuthorityFault = fault.startsWith('continuation mining authority ');
     const secondPayoutFault = fault.startsWith('continuation second payout ') || fault === 'continuation mining authority valid';
@@ -424,6 +463,32 @@ describe('native FED withdrawal continuation', () => {
     const secondReserveVmEvaluationLabels: string[] = [];
     const submissionBodies: Record<string, unknown>[] = [];
     const feeSubmissionBodies: Record<string, unknown>[] = [];
+    if (rawNodeJson) {
+      // Observe the real lifecycle ports without replacing candidate, checker,
+      // authorizer or observation identities; retain the fixture's custody doubles.
+      const run = operationalRunner.runErgoOperationalTransaction;
+      vi.spyOn(operationalRunner, 'runErgoOperationalTransaction').mockImplementation((input, ports) => {
+        if (input.expectedTxId !== secondContinuationPacket?.transactions.reserveTransition.txId) {
+          return run(input, ports);
+        }
+        return run(input, {
+          ...ports,
+          revalidate: async checked => {
+            reserveRevalidationCalls++;
+            if (rawAncestryAdvance > 0) {
+              rawAncestryAnchorId = String(signingHeaders[0]!.id);
+              for (const header of signingHeaders) rawHeadersById.set(String(header.id), header);
+            }
+            reserveRevalidationActive = true;
+            try { return await ports.revalidate(checked); }
+            finally { reserveRevalidationActive = false; }
+          },
+          authorize: value => { reserveAuthorizations++; return ports.authorize(value); },
+          reserve: value => { reserveReservations++; return ports.reserve(value); },
+          submit: value => { reserveSubmissions++; return ports.submit(value); },
+        });
+      });
+    }
     const feeTransactions = new Map<string, Readonly<{
       inputs: readonly Readonly<{ boxId: string }>[];
       outputs: readonly Readonly<Eip12Box>[];
@@ -786,7 +851,7 @@ describe('native FED withdrawal continuation', () => {
       expect(path).toBe('/transactions/check'); expect(origin).toBe(PRIMARY);
       const signedBody = body as Record<string, unknown>;
       checkBodies.push(signedBody);
-      if (fault === 'continuation valid' && secondContinuationPacket !== undefined
+      if ((fault === 'continuation valid' || rawNodeJson) && secondContinuationPacket !== undefined
         && secondReserveSignedCandidate?.txId === secondContinuationPacket.transactions.reserveTransition.txId) {
         expect(signedId(signedBody)).toBe(secondReserveSignedCandidate.txId);
         expect(secondReserveSignedCandidate.signerContext.stateContextTipHeight).toBe(Number(signingHeaders[0]!.height));
@@ -888,10 +953,11 @@ describe('native FED withdrawal continuation', () => {
       return pending;
     });
     vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
-      if (fault === 'continuation valid' && secondContinuationPacket !== undefined
+      if ((fault === 'continuation valid' || rawNodeJson) && secondContinuationPacket !== undefined
         && args[0].txId === secondContinuationPacket.transactions.reserveTransition.txId) {
         secondReserveSignedCandidate = args[0];
         secondReserveSignedCandidateLabel = args[1];
+        if (rawNodeJson) rawReserveCheckCalls.push(args[1]);
       }
       const pending = check(...args);
       // The real checker passed its entry veto and suspended at its import.
@@ -908,6 +974,34 @@ describe('native FED withdrawal continuation', () => {
       if (secondPayoutStarted && fault === 'continuation second payout custody during checker') {
         disposeInside(args[3]);
       }
+      if (rawAncestryAdvance > 0 && reserveRevalidationActive
+        && args[1] === 'isolated local committed-vault pre-transport recheck') {
+        // Advance only after the actual check and WASM verification have returned.
+        // The candidate, signed bytes and signer context remain the original ones.
+        const checked = await pending;
+        expect(checked).not.toBeNull();
+        expect(checked!.signerContext).toBe(args[0].signerContext);
+        expect(checked!.signedTransactionDigestHex).toBe(args[0].signedTransactionDigestHex);
+        expect(checked!.signedTransactionBytesSha256Hex).toBe(args[0].signedTransactionBytesSha256Hex);
+        expect(checked!.signedTransactionBytesLength).toBe(args[0].signedTransactionBytesLength);
+        expect(rawHeaderAdvances).toBe(0);
+        const beforeHeight = Number(signingHeaders[0]!.height);
+        for (let index = 0; index < rawAncestryAdvance; index++) {
+          signingHeaders = appendSyntheticMinedHeader(signingHeaders);
+          const header = signingHeaders[0]!;
+          rawHeadersById.set(String(header.id), header);
+          rawHeaderAdvances++;
+        }
+        expect(Number(signingHeaders[0]!.height)).toBe(beforeHeight + rawAncestryAdvance);
+        expect(checked!.signerContext).toBe(args[0].signerContext);
+        const evaluationHeight = Number(signingHeaders[0]!.height) + 1;
+        const packet = secondContinuationPacket!;
+        const successorHeight = Number(packet.transactions.reserveTransition.outputs[0]!.creationHeight);
+        expect(evaluationHeight).toBeGreaterThanOrEqual(successorHeight);
+        expect(evaluationHeight).toBeLessThanOrEqual(successorHeight + 100);
+        expect(evaluationHeight).toBeLessThan(Number(packet.boxes.sourceLock.creationHeight) + 10_000);
+        return checked;
+      }
       return pending;
     });
     if (internalFault?.[2] === 'checker' || continuationInternal?.[2] === 'checker'
@@ -915,7 +1009,58 @@ describe('native FED withdrawal continuation', () => {
       || fault === 'continuation second payout custody during checker') {
       vi.spyOn(console, 'error').mockImplementation(() => {});
     }
-    vi.spyOn(axios, 'create').mockImplementation(config => ({
+    const createAxios = axios.create.bind(axios);
+    if (rawNodeJson) vi.spyOn(axios, 'create').mockImplementation(config => createAxios({
+      ...config,
+      // Keep the actual Axios instance, request configuration, raw-byte decoder
+      // and WASM normalizer. The adapter replaces network I/O only.
+      adapter: async request => {
+        const path = request.url!;
+        const origin = request.baseURL!;
+        let data: unknown;
+        let rawBoxBody: Buffer | undefined;
+        let status = 200;
+        try {
+          const ancestryId = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(path)?.[1];
+          if (reserveRevalidationActive && rawAncestryAdvance > 0 && path === '/blocks/lastHeaders/1') {
+            data = [signingHeaders[0]!];
+          } else if (reserveRevalidationActive && rawAncestryAdvance > 0 && ancestryId !== undefined) {
+            const reads = rawAncestryReads.get(origin) ?? [];
+            reads.push(ancestryId);
+            rawAncestryReads.set(origin, reads);
+            const header = rawHeadersById.get(ancestryId);
+            expect(header).toBeDefined();
+            expect(header!.id).toBe(Buffer.from(blakejs.blake2b(
+              serializeCanonicalErgoHeaderV2(header!), undefined, 32)).toString('hex'));
+            data = header;
+          } else data = await read(path, origin);
+        }
+        catch (error) {
+          if (!path.startsWith('/utxo/byId/') || boxes.has(path.slice('/utxo/byId/'.length))) throw error;
+          status = 404;
+          data = null;
+        }
+        if (reserveRevalidationActive && path === '/blocks/lastHeaders/1') {
+          rawRevalidationTips.add(canonicalJson(data));
+        }
+        if (reserveRevalidationActive && path.startsWith('/utxo/byId/') && status === 200) {
+          const box = data as Eip12Box;
+          const key = `${origin}/${box.boxId}`;
+          rawTransitionReads.set(key, (rawTransitionReads.get(key) ?? 0) + 1);
+          if (fault === 'continuation raw node JSON reserve drift' && rawReserveDrifts === 0
+            && origin === WITNESS && box.boxId === secondContinuationPacket!.boxes.reservePredecessor.boxId) {
+            data = { ...box, value: String(BigInt(box.value) + 1n) };
+            rawReserveDrifts++;
+          }
+          expect(request.responseType).toBe('arraybuffer');
+          rawBoxBody = nodeBoxResponseBytes(data as Eip12Box);
+        }
+        return { status, statusText: status === 404 ? 'Not Found' : 'OK', config: request,
+          headers: { 'content-type': 'application/json' },
+          data: request.responseType === 'arraybuffer' ? rawBoxBody ?? Buffer.from(JSON.stringify(data)) : data };
+      },
+    }));
+    else vi.spyOn(axios, 'create').mockImplementation(config => ({
       get: async (path: string, request?: { responseType?: string }) => {
         try {
           const data = await read(path, config!.baseURL!);
@@ -1448,7 +1593,10 @@ describe('native FED withdrawal continuation', () => {
           signingHeaders = headerContext(secondCreationHeight);
           continuation.stage = 'source';
           const transportCompositionFault = new Set<ContinuationFault>([
-            'continuation valid', 'continuation foreign observation before draft',
+            'continuation valid', 'continuation raw node JSON valid', 'continuation raw node JSON reserve drift',
+            'continuation raw node JSON descendants 2', 'continuation raw node JSON descendants 64',
+            'continuation raw node JSON ancestry 65',
+            'continuation foreign observation before draft',
             'continuation copied observation before evidence', 'continuation mismatched reservation draft',
             'continuation current target lost before transport', 'continuation custody lost after funding await',
             'continuation ambiguous source transport', 'continuation source proof native mint join',
@@ -1576,12 +1724,79 @@ describe('native FED withdrawal continuation', () => {
             expect(state.getErgoOperationalTransactionAttempt(sourceExecution.expectedTxId)?.status).toBe('confirmed');
             expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 1);
             continuation.stage = 'vault';
-            const vaultExecution = await executeContinuationVault({
+            const vaultPromise = executeContinuationVault({
               target: confirmationTarget, batch, packet: second,
               sourceLockObservation: sourceExecution.outputObservation, setupSession: session, state,
             });
+            if (fault === 'continuation raw node JSON reserve drift') {
+              await expect(vaultPromise).rejects.toThrow(/reserve predecessor.*(?:valid EIP-12 box|serialized box contents)/);
+              expect(reserveRevalidationCalls).toBe(1);
+              expect(rawReserveDrifts).toBe(1);
+              expect(rawReserveCheckCalls).toEqual(['isolated local peg-in committed-vault check']);
+              expect(secondReserveVmEvaluationLabels).toEqual(['isolated local peg-in committed-vault check']);
+              expect([reserveAuthorizations, reserveReservations, reserveSubmissions]).toEqual([0, 0, 0]);
+              expect(state.getErgoOperationalTransactionAttempt(second.transactions.reserveTransition.txId)).toBeNull();
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 1);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
+            if (fault === 'continuation raw node JSON ancestry 65') {
+              await expect(vaultPromise).rejects.toThrow(/check ancestry exceeds the bounded tip window/);
+              expect(reserveRevalidationCalls).toBe(1);
+              expect(rawHeaderAdvances).toBe(65);
+              expect(rawRevalidationTips.size).toBe(2);
+              expect(rawAncestryReads.size).toBe(0);
+              expect(rawReserveCheckCalls).toEqual([
+                'isolated local peg-in committed-vault check',
+                'isolated local committed-vault pre-transport recheck',
+              ]);
+              expect(secondReserveVmEvaluationLabels).toEqual(rawReserveCheckCalls);
+              for (const origin of [PRIMARY, WITNESS]) {
+                for (const box of [second.boxes.reservePredecessor, second.boxes.sourceLock, second.boxes.transitionFeeFunding]) {
+                  expect(rawTransitionReads.get(`${origin}/${box.boxId}`)).toBe(1);
+                }
+              }
+              expect([reserveAuthorizations, reserveReservations, reserveSubmissions]).toEqual([0, 0, 0]);
+              expect(state.getErgoOperationalTransactionAttempt(second.transactions.reserveTransition.txId)).toBeNull();
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 1);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
+            const vaultExecution = await vaultPromise;
             expect(vaultExecution.expectedTxId).toBe(second.transactions.reserveTransition.txId);
             expect(vaultExecution.transportStatus).toBe('accepted');
+            if (rawNodeJson) {
+              expect(reserveRevalidationCalls).toBe(1);
+              expect(rawReserveDrifts).toBe(0);
+              expect(rawRevalidationTips.size).toBe(rawAncestryAdvance > 0 ? 2 : 1);
+              expect(rawHeaderAdvances).toBe(rawAncestryAdvance);
+              if (rawAncestryAdvance > 0) {
+                expect(rawAncestryReads.size).toBe(2);
+                for (const origin of [PRIMARY, WITNESS]) {
+                  const reads = rawAncestryReads.get(origin)!;
+                  expect(reads).toHaveLength(rawAncestryAdvance + 1);
+                  expect(reads.at(-1)).toBe(rawAncestryAnchorId);
+                  for (let index = 0; index < reads.length - 1; index++) {
+                    expect(rawHeadersById.get(reads[index]!)!.parentId).toBe(reads[index + 1]);
+                  }
+                }
+              }
+              expect([reserveAuthorizations, reserveReservations, reserveSubmissions]).toEqual([1, 1, 1]);
+              expect(secondReserveVmEvaluationLabels).toEqual([
+                'isolated local peg-in committed-vault check',
+                'isolated local committed-vault pre-transport recheck',
+              ]);
+              expect(rawReserveCheckCalls).toEqual(secondReserveVmEvaluationLabels);
+              for (const origin of [PRIMARY, WITNESS]) {
+                for (const box of [second.boxes.reservePredecessor, second.boxes.sourceLock, second.boxes.transitionFeeFunding]) {
+                  expect(rawTransitionReads.get(`${origin}/${box.boxId}`)).toBe(2);
+                }
+              }
+              expect(state.getErgoOperationalTransactionAttempt(vaultExecution.expectedTxId)?.status).toBe('confirmed');
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 2);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
             if (fault === 'continuation valid') {
               expect(secondReserveVmEvaluationCount).toBe(2);
               expect(secondReserveVmEvaluationLabels).toEqual([

@@ -112,6 +112,15 @@ import {
 import {
   PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
 } from './relayer-core/ergo-operational-transaction-lifecycle.js';
+import * as operations from './substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
+import { tagSubstrateFederatedNativeTwoCycleRootFailurePhaseV1 as rootTag }
+  from './substrate-federated-native-two-cycle-root-phase-v1.js';
+import { tagNativeTwoCycleCycleStepFailureV1 as stepTag }
+  from './substrate-federated-native-two-cycle-cycle-step-v1.js';
+import { tagSubstrateFederatedNativeCommittedReserveFailureStageV1 as stageTag }
+  from './substrate-federated-native-committed-reserve-failure-v1.js';
+import { tagNativeCommittedReserveRevalidationOriginV1 as originTag }
+  from './substrate-federated-native-committed-reserve-revalidation-v1.js';
 
 const hex = (byte: string): string => byte.repeat(32);
 const PRIMARY = 'http://127.0.0.1:9051' as const;
@@ -355,6 +364,143 @@ describe('native committed-vault observation scheduling (mocked provenance and n
     mocks.tipIdHex = tipId(mocks.tipHeight);
     return { ...f, input };
   }
+
+  function projectEscapingOperation(error: unknown) {
+    // These are the unchanged enclosing helper/root tags, not operation inputs.
+    originTag(stepTag(rootTag(stageTag(error, 'operational-revalidate', 'continuation'),
+      'cycle-1'), 'cycle-1', 'committed-reserve'), 'revalidator-call');
+    return operations.projectNativeCommittedReserveRevalidationOperationV1(error);
+  }
+
+  it.each(operations.NATIVE_COMMITTED_RESERVE_REVALIDATION_OPERATIONS_V1)
+    ('attributes the actual native escaping %s operation without changing its error', async operation => {
+      const f = nativeFixture();
+      const session = create(f.input as never);
+      const error = new Error('opaque unchanged operation failure');
+      let freezeSpy: ReturnType<typeof vi.spyOn> | undefined;
+      if (operation === 'ingress-binding') mocks.assertTarget.mockImplementationOnce(() => { throw error; });
+      if (operation === 'input-observation-before-check') mocks.readBox.mockImplementation(async () => { throw error; });
+      if (operation === 'fresh-signed-check') mocks.checkSignedTransaction.mockRejectedValueOnce(error);
+      if (operation === 'input-observation-after-check') mocks.checkSignedTransaction.mockImplementationOnce(async () => {
+        mocks.readBox.mockImplementation(async () => { throw error; });
+        return f.freshCheck;
+      });
+      if (operation === 'post-check-observation-join' || operation === 'final-authorizer-binding') {
+        const freeze = Object.freeze;
+        freezeSpy = vi.spyOn(Object, 'freeze').mockImplementation(value => {
+          // A join-return escape or the next binding check: no claim that the
+          // post-check regression predicate can be reached with valid reads.
+          if (value !== null && typeof value === 'object'
+            && Object.keys(value).length === 2
+            && Object.hasOwn(value, 'observation')
+            && Object.hasOwn(value, 'freshJvmCheckResponseDigestHex')) {
+            if (operation === 'post-check-observation-join') throw error;
+            mocks.assertTarget.mockImplementationOnce(() => { throw error; });
+          }
+          return freeze(value);
+        });
+      }
+      try {
+        await expect(session.revalidator.revalidate(f.checked as never)).rejects.toBe(error);
+        expect(error.message).toBe('opaque unchanged operation failure');
+        expect(projectEscapingOperation(error)).toBe(operation);
+        expect(mocks.checkSignedTransaction).toHaveBeenCalledTimes(
+          operation === 'ingress-binding' || operation === 'input-observation-before-check' ? 0 : 1);
+      } finally { freezeSpy?.mockRestore(); }
+    });
+
+  it('keeps an ingress refusal outside the original failed-state transition', async () => {
+    const f = nativeFixture();
+    const session = create(f.input as never);
+    const error = new Error('temporary ingress refusal');
+    mocks.assertTarget.mockImplementationOnce(() => { throw error; });
+    await expect(session.revalidator.revalidate(f.checked as never)).rejects.toBe(error);
+    expect(projectEscapingOperation(error)).toBe('ingress-binding');
+    await expect(session.revalidator.revalidate(f.checked as never)).resolves.toBeDefined();
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('keeps an entered check failure terminal for the original one-shot state', async () => {
+    const f = nativeFixture();
+    const session = create(f.input as never);
+    const error = new Error('fresh check refusal');
+    mocks.checkSignedTransaction.mockRejectedValueOnce(error);
+    await expect(session.revalidator.revalidate(f.checked as never)).rejects.toBe(error);
+    expect(projectEscapingOperation(error)).toBe('fresh-signed-check');
+    await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(/one-shot/);
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    expect(() => session.takePreTransportObservation()).toThrow();
+  });
+
+  it('retains successful revalidation after the later one-shot ingress refusal', async () => {
+    const f = nativeFixture();
+    const session = create(f.input as never);
+    const result = await session.revalidator.revalidate(f.checked as never);
+    const error = await session.revalidator.revalidate(f.checked as never).catch(value => value);
+    expect(error).toBeInstanceOf(Error);
+    expect(projectEscapingOperation(error)).toBe('ingress-binding');
+    expect(session.broadcastAuthorizer.authorize({ checked: f.checked,
+      revalidationDigestHex: result.revalidationDigestHex } as never)).toBeDefined();
+    expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+  });
+
+  it('invalidates one Error reused across two actual native revalidation invocations', async () => {
+    const error = new Error('same opaque value');
+    for (let invocation = 0; invocation < 2; invocation += 1) {
+      const f = nativeFixture();
+      mocks.checkSignedTransaction.mockRejectedValueOnce(error);
+      await expect(create(f.input as never).revalidator.revalidate(f.checked as never)).rejects.toBe(error);
+      expect(projectEscapingOperation(error)).toBe(invocation === 0 ? 'fresh-signed-check' : null);
+    }
+  });
+
+  it.each(['factory', 'tag'] as const)('preserves failure when optional operation %s fails', async fault => {
+    const f = nativeFixture();
+    const session = create(f.input as never);
+    const error = new Error('original check failure');
+    mocks.checkSignedTransaction.mockRejectedValueOnce(error);
+    const spy = vi.spyOn(operations, 'createNativeCommittedReserveRevalidationOperationTaggerV1')
+      .mockImplementation(() => {
+        if (fault === 'factory') throw new Error('optional factory');
+        return () => { throw new Error('optional tag'); };
+      });
+    try {
+      await expect(session.revalidator.revalidate(f.checked as never)).rejects.toBe(error);
+      expect(projectEscapingOperation(error)).toBeNull();
+      await expect(session.revalidator.revalidate(f.checked as never)).rejects.toThrow(/one-shot/);
+      expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    } finally { spy.mockRestore(); }
+  });
+
+  it('preserves success when the optional operation factory fails', async () => {
+    const f = nativeFixture();
+    const session = create(f.input as never);
+    const spy = vi.spyOn(operations, 'createNativeCommittedReserveRevalidationOperationTaggerV1')
+      .mockImplementation(() => { throw new Error('optional factory'); });
+    try {
+      const result = await session.revalidator.revalidate(f.checked as never);
+      expect(session.broadcastAuthorizer.authorize({ checked: f.checked,
+        revalidationDigestHex: result.revalidationDigestHex } as never)).toBeDefined();
+      expect(mocks.checkSignedTransaction).toHaveBeenCalledOnce();
+    } finally { spy.mockRestore(); }
+  });
+
+  it('leaves legacy revalidation errors without native operation attribution', async () => {
+    const f = fixture();
+    const error = new Error('legacy check failure');
+    mocks.checkSignedTransaction.mockRejectedValueOnce(error);
+    await expect(createSubstrateFederatedIsolatedDevnetPegInCommittedVaultAuthorizationSessionV1(
+      f.input as never).revalidator.revalidate(f.checked as never)).rejects.toBe(error);
+    expect(projectEscapingOperation(error)).toBeNull();
+  });
+
+  it('preserves a primitive thrown by the actual native fresh checker', async () => {
+    const f = nativeFixture();
+    mocks.checkSignedTransaction.mockRejectedValueOnce('opaque primitive');
+    await expect(create(f.input as never).revalidator.revalidate(f.checked as never))
+      .rejects.toBe('opaque primitive');
+    expect(operations.projectNativeCommittedReserveRevalidationOperationV1('opaque primitive')).toBeNull();
+  });
 
   it('keeps full provenance checks outside the native equal-tip read window', async () => {
     const f = nativeFixture();

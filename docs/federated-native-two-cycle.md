@@ -261,6 +261,7 @@ Only the parent's terminal artifact determines the invocation outcome:
 | `worker-owner-stage-v2.json` / `failure-owner-stage-v2.json` | Optional worker/parent failure pair adding `invalid-timing` or `budget-exceeded` only at the exact owner completion check. It cannot classify a historical attempt. |
 | `worker-committed-reserve-stage.json` / `failure-committed-reserve-stage.json` | Optional worker/parent pair binding a closed native committed-reserve stage and `genesis` or `continuation` kind to the existing cycle-step and terminal failure ancestry. |
 | `worker-committed-reserve-revalidation.json` / `failure-committed-reserve-revalidation.json` | Optional worker/parent pair narrowing `operational-revalidate` to `callback-observation-guard` or `revalidator-call`, with exact committed-reserve-stage ancestry. |
+| `worker-committed-reserve-revalidation-operation.json` / `failure-committed-reserve-revalidation-operation.json` | Optional worker/parent pair identifying the last operation entered by the native revalidator, bound to the complete prior revalidation lineage. |
 | `worker-committed-reserve-confirmation-progress.json` / `failure-committed-reserve-confirmation-progress.json` | Optional opt-in worker/parent pair binding the latest completed paired-node index and exact-ID pool observations to the original confirmation failure, reserve kind and complete legacy ancestry. |
 
 Confirmation progress retains each node's full height before and after the
@@ -303,6 +304,19 @@ The origin identifies a call boundary, not an inner predicate or raw cause;
 completion, cleanup and raw-cause flags remain false. Existing receipt formats,
 digest domains, budgets and thrown values are unchanged. These files cannot
 classify earlier attempts or supply execution, signing or retry authority.
+
+The operation companion applies only to `revalidator-call`. Its six values are
+`ingress-binding`, `input-observation-before-check`, `fresh-signed-check`,
+`input-observation-after-check`, `post-check-observation-join` and
+`final-authorizer-binding`. The actual native revalidator owns the invocation
+token and tags the original escaping error. A second invocation reusing that
+error, conflicting labels, unsafe error graphs or cleanup ancestry refuse
+detail. A label names the last operation entered; it does not identify an
+inner predicate or raw cause. Each file is bounded to 16 KiB and binds config,
+commit, path and exact legacy worker/parent receipt digests. Missing, invalid
+or occupied optional files preserve the terminal failure and older receipts.
+Either operation file contradicts success. Completion, cleanup and raw-cause
+claims remain false. The companion grants no execution or retry authority.
 
 The setup-stage companion narrows a future native setup failure to retained
 session or compiler validation, request construction, observation, signing,

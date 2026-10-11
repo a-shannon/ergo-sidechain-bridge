@@ -57,6 +57,10 @@ import {
   normalizeEip12Box,
   type Eip12Box,
 } from './unsigned-ergo-transaction.js';
+import {
+  createNativeCommittedReserveRevalidationOperationTaggerV1,
+  type NativeCommittedReserveRevalidationOperationV1,
+} from './substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
 
 export const SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA =
   'e2s.substrate-federated-isolated-devnet-peg-in-committed-vault-broadcast-authorizer.v1' as const;
@@ -325,46 +329,61 @@ function createAuthorizationSession(
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>;
   const revalidator: RevalidatorPort = Object.freeze({
     revalidate: async checked => {
-      const material = assertAuthorizer(authorizer, input.target);
-      if (material.revalidationState !== 'fresh') {
-        throw new Error('isolated committed-vault revalidation is one-shot');
+      let operation: NativeCommittedReserveRevalidationOperationV1 = 'ingress-binding';
+      let tagOperation: ReturnType<typeof createNativeCommittedReserveRevalidationOperationTaggerV1> | undefined;
+      if (input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE) {
+        try { tagOperation = createNativeCommittedReserveRevalidationOperationTaggerV1(); }
+        catch { /* Optional attribution must preserve the original operation. */ }
       }
-      material.revalidationState = 'revalidating';
       try {
-        validateChecked(material, checked);
-        const {
-          observation,
-          freshJvmCheckResponseDigestHex,
-        } = await recheckAgainstStableTransitionInputs(material, packet);
-        assertAuthorizer(authorizer, input.target);
-        const revalidationDigestHex = sha256CanonicalJson({
-          schema:
-            SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
-          operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
-          processBindingDigestHex: material.binding.processBindingDigestHex,
-          executionTargetIdentityDigestHex:
-            material.binding.executionTargetIdentityDigestHex,
-          candidateDigestHex: material.candidateDigestHex,
-          expectedTxId: packet.transactions.reserveTransition.txId,
-          checkedTransactionDigestHex:
-            material.executionCheck.receipt.receiptDigestHex,
-          sourceLockObservationDigestHex:
-            material.sourceLockObservation.observationDigestHex,
-          preTransportObservationDigestHex: observation.observationDigestHex,
-          freshJvmCheckResponseDigestHex,
-        }, material.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
-          ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_COMMITTED_VAULT_REVALIDATION_V1'
-          : REVALIDATION_DIGEST_DOMAIN);
-        material.revalidation = Object.freeze({
-          checked,
-          observation,
-          freshJvmCheckResponseDigestHex,
-          revalidationDigestHex,
-        });
-        material.revalidationState = 'revalidated';
-        return Object.freeze({ revalidationDigestHex });
+        const material = assertAuthorizer(authorizer, input.target);
+        if (material.revalidationState !== 'fresh') {
+          throw new Error('isolated committed-vault revalidation is one-shot');
+        }
+        material.revalidationState = 'revalidating';
+        try {
+          validateChecked(material, checked);
+          const {
+            observation,
+            freshJvmCheckResponseDigestHex,
+          } = await recheckAgainstStableTransitionInputs(material, packet,
+            input.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+              ? entered => { operation = entered; } : undefined);
+          operation = 'final-authorizer-binding';
+          assertAuthorizer(authorizer, input.target);
+          const revalidationDigestHex = sha256CanonicalJson({
+            schema:
+              SUBSTRATE_FEDERATED_ISOLATED_DEVNET_PEG_IN_COMMITTED_VAULT_BROADCAST_AUTHORIZER_V1_SCHEMA,
+            operationProfile: PEG_IN_COMMITTED_VAULT_OPERATION_PROFILE,
+            processBindingDigestHex: material.binding.processBindingDigestHex,
+            executionTargetIdentityDigestHex:
+              material.binding.executionTargetIdentityDigestHex,
+            candidateDigestHex: material.candidateDigestHex,
+            expectedTxId: packet.transactions.reserveTransition.txId,
+            checkedTransactionDigestHex:
+              material.executionCheck.receipt.receiptDigestHex,
+            sourceLockObservationDigestHex:
+              material.sourceLockObservation.observationDigestHex,
+            preTransportObservationDigestHex: observation.observationDigestHex,
+            freshJvmCheckResponseDigestHex,
+          }, material.authorizationScope === NATIVE_AUTHORIZATION_SCOPE
+            ? 'E2S_SUBSTRATE_FEDERATED_NATIVE_GENESIS_PEG_IN_COMMITTED_VAULT_REVALIDATION_V1'
+            : REVALIDATION_DIGEST_DOMAIN);
+          material.revalidation = Object.freeze({
+            checked,
+            observation,
+            freshJvmCheckResponseDigestHex,
+            revalidationDigestHex,
+          });
+          material.revalidationState = 'revalidated';
+          return Object.freeze({ revalidationDigestHex });
+        } catch (error) {
+          material.revalidationState = 'failed';
+          throw error;
+        }
       } catch (error) {
-        material.revalidationState = 'failed';
+        try { tagOperation?.(error, operation); }
+        catch { /* Keep the original escaping value and its state transition. */ }
         throw error;
       }
     },
@@ -850,18 +869,23 @@ async function recheckExactSignedCandidate(
 async function recheckAgainstStableTransitionInputs(
   material: AuthorizerMaterialV1,
   packet: DepositPacket,
+  enterOperation?: (operation: NativeCommittedReserveRevalidationOperationV1) => void,
 ): Promise<Readonly<{
   observation: Readonly<
     SubstrateFederatedIsolatedDevnetPegInCommittedVaultPreTransportObservationV1
   >;
   freshJvmCheckResponseDigestHex: string;
 }>> {
+  enterOperation?.('input-observation-before-check');
   let before = await observeExactTransitionInputs(material, packet);
   if (material.nativeTips !== undefined) {
+    enterOperation?.('fresh-signed-check');
     const freshJvmCheckResponseDigestHex = await recheckExactSignedCandidate(material, before);
+    enterOperation?.('input-observation-after-check');
     const after = await observeExactTransitionInputs(material, packet, {
       height: before.observedTipHeight, idHex: before.observedTipHeaderIdHex,
     });
+    enterOperation?.('post-check-observation-join');
     assertObservationDidNotRegressOrReplace(before, after);
     return Object.freeze({ observation: after, freshJvmCheckResponseDigestHex });
   }

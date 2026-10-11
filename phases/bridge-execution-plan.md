@@ -28,7 +28,59 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–59 are permanently consumed or held. Separately admitted
+**Now:** Campaigns 24–60 are permanently consumed or held. Packaged C60 on local
+`5bfee4521b41d69a8a3a16f4094937e590f50871` terminated once at
+`2026-10-11T19:43:32.6475339Z`, with integer command exit 1, null launcher
+exception and no parent result. Main and independent review validated the
+bounded current public parent graph and canonical digest joins:
+`execution_failure/root-or-cleanup/cycle-1/committed-reserve/operational-revalidate/continuation/revalidator-call`.
+The inner predicate, raw cause, completion, cleanup and custody disposal remain
+unknown. Neither new diagnostics nor passing tests may reclassify C60.
+
+The existing genuine native continuation consumer already constructs and signs
+the packet and invokes the actual
+revalidator; the new cases retain the real Axios instance, raw JSON decoder and
+WASM box normalizer while replacing network observations through a test adapter.
+The pinned Sigma-state 6.0.2 codec emits numeric Long values and asset amounts.
+An intact response and an isolated witness reserve-value change pass their
+respective success/refusal expectations. Contiguous descendants at `+2` and `+64`
+pass; `+65` refuses before authorization, reservation or submission while the
+contract-height bounds remain open. Five focused cases, TypeScript, the import
+guard and exact independent source review pass. The complete 78-case file passes
+on the original authorizer; the five cases also pass on the new diagnostic
+producer. No public-source mismatch has been established. These fixtures do not establish
+actual node, custody or complete packaged lifecycle acceptance. No automatic
+C61, push or new CI; the local candidate requires affected validation,
+exact independent review and guarded local promotion.
+
+Invocation-owned metadata for the six existing internal native
+revalidator operations, carried through a new bounded optional worker/parent
+companion, is implemented locally. It identifies the last operation entered, rather than the inner
+predicate or raw cause. Preserve exact original throws, state transitions,
+legacy receipts, predicates, ordering, retries and budgets. Only escaping native
+errors receive detail; stale or conflicting tags, unsafe graphs and changed
+ancestry refuse it. This attribution preparation is not a proved correction
+or a reason to run another diagnostic-label campaign.
+
+The 85 actual-authorizer cases, 320 metadata/codec cases, exhaustive 412
+parent/worker cases in 17 serial exact-name shards, 359 architecture cases and
+TypeScript pass. The real import guard passes for 137 modules and 925 sources.
+Independent exact source review confirms unchanged underlying revalidation
+logic and legacy receipt bodies after removing diagnostic annotations. These
+selections overlap and are not summed. The 95 documentation/claims/bundle
+consumer cases pass. Exact claims review and guarded local promotion apply to
+the stable candidate; no push or new CI is selected.
+
+The next source-first feasibility check is full signed-continuation verification
+in the pinned JVM. The real fleet checker runs in the genuine fixture, but its
+node check response remains synthetic. The existing JVM export removes all
+three proofs and therefore cannot establish the missing signed-transaction join.
+Map a bounded offline consumer of the exact signed bytes, all input boxes and
+evaluation context before selecting implementation. One intact success and an
+isolated invalid fee proof would distinguish this scope. An SDK proof check is
+not node admission; neither outcome identifies C60's cause or authorizes C61.
+
+**Previous deciding result:** Separately admitted
 packaged C59 on local `e8edc8eb4d94d56c89a724f577eeb035052d8db8` terminated
 once at `2026-10-11T14:11:59.7249847Z`, with integer command exit 1, null
 launcher exception and no parent result. Independent review validated the
@@ -54,9 +106,10 @@ parent-result validation when supplied, a documented preparation command and
 strict checklist binding. This version remains blocked for release, with fixed
 open launcher/recovery/operator/custody/assurance/external-acceptance obligations
 and false completion/readiness claims. It preserves the authenticated-external-
-fee Gate 3 branch. Continue locally without push or new CI; no automatic C60.
-The current local result is a source-supported submission barrier and immutable
-completed-block height ceiling, retaining the original live attestation target.
+fee Gate 3 branch. The following barrier checkpoint is locally closed at
+`5bfee4521b41d69a8a3a16f4094937e590f50871`; C60 subsequently exercised it once.
+This checkpoint supplies a source-supported submission barrier and immutable
+completed-block height ceiling while retaining the original live attestation target.
 A fresh public Ergo development checkout implements the node producer and HTTP
 consumer. The actual bounded Scala runs pass 40 pure controls, 5 actor cases,
 10 HTTP cases and 18 legacy-generator cases. The eight-file cumulative patch
@@ -70,17 +123,16 @@ root checks pass in their scopes: 99 parser, 59 transport, 48 indexed-policy,
 13 extracted-body lifetime and 463 root cases. These selections overlap other
 checks and are not added together. Scoped independent source reviews cover the
 node, packaging, transport and original-target joins. Exact final manifest
-review and guarded local promotion precede fresh preparation; mocked composition
+review and guarded local promotion passed before fresh preparation; mocked composition
 does not establish actual process or lifecycle acceptance.
 The barrier must drain the exact submitted header, survive actor recreation and
 refuse late cached solutions. A pause receipt alone cannot establish index
 freshness; both indexes must reach its canonical watermark before reserve and
 distinct-fee observations are rechecked. Subsequent admitted mining must bind a
 fresh immutable ceiling to the fixed statement expiry. This development work
-supplies no campaign authority. After its exact local promotion, the selected
-next result is a separately fresh packaged lifecycle preparation, using the
-documented two-cycle entry point. No campaign label or invocation is admitted
-by this selection. Continue locally without publication; the genuine complete
+supplies no campaign authority. C60's separate fresh preparation, admission and
+one invocation did not close the lifecycle result. Continue locally without
+publication; the genuine complete
 packaged lifecycle and separately admitted recovery remain missing mandatory
 delivery results.
 
@@ -1785,13 +1837,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Owned submission pause -> indexed watermark -> original checkpoint attestation -> capped checkpoint miner -> fresh packaged preparation | Finish exact local review/promotion of the validated success-path contract, then prepare the documented complete two-cycle consumer with entirely fresh operation inputs | Actual bounded Scala suites and scoped relayer checks pass. Final manifest review and guarded local promotion precede fresh preparation. The FED preparation consumer stays blocked for release; C24-C59 holds remain permanent. Preparation is not dispatch authority; no automatic C60 |
+| **Now** | Fully signed continuation accepted by WASM -> pinned offline JVM consumer | Map exact signed-transaction/input-box/context API closure before implementation; distinguish intact acceptance from one invalid fee proof | Fleet runs genuinely, but the fixture's node-check response is synthetic and its existing JVM export is proofless. This check cannot establish node admission, C60's cause or campaign authority. C24-C60 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–59 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–60 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -1830,10 +1882,13 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Mining-barrier source-to-attestation join (local validation closed; final review/promotion due) | Establish the success-path contract while retaining original target/custody/credential guards | The cumulative node patch, four Scala suites, exact source reconstruction, one-way owned pause, indexed watermark, three fresh confirmations and immutable E−2 checkpoint mining are locally validated. Exact final review and guarded local promotion remain required; no push or new CI |
+| Signed-continuation JVM consumer feasibility (selected) | Exact fully signed bytes, three input boxes and evaluation context can reach an existing bounded pinned JVM verifier | Map source APIs and separate script/proof verification from full node transaction/state checks before implementation. Existing proofless export cannot satisfy this result. No broadcast, old custody, historical cause or campaign authority |
+| Native revalidation entered-operation join (locally validated) | Original escaping native error reaches optional bounded operation detail with unchanged failure semantics and complete prior revalidation ancestry | All six source-owned phases and isolated stale/conflicting/unsafe/cleanup refusals pass. Missing/invalid/occupied detail preserves old failures; contradictory success refuses. Source review GO and 95 generic consumer cases pass; exact final claims and guarded local promotion apply. Old schemas/bytes remain unchanged; no historical cause or execution authority |
+| Native continuation wire/advancing-header falsifier (locally closed) | Pass the genuine packet and checked handles through actual read decoding, normalization and revalidation; refuse one changed input or invalid header relation before authorization/reservation/submission | All 78 cases pass on the original authorizer; five focused cases also pass on the new diagnostic producer for intact response, reserve-value drift, descendants+2/+64 and ancestry+65. Signed identities, original73 cases and budgets remain unchanged. Component observations and checker responses are synthetic; no historical cause or campaign authority follows |
+| Mining-barrier source-to-attestation join (locally closed at5bfee452) | Establish the success-path contract while retaining original target/custody/credential guards | The cumulative node patch, four Scala suites, exact source reconstruction, one-way owned pause, indexed watermark, three fresh confirmations and immutable E−2 checkpoint mining passed exact independent review and guarded local promotion. C60 exercised this checkpoint once and failed upstream of the second pause; inner cause and lifecycle completion remain unknown. No push or new CI |
 | FED report-to-release preparation (locally closed) | Produce a dedicated canonical FED report and connect it to the actual release CLI/checklist without relabelling Gate 3 | The documented producer and strict release consumer are locally validated at the retained checkpoint. Candidate/target binding, fixed open obligations and false completion/readiness claims remain required; a later candidate needs its own exact preparation report |
 | Admission-window producer/decoder falsifier (locally closed) | Same fixed statement/anchor under two contiguous advancing header views reaches genuine expiry | Ten file cases, TypeScript and independent exact review pass. This is a prospective boundary test, not process/signature acceptance or C59's cause; a guard alone is not a lifecycle correction |
-| Fresh packaged two-cycle preparation (selected next after exact local promotion) | Prepare the missing genuine lifecycle consumer under the locally justified success-path contract | Full canonical BOTH baselines and source/tool/cache/native prerequisites, fresh package outputs, fresh empty attempt outputs, exact new callers/config, independent admission review and final process/port/100GiB gates precede any separately selected one-use dispatch. Standing synthetic-loopback scope remains bounded; no existing secrets, funds, public chain or automatic label campaign |
+| Fresh packaged two-cycle preparation (requires a separate distinguishing selection) | Prepare the missing genuine lifecycle consumer under a locally justified operation contract | A changed hypothesis or source input must first justify a distinguishing result. Full canonical BOTH baselines and source/tool/cache/native prerequisites, fresh package outputs, fresh empty attempt outputs, exact new callers/config, independent admission review and final process/port/100GiB gates precede any separately selected one-use dispatch. Standing synthetic-loopback scope remains bounded; no existing secrets, funds, public chain or automatic label campaign |
 | Tracker statement admission comparisons (locally closed) | Own genuine before-window/expiry relation reaches the existing unique-primary tracker statement check and worker/parent codecs | Original errors, predicates, old bytes and broad admission-horizon preserved. Actual producer tests, isolated projection/codecs, composed consumers, operator docs and exact independent review pass; no push/new CI or historical C58 cause |
 | Committed-reserve confirmation progress (closed on 6f2564d06) | Genuine opt-in observer capture reaches bounded separate worker/parent companions with original diagnostic and legacy ancestry | Local closure, independent review and exact-head CI passed. Reuse unchanged evidence in scope; optional reads can affect cost/count/deadline category. Neither C57 cause nor C58 authority follows |
 | Windows output fixture preparation (closed and published) | Prepare exact selected C# source freshly before the target interval, bind compiler/configuration/source/DLL bytes, and retain all genuine process/pipe/handle probes and limits | Independent review, guarded publication and all three exact-head jobs passed at b269ccc61 in run38045567224. Reuse the 29 affected local cases and exact source/probe equivalence. Compilation remains inside each original30s case; target loading and live probes remain inside target10s. Hosted cause and speedup are not established |

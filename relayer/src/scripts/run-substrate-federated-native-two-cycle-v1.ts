@@ -36,6 +36,8 @@ import { createNativeTwoCycleParentCommittedReserveStageV1 }
   from '../substrate-federated-native-committed-reserve-failure-v1.js';
 import { createNativeTwoCycleParentCommittedReserveRevalidationV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
+import { createNativeTwoCycleParentCommittedReserveRevalidationOperationV1 }
+  from '../substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
 import { createNativeTwoCycleParentCommittedReserveConfirmationV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
 import { createNativeTwoCycleParentCommittedReserveConfirmationProgressV1 }
@@ -245,6 +247,8 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       || existsSync(join(attemptPath, 'failure-committed-reserve-stage.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-revalidation.json'))
       || existsSync(join(attemptPath, 'failure-committed-reserve-revalidation.json'))
+      || existsSync(join(attemptPath, 'worker-committed-reserve-revalidation-operation.json'))
+      || existsSync(join(attemptPath, 'failure-committed-reserve-revalidation-operation.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation.json'))
       || existsSync(join(attemptPath, 'failure-committed-reserve-confirmation.json'))
       || existsSync(join(attemptPath, 'worker-committed-reserve-confirmation-progress.json'))
@@ -562,6 +566,33 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
             'native two-cycle parent committed reserve revalidation companion');
         } catch {
           // Optional origin preserves the failure and all older diagnostic receipts.
+        }
+        try {
+          const bindings = {
+            configSha256Hex: initial.configSha256Hex,
+            expectedBridgeCommit: initial.config.expectedBridgeCommit,
+            pathIdentityDigestHex: initial.pathIdentityDigestHex,
+          };
+          const readCompanion = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(attemptPath, name),
+              'native committed reserve revalidation operation lineage', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleParentCommittedReserveRevalidationOperationV1(
+            bindings, failure.receiptDigestHex, {
+              workerFailureText: readCompanion('worker-failure.json'),
+              workerRootPhaseV2Text: readCompanion('worker-root-phase-v2.json'),
+              workerCycleStepText: readCompanion('worker-cycle-step.json'),
+              workerCommittedReserveStageText: readCompanion('worker-committed-reserve-stage.json'),
+              parentCycleStepText: readCompanion('failure-cycle-step.json'),
+              parentCommittedReserveStageText: readCompanion('failure-committed-reserve-stage.json'),
+              workerRevalidationText: readCompanion('worker-committed-reserve-revalidation.json'),
+              parentRevalidationText: readCompanion('failure-committed-reserve-revalidation.json'),
+              workerRevalidationOperationText: readCompanion('worker-committed-reserve-revalidation-operation.json'),
+            });
+          writeNewFile(join(attemptPath, 'failure-committed-reserve-revalidation-operation.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native committed reserve revalidation operation companion');
+        } catch {
+          // Missing, invalid or occupied operation detail preserves all older evidence.
         }
         try {
           const bindings = {

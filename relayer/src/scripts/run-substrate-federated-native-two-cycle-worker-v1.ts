@@ -28,6 +28,9 @@ import { createNativeTwoCycleWorkerCommittedReserveStageV1,
 import { createNativeTwoCycleWorkerCommittedReserveRevalidationV1,
   projectNativeCommittedReserveRevalidationOriginV1 }
   from '../substrate-federated-native-committed-reserve-revalidation-v1.js';
+import { createNativeTwoCycleWorkerCommittedReserveRevalidationOperationV1,
+  projectNativeCommittedReserveRevalidationOperationV1 }
+  from '../substrate-federated-native-committed-reserve-revalidation-operation-v1.js';
 import { createNativeTwoCycleWorkerCommittedReserveConfirmationV1,
   projectNativeCommittedReserveConfirmationOriginV1 }
   from '../substrate-federated-native-committed-reserve-confirmation-v1.js';
@@ -341,6 +344,28 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
         }
       } catch {
         // Optional origin cannot alter the terminal failure or its existing lineage.
+      }
+      try {
+        const operation = projectNativeCommittedReserveRevalidationOperationV1(primaryFailure);
+        if (operation !== null && workerFailureText !== undefined
+          && workerRootPhaseV2Text !== undefined && workerCycleStepText !== undefined) {
+          const readOperationAncestor = (name: string) => new TextDecoder('utf-8', { fatal: true }).decode(
+            readBoundedRegularFile(join(invocation.attemptPath, name),
+              'native committed reserve revalidation operation ancestry', 16 * 1024).bytes);
+          const companion = createNativeTwoCycleWorkerCommittedReserveRevalidationOperationV1({
+            configSha256Hex: invocation.configSha256Hex,
+            expectedBridgeCommit: invocation.config.expectedBridgeCommit,
+            pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          }, { workerFailureText, workerRootPhaseV2Text, workerCycleStepText,
+            workerCommittedReserveStageText: readOperationAncestor('worker-committed-reserve-stage.json'),
+            workerRevalidationText: readOperationAncestor('worker-committed-reserve-revalidation.json'),
+          }, operation);
+          writeNewFile(join(invocation.attemptPath, 'worker-committed-reserve-revalidation-operation.json'),
+            Buffer.from(`${canonicalJson(companion)}\n`, 'utf8'),
+            'native committed reserve revalidation operation companion');
+        }
+      } catch {
+        // Optional entered-operation detail never replaces failure or older receipts.
       }
       try {
         const detail = projectNativeCommittedReserveConfirmationOriginV1(primaryFailure);
