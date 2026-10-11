@@ -489,7 +489,7 @@ export function validateConsensusSourceLock(
       'operator-provided',
       'Ergo extension commitment input must remain operator-provided',
     );
-    validatePatchedFiles(errors, ergoNode.files, 'Ergo', false);
+    validateErgoPatchedFiles(errors, ergoNode.files);
 
     if (!sameHex(ergoNode.patchSha256, observed.ergoPatchSha256)) {
       errors.push('Ergo extension patch SHA-256 does not match the source lock');
@@ -1263,20 +1263,9 @@ export function validateErgoCheckout(
     errors.push('Ergo checkout HEAD does not match the source lock base commit');
   }
 
-  const files = Array.isArray(ergoNode.files)
-    ? ergoNode.files.map(asRecord).filter((file): file is Record<string, unknown> => !!file)
-    : [];
-  const expectedLines = files
-    .map(file => typeof file.path === 'string' ? ` M ${file.path}` : '')
-    .filter(Boolean)
-    .sort();
-  const observedLines = observed.status
-    .split(/\r?\n/)
-    .map(line => line.trimEnd())
-    .filter(Boolean)
-    .sort();
-  const expectedStatus = expectedLines.join('\n');
-  if (JSON.stringify(observedLines) !== JSON.stringify(expectedLines)) {
+  const files = validateErgoPatchedFiles(errors, ergoNode.files);
+  const expectedStatus = expectedPatchStatus(files, true);
+  if (normalizedStatus(observed.status) !== expectedStatus) {
     errors.push('Ergo checkout changes must be limited to the declared patch files');
   }
 
@@ -1292,6 +1281,44 @@ export function validateErgoCheckout(
   }
 
   return { errors, observedBlobs: observed.blobs, expectedStatus };
+}
+
+function validateErgoPatchedFiles(errors: string[], value: unknown): DeclaredPatchFile[] {
+  const initialErrorCount = errors.length;
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push('Ergo patch files must be a non-empty array');
+    return [];
+  }
+
+  const files: DeclaredPatchFile[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    const file = asRecord(entry);
+    if (!file || typeof file.path !== 'string' || !isSafeRelativePath(file.path)
+      || /[\r\n]/.test(file.path)) {
+      errors.push('Ergo patch file paths must be safe repository-relative paths');
+      continue;
+    }
+    if (seen.has(file.path)) errors.push('Ergo patch file paths must be unique');
+    seen.add(file.path);
+    // Historical Ergo locks omitted status for their existing modified files.
+    const status = 'status' in file ? file.status : 'modified';
+    if (status !== 'modified' && status !== 'added') {
+      errors.push('Ergo patch file status must be modified or added');
+      continue;
+    }
+    if (status === 'added') {
+      if ('baseBlob' in file) {
+        errors.push(`Ergo added patch file ${file.path} must not declare a base blob`);
+      }
+    } else {
+      requireSha1(errors, file.baseBlob, `Ergo base blob ${file.path}`);
+    }
+    requireSha1(errors, file.patchedBlob, `Ergo patched blob ${file.path}`);
+    files.push({ path: file.path, status, patchedBlob: file.patchedBlob as string });
+  }
+  // A malformed declaration is never projected into a valid checkout subset.
+  return errors.length === initialErrorCount ? files : [];
 }
 
 function validatePatchedFiles(

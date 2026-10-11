@@ -422,7 +422,7 @@ jobs:
 
       - name: Test Ergo extension producer patch
         working-directory: .source-cache/ergo-node
-        run: sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"
+        run: sbt "testOnly org.ergoplatform.mining.OwnedMiningSubmissionV1Spec" "testOnly org.ergoplatform.mining.OwnedMiningSubmissionActorSpec" "testOnly org.ergoplatform.http.routes.MiningApiRouteSpec" "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"
 
       - name: Build patched Ergo node
         working-directory: .source-cache/ergo-node

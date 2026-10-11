@@ -23,8 +23,16 @@ import {
 } from 'node:path';
 import { isIP } from 'node:net';
 import { performance } from 'node:perf_hooks';
+import { types } from 'node:util';
 
 import { sha256CanonicalJson } from './ergo-settlement-core/strict-json.js';
+import {
+  createOwnedErgoMiningSubmissionControlV1,
+  type OwnedErgoMiningSubmissionControlV1,
+} from './owned-ergo-mining-submission-control-v1.js';
+import type {
+  OwnedErgoMiningSubmissionPauseReceiptV1,
+} from './owned-ergo-mining-submission-v1.js';
 import {
   buildErgoExtensionMembershipProof,
 } from './ergo-settlement-core/ergo-extension-membership.js';
@@ -129,6 +137,14 @@ const OWNED_READ_ONLY_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>(
 const ACTIVE_OWNED_READ_ONLY_TARGETS = new WeakSet<object>();
 const OWNED_EXECUTION_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_EXECUTION_TARGETS = new WeakSet<object>();
+const OWNED_MINING_SUBMISSION_CONTROLS =
+  new WeakMap<ChildProcess, Readonly<OwnedErgoMiningSubmissionControlV1>>();
+const OWNED_MINING_SUBMISSION_PAUSE_TARGETS = new WeakMap<
+  object, () => Promise<Readonly<SubstrateFederatedIsolatedDevnetMiningPauseObservationV1>>
+>();
+const OWNED_MINING_SUBMISSION_PAUSE_OBSERVATIONS = new WeakMap<
+  object, Readonly<{ target: object; revalidate: () => Promise<void> }>
+>();
 const OWNED_CHECKPOINT_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_CHECKPOINT_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS =
@@ -198,6 +214,7 @@ function createErgoNodeStartupPhaseFailureV1(
 export function deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
   priorHeight: number,
   minimumTipHeight?: number,
+  maximumBlockHeight?: number,
 ): number {
   if (
     !Number.isSafeInteger(priorHeight)
@@ -215,7 +232,16 @@ export function deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
   ) {
     throw new Error('isolated checkpoint minimum tip height is invalid');
   }
-  return Math.max(priorHeight + 1, minimumTipHeight ?? 0);
+  if (maximumBlockHeight !== undefined && (!Number.isSafeInteger(maximumBlockHeight)
+    || Object.is(maximumBlockHeight, -0) || maximumBlockHeight < 0
+    || maximumBlockHeight > 2_147_483_647)) {
+    throw new Error('isolated checkpoint maximum block height is invalid');
+  }
+  const requiredHeight = Math.max(priorHeight + 1, minimumTipHeight ?? 0);
+  if (maximumBlockHeight !== undefined && requiredHeight > maximumBlockHeight) {
+    throw new Error('isolated checkpoint required height exceeds its maximum block height');
+  }
+  return requiredHeight;
 }
 
 type NodeRole = 'primary' | 'witness';
@@ -242,6 +268,11 @@ interface TargetSnapshot {
   readonly fullHeight: number;
   readonly indexedHeight: number;
   readonly headerIdHex: string;
+}
+
+export interface SubstrateFederatedIsolatedDevnetMiningPauseObservationV1 {
+  readonly pauseReceipt: Readonly<OwnedErgoMiningSubmissionPauseReceiptV1>;
+  readonly snapshot: Readonly<TargetSnapshot>;
 }
 
 interface OwnedNode {
@@ -290,6 +321,7 @@ interface CheckpointExecutionContinuation {
   readonly checkpointSnapshot: Readonly<TargetSnapshot>;
   readonly executionTargetIdentityDigestHex: string;
   readonly checkpointExtensionObservationDigestHex: string;
+  readonly maximumBlockHeight?: number;
 }
 
 interface TrackerReservationFreshnessContinuation {
@@ -472,6 +504,35 @@ export type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1 = Pick<
 
 export interface SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1 {
   readonly minimumTipHeight?: number;
+  readonly maximumBlockHeight?: number;
+}
+
+export function captureSubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1(
+  value: Readonly<SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1>,
+): Readonly<SubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1> {
+  if (typeof value !== 'object' || value === null || types.isProxy(value)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    throw new Error('isolated Ergo checkpoint mining policy is invalid');
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).some(key => typeof key !== 'string'
+    || !['minimumTipHeight', 'maximumBlockHeight'].includes(key)
+    || !Object.hasOwn(descriptors[key]!, 'value') || !descriptors[key]!.enumerable)) {
+    throw new Error('isolated Ergo checkpoint mining policy is invalid');
+  }
+  const minimumTipHeight: unknown = descriptors.minimumTipHeight?.value;
+  const maximumBlockHeight: unknown = descriptors.maximumBlockHeight?.value;
+  if ((minimumTipHeight !== undefined && (typeof minimumTipHeight !== 'number'
+    || !Number.isSafeInteger(minimumTipHeight) || minimumTipHeight < 0))
+    || (Object.hasOwn(descriptors, 'maximumBlockHeight') && (typeof maximumBlockHeight !== 'number'
+      || !Number.isSafeInteger(maximumBlockHeight) || Object.is(maximumBlockHeight, -0)
+      || maximumBlockHeight < 0 || maximumBlockHeight > 2_147_483_647))) {
+    throw new Error('isolated Ergo checkpoint mining policy is invalid');
+  }
+  return Object.freeze({
+    ...(minimumTipHeight === undefined ? {} : { minimumTipHeight: minimumTipHeight as number }),
+    ...(maximumBlockHeight === undefined ? {} : { maximumBlockHeight: maximumBlockHeight as number }),
+  });
 }
 
 export interface SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1 {
@@ -853,6 +914,32 @@ export function assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(
     executionTargetIdentityDigestHex:
       binding.executionTargetIdentityDigestHex,
   });
+}
+
+export async function pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Promise<Readonly<SubstrateFederatedIsolatedDevnetMiningPauseObservationV1>> {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const pause = OWNED_MINING_SUBMISSION_PAUSE_TARGETS.get(target);
+  if (pause === undefined) {
+    throw new Error('isolated Ergo mining pause is not bound to this active target');
+  }
+  const observation = await pause();
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  return observation;
+}
+
+export async function revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  observation: Readonly<SubstrateFederatedIsolatedDevnetMiningPauseObservationV1>,
+): Promise<void> {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const binding = OWNED_MINING_SUBMISSION_PAUSE_OBSERVATIONS.get(observation);
+  if (binding === undefined || binding.target !== target) {
+    throw new Error('isolated Ergo mining pause observation is not bound to this active target');
+  }
+  await binding.revalidate();
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
 }
 
 export function assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1(
@@ -1436,6 +1523,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           executionTargetIdentityDigestHex,
           assertActiveProcesses,
         }));
+        bindOwnedMiningSubmissionPause(target, primary, witness, assertActiveProcesses);
         state = 'action';
         ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
         let value: T;
@@ -1636,14 +1724,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
       if (typeof action !== 'function') {
         throw new Error('isolated Ergo checkpoint mining action is required');
       }
-      if (
-        typeof policy !== 'object'
-        || policy === null
-        || Array.isArray(policy)
-        || Object.keys(policy).some(key => key !== 'minimumTipHeight')
-      ) {
-        throw new Error('isolated Ergo checkpoint mining policy is invalid');
-      }
+      const miningPolicy = captureSubstrateFederatedIsolatedDevnetCheckpointMiningPolicyV1(policy);
       const checkpointExtensionValueHex = fixedHex(
         checkpointExtensionValueHexValue,
         64,
@@ -1663,7 +1744,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
         const requiredCheckpointTipHeight =
           deriveSubstrateFederatedIsolatedDevnetCheckpointTipHeightV1(
             priorSnapshot.fullHeight,
-            policy.minimumTipHeight,
+            miningPolicy.minimumTipHeight,
+            miningPolicy.maximumBlockHeight,
           );
         await assertStableExactSnapshot(primary, witness, priorSnapshot);
         await stopOwnedNode(primary, true);
@@ -1687,6 +1769,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               'mining',
               ephemeralMiningMnemonic,
               extensionFields,
+              undefined,
+              miningPolicy.maximumBlockHeight,
             );
           },
         );
@@ -1712,6 +1796,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           witness,
           requiredCheckpointTipHeight - 1,
         );
+        assertMiningSnapshotCeiling(minedSnapshot, miningPolicy.maximumBlockHeight);
 
         await stopOwnedNode(primary, true);
         primary = undefined;
@@ -1728,6 +1813,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           extensionFields,
         );
         const finalSnapshot = await waitForMinimumIndexedSnapshot(primary);
+        assertMiningSnapshotCeiling(finalSnapshot, miningPolicy.maximumBlockHeight);
         witness = spawnOwnedNode(
           input,
           runtime,
@@ -1814,6 +1900,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           checkpointSnapshot: finalSnapshot,
           executionTargetIdentityDigestHex,
           checkpointExtensionObservationDigestHex,
+          ...(miningPolicy.maximumBlockHeight === undefined ? {} : { maximumBlockHeight: miningPolicy.maximumBlockHeight }),
         });
 
         const receipt: SubstrateFederatedIsolatedDevnetCheckpointMiningV1Receipt =
@@ -1897,6 +1984,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               'mining',
               ephemeralMiningMnemonic,
               continuation.extensionFields,
+              undefined,
+              continuation.maximumBlockHeight,
             );
           },
         );
@@ -1923,6 +2012,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           primary,
           witness,
         );
+        assertMiningSnapshotCeiling(initialSnapshot, continuation.maximumBlockHeight);
         await assertCheckpointRemainsCanonical(
           primary,
           witness,
@@ -2016,6 +2106,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           undefined,
           continuation.extensionFields,
         );
+        assertMiningSnapshotCeiling(finalSnapshot, continuation.maximumBlockHeight);
         await waitForExactSnapshot(witness, finalSnapshot, STARTUP_TIMEOUT_MS);
         assertOwnedNodeIdentity(input, runtime, primary);
         assertOwnedNodeIdentity(input, runtime, witness);
@@ -2119,6 +2210,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               'mining',
               ephemeralMiningMnemonic,
               continuation.extensionFields,
+              undefined,
+              continuation.maximumBlockHeight,
             );
           },
         );
@@ -2145,6 +2238,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           primary,
           witness,
         );
+        assertMiningSnapshotCeiling(preFreezeMiningSnapshot, continuation.maximumBlockHeight);
         await assertCheckpointRemainsCanonical(
           primary,
           witness,
@@ -2167,6 +2261,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           continuation.extensionFields,
         );
         const frozenSnapshot = await waitForMinimumIndexedSnapshot(primary);
+        assertMiningSnapshotCeiling(frozenSnapshot, continuation.maximumBlockHeight);
         witness = spawnOwnedNode(
           input,
           runtime,
@@ -2922,6 +3017,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           executionTargetIdentityDigestHex,
           assertActiveProcesses,
         }));
+        bindOwnedMiningSubmissionPause(target, primary, witness, assertActiveProcesses);
         OWNED_TRACKER_CONFIRMATION_TARGET_PARENTS.set(target, Object.freeze({
           trackerTransportProcessBindingDigestHex: continuation.trackerTransportProcessBindingDigestHex,
           trackerTransportExecutionTargetIdentityDigestHex: continuation.trackerTransportExecutionTargetIdentityDigestHex,
@@ -3446,6 +3542,7 @@ function spawnOwnedNode(
   ephemeralMiningMnemonic?: string,
   extensionFields: string = INITIAL_EXTENSION_FIELDS,
   requiredMiningTransactionIdHex?: string,
+  maximumBlockHeight?: number,
 ): OwnedNode {
   const requiresMiningSecret = role === 'primary' && mode === 'mining';
   if (
@@ -3497,17 +3594,34 @@ function spawnOwnedNode(
     '--config',
     configPath,
   ];
+  const miningSubmissionControl = requiresMiningSecret
+    ? createOwnedErgoMiningSubmissionControlV1(maximumBlockHeight ?? null) : undefined;
+  if (maximumBlockHeight !== undefined && !requiresMiningSecret) {
+    throw new Error('isolated Ergo mining block ceiling does not match the process role');
+  }
+  const environment = minimalEnvironment(
+    ephemeralMiningMnemonic,
+    extensionFields,
+    requiredMiningTransactionIdHex,
+  );
+  if (miningSubmissionControl !== undefined) {
+    environment.ERGO_SIDECHAIN_OWNED_MINING_NONCE_SHA256 =
+      miningSubmissionControl.nonceSha256Hex;
+    if (miningSubmissionControl.maximumBlockHeight !== null) {
+      environment.ERGO_SIDECHAIN_MAXIMUM_MINING_BLOCK_HEIGHT =
+        String(miningSubmissionControl.maximumBlockHeight);
+    }
+  }
   const child = spawn(input.javaExecutablePath, args, {
     cwd: runtime.root,
     shell: false,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: minimalEnvironment(
-      ephemeralMiningMnemonic,
-      extensionFields,
-      requiredMiningTransactionIdHex,
-    ),
+    env: environment,
   });
+  if (miningSubmissionControl !== undefined) {
+    OWNED_MINING_SUBMISSION_CONTROLS.set(child, miningSubmissionControl);
+  }
   child.stdout?.resume();
   child.stderr?.resume();
   child.once('error', () => {
@@ -3533,6 +3647,12 @@ async function waitForBasicNodeReadiness(node: Readonly<OwnedNode>): Promise<voi
   });
 }
 
+function assertMiningSnapshotCeiling(snapshot: Readonly<TargetSnapshot>, maximumBlockHeight?: number): void {
+  if (maximumBlockHeight !== undefined && snapshot.fullHeight > maximumBlockHeight) {
+    throw new Error('isolated Ergo indexed snapshot exceeds its immutable mining block ceiling');
+  }
+}
+
 async function waitForMinimumIndexedSnapshot(
   node: Readonly<OwnedNode>,
 ): Promise<Readonly<TargetSnapshot>> {
@@ -3548,6 +3668,7 @@ async function waitForMinimumIndexedSnapshot(
 async function waitForCommonIndexedSnapshot(
   primary: Readonly<OwnedNode>,
   witness: Readonly<OwnedNode>,
+  minimumIndexedHeight: number = MINIMUM_MINED_HEIGHT,
 ): Promise<Readonly<TargetSnapshot>> {
   return await retryNode(primary, MINING_TIMEOUT_MS, async () => {
     assertLive(witness);
@@ -3560,10 +3681,117 @@ async function waitForCommonIndexedSnapshot(
       || !isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(witnessSnapshot)
       || primarySnapshot.fullHeight !== witnessSnapshot.fullHeight
       || primarySnapshot.headerIdHex !== witnessSnapshot.headerIdHex
+      || primarySnapshot.indexedHeight < minimumIndexedHeight
+      || witnessSnapshot.indexedHeight < minimumIndexedHeight
     ) {
       throw new Error('isolated Ergo execution pair has not reached one common tip');
     }
     return primarySnapshot;
+  });
+}
+
+export function assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1(
+  input: Readonly<{
+    watermark: OwnedErgoMiningSubmissionPauseReceiptV1['latestAppliedBlock'];
+    primarySnapshot: Readonly<TargetSnapshot>;
+    witnessSnapshot: Readonly<TargetSnapshot>;
+    primaryHeaderIdsAtWatermark: unknown;
+    witnessHeaderIdsAtWatermark: unknown;
+  }>,
+): void {
+  const { watermark, primarySnapshot, witnessSnapshot } = input;
+  if (watermark === null || !Number.isSafeInteger(watermark.height)
+    || watermark.height < 1 || watermark.height > 2_147_483_647
+    || typeof watermark.headerId !== 'string' || !/^[0-9a-f]{64}$/u.test(watermark.headerId)) {
+    throw new Error('isolated Ergo mining pause applied watermark is absent or invalid');
+  }
+  for (const snapshot of [primarySnapshot, witnessSnapshot]) {
+    if (snapshot.network !== 'devnet'
+      || !Number.isSafeInteger(snapshot.fullHeight) || snapshot.fullHeight < MINIMUM_MINED_HEIGHT
+      || snapshot.fullHeight > 2_147_483_647 || snapshot.indexedHeight !== snapshot.fullHeight
+      || snapshot.indexedHeight < watermark.height
+      || typeof snapshot.headerIdHex !== 'string' || !/^[0-9a-f]{64}$/u.test(snapshot.headerIdHex)) {
+      throw new Error('isolated Ergo mining pause index has not reached its applied watermark');
+    }
+  }
+  if (primarySnapshot.fullHeight !== witnessSnapshot.fullHeight
+    || primarySnapshot.headerIdHex !== witnessSnapshot.headerIdHex) {
+    throw new Error('isolated Ergo mining pause nodes do not share one indexed tip');
+  }
+  if (primarySnapshot.fullHeight === watermark.height
+    && primarySnapshot.headerIdHex !== watermark.headerId) {
+    throw new Error('isolated Ergo mining pause tip contradicts its applied watermark');
+  }
+  for (const value of [input.primaryHeaderIdsAtWatermark, input.witnessHeaderIdsAtWatermark]) {
+    if (!Array.isArray(value) || value.length !== 1 || value[0] !== watermark.headerId) {
+      throw new Error('isolated Ergo mining pause watermark is not canonical on both nodes');
+    }
+  }
+}
+
+function bindOwnedMiningSubmissionPause(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  primary: Readonly<OwnedNode>,
+  witness: Readonly<OwnedNode>,
+  assertActiveProcesses: () => void,
+): void {
+  const control = OWNED_MINING_SUBMISSION_CONTROLS.get(primary.child);
+  if (control === undefined || primary.role !== 'primary' || primary.mode !== 'mining') {
+    throw new Error('isolated Ergo mining pause control is absent');
+  }
+  const assertOriginalTarget = (): void => {
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+    assertActiveProcesses();
+    assertLive(primary);
+    assertLive(witness);
+  };
+  OWNED_MINING_SUBMISSION_PAUSE_TARGETS.set(target, async () => {
+    assertOriginalTarget();
+    const pauseReceipt = await control.pause();
+    assertOriginalTarget();
+    const watermark = pauseReceipt.latestAppliedBlock;
+    if (watermark === null) {
+      throw new Error('isolated Ergo mining pause has no applied watermark');
+    }
+    const snapshot = await waitForCommonIndexedSnapshot(primary, witness, watermark.height);
+    const validateWatermark = async (): Promise<void> => {
+      assertOriginalTarget();
+      const path = `/blocks/at/${watermark.height}`;
+      const [primarySnapshot, witnessSnapshot, primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark] =
+        await Promise.all([
+          readTargetSnapshot(primary), readTargetSnapshot(witness),
+          getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path),
+          getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, path),
+        ]);
+      assertOriginalTarget();
+      assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1({
+        watermark, primarySnapshot, witnessSnapshot,
+        primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
+      });
+      assertExactSnapshot(primarySnapshot, snapshot, 'primary');
+      assertExactSnapshot(witnessSnapshot, snapshot, 'witness');
+      await assertStableExactSnapshot(primary, witness, snapshot);
+      assertOriginalTarget();
+      const [primaryAfter, witnessAfter, primaryIdsAfter, witnessIdsAfter] = await Promise.all([
+        readTargetSnapshot(primary), readTargetSnapshot(witness),
+        getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path),
+        getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, path),
+      ]);
+      assertOriginalTarget();
+      assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1({
+        watermark, primarySnapshot: primaryAfter, witnessSnapshot: witnessAfter,
+        primaryHeaderIdsAtWatermark: primaryIdsAfter, witnessHeaderIdsAtWatermark: witnessIdsAfter,
+      });
+      assertExactSnapshot(primaryAfter, snapshot, 'primary');
+      assertExactSnapshot(witnessAfter, snapshot, 'witness');
+      assertOriginalTarget();
+    };
+    await validateWatermark();
+    assertOriginalTarget();
+    const observation = Object.freeze({ pauseReceipt, snapshot });
+    OWNED_MINING_SUBMISSION_PAUSE_OBSERVATIONS.set(observation,
+      Object.freeze({ target, revalidate: validateWatermark }));
+    return observation;
   });
 }
 

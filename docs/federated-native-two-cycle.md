@@ -207,6 +207,25 @@ worker. Existing attempts are refused. The worker calls the native root once.
 Both external miner-fee inputs must be confirmed before each corresponding
 checkpoint anchor is frozen.
 
+Before attesting either checkpoint, the original owned mining target requests
+its one-way submission pause. The node drains the exact pending submitted
+header before acknowledging the pause; an acknowledgment alone does not prove
+that the indexes are current. The relayer requires both indexes to reach one
+common tip with the acknowledged watermark in their canonical ancestry. It
+then reobserves the reserve and both distinct external fee transactions at that
+tip, preserving their exact confirmation heights and header IDs, and rechecks
+the same snapshot and watermark before attestation. The original target and
+callback must remain active through these operations.
+
+For the resulting fixed validity window `[V, E)`, subsequent checkpoint mining
+receives an immutable maximum submitted-block height of `E - 2`. A required
+minimum height beyond that ceiling is refused before credential consumption.
+The source control checks the completed block selected from the current or
+previous cached candidate before submitting its sections. Later indexed
+snapshots must also respect the ceiling. The separately authorized tracker
+transport retains its exact required-transaction gate; it does not resume the
+paused process or inherit authority from a pause receipt.
+
 Build-output freshness is an admission prerequisite only. The identity checks
 after worker success or failure still accept the build outputs created by that
 worker; they verify repository and tool identity and do not demand an empty

@@ -137,6 +137,22 @@ const ergoNode = {
   ],
 };
 
+const addedErgoPath = 'src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala';
+
+function mixedErgoCheckoutFixture() {
+  const declaration: any = structuredClone(ergoNode);
+  declaration.files.push({ path: addedErgoPath, status: 'added', patchedBlob: '6'.repeat(40) });
+  return {
+    declaration,
+    observation: {
+      head: declaration.baseCommit,
+      status: declaration.files.map((file: any) =>
+        `${file.status === 'added' ? '??' : ' M'} ${file.path}`).join('\n'),
+      blobs: Object.fromEntries(declaration.files.map((file: any) => [file.path, file.patchedBlob])),
+    },
+  };
+}
+
 const solidityBuild = {
   schema: 'ergo-sidechain-bridge/solidity-build-closure/v1',
   manifestPath: 'solidity/compiled/build-manifest.json',
@@ -848,6 +864,181 @@ describe('consensus source baseline', () => {
     expect(extraChange.errors).toContain(
       'Ergo checkout changes must be limited to the declared patch files',
     );
+  });
+
+  it.each(['legacy omitted', 'explicit modified'])(
+    'accepts exact unstaged Ergo additions with %s modified declarations',
+    async (modifiedStatus) => {
+      const baseline = await loadBaselineModule();
+      expect(baseline, 'consensus-source-baseline module').toBeDefined();
+      if (!baseline) return;
+      const { declaration, observation } = mixedErgoCheckoutFixture();
+      if (modifiedStatus === 'explicit modified') {
+        for (const file of declaration.files.slice(0, 2)) file.status = 'modified';
+      }
+      expect(baseline.validateConsensusSourceLock({ ...validLock, ergoNode: declaration }, {
+        frontierGitlinkCommit: frontier.commit,
+        frontierSubmoduleUrl: frontier.repository,
+        frontierPatchSha256: frontier.patchSha256,
+        ergoPatchSha256: ergoNode.patchSha256,
+      }).errors).toEqual([]);
+      const exact = baseline.validateErgoCheckout(declaration, observation);
+      expect(exact.errors).toEqual([]);
+      expect(exact.expectedStatus.split('\n')).toEqual(observation.status.split('\n').sort());
+      expect(exact.expectedStatus).toContain(`?? ${addedErgoPath}`);
+    },
+  );
+
+  it.each([
+    {
+      name: 'added base blob',
+      mutate: (node: any) => { node.files[2].baseBlob = '7'.repeat(40); },
+      expected: `Ergo added patch file ${addedErgoPath} must not declare a base blob`,
+    },
+    {
+      name: 'present undefined added base blob',
+      mutate: (node: any) => { node.files[2].baseBlob = undefined; },
+      expected: `Ergo added patch file ${addedErgoPath} must not declare a base blob`,
+    },
+    {
+      name: 'missing modified base blob',
+      mutate: (node: any) => { delete node.files[0].baseBlob; },
+      expected: `Ergo base blob ${ergoNode.files[0].path} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'malformed modified base blob',
+      mutate: (node: any) => { node.files[0].baseBlob = 'malformed'; },
+      expected: `Ergo base blob ${ergoNode.files[0].path} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'invalid status',
+      mutate: (node: any) => { node.files[2].status = 'deleted'; },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'null status',
+      mutate: (node: any) => { node.files[0].status = null; },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'present undefined status',
+      mutate: (node: any) => { node.files[0].status = undefined; },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'inherited null status',
+      mutate: (node: any) => { node.files[0] = Object.assign(Object.create({ status: null }), node.files[0]); },
+      expected: 'Ergo patch file status must be modified or added',
+    },
+    {
+      name: 'duplicate path',
+      mutate: (node: any) => { node.files.push({ ...node.files[2] }); },
+      expected: 'Ergo patch file paths must be unique',
+    },
+    {
+      name: 'unsafe path',
+      mutate: (node: any) => { node.files[2].path = '../escape.scala'; },
+      expected: 'Ergo patch file paths must be safe repository-relative paths',
+    },
+    {
+      name: 'missing declared result blob',
+      mutate: (node: any) => { delete node.files[2].patchedBlob; },
+      expected: `Ergo patched blob ${addedErgoPath} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'malformed declared result blob',
+      mutate: (node: any) => { node.files[2].patchedBlob = 'malformed'; },
+      expected: `Ergo patched blob ${addedErgoPath} must be a 40-character Git object ID`,
+    },
+    {
+      name: 'null entry beside valid entries',
+      mutate: (node: any) => { node.files.push(null); },
+      expected: 'Ergo patch file paths must be safe repository-relative paths',
+    },
+    {
+      name: 'empty declaration',
+      mutate: (node: any) => { node.files = []; },
+      expected: 'Ergo patch files must be a non-empty array',
+    },
+    {
+      name: 'non-array declaration',
+      mutate: (node: any) => { node.files = null; },
+      expected: 'Ergo patch files must be a non-empty array',
+    },
+  ])('rejects the isolated Ergo declaration fault: $name', async ({ mutate, expected }) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+    const { declaration, observation } = mixedErgoCheckoutFixture();
+    mutate(declaration);
+    expect(baseline.validateConsensusSourceLock({ ...validLock, ergoNode: declaration }, {
+      frontierGitlinkCommit: frontier.commit,
+      frontierSubmoduleUrl: frontier.repository,
+      frontierPatchSha256: frontier.patchSha256,
+      ergoPatchSha256: ergoNode.patchSha256,
+    }).errors).toContain(expected);
+    const direct = baseline.validateErgoCheckout(declaration, observation);
+    expect(direct.errors).toContain(expected);
+    expect(direct.expectedStatus).toBe('');
+  });
+
+  it.each(['\n', '\r', '\r\n'])(
+    'rejects a status-record delimiter in an Ergo declaration: %j',
+    async delimiter => {
+      const baseline = await loadBaselineModule();
+      expect(baseline, 'consensus-source-baseline module').toBeDefined();
+      if (!baseline) return;
+      const { declaration } = mixedErgoCheckoutFixture();
+      const path = `one.scala${delimiter} M two.scala`;
+      declaration.files = [{ path, baseBlob: '1'.repeat(40), patchedBlob: '2'.repeat(40) }];
+      const expected = 'Ergo patch file paths must be safe repository-relative paths';
+      expect(baseline.validateConsensusSourceLock({ ...validLock, ergoNode: declaration }, {
+        frontierGitlinkCommit: frontier.commit,
+        frontierSubmoduleUrl: frontier.repository,
+        frontierPatchSha256: frontier.patchSha256,
+        ergoPatchSha256: ergoNode.patchSha256,
+      }).errors).toContain(expected);
+      const direct = baseline.validateErgoCheckout(declaration, {
+        head: declaration.baseCommit,
+        status: ` M one.scala${delimiter} M two.scala`,
+        blobs: { [path]: '2'.repeat(40) },
+      });
+      expect(direct.errors).toContain(expected);
+      expect(direct.expectedStatus).toBe('');
+    },
+  );
+
+  it.each([
+    { name: 'staged addition', replacement: `A  ${addedErgoPath}` },
+    { name: 'staged index marker', suffix: '\n!! INDEX DRIFT' },
+    { name: 'addition reported as modified', replacement: ` M ${addedErgoPath}` },
+    { name: 'missing addition', replacement: '' },
+    { name: 'extra change', suffix: '\n?? unexpected.scala' },
+    { name: 'absent changes', empty: true },
+    { name: 'modified file reported as untracked', modifiedReplacement: `?? ${ergoNode.files[0].path}` },
+  ])('rejects the isolated Ergo checkout status fault: $name', async (fault) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+    const { declaration, observation } = mixedErgoCheckoutFixture();
+    const faultyStatus = fault.empty ? '' : observation.status
+      .replace(`?? ${addedErgoPath}`, fault.replacement ?? `?? ${addedErgoPath}`)
+      .replace(` M ${ergoNode.files[0].path}`, fault.modifiedReplacement ?? ` M ${ergoNode.files[0].path}`)
+      + (fault.suffix ?? '');
+    expect(baseline.validateErgoCheckout(declaration, {
+      ...observation, status: faultyStatus,
+    }).errors).toContain('Ergo checkout changes must be limited to the declared patch files');
+  });
+
+  it.each(['missing', 'wrong'])('rejects an isolated %s observed Ergo result blob', async (fault) => {
+    const baseline = await loadBaselineModule();
+    expect(baseline, 'consensus-source-baseline module').toBeDefined();
+    if (!baseline) return;
+    const { declaration, observation } = mixedErgoCheckoutFixture();
+    if (fault === 'missing') delete observation.blobs[addedErgoPath];
+    else observation.blobs[addedErgoPath] = '7'.repeat(40);
+    expect(baseline.validateErgoCheckout(declaration, observation).errors)
+      .toContain(`Ergo patched blob ${addedErgoPath} does not match the source lock`);
   });
 
   it('drops Windows stat-only status noise only for raw or controlled CRLF-equivalent bytes', async () => {

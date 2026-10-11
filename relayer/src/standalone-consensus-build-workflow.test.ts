@@ -27,6 +27,38 @@ const consensusJobEnvironment = [
   '',
 ].join('\n');
 
+const requiredErgoTestSuites = [
+  'org.ergoplatform.mining.OwnedMiningSubmissionV1Spec',
+  'org.ergoplatform.mining.OwnedMiningSubmissionActorSpec',
+  'org.ergoplatform.http.routes.MiningApiRouteSpec',
+  'org.ergoplatform.mining.CandidateGeneratorSpec',
+];
+const reviewedErgoTestCommand = ergoTestCommand(requiredErgoTestSuites);
+
+function ergoTestCommand(suites: readonly string[]): string {
+  return ['sbt', ...suites.map(suite => `"testOnly ${suite}"`)].join(' ');
+}
+
+function expectErgoCommandRefusal(mutatedCommand: string): void {
+  expect(sourceLock.ergoNode.testCommand).toBe(reviewedErgoTestCommand);
+  const mutatedWorkflow = workflowText.replace(reviewedErgoTestCommand, mutatedCommand);
+  expect(mutatedWorkflow).not.toBe(workflowText);
+  const workflowOnly = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, sourceLock);
+  expect(workflowOnly.errors).toContain(
+    'Test Ergo extension producer patch: run command must match the reviewed command graph',
+  );
+  expect(workflowOnly.checks.exactCommandGraphValid).toBe(false);
+
+  const driftedLock = structuredClone(sourceLock);
+  driftedLock.ergoNode.testCommand = mutatedCommand;
+  const coModified = validateStandaloneConsensusBuildWorkflow(mutatedWorkflow, driftedLock);
+  expect(coModified.errors).toContain('ergoNode.testCommand must match the reviewed command');
+  expect(coModified.errors).toContain(
+    'Test Ergo extension producer patch: run command must match the reviewed command graph',
+  );
+  expect(coModified.checks.exactCommandGraphValid).toBe(false);
+}
+
 describe('standalone consensus-source build workflow', () => {
   it('binds the standalone hosted command graph to the canonical source lock', () => {
     const report = inspectStandaloneConsensusBuildWorkflow({ bridgeRoot });
@@ -301,6 +333,22 @@ describe('standalone consensus-source build workflow', () => {
       'frontier.buildCommand must match the reviewed command',
     );
     expect(result.checks.exactCommandGraphValid).toBe(false);
+  });
+
+  it.each(requiredErgoTestSuites)(
+    'rejects omission of required Ergo suite %s even with a co-modified lock', (omittedSuite) => {
+      expectErgoCommandRefusal(ergoTestCommand(requiredErgoTestSuites.filter(suite => suite !== omittedSuite)));
+    },
+  );
+
+  it.each([0, 1, 2])('rejects swapping adjacent Ergo suites at index %s even with a co-modified lock', (index) => {
+    const reordered = [...requiredErgoTestSuites];
+    [reordered[index], reordered[index + 1]] = [reordered[index + 1]!, reordered[index]!];
+    expectErgoCommandRefusal(ergoTestCommand(reordered));
+  });
+
+  it('rejects omission of all Ergo suites even with a co-modified lock', () => {
+    expectErgoCommandRefusal(ergoTestCommand([]));
   });
 
   it('rejects patch execution outside the reviewed bash shell', () => {

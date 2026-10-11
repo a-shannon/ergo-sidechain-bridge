@@ -47,10 +47,10 @@ describe('isolated devnet Ergo node build V1', () => {
       kind: 'substrate-federated-isolated-devnet-node-build-lock',
       platform: 'win32-x64',
       consensusSourceLockSha256Hex:
-        'ddfc4a317d124401d3ebd491e1b62770229ce0d6f6adbd07b61f21910f599aa5',
+        '1573a69aa3c5cafa302621efcc65032b653e9cf1548a32c69e2dd5011ca8b56d',
       ergoNodeBaseCommit: '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1',
       ergoPatchSha256Hex:
-        '8c56b3cfb2e6d6a8114dfd4071723dccf7f7bc5bddcdf78ee0c412c82ade21fe',
+        'cd282677b05e1fca21d9c94e6338566ce4448ce503f7055de8667aaa86378fdf',
       gitVersion: '2.54.0.windows.1',
       gitExecutableSha256Hex:
         '81ef35ae005ca9318018d18e3327578ce939fb99feaad6b2d7c8ab15f3de8db5',

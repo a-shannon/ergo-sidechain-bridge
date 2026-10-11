@@ -1,5 +1,74 @@
+diff --git a/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala b/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala
+index ce0c10f204d9c05623c44e90e2edc7876a7b4cf9..7a8319307dcf6cb639fd28f2c05f2259906c4524 100644
+--- a/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala
++++ b/src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala
+@@ -2,11 +2,12 @@ package org.ergoplatform.http.api
+ 
+ import akka.actor.{ActorRef, ActorRefFactory}
+ import akka.http.scaladsl.server.Route
++import akka.http.scaladsl.model.StatusCodes
+ import akka.pattern.ask
+ import io.circe.syntax._
+ import io.circe.{Encoder, Json}
+ import org.ergoplatform.mining.CandidateGenerator.Candidate
+-import org.ergoplatform.mining.{AutolykosSolution, CandidateGenerator, ErgoMiner}
++import org.ergoplatform.mining.{AutolykosSolution, CandidateGenerator, ErgoMiner, OwnedMiningSubmissionV1}
+ import org.ergoplatform.modifiers.mempool.ErgoTransaction
+ import org.ergoplatform.nodeView.wallet.ErgoAddressJsonEncoder
+ import org.ergoplatform.settings.{ErgoSettings, RESTApiSettings}
+@@ -17,7 +18,8 @@ import sigma.data.ProveDlog
+ import scala.concurrent.Future
+ 
+ case class MiningApiRoute(miner: ActorRef,
+-                          ergoSettings: ErgoSettings)
++                          ergoSettings: ErgoSettings,
++                          ownedSubmissionControl: Option[OwnedMiningSubmissionV1.Control] = OwnedMiningSubmissionV1.processControl)
+                          (implicit val context: ActorRefFactory) extends ErgoBaseApiRoute with ApiCodecs {
+ 
+   val settings: RESTApiSettings = ergoSettings.scorexSettings.restApi
+@@ -28,6 +30,7 @@ case class MiningApiRoute(miner: ActorRef,
+     candidateR ~
+       candidateWithTxsR ~
+       solutionR ~
++      ownedSubmissionPauseR ~
+       rewardAddressR ~
+       rewardPublicKeyR
+   }
+@@ -62,6 +65,32 @@ case class MiningApiRoute(miner: ActorRef,
+     ApiResponse(result)
+   }
+ 
++  def ownedSubmissionPauseR: Route = ownedSubmissionControl match {
++    case None => reject()
++    case Some(control) =>
++      (path("ownedSubmissionPauseV1") & pathEndOrSingleSlash & post & withAuth &
++        headerValueByName("X-Ergo-Owned-Mining-Nonce") &
++        headerValueByName("X-Ergo-Owned-Mining-Operation")) { (nonce, operationId) =>
++        if (!control.authenticate(nonce) || !OwnedMiningSubmissionV1.validOperationId(operationId)) {
++          complete(StatusCodes.Forbidden)
++        } else {
++          val result = miner.askWithStatus(CandidateGenerator.PauseOwnedSubmissionV1(nonce, operationId))
++            .mapTo[OwnedMiningSubmissionV1.PauseReceipt].map { receipt =>
++              Json.obj(
++                "schema" -> Json.fromString("e2s.owned-mining-submission-pause.v1"),
++                "operationId" -> Json.fromString(receipt.operationId),
++                "submissionPaused" -> Json.fromBoolean(true),
++                "maximumBlockHeight" -> receipt.maximumBlockHeight.map(Json.fromInt).getOrElse(Json.Null),
++                "latestAppliedBlock" -> receipt.watermark.map { block =>
++                  Json.obj("headerId" -> Json.fromString(block.headerId), "height" -> Json.fromInt(block.height))
++                }.getOrElse(Json.Null)
++              )
++            }
++          ApiResponse(result)
++        }
++      }
++  }
++
+   def rewardAddressR: Route = (path("rewardAddress") & get) {
+     val addressF: Future[ErgoAddress] =
+       miner.askWithStatus(ErgoMiner.ReadMinerPk)
 diff --git a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
-index bfa0fe6..1d82715 100644
+index bfa0fe6162477fae9012eddd3de8736f2c140a1d..cc95218c2c3ec2704c7036899ec296327bec4a34 100644
 --- a/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
 +++ b/src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala
 @@ -8,7 +8,7 @@ import org.ergoplatform.mining.AutolykosPowScheme.derivedHeaderFields
@@ -31,16 +100,41 @@ index bfa0fe6..1d82715 100644
  import sigma.data.{Digest32Coll, ProveDlog}
  import sigma.interpreter.ProverResult
  import sigma.validation.ReplacedRule
-@@ -54,6 +54,8 @@ class CandidateGenerator(
+@@ -46,7 +46,8 @@ class CandidateGenerator(
+   minerPk: ProveDlog,
+   readersHolderRef: ActorRef,
+   viewHolderRef: ActorRef,
+-  ergoSettings: ErgoSettings
++  ergoSettings: ErgoSettings,
++  ownedSubmissionControl: Option[OwnedMiningSubmissionV1.Control] = OwnedMiningSubmissionV1.processControl
+ ) extends Actor
+   with ScorexLogging {
+ 
+@@ -54,6 +55,23 @@ class CandidateGenerator(
  
    private val candidateGenInterval =
      ergoSettings.nodeSettings.blockCandidateGenerationInterval
 +  private val requiredMiningTransactionIdHex =
 +    CandidateGenerator.parseRequiredMiningTransactionId(sys.env)
++  private var ownedPauseReply: Option[ActorRef] = None
++
++  private def replyToCompletedOwnedPause(): Unit = {
++    for (control <- ownedSubmissionControl; reply <- ownedPauseReply) {
++      control.pauseCompletion match {
++        case Right(Some(receipt)) =>
++          ownedPauseReply = None
++          reply ! StatusReply.success(receipt)
++        case Left(_) =>
++          ownedPauseReply = None
++          reply ! StatusReply.error("Owned mining submission pause failed")
++        case Right(None) =>
++      }
++    }
++  }
  
    /** retrieve Readers once on start and then get updated by events */
    override def preStart(): Unit = {
-@@ -93,6 +95,7 @@ class CandidateGenerator(
+@@ -93,6 +111,7 @@ class CandidateGenerator(
              cachedCandidate = None,
              cachedPreviousCandidate = None,
              solvedBlock = None,
@@ -48,7 +142,7 @@ index bfa0fe6..1d82715 100644
              h,
              s,
              m,
-@@ -103,6 +106,8 @@ class CandidateGenerator(
+@@ -103,6 +122,8 @@ class CandidateGenerator(
        self ! GenerateCandidate(txsToInclude = Seq.empty, reply = false, forced = false)
        context.system.eventStream
          .subscribe(self, classOf[FullBlockApplied])
@@ -57,7 +151,26 @@ index bfa0fe6..1d82715 100644
        context.system.eventStream.subscribe(self, classOf[NodeViewChange])
      case Readers(_, _, _, _) =>
        log.error("Invalid readers state, mining is possible in UTXO mode only")
-@@ -118,7 +123,17 @@ class CandidateGenerator(
+@@ -113,12 +134,36 @@ class CandidateGenerator(
+   }
+ 
+   private def initialized(state: CandidateGeneratorState): Receive = {
++    case PauseOwnedSubmissionV1(ownerNonce, operationId) =>
++      ownedSubmissionControl match {
++        case Some(control) =>
++          control.pause(ownerNonce, operationId) match {
++            case Right(Some(receipt)) => sender() ! StatusReply.success(receipt)
++            case Right(None) => ownedPauseReply = Some(sender())
++            case Left(_) => sender() ! StatusReply.error("Owned mining submission pause refused")
++          }
++        case None => sender() ! StatusReply.error("Owned mining submission control is disabled")
++      }
++    case GenerateCandidate(_, reply, _) if ownedSubmissionControl.exists(_.submissionsClosed) =>
++      if (reply) sender() ! StatusReply.error("Owned mining submissions are closed")
++    case _: AutolykosSolution if ownedSubmissionControl.exists(_.submissionsClosed) =>
++      sender() ! StatusReply.error("Owned mining submissions are closed")
+     case ChangedHistory(h: ErgoHistoryReader) =>
+       context.become(initialized(state.copy(hr = h)))
      case ChangedState(s: UtxoStateReader) =>
        context.become(initialized(state.copy(sr = s)))
      case ChangedMempool(mp: ErgoMemPoolReader) =>
@@ -76,10 +189,19 @@ index bfa0fe6..1d82715 100644
          state.cachedCandidate,
          state.solvedBlock,
          candidateGenInterval
-@@ -131,6 +146,14 @@ class CandidateGenerator(
+@@ -131,6 +176,23 @@ class CandidateGenerator(
        } else {
          context.become(initialized(state.copy(mpr = mp)))
        }
++    case SemanticallyFailedModification(typeId, modifierId, _)
++        if typeId == ErgoFullBlock.modifierTypeId && ownedSubmissionControl.nonEmpty =>
++      ownedSubmissionControl.foreach(_.observeRejected(modifierId))
++      replyToCompletedOwnedPause()
++      if (state.solvedBlock.exists(_.id == modifierId)) {
++        context.become(initialized(state.copy(
++          cachedCandidate = None, cachedPreviousCandidate = None, solvedBlock = None
++        )))
++      }
 +    case SemanticallyFailedModification(typeId, modifierId, error)
 +        if typeId == ErgoFullBlock.modifierTypeId && state.solvedBlock.exists(_.id == modifierId) =>
 +      log.warn(s"Clearing solved candidate after semantic rejection of block $modifierId: ${error.getMessage}")
@@ -91,7 +213,12 @@ index bfa0fe6..1d82715 100644
      case _: NodeViewChange =>
      // Just ignore all other NodeView Changes
  
-@@ -142,19 +165,43 @@ class CandidateGenerator(
+@@ -139,22 +201,48 @@ class CandidateGenerator(
+      * we need to generate new candidate and possibly also discard existing solution if it is also behind
+      */
+     case FullBlockApplied(header) =>
++      ownedSubmissionControl.foreach(_.observeApplied(header))
++      replyToCompletedOwnedPause()
        log.info(
          s"Preparing new candidate on getting new block at ${header.height}"
        )
@@ -139,7 +266,7 @@ index bfa0fe6..1d82715 100644
          senderOpt.foreach(_ ! StatusReply.success(state.cachedCandidate.get))
        } else {
          val start = System.currentTimeMillis()
-@@ -164,7 +211,8 @@ class CandidateGenerator(
+@@ -164,7 +252,8 @@ class CandidateGenerator(
            state.mpr,
            minerPk,
            txsToInclude,
@@ -149,7 +276,7 @@ index bfa0fe6..1d82715 100644
          ) match {
            case Some(Failure(ex)) =>
              log.error(s"Candidate generation failed", ex)
-@@ -211,16 +259,32 @@ class CandidateGenerator(
+@@ -211,16 +300,37 @@ class CandidateGenerator(
            .filter(block => ergoSettings.chainSettings.powScheme.validate(block.header).isSuccess)
            .getOrElse {
              log.info(s"Using previous candidate as a solution: " + state.cachedPreviousCandidate)
@@ -164,14 +291,22 @@ index bfa0fe6..1d82715 100644
            .validate(newBlock.header)
            .map(_ => newBlock) match {
 -          case Success(newBlock) =>
+-            sendToNodeView(newBlock)
+-            context.become(initialized(state.copy(solvedBlock = Some(newBlock))))
+-            StatusReply.success(())
 +          case Success(newBlock) if solvedBlockSatisfiesMiningRequirement(
 +            requiredMiningTransactionIdHex,
 +            state.requiredMiningTransactionConfirmed,
 +            newBlock.transactions.map(_.id)
 +          ) =>
-             sendToNodeView(newBlock)
-             context.become(initialized(state.copy(solvedBlock = Some(newBlock))))
-             StatusReply.success(())
++            val admission: Either[String, Unit] = ownedSubmissionControl.map(_.admitSubmission(newBlock.header)).getOrElse(Right(()))
++            admission match {
++              case Right(_) =>
++                sendToNodeView(newBlock)
++                context.become(initialized(state.copy(solvedBlock = Some(newBlock))))
++                StatusReply.success(())
++              case Left(_) => StatusReply.error("Owned mining submission refused")
++            }
 +          case Success(_) =>
 +            log.warn("Removing candidates because the solved block omitted the required mining transaction")
 +            context.become(initialized(state.copy(
@@ -184,10 +319,14 @@ index bfa0fe6..1d82715 100644
            case Failure(exception) =>
              log.warn(s"Removing candidates due to invalid block", exception)
              context.become(initialized(state.copy(cachedCandidate = None, cachedPreviousCandidate = None)))
-@@ -243,6 +307,54 @@ class CandidateGenerator(
+@@ -243,6 +353,58 @@ class CandidateGenerator(
  
  object CandidateGenerator extends ScorexLogging {
  
++  final case class PauseOwnedSubmissionV1(ownerNonce: String, operationId: String) {
++    override def toString: String = "PauseOwnedSubmissionV1(<redacted>)"
++  }
++
 +  val SidechainExtensionFieldsEnv = "ERGO_SIDECHAIN_EXTENSION_FIELDS"
 +  val RequiredMiningTransactionIdEnv = "ERGO_SIDECHAIN_REQUIRED_MINING_TRANSACTION_ID"
 +
@@ -239,7 +378,7 @@ index bfa0fe6..1d82715 100644
    /**
      * Holder for both candidate block and data for external miners derived from it
      * (to avoid possibly costly recalculation)
-@@ -268,6 +380,7 @@ object CandidateGenerator extends ScorexLogging {
+@@ -268,6 +430,7 @@ object CandidateGenerator extends ScorexLogging {
      cachedCandidate: Option[Candidate],
      cachedPreviousCandidate: Option[Candidate],
      solvedBlock: Option[ErgoFullBlock],
@@ -247,7 +386,36 @@ index bfa0fe6..1d82715 100644
      hr: ErgoHistoryReader,
      sr: UtxoStateReader,
      mpr: ErgoMemPoolReader,
-@@ -368,6 +481,72 @@ object CandidateGenerator extends ScorexLogging {
+@@ -278,7 +441,8 @@ object CandidateGenerator extends ScorexLogging {
+     minerPk: ProveDlog,
+     readersHolderRef: ActorRef,
+     viewHolderRef: ActorRef,
+-    ergoSettings: ErgoSettings
++    ergoSettings: ErgoSettings,
++    ownedSubmissionControl: Option[OwnedMiningSubmissionV1.Control] = OwnedMiningSubmissionV1.processControl
+   )(implicit context: ActorRefFactory): ActorRef =
+     context.actorOf(
+       Props(
+@@ -286,7 +450,8 @@ object CandidateGenerator extends ScorexLogging {
+           minerPk,
+           readersHolderRef,
+           viewHolderRef,
+-          ergoSettings
++          ergoSettings,
++          ownedSubmissionControl
+         )
+       ).withDispatcher("critical-dispatcher"),
+       s"CandidateGenerator-${Random.alphanumeric.take(5).mkString}"
+@@ -355,7 +520,7 @@ object CandidateGenerator extends ScorexLogging {
+     val miningTimes =
+       timestamps.sorted
+         .sliding(2, 1)
+-        .map { case IndexedSeq(prev, next) => next - prev }
++        .collect { case IndexedSeq(prev, next) => next - prev }
+         .toVector
+     Math.round(miningTimes.sum / miningTimes.length.toDouble).millis
+   }
+@@ -368,6 +533,72 @@ object CandidateGenerator extends ScorexLogging {
    private def inputsNotSpent(tx: ErgoTransaction, s: UtxoStateReader): Boolean =
      tx.inputs.forall(inp => s.boxById(inp.boxId).isDefined)
  
@@ -320,7 +488,7 @@ index bfa0fe6..1d82715 100644
    /**
      * @return None if chain is not synced or Some of attempt to create candidate
      */
-@@ -377,7 +556,8 @@ object CandidateGenerator extends ScorexLogging {
+@@ -377,7 +608,8 @@ object CandidateGenerator extends ScorexLogging {
      m: ErgoMemPoolReader,
      pk: ProveDlog,
      txsToInclude: Seq[ErgoTransaction],
@@ -330,7 +498,7 @@ index bfa0fe6..1d82715 100644
    ): Option[Try[(Candidate, EliminateTransactions)]] = {
      // mandatory transactions to include into next block taken from the previous candidate
      val stateWithMandatoryTxs = s.withTransactions(txsToInclude)
-@@ -399,7 +579,13 @@ object CandidateGenerator extends ScorexLogging {
+@@ -399,7 +631,13 @@ object CandidateGenerator extends ScorexLogging {
      def hasAnyMemPoolOrMinerTx =
        poolTransactions.nonEmpty || unspentTxsToInclude.nonEmpty || emissionTxOpt.nonEmpty
  
@@ -345,7 +513,7 @@ index bfa0fe6..1d82715 100644
        log.info(s"Avoiding generation of a block without any transactions")
        None
      } else if (!chainSynced) {
-@@ -427,7 +613,15 @@ object CandidateGenerator extends ScorexLogging {
+@@ -427,7 +665,15 @@ object CandidateGenerator extends ScorexLogging {
            emissionTxOpt,
            unspentTxsToInclude,
            ergoSettings
@@ -362,7 +530,7 @@ index bfa0fe6..1d82715 100644
        )
      }
    }
-@@ -482,6 +676,32 @@ object CandidateGenerator extends ScorexLogging {
+@@ -482,6 +728,32 @@ object CandidateGenerator extends ScorexLogging {
        nextHeightCondition
    }
  
@@ -395,7 +563,7 @@ index bfa0fe6..1d82715 100644
    /**
      * Assemble correct block candidate based on
      *
-@@ -567,7 +787,11 @@ object CandidateGenerator extends ScorexLogging {
+@@ -567,7 +839,11 @@ object CandidateGenerator extends ScorexLogging {
            (interlinksExtension, Array(0: Byte, 0: Byte, 0: Byte), Header.InitialVersion)
          )
  
@@ -408,7 +576,7 @@ index bfa0fe6..1d82715 100644
          minerPk.value,
          timestamp,
          nBits,
-@@ -624,7 +848,7 @@ object CandidateGenerator extends ScorexLogging {
+@@ -624,7 +900,7 @@ object CandidateGenerator extends ScorexLogging {
              adProof,
              txs,
              timestamp,
@@ -417,7 +585,7 @@ index bfa0fe6..1d82715 100644
              votes
            )
            val ext = deriveWorkMessage(candidate)
-@@ -656,7 +880,7 @@ object CandidateGenerator extends ScorexLogging {
+@@ -656,7 +932,7 @@ object CandidateGenerator extends ScorexLogging {
                      adProof,
                      fallbackTxs,
                      timestamp,
@@ -426,8 +594,242 @@ index bfa0fe6..1d82715 100644
                      votes
                    )
                    Candidate(
+diff --git a/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala b/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala
+index e2dc8060c735cee6eebbf9082a2e3519b42f7487..2b4726a2c03b6527aac06f2936fb34be247410c8 100644
+--- a/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala
++++ b/src/main/scala/org/ergoplatform/mining/ErgoMiner.scala
+@@ -2,7 +2,7 @@ package org.ergoplatform.mining
+ 
+ import akka.actor.{Actor, ActorRef, ActorRefFactory, Props, Stash}
+ import akka.pattern.StatusReply
+-import org.ergoplatform.mining.CandidateGenerator.GenerateCandidate
++import org.ergoplatform.mining.CandidateGenerator.{GenerateCandidate, PauseOwnedSubmissionV1}
+ import org.ergoplatform.nodeView.state.DigestState
+ import org.ergoplatform.modifiers.history.header.Header
+ import org.ergoplatform.nodeView.wallet.ErgoWalletActorMessages.{FirstSecretResponse, GetFirstSecret, GetMiningPubKey, MiningPubKeyResponse}
+@@ -158,12 +158,16 @@ class ErgoMiner(
+ 
+     case GenerateCandidate(_, _, _) =>
+       sender() ! StatusReply.error("Miner has not started yet")
++    case _: PauseOwnedSubmissionV1 =>
++      sender() ! StatusReply.error("Miner has not started yet")
+   }
+ 
+   /** Bridge between external miner and CandidateGenerator (Internal mining threads are talking to CandidateGenerator directly.)
+     * The reason is that replying is optional and it is not possible to obtain a sender reference from MiningApiRoute 'ask'.
+     */
+   def started(minerState: MinerState): Receive = {
++    case pause: PauseOwnedSubmissionV1 =>
++      minerState.candidateGeneratorRef forward pause
+     case genCandidate @ GenerateCandidate(_, _, _) =>
+       minerState.candidateGeneratorRef forward genCandidate
+ 
+diff --git a/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala b/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala
+index 2731827bcf33dbf80749ad2fb40c9304f54a7496..98d75c97b682cb30902acbb49f30004afd33d409 100644
+--- a/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala
++++ b/src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala
+@@ -1,21 +1,32 @@
+ package org.ergoplatform.http.routes
+ 
++import akka.actor.{ActorRef, Props}
+ import akka.http.scaladsl.model.StatusCodes
++import akka.http.scaladsl.model.headers.RawHeader
+ import akka.http.scaladsl.server.Route
+ import akka.http.scaladsl.testkit.ScalatestRouteTest
++import akka.pattern.StatusReply
++import akka.testkit.TestProbe
+ import de.heikoseeberger.akkahttpcirce.FailFastCirceSupport
+ import io.circe.Json
+ import io.circe.syntax._
+ import org.ergoplatform.http.api.MiningApiRoute
+-import org.ergoplatform.mining.AutolykosSolution
++import org.ergoplatform.mining.{AutolykosSolution, CandidateGenerator, ErgoMiner, OwnedMiningSubmissionV1}
++import org.ergoplatform.nodeView.state.StateType
+ import org.ergoplatform.settings.ErgoSettings
+ import org.ergoplatform.utils.Stubs
+ import org.ergoplatform.utils.generators.ErgoCoreGenerators.genECPoint
+ import org.ergoplatform.{ErgoTreePredef, Pay2SAddress}
+ import org.scalatest.flatspec.AnyFlatSpec
+ import org.scalatest.matchers.should.Matchers
++import scorex.crypto.hash.Blake2b256
++import scorex.util.encode.Base16
+ 
++import scala.concurrent.Await
++import scala.concurrent.duration._
+ import scala.util.Try
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
+ 
+ class MiningApiRouteSpec
+   extends AnyFlatSpec
+@@ -56,4 +67,165 @@ class MiningApiRouteSpec
+     }
+   }
+ 
++  it should "leave the owned mining submission endpoint absent when control is omitted" in {
++    val disabled = MiningApiRoute(minerRef, localSetting, None).route
++    Post(prefix + "/ownedSubmissionPauseV1") ~> Route.seal(disabled) ~> check {
++      status shouldBe StatusCodes.NotFound
++    }
++  }
++
++  it should "refuse a foreign owned mining nonce before forwarding any pause" in {
++    val nonce = "ab" * 32
++    val digest = MessageDigest.getInstance("SHA-256").digest(nonce.getBytes(StandardCharsets.UTF_8))
++      .map(byte => f"${byte & 0xff}%02x").mkString
++    val control = OwnedMiningSubmissionV1.fromEnvironment(Map(OwnedMiningSubmissionV1.OwnerNonceSha256Env -> digest)).get
++    val guarded = MiningApiRoute(minerRef, localSetting, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("X-Ergo-Owned-Mining-Nonce", "ef" * 32),
++      RawHeader("X-Ergo-Owned-Mining-Operation", "cd" * 32)
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++      control.submissionsClosed shouldBe false
++    }
++  }
++
++  it should "refuse a malformed owned mining operation before forwarding any pause" in {
++    val nonce = "ab" * 32
++    val digest = MessageDigest.getInstance("SHA-256").digest(nonce.getBytes(StandardCharsets.UTF_8))
++      .map(byte => f"${byte & 0xff}%02x").mkString
++    val control = OwnedMiningSubmissionV1.fromEnvironment(Map(OwnedMiningSubmissionV1.OwnerNonceSha256Env -> digest)).get
++    val guarded = MiningApiRoute(minerRef, localSetting, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("X-Ergo-Owned-Mining-Nonce", nonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", "malformed")
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++      control.submissionsClosed shouldBe false
++    }
++  }
++
++  private val ownedNonce = "ab" * 32
++  private val ownedOperation = "cd" * 32
++  private val ownedApiKey = "owned-mining-route-fixture"
++  private val authenticatedSettings = localSetting.copy(
++    scorexSettings = localSetting.scorexSettings.copy(
++      restApi = localSetting.scorexSettings.restApi.copy(
++        apiKeyHash = Some(Base16.encode(Blake2b256(ownedApiKey)))
++      )
++    )
++  )
++
++  private def ownedControl(maximumHeight: Option[String] = None): OwnedMiningSubmissionV1.Control = {
++    val digest = MessageDigest.getInstance("SHA-256").digest(ownedNonce.getBytes(StandardCharsets.UTF_8))
++      .map(byte => f"${byte & 0xff}%02x").mkString
++    val environment = Map(OwnedMiningSubmissionV1.OwnerNonceSha256Env -> digest) ++
++      maximumHeight.map(OwnedMiningSubmissionV1.MaximumBlockHeightEnv -> _)
++    OwnedMiningSubmissionV1.fromEnvironment(environment).get
++  }
++
++  it should "refuse a missing API key before forwarding an authenticated owned pause" in {
++    val control = ownedControl()
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++    }
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.pauseCompletion.isLeft shouldBe true
++  }
++
++  it should "refuse an incorrect API key before forwarding an authenticated owned pause" in {
++    val control = ownedControl()
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("api_key", "foreign-mining-route-fixture"),
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++    ) ~> Route.seal(guarded) ~> check {
++      status shouldBe StatusCodes.Forbidden
++    }
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.pauseCompletion.isLeft shouldBe true
++  }
++
++  it should "fail an authenticated owned pause on actor timeout without changing control" in {
++    val control = ownedControl()
++    val silentMiner = TestProbe()
++    val guarded = MiningApiRoute(silentMiner.ref, authenticatedSettings, Some(control)).route
++    val request = Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++      RawHeader("api_key", ownedApiKey),
++      RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++      RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++    )
++    // Keep the configured actor ask timeout and the existing bounded actor-test wait.
++    val handler = Route.toFunction(Route.seal(guarded))
++    val response = Await.result(handler(request), defaultAwaitDuration)
++    response.status shouldBe StatusCodes.InternalServerError
++    response.discardEntityBytes()
++    silentMiner.expectMsg(CandidateGenerator.PauseOwnedSubmissionV1(ownedNonce, ownedOperation))
++    silentMiner.expectNoMessage(100.millis)
++    control.submissionsClosed shouldBe false
++    control.pauseCompletion.isLeft shouldBe true
++  }
++
++  // Only bootstrap is supplied by the test. StartMining and started-message forwarding
++  // remain production ErgoMiner behavior; this does not cover process environment wiring.
++  private class OwnedControlInjectedMinerBootstrap(
++    generator: ActorRef,
++    view: ActorRef,
++    miningSettings: ErgoSettings
++  ) extends ErgoMiner(miningSettings, view, utxoReadersRef, None) {
++    override def preStart(): Unit = {
++      context.become(starting(ErgoMiner.MinerState(None, pk, generator)))
++    }
++  }
++
++  it should "return the real generator pause receipt through HTTP and a bootstrap-injected real miner" in {
++    val control = ownedControl(Some("10"))
++    val view = TestProbe()
++    val readiness = TestProbe()
++    val joinSettings = authenticatedSettings.copy(nodeSettings = authenticatedSettings.nodeSettings.copy(
++      stateType = StateType.Utxo,
++      useExternalMiner = true,
++      internalMinersCount = 0
++    ))
++    val generator = CandidateGenerator(pk, utxoReadersRef, view.ref, joinSettings, Some(control))
++    val realMiner = system.actorOf(Props(new OwnedControlInjectedMinerBootstrap(generator, view.ref, joinSettings)))
++    try {
++      // Same-sender ordering establishes StartMining before the readiness response.
++      readiness.send(realMiner, ErgoMiner.StartMining)
++      readiness.send(realMiner, ErgoMiner.ReadMinerPk)
++      readiness.expectMsg(StatusReply.success(pk))
++      val joinedRoute = MiningApiRoute(realMiner, joinSettings, Some(control)).route
++      Post(prefix + "/ownedSubmissionPauseV1").withHeaders(
++        RawHeader("api_key", ownedApiKey),
++        RawHeader("X-Ergo-Owned-Mining-Nonce", ownedNonce),
++        RawHeader("X-Ergo-Owned-Mining-Operation", ownedOperation)
++      ) ~> Route.seal(joinedRoute) ~> check {
++        status shouldBe StatusCodes.OK
++        responseAs[Json] shouldBe Json.obj(
++          "schema" -> Json.fromString("e2s.owned-mining-submission-pause.v1"),
++          "operationId" -> Json.fromString(ownedOperation),
++          "submissionPaused" -> Json.True,
++          "maximumBlockHeight" -> Json.fromInt(10),
++          "latestAppliedBlock" -> Json.Null
++        )
++        responseAs[Json].noSpaces should not include ownedNonce
++      }
++      control.submissionsClosed shouldBe true
++      control.pauseCompletion shouldBe Right(Some(OwnedMiningSubmissionV1.PauseReceipt(
++        ownedOperation, None, Some(10)
++      )))
++    } finally {
++      system.stop(realMiner)
++      system.stop(generator)
++    }
++  }
++
+ }
 diff --git a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
-index 1c394b2..fdfbf97 100644
+index 1c394b28174aa12303e67827d9c6a38ea6a38caf..fdfbf97b9f1c3c5d683c7777cc10bc58f86d4c02 100644
 --- a/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
 +++ b/src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala
 @@ -13,11 +13,12 @@ import org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.FullBlockApplie
@@ -649,3 +1051,593 @@ index 1c394b2..fdfbf97 100644
    it should "provider candidate to internal miner and verify and apply his solution" in new TestKit(
      ActorSystem()
    ) {
+diff --git a/src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala b/src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..e480ab20a367dc65128d67b6ea74b647bfe661ab
+--- /dev/null
++++ b/src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala
+@@ -0,0 +1,137 @@
++package org.ergoplatform.mining
++
++import org.ergoplatform.modifiers.history.header.Header
++
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++import scala.util.Try
++
++/** Optional process-lifetime gate for the owned synthetic miner's submissions.
++  * Actor replacement must reuse processControl; this gate does not stop a node,
++  * attest indexed state, authenticate a chain, or resume a paused submission.
++  */
++object OwnedMiningSubmissionV1 {
++  val OwnerNonceSha256Env = "ERGO_SIDECHAIN_OWNED_MINING_NONCE_SHA256"
++  val MaximumBlockHeightEnv = "ERGO_SIDECHAIN_MAXIMUM_MINING_BLOCK_HEIGHT"
++  // Canonical request/receipt identity; its value is public, never an owner nonce.
++  val OperationIdField = "operationId"
++
++  def validOperationId(value: String): Boolean = isLowerHex(value)
++
++  final case class Watermark(headerId: String, height: Int)
++  final case class PauseReceipt(operationId: String,
++                                watermark: Option[Watermark],
++                                maximumBlockHeight: Option[Int])
++
++  lazy val processControl: Option[Control] = fromEnvironment(sys.env)
++
++  def fromEnvironment(environment: collection.Map[String, String]): Option[Control] = {
++    val owner = environment.get(OwnerNonceSha256Env)
++    val maximum = environment.get(MaximumBlockHeightEnv)
++    if (owner.isEmpty && maximum.isEmpty) None
++    else {
++      val ownerDigest = owner.filter(isLowerHex).getOrElse(invalidConfiguration())
++      val maximumHeight = maximum.map { value =>
++        if (value == null || !value.matches("(?:0|[1-9][0-9]*)")) invalidConfiguration()
++        Try(value.toInt).toOption.filter(_ >= 0).getOrElse(invalidConfiguration())
++      }
++      val digestBytes = ownerDigest.grouped(2).map(Integer.parseInt(_, 16).toByte).toArray
++      Some(new Control(digestBytes, maximumHeight))
++    }
++  }
++
++  private def invalidConfiguration(): Nothing =
++    throw new IllegalArgumentException("owned mining submission configuration is invalid")
++
++  private def isLowerHex(value: String): Boolean =
++    value != null && value.matches("[0-9a-f]{64}")
++
++  final class Control private[OwnedMiningSubmissionV1](ownerDigest: Array[Byte],
++                                                       val maximumBlockHeight: Option[Int]) {
++    private var pausedOperation: Option[String] = None
++    private var pendingHeader: Option[Watermark] = None
++    private var latestAppliedWatermark: Option[Watermark] = None
++    private var permanentFailure = false
++
++    def authenticate(ownerNonce: String): Boolean = {
++      isLowerHex(ownerNonce) && MessageDigest.isEqual(
++        MessageDigest.getInstance("SHA-256").digest(ownerNonce.getBytes(StandardCharsets.UTF_8)),
++        ownerDigest
++      )
++    }
++
++    def submissionsClosed: Boolean = synchronized {
++      pausedOperation.nonEmpty || permanentFailure
++    }
++
++    /** Reserve the identity before the caller sends its header and sections. */
++    def admitSubmission(header: Header): Either[String, Unit] = synchronized {
++      if (permanentFailure || pausedOperation.nonEmpty || pendingHeader.nonEmpty) {
++        Left("owned mining submission is closed or pending")
++      } else {
++        identity(header) match {
++          case Some(value) if maximumBlockHeight.forall(value.height <= _)
++            && latestAppliedWatermark.forall(_.height < value.height) =>
++            pendingHeader = Some(value)
++            Right(())
++          case _ => Left("owned mining submission header is outside its policy")
++        }
++      }
++    }
++
++    /** FullBlockApplied resolves only the exact registered local header. */
++    def observeApplied(header: Header): Unit = synchronized {
++      identity(header) match {
++        case None => permanentFailure = true
++        case Some(applied) =>
++          pendingHeader match {
++            case Some(pending) if applied == pending =>
++              latestAppliedWatermark = Some(applied)
++              pendingHeader = None
++            case Some(pending) if applied.height >= pending.height =>
++              permanentFailure = true
++            case _ =>
++              if (latestAppliedWatermark.exists(value =>
++                applied.height == value.height && applied.headerId != value.headerId)) {
++                permanentFailure = true
++              }
++          }
++      }
++    }
++
++    def observeRejected(modifierId: String): Unit = synchronized {
++      if (pendingHeader.exists(_.headerId == modifierId)) permanentFailure = true
++    }
++
++    /** A valid request closes submissions once; pending completion is not a receipt. */
++    def pause(ownerNonce: String, operationId: String): Either[String, Option[PauseReceipt]] = synchronized {
++      if (!validOperationId(operationId) || !authenticate(ownerNonce)) {
++        Left("owned mining pause authentication or identity is invalid")
++      } else if (permanentFailure || pausedOperation.nonEmpty) {
++        Left("owned mining pause is failed or already requested")
++      } else {
++        pausedOperation = Some(operationId)
++        completion
++      }
++    }
++
++    def pauseCompletion: Either[String, Option[PauseReceipt]] = synchronized {
++      completion
++    }
++
++    private def completion: Either[String, Option[PauseReceipt]] = {
++      if (permanentFailure) Left("owned mining submission failed permanently")
++      else pausedOperation match {
++        case None => Left("owned mining pause was not requested")
++        case Some(_) if pendingHeader.nonEmpty => Right(None)
++        case Some(operationId) =>
++          Right(Some(PauseReceipt(operationId, latestAppliedWatermark, maximumBlockHeight)))
++      }
++    }
++
++    private def identity(header: Header): Option[Watermark] = {
++      if (header == null || header.height < 1) None
++      else Try(header.id).toOption.filter(isLowerHex).map(id => Watermark(id, header.height))
++    }
++  }
++}
+diff --git a/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..ec14bb083df3922067f14cea4033b0bd5c9cf4e9
+--- /dev/null
++++ b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala
+@@ -0,0 +1,175 @@
++package org.ergoplatform.mining
++
++import akka.actor.{Actor, ActorRef, ActorSystem, Props}
++import akka.pattern.{StatusReply, ask}
++import akka.testkit.{TestKit, TestProbe}
++import akka.util.Timeout
++import org.ergoplatform.mining.CandidateGenerator.{Candidate, GenerateCandidate, PauseOwnedSubmissionV1}
++import org.ergoplatform.modifiers.ErgoFullBlock
++import org.ergoplatform.network.ErgoNodeViewSynchronizerMessages.{FullBlockApplied, SemanticallyFailedModification}
++import org.ergoplatform.nodeView.{ErgoNodeViewRef, ErgoReadersHolderRef, LocallyGeneratedModifier}
++import org.ergoplatform.nodeView.ErgoReadersHolder.{GetReaders, Readers}
++import org.ergoplatform.nodeView.state.StateType
++import org.ergoplatform.settings.ErgoSettings
++import org.ergoplatform.utils.ErgoTestHelpers
++import org.scalatest.flatspec.AnyFlatSpec
++import org.scalatest.matchers.should.Matchers
++
++import java.nio.charset.StandardCharsets
++import java.nio.file.Files
++import java.security.MessageDigest
++import scala.concurrent.duration._
++
++/** Real actors and a fresh NodeView; only forwarding the submitted sections is held. */
++class OwnedMiningSubmissionActorSpec extends AnyFlatSpec with Matchers with ErgoTestHelpers {
++  import org.ergoplatform.utils.ErgoNodeTestConstants._
++  import org.ergoplatform.utils.ErgoCoreTestConstants._
++  import OwnedMiningSubmissionV1._
++
++  implicit private val timeout: Timeout = defaultTimeout
++  private val nonce = "ab" * 32
++  private val operation = "cd" * 32
++  private val digest = MessageDigest.getInstance("SHA-256")
++    .digest(nonce.getBytes(StandardCharsets.UTF_8)).map(byte => f"${byte & 0xff}%02x").mkString
++
++  private case object ReleaseSubmission
++  private final class HeldForwarder(destination: ActorRef, observed: ActorRef) extends Actor {
++    private var held = Vector.empty[LocallyGeneratedModifier]
++    override def receive: Receive = {
++      case modifier: LocallyGeneratedModifier =>
++        held :+= modifier
++        observed ! modifier
++      case ReleaseSubmission =>
++        held.foreach(destination ! _)
++        held = Vector.empty
++    }
++  }
++
++  private final class Fixture(val system: ActorSystem, val generator: ActorRef, val readers: ActorRef,
++                              val forwarder: ActorRef, val submissions: TestProbe, val applied: TestProbe,
++                              val control: Control, val nodeSettings: ErgoSettings) {
++    def candidate(): Candidate = {
++      val reply = TestProbe()(system)
++      generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), reply.ref)
++      reply.expectMsgPF(3.seconds) { case StatusReply.Success(value: Candidate) => value }
++    }
++    def solve(candidate: Candidate): ErgoFullBlock =
++      nodeSettings.chainSettings.powScheme.proveCandidate(candidate.candidateBlock, defaultMinerSecret.w, 0, 1000).get
++    def submit(block: ErgoFullBlock): Unit = {
++      val reply = TestProbe()(system)
++      generator.tell(block.header.powSolution, reply.ref)
++      reply.expectMsg(2.seconds, StatusReply.success(()))
++      val sections = Vector(block.header) ++ block.mandatoryBlockSections
++      sections.foreach(section => submissions.expectMsgPF(2.seconds) {
++        case LocallyGeneratedModifier(observed) => observed.id shouldBe section.id
++      })
++    }
++  }
++
++  private def withFixture(maximum: Option[Int] = None)(run: Fixture => Unit): Unit = {
++    implicit val system: ActorSystem = ActorSystem()
++    try {
++      val control = fromEnvironment(Map(OwnerNonceSha256Env -> digest) ++ maximum.map(value => MaximumBlockHeightEnv -> value.toString)).get
++      val nodeSettings = settings.copy(
++        directory = Files.createTempDirectory("owned-mining-actor-").toString,
++        nodeSettings = settings.nodeSettings.copy(mining = true, stateType = StateType.Utxo,
++          internalMinerPollingInterval = 1.second, offlineGeneration = true, verifyTransactions = true),
++        chainSettings = settings.chainSettings.copy(blockInterval = 1.second,
++          powScheme = new AutolykosPowScheme(settings.chainSettings.powScheme.k, settings.chainSettings.powScheme.n))
++      )
++      val node = ErgoNodeViewRef(nodeSettings)
++      val readers = ErgoReadersHolderRef(node)
++      val submissions = TestProbe()
++      val applied = TestProbe()
++      system.eventStream.subscribe(applied.ref, classOf[FullBlockApplied])
++      val forwarder = system.actorOf(Props(new HeldForwarder(node, submissions.ref)))
++      val generator = CandidateGenerator(defaultMinerSecret.publicImage, readers, forwarder, nodeSettings, Some(control))
++      run(new Fixture(system, generator, readers, forwarder, submissions, applied, control, nodeSettings))
++    } finally TestKit.shutdownActorSystem(system)
++  }
++
++  it should "drain owned mining before acknowledgement and reject late cached solutions across actor replacement" in {
++    withFixture() { fixture =>
++      val previous = fixture.solve(fixture.candidate())
++      val current = fixture.solve(fixture.candidate())
++      fixture.submit(current)
++      val pause = TestProbe()(fixture.system)
++      fixture.generator.tell(PauseOwnedSubmissionV1(nonce, operation), pause.ref)
++      pause.expectNoMessage(200.millis)
++      val late = TestProbe()(fixture.system)
++      fixture.generator.tell(previous.header.powSolution, late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(current.header.powSolution, late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.generator.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      await((fixture.readers ? GetReaders).mapTo[Readers]).h.bestFullBlockOpt shouldBe None
++      fixture.forwarder ! ReleaseSubmission
++      fixture.applied.expectMsgPF(2.seconds) { case FullBlockApplied(header) => header.id shouldBe current.id }
++      pause.expectMsgPF(2.seconds) { case StatusReply.Success(receipt: PauseReceipt) =>
++        receipt shouldBe PauseReceipt(operation, Some(Watermark(current.id, current.header.height)), None)
++      }
++      val terminated = TestProbe()(fixture.system)
++      terminated.watch(fixture.generator)
++      fixture.system.stop(fixture.generator)
++      terminated.expectTerminated(fixture.generator, 2.seconds)
++      val replacement = CandidateGenerator(defaultMinerSecret.publicImage, fixture.readers, fixture.forwarder,
++        fixture.nodeSettings, Some(fixture.control))(fixture.system)
++      replacement.tell(GenerateCandidate(Seq.empty, reply = true, forced = true), late.ref)
++      late.expectMsgPF(3.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      replacement.tell(current.header.powSolution, late.ref)
++      late.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "retain an owned mining failure on semantic rejection of a pending submission" in {
++    withFixture() { fixture =>
++      val block = fixture.solve(fixture.candidate())
++      fixture.submit(block)
++      val pause = TestProbe()(fixture.system)
++      fixture.generator.tell(PauseOwnedSubmissionV1(nonce, operation), pause.ref)
++      pause.expectNoMessage(200.millis)
++      fixture.generator ! SemanticallyFailedModification(ErgoFullBlock.modifierTypeId, block.id, new Exception("synthetic rejection"))
++      pause.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.control.submissionsClosed shouldBe true
++      fixture.control.pauseCompletion.isLeft shouldBe true
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "refuse owned mining above the immutable completed block ceiling before sending any section" in {
++    withFixture(Some(0)) { fixture =>
++      val block = fixture.solve(fixture.candidate())
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(block.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++    }
++  }
++
++  it should "admit owned mining at the immutable completed block ceiling" in {
++    withFixture(Some(1)) { fixture =>
++      val block = fixture.solve(fixture.candidate())
++      block.header.height shouldBe 1
++      fixture.submit(block)
++    }
++  }
++
++  it should "refuse a valid previous-candidate solution above the immutable completed block ceiling" in {
++    withFixture(Some(0)) { fixture =>
++      val previous = fixture.solve(fixture.candidate())
++      val current = fixture.candidate()
++      previous.header.version shouldBe 1
++      fixture.nodeSettings.chainSettings.powScheme.validate(previous.header).isSuccess shouldBe true
++      val mismatchedCurrent = CandidateGenerator.completeBlock(current.candidateBlock, previous.header.powSolution)
++      fixture.nodeSettings.chainSettings.powScheme.validate(mismatchedCurrent.header).isFailure shouldBe true
++      val reply = TestProbe()(fixture.system)
++      fixture.generator.tell(previous.header.powSolution, reply.ref)
++      reply.expectMsgPF(2.seconds) { case error: StatusReply[_] => error.isError shouldBe true }
++      fixture.submissions.expectNoMessage(200.millis)
++      fixture.control.submissionsClosed shouldBe false
++    }
++  }
++}
+diff --git a/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala
+new file mode 100644
+index 0000000000000000000000000000000000000000..5a3bfbc618807486261a72c7828d2d8bf52943af
+--- /dev/null
++++ b/src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala
+@@ -0,0 +1,260 @@
++package org.ergoplatform.mining
++
++import org.ergoplatform.modifiers.history.header.Header
++import org.scalatest.flatspec.AnyFlatSpec
++import org.scalatest.matchers.should.Matchers
++import scorex.crypto.authds.ADDigest
++import scorex.crypto.hash.Digest32
++import scorex.util.bytesToId
++
++import java.nio.charset.StandardCharsets
++import java.security.MessageDigest
++import java.util.concurrent.{Callable, CountDownLatch, Executors, TimeUnit}
++
++/** Pure control transitions with serialized Header identities, not actor or node evidence. */
++class OwnedMiningSubmissionV1Spec extends AnyFlatSpec with Matchers {
++  import OwnedMiningSubmissionV1._
++
++  private val nonce = "ab" * 32
++  private val operation = "cd" * 32
++  private val digest = MessageDigest.getInstance("SHA-256")
++    .digest(nonce.getBytes(StandardCharsets.UTF_8)).map(byte => f"${byte & 0xff}%02x").mkString
++
++  private def control(maximum: Option[String] = None): Control =
++    fromEnvironment(Map(OwnerNonceSha256Env -> digest) ++ maximum.map(MaximumBlockHeightEnv -> _)).get
++
++  // These headers exercise only identity/height binding; they are not accepted PoW blocks.
++  private def header(height: Int, timestamp: Long = 1L): Header = Header(
++    version = 2.toByte,
++    parentId = bytesToId(Array.fill(32)(0.toByte)),
++    ADProofsRoot = Digest32 @@ Array.fill(32)(0.toByte),
++    stateRoot = ADDigest @@ Array.fill(33)(0.toByte),
++    transactionsRoot = Digest32 @@ Array.fill(32)(0.toByte),
++    timestamp = timestamp,
++    nBits = 0L,
++    height = height,
++    extensionRoot = Digest32 @@ Array.fill(32)(0.toByte),
++    powSolution = AutolykosSolution(AutolykosSolution.pkForV2, AutolykosSolution.wForV2,
++      Array.fill(8)(0.toByte), AutolykosSolution.dForV2),
++    votes = Array.fill(3)(0.toByte),
++    unparsedBytes = Array.emptyByteArray
++  )
++
++  it should "leave omitted owned controls unchanged for legacy environments" in {
++    fromEnvironment(Map.empty) shouldBe None
++    fromEnvironment(Map("PATH" -> "unused", "ERGO_SIDECHAIN_EXTENSION_FIELDS" -> "unused")) shouldBe None
++  }
++
++  it should "require owner opt-in for a height limit" in {
++    val error = intercept[IllegalArgumentException] {
++      fromEnvironment(Map(MaximumBlockHeightEnv -> "10"))
++    }
++    error.getMessage shouldBe "owned mining submission configuration is invalid"
++  }
++
++  Seq("", "a" * 63, "A" * 64, "g" * 64, " " + digest).zipWithIndex.foreach { case (invalid, index) =>
++    it should s"reject malformed owner digest $index without exposing it" in {
++      val error = intercept[IllegalArgumentException] {
++        fromEnvironment(Map(OwnerNonceSha256Env -> invalid))
++      }
++      error.getMessage shouldBe "owned mining submission configuration is invalid"
++    }
++  }
++
++  Seq("", "01", "+1", "-1", "1.0", " 1", "2147483648").zipWithIndex.foreach { case (invalid, index) =>
++    it should s"reject malformed height limit $index" in {
++      intercept[IllegalArgumentException] {
++        control(Some(invalid))
++      }.getMessage shouldBe "owned mining submission configuration is invalid"
++    }
++  }
++
++  it should "accept canonical zero and maximum Int policy without wrapping" in {
++    control(Some("0")).maximumBlockHeight shouldBe Some(0)
++    control(Some(Int.MaxValue.toString)).maximumBlockHeight shouldBe Some(Int.MaxValue)
++    control().maximumBlockHeight shouldBe None
++  }
++
++  it should "authenticate only the exact canonical nonce" in {
++    val owned = control()
++    owned.authenticate(nonce) shouldBe true
++    Seq(null, "", nonce.toUpperCase, "aa" * 32, nonce + "00").foreach(value =>
++      owned.authenticate(value) shouldBe false)
++    owned.submissionsClosed shouldBe false
++  }
++
++  it should "expose the canonical public operation identity field and validator" in {
++    OperationIdField shouldBe "operationId"
++    validOperationId(operation) shouldBe true
++  }
++
++  Seq(null, "", "c" * 63, operation.toUpperCase, "g" * 64, " " + operation, operation + "00")
++    .zipWithIndex.foreach { case (invalid, index) =>
++      it should s"reject malformed operation identity $index before pause effects" in {
++        val owned = control()
++        validOperationId(invalid) shouldBe false
++        owned.pause(nonce, invalid).isLeft shouldBe true
++        owned.submissionsClosed shouldBe false
++        owned.admitSubmission(header(1)) shouldBe Right(())
++      }
++    }
++
++  it should "reject unauthorized or malformed pause requests before latching" in {
++    val owned = control()
++    owned.pause("aa" * 32, operation).isLeft shouldBe true
++    owned.pause(nonce, operation.toUpperCase).isLeft shouldBe true
++    owned.pause(nonce, null).isLeft shouldBe true
++    owned.submissionsClosed shouldBe false
++    owned.admitSubmission(header(1)) shouldBe Right(())
++  }
++
++  it should "return an immutable receipt for an empty pending slot and never resume" in {
++    val owned = control(Some("10"))
++    val receipt = PauseReceipt(operation, None, Some(10))
++    owned.pause(nonce, operation) shouldBe Right(Some(receipt))
++    owned.pauseCompletion shouldBe Right(Some(receipt))
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++    owned.pause(nonce, "ef" * 32).isLeft shouldBe true
++    owned.admitSubmission(header(1)).isLeft shouldBe true
++    receipt.productIterator.toSeq shouldBe Seq(operation, None, Some(10))
++  }
++
++  it should "reject a completion query before any pause was requested" in {
++    val owned = control()
++    owned.pauseCompletion.isLeft shouldBe true
++    owned.submissionsClosed shouldBe false
++  }
++
++  it should "admit at the cap and reject above it without reserving a slot" in {
++    val owned = control(Some("10"))
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++    owned.admitSubmission(header(10)) shouldBe Right(())
++    owned.admitSubmission(header(9)).isLeft shouldBe true
++  }
++
++  it should "reject zero negative and null headers before reserving a slot" in {
++    val owned = control()
++    Seq(header(0), header(-1), null).foreach(value => owned.admitSubmission(value).isLeft shouldBe true)
++    owned.admitSubmission(header(1)) shouldBe Right(())
++    control(Some("0")).admitSubmission(header(1)).isLeft shouldBe true
++  }
++
++  it should "keep a pause pending until the exact local header is applied" in {
++    val owned = control()
++    val submitted = header(10)
++    owned.admitSubmission(submitted) shouldBe Right(())
++    owned.pause(nonce, operation) shouldBe Right(None)
++    owned.observeApplied(header(9))
++    owned.pauseCompletion shouldBe Right(None)
++    owned.observeRejected(header(9).id)
++    owned.pauseCompletion shouldBe Right(None)
++    owned.observeApplied(submitted)
++    owned.pauseCompletion shouldBe Right(Some(PauseReceipt(operation,
++      Some(Watermark(submitted.id, submitted.height)), None)))
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++  }
++
++  it should "retain the applied watermark even after its pending slot was cleared" in {
++    val owned = control()
++    val first = header(10)
++    owned.admitSubmission(first) shouldBe Right(())
++    owned.observeApplied(first)
++    owned.pause(nonce, operation) shouldBe Right(Some(PauseReceipt(operation,
++      Some(Watermark(first.id, 10)), None)))
++  }
++
++  it should "advance the retained watermark only through a new exact pending header" in {
++    val owned = control()
++    val first = header(10)
++    val second = header(11)
++    owned.admitSubmission(first) shouldBe Right(())
++    owned.observeApplied(first)
++    owned.admitSubmission(first).isLeft shouldBe true
++    owned.admitSubmission(second) shouldBe Right(())
++    owned.observeApplied(second)
++    owned.pause(nonce, operation) shouldBe Right(Some(PauseReceipt(operation,
++      Some(Watermark(second.id, 11)), None)))
++  }
++
++  it should "fail permanently on an unrelated applied header at the pending height" in {
++    val owned = control()
++    val submitted = header(10)
++    owned.admitSubmission(submitted) shouldBe Right(())
++    owned.pause(nonce, operation) shouldBe Right(None)
++    owned.observeApplied(header(10, timestamp = 2L))
++    owned.submissionsClosed shouldBe true
++    owned.pauseCompletion.isLeft shouldBe true
++    owned.observeApplied(submitted)
++    owned.pauseCompletion.isLeft shouldBe true
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++  }
++
++  it should "fail permanently if an unrelated application overtakes the pending height" in {
++    val owned = control()
++    owned.admitSubmission(header(10)) shouldBe Right(())
++    owned.observeApplied(header(11))
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++  }
++
++  it should "fail permanently on rejection of the exact pending submission" in {
++    val owned = control()
++    val submitted = header(10)
++    owned.admitSubmission(submitted) shouldBe Right(())
++    owned.observeRejected(submitted.id)
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++    owned.observeApplied(submitted)
++    owned.admitSubmission(header(11)).isLeft shouldBe true
++  }
++
++  it should "fail closed if an applied watermark is displaced at its own height" in {
++    val owned = control()
++    owned.admitSubmission(header(10)) shouldBe Right(())
++    owned.observeApplied(header(10))
++    owned.observeApplied(header(10, timestamp = 2L))
++    owned.submissionsClosed shouldBe true
++    owned.pause(nonce, operation).isLeft shouldBe true
++  }
++
++  it should "retain zero mining time for an empty header history" in {
++    CandidateGenerator.getBlockMiningTimeAvg(Vector.empty).toMillis shouldBe 0L
++  }
++
++  it should "initialize mining time from a single applied header without a partial pair" in {
++    CandidateGenerator.getBlockMiningTimeAvg(Vector(1000L)).toMillis shouldBe 0L
++  }
++
++  it should "retain the mining time average for complete sorted header pairs" in {
++    CandidateGenerator.getBlockMiningTimeAvg(Vector(4000L, 1000L, 2000L)).toMillis shouldBe 1500L
++  }
++
++  it should "share pending reservation across concurrent simulated owners" in {
++    val owned = control()
++    val firstOwner = owned
++    val secondOwner = owned
++    val start = new CountDownLatch(1)
++    val pool = Executors.newFixedThreadPool(2)
++    try {
++      val requests = Seq(firstOwner -> header(10), secondOwner -> header(10, timestamp = 2L)).map {
++        case (owner, candidate) => pool.submit(new Callable[Either[String, Unit]] {
++          override def call(): Either[String, Unit] = {
++            if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test synchronization failed")
++            owner.admitSubmission(candidate)
++          }
++        })
++      }
++      start.countDown()
++      val results = requests.map(_.get(5, TimeUnit.SECONDS))
++      results.count(_.isRight) shouldBe 1
++      results.count(_.isLeft) shouldBe 1
++      secondOwner.pause(nonce, operation) shouldBe Right(None)
++      firstOwner.submissionsClosed shouldBe true
++      firstOwner.pause(nonce, operation).isLeft shouldBe true
++    } finally {
++      pool.shutdownNow()
++      pool.awaitTermination(5, TimeUnit.SECONDS) shouldBe true
++    }
++  }
++}

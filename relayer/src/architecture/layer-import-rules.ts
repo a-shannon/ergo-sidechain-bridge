@@ -363,6 +363,8 @@ const REVIEWED_FEDERATED_GENESIS_LEGACY_BINDINGS: ReadonlyMap<string, ReadonlySe
     'createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2',
     'assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1',
     'assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1',
+    'pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1',
+    'revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1',
     'projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1',
     'SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2',
     'SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1',
@@ -2336,6 +2338,14 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
   [
     'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
     new Map([
+      ['pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1', new Set([
+        FEDERATED_GENESIS_TARGET_ROOT,
+        'substrate-federated-isolated-devnet-mining-pause-v1.test.ts',
+      ])],
+      ['revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1', new Set([
+        FEDERATED_GENESIS_TARGET_ROOT,
+        'substrate-federated-isolated-devnet-mining-pause-v1.test.ts',
+      ])],
       ['assertSubstrateFederatedIsolatedDevnetTrackerFreshnessLineageV2', new Set([
         'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         'substrate-federated-isolated-devnet-ergo-node-process-v1.test.ts',
@@ -2368,6 +2378,15 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
           'substrate-federated-isolated-devnet-setup-check-execution-v2.ts',
         ]),
       ],
+    ]),
+  ],
+  [
+    'owned-ergo-mining-submission-control-v1.ts',
+    new Map([
+      ['createOwnedErgoMiningSubmissionControlV1', new Set([
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+        'owned-ergo-mining-submission-control-v1.test.ts',
+      ])],
     ]),
   ],
   [

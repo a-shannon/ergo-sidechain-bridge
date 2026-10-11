@@ -37,6 +37,8 @@ import { buildSubstrateFederatedIsolatedDevnetErgoNodeV1, type BuildSubstrateFed
 import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1, type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
   type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1,
+  pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1,
+  revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1, assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
 import {
@@ -481,19 +483,13 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
             throw new Error('FED native external fee inputs differ from their distinct checked funding');
           }
           markStep('reserve-confirmation');
-          const freshReserve = await waitForCanonicalConfirmation(observer, reserve.expectedTxId,
-            performance.now() + 2 * 60_000, 'native-checkpoint-admission', assertActive);
+          const admissionHeight = await observePausedNativeAdmissionHeightV1({ target, observer,
+            reserve, withdrawalFee, trackerFee, stage: 'native-checkpoint-admission', assertActive });
           assertActive();
-          if (freshReserve.confirmationHeight !== reserve.outputObservation.confirmationHeight
-            || freshReserve.confirmationHeaderIdHex !== reserve.outputObservation.confirmationHeaderIdHex
-            || !Number.isSafeInteger(freshReserve.observedAtHeight)
-            || freshReserve.observedAtHeight < Math.max(withdrawalFee.confirmationHeight, trackerFee.confirmationHeight)) {
-            throw new Error('FED native admission window does not follow unchanged reserve and fee confirmations');
-          }
           markStep('checkpoint-attestation');
           const checkpoint = await attestFrontierNativeBurnCheckpointV1({ execution: burn,
-            admissionValidFromErgoHeight: String(freshReserve.observedAtHeight),
-            admissionExpiresAtErgoHeight: String(BigInt(freshReserve.observedAtHeight)
+            admissionValidFromErgoHeight: String(admissionHeight),
+            admissionExpiresAtErgoHeight: String(BigInt(admissionHeight)
               + BigInt(compiled.preparation.checkpointProfile.maxAdmissionValidityBlocks)),
           });
           assertActive();
@@ -756,6 +752,46 @@ function confirmedFee(value: Readonly<NativeFeeFundingReceipt>) {
   return Object.freeze({ ...value, confirmationHeight, confirmationHeaderIdHex });
 }
 
+async function observePausedNativeAdmissionHeightV1(input: Readonly<{
+  target: Parameters<NativeSetup['runNativeGenesisRetainingSigner']>[1];
+  observer: Readonly<SubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1>;
+  reserve: Readonly<{ expectedTxId: string; outputObservation: Readonly<{
+    confirmationHeight: number; confirmationHeaderIdHex: string;
+  }> }>;
+  withdrawalFee: ReturnType<typeof confirmedFee>;
+  trackerFee: ReturnType<typeof confirmedFee>;
+  stage: string;
+  assertActive: () => void;
+}>): Promise<number> {
+  input.assertActive();
+  const paused = await pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1(input.target);
+  input.assertActive();
+  const expected = [
+    { expectedTxId: input.reserve.expectedTxId, ...input.reserve.outputObservation, suffix: '' },
+    { ...input.withdrawalFee, suffix: '-withdrawal-fee' },
+    { ...input.trackerFee, suffix: '-tracker-fee' },
+  ];
+  if (new Set(expected.map(value => value.expectedTxId)).size !== 3) {
+    throw new Error('FED native admission reserve and fee transactions are not distinct');
+  }
+  const deadline = performance.now() + 2 * 60_000;
+  for (const prior of expected) {
+    const fresh = await waitForCanonicalConfirmation(input.observer, prior.expectedTxId,
+      deadline, `${input.stage}${prior.suffix}`, input.assertActive);
+    input.assertActive();
+    if (fresh.confirmationHeight !== prior.confirmationHeight
+      || fresh.confirmationHeaderIdHex !== prior.confirmationHeaderIdHex
+      || !Number.isSafeInteger(fresh.observedAtHeight)
+      || fresh.observedAtHeight !== paused.snapshot.fullHeight
+      || prior.confirmationHeight > paused.snapshot.fullHeight) {
+      throw new Error('FED native admission window does not follow unchanged reserve and fee confirmations');
+    }
+  }
+  await revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1(input.target, paused);
+  input.assertActive();
+  return paused.snapshot.fullHeight;
+}
+
 type NativeSetup = Readonly<SubstrateFederatedIsolatedDevnetSetupCheckSessionV2>;
 interface NativeReturnContinuation {
   readonly compiled: Readonly<ObservedSubstrateFederatedGenesisV1>;
@@ -824,7 +860,8 @@ async function completeFirstNativeReturn(input: Readonly<{
   const extensionValueHex = encodeSubstrateFederatedCheckpointExtensionValueV1(statement.encodedStatementHex);
   const genesisHeaderIdHex = prepared.batch.request.target.genesisHeaderIdHex;
   markStep('checkpoint-anchor');
-  const anchored = await node.withCheckpointExtensionMiningTarget(extensionValueHex, { minimumTipHeight: 11 }, async target => {
+  const anchored = await node.withCheckpointExtensionMiningTarget(extensionValueHex,
+    { minimumTipHeight: 11, maximumBlockHeight: Number(BigInt(statement.admissionExpiresAtErgoHeight) - 2n) }, async target => {
     readCustody();
     const result = await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({ target, targetGenesisHeaderIdHex: genesisHeaderIdHex,
       expectedPriorHeaderIdHex: priorSnapshot.headerIdHex, expectedPriorHeight: priorSnapshot.fullHeight,
@@ -1035,8 +1072,10 @@ async function completeFirstNativeReturn(input: Readonly<{
       markStep('continuation-preparation');
       const miningAuthority = await setup.issueNativeContinuationMiningAuthorityV1(target);
       readCustody();
-      const admissionValidFrom = Math.max(reserve.outputObservation.confirmationHeight,
-        secondWithdrawalFee.confirmationHeight, secondTrackerFee.confirmationHeight);
+      const admissionValidFrom = await observePausedNativeAdmissionHeightV1({ target, observer, reserve,
+        withdrawalFee: secondWithdrawalFee, trackerFee: secondTrackerFee,
+        stage: 'native-continuation-checkpoint-admission', assertActive: readCustody });
+      readCustody();
       markStep('checkpoint-attestation');
       const secondCheckpoint = await attestFrontierNativeBurnCheckpointV1({
         execution: continuationExecution, admissionValidFromErgoHeight: String(admissionValidFrom),
@@ -1182,7 +1221,8 @@ async function completeSecondNativeReturn(input: Readonly<{
   }
   markStep('checkpoint-anchor');
   const anchored = await node.withCheckpointExtensionMiningTarget(extensionValueHex,
-    { minimumTipHeight: Math.max(priorSnapshot.fullHeight + 1, admissionHeight) }, async target => {
+    { minimumTipHeight: Math.max(priorSnapshot.fullHeight + 1, admissionHeight),
+      maximumBlockHeight: Number(BigInt(statement.admissionExpiresAtErgoHeight) - 2n) }, async target => {
       readCustody();
       const result = await observeSubstrateFederatedIsolatedDevnetCheckpointAnchorV1({
         target, targetGenesisHeaderIdHex: genesisHeaderIdHex,

@@ -66,7 +66,10 @@ const SOLIDITY_AUDIT_RUN = [
   'exit "$status"',
 ].join('\n');
 const FRONTIER_BUILD_COMMAND = 'cargo build --locked --release -p frontier-template-node';
-const ERGO_TEST_COMMAND = 'sbt "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"';
+const ERGO_TEST_COMMAND = 'sbt "testOnly org.ergoplatform.mining.OwnedMiningSubmissionV1Spec"'
+  + ' "testOnly org.ergoplatform.mining.OwnedMiningSubmissionActorSpec"'
+  + ' "testOnly org.ergoplatform.http.routes.MiningApiRouteSpec"'
+  + ' "testOnly org.ergoplatform.mining.CandidateGeneratorSpec"';
 const ERGO_BUILD_COMMAND = 'sbt assembly';
 const AUDIT_NODE_ISOLATION_COMMAND_SHA256 =
   '500825e8cb86e4d82215b2d14076eca67ad74f85a8697f2efe12422cf18bef45';

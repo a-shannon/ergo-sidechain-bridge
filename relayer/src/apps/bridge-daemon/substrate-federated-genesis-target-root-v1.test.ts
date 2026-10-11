@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import ts from 'typescript';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Builds, compilers, observations and processes are stubs. Session/key custody,
@@ -9,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Downstream deposit, burn, checkpoint, tracker and payout are component doubles, not crypto evidence.
 const mocked = vi.hoisted(() => ({
   frontier: vi.fn(), ergoBuild: vi.fn(), process: vi.fn(), owned: vi.fn(), readOnlyOwned: vi.fn(),
+  pause: vi.fn(), pauseRevalidate: vi.fn(),
   discover: vi.fn(), history: vi.fn(), compile: vi.fn(), materialize: vi.fn(),
   pin: vi.fn(), nodes: vi.fn(), environment: vi.fn(),
   check: vi.fn(), batch: vi.fn(), execute: vi.fn(), source: vi.fn(), confirmation: vi.fn(),
@@ -34,6 +36,8 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', asy
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2: mocked.process,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: mocked.owned,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1: mocked.readOnlyOwned,
+  pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1: mocked.pause,
+  revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1: mocked.pauseRevalidate,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1: mocked.projectStartupPhase,
 }));
 vi.mock('../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js', () => ({
@@ -513,7 +517,10 @@ beforeEach(() => {
       withCheckpointExtensionMiningTarget: async (_extension: string, policy: unknown, callback: (value: any) => Promise<unknown>) => {
         expect(order.indexOf('withdrawalFee')).toBeLessThan(order.indexOf('checkpoint'));
         expect(order.indexOf('trackerFee')).toBeLessThan(order.indexOf('checkpoint'));
-        expect(policy).toEqual({ minimumTipHeight: 11 }); return invoke('anchor', callback);
+        expect(policy).toEqual({ minimumTipHeight: 11, maximumBlockHeight: 202 });
+        expect((policy as { maximumBlockHeight: number }).maximumBlockHeight)
+          .toBe(Number(BigInt(checkpoint.attestation.checkpointStatement.admissionExpiresAtErgoHeight) - 2n));
+        return invoke('anchor', callback);
       },
       withCheckpointBoundMiningStoppedExecutionTarget: (callback: (value: any) => Promise<unknown>) => invoke('frozen', callback),
       withCheckpointBoundReservationFreshnessRevalidationTarget: (callback: (value: any) => Promise<unknown>) => invoke('freshness', callback),
@@ -536,7 +543,10 @@ beforeEach(() => {
         return {
           withCheckpointExtensionMiningTarget: async (_extension: string, policy: unknown,
             callback: (value: any) => Promise<unknown>) => {
-            expect(policy).toEqual({ minimumTipHeight: 191 }); return invoke('secondAnchor', callback);
+            expect(policy).toEqual({ minimumTipHeight: 191, maximumBlockHeight: 252 });
+            expect((policy as { maximumBlockHeight: number }).maximumBlockHeight)
+              .toBe(Number(BigInt(continuationCheckpoint.attestation.checkpointStatement.admissionExpiresAtErgoHeight) - 2n));
+            return invoke('secondAnchor', callback);
           },
           withCheckpointBoundMiningStoppedExecutionTarget: (callback: (value: any) => Promise<unknown>) =>
             invoke('secondFrozen', callback),
@@ -939,12 +949,57 @@ function configureNativeReturnMocks() {
     expect(returnValues.secondTrackerFee.confirmationHeight).toBe(173);
     assertCustodyActive(); return continuationMiningAuthority;
   });
+  // These doubles enforce root forwarding and callback lifetime only; they do not
+  // establish an actual process pause, indexed watermark or node acceptance.
+  const pauseBindings = new WeakMap<object, object>();
+  const assertPauseTarget = (value: object) => {
+    if (value === target && active) return false;
+    if (value === phaseTargets.confirmation && phase === 'confirmation') return true;
+    throw new Error('pause fixture target is not the original active target');
+  };
+  mocked.pause.mockImplementation(async value => {
+    const second = assertPauseTarget(value);
+    assertCustodyActive();
+    expect(order).toContain(second ? 'secondWithdrawalFee' : 'withdrawalFee');
+    expect(order).toContain(second ? 'secondTrackerFee' : 'trackerFee');
+    expect(mocked.checkpoint).toHaveBeenCalledTimes(second ? 1 : 0);
+    order.push(second ? 'secondPause' : 'pause');
+    const observation = Object.freeze({
+      snapshot: Object.freeze({ fullHeight: second ? 190 : 140, headerIdHex: (second ? '98' : '97').repeat(32) }),
+      pauseReceipt: Object.freeze({ schema: 'e2s.owned-mining-submission-pause.v1',
+        operationId: (second ? 'd8' : 'd7').repeat(32), submissionPaused: true,
+        maximumBlockHeight: null,
+        latestAppliedBlock: Object.freeze({ height: second ? 190 : 140, headerId: (second ? '98' : '97').repeat(32) }) }),
+    });
+    pauseBindings.set(observation, value);
+    returnValues[second ? 'secondPause' : 'pause'] = observation;
+    return observation;
+  });
+  mocked.pauseRevalidate.mockImplementation(async (value, observation) => {
+    const second = assertPauseTarget(value);
+    assertCustodyActive();
+    if (pauseBindings.get(observation) !== value) throw new Error('pause fixture observation is not bound to the original target');
+    const prefix = second ? 'native-continuation-checkpoint-admission' : 'native-checkpoint-admission';
+    expect(order.slice(-3)).toEqual([prefix, `${prefix}-withdrawal-fee`, `${prefix}-tracker-fee`]);
+    expect(mocked.checkpoint).toHaveBeenCalledTimes(second ? 1 : 0);
+    order.push(second ? 'secondPauseRevalidate' : 'pauseRevalidate');
+  });
   mocked.wait.mockImplementation(async (_observer, txId, _deadline, stage, assertActive) => {
     assertActive?.();
-    if (stage === 'native-checkpoint-admission') {
-      expect(txId).toBe(committedVault.expectedTxId); expect(active).toBe(true);
-      expect(order).toContain('withdrawalFee'); expect(order).toContain('trackerFee');
-      return { status: 'confirmed', observedAtHeight: 140, confirmationHeight: 130, confirmationHeaderIdHex: '96'.repeat(32) };
+    if (stage.startsWith('native-checkpoint-admission') || stage.startsWith('native-continuation-checkpoint-admission')) {
+      const second = stage.startsWith('native-continuation-');
+      const prefix = second ? 'native-continuation-checkpoint-admission' : 'native-checkpoint-admission';
+      expect(_observer).toBe(mocked.confirmation.mock.results.at(-1)!.value);
+      if (second) expect(phase).toBe('confirmation'); else expect(active).toBe(true);
+      expect(order).toContain(second ? 'secondPause' : 'pause');
+      const prior = stage === prefix ? { expectedTxId: (second ? continuationVault : committedVault).expectedTxId,
+        ...(second ? continuationVault : committedVault).outputObservation }
+        : returnValues[second ? (stage.endsWith('withdrawal-fee') ? 'secondWithdrawalFee' : 'secondTrackerFee')
+          : (stage.endsWith('withdrawal-fee') ? 'withdrawalFee' : 'trackerFee')];
+      expect(txId).toBe(prior.expectedTxId);
+      order.push(stage);
+      return { status: 'confirmed', observedAtHeight: second ? 190 : 140,
+        confirmationHeight: prior.confirmationHeight, confirmationHeaderIdHex: prior.confirmationHeaderIdHex };
     }
     const second = stage.startsWith('native-continuation-');
     expect(phase).toBe(second ? 'secondConfirmation' : 'confirmation');
@@ -961,8 +1016,8 @@ function configureNativeReturnMocks() {
     order.push(second ? 'continuationCheckpoint' : 'checkpoint');
     expect(value.execution).toBe(second ? continuationExecution : burn); assertCustodyActive();
     if (!second) expect(active).toBe(true); expect(frontierActive).toBe(true);
-    expect(value.admissionValidFromErgoHeight).toBe(second ? '173' : '140');
-    expect(value.admissionExpiresAtErgoHeight).toBe(second ? '237' : '204');
+    expect(value.admissionValidFromErgoHeight).toBe(second ? '190' : '140');
+    expect(value.admissionExpiresAtErgoHeight).toBe(second ? '254' : '204');
     const statement = buildSubstrateFederatedCheckpointStatementV1({ profile: compiled.preparation.checkpointProfile,
       sourceNetworkIdHex: 'b1'.repeat(32), sidechainIdHex: 'b2'.repeat(32), sourceNativeBlockHeight: second ? '8' : '4',
       sourceNativeBlockHashHex: (second ? 'd1' : 'a1').repeat(32), executionBlockHashHex: (second ? 'd2' : 'a2').repeat(32),
@@ -1138,7 +1193,112 @@ function configureNativeReturnMocks() {
   });
 }
 
+// Isolate the exact admission helper below earlier checked-funding joins. These
+// synthetic inputs prove guard reachability, not producer/process/node admission.
+function admissionHelperFixture(second: boolean,
+  omitGuard?: 'distinct-transactions' | 'prior-height') {
+  const sourceText = readFileSync(new URL('./substrate-federated-genesis-target-root-v1.ts', import.meta.url), 'utf8');
+  const parsed = ts.createSourceFile('root.ts', sourceText, ts.ScriptTarget.ES2022, true);
+  const name = 'observePausedNativeAdmissionHeightV1';
+  const declarations = parsed.statements.filter((node): node is ts.FunctionDeclaration =>
+    ts.isFunctionDeclaration(node) && node.name?.text === name);
+  expect(declarations).toHaveLength(1);
+  let body = declarations[0]!.getText(parsed);
+  if (omitGuard) {
+    const needle = omitGuard === 'distinct-transactions'
+      ? 'new Set(expected.map(value => value.expectedTxId)).size !== 3'
+      : 'prior.confirmationHeight > paused.snapshot.fullHeight';
+    expect(body.split(needle)).toHaveLength(2);
+    body = body.replace(needle, 'false');
+  }
+  const height = second ? 190 : 140;
+  const reserve = { expectedTxId: '71'.repeat(32), outputObservation: {
+    confirmationHeight: height - 10, confirmationHeaderIdHex: '72'.repeat(32),
+  } };
+  const withdrawalFee = { expectedTxId: '73'.repeat(32), confirmationHeight: height - 2,
+    confirmationHeaderIdHex: '74'.repeat(32) };
+  const trackerFee = { expectedTxId: '75'.repeat(32), confirmationHeight: height - 1,
+    confirmationHeaderIdHex: '76'.repeat(32) };
+  const originalTarget = Object.freeze({ component: 'exact admission helper target double' });
+  const observer = Object.freeze({ component: 'exact admission helper observer double' });
+  const paused = Object.freeze({ snapshot: Object.freeze({ fullHeight: height }) });
+  const pause = vi.fn(async (value: object) => {
+    expect(value).toBe(originalTarget);
+    return paused;
+  });
+  const fresh = vi.fn(async (value: object, txId: string, _deadline: number, stage: string) => {
+    expect(value).toBe(observer);
+    const prior = stage.endsWith('-withdrawal-fee') ? withdrawalFee
+      : stage.endsWith('-tracker-fee') ? trackerFee
+        : { expectedTxId: reserve.expectedTxId, ...reserve.outputObservation };
+    expect(txId).toBe(prior.expectedTxId);
+    return { status: 'confirmed', observedAtHeight: height,
+      confirmationHeight: prior.confirmationHeight, confirmationHeaderIdHex: prior.confirmationHeaderIdHex };
+  });
+  const revalidate = vi.fn(async (value: object, observation: object) => {
+    expect(value).toBe(originalTarget); expect(observation).toBe(paused);
+  });
+  const compiledBody = ts.transpileModule(body, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  expect(compiledBody).not.toMatch(/\brequire\s*\(/u);
+  const helper = new Function('pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1',
+    'waitForCanonicalConfirmation', 'revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1',
+    `${compiledBody}\nreturn ${name};`)(pause, fresh, revalidate) as (value: object) => Promise<number>;
+  const request = { target: originalTarget, observer, reserve, withdrawalFee, trackerFee,
+    stage: second ? 'native-continuation-checkpoint-admission' : 'native-checkpoint-admission',
+    assertActive: vi.fn() };
+  return { helper, request, height, pause, fresh, revalidate };
+}
+
 describe('fresh FED target composition', () => {
+  for (const second of [false, true]) {
+    const cycle = second ? 'continuation' : 'first';
+    it.each(['reserve/withdrawal-fee', 'withdrawal-fee/tracker-fee'] as const)
+      (`isolates ${cycle} helper duplicate %s below checked funding with a guard mutant`, async relation => {
+        for (const omit of [false, true]) {
+          const h = admissionHelperFixture(second, omit ? 'distinct-transactions' : undefined);
+          if (relation === 'reserve/withdrawal-fee') h.request.withdrawalFee.expectedTxId = h.request.reserve.expectedTxId;
+          else h.request.trackerFee.expectedTxId = h.request.withdrawalFee.expectedTxId;
+          if (omit) {
+            await expect(h.helper(h.request)).resolves.toBe(h.height);
+            expect(h.fresh).toHaveBeenCalledTimes(3);
+            expect(h.revalidate).toHaveBeenCalledOnce();
+          } else {
+            await expect(h.helper(h.request)).rejects.toThrow('reserve and fee transactions are not distinct');
+            expect(h.fresh).not.toHaveBeenCalled();
+            expect(h.revalidate).not.toHaveBeenCalled();
+          }
+          expect(h.pause).toHaveBeenCalledOnce();
+        }
+      });
+
+    it.each(['withdrawalFee', 'trackerFee'] as const)
+      (`isolates ${cycle} helper prior and fresh %s above the paused tip with a guard mutant`, async fee => {
+        for (const omit of [false, true]) {
+          const h = admissionHelperFixture(second, omit ? 'prior-height' : undefined);
+          const prior = h.request[fee];
+          const originalHeader = prior.confirmationHeaderIdHex;
+          const originalTxId = prior.expectedTxId;
+          prior.confirmationHeight = h.height + 1;
+          if (omit) {
+            await expect(h.helper(h.request)).resolves.toBe(h.height);
+            expect(h.fresh).toHaveBeenCalledTimes(3);
+            expect(h.revalidate).toHaveBeenCalledOnce();
+          } else {
+            await expect(h.helper(h.request)).rejects.toThrow('admission window does not follow unchanged reserve and fee confirmations');
+            expect(h.fresh).toHaveBeenCalledTimes(fee === 'withdrawalFee' ? 2 : 3);
+            expect(h.revalidate).not.toHaveBeenCalled();
+          }
+          const observed = h.fresh.mock.results[fee === 'withdrawalFee' ? 1 : 2]!.value;
+          await expect(observed).resolves.toEqual({ status: 'confirmed', observedAtHeight: h.height,
+            confirmationHeight: h.height + 1, confirmationHeaderIdHex: originalHeader });
+          expect(prior.expectedTxId).toBe(originalTxId);
+          expect(h.pause).toHaveBeenCalledOnce();
+        }
+      });
+  }
+
   it.each([false, undefined, null, 0, 1, 'true', [], {}])(
     'rejects an invalid root confirmation progress opt-in %j before custody', async value => {
       const candidate = { ...input, captureCommittedReserveConfirmationProgress: value } as unknown as RunSubstrateFederatedGenesisTargetRootV1Input;
@@ -1253,6 +1413,62 @@ describe('fresh FED target composition', () => {
     await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('admission window does not follow');
     expect(mocked.checkpoint).not.toHaveBeenCalled(); expect(mocked.anchor).not.toHaveBeenCalled(); assertDownstreamCleanup();
   });
+
+  function assertPausedAdmissionHeldBeforeAttestation(second: boolean) {
+    expect(mocked.checkpoint).toHaveBeenCalledTimes(second ? 1 : 0);
+    expect(mocked.anchor).toHaveBeenCalledTimes(second ? 1 : 0);
+    expect(order).not.toContain(second ? 'secondAnchor-phase' : 'anchor-phase');
+    expect(mocked.continuationContext).not.toHaveBeenCalled();
+    assertDownstreamCleanup();
+  }
+
+  for (const second of [false, true]) {
+    const cycle = second ? 'continuation' : 'first';
+    it.each(['pause rejection', 'foreign target', 'revalidation rejection', 'copied observation'] as const)
+      (`holds ${cycle} checkpoint before attestation on %s`, async fault => {
+        const priorCalls = second ? 1 : 0;
+        const consume = fault === 'pause rejection' || fault === 'foreign target' ? mocked.pause : mocked.pauseRevalidate;
+        const original = consume.getMockImplementation()!;
+        const failure = new Error(`${cycle} pause boundary rejected`);
+        consume.mockImplementation(async (...args) => {
+          const selected = args[0] === (second ? phaseTargets.confirmation : target);
+          if (!selected) return original(...args);
+          if (fault === 'pause rejection' || fault === 'revalidation rejection') throw failure;
+          if (fault === 'foreign target') return original({ ...args[0] });
+          return original(args[0], { ...args[1] });
+        });
+        const caught = await runSubstrateFederatedGenesisTargetRootV1(input).catch(error => error);
+        if (fault === 'pause rejection' || fault === 'revalidation rejection') expect(caught).toBe(failure);
+        else expect(caught.message).toContain(fault === 'foreign target'
+          ? 'not the original active target' : 'not bound to the original target');
+        expect(mocked.pause).toHaveBeenCalledTimes(priorCalls + 1);
+        expect(mocked.pauseRevalidate).toHaveBeenCalledTimes(priorCalls
+          + Number(fault === 'revalidation rejection' || fault === 'copied observation'));
+        assertPausedAdmissionHeldBeforeAttestation(second);
+      });
+
+    const purposes = second ? ['reserve', 'withdrawal-fee', 'tracker-fee'] as const
+      : ['withdrawal-fee', 'tracker-fee'] as const;
+    for (const purpose of purposes) {
+      it.each(['height', 'header', 'observed height'] as const)
+        (`rejects ${cycle} fresh ${purpose} %s drift before checkpoint attestation`, async fault => {
+          const original = mocked.wait.getMockImplementation()!;
+          const prefix = second ? 'native-continuation-checkpoint-admission' : 'native-checkpoint-admission';
+          const selectedStage = `${prefix}${purpose === 'reserve' ? '' : `-${purpose}`}`;
+          mocked.wait.mockImplementation(async (...args) => {
+            const value = await original(...args);
+            if (args[3] !== selectedStage) return value;
+            return fault === 'height' ? { ...value, confirmationHeight: value.confirmationHeight - 1 }
+              : fault === 'header' ? { ...value, confirmationHeaderIdHex: 'ff'.repeat(32) }
+                : { ...value, observedAtHeight: value.observedAtHeight - 1 };
+          });
+          await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('admission window does not follow');
+          expect(mocked.pauseRevalidate).toHaveBeenCalledTimes(second ? 1 : 0);
+          expect(mocked.wait.mock.calls.filter(args => args[3] === selectedStage)).toHaveLength(1);
+          assertPausedAdmissionHeldBeforeAttestation(second);
+        });
+    }
+  }
 
   it.each(['checkpoint', 'withdrawalFeeCheck', 'trackerCheck', 'payoutCheck'] as const)
     ('does not convert a JSON copy of %s into continuation authority', async stage => {
@@ -1694,14 +1910,18 @@ describe('fresh FED target composition', () => {
     expect(result.storageKeysChecked).toBe(6); expect(Object.isFrozen(result)).toBe(true);
     expect(order).toEqual(['setup', 'source', 'operator', 'frontier-build', 'ergo-build', 'process', 'mine',
       'discover', 'history', 'compile', 'materialize', 'nodes', 'check', 'execute',
-      ...downstreamStages, 'withdrawalFeeCheck', 'withdrawalFee', 'trackerFeeCheck', 'trackerFee', 'checkpoint',
+      ...downstreamStages, 'withdrawalFeeCheck', 'withdrawalFee', 'trackerFeeCheck', 'trackerFee', 'pause',
+      'native-checkpoint-admission', 'native-checkpoint-admission-withdrawal-fee', 'native-checkpoint-admission-tracker-fee',
+      'pauseRevalidate', 'checkpoint',
       'anchor-phase', 'anchor', 'frozen-phase', 'frozenObservation', 'context', 'trackerTx', 'trackerCheck', 'trackerAuthorize', 'trackerReserve',
       'freshness-phase', 'trackerFreshness', 'transport-phase', 'trackerSubmit', 'trackerFinalize', 'confirmation-phase', 'trackerConfirm',
       'payoutCheck', 'payoutAuthorize', 'payoutReserve', 'payoutSubmit', 'payoutFinalize', 'payoutConfirm',
       'continuationFunding', 'continuationPacket', 'continuationSourceLock', 'continuationVault', 'continuationDraft',
       'continuationEvidence', 'continuationProof', 'continuationReservation', 'continuationMintBurn',
       'continuationWithdrawalFeeCheck', 'secondWithdrawalFee', 'continuationTrackerFeeCheck', 'secondTrackerFee',
-      'miningAuthority', 'continuationCheckpoint', 'readOnly-phase', 'continue-cycle',
+      'miningAuthority', 'secondPause', 'native-continuation-checkpoint-admission',
+      'native-continuation-checkpoint-admission-withdrawal-fee', 'native-continuation-checkpoint-admission-tracker-fee',
+      'secondPauseRevalidate', 'continuationCheckpoint', 'readOnly-phase', 'continue-cycle',
       'secondAnchor-phase', 'secondAnchor', 'secondFrozen-phase', 'secondFrozenObservation', 'continuationContext',
       'secondTrackerTx', 'continuationTrackerCheck', 'secondTrackerAuthorize', 'secondTrackerReserve',
       'secondFreshness-phase', 'secondTrackerFreshness', 'secondTransport-phase', 'secondTrackerSubmit',
@@ -1709,6 +1929,16 @@ describe('fresh FED target composition', () => {
       'secondPayoutAuthorize', 'secondPayoutReserve', 'secondPayoutSubmit', 'secondPayoutFinalize', 'secondPayoutConfirm',
       'recovery-capture', 'nodes-stop', 'stop']);
     expect(nativeAction).toHaveBeenCalledTimes(3);
+    expect(mocked.pause.mock.calls).toEqual([[target], [phaseTargets.confirmation]]);
+    expect(mocked.pauseRevalidate.mock.calls).toEqual([[target, returnValues.pause],
+      [phaseTargets.confirmation, returnValues.secondPause]]);
+    expect(mocked.wait.mock.calls.filter(args => args[3].includes('checkpoint-admission')).map(args => [args[1], args[3]]))
+      .toEqual([[committedVault.expectedTxId, 'native-checkpoint-admission'],
+        [returnValues.withdrawalFee.expectedTxId, 'native-checkpoint-admission-withdrawal-fee'],
+        [returnValues.trackerFee.expectedTxId, 'native-checkpoint-admission-tracker-fee'],
+        [continuationVault.expectedTxId, 'native-continuation-checkpoint-admission'],
+        [returnValues.secondWithdrawalFee.expectedTxId, 'native-continuation-checkpoint-admission-withdrawal-fee'],
+        [returnValues.secondTrackerFee.expectedTxId, 'native-continuation-checkpoint-admission-tracker-fee']]);
     expect(closeNative).toHaveBeenCalledTimes(2);
     expect(result.frontierProcess).toEqual({ component: 'FED process stub' });
     expect(calls.filter(call => call.method === 'state_getStorage')).toHaveLength(28);
@@ -2692,10 +2922,10 @@ describe('fresh FED target composition', () => {
       name: 'tracker confirmation', step: 'tracker-confirmation',
       inject: (failure: Error) => {
         const original = mocked.wait.getMockImplementation()!;
-        for (let index = 0; index < 3; index++) mocked.wait.mockImplementationOnce((...args) => original(...args));
+        for (let index = 0; index < 8; index++) mocked.wait.mockImplementationOnce((...args) => original(...args));
         mocked.wait.mockRejectedValueOnce(failure);
       },
-      assertCalls: () => expect(mocked.wait).toHaveBeenCalledTimes(4),
+      assertCalls: () => expect(mocked.wait).toHaveBeenCalledTimes(9),
     },
     {
       name: 'withdrawal transport', step: 'withdrawal-transport',
@@ -2710,10 +2940,10 @@ describe('fresh FED target composition', () => {
       name: 'withdrawal confirmation', step: 'withdrawal-confirmation',
       inject: (failure: Error) => {
         const original = mocked.wait.getMockImplementation()!;
-        for (let index = 0; index < 4; index++) mocked.wait.mockImplementationOnce((...args) => original(...args));
+        for (let index = 0; index < 9; index++) mocked.wait.mockImplementationOnce((...args) => original(...args));
         mocked.wait.mockRejectedValueOnce(failure);
       },
-      assertCalls: () => expect(mocked.wait).toHaveBeenCalledTimes(5),
+      assertCalls: () => expect(mocked.wait).toHaveBeenCalledTimes(10),
     },
   ] as const;
 

@@ -46,6 +46,58 @@ function staticAppFixture(file: string, source: string): Record<string, string> 
 }
 
 describe('layer import rules', () => {
+  it.each([
+    'pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1',
+    'revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1',
+  ])('reserves mining pause capability %s to the direct native root', binding => {
+    const specifier = '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `${declaration} await ${binding}(target);`))).toEqual([]);
+    for (const file of [GENESIS_SETUP_ROOT, TRACKER_V2_CAMPAIGN_ROOT,
+      'apps/bridge-daemon/foreign.ts', 'scripts/foreign.ts', 'foreign.ts']) {
+      const relative = `./${path.posix.relative(path.posix.dirname(file),
+        'substrate-federated-isolated-devnet-ergo-node-process-v1.js')}`;
+      expect(inspect(staticAppFixture(file, `import { ${binding} } from '${relative}'; ${binding}(target);`))
+        .map(item => item.message)).toContain(
+        `exclusive authority import has the wrong owner: ${relative}#${binding}`);
+    }
+    for (const suffix of [`const escaped = ${binding};`, `capture(${binding});`]) {
+      expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} ${suffix}`))
+        .map(item => item.message)).toContain(
+        `restricted capability binding must not escape its reviewed call: ${specifier}#${binding}`);
+    }
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT, `${declaration} export { ${binding} };`))
+      .map(item => item.message)).toContain(
+      `restricted capability binding must not be re-exported: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import { ${binding} as pause } from '${specifier}'; pause(target);`))
+      .map(item => item.message)).toContain(
+      `exclusive authority import must not be aliased: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture(FEDERATED_GENESIS_TARGET_ROOT,
+      `import * as controls from '${specifier}'; controls.${binding}(target);`))
+      .map(item => item.message)).toContain(
+      `exclusive authority module must use named runtime imports: ${specifier}`);
+  });
+
+  it('reserves the fixed-loopback pause transport factory to its process owner and direct test', () => {
+    const binding = 'createOwnedErgoMiningSubmissionControlV1';
+    const specifier = './owned-ergo-mining-submission-control-v1.js';
+    const source = `import { ${binding} } from '${specifier}'; ${binding}();`;
+    for (const file of ['substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      'owned-ergo-mining-submission-control-v1.test.ts']) {
+      expect(inspect(staticAppFixture(file, source))).toEqual([]);
+    }
+    expect(inspect(staticAppFixture('foreign.ts', source)).map(item => item.message))
+      .toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture('substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      `import { ${binding} as create } from '${specifier}'; create();`)).map(item => item.message))
+      .toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);
+    expect(inspect(staticAppFixture('substrate-federated-isolated-devnet-ergo-node-process-v1.ts',
+      `import * as controls from '${specifier}'; controls.${binding}();`)).map(item => item.message))
+      .toContain(`exclusive authority module must use named runtime imports: ${specifier}`);
+  });
+
   it('reserves the complete native root to the contained two-cycle worker', () => {
     const worker = 'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts';
     const specifier = '../apps/bridge-daemon/substrate-federated-genesis-target-root-v1.js';
