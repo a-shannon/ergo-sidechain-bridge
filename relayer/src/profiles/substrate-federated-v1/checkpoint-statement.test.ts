@@ -14,6 +14,7 @@ import {
   decodeSubstrateFederatedCheckpointStatementV1,
   decodeSubstrateFederatedCheckpointStatementV1ForAdmission,
   projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1 as ownAdmissionStage,
+  projectOwnSubstrateFederatedCheckpointAdmissionWindowFailureV1 as ownWindowFailure,
   deriveSubstrateFederatedCheckpointAttestationDigestHex,
   encodeSubstrateFederatedCheckpointExtensionValueV1,
   encodeSubstrateFederatedCheckpointProfileV1,
@@ -268,9 +269,59 @@ describe('substrate-federated-v1 checkpoint profile and statement', () => {
       expect(error).toBeInstanceOf(Error);
       expect(ownAdmissionStage(error)).toBe(fault === 'decode' ? 'decode'
         : fault.startsWith('profile') ? 'profile' : 'admission-horizon');
+      expect(ownWindowFailure(error)).toBe(fault === 'before window' ? 'before-window'
+        : fault === 'exclusive expiry' ? 'expired' : null);
       expect(decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, profile, '1010'))
         .toEqual(statement);
     });
+
+  it.each(['1009', '1060', '1061'])(
+    'projects only the genuine window comparison at current height %s', current => {
+      const { profile, statement } = fixture();
+      let failure: unknown;
+      try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, profile, current); }
+      catch (error) { failure = error; }
+      expect(ownWindowFailure(failure)).toBe(current === '1009' ? 'before-window' : 'expired');
+      expect(ownAdmissionStage(failure)).toBe('admission-horizon');
+      expect(Reflect.ownKeys(failure as Error)).not.toContain('windowFailure');
+      for (const admittedHeight of ['1010', '1059']) {
+        expect(decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, profile, admittedHeight))
+          .toEqual(statement);
+      }
+    });
+
+  it.each(['-1', '1.5', 'NaN', '18446744073709551616'])(
+    'does not mistake invalid current height %s for a window comparison', current => {
+      const { profile, statement } = fixture();
+      let failure: unknown;
+      try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, profile, current); }
+      catch (error) { failure = error; }
+      expect(ownAdmissionStage(failure)).toBe('admission-horizon');
+      expect(ownWindowFailure(failure)).toBeNull();
+    });
+
+  it('rejects caller relation properties and invalidates a genuine error reused outside its window comparison', () => {
+    const { profile, statement } = fixture();
+    let failure: unknown;
+    try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, profile, '1060'); }
+    catch (error) { failure = error; }
+    expect(ownWindowFailure(failure)).toBe('expired');
+    let reads = 0;
+    const forged = new Error();
+    Object.defineProperty(forged, 'windowFailure', { get() { reads++; return 'expired'; } });
+    expect(ownWindowFailure(forged)).toBeNull();
+    expect(ownWindowFailure(new Proxy(failure as Error, { get() { reads++; throw new Error(); } }))).toBeNull();
+    expect(ownWindowFailure(Object.create(Error.prototype))).toBeNull();
+    expect(reads).toBe(0);
+    const changed = Object.create(null);
+    Object.defineProperty(changed, 'encodedProfileHex', { get() { throw failure; } });
+    let rethrown: unknown;
+    try { decodeSubstrateFederatedCheckpointStatementV1ForAdmission(statement.encodedStatementHex, changed, '1010'); }
+    catch (error) { rethrown = error; }
+    expect(rethrown).toBe(failure);
+    expect(ownWindowFailure(failure)).toBeNull();
+    expect(ownAdmissionStage(failure)).toBeNull();
+  });
 
   it.each([new Error('opaque'), 'primitive', Object.create(Error.prototype),
     new Proxy(new Error(), {}), new Proxy({}, { get() { throw new Error('must not inspect'); } })])(
@@ -287,6 +338,7 @@ describe('substrate-federated-v1 checkpoint profile and statement', () => {
       catch (failure) { caught = failure; }
       expect(caught).toBe(thrown);
       expect(ownAdmissionStage(caught)).toBe(isNativeError(thrown) ? 'profile' : null);
+      expect(ownWindowFailure(caught)).toBeNull();
       expect(ownAdmissionStage(new Error())).toBeNull();
       expect(ownAdmissionStage(profile)).toBeNull();
     });

@@ -21,6 +21,7 @@ import { verifyErgoExtensionMembership } from './ergo-settlement-core/ergo-exten
 import {
   decodeSubstrateFederatedCheckpointStatementV1ForAdmission,
   projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1,
+  projectOwnSubstrateFederatedCheckpointAdmissionWindowFailureV1,
   encodeSubstrateFederatedCheckpointExtensionValueV1,
 } from './profiles/substrate-federated-v1/checkpoint-statement.js';
 import {
@@ -418,7 +419,11 @@ async function buildObservedAnchorCompilerBoundSubstrateFederatedTrackerV2Contex
     if (phase === 'statement' && statementCheck !== undefined) {
       const check = statementCheck === 'admission'
         ? projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1(error) : statementCheck;
-      if (check !== null) tagSubstrateFederatedTrackerV2StatementFailureCheckV1(error, check);
+      const windowFailure = check === 'admission-horizon'
+        ? projectOwnSubstrateFederatedCheckpointAdmissionWindowFailureV1(error) : null;
+      if (check !== null) tagSubstrateFederatedTrackerV2StatementFailureCheckV1(error,
+        windowFailure === 'before-window' ? 'admission-before-window'
+          : windowFailure === 'expired' ? 'admission-expired' : check);
     }
     throw tagSubstrateFederatedTrackerV2BuildFailurePhaseV1(error, phase);
   }

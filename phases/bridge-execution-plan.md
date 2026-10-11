@@ -1,6 +1,6 @@
 # Bridge Execution Plan
 
-Updated: 2026-10-10
+Updated: 2026-10-11
 
 This is the single active continuation queue for the Ergo sidechain bridge.
 The deliverable is a reproducible open-source reference that an institution
@@ -28,7 +28,50 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–57 are permanently consumed or held. Packaged C57 on
+**Now:** Campaigns 24–58 are permanently consumed or held. Separately admitted
+packaged C58 on `6f2564d06d56d3dfbc4c0333fa48f9ca55824182` terminated once at
+`2026-10-11T00:04:43.6627268Z`, with integer command exit 1, null launcher
+exception and no parent result. Independent review validated the bounded
+current public parent metadata, own digests and repeated opaque worker links:
+`execution_failure/root-or-cleanup/cycle-1/tracker-context/statement/admission-horizon`.
+Worker ancestry was not reconstructed. The receipts publish no heights and
+identify neither the admission comparison nor the raw cause. Completion,
+cleanup and custody disposal remain unknown. C58 cannot be retried, resumed or
+reclassified. Its terminal supplies no authority for another invocation.
+
+All three required jobs passed on that unchanged source in
+[run 38074529173](https://github.com/a-shannon/ergo-sidechain-bridge/actions/runs/38074529173).
+The selected local result distinguishes the genuine statement comparisons
+`current < validFrom` and `current >= expires` through the existing tracker
+statement-check producer and worker/parent consumers. It retains the broad
+`admission-horizon` value, existing fields, schemas, domains and old canonical
+receipts. The new checks are `admission-before-window` and `admission-expired`.
+Updated readers retain backward readability; older binaries reject new values.
+The actual tracker path already validates a positive integer height before
+statement admission. This source fact does not establish C58's historical
+branch or justify a mining, validity-window or runtime-budget correction.
+
+The genuine decoder/header/tracker join, isolated projection and codec negatives,
+old-byte regression, composed parent consumers, operator instructions and exact
+independent review are locally closed. Existing unchanged green checks remain
+scoped. Continue locally without a push or new CI. The next selected preparation
+is one separately fresh packaged two-cycle lifecycle on exact locally frozen
+source, under the standing owned synthetic-loopback scope. Preparation does not
+dispatch it: a new config, callers, source/tool/output identities, both canonical
+baselines, independent admission review, process/port exclusivity, fresh disposable
+custody, distinct confirmed external fees before each anchor and final100GiB
+headroom remain mandatory. A diagnostic, local commit or old CI supplies none of
+that operation authority.
+The Publication Cadence rule below governs this local lane: public promotion
+requires its guarded update and due exact-head hosted checks; a local synthetic
+run requires its own exact identity, applicable validation and fresh admission.
+Known relevant failures still block. Do not reinterpret historical publication
+checkpoints as a compulsory push between local diagnostic and lifecycle work.
+The missing accepted result remains a genuine complete packaged two-cycle
+lifecycle followed by separately admitted recovery and real external FED
+acceptance. This diagnostic closure cannot substitute for those results.
+
+**Earlier progress milestone:** Packaged C57 on
 `b269ccc61b1a5a10334a481d35f63d8fc9bd79a4` terminated once at
 `2026-10-10T16:59:16.5994018Z`, with integer command exit 1 and no launcher
 exception. Independent review validated the current public parent graph:
@@ -1688,13 +1731,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Genuine reserve confirmation observer -> bounded operator failure detail | Connect opt-in paired index/pool capture through both actual helpers and worker/parent ancestry; document the cost and interpretation, then validate and review one coherent source candidate | Required-read failure, stale or foreign detail, conflicting primary errors, malformed/occupied companions and successful-result contradictions must fail closed while preserving the original failure and old receipts. C57 remains consumed; no campaign is selected by this diagnostic join |
-| First runtime candidate | Two-cycle invocation -> fresh chain | Admit one new campaign only after a deciding correction or diagnostic checkpoint, guarded promotion, exact-head CI and fresh runtime/source/output/custody/fee gates | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
+| **Now** | Locally reviewed diagnostic source -> fresh packaged two-cycle preparation | Freeze the coherent local source without pushing; prepare a separate clean-root package, fresh config and callers, canonical baselines and exact independent admission review for the missing lifecycle | No dispatch until every applicable local admission and operation-specific authority is established. C58 remains consumed; its new diagnostic identifies no historical branch and provides no authority |
+| First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–57 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–58 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -1703,7 +1746,9 @@ The callback timing join and listener checkpoint have passed review, guarded
 promotion and exact-head CI. The committed-reserve join also passed guarded
 promotion and exact-head CI at `1efe1bd`. The current local interpreter
 differential is not a campaign admission. Preserve independent admission review
-and guarded promotion before any separately fresh full campaign. Reopen only gates
+before any separately fresh full campaign. Guarded publication and due exact-head
+CI apply to public promotion; the local synthetic lane retains exact local source
+identity, applicable checks and operation-specific authority. Reopen only gates
 invalidated by changed inputs; unchanged candidate evidence remains reusable.
 It must exercise the changed successor consumer through a minimal documented
 and reproducible invocation. A finished operator package is not a prerequisite
@@ -1731,7 +1776,9 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Committed-reserve confirmation progress (selected local batch) | Connect the genuine opt-in observer capture to bounded separate worker/parent companions, with exact original diagnostic and legacy ancestry; close the documented operator consumer without changing signing, transactions, confirmation predicates or budgets | Config omission/false preserve the default root input; true reaches both helper kinds. Actual helper tests and worker-parent tests must preserve old throws/receipts under isolated invalid/absent/occupied detail. Pure codec/projection negatives, narrow import guards, affected generic consumers and exact independent review precede one guarded publication/CI. No C57 cause or C58 authority follows |
+| Fresh packaged two-cycle preparation (selected local batch) | Prepare a separately fresh invocation of the missing complete successor lifecycle from exact locally frozen source and the documented npm entry point | Full canonical baselines and source/tool/cache/native prerequisites, fresh empty outputs, exact callers/config, independent admission review and final process/port/100GiB gates precede any one-use dispatch. Standing synthetic-loopback scope remains bounded; no existing secrets, funds, public chain or automatic label campaign |
+| Tracker statement admission comparisons (locally closed) | Own genuine before-window/expiry relation reaches the existing unique-primary tracker statement check and worker/parent codecs | Original errors, predicates, old bytes and broad admission-horizon preserved. Actual producer tests, isolated projection/codecs, composed consumers, operator docs and exact independent review pass; no push/new CI or historical C58 cause |
+| Committed-reserve confirmation progress (closed on 6f2564d06) | Genuine opt-in observer capture reaches bounded separate worker/parent companions with original diagnostic and legacy ancestry | Local closure, independent review and exact-head CI passed. Reuse unchanged evidence in scope; optional reads can affect cost/count/deadline category. Neither C57 cause nor C58 authority follows |
 | Windows output fixture preparation (closed and published) | Prepare exact selected C# source freshly before the target interval, bind compiler/configuration/source/DLL bytes, and retain all genuine process/pipe/handle probes and limits | Independent review, guarded publication and all three exact-head jobs passed at b269ccc61 in run38045567224. Reuse the 29 affected local cases and exact source/probe equivalence. Compilation remains inside each original30s case; target loading and live probes remain inside target10s. Hosted cause and speedup are not established |
 | Compatibility-inventory configuration cases (published) | Keep every observation and source freshness check while isolating the three independent case watchdogs; preserve assertions and configured limits | Independent review and guarded publication close the correction at288405c1c. Reuse 32 local cases, TypeScript and scoped generic evidence while unchanged. The watchdog applies per observation; the prior aggregate15s ceiling is not preserved. No runtime predicate or authority change |
 | C56 prospective confirmation join (published; public timeout correction due) | Bind an active guard or genuine bounded confirmation category to the unique native primary error and exact old committed-reserve worker/parent ancestry in separate optional companions, preserving old receipts, throws, predicates, order and budgets | Local closure, independent review and guarded publication pass at96a8e8973. Exact CI has two jobs PASS and a compatibility-inventory case timeout in the gate. These results do not close hosted acceptance or reclassify C56; no automatic C57 |
@@ -1797,10 +1844,10 @@ similar:
 
 | Observed state | Permitted next action | Mandatory stop condition |
 |---|---|---|
-| Exact CI pending or head mismatch | Read-only status inspection and handoff update | No source edit, campaign, retry, push or readiness claim |
-| Exact CI terminal-green | Run pinned runtime-composition, clean-candidate and fresh build-output admission checks | Stop on alias, lock, tool, path, loader or package drift, or occupied build outputs |
+| Relevant required CI pending, failure or promoted-head mismatch | Read-only status inspection and bounded public diagnosis | No bypass of a deciding hosted failure or hosted acceptance claim; unrelated pending jobs do not authorize or block local experiments |
+| Exact local source and applicable validation/review closed; known relevant failures resolved | Run pinned runtime-composition, clean-candidate and fresh build-output admission checks; require due exact-head CI at public promotion | Stop on alias, lock, tool, path, loader or package drift, or occupied build outputs |
 | Earlier campaigns consumed | Reuse completed bounded diagnoses and investigate only a new deciding uncertainty | Stop if evidence would require private runtime access, custody inference or transport retry |
-| CI, preflight and root-diagnosis gates closed | Prepare exactly one new campaign admission with unique identity, fresh custody and build outputs | Stop before admission if any input, fee, key, target, process, cleanup or terminal artifact is ambiguous |
+| Local validation, preflight and deciding root-diagnosis gates closed | Separately select and prepare one new synthetic campaign admission with exact local identity, unique attempt, fresh custody and build outputs | Stop before dispatch if operation-specific authority or any input, fee, key, target, process, cleanup or terminal artifact is ambiguous; public promotion retains its hosted gates |
 
 The historical diagnosis gate has two valid outcomes: a bounded
 source-supported explanation, or an explicit `unknown` classification that

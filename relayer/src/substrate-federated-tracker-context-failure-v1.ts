@@ -254,6 +254,7 @@ function asError(value: unknown): Error | null {
 
 export const SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1 = Object.freeze([
   'decode', 'profile', 'admission-horizon', 'height-progression', 'application-binding',
+  'admission-before-window', 'admission-expired',
 ] as const);
 export type SubstrateFederatedTrackerV2StatementFailureCheckV1 =
   typeof SUBSTRATE_FEDERATED_TRACKER_V2_STATEMENT_FAILURE_CHECKS_V1[number];

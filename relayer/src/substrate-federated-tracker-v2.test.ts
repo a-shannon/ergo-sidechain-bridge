@@ -409,9 +409,31 @@ describe('observed-anchor compiler-bound federated tracker V2 FIRST/GENESIS', ()
       const failure = await build(candidate).then(() => undefined, error => error);
       expect(ownFailurePhase(failure)).toBe('statement');
       expect(ownStatementCheck(failure)).toBe(fault === 'decoder' ? 'decode'
-        : fault === 'profile' ? 'profile' : 'admission-horizon');
+        : fault === 'profile' ? 'profile' : 'admission-expired');
       expect(await build(input)).toEqual(context);
     });
+
+  it.each((['genesis', 'continuation'] as const).flatMap(kind =>
+    [1_009, 1_060].map(currentHeight => ({ kind, currentHeight }))))(
+    'joins genuine observed tip to the $kind statement window at $currentHeight', async ({ kind, currentHeight }) => {
+      const currentStatement = kind === 'genesis' ? statement : secondStatement;
+      const observed = anchorInput(currentStatement.encodedStatementHex, '0401', currentHeight);
+      expect(observed.observedHeaderContext.currentHeight).toBe(currentHeight);
+      expect(observed.observedHeaderContext.headers[0]!.height).toBe(currentHeight - 1);
+      const failure = await (kind === 'genesis'
+        ? build({ ...input, ...observed })
+        : buildContinuation({ ...continuationInput, ...observed }))
+        .then(() => undefined, error => error);
+      expect(ownFailurePhase(failure)).toBe('statement');
+      expect(ownStatementCheck(failure)).toBe(currentHeight === 1_009
+        ? 'admission-before-window' : 'admission-expired');
+    });
+
+  it.each([1_012, 1_059])('keeps real observed-anchor construction admissible at current height %s', async currentHeight => {
+    const result = await build({ ...input, ...anchorInput(statement.encodedStatementHex, '0401', currentHeight) });
+    expect(result.trackerTransition.currentErgoHeight).toBe(currentHeight);
+    expect(result.statement.encodedHex).toBe(statement.encodedStatementHex);
+  });
 
   it('snapshots mutable caller parameters and exact-consumer input before awaiting', async () => {
     const box = structuredClone(trackerInputBox);

@@ -264,6 +264,53 @@ describe('tracker statement same-producer metadata', () => {
 });
 
 describe('tracker statement versioned companion joins', () => {
+  it('preserves the legacy admission-horizon canonical bytes and receipt digests', () => {
+    const f = statementFixture('admission-horizon');
+    const workerText = '{"configSha256Hex":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cycle":"cycle-1","expectedBridgeCommit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","operationCompletionEstablished":false,"pathIdentityDigestHex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","rawCausePublished":false,"receiptDigestHex":"5dbc33fcd49dcac4e03a15d87a3fbeda13b4ead3120f80a633606c05bbfd2742","rootCleanupEstablished":false,"schema":"e2s.substrate-federated-native-two-cycle-worker-tracker-statement.v1","statementCheck":"admission-horizon","status":"tracker_statement_check_failed","step":"tracker-context","trackerContextPhase":"statement","version":1,"workerCycleStepReceiptDigestHex":"bc1e3fcc9e58b7d30e49fe8c81126da15dc64f9ca7e09b16ca5d906c8ea6a5ba","workerFailureReceiptDigestHex":"914dc8209b39a96dc2ffe1cd14da4696f3859deac818e94fde31665d3a9a034e","workerRootPhaseV2ReceiptDigestHex":"d09cf7ad34723c5110595b06421ffc0c9241291300af65d5abedeb10e17b6596","workerTrackerContextReceiptDigestHex":"ee79db7c29b761e86dc916881d73a14aed13f4c1a2f823282d1f18208aedc0b4"}\n';
+    const parentText = '{"configSha256Hex":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cycle":"cycle-1","expectedBridgeCommit":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","failureReceiptDigestHex":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","operationCompletionEstablished":false,"parentCycleStepReceiptDigestHex":"5f392c6f2ed378e840f09266c9d9605516d3258dbc67a05223dd047af3cdc693","parentTrackerContextReceiptDigestHex":"f7366a63ff622a2f36792a265dec60401bd9f523a28bb4695bedfca13495a881","pathIdentityDigestHex":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","rawCausePublished":false,"receiptDigestHex":"086fedb0bed56929599e0cee4612a507b8c295b64c158c1948ce4b5dcf2c1f7c","rootCleanupEstablished":false,"schema":"e2s.substrate-federated-native-two-cycle-parent-tracker-statement.v1","statementCheck":"admission-horizon","status":"tracker_statement_diagnostics_validated","step":"tracker-context","trackerContextPhase":"statement","version":1,"workerCycleStepReceiptDigestHex":"bc1e3fcc9e58b7d30e49fe8c81126da15dc64f9ca7e09b16ca5d906c8ea6a5ba","workerFailureReceiptDigestHex":"914dc8209b39a96dc2ffe1cd14da4696f3859deac818e94fde31665d3a9a034e","workerRootPhaseV2ReceiptDigestHex":"d09cf7ad34723c5110595b06421ffc0c9241291300af65d5abedeb10e17b6596","workerTrackerContextReceiptDigestHex":"ee79db7c29b761e86dc916881d73a14aed13f4c1a2f823282d1f18208aedc0b4","workerTrackerStatementReceiptDigestHex":"5dbc33fcd49dcac4e03a15d87a3fbeda13b4ead3120f80a633606c05bbfd2742"}\n';
+    expect(text(f.statementWorker)).toBe(workerText);
+    expect(text(f.statementParent)).toBe(parentText);
+    expect(readStatementWorker(workerText, f)).toEqual(f.statementWorker);
+    expect(readStatementParent(parentText, f)).toEqual(f.statementParent);
+  });
+  describe.each(['admission-before-window', 'admission-expired'] as const)(
+    '%s prospective producer-to-parent join', check => {
+      it.each(['cycle-1', 'cycle-2'] as const)('retains the unique own %s producer through codecs', cycle => {
+        const error = primary('statement', cycle);
+        expect(checkTag(error, check)).toBe(error);
+        const projected = projectCheck(new AggregateError([error, rootTag(new Error(), 'cleanup')]));
+        expect(projected).toBe(check);
+        const f = statementFixture(projected!, cycle);
+        const worker = readStatementWorker(text(f.statementWorker), f);
+        const parent = readStatementParent(text(f.statementParent), f);
+        expect(worker.statementCheck).toBe(check);
+        expect(parent.statementCheck).toBe(check);
+        expect(parent.workerTrackerStatementReceiptDigestHex).toBe(worker.receiptDigestHex);
+        expect(parent).toMatchObject({ cycle, step: 'tracker-context', trackerContextPhase: 'statement',
+          operationCompletionEstablished: false, rootCleanupEstablished: false, rawCausePublished: false });
+      });
+      it.each(['conflict', 'multiple producers', 'cleanup ancestry', 'wrong step', 'wrong cycle'] as const)(
+        'rejects isolated %s provenance', fault => {
+          const error = checkTag(primary(), check);
+          let graph: unknown = new AggregateError([error]);
+          if (fault === 'conflict') {
+            checkTag(error, 'admission-horizon'); checkTag(error, check);
+            expect(ownCheck(error)).toBeNull();
+          }
+          if (fault === 'multiple producers') graph = new AggregateError([error, checkTag(primary(), check)]);
+          if (fault === 'cleanup ancestry') graph = rootTag(new AggregateError([error]), 'cleanup');
+          if (fault === 'wrong step') stepTag(error, 'cycle-1', 'tracker-check');
+          if (fault === 'wrong cycle') graph = stepTag(rootTag(tag(checkTag(new Error(), check), 'statement'),
+            'cycle-2'), 'cycle-1', 'tracker-context');
+          expect(projectCheck(graph)).toBeNull();
+        });
+      it('rejects substituting the other admission relation after rehashing only the parent', () => {
+        const f = statementFixture(check);
+        const other = check === 'admission-before-window' ? 'admission-expired' : 'admission-before-window';
+        const changed = resign({ ...f.statementParent, statementCheck: other }, statementParentDomain);
+        expect(() => readStatementParent(text(changed), f)).toThrow();
+      });
+    });
   it.each((['cycle-1', 'cycle-2'] as const).flatMap(cycle => checks.map(check => ({ cycle, check }))))(
     'roundtrips synthetic $cycle $check', ({ cycle, check }) => {
       const f = statementFixture(check, cycle);

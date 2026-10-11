@@ -457,6 +457,9 @@ export function assertSubstrateFederatedCheckpointStatementV1Matches(
 export type SubstrateFederatedCheckpointAdmissionFailureStageV1 =
   'decode' | 'profile' | 'admission-horizon';
 const ADMISSION_FAILURE_STAGES = new WeakMap<Error, SubstrateFederatedCheckpointAdmissionFailureStageV1 | null>();
+export type SubstrateFederatedCheckpointAdmissionWindowFailureV1 =
+  'before-window' | 'expired';
+const ADMISSION_WINDOW_FAILURES = new WeakMap<Error, SubstrateFederatedCheckpointAdmissionWindowFailureV1 | null>();
 const admissionIsNativeError = (Error as ErrorConstructor & {
   isError?: (value: unknown) => boolean;
 }).isError;
@@ -471,12 +474,23 @@ export function projectOwnSubstrateFederatedCheckpointAdmissionFailureStageV1(
   } catch { return null; }
 }
 
+/** The genuine window comparison only; retain the existing broad stage metadata. */
+export function projectOwnSubstrateFederatedCheckpointAdmissionWindowFailureV1(
+  value: unknown,
+): SubstrateFederatedCheckpointAdmissionWindowFailureV1 | null {
+  try {
+    return admissionIsNativeError?.(value) === true
+      ? ADMISSION_WINDOW_FAILURES.get(value as Error) ?? null : null;
+  } catch { return null; }
+}
+
 export function decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
   encoded: Buffer | string,
   expectedProfile: Readonly<SubstrateFederatedCheckpointProfileV1>,
   currentErgoHeight: string | number | bigint,
 ): Readonly<SubstrateFederatedCheckpointStatementV1> {
   let stage: SubstrateFederatedCheckpointAdmissionFailureStageV1 = 'decode';
+  let windowFailure: SubstrateFederatedCheckpointAdmissionWindowFailureV1 | undefined;
   try {
     const statement = decodeSubstrateFederatedCheckpointStatementV1(encoded);
     stage = 'profile';
@@ -489,6 +503,7 @@ export function decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
     const validFrom = BigInt(statement.admissionValidFromErgoHeight);
     const expires = BigInt(statement.admissionExpiresAtErgoHeight);
     if (current < validFrom || current >= expires) {
+      windowFailure = current < validFrom ? 'before-window' : 'expired';
       throw new Error('substrate federated checkpoint statement is outside its Ergo admission horizon');
     }
     return statement;
@@ -500,6 +515,13 @@ export function decodeSubstrateFederatedCheckpointStatementV1ForAdmission(
         const previous = ADMISSION_FAILURE_STAGES.get(nativeError);
         ADMISSION_FAILURE_STAGES.set(nativeError,
           previous === undefined || previous === stage ? stage : null);
+        const previousWindow = ADMISSION_WINDOW_FAILURES.get(nativeError);
+        if (windowFailure !== undefined || previousWindow !== undefined) {
+          ADMISSION_WINDOW_FAILURES.set(nativeError,
+            windowFailure !== undefined
+              && (previousWindow === undefined || previousWindow === windowFailure)
+              ? windowFailure : null);
+        }
       }
     } catch { /* Omit optional metadata if the intrinsic is unavailable. */ }
     throw error;

@@ -316,6 +316,22 @@ it does not classify previous attempts or establish cleanup, custody disposal
 or operation completion. Its digest establishes diagnostic consistency under
 the same-user host assumption, not authentication.
 
+The optional `worker-tracker-statement.json` and
+`failure-tracker-statement.json` pair identifies the constructor's statement
+check. `admission-before-window` means its validated current height is below
+the statement's valid-from height; `admission-expired` means it is at or above
+the exclusive expiry. These labels come from the actual admission comparison,
+not error text. `admission-horizon` remains readable for earlier receipts and
+for failures without a validated comparison, including invalid height
+conversion. No height, statement window, predicate or execution deadline is
+changed. The same unique-primary-error and exact-ancestry checks apply.
+
+Updated readers accept all earlier statement-check values with unchanged fields,
+schemas and digest domains. Earlier binaries reject the two new values; use the
+source version bound to the attempt when interpreting a receipt. A new label
+does not identify an earlier attempt's branch or permit retry, signing or a new
+campaign.
+
 The diagnostics use separate schemas and digest domains; the existing terminal
 failure format and digest are unchanged. Missing, invalid or unwritable
 diagnostics leave the original failure and consumed attempt intact. Any worker
