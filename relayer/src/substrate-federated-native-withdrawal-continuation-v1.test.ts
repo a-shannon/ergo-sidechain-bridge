@@ -272,6 +272,11 @@ function verifyRetainedTrackerAtHeaders(input: Readonly<{
   } finally { dataInputs.free(); inputs.free(); context.free(); txId.free(); tx.free(); }
 }
 
+function heightEdgeExportEnabled(value: string | undefined): boolean {
+  if (value !== undefined && value !== '1') throw new Error('height-edge fixture opt-in must be exactly 1 or absent');
+  return value === '1';
+}
+
 function exportSignedContinuationTransactionFixture(input: Readonly<{
   signedBody: Record<string, unknown>;
   boxes: readonly Readonly<Eip12Box>[];
@@ -339,7 +344,7 @@ function exportSignedContinuationTransactionFixture(input: Readonly<{
       try { return { id: box.boxId, serializedHex: Buffer.from(parsed.sigma_serialize_bytes()).toString('hex') }; }
       finally { parsed.free(); }
     });
-    const serializedHeaders = headers.map(raw => {
+    const serializeHeader = (raw: Readonly<Record<string, unknown>>) => {
       const parsed = wasm.BlockHeader.from_json(JSON.stringify(raw));
       const parsedId = parsed.id();
       const expectedId = wasm.BlockId.from_str(String(raw.id));
@@ -350,13 +355,40 @@ function exportSignedContinuationTransactionFixture(input: Readonly<{
         expect(Buffer.from(blakejs.blake2b(bytes, undefined, 32)).toString('hex')).toBe(raw.id);
         return { id: raw.id, serializedHex: bytes.toString('hex') };
       } finally { expectedId.free(); parsedId.free(); parsed.free(); }
-    });
+    };
+    const serializedHeaders = headers.map(serializeHeader);
+    const edgeExport = heightEdgeExportEnabled(process.env.BRIDGE_NATIVE_CONTINUATION_HEIGHT_EDGE_FIXTURE);
+    const creationHeightDescendants: ReturnType<typeof serializeHeader>[] = [];
+    if (edgeExport) {
+      const successorHeight = Number((signedBody.outputs as { creationHeight: number }[])[0]!.creationHeight);
+      expect(Number.isSafeInteger(successorHeight) && successorHeight > 0).toBe(true);
+      expect(Number(headers[0]!.height)).toBeLessThan(successorHeight + 99);
+      expect(successorHeight + 101).toBeLessThan(boxes[1]!.creationHeight + 10_000);
+      let window = [...headers];
+      while (Number(window[0]!.height) < successorHeight + 100) {
+        window = appendSyntheticMinedHeader(window);
+        creationHeightDescendants.push(serializeHeader(window[0]!));
+        expect(creationHeightDescendants.length).toBeLessThanOrEqual(101);
+        const evaluationHeight = Number(window[0]!.height) + 1;
+        if (evaluationHeight === successorHeight + 100 || evaluationHeight === successorHeight + 101) {
+          const verdict = verifyRetainedTrackerAtHeaders({ signedBody, boxes, headers: window,
+            signedCandidate: { txId: id, signedTransactionBytesLength: signedBytes.length,
+              signedTransactionBytesSha256Hex: createHash('sha256').update(signedBytes).digest('hex') } });
+          expect(verdict.proofs).toEqual(evaluationHeight === successorHeight + 100
+            ? [true, true, true] : [false, true, true]);
+          if (evaluationHeight === successorHeight + 100) expect(verdict.transactionError).toBeNull();
+          else expect(verdict.transactionError).toMatch(/^TxValidationError: Input 0 /u);
+        }
+      }
+      expect(Buffer.from(tx.sigma_serialize_bytes())).toEqual(signedBytes);
+    }
     const fixture = Buffer.from(canonicalJson({
       schema: 'e2s.substrate-federated-native-continuation-transaction-fixture.v1', version: 1,
       transaction: { id, signedBytesHex: signedBytes.toString('hex'),
         signedBytesSha256Hex: createHash('sha256').update(signedBytes).digest('hex'),
         signedBytesLength: signedBytes.length, json: signedBody },
       inputs: serializedInputs, headers: serializedHeaders,
+      ...(edgeExport ? { creationHeightDescendants } : {}),
       evaluationContext: { schema: 'e2s.ergo-wasm-default-evaluation-context.v1',
         wasmPreHeader: preHeader(carrier, (carrier.powSolutions as Record<string, unknown>).pk),
         nodePreHeader: preHeader(upcoming, upcoming.minerPk), parameters,
@@ -461,6 +493,7 @@ type ContinuationFault = SecondTrackerFault | SecondPayoutFault | MiningAuthorit
   | 'continuation raw node JSON descendants 2' | 'continuation raw node JSON descendants 64'
   | 'continuation raw node JSON ancestry 65'
   | 'continuation raw node JSON precheck converges' | 'continuation raw node JSON precheck exhausts'
+  | 'continuation raw node JSON precheck successor last valid' | 'continuation raw node JSON precheck successor first invalid'
   | 'continuation copied withdrawal attempt' | 'continuation unconfirmed payout' | 'continuation old packet'
   | 'continuation foreign target' | 'continuation duplicate source invocation' | 'continuation disposed during source preparation'
   | 'continuation disposed during source checker' | 'continuation wrong vault packet'
@@ -476,6 +509,15 @@ type ContinuationFault = SecondTrackerFault | SecondPayoutFault | MiningAuthorit
   | 'continuation external fees spent first change' | 'continuation external fees custody during preparation'
   | 'continuation external fees custody during checker' | 'continuation external fees ambiguous withdrawal';
 
+describe('signed continuation height-edge export opt-in', () => {
+  it.each([undefined, '1'])('accepts the explicit supported flag %s', value => {
+    expect(heightEdgeExportEnabled(value)).toBe(value === '1');
+  });
+  it.each(['', '0', 'true', '1\n'])('refuses a malformed opt-in %#', value => {
+    expect(() => heightEdgeExportEnabled(value)).toThrow('height-edge fixture opt-in must be exactly 1 or absent');
+  });
+});
+
 describe('native FED withdrawal continuation', () => {
   it.each<Fault | ContinuationFault>(['valid', 'foreign native origin', 'source disposed during tracker',
     'source disposed during payout', 'foreign confirmation', 'source disposed before tracker authorization',
@@ -486,6 +528,7 @@ describe('native FED withdrawal continuation', () => {
     'continuation raw node JSON reserve drift', 'continuation raw node JSON descendants 2',
     'continuation raw node JSON descendants 64', 'continuation raw node JSON ancestry 65',
     'continuation raw node JSON precheck converges', 'continuation raw node JSON precheck exhausts',
+    'continuation raw node JSON precheck successor last valid', 'continuation raw node JSON precheck successor first invalid',
     'continuation old terminal signer',
     'continuation copied withdrawal check', 'continuation copied withdrawal attempt', 'continuation unconfirmed payout',
     'continuation old packet', 'continuation foreign target', 'continuation duplicate source invocation',
@@ -513,6 +556,9 @@ describe('native FED withdrawal continuation', () => {
     const rawNodeJson = fault.startsWith('continuation raw node JSON ');
     const rawPrecheckWindow = fault === 'continuation raw node JSON precheck converges'
       || fault === 'continuation raw node JSON precheck exhausts';
+    const rawHeightEdge = fault === 'continuation raw node JSON precheck successor last valid'
+      || fault === 'continuation raw node JSON precheck successor first invalid';
+    let rawHeightEdgeHeaders: readonly Readonly<Record<string, unknown>>[] = [];
     const rawPrecheckHeaders: Readonly<Record<string, unknown>>[] = [];
     const rawPrecheckTipReads = new Map<string, number>();
     const rawPrecheckInputReads = new Map<string, number>();
@@ -584,6 +630,45 @@ describe('native FED withdrawal continuation', () => {
           ...ports,
           revalidate: async checked => {
             reserveRevalidationCalls++;
+            const originalSigningHeaders = signingHeaders;
+            const originalSigningHeadersJson = rawHeightEdge ? canonicalJson(signingHeaders) : undefined;
+            if (rawHeightEdge) {
+              rawPrecheckCandidate = checked.signed.signerArtifact as fleet.LocalWasmSignedCheckCandidate;
+              expect(rawPrecheckCandidate).toBeDefined();
+              rawPrecheckCandidateJson = canonicalJson(rawPrecheckCandidate);
+              rawPrecheckBoxesJson = canonicalJson([...boxes.entries()]);
+              const packet = secondContinuationPacket!;
+              const successorHeight = packet.boxes.reserveSuccessor.creationHeight;
+              const valid = fault === 'continuation raw node JSON precheck successor last valid';
+              const minedHeight = successorHeight + (valid ? 99 : 100);
+              expect(Number(signingHeaders[0]!.height)).toBeLessThan(minedHeight);
+              rawHeightEdgeHeaders = signingHeaders;
+              while (Number(rawHeightEdgeHeaders[0]!.height) < minedHeight) {
+                rawHeightEdgeHeaders = appendSyntheticMinedHeader(rawHeightEdgeHeaders);
+              }
+              expect(Number(rawHeightEdgeHeaders[0]!.height)).toBe(minedHeight);
+              expect(minedHeight + 1).toBeLessThan(packet.boxes.sourceLock.creationHeight + 10_000);
+              // Same signed body and ordered boxes, with a coherent synthetic
+              // descendant context. No new signing or mined-node claim.
+              const signedBody = checkBodies.at(-1)!;
+              expect(signedBody).toBeDefined();
+              expect(signedId(signedBody)).toBe(rawPrecheckCandidate.txId);
+              const verification = verifyRetainedTrackerAtHeaders({
+                signedBody,
+                signedCandidate: {
+                  txId: rawPrecheckCandidate.txId,
+                  signedTransactionBytesSha256Hex: rawPrecheckCandidate.signedTransactionBytesSha256Hex!,
+                  signedTransactionBytesLength: rawPrecheckCandidate.signedTransactionBytesLength!,
+                },
+                boxes: [packet.boxes.reservePredecessor, packet.boxes.sourceLock, packet.boxes.transitionFeeFunding],
+                headers: rawHeightEdgeHeaders,
+              });
+              if (valid) expect(verification).toEqual({ proofs: [true, true, true], transactionError: null });
+              else {
+                expect(verification.proofs).toEqual([false, true, true]);
+                expect(verification.transactionError).toMatch(/^TxValidationError: Input 0 reduced to false during verification:/);
+              }
+            }
             if (rawPrecheckWindow) {
               rawPrecheckCandidate = checked.signed.signerArtifact as fleet.LocalWasmSignedCheckCandidate;
               expect(rawPrecheckCandidate).toBeDefined();
@@ -616,7 +701,11 @@ describe('native FED withdrawal continuation', () => {
             try { return await ports.revalidate(checked); }
             finally {
               reserveRevalidationActive = false;
-              if (rawPrecheckWindow) {
+              if (rawHeightEdge) {
+                expect(signingHeaders).toBe(originalSigningHeaders);
+                expect(canonicalJson(signingHeaders)).toBe(originalSigningHeadersJson);
+              }
+              if (rawPrecheckWindow || rawHeightEdge) {
                 expect(checked.signed.signerArtifact).toBe(rawPrecheckCandidate);
                 expect(canonicalJson(checked.signed.signerArtifact)).toBe(rawPrecheckCandidateJson);
                 expect(canonicalJson([...boxes.entries()])).toBe(rawPrecheckBoxesJson);
@@ -1102,7 +1191,7 @@ describe('native FED withdrawal continuation', () => {
       return pending;
     });
     vi.spyOn(fleet, 'checkSignedTransaction').mockImplementation(async (...args) => {
-      if (rawPrecheckWindow && reserveRevalidationActive) {
+      if ((rawPrecheckWindow || rawHeightEdge) && reserveRevalidationActive) {
         expect(args[0]).toBe(rawPrecheckCandidate);
         expect(canonicalJson(args[0])).toBe(rawPrecheckCandidateJson);
       }
@@ -1175,7 +1264,10 @@ describe('native FED withdrawal continuation', () => {
         let status = 200;
         try {
           const ancestryId = /^\/blocks\/([0-9a-f]{64})\/header$/.exec(path)?.[1];
-          if (reserveRevalidationActive && rawPrecheckWindow && path === '/blocks/lastHeaders/1') {
+          if (reserveRevalidationActive && rawHeightEdge && path === '/blocks/lastHeaders/1') {
+            rawPrecheckTipReads.set(origin, (rawPrecheckTipReads.get(origin) ?? 0) + 1);
+            data = [rawHeightEdgeHeaders[0]!];
+          } else if (reserveRevalidationActive && rawPrecheckWindow && path === '/blocks/lastHeaders/1') {
             const count = rawPrecheckTipReads.get(origin) ?? 0;
             rawPrecheckTipReads.set(origin, count + 1);
             // First window: witness is stable one block behind primary. The
@@ -1205,7 +1297,7 @@ describe('native FED withdrawal continuation', () => {
         if (reserveRevalidationActive && path === '/blocks/lastHeaders/1') {
           rawRevalidationTips.add(canonicalJson(data));
         }
-        if (reserveRevalidationActive && rawPrecheckWindow && path.startsWith('/utxo/byId/')) {
+        if (reserveRevalidationActive && (rawPrecheckWindow || rawHeightEdge) && path.startsWith('/utxo/byId/')) {
           rawPrecheckInputReads.set(origin, (rawPrecheckInputReads.get(origin) ?? 0) + 1);
         }
         if (reserveRevalidationActive && path.startsWith('/utxo/byId/') && status === 200) {
@@ -1762,6 +1854,7 @@ describe('native FED withdrawal continuation', () => {
             'continuation raw node JSON descendants 2', 'continuation raw node JSON descendants 64',
             'continuation raw node JSON ancestry 65',
             'continuation raw node JSON precheck converges', 'continuation raw node JSON precheck exhausts',
+            'continuation raw node JSON precheck successor last valid', 'continuation raw node JSON precheck successor first invalid',
             'continuation foreign observation before draft',
             'continuation copied observation before evidence', 'continuation mismatched reservation draft',
             'continuation current target lost before transport', 'continuation custody lost after funding await',
@@ -1894,6 +1987,28 @@ describe('native FED withdrawal continuation', () => {
               target: confirmationTarget, batch, packet: second,
               sourceLockObservation: sourceExecution.outputObservation, setupSession: session, state,
             });
+            if (fault === 'continuation raw node JSON precheck successor first invalid') {
+              await expect(vaultPromise).rejects.toThrow('native committed-vault observation exceeds the successor creation-height window');
+              expect(reserveRevalidationCalls).toBe(1);
+              expect(rawRevalidationTips.size).toBe(1);
+              expect(rawAncestryReads.size).toBe(0);
+              expect(rawHeaderAdvances).toBe(0);
+              expect(rawReserveDrifts).toBe(0);
+              expect(rawReserveCheckCalls).toEqual(['isolated local peg-in committed-vault check']);
+              expect(secondReserveVmEvaluationLabels).toEqual(rawReserveCheckCalls);
+              for (const origin of [PRIMARY, WITNESS]) {
+                expect(rawPrecheckTipReads.get(origin)).toBe(2);
+                expect(rawPrecheckInputReads.get(origin)).toBe(4);
+                for (const box of [second.boxes.reservePredecessor, second.boxes.sourceLock, second.boxes.transitionFeeFunding]) {
+                  expect(rawTransitionReads.get(`${origin}/${box.boxId}`)).toBe(1);
+                }
+              }
+              expect([reserveAuthorizations, reserveReservations, reserveSubmissions]).toEqual([0, 0, 0]);
+              expect(state.getErgoOperationalTransactionAttempt(second.transactions.reserveTransition.txId)).toBeNull();
+              expect(submissionBodies).toHaveLength(beforeTransportSubmissions + 1);
+              assertHistoricalRowsUnchanged();
+              return;
+            }
             if (fault === 'continuation raw node JSON precheck exhausts') {
               await expect(vaultPromise).rejects.toThrow(/native committed-vault tip did not stabilize during input observation/);
               expect(reserveRevalidationCalls).toBe(1);
@@ -1975,6 +2090,11 @@ describe('native FED withdrawal continuation', () => {
               ]);
               expect(rawReserveCheckCalls).toEqual(secondReserveVmEvaluationLabels);
               for (const origin of [PRIMARY, WITNESS]) {
+                if (rawHeightEdge) {
+                  expect(rawPrecheckTipReads.get(origin)).toBe(4);
+                  expect(rawPrecheckInputReads.get(origin)).toBe(8);
+                  expect(rawAncestryReads.size).toBe(0);
+                }
                 if (rawPrecheckWindow) {
                   expect(rawPrecheckTipReads.get(origin)).toBe(6);
                   expect(rawPrecheckInputReads.get(origin)).toBe(12);

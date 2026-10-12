@@ -22,6 +22,7 @@ $fixture = Join-Path $work 'signed-continuation.json'
 $output = Join-Path $work 'offline-output'
 New-Item -ItemType Directory -Path $output | Out-Null
 $env:BRIDGE_NATIVE_CONTINUATION_TRANSACTION_FIXTURE = $fixture
+$env:BRIDGE_NATIVE_CONTINUATION_HEIGHT_EDGE_FIXTURE = '1'
 Push-Location relayer
 try {
     & $NodePath node_modules/vitest/vitest.mjs run `
@@ -31,6 +32,7 @@ try {
 } finally {
     Pop-Location
     Remove-Item Env:BRIDGE_NATIVE_CONTINUATION_TRANSACTION_FIXTURE
+    Remove-Item Env:BRIDGE_NATIVE_CONTINUATION_HEIGHT_EDGE_FIXTURE
 }
 $fixtureHash = (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash.ToLowerInvariant()
 & ./validity-proof/consumer-jvm/run-substrate-federated-native-continuation-transaction.ps1 `
@@ -43,6 +45,11 @@ The fixture is written once and read back. The runner uses the existing local
 trusted Maven and SBT caches with a file-only, offline configuration and a fresh
 isolated home. Its process limit is five minutes, termination grace 15 seconds,
 output limit 4 MiB and JVM heap limit 4 GiB. It retains its output directory.
+
+The height-edge opt-in adds serialized, parent-linked synthetic descendants to
+the original fixture. The current 48-case consumer requires this field. Omitting
+the flag preserves the original six-field export for its earlier scope; that
+export does not satisfy the expanded matrix. Other flag values are rejected.
 
 ## Validation Scope
 
@@ -59,6 +66,14 @@ creation of one extra nanoERG, input order, header ancestry, each preheader and
 parameter field, previous state digest, raw header projection and trailing
 transaction bytes. The runner requires every case to pass, with no ignored,
 canceled or pending test and no aborted suite. It rechecks inputs after execution.
+
+The same signed transaction, proofs and ordered boxes also pass at evaluation
+height `reserveSuccessor.creationHeight + 100` and fail only at input 0 at `+101`.
+Both explicit preheader contexts use ten contiguous headers derived from the
+same original fixture tip; the source refund remains unexpired. Separate
+transport negatives reject changed identities, bytes, heights, parents, ordering,
+cardinality, anchor, terminal height and field shape. Synthetic descendants
+establish offline evaluation contexts, not mined proof of work or chain inclusion.
 
 Supplied input boxes establish offline transaction validity in these contexts.
 UTXO membership, HTTP or mempool admission, chain inclusion, independent custody

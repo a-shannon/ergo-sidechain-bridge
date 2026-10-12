@@ -19,8 +19,8 @@ const implementationHashes = [
 ];
 const oldWrapperHash = '09cc5b729365b8e41b276117b54888dd58d0f2dc89b08a21db1f64853cfa82af';
 const specHashes = [
-  'ab7f9defc3e49121702673ad057ddb3d9cac197c657f8c033468eeab131b8cdf',
-  '84b2bb399bb6c8762a993cacf5c6e0261ffcc1f36047416849fc562e09790314',
+  'bb254fc9ca85dee6c46401d87cd0d1c01f95a78a3f0d07bfd0e7f49a2fc7b49f',
+  '21ad223ae443505dc04c7b55f5a9baf9a687c482e7e7e6fb7235dca2fb7d70a4',
 ];
 const trackerSpecHash = '51c546cb36c9c8cf20e6dd1a93ac618872f27f08175f0297de518c80cd125ccd';
 const trackerFixtureHash = 'a19a03efbeca8a7a515f75992a772c720499816a9b3c153caaef7969a292ebe1';
@@ -52,6 +52,9 @@ const cases: Case[] = [
   { name: 'rejects unlisted spec newline representation', file: 'spec-newline-mutant', pins: 'spec', caller: 'continuation-transaction', accepted: false },
   { name: 'rejects implementation substituted for spec', file: 'implementation-lf', pins: 'spec', caller: 'continuation-transaction', accepted: false },
   { name: 'rejects absent spec', file: 'absent', pins: 'spec', caller: 'continuation-transaction', accepted: false },
+  { name: 'rejects historical continuation spec pin', file: 'spec-lf', pins: 'spec',
+    expected: 'ab7f9defc3e49121702673ad057ddb3d9cac197c657f8c033468eeab131b8cdf',
+    caller: 'continuation-transaction', accepted: false },
   { name: 'accepts current tracker spec', file: 'tracker-spec', pins: 'spec', caller: 'tracker-mempool', accepted: true },
   { name: 'rejects tracker spec content drift', file: 'tracker-spec-mutant', pins: 'spec', caller: 'tracker-mempool', accepted: false },
   { name: 'accepts exact public tracker fixture', file: 'tracker-fixture', pins: 'spec', expected: trackerFixtureHash, caller: 'tracker-mempool', accepted: true },

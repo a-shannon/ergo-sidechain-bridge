@@ -14,8 +14,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
 $ExpectedSpecHash = @(
-    'ab7f9defc3e49121702673ad057ddb3d9cac197c657f8c033468eeab131b8cdf',
-    '84b2bb399bb6c8762a993cacf5c6e0261ffcc1f36047416849fc562e09790314')
+    'bb254fc9ca85dee6c46401d87cd0d1c01f95a78a3f0d07bfd0e7f49a2fc7b49f',
+    '21ad223ae443505dc04c7b55f5a9baf9a687c482e7e7e6fb7235dca2fb7d70a4')
 $ExpectedLockHash = '1573a69aa3c5cafa302621efcc65032b653e9cf1548a32c69e2dd5011ca8b56d'
 $ExpectedPatchHash = 'cd282677b05e1fca21d9c94e6338566ce4448ce503f7055de8667aaa86378fdf'
 $ExpectedBoundedProcessLibraryHash = @(
@@ -26,7 +26,7 @@ $ExpectedBoundedProcessImplementationHash = @(
     '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',
     'b84c68bb7ddd9526832c92a76c149f10d024be477e73127399439ad46d85da02',
     '2dadbfc063fc51f7f7c6ed85ac95380378957447110ebf8daee13723eb797ab3')
-$ExpectedTests = 35
+$ExpectedTests = 48
 $SbtTimeoutMilliseconds = 300000
 $TerminationGraceMilliseconds = 15000
 $MaxOutputBytes = 4MB
@@ -140,7 +140,7 @@ function Assert-AllInputs {
 }
 function Assert-SuccessOutput([string] $Output, [int] $ExitCode) {
     # Fixed to the exact pinned spec, not a caller-selected expected count.
-    $ExpectedTests = 35
+    $ExpectedTests = 48
     if ($ExitCode -ne 0) { throw 'Offline continuation validation exited nonzero' }
     $counts = [regex]::Matches($Output, '(?m)^\[info\] Total number of tests run:[^\r\n]*\r?$')
     $suites = [regex]::Matches($Output, '(?m)^\[info\] Suites:[^\r\n]*\r?$')
@@ -152,7 +152,7 @@ function Assert-SuccessOutput([string] $Output, [int] $ExitCode) {
         $success.Count -ne 1 -or
         $success[0].Value -cnotmatch ('^\[info\] Tests: succeeded ' + $ExpectedTests + ', failed 0, canceled 0, ignored 0, pending 0\r?$') -or
         $passed.Count -ne 1 -or $passed[0].Value -cnotmatch '^\[info\] All tests passed\.\r?$') {
-        throw 'Pinned validator did not report all 35 tests with no aborted or skipped cases'
+        throw 'Pinned validator did not report all 48 tests with no aborted or skipped cases'
     }
 }
 function Invoke-BoundedJob([string[]] $Arguments) {

@@ -28,28 +28,51 @@ Use the [adaptive planning rule](../docs/development-process.md#keep-the-queue-s
 the delivery obligations remain binding, while future batch order and
 implementation choices are provisional. Only the current result is detailed.
 
-**Now:** Campaigns 24–62 are permanently consumed or held. Packaged C62 on local
-`615d12d7d189b997f7b558aa91502e801e94da27` terminated once at
-`2026-10-12T08:42:32.3085683Z`, with integer command exit 1, null launcher
+**Now:** Campaigns 24–63 are permanently consumed or held. Packaged C63 on local
+`6c74a946dbe51233d32d6eb78fb3cffe179ff696` terminated once at
+`2026-10-12T19:48:36.4345743Z`, with integer command exit 1, null launcher
 exception and no parent result. Main and independent review validated the
 bounded current public parent graph and canonical digest joins:
-`execution_failure/root-or-cleanup/cycle-1/committed-reserve/operational-revalidate/continuation/revalidator-call/input-observation-before-check`.
-The inner predicate, raw cause, completion, cleanup and custody disposal remain
-unknown. The detail identifies the last operation entered only. Neither new
-diagnostics nor passing tests may reclassify C62 or any earlier hold. Matching
-C61 and C62 operation labels do not establish the same cause.
+`execution_failure/root-or-cleanup/cycle-1/committed-reserve/operational-revalidate/continuation/revalidator-call/input-observation-before-check/successor-creation-height-window/witness`.
+The source-owned refusal identifies the existing successor-height guard, without
+publishing the observed heights or raw cause. Completion, cleanup and custody
+disposal remain unknown. Neither diagnostics nor passing tests may reclassify
+C63 or any earlier hold; zero cleanup errors do not establish cleanup.
 
-The current local batch joins source-owned native input refusals to separate
-optional worker/parent companions. Public-source REST and packet-producer
-checks found no contradiction that justifies changing the revalidator.
-The new detail names existing explicit predicate errors and exact node roles;
-it does not classify dependency exceptions. It preserves original predicates,
-errors, scheduling and budgets. The exhaustive parent/worker selection passes
-476 cases with each name once; architecture and generic consumers pass475.
-TypeScript/import checks pass for137 layered modules/929 sources. Actual native
-predicate fixtures and metadata/codecs pass in their separate scopes. Source
-review finds no actionable defect; exact final review and guarded local
-promotion close this checkpoint. No new campaign, push or CI is selected.
+The current local batch checks two separately bound synthetic fixture scopes at
+evaluation heights `reserveSuccessor.creationHeight + 100` and `+101`.
+Each raw-response case retains its own signed candidate through WASM checking
+and actual revalidation. Separately, the exported continuation retains identical
+transaction, proof and ordered input-box bytes across WASM and native JVM checks
+at both edges. Synthetic descendant headers retain its original anchor; the
+source refund remains unexpired. All48 native JVM
+cases pass: the inclusive edge accepts all three inputs; the following block
+rejects input0 only, in both explicit vote contexts. The actual raw-response
+revalidator and WASM checks agree. The current caller's90 acceptance/source-pin
+checks pass, including rejection of old counts and pins. The complete affected
+fixture passes88 cases. TypeScript and the137-module/929-source import check
+pass. Exact final claims review and guarded local promotion remain due. This is a bounded
+offline discriminator, not C63's historical cause or a new campaign admission.
+The packet fixes its heights before several awaited operations while mining
+remains active; the source does not guarantee that the successor stays inside
+the window. Their agreement supports preserving the guard and addressing that
+producer/mining contract. No automatic C64, push or new CI is selected.
+
+The next falsifier exercises the actual candidate actor in a fresh public source
+checkout: an authenticated hold must drain its pending block, then each permit
+must bind the held parent and first transaction, admit exactly ten matching
+block applications and return to held. Late solutions, previous-candidate
+fallback, rejection, replay, actor replacement, immutable ceilings and permanent
+pause must preserve that boundary. Compilation and actor execution remain due;
+the prototype adds no HTTP route or lifecycle authority.
+
+Native input-refusal attribution is locally closed at `6c74a946`: separate
+optional worker/parent companions preserve original predicates, errors,
+scheduling and budgets. The exhaustive parent/worker selection passes476 names
+once; architecture and generic consumers pass475. TypeScript/import checks
+pass for137 layered modules/929 sources. Actual native predicate fixtures and
+metadata/codecs pass in their separate scopes, with exact independent review
+and guarded local promotion. Reuse those unchanged results within their pins.
 
 The paired precheck falsifier confirms the existing selection of a permanent
 witness-read error after all paired reads settle, including replacement by the
@@ -1972,13 +1995,13 @@ independent-assurance obligations; STARK/Gate 5 remains a separate upgrade.
 
 | Horizon | Boundary | Candidate action | Completion evidence / blocker |
 |---|---|---|---|
-| **Now** | Successful lifecycle capture -> admitted accumulated-state recovery | Use the closed copy/owner components only after separately selecting a genuine lifecycle result and binding the stopped capture, exact expected public tip and fresh recovery admission to a concrete caller | The non-mining owner component is locally validated on synthetic files and simulated process/HTTP boundaries. No successful accumulated-state capture or operational caller admission exists; C24-C62 holds remain permanent |
+| **Now** | Signed successor height -> unchanged revalidator and complete transaction consumers | Compare the exact signed continuation at the inclusive height edge and next block, then use the result to decide the producer/mining contract | Offline synthetic contexts cannot establish C63's observed heights, mined-node acceptance or lifecycle completion. No successful accumulated-state capture or recovery admission exists; C24-C63 holds remain permanent |
 | First runtime candidate | Two-cycle invocation -> fresh chain | Separately select and admit one local synthetic campaign after a deciding checkpoint, exact local source identity, applicable checks/review and fresh runtime/source/output/custody/fee gates; apply guarded publication and due exact-head CI at public promotion | Consume exact reserve/DUP/tracker successors, preserve both replay histories and cumulative value/liability conservation; leave the first confirmation scope before the second checkpoint, await teardown, and never reset genesis, substitute historical custody or reuse consumed or ambiguous attempts |
 | Next candidate | Accumulated state -> recovery | Bind the source-derived stopped-data capture to one separately admitted successful fresh two-cycle run, inspect the actual node inventory, and reopen disposable copies in fresh processes; then exercise DB loss/rollback, divergent RPC, out-of-order events, reorgs and cross-profile collisions | The new capture code is not actual node-state or restart evidence. Existing dual-node recovery uses empty blocks and one synthetic database row. Holds remain non-authorizing; ambiguity never permits resend, mint/payout duplication or reconstructed key/receipt authority. |
 | Alongside when independent | Working consumer -> reproducible operator package | Provide one documented entry point, reproduce in a separate clean root, and complete the exact non-mainnet target, role-custody, key-loss/rotation and alert/recovery rehearsal | Reuse source-locked components. Cross-root build independence, fresh external integration and actual independent custody need their own evidence; a simulated actor or hosted reviewer does not supply operator custody |
 | Final delivery obligation | Completed FED obligations -> FED-7 | Bind exact profile evidence, affected validation, independent assurance and the external integration decision to the final candidate | Close every claim-relevant blocker before supported release. Missing external participation caps the corresponding claim without stopping independent local engineering. Gate 5 remains separate |
 
-Campaigns 24–62 remain consumed or held. C42 is incomplete/ambiguous without a
+Campaigns 24–63 remain consumed or held. C42 is incomplete/ambiguous without a
 parent terminal artifact; C43–C51 failed once as recorded in Current Focus and
 the active handoff. None authorizes retry, resume or custody reuse. The earlier
 timing, tracker-phase and source-lock checkpoints are closed; the selected
@@ -2017,8 +2040,10 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Native input-refusal attribution (current local batch) | Join actual source-owned predicate errors and node roles to the exact existing operation graph without changing throws, predicates or budgets | Real native predicate fixtures, isolated codec/graph refusals and composed worker/parent failure preservation and success contradiction checks; exact independent review and guarded local promotion. Paired disagreement is a defensive predicate with malformed-normalizer fixture scope. No historical cause, lifecycle correction or C63 authority |
-| Accumulated-state recovery admission (requires successful lifecycle capture) | Admit a copied-Ergo observation caller against a genuine successful lifecycle capture and its selected public parent companion | The pure selector, optional packaged producer and public-parent owner-input preparation bind component-pin roles, expected snapshot and result/locator ancestry. Synthetic owner composition is closed; actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
+| Transaction-specific bounded mining (next local falsifier) | The actual candidate actor drains to an authenticated held parent, admits the bound transaction followed by exactly nine contiguous matching applications, then remains held | Exercise real local NodeView blocks, more than100 otherwise valid held solutions, exact application joins, rejection/replay/actor replacement, immutable ceilings and permanent pause in a separate fresh public checkout. Compilation, execution and independent review are due; no HTTP route, bridge transaction acceptance or campaign admission |
+| Signed successor-height boundary (local checks passed; final review/promotion due) | Each raw HTTP case binds its candidate through WASM and revalidation; a separate exported signed fixture agrees across WASM and native full transaction validation at the inclusive edge and next block | Complete fixture88, native48, caller/source pins90, TypeScript/import checks pass. Keep transaction/proofs/ordered boxes fixed within each scope, refund unexpired and before/after observed tips stable. Preserve all runtime guards and budgets; no cross-case byte-identity claim, historical cause or automatic C64 |
+| Native input-refusal attribution (locally closed at6c74a946) | Join actual source-owned predicate errors and node roles to the exact existing operation graph without changing throws, predicates or budgets | Real native predicate fixtures, isolated codec/graph refusals and composed worker/parent failure preservation and success contradiction checks, exact independent review and guarded local promotion pass. Paired disagreement is a defensive predicate with malformed-normalizer fixture scope; no historical cause or lifecycle correction |
+| Accumulated-state recovery admission (requires successful lifecycle capture) | Admit a copied-Ergo observation caller against a genuine successful lifecycle capture and its selected public parent companion | The pure selector, optional packaged producer and public-parent owner-input preparation bind component-pin roles, expected snapshot and result/locator ancestry. Synthetic owner composition is closed; actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C64 |
 | Copied non-mining Ergo owner (locally validated) | Verified captured-node copies reach fresh non-mining owned processes, exact expected paired snapshot observations and verified termination without issuing old target or custody authority | 34 synthetic owner cases,128 copy cases and362 architecture cases pass. Existing owner/mining-pause/capture consumers pass96 cases with11 unchanged actual-runtime guards inapplicable. TypeScript/imports and independent source review pass. Exact final claims and guarded local promotion bind this checkpoint; no actual JVM restart or restored execution authority |
 | Pinned captured-node materialization (locally closed atdda85577) | An existing fixed-subtree capture and separately admitted manifest pin produce another disposable copy without changing the default owner-source path or adding restart authority | 113 whole-file cases,21 capture consumers and95 generic consumers pass with exact independent review and guarded local promotion. Files define allowed directory ancestors; unbound empty directories reject. This is byte correspondence on synthetic captures, not actual node consistency or restart |
 | Test-framework dependency closure (validated locally) | Supported Vitest 4.1.11 closes the three development advisories while preserving assertions, source inventory and runtime capability boundaries | Fresh locked installation and full audit zero; Vite7.3.6/Rollup4.62.4 retained. Exact CLI listing/selection, all638 source files with23131 passing cases and26 existing guarded cases, TypeScript and affected provenance/JVM checks pass. Exact independent review and guarded local promotion bind the candidate. No override, suppressed error or runtime budget change |

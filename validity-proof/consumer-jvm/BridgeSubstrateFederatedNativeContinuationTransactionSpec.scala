@@ -58,7 +58,9 @@ class BridgeSubstrateFederatedNativeContinuationTransactionSpec
     val text = new String(bytes, Charsets.US_ASCII)
     val value = parser.parse(text).fold(e => fail(e.message), identity)
     require(text == canonical(value) + "\n", "canonical fixture JSON")
-    exactFields(value, Set("schema", "version", "transaction", "inputs", "headers", "evaluationContext"))
+    val originalFields = Set("schema", "version", "transaction", "inputs", "headers", "evaluationContext")
+    exactFields(value, if (value.hcursor.downField("creationHeightDescendants").succeeded)
+      originalFields + "creationHeightDescendants" else originalFields)
     require(str(value.hcursor, "schema") == Schema && int(value.hcursor, "version") == 1, "fixture schema/version")
     value
   }
@@ -107,6 +109,50 @@ class BridgeSubstrateFederatedNativeContinuationTransactionSpec
     header
   }
   private lazy val evaluation = field(fixture.hcursor, "evaluationContext")
+
+  // Synthetic descendants bind back to the original fixture's exact tip. They
+  // are offline evaluation contexts, not claims of mined PoW or UTXO membership.
+  private lazy val creationHeightDescendants =
+    decodeCreationHeightDescendants(field(fixture.hcursor, "creationHeightDescendants"))
+
+  private def decodeCreationHeightDescendants(value: Json): Vector[Header] = {
+    require(value.isArray, "descendant array")
+    val values = value.asArray.get
+    require(values.nonEmpty && values.size <= 101, "bounded descendants")
+    val decoded = values.map { value =>
+      exactFields(value, Set("id", "serializedHex"))
+      val bytes = unhex(str(value.hcursor, "serializedHex"))
+      val reader = new VLQByteBufferReader(ByteBuffer.wrap(bytes.clone()))
+      val header = HeaderSerializer.parse(reader)
+      require(reader.remaining == 0 && HeaderSerializer.toBytes(header).sameElements(bytes), "descendant roundtrip")
+      require(header.id == str(value.hcursor, "id"), "descendant identity")
+      header
+    }
+    checkCreationHeightDescendantChain(decoded, headers.head)
+    decoded
+  }
+
+  private def checkCreationHeightDescendantChain(decoded: Vector[Header], anchor: Header): Unit = {
+    require(decoded.nonEmpty && decoded.size <= 101, "bounded descendants")
+    (anchor +: decoded).sliding(2).foreach { pair =>
+      require(pair(1).height.toLong == pair.head.height.toLong + 1L, "descendant heights")
+      require(pair(1).parentId == pair.head.id, "descendant parents")
+    }
+    val successorHeight = transaction.outputCandidates.head.creationHeight
+    require(anchor.height.toLong < successorHeight.toLong + 99L, "base precedes both height edges")
+    require(decoded.last.height.toLong == successorHeight.toLong + 100L, "descendant final height")
+  }
+
+  private def heightEdgeContext(offset: Int): UpcomingStateContext = {
+    val target = transaction.outputCandidates.head.creationHeight.toLong + offset.toLong
+    val window = (creationHeightDescendants.reverse ++ headers).filter(_.height.toLong < target).take(10)
+    checkHeaderOrder(window)
+    val context = new ErgoStateContext(window, None, chain.genesisStateDigest, Parameters,
+      ErgoValidationSettings.initial, VotingData.empty)(chain).simplifiedUpcoming()
+    require(context.currentHeight.toLong == target, "exact upcoming height edge")
+    require(target < inputs(1).creationHeight.toLong + 10000L, "refund remains unexpired")
+    context
+  }
 
   private lazy val sourceConfig = {
     val bytes = boundedFile(Paths.get(property("root")).resolve("src/main/resources/application.conf"))
@@ -255,6 +301,90 @@ class BridgeSubstrateFederatedNativeContinuationTransactionSpec
       validate(transaction, context).isSuccess shouldBe true
     }
     ErgoTransactionSerializer.toBytes(transaction).toVector shouldBe signedBytes.toVector
+  }
+
+  Vector(100, 101).foreach { offset =>
+    test(s"unchanged signed continuation at successor height plus $offset has the exact full-validation verdict") {
+      checkFixture()
+      val native = heightEdgeContext(offset)
+      val h = native.predictedHeader
+      val carrier = native.copy(predictedHeader = CPreHeader(h.version, h.parentId, h.timestamp, h.nBits,
+        h.height, Array(0.toByte, 0.toByte, 0.toByte), h.minerPk))(chain)
+      transaction.statelessValidity().isSuccess shouldBe true
+      Vector(native, carrier).foreach { context =>
+        inputVerdicts(transaction, context) shouldBe
+          (if (offset == 100) Vector(true, true, true) else Vector(false, true, true))
+        val result = validate(transaction, context)
+        if (offset == 100) result.isSuccess shouldBe true
+        else {
+          result.isFailure shouldBe true
+          result.failed.get.getMessage should include("#0 =>")
+          result.failed.get.getMessage should not include "#1 =>"
+          result.failed.get.getMessage should not include "#2 =>"
+        }
+      }
+      ErgoTransactionSerializer.toBytes(transaction).toVector shouldBe signedBytes.toVector
+    }
+  }
+
+  test("height-edge transport rejects a substituted serialized header identity") {
+    val rows = field(fixture.hcursor, "creationHeightDescendants").asArray.get
+    val id = str(rows.head.hcursor, "id")
+    val changed = (if (id.startsWith("00")) "01" else "00") + id.drop(2)
+    val value = Json.fromValues(rows.updated(0, rows.head.mapObject(_.add("id", Json.fromString(changed)))))
+    intercept[IllegalArgumentException](decodeCreationHeightDescendants(value)).getMessage shouldBe
+      "requirement failed: descendant identity"
+  }
+  test("height-edge transport rejects trailing serialized header bytes") {
+    val rows = field(fixture.hcursor, "creationHeightDescendants").asArray.get
+    val value = Json.fromValues(rows.updated(0, rows.head.mapObject(_.add("serializedHex",
+      Json.fromString(str(rows.head.hcursor, "serializedHex") + "00")))))
+    intercept[IllegalArgumentException](decodeCreationHeightDescendants(value)).getMessage shouldBe
+      "requirement failed: descendant roundtrip"
+  }
+  test("height-edge transport rejects one changed height before parent checks") {
+    val rows = creationHeightDescendants
+    val changed = rows.updated(0, rows.head.copy(height = rows.head.height + 1, sizeOpt = None))
+    intercept[IllegalArgumentException](checkCreationHeightDescendantChain(changed, headers.head)).getMessage shouldBe
+      "requirement failed: descendant heights"
+  }
+  test("height-edge transport rejects one changed parent at the same height") {
+    val rows = creationHeightDescendants
+    val changed = rows.updated(0, rows.head.copy(parentId = headers(1).id, sizeOpt = None))
+    intercept[IllegalArgumentException](checkCreationHeightDescendantChain(changed, headers.head)).getMessage shouldBe
+      "requirement failed: descendant parents"
+  }
+  test("height-edge transport rejects reversed descendant ordering") {
+    require(creationHeightDescendants.size > 1, "multiple descendants")
+    intercept[IllegalArgumentException](checkCreationHeightDescendantChain(creationHeightDescendants.reverse, headers.head))
+      .getMessage shouldBe "requirement failed: descendant heights"
+  }
+  Vector(0, 102).foreach { count =>
+    test(s"height-edge transport rejects descendant cardinality $count before decoding") {
+      val row = field(fixture.hcursor, "creationHeightDescendants").asArray.get.head
+      intercept[IllegalArgumentException](decodeCreationHeightDescendants(Json.fromValues(Vector.fill(count)(row))))
+        .getMessage shouldBe "requirement failed: bounded descendants"
+    }
+  }
+  test("height-edge transport refuses a replacement original anchor at the same height") {
+    val changed = headers.head.copy(timestamp = headers.head.timestamp + 1L, sizeOpt = None)
+    changed.id should not be headers.head.id
+    intercept[IllegalArgumentException](checkCreationHeightDescendantChain(creationHeightDescendants, changed)).getMessage shouldBe
+      "requirement failed: descendant parents"
+  }
+  test("height-edge transport refuses a truncated chain with valid remaining ancestry") {
+    intercept[IllegalArgumentException](checkCreationHeightDescendantChain(creationHeightDescendants.dropRight(1), headers.head))
+      .getMessage shouldBe "requirement failed: descendant final height"
+  }
+  test("height-edge transport refuses an unknown header field") {
+    val rows = field(fixture.hcursor, "creationHeightDescendants").asArray.get
+    val changed = rows.updated(0, rows.head.mapObject(_.add("unexpected", Json.fromBoolean(false))))
+    intercept[IllegalArgumentException](decodeCreationHeightDescendants(Json.fromValues(changed))).getMessage shouldBe
+      "requirement failed: exact fields"
+  }
+  test("height-edge transport refuses a non-array instead of treating it as absent") {
+    intercept[IllegalArgumentException](decodeCreationHeightDescendants(Json.Null)).getMessage shouldBe
+      "requirement failed: descendant array"
   }
 
   test("only an empty fee proof rejects input two while protected inputs remain valid in both contexts") {

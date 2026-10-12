@@ -6,12 +6,12 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { runBoundedProcess } from './pinned-local-native-verifier-build.js';
 
 const runner = resolve(import.meta.dirname, '../../validity-proof/consumer-jvm/run-substrate-federated-native-continuation-transaction.ps1');
-// The actual SBT summary format, with the newly pinned 35-case closure. The
-// previously accepted 33-case result must no longer satisfy this runner.
+// The actual SBT summary format, with the pinned 48-case closure. The
+// previously accepted 33- and 35-case results must not satisfy this runner.
 const summary = [
-  '[info] Total number of tests run: 35',
+  '[info] Total number of tests run: 48',
   '[info] Suites: completed 1, aborted 0',
-  '[info] Tests: succeeded 35, failed 0, canceled 0, ignored 0, pending 0',
+  '[info] Tests: succeeded 48, failed 0, canceled 0, ignored 0, pending 0',
   '[info] All tests passed.',
 ];
 const good = summary.join('\n') + '\n';
@@ -31,9 +31,10 @@ const changed = (name: string, from: string, to: string): void => {
   if (good.split(from).length !== 2) throw new Error('runner fixture mutation is not isolated');
   cases.push({ name, output: good.replace(from, to), exitCode: 0, accepted: false });
 };
-changed('refuses one fewer test', 'tests run: 35', 'tests run: 34');
-changed('refuses one extra test', 'tests run: 35', 'tests run: 36');
-changed('refuses old 33-case count', 'tests run: 35', 'tests run: 33');
+changed('refuses one fewer test', 'tests run: 48', 'tests run: 47');
+changed('refuses one extra test', 'tests run: 48', 'tests run: 49');
+changed('refuses old 33-case count', 'tests run: 48', 'tests run: 33');
+changed('refuses old 35-case count', 'tests run: 48', 'tests run: 35');
 changed('refuses missing count', summary[0]! + '\n', '');
 changed('refuses duplicate count', summary[0]!, summary[0]! + '\n' + summary[0]!);
 changed('refuses contradictory count', summary[0]!, summary[0]! + '\n[info] Total number of tests run: 1');
@@ -44,14 +45,14 @@ changed('refuses aborted suite', 'aborted 0', 'aborted 1');
 changed('refuses missing suites', summary[1]! + '\n', '');
 changed('refuses duplicate suites', summary[1]!, summary[1]! + '\n' + summary[1]!);
 changed('refuses contradictory suites', summary[1]!, summary[1]! + '\n[info] Suites: completed 0, aborted 1');
-changed('refuses fewer successes', 'succeeded 35', 'succeeded 34');
+changed('refuses fewer successes', 'succeeded 48', 'succeeded 47');
 changed('refuses failed case', 'failed 0', 'failed 1');
 changed('refuses canceled case', 'canceled 0', 'canceled 1');
 changed('refuses ignored case', 'ignored 0', 'ignored 1');
 changed('refuses pending case', 'pending 0', 'pending 1');
 changed('refuses missing outcome summary', summary[2]! + '\n', '');
 changed('refuses duplicate outcome summary', summary[2]!, summary[2]! + '\n' + summary[2]!);
-changed('refuses contradictory outcome summary', summary[2]!, summary[2]! + '\n[info] Tests: succeeded 34, failed 1, canceled 0, ignored 0, pending 0');
+changed('refuses contradictory outcome summary', summary[2]!, summary[2]! + '\n[info] Tests: succeeded 47, failed 1, canceled 0, ignored 0, pending 0');
 changed('refuses missing success marker', summary[3]! + '\n', '');
 changed('refuses duplicate success marker', summary[3]!, summary[3]! + '\n' + summary[3]!);
 changed('refuses marker suffix', summary[3]!, summary[3]! + ' not really');
