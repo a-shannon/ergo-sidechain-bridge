@@ -9,6 +9,14 @@ import {
 import { delimiter, dirname, join, parse, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+function copiedSelectionEntryExists(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (error) {
+    if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 import {
   validatePinnedFederatedCampaignParentRuntime,
 } from '../authenticated-v2-runtime-bundle.js';
@@ -28,6 +36,11 @@ import { createNativeTwoCycleParentCycleStepV1 }
   from '../substrate-federated-native-two-cycle-cycle-step-diagnostic-v1.js';
 import { createNativeTwoCycleParentCallbackTimingV1 }
   from '../substrate-federated-native-two-cycle-callback-timing-v1.js';
+import {
+  createNativeTwoCycleParentCopiedErgoSelectionV1,
+  parseNativeTwoCycleWorkerCopiedErgoSelectionV1,
+  readNativeTwoCycleCopiedErgoCaptureManifestV1,
+} from '../substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
 import { createNativeTwoCycleParentTrackerContextV1, createNativeTwoCycleParentTrackerStatementV1 }
   from '../substrate-federated-tracker-context-failure-v1.js';
 import { createNativeTwoCycleParentSourceLockStageV1 }
@@ -309,6 +322,29 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
     assertNativeTwoCycleRecoveryManifestV1(
       captured.config.frontierBuildParentDirectory, workerRecovery.locator,
     );
+    const workerSelectionPath = join(attemptPath, 'worker-copied-ergo-selection-v1.json');
+    const parentSelectionPath = join(attemptPath, 'copied-ergo-selection-v1.json');
+    if (captured.config.captureCopiedErgoRecoverySelection !== true
+      && (copiedSelectionEntryExists(workerSelectionPath) || copiedSelectionEntryExists(parentSelectionPath))) {
+      throw new Error('native two-cycle copied Ergo selection contradicts disabled option');
+    }
+    const selectionExpected = captured.config.captureCopiedErgoRecoverySelection === true
+      ? Object.freeze({
+        bindings: Object.freeze({ ...recoveryBindings,
+          projectedReceiptDigestHex: transport.result.receiptDigestHex }),
+        locator: workerRecovery.locator,
+        ergoManifestSha256Hex: readNativeTwoCycleCopiedErgoCaptureManifestV1(
+          captured.config.frontierBuildParentDirectory, workerRecovery.locator,
+        ).ergoManifestSha256Hex,
+        workerRecoveryLocatorReceiptDigestHex: workerRecovery.receiptDigestHex,
+      }) : undefined;
+    const workerSelectionText = selectionExpected === undefined ? undefined
+      : new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(readBoundedRegularFile(
+        workerSelectionPath, 'native two-cycle worker copied Ergo selection', 16 * 1024,
+      ).bytes);
+    if (selectionExpected !== undefined) {
+      parseNativeTwoCycleWorkerCopiedErgoSelectionV1(workerSelectionText!, selectionExpected);
+    }
     const terminalBody = Object.freeze({
       schema: TERMINAL_SCHEMA,
       version: 1 as const,
@@ -350,6 +386,17 @@ export async function runSubstrateFederatedNativeTwoCycleFromArguments(
       Buffer.from(`${canonicalJson(parentRecovery)}\n`, 'utf8'),
       'native two-cycle parent recovery locator',
     );
+    if (selectionExpected !== undefined) {
+      const selection = createNativeTwoCycleParentCopiedErgoSelectionV1({
+        workerSelectionText: workerSelectionText!,
+        workerRecoveryLocatorText: workerRecoveryText,
+        parentRecoveryLocatorText: `${canonicalJson(parentRecovery)}\n`,
+        terminalReceiptDigestHex: terminal.receiptDigestHex,
+        expected: selectionExpected,
+      });
+      writeNewFile(parentSelectionPath, Buffer.from(`${canonicalJson(selection)}\n`, 'utf8'),
+        'native two-cycle parent copied Ergo selection');
+    }
     terminalPublicationStarted = true;
     writeNewFile(
       resultPath,

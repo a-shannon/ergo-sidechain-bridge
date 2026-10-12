@@ -159,6 +159,13 @@ observer returns. The existing 50-second observation envelope and confirmation
 deadlines remain unchanged, but fast observations can become slower, reducing
 the number of polls and potentially changing the deadline category.
 
+The optional Boolean `captureCopiedErgoRecoverySelection` defaults to disabled.
+When `true`, a genuine successful in-memory root return supplies a bounded
+public selection for later copied-Ergo observation. The option is bound to the
+configuration hash. Omission and explicit `false` preserve the root input and
+legacy result format; other values reject before an attempt is created.
+This option neither starts recovery nor changes lifecycle predicates.
+
 On Windows, use a shallow existing absolute directory for
 `frontierBuildParentDirectory`; the Frontier builder creates nested source,
 target, temporary and WASM paths beneath it. Keep `outputParentDirectory`
@@ -498,11 +505,41 @@ expected observation. Actual component bytes, stopped-state ownership,
 canonical paths and paired restart observations remain separate checks.
 Selection does not prove payout persistence at that tip.
 
-The current packaged public result does not expose the complete root data
-needed by this preparation function. A separately admitted source caller must
-receive it from a genuine successful in-memory root return. Synthetic fixture
-composition with the copied owner does not establish that producer or actual
-recovery acceptance.
+With `captureCopiedErgoRecoverySelection: true`, the packaged worker derives
+`worker-copied-ergo-selection-v1.json` from the complete in-memory root return
+and the selected aggregate capture. The parent validates its bindings against
+the existing worker recovery locator, projected result and freshly read
+aggregate, then writes `copied-ergo-selection-v1.json`. Each companion is
+create-only, canonical JSON plus LF, and bounded to 16 KiB. Both companions
+must be valid before the corresponding success result is published. A missing
+or malformed required companion refuses success; an occupied output is never
+overwritten. Unexpected companions also refuse success when the option is
+disabled.
+
+The public selection retains relative capture names, aggregate and Ergo
+component pins, the complete canonical root hash and the exact second
+confirmation snapshot. It binds the configuration, source and tool identities,
+legacy projected result and existing recovery-locator ancestry. The parent
+also binds its precomputed canonical result receipt. That digest is distinct
+from a launcher terminal receipt. A separately selected public parent
+companion can be parsed against explicit expected bindings without reading
+worker files.
+
+The bounded aggregate reader checks canonical direct ancestors, a stable
+single-link regular manifest, its raw hash, fixed component roles and declared
+bounds. It does not inspect component databases. The legacy result still omits
+the complete root data; the companion exposes only the selected public fields.
+Its raw-root hash and opaque worker digests establish byte correspondence
+under the trusted local producer assumption. They cannot authenticate a
+coherently forged result or snapshot. All five claims remain false:
+`successAuthenticated`, `recoveryAdmitted`, `nodeConsistencyEstablished`,
+`freshRestartValidated` and `executionAuthorityRestored`.
+
+Synthetic composition exercises this producer-to-parent path and publication
+ordering. A genuine successful lifecycle capture and separately admitted
+recovery execution remain unobserved. The selection does not establish payout
+persistence, stopped-state ownership, custody disposal or permission to start
+recovery.
 
 ## Observed campaign status
 

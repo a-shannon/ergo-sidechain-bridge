@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -105,6 +107,16 @@ import { beginNativeTwoCycleCallbackTimingV1, tagNativeTwoCycleCallbackTimingFai
 import { createNativeTwoCycleWorkerRecoveryLocatorV1,
   parseNativeTwoCycleParentRecoveryLocatorV1 }
   from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
+import type { RecoveryLocatorPointerV1 }
+  from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
+import {
+  createNativeTwoCycleWorkerCopiedErgoSelectionV1,
+  parseNativeTwoCycleParentCopiedErgoSelectionV1,
+  parseNativeTwoCycleWorkerCopiedErgoSelectionV1,
+} from '../substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
+import { extendedRootResult } from '../test-support/substrate-federated-native-two-cycle-root-result.js';
+import type { SubstrateFederatedNativeTwoCycleResultV1 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
+import * as createOnlyArtifacts from '../create-only-out-of-repository-artifact.js';
 import {
   runSubstrateFederatedNativeTwoCycleFromArguments,
 } from './run-substrate-federated-native-two-cycle-v1.js';
@@ -175,6 +187,228 @@ afterEach(() => {
 });
 
 describe('native two-cycle parent and worker V1', () => {
+  it('publishes opt-in copied Ergo selection from the genuine root seam before worker transport', async () => {
+    const fixture = workerFixture();
+    enableCopiedSelection(fixture, true);
+    const selected = await copiedSelectionSuccessFixture(fixture);
+    mocked.load.mockReturnValue(fixture.loaded);
+    mocked.environment.mockResolvedValue(environment());
+    mocked.root.mockResolvedValue(selected.root);
+    const publication = requireSelectionBeforePublication(fixture.attemptPath, true);
+    try {
+      await runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+        '--config', fixture.configPath, '--expected-config-sha256', fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+        '--attempt', fixture.attemptPath,
+      ]);
+      expect(publication).toHaveBeenCalled();
+    } finally { publication.mockRestore(); }
+    const selection = parseNativeTwoCycleWorkerCopiedErgoSelectionV1(
+      readFileSync(join(fixture.attemptPath, 'worker-copied-ergo-selection-v1.json'), 'utf8'),
+      selected.expected,
+    );
+    expect(selection.expectedSnapshot).toEqual(selected.snapshot);
+    expect(selection.ergoManifestSha256Hex).toBe(selected.expected.ergoManifestSha256Hex);
+    expect(selection.successAuthenticated).toBe(false);
+    expect(selection.recoveryAdmitted).toBe(false);
+    const transport = JSON.parse(readFileSync(join(fixture.attemptPath, 'worker-result.json'), 'utf8'));
+    expect(transport.result).toEqual(selected.result);
+    expect(mocked.root).toHaveBeenCalledOnce();
+    expect(mocked.root).toHaveBeenCalledWith(fixture.loaded.rootInput);
+  });
+
+  it.each(['missing aggregate', 'changed aggregate', 'nonindexed tip', 'occupied worker selection',
+    'occupied parent selection'] as const)('withholds worker success for opt-in %s', async fault => {
+    const fixture = workerFixture(); enableCopiedSelection(fixture, true);
+    const selected = await copiedSelectionSuccessFixture(fixture);
+    mocked.load.mockReturnValue(fixture.loaded); mocked.environment.mockResolvedValue(environment());
+    mocked.root.mockImplementation(async () => {
+      if (fault === 'missing aggregate') rmSync(selected.manifestPath);
+      if (fault === 'changed aggregate') writeFileSync(selected.manifestPath, 'changed aggregate');
+      if (fault === 'nonindexed tip') selected.snapshot.indexedHeight--;
+      if (fault === 'occupied worker selection' || fault === 'occupied parent selection') {
+        writeFileSync(join(fixture.attemptPath, fault === 'occupied worker selection'
+          ? 'worker-copied-ergo-selection-v1.json' : 'copied-ergo-selection-v1.json'), 'retained bytes');
+      }
+      return selected.root;
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+      '--config', fixture.configPath, '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
+    ])).rejects.toThrow();
+    expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+    if (fault.startsWith('occupied')) expect(readFileSync(join(fixture.attemptPath,
+      fault === 'occupied worker selection' ? 'worker-copied-ergo-selection-v1.json'
+        : 'copied-ergo-selection-v1.json'), 'utf8')).toBe('retained bytes');
+  });
+
+  it('joins opt-in worker selection to the unchanged canonical parent result and locator', async () => {
+    const fixture = commandFixture(); enableCopiedSelection(fixture, true);
+    const selected = await copiedSelectionSuccessFixture(fixture);
+    configureParent(fixture, selected.result);
+    mocked.process.mockImplementationOnce(async input => {
+      writeSelectedWorkerTransport(fixture, selected); return cleanProcessResult(input);
+    });
+    const publication = requireSelectionBeforePublication(fixture.attemptPath, false);
+    try {
+      await runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]);
+      expect(publication).toHaveBeenCalled();
+    } finally { publication.mockRestore(); }
+    const terminal = JSON.parse(readFileSync(join(fixture.attemptPath, 'result.json'), 'utf8'));
+    const locator = JSON.parse(readFileSync(join(fixture.attemptPath, 'recovery-locator-v1.json'), 'utf8'));
+    const parent = parseNativeTwoCycleParentCopiedErgoSelectionV1(
+      readFileSync(join(fixture.attemptPath, 'copied-ergo-selection-v1.json'), 'utf8'),
+      { ...selected.expected, terminalReceiptDigestHex: terminal.receiptDigestHex,
+        parentRecoveryLocatorReceiptDigestHex: locator.receiptDigestHex },
+    );
+    expect(parent.expectedSnapshot).toEqual(selected.snapshot);
+    expect(parent.ergoManifestSha256Hex).toBe(selected.expected.ergoManifestSha256Hex);
+    expect(parent.executionAuthorityRestored).toBe(false);
+    expect(terminal.result).toEqual(selected.result);
+    expect(Object.hasOwn(terminal, 'copiedErgoSelection')).toBe(false);
+  });
+
+  it.each(['missing worker selection', 'invalid worker selection', 'BOM worker selection', 'changed snapshot',
+    'repinned component mismatch', 'repinned locator mismatch', 'occupied parent selection'] as const)(
+    'withholds parent success for opt-in %s', async fault => {
+      const fixture = commandFixture(); enableCopiedSelection(fixture, true);
+      const selected = await copiedSelectionSuccessFixture(fixture);
+      configureParent(fixture, selected.result);
+      mocked.process.mockImplementationOnce(async input => {
+        writeSelectedWorkerTransport(fixture, selected);
+        const path = join(fixture.attemptPath, 'worker-copied-ergo-selection-v1.json');
+        if (fault === 'missing worker selection') rmSync(path);
+        if (fault === 'invalid worker selection') writeFileSync(path, '{}');
+        if (fault === 'BOM worker selection') writeFileSync(path,
+          Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), readFileSync(path)]));
+        if (fault === 'changed snapshot' || fault.startsWith('repinned')) {
+          const value = JSON.parse(readFileSync(path, 'utf8'));
+          if (fault === 'changed snapshot') value.expectedSnapshot.headerIdHex = '44'.repeat(32);
+          if (fault === 'repinned component mismatch') value.ergoManifestSha256Hex = '44'.repeat(32);
+          if (fault === 'repinned locator mismatch') value.locator.directoryName = 'two-cycle-recovery-ABC124';
+          if (fault.startsWith('repinned')) {
+            delete value.receiptDigestHex;
+            value.receiptDigestHex = sha256CanonicalJson(value,
+              'E2S_SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_WORKER_COPIED_ERGO_SELECTION_V1');
+          }
+          writeFileSync(path, `${canonicalJson(value)}\n`);
+        }
+        if (fault === 'occupied parent selection') {
+          writeFileSync(join(fixture.attemptPath, 'copied-ergo-selection-v1.json'), 'retained parent bytes');
+        }
+        return cleanProcessResult(input);
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toThrow();
+      expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+      expect(existsSync(join(fixture.attemptPath, 'failure.json'))).toBe(true);
+      if (fault === 'occupied parent selection') expect(readFileSync(
+        join(fixture.attemptPath, 'copied-ergo-selection-v1.json'), 'utf8')).toBe('retained parent bytes');
+    });
+
+  it.each([undefined, false] as const)('preserves legacy terminal bytes at identical bindings when copied selection is %s', async option => {
+    const baseline = commandFixture();
+    const result = projectedResult(); configureParent(baseline, result);
+    await runSubstrateFederatedNativeTwoCycleFromArguments(['--config', baseline.configSourcePath]);
+    const legacyBytes = readFileSync(join(baseline.attemptPath, 'result.json'), 'utf8');
+    const fixture = commandFixture(); if (option !== undefined) enableCopiedSelection(fixture, option);
+    configureParent(fixture, result);
+    await runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]);
+    expect(existsSync(join(fixture.attemptPath, 'worker-copied-ergo-selection-v1.json'))).toBe(false);
+    expect(existsSync(join(fixture.attemptPath, 'copied-ergo-selection-v1.json'))).toBe(false);
+    expect(readFileSync(join(fixture.attemptPath, 'result.json'), 'utf8')).toBe(legacyBytes);
+  });
+
+  it.each([undefined, false] as const)('refuses unexpected worker selection while disabled=%s', async option => {
+    const fixture = commandFixture(); if (option !== undefined) enableCopiedSelection(fixture, option);
+    configureParent(fixture, projectedResult());
+    mocked.process.mockImplementationOnce(async input => {
+      writeWorkerTransport(fixture, projectedResult());
+      writeFileSync(join(fixture.attemptPath, 'worker-copied-ergo-selection-v1.json'), 'unexpected bytes');
+      return cleanProcessResult(input);
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+      .rejects.toThrow(/disabled option/);
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+  });
+
+  it.each([undefined, false] as const)('refuses unexpected parent selection while disabled=%s', async option => {
+    const fixture = commandFixture(); if (option !== undefined) enableCopiedSelection(fixture, option);
+    configureParent(fixture, projectedResult());
+    mocked.process.mockImplementationOnce(async input => {
+      writeWorkerTransport(fixture, projectedResult());
+      writeFileSync(join(fixture.attemptPath, 'copied-ergo-selection-v1.json'), 'unexpected bytes');
+      return cleanProcessResult(input);
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+      .rejects.toThrow(/disabled option/);
+    expect(existsSync(join(fixture.attemptPath, 'result.json'))).toBe(false);
+  });
+
+  it.each([
+    [undefined, 'worker-copied-ergo-selection-v1.json'],
+    [false, 'worker-copied-ergo-selection-v1.json'],
+    [undefined, 'copied-ergo-selection-v1.json'],
+    [false, 'copied-ergo-selection-v1.json'],
+  ] as const)('refuses worker-side unexpected selection with option %s at %s', async (option, name) => {
+    const fixture = workerFixture(); if (option !== undefined) enableCopiedSelection(fixture, option);
+    const recoveryEvidence = writeRecoveryManifestFixture(fixture);
+    mocked.load.mockReturnValue(fixture.loaded); mocked.environment.mockResolvedValue(environment());
+    mocked.project.mockReturnValue(projectedResult());
+    mocked.root.mockImplementation(async () => {
+      writeFileSync(join(fixture.attemptPath, name), 'retained unexpected bytes');
+      return { root: 'synthetic', recoveryEvidence };
+    });
+    await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+      '--config', fixture.configPath, '--expected-config-sha256', fixture.loaded.configSha256Hex,
+      '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+      '--attempt', fixture.attemptPath,
+    ])).rejects.toThrow(/output is occupied/);
+    expect(readFileSync(join(fixture.attemptPath, name), 'utf8')).toBe('retained unexpected bytes');
+    expect(existsSync(join(fixture.attemptPath, 'worker-result.json'))).toBe(false);
+  });
+  it.each([
+    [true, undefined, 'worker-copied-ergo-selection-v1.json'],
+    [true, false, 'worker-copied-ergo-selection-v1.json'],
+    [true, undefined, 'copied-ergo-selection-v1.json'],
+    [true, false, 'copied-ergo-selection-v1.json'],
+    [false, undefined, 'worker-copied-ergo-selection-v1.json'],
+    [false, false, 'worker-copied-ergo-selection-v1.json'],
+    [false, undefined, 'copied-ergo-selection-v1.json'],
+    [false, false, 'copied-ergo-selection-v1.json'],
+  ] as const)('refuses dangling copied selection worker=%s option=%s at %s', async (worker, option, name) => {
+    const fixture = worker ? { worker: true as const, ...workerFixture() }
+      : { worker: false as const, ...commandFixture() };
+    if (option !== undefined) enableCopiedSelection(fixture, option);
+    const path = join(fixture.attemptPath, name);
+    const occupy = () => symlinkSync(join(fixture.attemptPath, 'absent-selection-target'), path,
+      process.platform === 'win32' ? 'junction' : 'dir');
+    if (fixture.worker) {
+      const recoveryEvidence = writeRecoveryManifestFixture(fixture);
+      mocked.load.mockReturnValue(fixture.loaded); mocked.environment.mockResolvedValue(environment());
+      mocked.project.mockReturnValue(projectedResult());
+      mocked.root.mockImplementation(async () => {
+        occupy(); return { root: 'synthetic', recoveryEvidence };
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleWorkerFromArguments([
+        '--config', fixture.configPath, '--expected-config-sha256', fixture.loaded.configSha256Hex,
+        '--expected-wasm-avl-package-sha256', wasmPackageIdentity().packageSha256Hex,
+        '--attempt', fixture.attemptPath,
+      ])).rejects.toThrow();
+    } else {
+      configureParent(fixture, projectedResult());
+      mocked.process.mockImplementationOnce(async input => {
+        writeWorkerTransport(fixture, projectedResult()); occupy(); return cleanProcessResult(input);
+      });
+      await expect(runSubstrateFederatedNativeTwoCycleFromArguments(['--config', fixture.configSourcePath]))
+        .rejects.toThrow();
+    }
+    expect(existsSync(path)).toBe(false);
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(fixture.attemptPath, worker ? 'worker-result.json' : 'result.json'))).toBe(false);
+  });
+
   it('records start, launches one bounded worker, and publishes only after clean exit', async () => {
     vi.stubEnv('JAVA_HOME', 'unreviewed-parent-java-home');
     vi.stubEnv('CARGO_HOME', 'unreviewed-parent-cargo-home');
@@ -2346,6 +2580,80 @@ describe('native two-cycle parent and worker V1', () => {
   });
 });
 
+function requireSelectionBeforePublication(attempt: string, worker: boolean) {
+  const original = createOnlyArtifacts.writeNewFile;
+  return vi.spyOn(createOnlyArtifacts, 'writeNewFile').mockImplementation((path, bytes, label) => {
+    if (path === join(attempt, worker ? 'worker-result.json' : 'result.json')) {
+      expect(existsSync(join(attempt, worker ? 'worker-copied-ergo-selection-v1.json'
+        : 'copied-ergo-selection-v1.json'))).toBe(true);
+    }
+    return original(path, bytes, label);
+  });
+}
+
+function enableCopiedSelection(
+  fixture: ReturnType<typeof commandFixture> | ReturnType<typeof workerFixture>, enabled: boolean,
+): void {
+  fixture.loaded = Object.freeze({ ...fixture.loaded,
+    config: Object.freeze({ ...fixture.loaded.config, captureCopiedErgoRecoverySelection: enabled }) });
+}
+
+async function copiedSelectionSuccessFixture(
+  fixture: ReturnType<typeof commandFixture> | ReturnType<typeof workerFixture>,
+) {
+  const root = extendedRootResult();
+  const snapshot = { network: 'devnet' as const, fullHeight: 220, indexedHeight: 220,
+    headerIdHex: '23'.repeat(32) };
+  Object.assign(root.secondCycle.confirmationExecution, { finalSnapshot: snapshot });
+  const captureManifestText = `${canonicalJson({
+    schema: 'e2s.substrate-federated-two-cycle-recovery-capture.v1',
+    kind: 'stopped-node-copy-and-sqlite-evidence',
+    components: {
+      ergo: { file: 'ergo/manifest.json', bytes: 1, sha256Hex: '31'.repeat(32) },
+      frontier: { file: 'frontier/manifest.json', bytes: 1, sha256Hex: '32'.repeat(32) },
+      sqlite: { file: 'sqlite/manifest.json', bytes: 1, sha256Hex: '33'.repeat(32) },
+    },
+    summary: { ergoFiles: 1, frontierFiles: 1, nodeDatabaseBytes: 2,
+      sqliteDatabaseBytes: 1, trackerAdmissionAttempts: 2 },
+    nodeConsistencyEstablished: false, freshRestartValidated: false, executionAuthorityRestored: false,
+  })}\n`;
+  root.recoveryEvidence.manifestSha256Hex = createHash('sha256').update(captureManifestText).digest('hex');
+  const manifestPath = join(fixture.loaded.config.frontierBuildParentDirectory,
+    root.recoveryEvidence.buildDirectoryName, 'target', root.recoveryEvidence.directoryName, 'manifest.json');
+  mkdirSync(dirname(manifestPath), { recursive: true }); writeFileSync(manifestPath, captureManifestText);
+  const actual = await vi.importActual<typeof import('../substrate-federated-native-two-cycle-invocation-v1.js')>(
+    '../substrate-federated-native-two-cycle-invocation-v1.js');
+  mocked.project.mockImplementation(actual.projectSubstrateFederatedNativeTwoCycleResultV1);
+  const result = actual.projectSubstrateFederatedNativeTwoCycleResultV1(root);
+  const bindings = {
+    configSha256Hex: fixture.loaded.configSha256Hex, bridgeCommit: environment().repository.commit,
+    bridgeTree: environment().repository.tree, pathIdentityDigestHex: fixture.loaded.pathIdentityDigestHex,
+    toolIdentityDigestHex: environment().toolIdentityDigestHex, rootResultDigestHex: result.rootResultDigestHex,
+    projectedReceiptDigestHex: result.receiptDigestHex,
+  };
+  const workerLocator = createNativeTwoCycleWorkerRecoveryLocatorV1(root.recoveryEvidence, {
+    configSha256Hex: bindings.configSha256Hex, bridgeCommit: bindings.bridgeCommit,
+    bridgeTree: bindings.bridgeTree, pathIdentityDigestHex: bindings.pathIdentityDigestHex,
+    toolIdentityDigestHex: bindings.toolIdentityDigestHex, rootResultDigestHex: bindings.rootResultDigestHex,
+  });
+  return { root, snapshot, result, manifestPath, captureManifestText, bindings, workerLocator,
+    expected: { bindings, locator: root.recoveryEvidence, ergoManifestSha256Hex: '31'.repeat(32),
+      workerRecoveryLocatorReceiptDigestHex: workerLocator.receiptDigestHex } };
+}
+
+function writeSelectedWorkerTransport(
+  fixture: ReturnType<typeof commandFixture>,
+  selected: Awaited<ReturnType<typeof copiedSelectionSuccessFixture>>,
+): void {
+  writeWorkerTransport(fixture, selected.result, selected.root.recoveryEvidence);
+  const selection = createNativeTwoCycleWorkerCopiedErgoSelectionV1({
+    rootResultText: canonicalJson(selected.root), captureManifestText: selected.captureManifestText,
+    buildParentDirectory: fixture.loaded.config.frontierBuildParentDirectory,
+    workerRecoveryLocatorText: `${canonicalJson(selected.workerLocator)}\n`, bindings: selected.bindings,
+  });
+  writeFileSync(join(fixture.attemptPath, 'worker-copied-ergo-selection-v1.json'), `${canonicalJson(selection)}\n`);
+}
+
 function commandFixture() {
   const root = mkdtempSync(join(tmpdir(), 'e2s-two-cycle-command-'));
   temporaryRoots.push(root);
@@ -2468,7 +2776,7 @@ function progressFailure(kind: 'genesis' | 'continuation', cycle: 'cycle-1' | 'c
 
 function configureParent(
   fixture: ReturnType<typeof commandFixture>,
-  result: ReturnType<typeof projectedResult>,
+  result: ReturnType<typeof projectedResult> | Readonly<SubstrateFederatedNativeTwoCycleResultV1>,
 ): void {
   mocked.load.mockReturnValue(fixture.loaded);
   mocked.environment.mockResolvedValue(environment());
@@ -2599,7 +2907,8 @@ function next(seed: string, increment: number): string {
 
 function writeWorkerTransport(
   fixture: ReturnType<typeof commandFixture>,
-  result: ReturnType<typeof projectedResult>,
+  result: ReturnType<typeof projectedResult> | Readonly<SubstrateFederatedNativeTwoCycleResultV1>,
+  providedLocator?: Readonly<RecoveryLocatorPointerV1>,
 ): void {
   const transport = {
     schema: 'e2s.substrate-federated-native-two-cycle-worker-transport.v1',
@@ -2612,7 +2921,7 @@ function writeWorkerTransport(
     toolIdentityDigestHex: environment().toolIdentityDigestHex,
     result,
   };
-  const locator = writeRecoveryManifestFixture(fixture);
+  const locator = providedLocator ?? writeRecoveryManifestFixture(fixture);
   const workerRecovery = createNativeTwoCycleWorkerRecoveryLocatorV1(locator, {
     configSha256Hex: fixture.loaded.configSha256Hex,
     bridgeCommit: environment().repository.commit,

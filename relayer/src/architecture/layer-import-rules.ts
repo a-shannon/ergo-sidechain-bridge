@@ -1930,6 +1930,33 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
     ['prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1', new Set([
       'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts',
       'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts',
+    ])],
+  ])],
+  ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts', new Map([
+    ['createNativeTwoCycleWorkerCopiedErgoSelectionV1', new Set([
+      'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
+    ])],
+    ['parseNativeTwoCycleWorkerCopiedErgoSelectionV1', new Set([
+      'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
+    ])],
+    ['createNativeTwoCycleParentCopiedErgoSelectionV1', new Set([
+      'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
+    ])],
+    ['parseNativeTwoCycleParentCopiedErgoSelectionV1', new Set([
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
+    ])],
+    ['readNativeTwoCycleCopiedErgoCaptureManifestV1', new Set([
+      'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v1.ts',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
     ])],
   ])],
   ['test-support/substrate-federated-native-two-cycle-root-result.ts', new Map([
@@ -1940,6 +1967,8 @@ const EXCLUSIVE_RUNTIME_AUTHORITY_IMPORT_OWNERS: ReadonlyMap<
       'substrate-federated-native-two-cycle-invocation-v1.test.ts',
       'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts',
       'substrate-federated-copied-non-mining-ergo-node-process-v1.test.ts',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts',
+      'scripts/run-substrate-federated-native-two-cycle-v1.test.ts',
     ])],
     ['fee', new Set(['substrate-federated-native-two-cycle-invocation-v1.test.ts'])],
     ['hex', new Set(['substrate-federated-native-two-cycle-invocation-v1.test.ts'])],

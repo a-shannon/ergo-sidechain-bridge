@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -27,6 +28,36 @@ afterEach(() => {
 });
 
 describe('native two-cycle invocation V1', () => {
+  it.each([false, true])('binds copied Ergo selection %s without changing root inputs', enabled => {
+    const fixture = invocationFixture();
+    const original = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);
+    writeConfig(fixture.configPath, { ...fixture.config, captureCopiedErgoRecoverySelection: enabled });
+    const loaded = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);
+    expect(loaded.config.captureCopiedErgoRecoverySelection).toBe(enabled);
+    expect(loaded.configSha256Hex).not.toBe(original.configSha256Hex);
+    expect(loaded.rootInput).toEqual(original.rootInput);
+  });
+
+  it.each([false, true])('keeps confirmation progress independent of copied selection %s', enabled => {
+    const fixture = invocationFixture();
+    const config = { ...fixture.config, captureCommittedReserveConfirmationProgress: true };
+    writeConfig(fixture.configPath, config);
+    const original = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);
+    writeConfig(fixture.configPath, { ...config, captureCopiedErgoRecoverySelection: enabled });
+    const loaded = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);
+    expect(loaded.config.captureCopiedErgoRecoverySelection).toBe(enabled);
+    expect(loaded.rootInput).toEqual(original.rootInput);
+    expect(loaded.rootInput.captureCommittedReserveConfirmationProgress).toBe(true);
+  });
+
+  it.each([null, 0, 1, 'true', 'false', [], {}])('refuses non-Boolean copied selection %j', value => {
+    const fixture = invocationFixture();
+    writeConfig(fixture.configPath, { ...fixture.config, captureCopiedErgoRecoverySelection: value });
+    expect(() => loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath))
+      .toThrow(/selection option must be Boolean/);
+    expect(existsSync(join(fixture.config.outputParentDirectory, fixture.config.attemptName))).toBe(false);
+  });
+
   it.each([false, true])('binds explicit confirmation progress %s to config bytes', enabled => {
     const fixture = invocationFixture();
     const original = loadSubstrateFederatedNativeTwoCycleInvocationV1(fixture.configPath);

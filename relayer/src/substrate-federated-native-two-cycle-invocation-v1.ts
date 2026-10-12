@@ -122,6 +122,7 @@ export interface SubstrateFederatedNativeTwoCycleInvocationV1Config {
   readonly outputParentDirectory: string;
   readonly attemptName: string;
   readonly captureCommittedReserveConfirmationProgress?: boolean;
+  readonly captureCopiedErgoRecoverySelection?: boolean;
 }
 
 export interface LoadedSubstrateFederatedNativeTwoCycleInvocationV1 {
@@ -247,12 +248,19 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
     throw new Error('native two-cycle invocation config is invalid JSON');
   }
   const progressKey = 'captureCommittedReserveConfirmationProgress';
+  const selectionKey = 'captureCopiedErgoRecoverySelection';
   const hasProgressOption = parsed !== null && typeof parsed === 'object'
     && Object.prototype.hasOwnProperty.call(parsed, progressKey);
-  const raw = exactRecord(parsed, hasProgressOption ? [...CONFIG_KEYS, progressKey] : CONFIG_KEYS,
+  const hasSelectionOption = parsed !== null && typeof parsed === 'object'
+    && Object.prototype.hasOwnProperty.call(parsed, selectionKey);
+  const raw = exactRecord(parsed, [...CONFIG_KEYS,
+    ...(hasProgressOption ? [progressKey] : []), ...(hasSelectionOption ? [selectionKey] : [])],
     'native two-cycle invocation config');
   if (hasProgressOption && typeof raw[progressKey] !== 'boolean') {
     throw new Error('native committed reserve confirmation progress option must be Boolean');
+  }
+  if (hasSelectionOption && typeof raw[selectionKey] !== 'boolean') {
+    throw new Error('native copied Ergo recovery selection option must be Boolean');
   }
   if (
     raw.schema !== SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA
@@ -351,6 +359,7 @@ export function loadSubstrateFederatedNativeTwoCycleInvocationV1(
 
   const config: SubstrateFederatedNativeTwoCycleInvocationV1Config = Object.freeze({
     ...(hasProgressOption ? { captureCommittedReserveConfirmationProgress: raw[progressKey] as boolean } : {}),
+    ...(hasSelectionOption ? { captureCopiedErgoRecoverySelection: raw[selectionKey] as boolean } : {}),
     schema: SUBSTRATE_FEDERATED_NATIVE_TWO_CYCLE_INVOCATION_V1_SCHEMA,
     version: 1,
     profile: PROFILE,

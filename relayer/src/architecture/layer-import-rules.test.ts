@@ -1024,6 +1024,12 @@ describe('layer import rules', () => {
   });
 
   it.each([
+    ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts',
+      'createNativeTwoCycleWorkerCopiedErgoSelectionV1',
+      'substrate-federated-native-two-cycle-copied-ergo-selection-v1.test.ts'],
+    ['substrate-federated-native-two-cycle-copied-ergo-selection-v1.ts',
+      'readNativeTwoCycleCopiedErgoCaptureManifestV1',
+      'scripts/run-substrate-federated-native-two-cycle-worker-v1.ts'],
     ['substrate-federated-two-cycle-copied-ergo-selection-v1.ts',
       'prepareSubstrateFederatedTwoCycleCopiedErgoSelectionV1',
       'substrate-federated-two-cycle-copied-ergo-selection-v1.test.ts'],
@@ -1037,11 +1043,13 @@ describe('layer import rules', () => {
       'assertSubstrateFederatedCapturedNodeStateV1',
       'substrate-federated-isolated-devnet-ergo-node-process-v1.ts'],
   ])('limits copied-state binding %s#%s to its exact consumer', (module, binding, owner) => {
-    const specifier = `./${module.replace(/\.ts$/, '.js')}`;
+    const scriptOwner = owner.startsWith('scripts/');
+    const specifier = `${scriptOwner ? '../' : './'}${module.replace(/\.ts$/, '.js')}`;
+    const foreignOwner = `${scriptOwner ? 'scripts/' : ''}foreign-copied-owner.ts`;
     const sources = { [module]: `export function ${binding}() {}` };
     const imported = `import { ${binding} } from '${specifier}'; ${binding}();`;
     expect(inspect({ ...sources, [owner]: imported })).toEqual([]);
-    expect(inspect({ ...sources, 'foreign-copied-owner.ts': imported }).map(item => item.message))
+    expect(inspect({ ...sources, [foreignOwner]: imported }).map(item => item.message))
       .toContain(`exclusive authority import has the wrong owner: ${specifier}#${binding}`);
     expect(inspect({ ...sources, [owner]: `import { ${binding} as escaped } from '${specifier}'; escaped();` })
       .map(item => item.message)).toContain(`exclusive authority import must not be aliased: ${specifier}#${binding}`);

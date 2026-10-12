@@ -1,6 +1,14 @@
-import { existsSync } from 'node:fs';
+import { existsSync, lstatSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+
+function copiedSelectionEntryExists(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (error) {
+    if (error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
 
 import { readBoundedRegularFile, writeNewFile } from '../create-only-out-of-repository-artifact.js';
 import { assertNoDuplicateJsonKeys, canonicalJson } from '../ergo-settlement-core/strict-json.js';
@@ -58,6 +66,10 @@ import {
 } from '../substrate-federated-native-two-cycle-invocation-v1.js';
 import { createNativeTwoCycleWorkerRecoveryLocatorV1 }
   from '../substrate-federated-native-two-cycle-recovery-locator-v1.js';
+import {
+  createNativeTwoCycleWorkerCopiedErgoSelectionV1,
+  readNativeTwoCycleCopiedErgoCaptureManifestV1,
+} from '../substrate-federated-native-two-cycle-copied-ergo-selection-v1.js';
 import {
   assertSubstrateFederatedNativeWasmAvlPackageMatchesV1,
   type SubstrateFederatedNativeWasmAvlPackageIdentityV1,
@@ -209,6 +221,33 @@ export async function runSubstrateFederatedNativeTwoCycleWorkerFromArguments(
       Buffer.from(`${canonicalJson(recoveryLocator)}\n`, 'utf8'),
       'native two-cycle worker recovery locator',
     );
+    const workerSelectionPath = join(invocation.attemptPath, 'worker-copied-ergo-selection-v1.json');
+    if (copiedSelectionEntryExists(workerSelectionPath)
+      || copiedSelectionEntryExists(join(invocation.attemptPath, 'copied-ergo-selection-v1.json'))) {
+      throw new Error('native two-cycle copied Ergo selection output is occupied');
+    }
+    if (invocation.config.captureCopiedErgoRecoverySelection === true) {
+      const capture = readNativeTwoCycleCopiedErgoCaptureManifestV1(
+        invocation.config.frontierBuildParentDirectory, recoveryLocator.locator,
+      );
+      const selection = createNativeTwoCycleWorkerCopiedErgoSelectionV1({
+        rootResultText: canonicalJson(rootResult),
+        captureManifestText: capture.captureManifestText,
+        buildParentDirectory: invocation.config.frontierBuildParentDirectory,
+        workerRecoveryLocatorText: `${canonicalJson(recoveryLocator)}\n`,
+        bindings: {
+          configSha256Hex: invocation.configSha256Hex,
+          bridgeCommit: after.repository.commit,
+          bridgeTree: after.repository.tree,
+          pathIdentityDigestHex: invocation.pathIdentityDigestHex,
+          toolIdentityDigestHex: after.toolIdentityDigestHex,
+          rootResultDigestHex: result.rootResultDigestHex,
+          projectedReceiptDigestHex: result.receiptDigestHex,
+        },
+      });
+      writeNewFile(workerSelectionPath, Buffer.from(`${canonicalJson(selection)}\n`, 'utf8'),
+        'native two-cycle worker copied Ergo selection');
+    }
     writeNewFile(
       join(invocation.attemptPath, 'worker-result.json'),
       Buffer.from(`${canonicalJson(transport)}\n`, 'utf8'),

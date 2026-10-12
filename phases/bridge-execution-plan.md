@@ -57,14 +57,21 @@ Actual restart acceptance still requires a successful lifecycle capture,
 expected public tip and separate recovery admission. No new campaign, push or
 CI is selected.
 
-The next local join prepares exact copied-Ergo observation inputs from a
-separately selected complete successful root and aggregate capture bytes. Its
-raw root pin is distinct from the legacy projection, which omits the recovery
-pointer and final snapshot. It binds component roles and an expected snapshot;
-it does not authenticate success, inspect captured files or admit recovery.
-The public packaged result cannot yet supply that complete input. A genuine
-successful in-memory producer and separately admitted recovery caller remain
-due; source fixture composition cannot substitute for either.
+The pure selection boundary prepares exact copied-Ergo observation inputs from
+a separately selected complete successful root and aggregate capture bytes.
+Its raw root pin is distinct from the legacy projection, which omits the
+recovery pointer and final snapshot. The packaged worker now has an optional
+`captureCopiedErgoRecoverySelection` producer from the genuine in-memory root
+return; the parent joins bounded create-only public companions to the old
+result and recovery-locator ancestry. It independently rereads the aggregate
+component pin and refuses missing, malformed, occupied or unexpectedly enabled
+companions before success publication. Omission and false preserve root inputs
+and legacy projected result bytes; configuration and terminal identities still
+bind the option. Five false claims retain the trusted local producer
+scope; self-consistent hashes do not authenticate a forged tip.
+A genuine successful lifecycle capture, stopped-state ownership and separately
+admitted recovery caller remain due. Synthetic source composition cannot
+substitute for those observations or supply another campaign admission.
 
 The owned HTTP and test-framework dependency closure is validated locally.
 Axios 1.20.0 and dev-only source-map-js 1.2.2 retain genuine loopback transport
@@ -1991,7 +1998,7 @@ their implementation only on changed inputs, a concrete defect or a new failure.
 
 | Batch | Completion contract | Cheapest deciding check |
 |---|---|---|
-| Accumulated-state recovery admission (next result) | Bind a separately selected complete successful root and aggregate capture to exact copied-Ergo observation inputs, then connect the genuine in-memory producer and separately admitted recovery caller | The pure selection boundary prepares component-pin roles and the expected confirmation snapshot. The current public projection omits that input; actual stopped capture and fresh execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
+| Accumulated-state recovery admission (next result) | Connect the bounded public selection from a genuine successful lifecycle capture to a separately admitted copied-Ergo observation caller | The pure selector and optional packaged producer bind component-pin roles, the expected confirmation snapshot and existing result/locator ancestry. Actual successful capture, stopped-state ownership and fresh recovery execution admission remain missing. No historical runtime reads, reused custody or automatic C63 |
 | Copied non-mining Ergo owner (locally validated) | Verified captured-node copies reach fresh non-mining owned processes, exact expected paired snapshot observations and verified termination without issuing old target or custody authority | 34 synthetic owner cases,128 copy cases and362 architecture cases pass. Existing owner/mining-pause/capture consumers pass96 cases with11 unchanged actual-runtime guards inapplicable. TypeScript/imports and independent source review pass. Exact final claims and guarded local promotion bind this checkpoint; no actual JVM restart or restored execution authority |
 | Pinned captured-node materialization (locally closed atdda85577) | An existing fixed-subtree capture and separately admitted manifest pin produce another disposable copy without changing the default owner-source path or adding restart authority | 113 whole-file cases,21 capture consumers and95 generic consumers pass with exact independent review and guarded local promotion. Files define allowed directory ancestors; unbound empty directories reject. This is byte correspondence on synthetic captures, not actual node consistency or restart |
 | Test-framework dependency closure (validated locally) | Supported Vitest 4.1.11 closes the three development advisories while preserving assertions, source inventory and runtime capability boundaries | Fresh locked installation and full audit zero; Vite7.3.6/Rollup4.62.4 retained. Exact CLI listing/selection, all638 source files with23131 passing cases and26 existing guarded cases, TypeScript and affected provenance/JVM checks pass. Exact independent review and guarded local promotion bind the candidate. No override, suppressed error or runtime budget change |
