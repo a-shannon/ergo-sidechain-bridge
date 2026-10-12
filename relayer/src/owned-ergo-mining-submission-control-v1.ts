@@ -2,6 +2,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import { types } from 'node:util';
 
 import {
+  createOwnedErgoMiningTransactionPermitControlV1,
+  type OwnedErgoMiningTransactionPermitControlV1,
+} from './owned-ergo-mining-transaction-permit-control-v1.js';
+
+import {
   parseOwnedErgoMiningSubmissionPauseReceiptV1,
   type OwnedErgoMiningSubmissionPauseReceiptV1,
 } from './owned-ergo-mining-submission-v1.js';
@@ -15,12 +20,15 @@ export interface OwnedErgoMiningSubmissionControlV1 {
   readonly nonceSha256Hex: string;
   readonly maximumBlockHeight: number | null;
   readonly pause: () => Promise<OwnedErgoMiningSubmissionPauseReceiptV1>;
+  readonly transactionPermits?: OwnedErgoMiningTransactionPermitControlV1;
 }
 
 /** One-use transport; the caller must separately establish the owned target's admission. */
 export function createOwnedErgoMiningSubmissionControlV1(
   maximumBlockHeight: number | null = null,
+  transactionPermitsEnabled = false,
 ): OwnedErgoMiningSubmissionControlV1 {
+  if (typeof transactionPermitsEnabled !== 'boolean') fail();
   if (maximumBlockHeight !== null && (typeof maximumBlockHeight !== 'number'
     || !Number.isInteger(maximumBlockHeight) || Object.is(maximumBlockHeight, -0)
     || maximumBlockHeight < 0 || maximumBlockHeight > 2_147_483_647)) fail();
@@ -80,7 +88,11 @@ export function createOwnedErgoMiningSubmissionControlV1(
         try { reader?.releaseLock(); } catch { /* No response or reader error is disclosed. */ }
       }
     };
-    return Object.freeze({ nonceSha256Hex, maximumBlockHeight, pause });
+    return Object.freeze({ nonceSha256Hex, maximumBlockHeight, pause,
+      ...(transactionPermitsEnabled ? {
+        transactionPermits: createOwnedErgoMiningTransactionPermitControlV1(nonce, maximumBlockHeight, () => claimed),
+      } : {}),
+    });
   } catch {
     throw new Error(ERROR_MESSAGE);
   }

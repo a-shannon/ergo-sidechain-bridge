@@ -37,6 +37,9 @@ import {
 import type {
   OwnedErgoMiningSubmissionPauseReceiptV1,
 } from './owned-ergo-mining-submission-v1.js';
+import { assertOwnedErgoMiningTransactionPermitControlV1,
+  type OwnedErgoMiningTransactionPermitControlV1 }
+  from './owned-ergo-mining-transaction-permit-control-v1.js';
 import {
   buildErgoExtensionMembershipProof,
 } from './ergo-settlement-core/ergo-extension-membership.js';
@@ -149,6 +152,12 @@ const OWNED_MINING_SUBMISSION_PAUSE_TARGETS = new WeakMap<
 const OWNED_MINING_SUBMISSION_PAUSE_OBSERVATIONS = new WeakMap<
   object, Readonly<{ target: object; revalidate: () => Promise<void> }>
 >();
+const OWNED_MINING_TRANSACTION_PERMIT_TARGETS = new WeakMap<object, Readonly<{
+  assertActive: () => void;
+  hold: () => Promise<Readonly<TargetSnapshot>>;
+  arm: (transactionIdHex: string) => Promise<void>;
+  complete: (transactionIdHex: string, completionDeadline: number) => Promise<void>;
+}>>();
 const OWNED_CHECKPOINT_TARGET_BINDINGS = new WeakMap<object, OwnedTargetBinding>();
 const ACTIVE_OWNED_CHECKPOINT_TARGETS = new WeakSet<object>();
 const OWNED_CHECKPOINT_BOUND_EXECUTION_TARGET_BINDINGS =
@@ -951,6 +960,47 @@ export async function revalidateSubstrateFederatedIsolatedDevnetMiningPauseObser
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
 }
 
+/** Hold the original miner before capturing a native deposit's height context. */
+export async function holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+): Promise<Readonly<TargetSnapshot>> {
+  const binding = requireOwnedMiningTransactionPermitTarget(target);
+  const snapshot = await binding.hold();
+  binding.assertActive();
+  return snapshot;
+}
+
+/** Called only inside the already consumed checked-submission callback. */
+export async function armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  transactionIdHex: string,
+): Promise<void> {
+  const binding = requireOwnedMiningTransactionPermitTarget(target);
+  await binding.arm(transactionIdHex);
+  binding.assertActive();
+}
+
+/** The caller supplies its original canonical-confirmation deadline. */
+export async function completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  transactionIdHex: string,
+  completionDeadline: number,
+): Promise<void> {
+  const binding = requireOwnedMiningTransactionPermitTarget(target);
+  await binding.complete(transactionIdHex, completionDeadline);
+  binding.assertActive();
+}
+
+function requireOwnedMiningTransactionPermitTarget(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+) {
+  assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+  const binding = OWNED_MINING_TRANSACTION_PERMIT_TARGETS.get(target);
+  if (binding === undefined) throw new Error('isolated Ergo transaction permit is not bound to this active target');
+  binding.assertActive();
+  return binding;
+}
+
 export function assertSubstrateFederatedIsolatedDevnetOwnedCheckpointBoundExecutionTargetV1(
   value: Readonly<
     SubstrateFederatedIsolatedDevnetCheckpointBoundExecutionTargetV1
@@ -1666,6 +1716,10 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               'primary',
               'mining',
               ephemeralMiningMnemonic,
+              INITIAL_EXTENSION_FIELDS,
+              undefined,
+              undefined,
+              true,
             );
           },
         );
@@ -1769,6 +1823,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           assertActiveProcesses,
         }));
         bindOwnedMiningSubmissionPause(target, primary, witness, assertActiveProcesses);
+        bindOwnedMiningTransactionPermit(target, primary, witness, assertActiveProcesses);
         state = 'action';
         ACTIVE_OWNED_EXECUTION_TARGETS.add(target);
         let value: T;
@@ -2971,6 +3026,8 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
               ephemeralMiningMnemonic,
               `${CHECKPOINT_EXTENSION_KEY_HEX}:${continuation.extensionValueHex}`,
               expectedTransactionIdHex,
+              undefined,
+              true,
             );
           },
         );
@@ -3263,6 +3320,7 @@ export function createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2(
           assertActiveProcesses,
         }));
         bindOwnedMiningSubmissionPause(target, primary, witness, assertActiveProcesses);
+        bindOwnedMiningTransactionPermit(target, primary, witness, assertActiveProcesses);
         OWNED_TRACKER_CONFIRMATION_TARGET_PARENTS.set(target, Object.freeze({
           trackerTransportProcessBindingDigestHex: continuation.trackerTransportProcessBindingDigestHex,
           trackerTransportExecutionTargetIdentityDigestHex: continuation.trackerTransportExecutionTargetIdentityDigestHex,
@@ -3788,12 +3846,16 @@ function spawnOwnedNode(
   extensionFields: string = INITIAL_EXTENSION_FIELDS,
   requiredMiningTransactionIdHex?: string,
   maximumBlockHeight?: number,
+  transactionPermitsEnabled = false,
 ): OwnedNode {
   const miningRuntime = 'primaryMiningConfigPath' in runtime ? runtime : undefined;
   if (mode === 'mining' && miningRuntime === undefined) {
     throw new Error('copied Ergo runtime does not contain mining configurations');
   }
   const requiresMiningSecret = role === 'primary' && mode === 'mining';
+  if (typeof transactionPermitsEnabled !== 'boolean' || (transactionPermitsEnabled && !requiresMiningSecret)) {
+    throw new Error('isolated Ergo transaction permits do not match the process role');
+  }
   if (
     requiresMiningSecret
       ? !isMnemonicPhrase(ephemeralMiningMnemonic)
@@ -3844,7 +3906,7 @@ function spawnOwnedNode(
     configPath,
   ];
   const miningSubmissionControl = requiresMiningSecret
-    ? createOwnedErgoMiningSubmissionControlV1(maximumBlockHeight ?? null) : undefined;
+    ? createOwnedErgoMiningSubmissionControlV1(maximumBlockHeight ?? null, transactionPermitsEnabled) : undefined;
   if (maximumBlockHeight !== undefined && !requiresMiningSecret) {
     throw new Error('isolated Ergo mining block ceiling does not match the process role');
   }
@@ -3856,6 +3918,7 @@ function spawnOwnedNode(
   if (miningSubmissionControl !== undefined) {
     environment.ERGO_SIDECHAIN_OWNED_MINING_NONCE_SHA256 =
       miningSubmissionControl.nonceSha256Hex;
+    if (transactionPermitsEnabled) environment.ERGO_SIDECHAIN_OWNED_TRANSACTION_PERMIT = '1';
     if (miningSubmissionControl.maximumBlockHeight !== null) {
       environment.ERGO_SIDECHAIN_MAXIMUM_MINING_BLOCK_HEIGHT =
         String(miningSubmissionControl.maximumBlockHeight);
@@ -4042,6 +4105,163 @@ function bindOwnedMiningSubmissionPause(
       Object.freeze({ target, revalidate: validateWatermark }));
     return observation;
   });
+}
+
+/** Exact target/child binding; none of these methods creates submission authority. */
+function bindOwnedMiningTransactionPermit(
+  target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
+  primary: Readonly<OwnedNode>,
+  witness: Readonly<OwnedNode>,
+  assertActiveProcesses: () => void,
+): void {
+  const control = OWNED_MINING_SUBMISSION_CONTROLS.get(primary.child)?.transactionPermits;
+  if (control === undefined || primary.role !== 'primary' || primary.mode !== 'mining') {
+    throw new Error('isolated Ergo transaction permit control is absent');
+  }
+  let phase: 'fresh' | 'holding' | 'held' | 'arming' | 'armed' | 'completing' | 'failed' = 'fresh';
+  let currentArm: Awaited<ReturnType<OwnedErgoMiningTransactionPermitControlV1['arm']>> | undefined;
+  let deadline = Infinity;
+  let lastClock = -Infinity;
+  const assertOriginalTarget = (): void => {
+    if (phase === 'failed') throw new Error('isolated Ergo transaction permit target failed');
+    assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
+    assertActiveProcesses();
+    assertLive(primary);
+    assertLive(witness);
+    assertOwnedErgoMiningTransactionPermitControlV1(control);
+    const now = performance.now();
+    if (!Number.isFinite(now) || now < lastClock || now >= deadline) {
+      throw new Error('isolated Ergo transaction permit exceeded its original deadline');
+    }
+    lastClock = now;
+  };
+  const requestDuration = (): number => {
+    assertOriginalTarget();
+    const remaining = Math.floor(Math.min(REQUEST_TIMEOUT_MS, deadline - lastClock));
+    if (remaining < 1) throw new Error('isolated Ergo transaction permit has no request budget');
+    return remaining;
+  };
+  const pausePoll = async (milliseconds: number): Promise<void> => {
+    const duration = Math.min(milliseconds, requestDuration());
+    await delay(duration);
+    assertOriginalTarget();
+  };
+  const readExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
+    assertOriginalTarget();
+    const [primarySnapshot, witnessSnapshot] = await Promise.all([
+      readTargetSnapshot(primary, false, deadline, assertOriginalTarget),
+      readTargetSnapshot(witness, false, deadline, assertOriginalTarget),
+    ]);
+    assertOriginalTarget();
+    for (const snapshot of [primarySnapshot, witnessSnapshot]) {
+      if (snapshot.fullHeight > watermark.height || snapshot.indexedHeight > snapshot.fullHeight
+        || (snapshot.fullHeight === watermark.height && snapshot.headerIdHex !== watermark.headerId)) {
+        throw new Error('isolated Ergo transaction permit indexed tip contradicts its held parent');
+      }
+    }
+    if ([primarySnapshot, witnessSnapshot].some(snapshot =>
+      snapshot.fullHeight < watermark.height || snapshot.indexedHeight < watermark.height)) return undefined;
+    const path = `/blocks/at/${watermark.height}`;
+    const [primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark] = await Promise.all([
+      getJson(SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN, path, deadline, assertOriginalTarget),
+      getJson(SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN, path, deadline, assertOriginalTarget),
+    ]);
+    assertOriginalTarget();
+    assertSubstrateFederatedIsolatedDevnetTransactionPermitIndexedSnapshotV1({
+      watermark, primarySnapshot, witnessSnapshot, primaryHeaderIdsAtWatermark, witnessHeaderIdsAtWatermark,
+    });
+    return primarySnapshot;
+  };
+  const stableExact = async (watermark: Readonly<{ headerId: string; height: number }>) => {
+    for (;;) {
+      const snapshot = await readExact(watermark);
+      assertOriginalTarget();
+      if (snapshot === undefined) { await pausePoll(250); assertOriginalTarget(); continue; }
+      await pausePoll(STABILITY_DELAY_MS);
+      assertOriginalTarget();
+      const after = await readExact(watermark);
+      assertOriginalTarget();
+      if (after === undefined) throw new Error('isolated Ergo transaction permit indexed watermark regressed');
+      assertExactSnapshot(after, snapshot, 'primary');
+      return snapshot;
+    }
+  };
+  OWNED_MINING_TRANSACTION_PERMIT_TARGETS.set(target, Object.freeze({
+    assertActive: assertOriginalTarget,
+    hold: async () => {
+      try {
+        assertOriginalTarget();
+        if (phase !== 'fresh') throw new Error('isolated Ergo transaction permit Hold was consumed');
+        phase = 'holding';
+        deadline = performance.now() + MINING_TIMEOUT_MS;
+        assertOriginalTarget();
+        const receipt = await control.hold();
+        assertOriginalTarget();
+        const snapshot = await stableExact(receipt.parent);
+        assertOriginalTarget();
+        phase = 'held';
+        deadline = Infinity;
+        return snapshot;
+      } catch (cause) { phase = 'failed'; throw cause; }
+    },
+    arm: async (transactionIdHex: string) => {
+      try {
+        assertOriginalTarget();
+        if (phase !== 'held') throw new Error('isolated Ergo transaction permit is not held for submission');
+        phase = 'arming';
+        deadline = performance.now() + REQUEST_TIMEOUT_MS;
+        assertOriginalTarget();
+        currentArm = await control.arm(transactionIdHex);
+        assertOriginalTarget();
+        phase = 'armed';
+        deadline = Infinity;
+      } catch (cause) { phase = 'failed'; throw cause; }
+    },
+    complete: async (transactionIdHex: string, completionDeadline: number) => {
+      try {
+        assertOriginalTarget();
+        if (phase !== 'armed' || currentArm === undefined || currentArm.transactionId !== transactionIdHex
+          || !Number.isFinite(completionDeadline)) throw new Error('isolated Ergo transaction permit completion differs from its armed submission');
+        phase = 'completing';
+        deadline = completionDeadline;
+        assertOriginalTarget();
+        const arm = currentArm;
+        for (;;) {
+          const status = await control.status(arm, requestDuration());
+          assertOriginalTarget();
+          if (!status.completed) { await pausePoll(250); assertOriginalTarget(); continue; }
+          if (status.finalWatermark === null) throw new Error('isolated Ergo transaction permit completion has no watermark');
+          const snapshot = await stableExact(status.finalWatermark);
+          assertOriginalTarget();
+          const fresh = await control.status(arm, requestDuration());
+          assertOriginalTarget();
+          if (!fresh.completed || fresh.finalWatermark === null
+            || fresh.finalWatermark.headerId !== status.finalWatermark.headerId
+            || fresh.finalWatermark.height !== status.finalWatermark.height) {
+            throw new Error('isolated Ergo transaction permit completion changed after indexing');
+          }
+          const after = await readExact(fresh.finalWatermark);
+          assertOriginalTarget();
+          if (after === undefined) throw new Error('isolated Ergo transaction permit completion index regressed');
+          assertExactSnapshot(after, snapshot, 'primary');
+          phase = 'held';
+          deadline = Infinity;
+          return;
+        }
+      } catch (cause) { phase = 'failed'; throw cause; }
+    },
+  }));
+}
+
+export function assertSubstrateFederatedIsolatedDevnetTransactionPermitIndexedSnapshotV1(
+  input: Parameters<typeof assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1>[0],
+): void {
+  assertSubstrateFederatedIsolatedDevnetPausedMiningIndexedSnapshotV1(input);
+  for (const snapshot of [input.primarySnapshot, input.witnessSnapshot]) {
+    if (snapshot.fullHeight !== input.watermark!.height || snapshot.headerIdHex !== input.watermark!.headerId) {
+      throw new Error('isolated Ergo transaction permit nodes are not exactly at their held watermark');
+    }
+  }
 }
 
 export function isSubstrateFederatedIsolatedDevnetSetupSnapshotReadyV1(
@@ -4375,17 +4595,20 @@ async function assertStableExactSnapshot(
 async function readTargetSnapshot(
   node: Readonly<OwnedNode>,
   settleReads = false,
+  deadline?: number,
+  assertActive: () => void = () => {},
 ): Promise<Readonly<TargetSnapshot>> {
   const origin = node.role === 'primary'
     ? SUBSTRATE_FEDERATED_FIXED_PRIMARY_NODE_ORIGIN
     : SUBSTRATE_FEDERATED_FIXED_WITNESS_NODE_ORIGIN;
   const reads = [
-    getJson(origin, '/info'),
-    getJson(origin, '/blocks/lastHeaders/1'),
-    getJson(origin, '/blockchain/indexedHeight'),
+    getJson(origin, '/info', deadline, assertActive),
+    getJson(origin, '/blocks/lastHeaders/1', deadline, assertActive),
+    getJson(origin, '/blockchain/indexedHeight', deadline, assertActive),
   ];
   const [infoValue, headersValue, indexValue] = settleReads
     ? await settleCopiedErgoReads(reads) : await Promise.all(reads);
+  assertActive();
   const info = plainRecord(infoValue, `${node.role} node info`);
   const networkValue = info.network ?? info.networkType;
   if (typeof networkValue !== 'string' || networkValue.trim().toLowerCase() !== 'devnet') {
@@ -4451,15 +4674,22 @@ async function retryNode<T>(
   );
 }
 
-async function getJson(origin: string, path: string): Promise<unknown> {
+async function getJson(origin: string, path: string, deadline?: number,
+  assertActive: () => void = () => {}): Promise<unknown> {
+  assertActive();
+  const duration = deadline === undefined ? REQUEST_TIMEOUT_MS
+    : Math.floor(Math.min(REQUEST_TIMEOUT_MS, deadline - performance.now()));
+  if (!Number.isFinite(duration) || duration < 1) throw new Error('isolated Ergo read has no original request budget');
   const response = await fetch(`${origin}${path}`, {
     method: 'GET',
     headers: { 'Accept-Encoding': 'identity', Accept: 'application/json' },
     redirect: 'error',
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(duration),
   });
+  assertActive();
   if (!response.ok) throw new Error('isolated Ergo read returned non-success');
   const text = await response.text();
+  assertActive();
   if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
     throw new Error('isolated Ergo read exceeded the response limit');
   }

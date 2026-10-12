@@ -44,6 +44,7 @@ import {
 } from './substrate-federated-local-devnet-peg-in-committed-vault-journal-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1,
   type SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1,
   type SubstrateFederatedIsolatedDevnetTrackerTransportTargetV2,
   type SubstrateFederatedIsolatedDevnetOwnedExecutionTargetBindingV1,
@@ -52,6 +53,7 @@ import {
   claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1,
   requireSubstrateFederatedIsolatedDevnetTrackerFeeFundingFinalizationV1,
   claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1,
+  assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1,
   requireSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingFinalizationV1,
   type SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1,
 } from './substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js';
@@ -192,22 +194,26 @@ export function finalizeSubstrateFederatedIsolatedDevnetWithdrawalV2(
 export async function submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
+  transactionPermitsEnabled = false,
 ): Promise<AcceptedOrAmbiguousSubmission> {
-  return submitFeeFunding(target, attempt, 'tracker');
+  return submitFeeFunding(target, attempt, 'tracker', transactionPermitsEnabled);
 }
 
 export async function submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
+  transactionPermitsEnabled = false,
 ): Promise<AcceptedOrAmbiguousSubmission> {
-  return submitFeeFunding(target, attempt, 'withdrawal');
+  return submitFeeFunding(target, attempt, 'withdrawal', transactionPermitsEnabled);
 }
 
 async function submitFeeFunding(
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   attempt: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingAttemptV1>,
   purpose: 'tracker' | 'withdrawal',
+  transactionPermitsEnabled = false,
 ): Promise<AcceptedOrAmbiguousSubmission> {
+  if (typeof transactionPermitsEnabled !== 'boolean') throw new Error('fee funding transaction permit selection is invalid');
   const { check, binding, authorization } = purpose === 'tracker'
     ? await claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1(attempt, target)
     : await claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1(attempt, target);
@@ -216,9 +222,17 @@ async function submitFeeFunding(
     target.primaryNodeOrigin, check.signedCandidate.signedTransactionDigestHex,
     handle.checkResponseDigestHex);
   const submission = await consumeLocalWasmCheckedSubmissionHandleV1(handle, check.signedCandidate,
-    async signed => await submitExactTransaction(signed, attempt.expectedTxId,
-      attempt.durableAttemptDigestHex, authorization.authorizationDigestHex,
-      handle, binding, purpose === 'tracker' ? 3 : 5));
+    async signed => {
+      if (transactionPermitsEnabled) {
+        assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(attempt, target);
+        await armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, attempt.expectedTxId);
+        assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(attempt, target);
+        assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(handle, binding);
+      }
+      return await submitExactTransaction(signed, attempt.expectedTxId,
+        attempt.durableAttemptDigestHex, authorization.authorizationDigestHex,
+        handle, binding, purpose === 'tracker' ? 3 : 5);
+    });
   (purpose === 'tracker' ? FEE_FUNDING_SUBMISSIONS : WITHDRAWAL_FEE_FUNDING_SUBMISSIONS).set(submission, attempt);
   return submission;
 }
@@ -403,7 +417,9 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubm
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1>,
+  transactionPermitsEnabled = false,
 ): Readonly<PegInSubmitter> {
+  if (typeof transactionPermitsEnabled !== 'boolean') throw new Error('source-lock transaction permit selection is invalid');
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(
@@ -472,6 +488,12 @@ export function createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubm
         exactSignedCandidate,
         async signedTransaction => {
           assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(authorizer, target);
+          if (transactionPermitsEnabled) {
+            await armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, admission.expectedTxId);
+            assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizerV1(authorizer, target);
+            assertSubstrateFederatedIsolatedDevnetPegInSourceLockBroadcastAuthorizationArtifactV1(authorizer, attempt.authorization);
+            assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(exactHandle, binding);
+          }
           return await submitExactTransaction(
             signedTransaction, admission.expectedTxId, attempt.durableAttemptDigestHex,
             attempt.authorization.authorizationDigestHex, exactHandle, binding,
@@ -487,7 +509,9 @@ export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultChecked
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>,
   authorizer:
     Readonly<SubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1>,
+  transactionPermitsEnabled = false,
 ): Readonly<PegInSubmitter> {
+  if (typeof transactionPermitsEnabled !== 'boolean') throw new Error('committed-vault transaction permit selection is invalid');
   const binding =
     assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1(target);
   assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(
@@ -568,6 +592,12 @@ export function createSubstrateFederatedIsolatedDevnetPegInCommittedVaultChecked
         exactSignedCandidate,
         async signedTransaction => {
           assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(authorizer, target);
+          if (transactionPermitsEnabled) {
+            await armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, admission.expectedTxId);
+            assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizerV1(authorizer, target);
+            assertSubstrateFederatedIsolatedDevnetPegInCommittedVaultBroadcastAuthorizationArtifactV1(authorizer, attempt.authorization);
+            assertLocalWasmCheckedSubmissionHandleV1ExecutionBinding(exactHandle, binding);
+          }
           return await submitExactTransaction(
             signedTransaction, admission.expectedTxId, attempt.durableAttemptDigestHex,
             attempt.authorization.authorizationDigestHex, exactHandle, binding,

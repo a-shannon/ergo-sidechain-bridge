@@ -16,12 +16,12 @@ $ExpectedNodeCommit = '2cdbb8cf09d7ccbc060e1022e3c15bcf6a9991b1'
 $ExpectedSpecHash = @(
     'bb254fc9ca85dee6c46401d87cd0d1c01f95a78a3f0d07bfd0e7f49a2fc7b49f',
     '21ad223ae443505dc04c7b55f5a9baf9a687c482e7e7e6fb7235dca2fb7d70a4')
-$ExpectedLockHash = '1573a69aa3c5cafa302621efcc65032b653e9cf1548a32c69e2dd5011ca8b56d'
-$ExpectedPatchHash = 'cd282677b05e1fca21d9c94e6338566ce4448ce503f7055de8667aaa86378fdf'
+$ExpectedLockHash = '82e96dca999244f145a67381e0037770dfd93ad61ecb29d3063a6e5ea426a8b6'
+$ExpectedPatchHash = '08fb00b4c94f7db54228b6312bea58af430f13825e2b231821da3ef26e4796c3'
 $ExpectedBoundedProcessLibraryHash = @(
-    '391aa32f06203512517ca32a9b062247f224cfae29d542b01fb355633849c75a',
-    'eec0c0e7a61f5489f957c3ea0d93041cd518cc2a09157122d8648476f67e870c',
-    'ea07ff1c95e54e60cfd4e621dce04de6074c46e9744dace674c1dbef4190276a')
+    '13ba7a4c3fa11b62d7353af5babaee01979362984740a660026dc3da087a4911',
+    '1f7d0b56931de10d69deb533c92a165a103a00aa376478eab6d7f28721b2ed47',
+    '34a0186efed2a8f4f1766b4d8d73a1a8defa34b95f8897373d38dd6832e9f577')
 $ExpectedBoundedProcessImplementationHash = @(
     '6a3153c6a69c290ced5f7fd7eaebbb975d69aa1010e9c6bd98ca31e71041c208',
     'b84c68bb7ddd9526832c92a76c149f10d024be477e73127399439ad46d85da02',
@@ -35,29 +35,29 @@ $MaxOwnerOutputBytes = $MaxOutputBytes + 64KB
 # verified LF reconstruction. No normalization is performed during admission.
 $PatchFiles = [ordered]@{
     'src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala' = @(' M',
-        'aa69b780cebceb3e07b7f3682ca4af52aa8de7a2ecfb345939173c8d73ea26aa',
-        'fd3593161754ce29bd93b4ec6d28ce2ce50bcc508b718787af716be60e70a17c')
+        '3174bd8ab627c71130bf08c3d7b240c124a7aa75b63238d3a0b91b9cae5eff01',
+        '58c20d56e196efabc2252659996dad8c0037cbab6ad1523b64c601610ef73e75')
     'src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala' = @(' M',
-        'cac4a5280fcd45b85a2007b86d44cbb7a4316e312246f69599f2ce140b06b632',
-        '31eef3c1990b22ca7fa667503a73079e6d2d615ef688524bdbdca221b241405b')
+        '254af1743ea8d580e052f156b3c3c6c45788256dbac3215f8d7f50a90ca0a3f0',
+        'cbe5dadb6456274bdf707a472d8cf8f863f40cac1dee177c2089c16765362eda')
     'src/main/scala/org/ergoplatform/mining/ErgoMiner.scala' = @(' M',
-        'b12b5909f05dae3618efaec2e1ae4a123e4decbba029822c238359f56acf062e',
-        '5f84314936680588497778b534be3f98724a51eee517f815980022452c4ca3e6')
+        '4d4f822ab1afef897a8810537f5ccb4e7d78c684e15926dd61d21ec7630ce94c',
+        'dac558df8c32681403ed8a3443c4dd3919da0a92b7ac3e6ee63106c2a0d28161')
     'src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala' = @('??',
-        '0079375a40231ac7f690d153ea37a112a7ba06d7af5b4ab3dd0a472a723168ae',
-        '06021e33ecf612a194d9ddfa89b22eaeace5eb0d1ae7c6176af46170573a59e4')
+        '6532b75cc47c0c4e518d5e4a19bf710b0ef0de70d1fcc2b14f256f432fd48a95',
+        '9bc046c607d5084c216bc27fe446ed157ed0cf2eff0a4a033181c07888c571ba')
     'src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala' = @(' M',
-        'fedcae828c82a19778ec4301781f449c12d5d1845b6c56c55c843fc3b9c9d05f',
-        'fc4b02b85cb98bce78ec7aacfce4781b84fced8792d33cab5e9f17c7d82ca8b4')
+        '8729a4e0419a5ca203a19532357e3c3d3f08948ea498e7be60f998e52944773e',
+        'c9e20bbf1e3e85cb6121b4d14201ae7211de9425f6021dd174ffb0401f430ef7')
     'src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala' = @(' M',
-        'fe66e8a313befaa198d4fea966b19b91067d5b756eaad98afaba151f8d0bb463',
-        'dbfd445a0655f8b9892962717aae674bcbbdfd09a1e2c299401ba965c350a4d8')
+        '2cf2358e398a18c909d7b537ec68f4b3277b649ca0ff59ea252eb1b4b563b3dd',
+        '059cc455d778b1f3ecf4a641a9e723d405deace67f4e7c72e3c66a1323ed4184')
     'src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala' = @('??',
-        '84b11846820c67f05435525bad4992ebcea512c257f6efc9eb5e43c645a4dde4',
-        'a97593d3918a752b59a1b6b7296324325da8706639ce024cb88fd5e7d6d38f8a')
+        '661b60135bc1587d583c41a9028b25f9527ae9f77fd0d59e37eac29e2be560b9',
+        '94d85146b4f1c4984106c71315835d071b0aa0f41514c22c2f5ede9d153119d9')
     'src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala' = @('??',
-        '808b58e4ed52aed4d826c49c043cfa814c4005a2f4f83c778a4de0de0c5bb7ec',
-        'a9898bf22ab5cbc059614dddd99450d20c3ef8e56d7da04f03c976432ea18a70')
+        'e7218a6510f407cb3ffbb161072e7d400ea98dd28113314b3f913225902b2640',
+        '145b4112c79c53ae8ea6e0d5160264e6acfd11b32631ee9992996fba4c4d299a')
 }
 
 function Resolve-RealPath([string] $Path, [bool] $Directory) {

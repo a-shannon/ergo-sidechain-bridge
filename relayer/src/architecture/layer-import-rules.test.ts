@@ -46,6 +46,45 @@ function staticAppFixture(file: string, source: string): Record<string, string> 
 }
 
 describe('layer import rules', () => {
+  describe.each([
+    [FEDERATED_GENESIS_TARGET_ROOT, 'substrate-federated-isolated-devnet-ergo-node-process-v1',
+      'holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1'],
+    [GENESIS_SETUP_ROOT, 'substrate-federated-isolated-devnet-ergo-node-process-v1',
+      'completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1'],
+    [GENESIS_SETUP_ROOT, 'substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1',
+      'assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1'],
+  ])('transaction permit binding %s → %s#%s', (owner, module, binding) => {
+    const specifier = `../../${module}.js`;
+    const declaration = `import { ${binding} } from '${specifier}';`;
+    it('allows only the reviewed direct call at its intended root', () => {
+      expect(inspect(staticAppFixture(owner, `${declaration} await ${binding}(target);`))).toEqual([]);
+    });
+    it.each([FEDERATED_GENESIS_TARGET_ROOT, GENESIS_SETUP_ROOT, TRACKER_V2_CAMPAIGN_ROOT]
+      .filter(file => file !== owner))('refuses the different reviewed root %s', file => {
+      const messages = inspect(staticAppFixture(file, `${declaration} ${binding}(target);`))
+        .map(item => item.message);
+      const expected = module === 'substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1'
+        ? `apps must not import an unclassified legacy module: ${module}.ts`
+        : `restricted capability import binding is not allowlisted: ${specifier}#${binding}`;
+      expect(messages).toContain(expected);
+    });
+    it.each([
+      ['alias', `import { ${binding} as run } from '${specifier}'; run(target);`,
+        'restricted capability import binding must not be aliased'],
+      ['namespace', `import * as permit from '${specifier}'; permit.${binding}(target);`,
+        'restricted capability import must use reviewed named bindings'],
+      ['assignment', `${declaration} const escaped = ${binding};`,
+        'restricted capability binding must not escape its reviewed call'],
+      ['argument', `${declaration} capture(${binding});`,
+        'restricted capability binding must not escape its reviewed call'],
+      ['re-export', `${declaration} export { ${binding} };`,
+        'restricted capability binding must not be re-exported'],
+    ])('refuses %s at the otherwise allowed owner', (_fault, source, expected) => {
+      expect(inspect(staticAppFixture(owner, source)).map(item => item.message)
+        .some(message => message.includes(expected))).toBe(true);
+    });
+  });
+
   it.each([
     'pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1',
     'revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1',

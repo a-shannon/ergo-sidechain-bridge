@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Downstream deposit, burn, checkpoint, tracker and payout are component doubles, not crypto evidence.
 const mocked = vi.hoisted(() => ({
   frontier: vi.fn(), ergoBuild: vi.fn(), process: vi.fn(), owned: vi.fn(), readOnlyOwned: vi.fn(),
-  pause: vi.fn(), pauseRevalidate: vi.fn(),
+  pause: vi.fn(), pauseRevalidate: vi.fn(), hold: vi.fn(),
   discover: vi.fn(), history: vi.fn(), compile: vi.fn(), materialize: vi.fn(),
   pin: vi.fn(), nodes: vi.fn(), environment: vi.fn(),
   check: vi.fn(), batch: vi.fn(), execute: vi.fn(), source: vi.fn(), confirmation: vi.fn(),
@@ -37,6 +37,7 @@ vi.mock('../../substrate-federated-isolated-devnet-ergo-node-process-v1.js', asy
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: mocked.owned,
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1: mocked.readOnlyOwned,
   pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1: mocked.pause,
+  holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1: mocked.hold,
   revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1: mocked.pauseRevalidate,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1: mocked.projectStartupPhase,
 }));
@@ -365,11 +366,11 @@ beforeEach(() => {
   frontierActive = false; batchActive = true;
   frontierEndpoints = Object.freeze({ primaryRpcUrl: PRIMARY, witnessRpcUrl: WITNESS });
   funding = Object.freeze({ observation: Object.freeze({
-    target: Object.freeze({ tipHeight: 137, genesisHeaderIdHex: '91'.repeat(32) }),
+    target: Object.freeze({ tipHeight: 137, tipHeaderIdHex: '9a'.repeat(32), genesisHeaderIdHex: '91'.repeat(32) }),
     genesisInputs: Object.freeze({ tracker: Object.freeze({ component: 'fresh reward funding double', boxId: 'a1'.repeat(32) }) }),
   }) });
   continuationFunding = Object.freeze({ observation: Object.freeze({
-    target: Object.freeze({ tipHeight: 166, genesisHeaderIdHex: '91'.repeat(32) }),
+    target: Object.freeze({ tipHeight: 166, tipHeaderIdHex: '9b'.repeat(32), genesisHeaderIdHex: '91'.repeat(32) }),
     genesisInputs: Object.freeze({ tracker: Object.freeze({ component: 'continuation reward funding double', boxId: 'b1'.repeat(32) }) }),
   }) });
   packet = Object.freeze({ component: 'native peg-in packet double',
@@ -586,6 +587,15 @@ beforeEach(() => {
     }
     order.push('discover');
     return discovery;
+  });
+  mocked.hold.mockImplementation(async value => {
+    assertCustodyActive();
+    const second = value === phaseTargets.confirmation;
+    if (second) { expect(phase).toBe('confirmation'); expect(mocked.continuationPacket).not.toHaveBeenCalled(); }
+    else { expect(value).toBe(target); expect(active).toBe(true); expect(mocked.packet).not.toHaveBeenCalled(); }
+    const observation = (second ? continuationFunding : funding).observation;
+    return Object.freeze({ network: 'devnet', fullHeight: observation.target.tipHeight,
+      indexedHeight: observation.target.tipHeight, headerIdHex: observation.target.tipHeaderIdHex });
   });
   mocked.history.mockImplementation(async value => { order.push('history'); expect(value).toBe(discovery.observation); return history; });
   mocked.compile.mockImplementation(async value => {
@@ -936,6 +946,7 @@ function configureNativeReturnMocks() {
       const resultName = `${second ? 'second' : ''}${second ? name[0]!.toUpperCase() + name.slice(1) : name}Fee`;
       order.push(resultName); expect(value.target).toBe(second ? phaseTargets.confirmation : target);
       expect(value.checked).toBe(returnValues[second ? continuationCheckName : checkName]);
+      expect(value.transactionPermitsEnabled).toBe(true);
       expect(value.state).toBe(journalState); assertCustodyActive();
       if (!second) expect(active).toBe(true);
       retainAttempt(`${resultName}-attempt`);
@@ -1936,6 +1947,7 @@ describe('fresh FED target composition', () => {
       'recovery-capture', 'nodes-stop', 'stop']);
     expect(nativeAction).toHaveBeenCalledTimes(3);
     expect(mocked.pause.mock.calls).toEqual([[target], [phaseTargets.confirmation]]);
+    expect(mocked.hold.mock.calls).toEqual([[target], [phaseTargets.confirmation]]);
     expect(mocked.pauseRevalidate.mock.calls).toEqual([[target, returnValues.pause],
       [phaseTargets.confirmation, returnValues.secondPause]]);
     expect(mocked.wait.mock.calls.filter(args => args[3].includes('checkpoint-admission')).map(args => [args[1], args[3]]))
@@ -2275,6 +2287,34 @@ describe('fresh FED target composition', () => {
     expect(readdirSync(builtTargetDirectory).filter(name => name.startsWith('issuance-journal-'))).toEqual([]);
     expect(order.slice(-2)).toEqual(['nodes-stop', 'stop']); expect(stop).toHaveBeenCalledOnce(); assertDisposed();
   });
+
+  it.each([false, true])('contains native deposit Hold failure before fresh funding (continuation=%s)', async second => {
+    const original = mocked.hold.getMockImplementation()!;
+    mocked.hold.mockImplementation(async value => {
+      if ((value === phaseTargets.confirmation) === second) throw new Error('synthetic held miner refusal');
+      return original(value);
+    });
+    await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow('synthetic held miner refusal');
+    expect(mocked.packet).toHaveBeenCalledTimes(second ? 1 : 0);
+    expect(mocked.continuationPacket).not.toHaveBeenCalled();
+    expect(order).not.toContain(second ? 'continuationFunding' : 'funding');
+    assertDisposed();
+  });
+
+  it.each([false, true].flatMap(second => ['height', 'header'].map(field => ({ second, field }))))(
+    'rejects a $field difference from the held deposit watermark (continuation=$second)', async ({ second, field }) => {
+      const original = mocked.hold.getMockImplementation()!;
+      mocked.hold.mockImplementation(async value => {
+        const snapshot = await original(value);
+        if ((value === phaseTargets.confirmation) !== second) return snapshot;
+        return { ...snapshot, ...(field === 'height' ? { fullHeight: snapshot.fullHeight + 1 }
+          : { headerIdHex: 'aa'.repeat(32) }) };
+      });
+      await expect(runSubstrateFederatedGenesisTargetRootV1(input)).rejects.toThrow(/funding does not follow/);
+      expect(mocked.packet).toHaveBeenCalledTimes(second ? 1 : 0);
+      expect(mocked.continuationPacket).not.toHaveBeenCalled();
+      assertDisposed();
+    });
 
   it.each(['provenance', 'genesis', 'height'] as const)('rejects second funding %s before constructing a packet', async fault => {
     if (fault === 'provenance') mocked.fundingOwned.mockImplementationOnce(() => { throw new Error('funding provenance lost'); });

@@ -45,6 +45,23 @@ rejection or conflicting application fails closed. Actor replacement retains
 the control; there is no resume operation. The process and its original
 mining configuration remain live after the barrier.
 
+`ERGO_SIDECHAIN_OWNED_TRANSACTION_PERMIT=1` additionally enables authenticated
+`POST /mining/ownedTransactionHoldV1`, `ownedTransactionArmV1` and
+`ownedTransactionStatusV1` controls. Hold drains the registered submitted block
+and joins the current history/state readers before returning its held parent.
+Arm binds a fresh operation ID, that exact parent and one transaction ID; the
+first candidate must include the transaction. It permits eleven contiguous
+matching block applications: inclusion plus ten successors. The wire value
+`confirmations: 10` follows the node's indexed depth, tip height minus inclusion
+height. Ten applications alone provide only nine confirmations.
+
+The control then remains held. Status reports completion only with fresh
+matching readers at the final watermark; the relayer additionally requires
+both nodes' exact fully indexed tip there before another Arm. Replay, conflicting
+application, actor replacement and immutable height ceilings retain their
+fail-closed checks. Permanent Pause dominates every permit and has no resume.
+Omitting this launch option preserves the legacy input and mining behavior.
+
 The reply is not an index-freshness observation. Before choosing an admission
 window, a consumer must obtain a common fully indexed tip at or above the
 applied watermark, verify its exact header ID at that height on both nodes,

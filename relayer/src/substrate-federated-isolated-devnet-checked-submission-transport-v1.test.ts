@@ -84,6 +84,12 @@ const node = vi.hoisted(() => ({
   post: vi.fn(),
 }));
 
+const permitBoundary = vi.hoisted(() => ({
+  arm: vi.fn(), claimTrackerFee: vi.fn(), claimWithdrawalFee: vi.fn(), assertFeeActive: vi.fn(),
+  events: [] as string[], targetActive: true, authorizerActive: true, artifactActive: true,
+  custodyActive: true, feeClaimed: false, feeAttempt: undefined as unknown,
+}));
+
 const genesisBoundary = vi.hoisted(() => ({
   authorizerNative: Object.freeze({
     schema: 'e2s.substrate-federated-native-genesis-broadcast-authorizer.v1',
@@ -170,9 +176,11 @@ vi.mock(
       value: unknown,
       target: unknown,
     ) => {
+      permitBoundary.events.push('source-authorizer');
       if (
         value !== boundary.sourceLockAuthorizer
         || target !== processBoundary.target
+        || !permitBoundary.targetActive || !permitBoundary.authorizerActive
       ) {
         throw new Error('synthetic source-lock authorizer provenance is missing');
       }
@@ -181,10 +189,12 @@ vi.mock(
       value: unknown,
       authorization: Readonly<{ authorizationArtifact?: unknown }>,
     ) => {
+      permitBoundary.events.push('source-artifact');
       if (
         value !== boundary.sourceLockAuthorizer
         || authorization.authorizationArtifact
           !== boundary.sourceLockAuthorizationArtifact
+        || !permitBoundary.artifactActive
       ) {
         throw new Error('synthetic source-lock authorization is missing');
       }
@@ -199,9 +209,11 @@ vi.mock(
       value: unknown,
       target: unknown,
     ) => {
+      permitBoundary.events.push('reserve-authorizer');
       if (
         value !== boundary.committedVaultAuthorizer
         || target !== processBoundary.target
+        || !permitBoundary.targetActive || !permitBoundary.authorizerActive
       ) {
         throw new Error(
           'synthetic committed-vault authorizer provenance is missing',
@@ -212,10 +224,12 @@ vi.mock(
       value: unknown,
       authorization: Readonly<{ authorizationArtifact?: unknown }>,
     ) => {
+      permitBoundary.events.push('reserve-artifact');
       if (
         value !== boundary.committedVaultAuthorizer
         || authorization.authorizationArtifact
           !== boundary.committedVaultAuthorizationArtifact
+        || !permitBoundary.artifactActive
       ) {
         throw new Error(
           'synthetic committed-vault authorization is missing',
@@ -299,6 +313,7 @@ vi.mock('axios', () => ({
 }));
 
 vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => ({
+  armSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1: permitBoundary.arm,
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1: (
     value: unknown,
   ) => {
@@ -333,6 +348,13 @@ vi.mock('./substrate-federated-isolated-devnet-ergo-node-process-v1.js', () => (
   },
 }));
 
+vi.mock('./substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js', async importOriginal => ({
+  ...await importOriginal<typeof import('./substrate-federated-isolated-devnet-tracker-fee-funding-authority-v1.js')>(),
+  claimSubstrateFederatedIsolatedDevnetTrackerFeeFundingTransportV1: permitBoundary.claimTrackerFee,
+  claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingTransportV1: permitBoundary.claimWithdrawalFee,
+  assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1: permitBoundary.assertFeeActive,
+}));
+
 import {
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_TRANSPORT_V1_SCHEMA,
   createSubstrateFederatedIsolatedDevnetCheckedSubmissionTransportV1,
@@ -340,6 +362,8 @@ import {
   createSubstrateFederatedNativeGenesisCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1,
   createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1,
+  submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
   projectSubstrateFederatedIsolatedDevnetCheckedSubmissionDiagnostic as projectDiagnostic,
 } from './substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
@@ -374,6 +398,55 @@ const TRANSITION_FEE_BOX_ID = '17'.repeat(32);
 const TRACKER_SUBMISSION_RESPONSE_DIGEST_DOMAIN =
   'E2S_SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKED_SUBMISSION_RESPONSE_V1';
 
+type PermitSubmissionKind = 'source-lock' | 'reserve' | 'tracker-fee' | 'withdrawal-fee';
+const permitSubmissionKinds = ['source-lock', 'reserve', 'tracker-fee', 'withdrawal-fee'] as const;
+
+// Reuse the existing synthetic signed candidate, exact handle and authorizer ports.
+// Calling the transport directly preserves its throw semantics outside the operational wrapper.
+function permitSubmission(kind: PermitSubmissionKind, enabled?: boolean) {
+  node.post.mockImplementation(async () => {
+    permitBoundary.events.push('post');
+    return { status: 200, data: boundary.expectedTxId };
+  });
+  if (kind === 'tracker-fee' || kind === 'withdrawal-fee') {
+    const attempt = Object.freeze({ expectedTxId: boundary.expectedTxId, durableAttemptDigestHex: ATTEMPT_DIGEST });
+    permitBoundary.feeAttempt = attempt;
+    const submit = kind === 'tracker-fee' ? submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1
+      : submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1;
+    return { run: () => enabled === undefined ? submit(processBoundary.target, attempt as never)
+      : submit(processBoundary.target, attempt as never, enabled) };
+  }
+  const artifact = kind === 'source-lock' ? boundary.sourceLockAuthorizationArtifact : boundary.committedVaultAuthorizationArtifact;
+  const attempt = Object.freeze({
+    durableAttemptDigestHex: ATTEMPT_DIGEST, durableArtifact: journalBoundary.durableArtifact,
+    authorization: Object.freeze({ authorizationDigestHex: AUTHORIZATION_DIGEST, authorizationArtifact: artifact,
+      revalidated: Object.freeze({ checked: Object.freeze({
+        signed: Object.freeze({ admission: Object.freeze({ expectedTxId: boundary.expectedTxId }),
+          nodeOrigin: boundary.nodeOrigin, signedTransactionDigestHex: boundary.signedTransactionDigestHex,
+          signerArtifact: boundary.signedCandidate }),
+        checkerArtifact: boundary.checkedHandle, checkResponseDigestHex: boundary.checkResponseDigestHex,
+      }) }),
+    }),
+  });
+  const transport = kind === 'source-lock'
+    ? enabled === undefined ? createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(
+      processBoundary.target, boundary.sourceLockAuthorizer as never)
+      : createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(
+        processBoundary.target, boundary.sourceLockAuthorizer as never, enabled)
+    : enabled === undefined ? createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
+      processBoundary.target, boundary.committedVaultAuthorizer as never)
+      : createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
+        processBoundary.target, boundary.committedVaultAuthorizer as never, enabled);
+  return { run: () => transport.submit(attempt as never) };
+}
+
+function permitDeferred() {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
 type GenesisVersion = 1 | 2 | 'native';
 function genesisProfile(version: GenesisVersion) {
   if (version === 'native') return {
@@ -394,6 +467,34 @@ function genesisProfile(version: GenesisVersion) {
 }
 
 beforeEach(() => {
+  permitBoundary.events.length = 0;
+  permitBoundary.targetActive = true; permitBoundary.authorizerActive = true;
+  permitBoundary.artifactActive = true; permitBoundary.custodyActive = true;
+  permitBoundary.feeClaimed = false; permitBoundary.feeAttempt = undefined;
+  permitBoundary.arm.mockReset().mockImplementation(async (target: unknown, transactionId: string) => {
+    permitBoundary.events.push('arm');
+    if (target !== processBoundary.target || transactionId !== boundary.expectedTxId || !boundary.consumed) {
+      throw new Error('synthetic Arm lacks exact consumed submission');
+    }
+  });
+  permitBoundary.assertFeeActive.mockReset().mockImplementation((attempt: unknown, target: unknown) => {
+    permitBoundary.events.push('fee-active');
+    if (attempt !== permitBoundary.feeAttempt || target !== processBoundary.target
+      || !permitBoundary.targetActive || !permitBoundary.custodyActive) throw new Error('synthetic fee custody revoked');
+  });
+  for (const [purpose, claim] of [['tracker', permitBoundary.claimTrackerFee], ['withdrawal', permitBoundary.claimWithdrawalFee]] as const) {
+    claim.mockReset().mockImplementation(async (attempt: unknown, target: unknown) => {
+      permitBoundary.events.push(`${purpose}-claim`);
+      if (attempt !== permitBoundary.feeAttempt || target !== processBoundary.target || permitBoundary.feeClaimed) {
+        throw new Error('synthetic fee claim is unavailable');
+      }
+      permitBoundary.feeClaimed = true;
+      return { check: { signedCandidate: boundary.signedCandidate, checkedAcceptance: { submissionHandle: boundary.checkedHandle } },
+        binding: Object.freeze({ processBindingDigestHex: processBoundary.processBindingDigestHex,
+          executionTargetIdentityDigestHex: processBoundary.reconciliationIdentityDigestHex }),
+        authorization: Object.freeze({ authorizationDigestHex: AUTHORIZATION_DIGEST }) };
+    });
+  }
   genesisBoundary.events.length = 0;
   boundary.issuedSignedCandidate = boundary.signedCandidate;
   for (const version of [1, 2, 'native'] as const) {
@@ -440,6 +541,7 @@ beforeEach(() => {
     }>,
   ) => {
     genesisBoundary.events.push('execution-binding');
+    permitBoundary.events.push('handle-binding');
     if (
       value !== boundary.checkedHandle
       || !Object.isFrozen(binding)
@@ -468,6 +570,7 @@ beforeEach(() => {
       throw new Error('synthetic checked handle is unavailable');
     }
     boundary.consumed = true;
+    permitBoundary.events.push('consume');
     genesisBoundary.events.push('consume');
     trackerBoundary.events.push('consume');
     await trackerBoundary.beforeCheckedCallback();
@@ -1047,6 +1150,103 @@ describe.each(GENESIS_RESPONSE_PROFILES)(
     });
   },
 );
+
+describe('opt-in transaction permit checked submission boundary', () => {
+  it.each(permitSubmissionKinds.flatMap(kind => [undefined, false].map(enabled => ({ kind, enabled })) ))(
+    '$kind preserves the legacy path with permits $enabled', async ({ kind, enabled }) => {
+      const fixture = permitSubmission(kind, enabled);
+      await expect(fixture.run()).resolves.toMatchObject({ status: 'accepted', submittedTxId: boundary.expectedTxId });
+      expect(permitBoundary.arm).not.toHaveBeenCalled(); expect(boundary.consume).toHaveBeenCalledTimes(1);
+      expect(node.post).toHaveBeenCalledTimes(1); expect(node.post.mock.calls[0][1]).toBe(boundary.signedTransaction);
+    });
+
+  it.each(permitSubmissionKinds.flatMap(kind => [null, 1, 'true', {}, new Boolean(true)].map(value => ({ kind, value })) ))(
+    '$kind refuses a nonboolean opt-in $value before claim, consumption or HTTP', async ({ kind, value }) => {
+      await expect((async () => permitSubmission(kind, value as boolean).run())()).rejects.toThrow('selection is invalid');
+      expect(permitBoundary.claimTrackerFee).not.toHaveBeenCalled(); expect(permitBoundary.claimWithdrawalFee).not.toHaveBeenCalled();
+      expect(boundary.consume).not.toHaveBeenCalled(); expect(permitBoundary.arm).not.toHaveBeenCalled(); expect(node.post).not.toHaveBeenCalled();
+    });
+
+  it.each(permitSubmissionKinds)('%s Arms exactly the authorized transaction after consumption and before the unchanged POST', async kind => {
+    const fixture = permitSubmission(kind, true); permitBoundary.events.length = 0;
+    await expect(fixture.run()).resolves.toMatchObject({ status: 'accepted' });
+    expect(permitBoundary.arm).toHaveBeenCalledExactlyOnceWith(processBoundary.target, boundary.expectedTxId);
+    expect(boundary.consume).toHaveBeenCalledExactlyOnceWith(boundary.checkedHandle, boundary.signedCandidate, expect.any(Function));
+    const events = permitBoundary.events;
+    const authorization = kind === 'source-lock' ? 'source-artifact' : kind === 'reserve' ? 'reserve-artifact'
+      : kind === 'tracker-fee' ? 'tracker-claim' : 'withdrawal-claim';
+    expect(events.indexOf(authorization)).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf(authorization)).toBeLessThan(events.indexOf('consume'));
+    expect(events.indexOf('consume')).toBeLessThan(events.indexOf('arm'));
+    expect(events.indexOf('arm')).toBeLessThan(events.lastIndexOf('handle-binding'));
+    expect(events.lastIndexOf('handle-binding')).toBeLessThan(events.indexOf('post'));
+    expect(node.post).toHaveBeenCalledExactlyOnceWith('http://127.0.0.1:9051/transactions', boundary.signedTransaction, {
+      headers: { 'Content-Type': 'application/json' }, maxRedirects: 0, proxy: false, timeout: 30_000, maxContentLength: 1_024,
+    });
+  });
+
+  it.each(permitSubmissionKinds)('%s waits for deferred Arm before any transaction POST', async kind => {
+    const fixture = permitSubmission(kind, true); const entered = permitDeferred(); const gate = permitDeferred();
+    permitBoundary.arm.mockImplementationOnce(async (target: unknown, transactionId: string) => {
+      expect(target).toBe(processBoundary.target); expect(transactionId).toBe(boundary.expectedTxId);
+      expect(boundary.consumed).toBe(true); entered.resolve(); await gate.promise;
+    });
+    const pending = fixture.run(); await entered.promise;
+    expect(node.post).not.toHaveBeenCalled(); gate.resolve();
+    await expect(pending).resolves.toMatchObject({ status: 'accepted' }); expect(node.post).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(permitSubmissionKinds)('%s propagates exact Arm lost-response failure with zero POST and no replay', async kind => {
+    const fixture = permitSubmission(kind, true); const error = new Error('synthetic Arm response lost');
+    const entered = permitDeferred(); const gate = permitDeferred();
+    permitBoundary.arm.mockImplementationOnce(async () => { entered.resolve(); await gate.promise; });
+    const pending = fixture.run(); const refused = expect(pending).rejects.toBe(error);
+    await entered.promise; expect(boundary.consumed).toBe(true); expect(node.post).not.toHaveBeenCalled();
+    gate.reject(error); await refused;
+    await expect(fixture.run()).rejects.toThrow();
+    expect(permitBoundary.arm).toHaveBeenCalledTimes(1); expect(node.post).not.toHaveBeenCalled();
+  });
+
+  it.each(permitSubmissionKinds.flatMap(kind => (kind === 'source-lock' || kind === 'reserve'
+    ? ['target', 'authorizer', 'artifact', 'handle'] : ['target', 'custody', 'handle']).map(fault => ({ kind, fault })) ))(
+    '$kind refuses $fault revoked after successful Arm before transaction POST', async ({ kind, fault }) => {
+      const fixture = permitSubmission(kind, true);
+      permitBoundary.arm.mockImplementationOnce(async () => {
+        expect(boundary.consumed).toBe(true);
+        if (fault === 'target') permitBoundary.targetActive = false;
+        if (fault === 'authorizer') permitBoundary.authorizerActive = false;
+        if (fault === 'artifact') permitBoundary.artifactActive = false;
+        if (fault === 'custody') permitBoundary.custodyActive = false;
+        if (fault === 'handle') boundary.handleExecutionTargetIdentityDigestHex = 'ff'.repeat(32);
+      });
+      await expect(fixture.run()).rejects.toThrow(); expect(permitBoundary.arm).toHaveBeenCalledTimes(1);
+      expect(node.post).not.toHaveBeenCalled();
+      await expect(fixture.run()).rejects.toThrow(); expect(permitBoundary.arm).toHaveBeenCalledTimes(1);
+      expect(node.post).not.toHaveBeenCalled();
+    });
+
+  it.each(permitSubmissionKinds)('%s refuses prior authorization failure before consumption and Arm', async kind => {
+    const fixture = permitSubmission(kind, true);
+    if (kind === 'source-lock' || kind === 'reserve') permitBoundary.artifactActive = false;
+    else (kind === 'tracker-fee' ? permitBoundary.claimTrackerFee : permitBoundary.claimWithdrawalFee)
+      .mockRejectedValueOnce(new Error('synthetic prior fee authorization refusal'));
+    await expect(fixture.run()).rejects.toThrow(); expect(boundary.consume).not.toHaveBeenCalled();
+    expect(permitBoundary.arm).not.toHaveBeenCalled(); expect(node.post).not.toHaveBeenCalled();
+  });
+
+  it.each(permitSubmissionKinds)('%s permits no second Arm or POST after an accepted one-use submission', async kind => {
+    const fixture = permitSubmission(kind, true); await expect(fixture.run()).resolves.toMatchObject({ status: 'accepted' });
+    await expect(fixture.run()).rejects.toThrow();
+    expect(permitBoundary.arm).toHaveBeenCalledTimes(1); expect(node.post).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(permitSubmissionKinds)('%s retains actual POST ambiguity only after acknowledged Arm', async kind => {
+    const fixture = permitSubmission(kind, true); node.post.mockRejectedValueOnce(new Error('synthetic POST response lost'));
+    await expect(fixture.run()).resolves.toMatchObject({ status: 'ambiguous', submittedTxId: null });
+    expect(permitBoundary.arm).toHaveBeenCalledTimes(1); expect(node.post).toHaveBeenCalledTimes(1);
+    expect(boundary.consumed).toBe(true);
+  });
+});
 
 describe('isolated devnet checked submission transport V1', () => {
   it('claims the durable tracker attempt before one exact loopback POST', async () => {

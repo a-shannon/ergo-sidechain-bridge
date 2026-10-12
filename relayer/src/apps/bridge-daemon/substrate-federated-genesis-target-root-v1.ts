@@ -38,6 +38,7 @@ import { createSubstrateFederatedIsolatedDevnetErgoNodeProcessV2, assertSubstrat
   assertSubstrateFederatedIsolatedDevnetOwnedReadOnlyTargetV1, type SubstrateFederatedIsolatedDevnetErgoNodeProcessSessionV2,
   type SubstrateFederatedIsolatedDevnetNativeTrackerCycleV1,
   pauseSubstrateFederatedIsolatedDevnetOwnedMiningSubmissionV1,
+  holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1,
   revalidateSubstrateFederatedIsolatedDevnetMiningPauseObservationV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1 } from '../../substrate-federated-isolated-devnet-ergo-node-process-v1.js';
 import { discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1, assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1 } from '../../substrate-federated-isolated-devnet-owned-reward-input-discovery-v1.js';
@@ -403,10 +404,14 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           assertActive();
           // Issuance funding is spent. Discover a new owned input for this deposit.
           markStep('deposit-funding');
+          const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
+          assertActive();
           const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
           assertActive();
           const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
           if (funding.target.genesisHeaderIdHex !== batch.request.target.genesisHeaderIdHex
+            || funding.target.tipHeight !== heldDepositSnapshot.fullHeight
+            || funding.target.tipHeaderIdHex !== heldDepositSnapshot.headerIdHex
             || funding.target.tipHeight < Math.max(...transactions.map(receipt => receipt.confirmationHeight))) {
             throw new Error('FED deposit funding does not follow the confirmed genesis issuance');
           }
@@ -463,7 +468,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           assertActive();
           markStep('withdrawal-fee-funding');
           const withdrawalFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1({
-            target, checked: withdrawalCheck, state,
+            target, checked: withdrawalCheck, state, transactionPermitsEnabled: true,
           }));
           assertActive();
           markStep('tracker-fee-check');
@@ -471,7 +476,7 @@ export async function runSubstrateFederatedGenesisTargetRootV1(input: RunSubstra
           assertActive();
           markStep('tracker-fee-funding');
           const trackerFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1({
-            target, checked: trackerCheck, state,
+            target, checked: trackerCheck, state, transactionPermitsEnabled: true,
           }));
           assertActive();
           markStep('fee-input-validation');
@@ -980,10 +985,14 @@ async function completeFirstNativeReturn(input: Readonly<{
       // The second source deposit is built and committed while the first
       // confirmation target and its retained signer are still current.
       markStep('deposit-funding');
+      const heldDepositSnapshot = await holdSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target);
+      readCustody();
       const ownedFunding = await discoverSubstrateFederatedRewardInputsForOwnedExecutionTargetV1(setup.signer, target);
       readCustody();
       const funding = assertSubstrateFederatedIsolatedDevnetOwnedRewardInputDiscoveryV1(ownedFunding, target);
       if (funding.target.genesisHeaderIdHex !== genesisHeaderIdHex
+        || funding.target.tipHeight !== heldDepositSnapshot.fullHeight
+        || funding.target.tipHeaderIdHex !== heldDepositSnapshot.headerIdHex
         || funding.target.tipHeight < payout.confirmationHeight) {
         throw new Error('FED continuation funding does not follow the first confirmed payout');
       }
@@ -1050,7 +1059,7 @@ async function completeFirstNativeReturn(input: Readonly<{
       readCustody();
       markStep('withdrawal-fee-funding');
       const secondWithdrawalFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1({
-        target, checked: secondWithdrawalCheck, state,
+        target, checked: secondWithdrawalCheck, state, transactionPermitsEnabled: true,
       }));
       readCustody();
       markStep('tracker-fee-check');
@@ -1058,7 +1067,7 @@ async function completeFirstNativeReturn(input: Readonly<{
       readCustody();
       markStep('tracker-fee-funding');
       const secondTrackerFee = confirmedFee(await executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1({
-        target, checked: secondTrackerCheck, state,
+        target, checked: secondTrackerCheck, state, transactionPermitsEnabled: true,
       }));
       readCustody();
       markStep('fee-input-validation');

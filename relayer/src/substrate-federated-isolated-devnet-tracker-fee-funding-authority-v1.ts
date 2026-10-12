@@ -168,6 +168,18 @@ export async function claimSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingT
   return claimFeeFundingTransport(attempt, target, 'withdrawal');
 }
 
+/** Recheck retained custody after a native permit await; never reclaim an attempt. */
+export function assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(
+  attempt: Attempt, target: Readonly<Target>,
+): void {
+  const material = ATTEMPTS.get(attempt);
+  if (material === undefined || material.target !== target || !TRANSPORT_STARTED.has(attempt)) {
+    throw new Error('fee funding transport is not active for this exact attempt and target');
+  }
+  material.assertCustody();
+  assertBinding(target, material.binding);
+}
+
 async function claimFeeFundingTransport(attempt: Attempt, target: Readonly<Target>, purpose: Material['purpose']) {
   const material = requireAttempt(attempt, purpose);
   if (material.target !== target || TRANSPORT_STARTED.has(attempt)) {

@@ -650,7 +650,7 @@
     "baseTag": "v6.0.2",
     "patchCommitProvenance": "ed506f3c63273a89793a14505a709f18701825f8",
     "patchPath": "sources/ergo-node/0002-sidechain-extension-fields-candidate-recovery.patch",
-    "patchSha256": "cd282677b05e1fca21d9c94e6338566ce4448ce503f7055de8667aaa86378fdf",
+    "patchSha256": "08fb00b4c94f7db54228b6312bea58af430f13825e2b231821da3ef26e4796c3",
     "javaVersion": "17",
     "testCommand": "sbt \"testOnly org.ergoplatform.mining.OwnedMiningSubmissionV1Spec\" \"testOnly org.ergoplatform.mining.OwnedMiningSubmissionActorSpec\" \"testOnly org.ergoplatform.http.routes.MiningApiRouteSpec\" \"testOnly org.ergoplatform.mining.CandidateGeneratorSpec\"",
     "buildCommand": "sbt assembly",
@@ -661,46 +661,46 @@
         "path": "src/main/scala/org/ergoplatform/http/api/MiningApiRoute.scala",
         "status": "modified",
         "baseBlob": "ce0c10f204d9c05623c44e90e2edc7876a7b4cf9",
-        "patchedBlob": "7a8319307dcf6cb639fd28f2c05f2259906c4524"
+        "patchedBlob": "cfad3bd4d15bda2c407c9f950dc6eea2b10b6c2a"
       },
       {
         "path": "src/main/scala/org/ergoplatform/mining/CandidateGenerator.scala",
         "status": "modified",
         "baseBlob": "bfa0fe6162477fae9012eddd3de8736f2c140a1d",
-        "patchedBlob": "cc95218c2c3ec2704c7036899ec296327bec4a34"
+        "patchedBlob": "47cb89128a2c754e7d62bf93d983e5df6c2c37fd"
       },
       {
         "path": "src/main/scala/org/ergoplatform/mining/ErgoMiner.scala",
         "status": "modified",
         "baseBlob": "e2dc8060c735cee6eebbf9082a2e3519b42f7487",
-        "patchedBlob": "2b4726a2c03b6527aac06f2936fb34be247410c8"
+        "patchedBlob": "eab6548cff2c08a06d47afc061978a8352d7a2d0"
       },
       {
         "path": "src/main/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1.scala",
         "status": "added",
-        "patchedBlob": "e480ab20a367dc65128d67b6ea74b647bfe661ab"
+        "patchedBlob": "54831ed65c6ef37f2fd67362a15417c361dc4431"
       },
       {
         "path": "src/test/scala/org/ergoplatform/http/routes/MiningApiRouteSpec.scala",
         "status": "modified",
         "baseBlob": "2731827bcf33dbf80749ad2fb40c9304f54a7496",
-        "patchedBlob": "98d75c97b682cb30902acbb49f30004afd33d409"
+        "patchedBlob": "894039d9f2f20f2fadb4a40788f71365de0537e0"
       },
       {
         "path": "src/test/scala/org/ergoplatform/mining/CandidateGeneratorSpec.scala",
         "status": "modified",
         "baseBlob": "1c394b28174aa12303e67827d9c6a38ea6a38caf",
-        "patchedBlob": "fdfbf97b9f1c3c5d683c7777cc10bc58f86d4c02"
+        "patchedBlob": "4c09a8e469bb2650a9a9106d634da3ff6de6ea59"
       },
       {
         "path": "src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionActorSpec.scala",
         "status": "added",
-        "patchedBlob": "ec14bb083df3922067f14cea4033b0bd5c9cf4e9"
+        "patchedBlob": "ddad50c8072370bcec0fad59adb4622e3be2a7f9"
       },
       {
         "path": "src/test/scala/org/ergoplatform/mining/OwnedMiningSubmissionV1Spec.scala",
         "status": "added",
-        "patchedBlob": "5a3bfbc618807486261a72c7828d2d8bf52943af"
+        "patchedBlob": "801652f2da58bd53f9a49d64c4aeb8518db8dabf"
       }
     ]
   },

@@ -252,6 +252,18 @@ worker. Existing attempts are refused. The worker calls the native root once.
 Both external miner-fee inputs must be confirmed before each corresponding
 checkpoint anchor is frozen.
 
+For each deposit, the original owned primary process first holds mining and
+the relayer joins both nodes' exact indexed held tip. Funding and packet heights
+are captured against that tip. The already authorized source-lock, reserve and
+two external-fee submissions each arm a separate permit after their existing
+checked authorization and before the transaction POST. Each permit binds the
+exact transaction and held parent, allows its inclusion plus ten successors,
+then holds again. This is eleven block applications for indexed depth ten.
+The existing confirmation check and fresh exact held-index completion must
+both finish within the original confirmation deadline before the next Arm.
+The original process, target and custody guards remain active across every
+awaited operation. A failed or ambiguous operation never permits resubmission.
+
 Before attesting either checkpoint, the original owned mining target requests
 its one-way submission pause. The node drains the exact pending submitted
 header before acknowledging the pause; an acknowledgment alone does not prove

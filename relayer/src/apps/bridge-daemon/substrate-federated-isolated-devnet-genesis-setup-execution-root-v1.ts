@@ -111,6 +111,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-ergo-node-build-v1.js';
 import {
   assertSubstrateFederatedIsolatedDevnetOwnedExecutionTargetV1,
+  completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1,
   createSubstrateFederatedIsolatedDevnetErgoNodeProcessV1,
   projectSubstrateFederatedIsolatedDevnetErgoNodeStartupPhaseFailureV1,
   SUBSTRATE_FEDERATED_ISOLATED_DEVNET_CHECKPOINT_BOUND_FROZEN_EXECUTION_V2_SCHEMA,
@@ -283,6 +284,7 @@ import {
 } from '../../substrate-federated-isolated-devnet-checked-submission-transport-v1.js';
 import {
   authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
+  assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1,
   reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1,
   authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1,
@@ -2483,16 +2485,26 @@ export async function executeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   checked: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>;
   state: SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1;
+  transactionPermitsEnabled?: boolean;
 }>) {
   const { target, checked, state } = input;
+  if (input.transactionPermitsEnabled !== undefined && typeof input.transactionPermitsEnabled !== 'boolean') {
+    throw new Error('tracker fee funding transaction permit selection is invalid');
+  }
   const authorization = await authorizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(checked, target);
   const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, authorization.genesisHeaderIdHex);
   const attempt = reserveSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(authorization, state);
-  const submission = await submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(target, attempt);
+  const submission = input.transactionPermitsEnabled === true
+    ? await submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(target, attempt, true)
+    : await submitSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(target, attempt);
   const finalized = finalizeSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, submission);
   const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
     performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
-    'tracker-fee-funding');
+    'tracker-fee-funding',
+    input.transactionPermitsEnabled === true
+      ? () => assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(attempt, target) : undefined,
+    input.transactionPermitsEnabled === true
+      ? deadline => completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, attempt.expectedTxId, deadline) : undefined);
   const confirmed = await confirmSubstrateFederatedIsolatedDevnetTrackerFeeFundingV1(attempt, confirmation);
   return Object.freeze({
     expectedTxId: attempt.expectedTxId,
@@ -2511,16 +2523,26 @@ export async function executeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundin
   target: Readonly<SubstrateFederatedIsolatedDevnetExecutionErgoTargetV1>;
   checked: Readonly<SubstrateFederatedIsolatedDevnetTrackerFeeFundingCheckV1>;
   state: SubstrateFederatedIsolatedDevnetTrackerFeeFundingJournalV1;
+  transactionPermitsEnabled?: boolean;
 }>) {
   const { target, checked, state } = input;
+  if (input.transactionPermitsEnabled !== undefined && typeof input.transactionPermitsEnabled !== 'boolean') {
+    throw new Error('withdrawal fee funding transaction permit selection is invalid');
+  }
   const authorization = await authorizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(checked, target);
   const observer = createSubstrateFederatedIsolatedDevnetGenesisConfirmationObserverV1(target, authorization.genesisHeaderIdHex);
   const attempt = reserveSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(authorization, state);
-  const submission = await submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(target, attempt);
+  const submission = input.transactionPermitsEnabled === true
+    ? await submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(target, attempt, true)
+    : await submitSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(target, attempt);
   const finalized = finalizeSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(attempt, submission);
   const confirmation = await waitForCanonicalConfirmation(observer, attempt.expectedTxId,
     performance.now() + TRANSACTION_CONFIRMATION_BUDGET_MS + NON_CONFIRMATION_ACTION_BUDGET_MS,
-    'withdrawal-fee-funding');
+    'withdrawal-fee-funding',
+    input.transactionPermitsEnabled === true
+      ? () => assertSubstrateFederatedIsolatedDevnetFeeFundingTransportActiveV1(attempt, target) : undefined,
+    input.transactionPermitsEnabled === true
+      ? deadline => completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, attempt.expectedTxId, deadline) : undefined);
   const confirmed = await confirmSubstrateFederatedIsolatedDevnetWithdrawalFeeFundingV1(attempt, confirmation);
   return Object.freeze({
     expectedTxId: attempt.expectedTxId,
@@ -2689,7 +2711,7 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
     throw new Error('unexpected prior native source-lock attempt was reconciled');
   }
   failureStage = 'operational-execution';
-  const transport = createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(target, authorizer);
+  const transport = createSubstrateFederatedIsolatedDevnetPegInSourceLockCheckedSubmissionTransportV1(target, authorizer, true);
   const transaction = packet.transactions.sourceLockCreation;
   const sourceBoxId = packet.boxes.sourceFundingInput.boxId;
   const creationHeight = transaction.eip12Tx.outputs[0]?.creationHeight;
@@ -2734,7 +2756,8 @@ async function executeSubstrateFederatedNativePegInSourceLockV1(
   assertSourceLockTransportExecution(result, transaction.txId);
   assertActive();
   failureStage = 'confirmation';
-  const confirmation = await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline, 'native source-lock', assertActive);
+  const confirmation = await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline, 'native source-lock', assertActive,
+    deadline => completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, transaction.txId, deadline));
   assertActive();
   failureStage = 'confirmed-journal';
   const reconciled = await journal.reconcileActive(observer);
@@ -2854,7 +2877,7 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   assertActive();
   if (prior !== 'none') throw new Error('unexpected prior native committed-vault attempt was reconciled');
   const transport = createSubstrateFederatedIsolatedDevnetPegInCommittedVaultCheckedSubmissionTransportV1(
-    target, authorizationSession.broadcastAuthorizer,
+    target, authorizationSession.broadcastAuthorizer, true,
   );
   const transaction = packet.transactions.reserveTransition;
   const inputBoxIds = [packet.boxes.reservePredecessor.boxId, packet.boxes.sourceLock.boxId, packet.boxes.transitionFeeFunding.boxId] as const;
@@ -2927,7 +2950,8 @@ async function executeSubstrateFederatedNativePegInCommittedVaultV1(
   };
   try {
     await waitForCanonicalConfirmation(observer, transaction.txId, completionDeadline,
-      'native committed-vault', assertConfirmationActive);
+      'native committed-vault', assertConfirmationActive,
+      deadline => completeSubstrateFederatedIsolatedDevnetOwnedMiningTransactionV1(target, transaction.txId, deadline));
     assertConfirmationActive();
   } catch (cause) {
     const diagnostic = projectTrackerCanonicalConfirmationFailureDiagnosticV1(cause);
@@ -9039,7 +9063,11 @@ export async function waitForCanonicalConfirmation(
   completionDeadline: number,
   stage: string,
   assertActive: () => void = () => {},
+  onConfirmed?: (originalDeadline: number) => Promise<void>,
 ): Promise<Readonly<SubstrateFederatedLocalDevnetGenesisConfirmation>> {
+  if (onConfirmed !== undefined && typeof onConfirmed !== 'function') {
+    throw new Error('isolated confirmation completion guard is invalid');
+  }
   assertActive();
   let observedAt = performance.now();
   if (
@@ -9180,6 +9208,23 @@ export async function waitForCanonicalConfirmation(
       && observation.confirmationHeight !== null
       && observation.confirmationHeaderIdHex !== null
     ) {
+      if (onConfirmed !== undefined) {
+        await onConfirmed(deadline);
+        assertActive();
+        const afterCompletion = performance.now();
+        if (!Number.isFinite(afterCompletion) || afterCompletion < observedAt) {
+          throw canonicalConfirmationFailureDiagnosticErrorV1({
+            category: 'clock_failure', observer, expectedTxId, observationCount,
+            lastObservation: null, message: 'isolated confirmation completion clock regressed',
+          });
+        }
+        if (afterCompletion >= deadline) {
+          throw canonicalConfirmationFailureDiagnosticErrorV1({
+            category: 'observation_completed_after_deadline', observer, expectedTxId, observationCount,
+            lastObservation: observation, message: `isolated ${stage} transaction completion exceeded its original deadline`,
+          });
+        }
+      }
       return observation;
     }
     await delay(Math.min(CONFIRMATION_POLL_MS, deadline - observedAt));
